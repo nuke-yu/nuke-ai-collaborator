@@ -21,8 +21,9 @@ const INIT_FORM = {
   model_provider: 'deepseek', model_name: 'deepseek-chat',
 }
 
-export default function MemberList({ onAddMember, onClose }) {
-  const [form, setForm] = useState(INIT_FORM)
+export default function MemberList({ onAddMember, onEditMember, onClose, initialData }) {
+  const isEdit = !!initialData
+  const [form, setForm] = useState(isEdit ? { ...INIT_FORM, ...initialData } : INIT_FORM)
 
   const setField = (patch) => setForm(f => ({ ...f, ...patch }))
 
@@ -33,15 +34,18 @@ export default function MemberList({ onAddMember, onClose }) {
 
   const handleSubmit = async () => {
     if (!form.name.trim()) return
-    await onAddMember(form)
-    setForm(INIT_FORM)
+    if (isEdit) {
+      await onEditMember(initialData.id, form)
+    } else {
+      await onAddMember(form)
+    }
     onClose()
   }
 
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={onClose}>
       <div className="bg-gray-800 rounded-2xl p-6 w-80 shadow-xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-        <h2 className="text-white font-semibold mb-4">添加成员</h2>
+        <h2 className="text-white font-semibold mb-4">{isEdit ? '编辑成员' : '添加成员'}</h2>
 
         <div className="space-y-3">
           <div>
@@ -55,20 +59,22 @@ export default function MemberList({ onAddMember, onClose }) {
             />
           </div>
 
-          <div>
-            <label className="text-xs text-gray-400 mb-1 block">类型</label>
-            <div className="flex gap-2">
-              {['human', 'bot'].map((t) => (
-                <button
-                  key={t}
-                  onClick={() => setField({ type: t })}
-                  className={`flex-1 py-1.5 rounded-lg text-sm transition-colors ${form.type === t ? 'bg-indigo-600 text-white' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'}`}
-                >
-                  {t === 'human' ? '👤 真人' : '🤖 AI 角色'}
-                </button>
-              ))}
+          {!isEdit && (
+            <div>
+              <label className="text-xs text-gray-400 mb-1 block">类型</label>
+              <div className="flex gap-2">
+                {['human', 'bot'].map((t) => (
+                  <button
+                    key={t}
+                    onClick={() => setField({ type: t })}
+                    className={`flex-1 py-1.5 rounded-lg text-sm transition-colors ${form.type === t ? 'bg-indigo-600 text-white' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'}`}
+                  >
+                    {t === 'human' ? '👤 真人' : '🤖 AI 角色'}
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
 
           {form.type === 'bot' && (
             <>
@@ -147,7 +153,7 @@ export default function MemberList({ onAddMember, onClose }) {
         </div>
 
         <div className="flex gap-2 mt-5">
-          <button onClick={handleSubmit} className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg py-2 text-sm font-medium transition-colors">添加</button>
+          <button onClick={handleSubmit} className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg py-2 text-sm font-medium transition-colors">{isEdit ? '保存' : '添加'}</button>
           <button onClick={onClose} className="flex-1 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-lg py-2 text-sm transition-colors">取消</button>
         </div>
       </div>

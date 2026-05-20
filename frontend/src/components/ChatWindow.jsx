@@ -11,6 +11,8 @@ import SearchPanel from './SearchPanel'
 import ApiKeyManager from './ApiKeyManager'
 import PinnedBar from './PinnedBar'
 import AnnouncementBar from './AnnouncementBar'
+import WorkflowBar from './WorkflowBar'
+import WorkflowStartModal from './WorkflowStartModal'
 
 export default function ChatWindow({ memberId, isDark, onToggleTheme }) {
   const [groups, setGroups] = useState([])
@@ -25,7 +27,11 @@ export default function ChatWindow({ memberId, isDark, onToggleTheme }) {
   const [showTemplates, setShowTemplates] = useState(false)
   const [showApiKeys, setShowApiKeys] = useState(false)
   const [showAddMember, setShowAddMember] = useState(false)
+  const [editingMember, setEditingMember] = useState(null)
   const [error, setError] = useState(null)
+  const [workflow, setWorkflow] = useState(null)
+  const [showWorkflowStart, setShowWorkflowStart] = useState(false)
+  const [wfBotOrder, setWfBotOrder] = useState([])
   const [readMap, setReadMap] = useState({})
   const [hasMore, setHasMore] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
@@ -102,6 +108,7 @@ export default function ChatWindow({ memberId, isDark, onToggleTheme }) {
       setMessagesCache(prev => ({ ...prev, [activeGroupId]: { messages, hasMore: has_more } }))
       setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'instant' }), 0)
     })
+    fetch(`/api/groups/${activeGroupId}/workflow`).then(r => r.json()).then(setWorkflow)
   }, [activeGroupId])
 
   const loadMore = useCallback(async () => {
@@ -202,6 +209,8 @@ export default function ChatWindow({ memberId, isDark, onToggleTheme }) {
         data.online ? next.add(data.member_id) : next.delete(data.member_id)
         return next
       })
+    } else if (data.type === 'workflow_update') {
+      setWorkflow(data.active ? data : null)
     }
   }
 
@@ -247,7 +256,20 @@ export default function ChatWindow({ memberId, isDark, onToggleTheme }) {
 
   return (
     <div className="flex h-screen bg-gray-900 relative">
-      {showTemplates && <TemplateManager onClose={() => setShowTemplates(false)} />}
+      {showTemplates && (
+        <TemplateManager
+          onClose={() => setShowTemplates(false)}
+          groupId={activeGroupId}
+          onAdded={async () => {
+            const { members: updated } = await fetchGroupInfo(activeGroupId)
+            setMembers(updated)
+            setMembersCache(prev => ({ ...prev, [activeGroupId]: updated }))
+            setGroups(prev => prev.map(g =>
+              g.id === activeGroupId ? { ...g, member_count: updated.length } : g
+            ))
+          }}
+        />
+      )}
       {showApiKeys && <ApiKeyManager onClose={() => setShowApiKeys(false)} />}
       {showStats && (
         <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center" onClick={() => setShowStats(false)}>
@@ -292,6 +314,7 @@ export default function ChatWindow({ memberId, isDark, onToggleTheme }) {
         currentMemberId={memberId}
         membersCache={membersCache}
         onOpenAddMember={() => setShowAddMember(true)}
+        onEditMember={(m) => setEditingMember(m)}
         onRemoveMember={async (id) => {
           await fetch(`/api/groups/${activeGroupId}/members/${id}`, { method: 'DELETE' })
           setMembers(prev => prev.filter(m => m.id !== id))
@@ -322,6 +345,22 @@ export default function ChatWindow({ memberId, isDark, onToggleTheme }) {
             ))
           }}
           onClose={() => setShowAddMember(false)}
+        />
+      )}
+      {editingMember && (
+        <MemberList
+          initialData={editingMember}
+          onEditMember={async (id, form) => {
+            await fetch(`/api/members/${id}`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(form),
+            })
+            const { members: updated } = await fetchGroupInfo(activeGroupId)
+            setMembers(updated)
+            setMembersCache(prev => ({ ...prev, [activeGroupId]: updated }))
+          }}
+          onClose={() => setEditingMember(null)}
         />
       )}
       <div className={`${tabClass('chat')} flex-1 min-w-0 flex flex-col md:flex-row`}>
@@ -359,6 +398,48 @@ export default function ChatWindow({ memberId, isDark, onToggleTheme }) {
             <span className="text-xs text-yellow-400 animate-pulse">⚠ 连接断开，正在重连...</span>
           )}
           <div className="ml-auto flex items-center gap-1">
+            {members.some(m => m.type === 'bot') && !workflow?.active && (
+              <button
+                onClick={() => {
+                  const defaultKeyword = (m) => {
+                    const role = m.role || m.name
+                    if (role.includes('需求')) return '需求确认完毕'
+                    if (role.includes('架构')) return '架构设计完毕'
+                    if (role.includes('前端')) return '前端开发完毕'
+                    if (role.includes('后端') || role.includes('开发') || role.includes('工程师')) return '开发完毕'
+                    if (role.includes('测试')) return '测试完成'
+                    if (role.includes('运维')) return '运维完毕'
+                    return `${m.name}完毕`
+                  }
+                  const isDevBot = (m) => {
+                    const t = (m.role || m.name || '').toLowerCase()
+                    return t.includes('开发') || t.includes('工程师') || t.includes('developer') || t.includes('engineer')
+                  }
+                  const bots = members.filter(m => m.type === 'bot')
+                  const devBots = bots.filter(isDevBot)
+                  const stages = []
+                  let poolAdded = false
+                  for (const m of bots) {
+                    if (isDevBot(m)) {
+                      if (!poolAdded) {
+                        if (devBots.length > 1) {
+                          stages.push({ stage_type: 'pool', bots: devBots.map(b => ({...b})), done_keyword: '开发完毕' })
+                        } else {
+                          stages.push({ stage_type: 'single', ...m, done_keyword: defaultKeyword(m) })
+                        }
+                        poolAdded = true
+                      }
+                    } else {
+                      stages.push({ stage_type: 'single', ...m, done_keyword: defaultKeyword(m) })
+                    }
+                  }
+                  setWfBotOrder(stages)
+                  setShowWorkflowStart(true)
+                }}
+                className="text-sm px-2 py-1 rounded text-gray-500 hover:text-indigo-400 transition-colors"
+                title="启动工作流"
+              >⚡</button>
+            )}
             <button
               onClick={async () => { const s = await fetchGroupStats(activeGroupId); setStats(s); setShowStats(true) }}
               className="text-sm px-2 py-1 rounded text-gray-500 hover:text-gray-300 transition-colors"
@@ -401,10 +482,39 @@ export default function ChatWindow({ memberId, isDark, onToggleTheme }) {
           announcement={group?.announcement || null}
           onSave={saveAnnouncement}
         />
+        <WorkflowBar
+          workflow={workflow}
+          onNext={async () => {
+            await fetch(`/api/groups/${activeGroupId}/workflow/next`, { method: 'POST' })
+          }}
+          onEnd={async () => {
+            await fetch(`/api/groups/${activeGroupId}/workflow`, { method: 'DELETE' })
+          }}
+        />
         <PinnedBar
           pins={pins}
           onUnpin={(msgId) => unpinMessage(activeGroupId, msgId)}
         />
+        {showWorkflowStart && (
+          <WorkflowStartModal
+            stages={wfBotOrder}
+            onChangeStages={setWfBotOrder}
+            onClose={() => setShowWorkflowStart(false)}
+            onStart={async () => {
+              const stages = wfBotOrder.map(s => {
+                if (s.stage_type === 'pool') {
+                  return { pool: s.bots.map(b => ({ bot_id: b.id })), done_keyword: s.done_keyword || '完毕' }
+                }
+                return { bot_id: s.id, done_keyword: s.done_keyword || '完毕' }
+              })
+              await fetch(`/api/groups/${activeGroupId}/workflow/start`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ stages }),
+              })
+              setShowWorkflowStart(false)
+            }}
+          />
+        )}
 
         {error && (
           <div className="mx-4 mt-2 px-4 py-2 bg-red-900/80 border border-red-700 rounded-lg text-sm text-red-200 flex items-center justify-between">

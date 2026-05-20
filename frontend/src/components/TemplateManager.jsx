@@ -4,10 +4,11 @@ const COLORS = ['#6366f1', '#8b5cf6', '#3b82f6', '#10b981', '#f59e0b', '#ef4444'
 
 const empty = { name: '', role: '', system_prompt: '', avatar_color: '#6366f1' }
 
-export default function TemplateManager({ onClose }) {
+export default function TemplateManager({ onClose, groupId, onAdded }) {
   const [templates, setTemplates] = useState([])
   const [editing, setEditing] = useState(null) // null | 'new' | template object
   const [form, setForm] = useState(empty)
+  const [addedIds, setAddedIds] = useState(new Set())
 
   useEffect(() => { loadTemplates() }, [])
 
@@ -42,6 +43,22 @@ export default function TemplateManager({ onClose }) {
   const startEdit = (t) => { setEditing(t); setForm(t) }
   const startNew = () => { setEditing('new'); setForm(empty) }
 
+  const handleAddToGroup = async (t) => {
+    if (!groupId) return
+    await fetch(`/api/groups/${groupId}/members`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: t.name, type: 'bot', role: t.role,
+        system_prompt: t.system_prompt, avatar_color: t.avatar_color,
+        model_provider: 'deepseek', model_name: 'deepseek-chat',
+      }),
+    })
+    setAddedIds(prev => new Set([...prev, t.id]))
+    setTimeout(() => setAddedIds(prev => { const s = new Set(prev); s.delete(t.id); return s }), 2000)
+    onAdded?.()
+  }
+
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={onClose}>
       <div className="bg-gray-800 rounded-2xl w-[640px] max-h-[80vh] flex flex-col shadow-2xl" onClick={e => e.stopPropagation()}>
@@ -60,12 +77,25 @@ export default function TemplateManager({ onClose }) {
               <div
                 key={t.id}
                 onClick={() => startEdit(t)}
-                className={`flex items-center gap-2 px-3 py-2 cursor-pointer transition-colors ${editing?.id === t.id ? 'bg-gray-700' : 'hover:bg-gray-750'}`}
+                className={`group flex items-center gap-2 px-3 py-2 cursor-pointer transition-colors ${editing?.id === t.id ? 'bg-gray-700' : 'hover:bg-gray-700'}`}
               >
                 <div className="w-6 h-6 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-bold text-white" style={{ backgroundColor: t.avatar_color }}>
                   {t.name[0]}
                 </div>
-                <span className="text-sm text-gray-200 truncate">{t.name}</span>
+                <span className="text-sm text-gray-200 truncate flex-1">{t.name}</span>
+                {groupId && (
+                  <button
+                    onClick={e => { e.stopPropagation(); handleAddToGroup(t) }}
+                    title="添加到当前群组"
+                    className={`flex-shrink-0 text-xs px-1.5 py-0.5 rounded transition-all
+                      ${addedIds.has(t.id)
+                        ? 'bg-green-600 text-white opacity-100'
+                        : 'bg-indigo-600 hover:bg-indigo-500 text-white opacity-0 group-hover:opacity-100'
+                      }`}
+                  >
+                    {addedIds.has(t.id) ? '✓' : '+'}
+                  </button>
+                )}
               </div>
             ))}
             {templates.length === 0 && (
@@ -105,6 +135,14 @@ export default function TemplateManager({ onClose }) {
                 </div>
                 <div className="flex gap-2 pt-2">
                   <button onClick={handleSave} className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg py-2 text-sm font-medium transition-colors">保存</button>
+                  {editing !== 'new' && groupId && (
+                    <button
+                      onClick={() => handleAddToGroup(editing)}
+                      className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${addedIds.has(editing.id) ? 'bg-green-600 text-white' : 'bg-emerald-600 hover:bg-emerald-500 text-white'}`}
+                    >
+                      {addedIds.has(editing.id) ? '✓ 已添加' : '+ 添加到群组'}
+                    </button>
+                  )}
                   {editing !== 'new' && (
                     <button onClick={() => handleDelete(editing.id)} className="bg-red-600/20 hover:bg-red-600/40 text-red-400 rounded-lg px-4 py-2 text-sm transition-colors">删除</button>
                   )}
