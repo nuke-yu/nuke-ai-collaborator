@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+
+# Database & data
+backend/*.db
+backend/uploads/
+backend/chroma_db/
+
+# API Keys & config
+backend/.env
+backend/app_config.json
+
+# Frontend build
+frontend/node_modules/
+frontend/dist/
+
+# OS
+.DS_Store
+Thumbs.db

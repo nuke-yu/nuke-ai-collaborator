@@ -1,0 +1,62 @@
+import { useEffect, useRef, useCallback, useState } from 'react'
+
+export function useWebSocket(groupId, memberId, onMessage) {
+  const ws = useRef(null)
+  const retryTimer = useRef(null)
+  const [connected, setConnected] = useState(false)
+  const [reconnecting, setReconnecting] = useState(false)
+
+  const connect = useCallback(() => {
+    if (!groupId || !memberId) return
+    const url = `ws://localhost:8000/ws/${groupId}/${memberId}`
+    const socket = new WebSocket(url)
+
+    socket.onopen = () => {
+      setConnected(true)
+      setReconnecting(false)
+    }
+
+    socket.onmessage = (e) => {
+      const data = JSON.parse(e.data)
+      onMessage(data)
+      // 收到他人消息时，立即发回已读确认
+      if (data.type === 'message' && data.id) {
+        if (socket.readyState === WebSocket.OPEN) {
+          socket.send(JSON.stringify({ type: 'read', msg_id: data.id }))
+        }
+      }
+    }
+
+    socket.onclose = () => {
+      setConnected(false)
+      setReconnecting(true)
+      retryTimer.current = setTimeout(connect, 3000)
+    }
+
+    socket.onerror = () => {
+      socket.close()
+    }
+
+    ws.current = socket
+  }, [groupId, memberId])
+
+  useEffect(() => {
+    connect()
+    return () => {
+      clearTimeout(retryTimer.current)
+      ws.current?.close()
+    }
+  }, [connect])
+
+  const send = useCallback((content, replyToId = null, fileData = null) => {
+    if (ws.current?.readyState === WebSocket.OPEN) {
+      ws.current.send(JSON.stringify({
+        content,
+        reply_to_id: replyToId,
+        ...(fileData && { file_url: fileData.url, file_name: fileData.name, file_size: fileData.size, file_type: fileData.type }),
+      }))
+    }
+  }, [])
+
+  return { send, connected, reconnecting }
+}
