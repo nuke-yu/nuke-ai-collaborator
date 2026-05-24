@@ -7,6 +7,7 @@ from database import (get_db, get_group, get_members, get_all_messages, get_memb
                       update_member_setting, update_member_full, clear_bot_context)
 from ws_manager import manager
 from models import AddMemberRequest, CreateGroupRequest, UpdateGroupRequest
+from workspace import init_bot_workspace, init_group_workspace
 
 router = APIRouter()
 
@@ -30,6 +31,7 @@ async def create_group(req: CreateGroupRequest):
         async with db.execute("INSERT INTO groups (name) VALUES (?)", (req.name,)) as cur:
             group_id = cur.lastrowid
         await db.commit()
+    await init_group_workspace(group_id, req.name)
     return {"id": group_id, "name": req.name}
 
 
@@ -78,7 +80,18 @@ async def add_member(group_id: int, req: AddMemberRequest):
             (group_id, req.name, req.type, req.role, req.system_prompt, req.avatar_color, req.model_provider, req.model_name)
         ) as cur:
             await db.commit()
-            return {"id": cur.lastrowid, "name": req.name, "type": req.type}
+            bot_id = cur.lastrowid
+
+        if req.type == "bot":
+            await init_bot_workspace({
+                "id": bot_id,
+                "name": req.name,
+                "role": req.role,
+                "system_prompt": req.system_prompt,
+                "personality_prompt": req.personality_prompt or "",
+            })
+
+        return {"id": bot_id, "name": req.name, "type": req.type}
 
 
 @router.delete("/api/groups/{group_id}/members/{member_id}")

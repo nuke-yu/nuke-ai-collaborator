@@ -23,60 +23,56 @@ def _get_collection():
 
 
 # ── 写入 Chroma（在线程池里跑，避免阻塞事件循环）──────────────────────
-def _add_sync(message_id: int, content: str, role: str, group_id: int):
+def _add_sync(message_id: int, content: str, role: str, bot_id: int):
     col = _get_collection()
     col.upsert(
         ids=[str(message_id)],
         documents=[content],
-        metadatas=[{"group_id": group_id, "role": role or ""}],
+        metadatas=[{"bot_id": bot_id, "role": role or ""}],
     )
 
-async def add_to_chroma(message_id: int, content: str, role: str, group_id: int):
+async def add_to_chroma(message_id: int, content: str, role: str, bot_id: int):
     loop = asyncio.get_event_loop()
-    await loop.run_in_executor(None, partial(_add_sync, message_id, content, role, group_id))
+    await loop.run_in_executor(None, partial(_add_sync, message_id, content, role, bot_id))
 
 
-# ── RAG 检索（语义向量，支持同义词/跨语言）────────────────────────────
-def _query_sync(query: str, role: str, group_id: int, top_k: int) -> list:
+# ── RAG 检索（语义向量，Bot 个人知识库）───────────────────────────────
+def _query_sync(query: str, bot_id: int, top_k: int) -> list:
     col = _get_collection()
     try:
         results = col.query(
             query_texts=[query],
             n_results=top_k,
-            where={"$and": [
-                {"group_id": {"$eq": group_id}},
-                {"role": {"$eq": role}},
-            ]},
+            where={"bot_id": {"$eq": bot_id}},
             include=["documents"],
         )
         return results["documents"][0] if results["documents"] else []
     except Exception:
         return []
 
-async def retrieve_relevant(group_id: int, role: str, query: str, top_k: int = 3) -> list:
-    if not role:
-        return []
+async def retrieve_relevant(bot_id: int, query: str, top_k: int = 3) -> list:
     loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, partial(_query_sync, query, role, group_id, top_k))
+    return await loop.run_in_executor(None, partial(_query_sync, query, bot_id, top_k))
 
 
 # ── 摘要压缩（超过阈值时把老消息压成要点，存 SQLite）─────────────────
-async def maybe_summarize(group_id: int, role: str, member_ids: list):
+async def maybe_summarize(bot_id: int, role: str, member_ids: list):
     from ai_client import call_ai
     if not member_ids:
         return
     try:
         ph = ",".join("?" * len(member_ids))
         async with get_db() as db:
+            # 跨群组查询：只按 member_id 过滤，不限 group_id
             async with db.execute(
-                f"SELECT id, content FROM messages WHERE group_id=? AND member_id IN ({ph}) ORDER BY id",
-                [group_id] + member_ids
+                f"SELECT id, content FROM messages WHERE member_id IN ({ph}) ORDER BY id",
+                member_ids
             ) as cur:
                 role_msgs = await cur.fetchall()
 
             async with db.execute(
-                "SELECT covered_through_id FROM role_summaries WHERE group_id=? AND role=? ORDER BY id DESC LIMIT 1",
-                (group_id, role)
+                "SELECT covered_through_id FROM role_summaries WHERE bot_id=? ORDER BY id DESC LIMIT 1",
+                (bot_id,)
             ) as cur:
                 last = await cur.fetchone()
 
@@ -96,8 +92,8 @@ async def maybe_summarize(group_id: int, role: str, member_ids: list):
 
         async with get_db() as db:
             await db.execute(
-                "INSERT INTO role_summaries (group_id, role, summary, covered_through_id) VALUES (?, ?, ?, ?)",
-                (group_id, role, summary, batch[-1][0])
+                "INSERT INTO role_summaries (bot_id, role, summary, covered_through_id) VALUES (?, ?, ?, ?)",
+                (bot_id, role, summary, batch[-1][0])
             )
             await db.commit()
     except Exception:
@@ -105,28 +101,25 @@ async def maybe_summarize(group_id: int, role: str, member_ids: list):
 
 
 # ── 组合记忆上下文（注入 system prompt）──────────────────────────────
-async def get_memory_context(group_id: int, role: str, query: str) -> str:
-    if not role:
-        return ""
-
+async def get_memory_context(bot_id: int, role: str, query: str) -> str:
     parts = []
 
-    # 1. 历史摘要（SQLite）
+    # 1. 历史摘要（SQLite，按 Bot 个人）
     try:
         async with get_db() as db:
             async with db.execute(
-                "SELECT summary FROM role_summaries WHERE group_id=? AND role=? ORDER BY id DESC LIMIT 3",
-                (group_id, role)
+                "SELECT summary FROM role_summaries WHERE bot_id=? ORDER BY id DESC LIMIT 3",
+                (bot_id,)
             ) as cur:
                 summaries = await cur.fetchall()
         if summaries:
             combined = "\n".join(r[0] for r in reversed(summaries))
-            parts.append(f"【历史工作摘要】\n{combined}")
+            parts.append(f"【我的历史经验摘要】\n{combined}")
     except Exception:
         pass
 
-    # 2. 语义检索（Chroma）
-    relevant = await retrieve_relevant(group_id, role, query)
+    # 2. 语义检索（Chroma，Bot 个人知识库）
+    relevant = await retrieve_relevant(bot_id, query)
     if relevant:
         parts.append("【相关历史记录】\n" + "\n---\n".join(relevant))
 

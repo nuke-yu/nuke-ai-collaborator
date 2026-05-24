@@ -211,8 +211,9 @@ async def _trigger_single_stage(group_id: int, prev_stage: dict, next_bot: dict)
     await asyncio.sleep(0.5)
     history = await _build_history(group_id)
     trigger_msg = f"请开始你（{next_bot['name']} · {next_bot.get('role', '')}）的工作。"
-    system_prompt = (next_bot["system_prompt"] or f"你是{next_bot['name']}，{next_bot.get('role', '')}。") \
-                    + system_suffix(group_id)
+    base = next_bot["system_prompt"] or f"你是{next_bot['name']}，{next_bot.get('role', '')}。"
+    p = (next_bot.get("personality_prompt") or "").strip()
+    system_prompt = (base + f"\n\n【性格指令】\n{p}" if p else base) + system_suffix(group_id)
 
     async with get_db() as db:
         msg_id = await save_message(db, group_id, next_bot["id"], "...")
@@ -225,7 +226,9 @@ async def _trigger_single_stage(group_id: int, prev_stage: dict, next_bot: dict)
     try:
         provider = next_bot.get("model_provider", "deepseek")
         model = next_bot.get("model_name", "deepseek-chat")
-        async for chunk in call_ai_stream(system_prompt, history, trigger_msg, provider, model):
+        temperature = next_bot.get("temperature", 0.7)
+        max_tokens = next_bot.get("max_tokens", 4096)
+        async for chunk in call_ai_stream(system_prompt, history, trigger_msg, provider, model, temperature, max_tokens):
             full += chunk
             await manager.broadcast(group_id, {"type": "stream_chunk", "temp_id": f"wf_{msg_id}", "chunk": chunk})
     except AIError as e:
@@ -292,7 +295,9 @@ async def _trigger_pool_bot(group_id: int, bot: dict, ticket: str, pool_stage: d
     idx = s["current"]
     total = len(s["stages"])
     keyword = pool_stage.get("done_keyword", "完毕")
-    system_prompt = (bot["system_prompt"] or f"你是{bot['name']}，{bot.get('role', '')}。") + (
+    base = bot["system_prompt"] or f"你是{bot['name']}，{bot.get('role', '')}。"
+    p = (bot.get("personality_prompt") or "").strip()
+    system_prompt = (base + f"\n\n【性格指令】\n{p}" if p else base) + (
         f"\n\n[工作流 {idx+1}/{total}] 你当前认领的任务：「{ticket}」\n"
         f"请完成这个任务，描述你的实现方案、关键代码思路，并给出 commit message 和 PR 描述。\n"
         f"完成后在回复末尾说「{keyword}」，系统会自动为你分配下一个任务（如果有的话）。"
@@ -310,7 +315,9 @@ async def _trigger_pool_bot(group_id: int, bot: dict, ticket: str, pool_stage: d
     try:
         provider = bot.get("model_provider", "deepseek")
         model = bot.get("model_name", "deepseek-chat")
-        async for chunk in call_ai_stream(system_prompt, history, trigger_msg, provider, model):
+        temperature = bot.get("temperature", 0.7)
+        max_tokens = bot.get("max_tokens", 4096)
+        async for chunk in call_ai_stream(system_prompt, history, trigger_msg, provider, model, temperature, max_tokens):
             full += chunk
             await manager.broadcast(group_id, {
                 "type": "stream_chunk", "temp_id": f"pool_{msg_id}", "chunk": chunk

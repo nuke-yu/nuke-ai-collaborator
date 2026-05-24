@@ -5,10 +5,17 @@ from ws_manager import manager
 from ai_client import call_ai, call_ai_stream, AIError
 from role_router import should_bot_respond, build_context_message
 from memory import maybe_summarize, get_memory_context, add_to_chroma
+from executors.base import ExecutionContext
+from executors import registry
 import workflow as wf
 
 # group_id -> bot_id: 记录当前哪个 bot 持有会话
 active_bot: dict[int, int] = {}
+
+
+def _with_personality(base_prompt: str, bot: dict) -> str:
+    p = (bot.get("personality_prompt") or "").strip()
+    return base_prompt + f"\n\n【性格指令】\n{p}" if p else base_prompt
 
 
 def select_triggered_bots(content: str, all_bots: list, group_id: int) -> list[dict]:
@@ -49,9 +56,11 @@ async def stream_bot_response(group_id: int, bot: dict, system_prompt: str,
     })
     provider = bot.get("model_provider", "deepseek")
     model = bot.get("model_name", "deepseek-chat")
+    temperature = bot.get("temperature", 0.7)
+    max_tokens = bot.get("max_tokens", 4096)
     full_text = ""
     try:
-        async for chunk in call_ai_stream(system_prompt, history, user_msg, provider, model):
+        async for chunk in call_ai_stream(system_prompt, history, user_msg, provider, model, temperature, max_tokens):
             full_text += chunk
             await manager.broadcast(group_id, {"type": "stream_chunk", "temp_id": temp_id, "delta": chunk})
     except AIError as e:
@@ -104,8 +113,8 @@ async def auto_continue_if_needed(group_id: int, bot: dict, all_members: list, m
         if any(f"@{m['name']}" in latest["content"] for m in all_members):
             break
         history, _ = build_context_message("", "系统", recent)
-        system_prompt = bot["system_prompt"] or f"你是{bot['name']}，{bot['role']}。"
-        memory = await get_memory_context(group_id, bot["role"] or "", "继续代码")
+        system_prompt = _with_personality(bot["system_prompt"] or f"你是{bot['name']}，{bot['role']}。", bot)
+        memory = await get_memory_context(bot["id"], bot["role"] or "", "继续代码")
         if memory:
             system_prompt += f"\n\n{memory}"
         ai_reply, bot_msg_id = await stream_bot_response(
@@ -114,8 +123,8 @@ async def auto_continue_if_needed(group_id: int, bot: dict, all_members: list, m
         )
         if not ai_reply:
             break
-        asyncio.create_task(add_to_chroma(bot_msg_id, ai_reply, bot["role"] or "", group_id))
-        asyncio.create_task(maybe_summarize(group_id, bot["role"] or bot["name"], [bot["id"]]))
+        asyncio.create_task(add_to_chroma(bot_msg_id, ai_reply, bot["role"] or "", bot["id"]))
+        asyncio.create_task(maybe_summarize(bot["id"], bot["role"] or bot["name"], [bot["id"]]))
         if any(f"@{m['name']}" in ai_reply for m in all_members):
             break
 
@@ -149,11 +158,11 @@ async def check_handoff(group_id: int, all_bots: list, all_members: list,
         handoff_prompt = f"上一阶段完成，以下是交接内容：\n\n{content}\n\n请开始你的工作。"
 
     history, _ = build_context_message("", latest_bot_msg["sender_name"], recent)
-    system_prompt = target_bot["system_prompt"] or f"你是{target_bot['name']}，{target_bot['role']}。"
+    system_prompt = _with_personality(target_bot["system_prompt"] or f"你是{target_bot['name']}，{target_bot['role']}。", target_bot)
     ai_reply, bot_msg_id = await stream_bot_response(group_id, target_bot, system_prompt, history, handoff_prompt)
     if not ai_reply:
         return
-    asyncio.create_task(add_to_chroma(bot_msg_id, ai_reply, target_bot["role"] or "", group_id))
+    asyncio.create_task(add_to_chroma(bot_msg_id, ai_reply, target_bot["role"] or "", target_bot["id"]))
     active_bot[group_id] = target_bot["id"]
     await auto_continue_if_needed(group_id, target_bot, all_members)
     async with get_db() as db_r:
@@ -162,7 +171,8 @@ async def check_handoff(group_id: int, all_bots: list, all_members: list,
 
 
 async def dispatch_bots(group_id: int, triggered: list, content: str, sender: dict,
-                         recent: list, all_bots: list, all_members: list):
+                         recent: list, all_bots: list, all_members: list,
+                         group_name: str = "", group_announcement: str = ""):
     """执行触发的 bot 列表：竞速、顺序、续写、交接。"""
     ctx = {'recent': recent}
 
@@ -177,27 +187,31 @@ async def dispatch_bots(group_id: int, triggered: list, content: str, sender: di
 
     async def call_bot(bot):
         history, user_msg = build_context_message(content, sender["name"], _bot_recent(bot))
-        base_prompt = bot["system_prompt"] or f"你是{bot['name']}，{bot['role']}。"
-        memory = await get_memory_context(group_id, bot["role"] or "", content)
+        base_prompt = _with_personality(bot["system_prompt"] or f"你是{bot['name']}，{bot['role']}。", bot)
+        memory = await get_memory_context(bot["id"], bot["role"] or "", content)
         system_prompt = base_prompt + (f"\n\n{memory}" if memory else "")
         if "测试" in (bot["role"] or ""):
             system_prompt += f"\n\n完成测试报告后，在最后一行写：「@{initiator_name} 测试完成，任务全部完成！」"
-        ai_reply = await call_ai(system_prompt, history, user_msg)
+        ai_reply = await call_ai(system_prompt, history, user_msg,
+                                 bot.get("temperature", 0.7), bot.get("max_tokens", 4096))
         return bot, ai_reply
 
     async def race_role_group(bots):
         if len(bots) == 1:
             bot = bots[0]
-            history, user_msg_text = build_context_message(content, sender["name"], _bot_recent(bot))
-            base_prompt = bot["system_prompt"] or f"你是{bot['name']}，{bot['role']}。"
-            memory = await get_memory_context(group_id, bot["role"] or "", content)
-            system_prompt = base_prompt + (f"\n\n{memory}" if memory else "") + wf.system_suffix(group_id)
-            ai_reply, bot_msg_id = await stream_bot_response(group_id, bot, system_prompt, history, user_msg_text)
-            if not ai_reply:
+            ctx = ExecutionContext(
+                bot=bot, group_id=group_id, user_message=content,
+                sender=sender, history=_bot_recent(bot),
+                all_bots=all_bots, all_members=all_members,
+                broadcaster=manager,
+                workflow_suffix=wf.system_suffix(group_id),
+                group_name=group_name,
+                group_announcement=group_announcement,
+            )
+            result = await registry.get(bot.get("executor_id", "simple_v1")).run(ctx)
+            if not result.full_text:
                 return
-            asyncio.create_task(add_to_chroma(bot_msg_id, ai_reply, bot["role"] or "", group_id))
-            asyncio.create_task(maybe_summarize(group_id, bot["role"] or bot["name"], [bot["id"]]))
-            await wf.check_and_advance(group_id, ai_reply, bot["id"])
+            await wf.check_and_advance(group_id, result.full_text, bot["id"])
             return
 
         tasks = {asyncio.create_task(call_bot(b)): b for b in bots}
@@ -217,7 +231,7 @@ async def dispatch_bots(group_id: int, triggered: list, content: str, sender: di
         async with get_db() as db2:
             bot_msg_id = await save_message(db2, group_id, winner_bot["id"], ai_reply)
             bot_recent = await get_messages(db2, group_id)
-        asyncio.create_task(add_to_chroma(bot_msg_id, ai_reply, winner_bot["role"] or "", group_id))
+        asyncio.create_task(add_to_chroma(bot_msg_id, ai_reply, winner_bot["role"] or "", winner_bot["id"]))
         await manager.broadcast(group_id, {
             "type": "message", "id": bot_msg_id,
             "member_id": winner_bot["id"], "sender_name": winner_bot["name"],
@@ -225,7 +239,7 @@ async def dispatch_bots(group_id: int, triggered: list, content: str, sender: di
             "content": ai_reply,
             "created_at": bot_recent[-1]["created_at"] if bot_recent else "",
         })
-        asyncio.create_task(maybe_summarize(group_id, winner_bot["role"] or winner_bot["name"], [winner_bot["id"]]))
+        asyncio.create_task(maybe_summarize(winner_bot["id"], winner_bot["role"] or winner_bot["name"], [winner_bot["id"]]))
 
     role_groups: dict[str, list] = {}
     for bot in triggered:

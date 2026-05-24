@@ -10,6 +10,7 @@ class AddMemberRequest(BaseModel):
     type: str
     role: Optional[str] = None
     system_prompt: Optional[str] = None
+    personality_prompt: Optional[str] = None
     avatar_color: Optional[str] = "#6366f1"
     model_provider: Optional[str] = "deepseek"
     model_name: Optional[str] = "deepseek-chat"

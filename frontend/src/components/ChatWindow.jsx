@@ -13,6 +13,7 @@ import PinnedBar from './PinnedBar'
 import AnnouncementBar from './AnnouncementBar'
 import WorkflowBar from './WorkflowBar'
 import WorkflowStartModal from './WorkflowStartModal'
+import WorkspacePanel from './WorkspacePanel'
 
 export default function ChatWindow({ memberId, isDark, onToggleTheme }) {
   const [groups, setGroups] = useState([])
@@ -28,6 +29,7 @@ export default function ChatWindow({ memberId, isDark, onToggleTheme }) {
   const [showApiKeys, setShowApiKeys] = useState(false)
   const [showAddMember, setShowAddMember] = useState(false)
   const [editingMember, setEditingMember] = useState(null)
+  const [workspaceBot, setWorkspaceBot] = useState(null)
   const [error, setError] = useState(null)
   const [workflow, setWorkflow] = useState(null)
   const [showWorkflowStart, setShowWorkflowStart] = useState(false)
@@ -315,6 +317,7 @@ export default function ChatWindow({ memberId, isDark, onToggleTheme }) {
         membersCache={membersCache}
         onOpenAddMember={() => setShowAddMember(true)}
         onEditMember={(m) => setEditingMember(m)}
+        onOpenWorkspace={(m) => setWorkspaceBot(m)}
         onRemoveMember={async (id) => {
           await fetch(`/api/groups/${activeGroupId}/members/${id}`, { method: 'DELETE' })
           setMembers(prev => prev.filter(m => m.id !== id))
@@ -336,13 +339,14 @@ export default function ChatWindow({ memberId, isDark, onToggleTheme }) {
       {showAddMember && (
         <MemberList
           onAddMember={async (form) => {
-            await addMember(activeGroupId, form.name, form.type, form.role, form.system_prompt, form.avatar_color, form.model_provider, form.model_name)
+            const result = await addMember(activeGroupId, form.name, form.type, form.role, form.system_prompt, form.avatar_color, form.model_provider, form.model_name)
             const { members: updated } = await fetchGroupInfo(activeGroupId)
             setMembers(updated)
             setMembersCache(prev => ({ ...prev, [activeGroupId]: updated }))
             setGroups(prev => prev.map(g =>
               g.id === activeGroupId ? { ...g, member_count: updated.length } : g
             ))
+            return result
           }}
           onClose={() => setShowAddMember(false)}
         />
@@ -362,6 +366,9 @@ export default function ChatWindow({ memberId, isDark, onToggleTheme }) {
           }}
           onClose={() => setEditingMember(null)}
         />
+      )}
+      {workspaceBot && (
+        <WorkspacePanel bot={workspaceBot} onClose={() => setWorkspaceBot(null)} />
       )}
       <div className={`${tabClass('chat')} flex-1 min-w-0 flex flex-col md:flex-row`}>
       <div
@@ -402,6 +409,7 @@ export default function ChatWindow({ memberId, isDark, onToggleTheme }) {
               <button
                 onClick={() => {
                   const defaultKeyword = (m) => {
+                    if (m.done_keyword) return m.done_keyword
                     const role = m.role || m.name
                     if (role.includes('需求')) return '需求确认完毕'
                     if (role.includes('架构')) return '架构设计完毕'

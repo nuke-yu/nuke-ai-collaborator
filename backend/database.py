@@ -1,4 +1,5 @@
 import aiosqlite
+import json
 import os
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "chat.db")
@@ -105,6 +106,13 @@ async def init_db():
             "ALTER TABLE groups ADD COLUMN announcement TEXT DEFAULT NULL",
             "ALTER TABLE messages ADD COLUMN is_auto_reply INTEGER DEFAULT 0",
             "ALTER TABLE members ADD COLUMN context_cleared_at TEXT DEFAULT NULL",
+            "ALTER TABLE members ADD COLUMN temperature REAL DEFAULT 0.7",
+            "ALTER TABLE members ADD COLUMN max_tokens INTEGER DEFAULT 4096",
+            "ALTER TABLE role_summaries ADD COLUMN bot_id INTEGER DEFAULT NULL",
+            "ALTER TABLE members ADD COLUMN personality_prompt TEXT DEFAULT NULL",
+            "ALTER TABLE members ADD COLUMN executor_id TEXT DEFAULT 'simple_v1'",
+            "ALTER TABLE members ADD COLUMN executor_config TEXT DEFAULT '{}'",
+            "ALTER TABLE members ADD COLUMN done_keyword TEXT DEFAULT NULL",
         ]:
             try:
                 await db.execute(col_sql)
@@ -192,13 +200,26 @@ async def get_group(db, group_id: int):
                     "announcement": row[3] if len(row) > 3 else None}
         return None
 
+def _parse_json(val):
+    try:
+        return json.loads(val) if val else {}
+    except Exception:
+        return {}
+
+
 def _row_to_member(r):
     return {"id": r[0], "group_id": r[1], "name": r[2], "type": r[3],
             "role": r[4], "system_prompt": r[5], "avatar_color": r[6],
             "model_provider": r[7] if len(r) > 7 else "deepseek",
             "model_name": r[8] if len(r) > 8 else "deepseek-chat",
             "auto_reply": r[9] if len(r) > 9 else None,
-            "context_cleared_at": r[10] if len(r) > 10 else None}
+            "context_cleared_at": r[10] if len(r) > 10 else None,
+            "temperature": r[11] if len(r) > 11 else 0.7,
+            "max_tokens": r[12] if len(r) > 12 else 4096,
+            "personality_prompt": r[13] if len(r) > 13 else None,
+            "executor_id": r[14] if len(r) > 14 else "simple_v1",
+            "executor_config": _parse_json(r[15]) if len(r) > 15 else {},
+            "done_keyword": r[16] if len(r) > 16 else None}
 
 async def get_members(db, group_id: int):
     async with db.execute("SELECT * FROM members WHERE group_id = ?", (group_id,)) as cur:
@@ -286,15 +307,22 @@ async def clear_bot_context(db, member_id: int, group_id: int):
     from datetime import datetime
     now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
     await db.execute("UPDATE members SET context_cleared_at=? WHERE id=?", (now, member_id))
-    await db.execute("DELETE FROM role_summaries WHERE group_id=? AND role=(SELECT role FROM members WHERE id=?)",
-                     (group_id, member_id))
+    await db.execute("DELETE FROM role_summaries WHERE bot_id=?", (member_id,))
     await db.commit()
 
 async def update_member_full(db, member_id: int, data: dict):
+    executor_config = data.get('executor_config', {})
+    if not isinstance(executor_config, str):
+        executor_config = json.dumps(executor_config)
     await db.execute(
-        "UPDATE members SET name=?, role=?, system_prompt=?, avatar_color=?, model_provider=?, model_name=? WHERE id=?",
+        "UPDATE members SET name=?, role=?, system_prompt=?, avatar_color=?, model_provider=?, model_name=?, temperature=?, max_tokens=?, personality_prompt=?, executor_id=?, executor_config=?, done_keyword=? WHERE id=?",
         (data.get('name'), data.get('role'), data.get('system_prompt'),
-         data.get('avatar_color'), data.get('model_provider'), data.get('model_name'), member_id)
+         data.get('avatar_color'), data.get('model_provider'), data.get('model_name'),
+         data.get('temperature', 0.7), data.get('max_tokens', 4096),
+         data.get('personality_prompt') or None,
+         data.get('executor_id', 'simple_v1'), executor_config,
+         data.get('done_keyword') or None,
+         member_id)
     )
     await db.commit()
 

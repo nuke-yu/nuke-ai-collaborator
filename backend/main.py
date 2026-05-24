@@ -6,7 +6,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from database import init_db, get_db, get_member, get_members, save_message, get_messages
+from database import init_db, get_db, get_member, get_members, get_group, save_message, get_messages
 from ws_manager import manager
 from models import AddMemberRequest  # noqa: keep models importable via main
 from bot_orchestrator import select_triggered_bots, dispatch_bots, mark_read, send_auto_reply
@@ -14,13 +14,29 @@ from message_routes import router as message_router, UPLOAD_DIR
 from group_routes import router as group_router
 from template_routes import router as template_router
 from workflow_routes import router as workflow_router
+from workspace_routes import router as workspace_router
 from config import read_config, write_config, _preview, FIELDS
+from executors import registry
+from workspace import init_all_bots, init_group_workspace
 import os
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
+    registry.discover()
+    async with get_db() as db:
+        async with db.execute("SELECT DISTINCT group_id FROM members WHERE type='bot'") as cur:
+            group_rows = await cur.fetchall()
+        all_bots = []
+        for (gid,) in group_rows:
+            all_bots.extend(await get_members(db, gid))
+    await init_all_bots(all_bots)
+    async with get_db() as db2:
+        async with db2.execute("SELECT id, name FROM groups") as cur:
+            groups = await cur.fetchall()
+    for gid, gname in groups:
+        await init_group_workspace(gid, gname)
     yield
 
 
@@ -38,6 +54,18 @@ app.include_router(message_router)
 app.include_router(group_router)
 app.include_router(template_router)
 app.include_router(workflow_router)
+app.include_router(workspace_router)
+
+
+@app.get("/api/plugins")
+async def list_plugins():
+    return registry.all_plugins()
+
+
+@app.post("/api/plugins/reload")
+async def reload_plugins():
+    loaded = registry.reload()
+    return {"loaded": loaded}
 
 
 @app.get("/api/config")
@@ -114,9 +142,13 @@ async def websocket_endpoint(websocket: WebSocket, group_id: int, member_id: int
                 all_members = await get_members(db, group_id)
                 all_bots = [m for m in all_members if m["type"] == "bot"]
                 triggered = select_triggered_bots(content or "", all_bots, group_id)
+                group_info = await get_group(db, group_id) or {}
 
             if triggered:
-                await dispatch_bots(group_id, triggered, content or "", sender, recent, all_bots, all_members)
+                await dispatch_bots(group_id, triggered, content or "", sender, recent,
+                                    all_bots, all_members,
+                                    group_name=group_info.get("name", ""),
+                                    group_announcement=group_info.get("announcement", ""))
 
     except WebSocketDisconnect:
         gone_id = manager.disconnect(websocket, group_id)

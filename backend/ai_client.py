@@ -13,6 +13,12 @@ def _keys():
 class AIError(Exception):
     pass
 
+def _require_key(keys: dict, name: str, label: str) -> str:
+    val = keys.get(name, "")
+    if not val:
+        raise AIError(f"未配置 {label} API Key，请在设置中填写")
+    return val
+
 async def get_embedding(text: str) -> list:
     api_key = _keys()["deepseek"]
     async with httpx.AsyncClient(timeout=30) as client:
@@ -24,9 +30,11 @@ async def get_embedding(text: str) -> list:
         response.raise_for_status()
         return response.json()["data"][0]["embedding"]
 
-async def call_ai(system_prompt: str, history: list, user_message: str) -> str:
+async def call_ai(system_prompt: str, history: list, user_message: str,
+                  temperature: float = 0.7, max_tokens: int = 4096) -> str:
     """Non-streaming call (DeepSeek only, used for legacy/non-streaming paths)"""
-    api_key = _keys()["deepseek"]
+    keys = _keys()
+    api_key = _require_key(keys, "deepseek", "DeepSeek")
     messages = [{"role": "system", "content": system_prompt}]
     messages.extend(history[-10:])
     messages.append({"role": "user", "content": user_message})
@@ -35,7 +43,7 @@ async def call_ai(system_prompt: str, history: list, user_message: str) -> str:
             response = await client.post(
                 "https://api.deepseek.com/v1/chat/completions",
                 headers={"Authorization": f"Bearer {api_key}"},
-                json={"model": "deepseek-chat", "messages": messages, "temperature": 0.7, "max_tokens": 4096},
+                json={"model": "deepseek-chat", "messages": messages, "temperature": temperature, "max_tokens": max_tokens},
             )
             response.raise_for_status()
             return response.json()["choices"][0]["message"]["content"]
@@ -46,12 +54,13 @@ async def call_ai(system_prompt: str, history: list, user_message: str) -> str:
     except Exception as e:
         raise AIError(f"AI 调用失败：{str(e)}")
 
-async def _stream_openai_compat(url: str, api_key: str, model: str, messages: list):
+async def _stream_openai_compat(url: str, api_key: str, model: str, messages: list,
+                                temperature: float = 0.7, max_tokens: int = 4096):
     async with httpx.AsyncClient(timeout=120) as client:
         async with client.stream(
             "POST", url,
             headers={"Authorization": f"Bearer {api_key}"},
-            json={"model": model, "messages": messages, "temperature": 0.7, "max_tokens": 4096, "stream": True},
+            json={"model": model, "messages": messages, "temperature": temperature, "max_tokens": max_tokens, "stream": True},
         ) as response:
             response.raise_for_status()
             async for line in response.aiter_lines():
@@ -87,7 +96,8 @@ async def _stream_ollama(model: str, messages: list, base_url: str = "http://loc
                 except json.JSONDecodeError:
                     continue
 
-async def _stream_claude(model: str, system_prompt: str, messages: list, api_key: str = ""):
+async def _stream_claude(model: str, system_prompt: str, messages: list, api_key: str = "",
+                         temperature: float = 0.7, max_tokens: int = 4096):
     async with httpx.AsyncClient(timeout=120) as client:
         async with client.stream(
             "POST", "https://api.anthropic.com/v1/messages",
@@ -98,7 +108,8 @@ async def _stream_claude(model: str, system_prompt: str, messages: list, api_key
             },
             json={
                 "model": model,
-                "max_tokens": 4096,
+                "max_tokens": max_tokens,
+                "temperature": temperature,
                 "system": system_prompt,
                 "messages": messages,
                 "stream": True,
@@ -117,19 +128,199 @@ async def _stream_claude(model: str, system_prompt: str, messages: list, api_key
                 except (json.JSONDecodeError, KeyError):
                     continue
 
+def _to_claude_messages(messages: list[dict]) -> list[dict]:
+    """Convert OpenAI-format messages (no system) to Claude format."""
+    result = []
+    for m in messages:
+        role = m.get("role")
+        if role == "tool":
+            result.append({
+                "role": "user",
+                "content": [{"type": "tool_result", "tool_use_id": m["tool_call_id"], "content": m["content"]}],
+            })
+        elif role == "assistant" and m.get("tool_calls"):
+            content = []
+            if m.get("content"):
+                content.append({"type": "text", "text": m["content"]})
+            for tc in m["tool_calls"]:
+                args = tc["function"]["arguments"]
+                content.append({
+                    "type": "tool_use", "id": tc["id"],
+                    "name": tc["function"]["name"],
+                    "input": json.loads(args) if isinstance(args, str) else args,
+                })
+            result.append({"role": "assistant", "content": content})
+        else:
+            result.append({"role": role, "content": m.get("content", "")})
+    return result
+
+
+async def _once_openai_compat(url: str, api_key: str, model: str, system_prompt: str,
+                               messages: list, temperature: float, max_tokens: int,
+                               tools: list | None) -> dict:
+    full_msgs = [{"role": "system", "content": system_prompt}] + messages
+    body = {"model": model, "messages": full_msgs, "temperature": temperature, "max_tokens": max_tokens}
+    if tools:
+        body["tools"] = tools
+        body["tool_choice"] = "auto"
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+    async with httpx.AsyncClient(timeout=60) as client:
+        resp = await client.post(url, headers=headers, json=body)
+        resp.raise_for_status()
+        data = resp.json()
+    choice = data["choices"][0]
+    msg = choice["message"]
+    if choice.get("finish_reason") == "tool_calls" and msg.get("tool_calls"):
+        calls = [
+            {"id": tc["id"], "name": tc["function"]["name"],
+             "arguments": json.loads(tc["function"]["arguments"])}
+            for tc in msg["tool_calls"]
+        ]
+        return {"type": "tool_calls", "calls": calls, "assistant_message": msg}
+    return {"type": "text", "content": msg.get("content", "")}
+
+
+async def _once_claude(api_key: str, model: str, system_prompt: str,
+                        messages: list, temperature: float, max_tokens: int,
+                        tools: list | None) -> dict:
+    body = {
+        "model": model, "max_tokens": max_tokens, "temperature": temperature,
+        "system": system_prompt, "messages": _to_claude_messages(messages),
+    }
+    if tools:
+        body["tools"] = [
+            {"name": t["function"]["name"], "description": t["function"]["description"],
+             "input_schema": t["function"]["parameters"]}
+            for t in tools
+        ]
+    async with httpx.AsyncClient(timeout=60) as client:
+        resp = await client.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={"x-api-key": api_key, "anthropic-version": "2023-06-01",
+                     "content-type": "application/json"},
+            json=body,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    text_parts, tool_uses = [], []
+    for block in data.get("content", []):
+        if block["type"] == "text":
+            text_parts.append(block["text"])
+        elif block["type"] == "tool_use":
+            tool_uses.append({"id": block["id"], "name": block["name"], "arguments": block["input"]})
+    if tool_uses:
+        assistant_msg = {
+            "role": "assistant", "content": None,
+            "tool_calls": [
+                {"id": u["id"], "type": "function",
+                 "function": {"name": u["name"], "arguments": json.dumps(u["arguments"])}}
+                for u in tool_uses
+            ],
+        }
+        return {"type": "tool_calls", "calls": tool_uses, "assistant_message": assistant_msg}
+    return {"type": "text", "content": "".join(text_parts)}
+
+
+async def call_ai_once(
+    system_prompt: str,
+    messages: list[dict],
+    provider: str = "deepseek",
+    model: str = "deepseek-chat",
+    temperature: float = 0.7,
+    max_tokens: int = 4096,
+    tools: list[dict] | None = None,
+) -> dict:
+    """
+    Single non-streaming AI call with optional tool support.
+    messages: OpenAI-format list (no system message).
+    Returns:
+      {"type": "text", "content": "..."}
+      {"type": "tool_calls", "calls": [...], "assistant_message": {...}}
+    """
+    keys = _keys()
+    try:
+        if provider in ("deepseek", "openai"):
+            url = ("https://api.deepseek.com/v1/chat/completions" if provider == "deepseek"
+                   else "https://api.openai.com/v1/chat/completions")
+            label = "DeepSeek" if provider == "deepseek" else "OpenAI"
+            api_key = _require_key(keys, "deepseek" if provider == "deepseek" else "openai", label)
+            return await _once_openai_compat(url, api_key, model, system_prompt,
+                                             messages, temperature, max_tokens, tools)
+        elif provider == "claude":
+            api_key = _require_key(keys, "anthropic", "Anthropic")
+            return await _once_claude(api_key, model, system_prompt,
+                                      messages, temperature, max_tokens, tools)
+        elif provider == "ollama":
+            url = f"{keys['ollama_url']}/v1/chat/completions"
+            return await _once_openai_compat(url, "", model, system_prompt,
+                                             messages, temperature, max_tokens, None)
+        else:
+            raise AIError(f"不支持的模型提供商: {provider}")
+    except AIError:
+        raise
+    except httpx.TimeoutException:
+        raise AIError("AI 响应超时，请稍后重试")
+    except httpx.HTTPStatusError as e:
+        raise AIError(f"AI 服务异常（{e.response.status_code}）")
+    except Exception as e:
+        raise AIError(f"AI 调用失败：{str(e)}")
+
+
+async def call_ai_stream_messages(
+    system_prompt: str,
+    messages: list[dict],
+    provider: str = "deepseek",
+    model: str = "deepseek-chat",
+    temperature: float = 0.7,
+    max_tokens: int = 4096,
+):
+    """Streaming call from pre-built OpenAI-format messages (no system). Used by tool_loop final response."""
+    keys = _keys()
+    try:
+        if provider in ("deepseek", "openai"):
+            url = ("https://api.deepseek.com/v1/chat/completions" if provider == "deepseek"
+                   else "https://api.openai.com/v1/chat/completions")
+            label = "DeepSeek" if provider == "deepseek" else "OpenAI"
+            api_key = _require_key(keys, "deepseek" if provider == "deepseek" else "openai", label)
+            full_msgs = [{"role": "system", "content": system_prompt}] + messages
+            async for chunk in _stream_openai_compat(url, api_key, model, full_msgs, temperature, max_tokens):
+                yield chunk
+        elif provider == "claude":
+            api_key = _require_key(keys, "anthropic", "Anthropic")
+            claude_msgs = _to_claude_messages(messages)
+            async for chunk in _stream_claude(model, system_prompt, claude_msgs, api_key, temperature, max_tokens):
+                yield chunk
+        elif provider == "ollama":
+            full_msgs = [{"role": "system", "content": system_prompt}] + messages
+            async for chunk in _stream_ollama(model, full_msgs, keys["ollama_url"]):
+                yield chunk
+        else:
+            raise AIError(f"不支持的模型提供商: {provider}")
+    except AIError:
+        raise
+    except httpx.TimeoutException:
+        raise AIError("AI 响应超时，请稍后重试")
+    except httpx.HTTPStatusError as e:
+        raise AIError(f"AI 服务异常（{e.response.status_code}）")
+    except Exception as e:
+        raise AIError(f"AI 调用失败：{str(e)}")
+
+
 async def call_ai_stream(system_prompt: str, history: list, user_message: str,
-                         provider: str = "deepseek", model: str = "deepseek-chat"):
+                         provider: str = "deepseek", model: str = "deepseek-chat",
+                         temperature: float = 0.7, max_tokens: int = 4096):
     """Unified streaming entry point for all providers."""
     keys = _keys()
     try:
         if provider in ("deepseek", "openai"):
             url = ("https://api.deepseek.com/v1/chat/completions" if provider == "deepseek"
                    else "https://api.openai.com/v1/chat/completions")
-            api_key = keys["deepseek"] if provider == "deepseek" else keys["openai"]
+            label = "DeepSeek" if provider == "deepseek" else "OpenAI"
+            api_key = _require_key(keys, "deepseek" if provider == "deepseek" else "openai", label)
             messages = [{"role": "system", "content": system_prompt}]
             messages.extend(history[-10:])
             messages.append({"role": "user", "content": user_message})
-            async for chunk in _stream_openai_compat(url, api_key, model, messages):
+            async for chunk in _stream_openai_compat(url, api_key, model, messages, temperature, max_tokens):
                 yield chunk
 
         elif provider == "ollama":
@@ -140,9 +331,10 @@ async def call_ai_stream(system_prompt: str, history: list, user_message: str,
                 yield chunk
 
         elif provider == "claude":
+            api_key = _require_key(keys, "anthropic", "Anthropic")
             hist = [m for m in history[-10:] if m["role"] in ("user", "assistant")]
             hist.append({"role": "user", "content": user_message})
-            async for chunk in _stream_claude(model, system_prompt, hist, keys["anthropic"]):
+            async for chunk in _stream_claude(model, system_prompt, hist, api_key, temperature, max_tokens):
                 yield chunk
 
         else:
