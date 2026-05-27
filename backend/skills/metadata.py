@@ -59,6 +59,14 @@ def parse_frontmatter(content: str) -> dict:
             fm["context"] = val  # "inline" (default) or "fork"
         elif key == "shell":
             fm["shell"] = val  # "bash" (default) or "powershell"
+        elif key == "user-invocable":
+            fm["user_invocable"] = val.lower() not in ("false", "no", "0")
+        elif key == "argument-hint":
+            fm["argument_hint"] = val
+        elif key == "allowed-tools":
+            fm["allowed_tools"] = [t.strip() for t in val.split(",") if t.strip()]
+        elif key == "model":
+            fm["model"] = val
     return fm
 
 
@@ -96,6 +104,10 @@ def parse_skill_meta(path: Path) -> dict:
             "paths": fm.get("paths", ""),
             "context": fm.get("context", "inline"),
             "shell": fm.get("shell", "bash"),
+            "user_invocable": fm.get("user_invocable", True),
+            "argument_hint": fm.get("argument_hint", ""),
+            "allowed_tools": fm.get("allowed_tools", []),
+            "model": fm.get("model", ""),
         }
     except Exception:
         return {"description": "", "always": False, "status": "active",

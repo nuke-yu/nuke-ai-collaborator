@@ -68,7 +68,17 @@ async def run_skill(bot_id: int, name: str, args: str = "", ctx: dict | None = N
         if meta.get("learns"):
             ctx["skill_learns"] = name
         if meta.get("context") == "fork":
-            ctx["skill_fork"] = {"name": name, "content": content, "args": args}
+            ctx["skill_fork"] = {
+                "name": name,
+                "content": content,
+                "args": args,
+                "allowed_tools": meta.get("allowed_tools", []),
+                "model": meta.get("model", ""),
+            }
             return "__SKILL_FORK__"
+        if meta.get("allowed_tools"):
+            ctx["skill_allowed_tools"] = meta["allowed_tools"]
+        if meta.get("model"):
+            ctx["skill_model"] = meta["model"]
 
     return content

@@ -1,6 +1,6 @@
 # PRD — AI 功能路线图
 
-> 最后更新：2026-05-27（Context P1 三项全部实现）
+> 最后更新：2026-05-28（M4 Skill frontmatter `model` 字段实现）
 > 项目：nuke-ai-collaborator
 
 ---
@@ -58,7 +58,7 @@ Bot 的推理循环、工具调用方式、记忆使用策略均由执行引擎�
 | 执行引擎 UI 配置 | M1 | ✅ 已完成 | Bot 编辑页面展示可用插件及其 manifest，直接切换 |
 | `simple_v1` 插件 | M1 | ✅ 已完成 | 现有逻辑提取：单次 AI 调用 + 流式输出 + 自动记忆积累 |
 | `tool_loop_v1` 插件 | M1 | ✅ 已完成 | 多轮工具调用循环（≤10 轮）：AI → 工具请求 → 结果注入 → 继续，直至完成 |
-| Context Compaction（上下文自动压缩） | M1 | ✅ 已完成 | 上下文超 60K 字符时自动 AI 摘要压缩，保留末尾 8 条消息，广播 compaction 事件（参考 GSD-2 CompactionOrchestrator） |
+| Context Compaction（上下文自动压缩） | M1 | ✅ 已完成 | AutoCompact 5 策略（参考 Claude Code）：Strategy 1 计数式微压缩 / Strategy 2 Snip / Strategy 3 Session Memory 增量摘要 / Strategy 4 九段结构化 AI 全量摘要 / Strategy 5 Cached Microcompact（Claude only）；电路熔断器；DB 软删除归档；broadcast strategy 字段 |
 | `react_v1` 插件 | M4 | ⬜ 未做 | ReAct 推理循环：Thought → Action → Observation |
 
 **插件 manifest 示例：**
@@ -259,12 +259,12 @@ Bot 发现可复用规律
 | `description` | M1 ✅ | 注入 skill 列表时使用，替代读第一行 |
 | `always` | M1 ✅ | `true` 则全文常驻 system prompt，否则懒加载元数据 |
 | `when_to_use` | M2 | 帮助模型判断调用时机，注入到 skill 列表条目中 |
-| `user-invocable` | M2 | `false` 则不出现在 skill 列表，只能 `always` 方式激活 |
-| `argument-hint` | M3 | 调用参数提示，注入到 skill 列表 |
-| `paths` | M3 | gitignore 语法，文件路径匹配时自动激活（参考 Claude Code） |
-| `context` | M3 | `inline`（默认）/ `fork`（独立子 Agent 执行） |
-| `allowed-tools` | M3 | skill 执行时允许使用的工具白名单 |
-| `model` | M4 | skill 执行时覆盖模型选择 |
+| `user-invocable` | M2 | ✅ 已完成 | `false` 则不出现在 skill 列表，只能 `always` 方式激活 |
+| `argument-hint` | M3 | ✅ 已完成 | 调用参数提示，注入到 skill 列表 XML `<argument_hint>` |
+| `paths` | M3 | ✅ 已完成 | gitignore 语法，文件路径匹配时自动激活（参考 Claude Code） |
+| `context` | M3 | ✅ 已完成 | `inline`（默认）/ `fork`（独立子 Agent 执行） |
+| `allowed-tools` | M3 | ✅ 已完成 | skill 执行时允许使用的工具白名单；inline 模式写入 `ctx["skill_allowed_tools"]`，fork 模式携带在 skill_fork dict 并过滤 tool_schemas |
+| `model` | M4 | ✅ 已完成 | skill 执行时覆盖模型选择；inline skill 写入 `ctx["skill_model"]`，下轮 AI 调用使用该模型；fork skill 携带在 `skill_fork` dict，`_run_fork_skill` 直接使用；不写则透明，保持 Bot 默认模型 |
 
 **注入格式升级方案（目标 M2）：**
 
@@ -435,8 +435,8 @@ Bot 的知识来自两个独立来源，运行时同时检索：
 |---|---|---|---|
 | 工具结果截断丢尾部 | 超 20K 整体砍头，尾部关键信号（exit code / pass/fail）丢失 | gsd-2: head+tail 各 1K，中间插 `[... N more ...]` | P1 ✅ |
 | 跨 run 历史不压缩 | Compaction 只在 tool loop 内触发，两次对话之间历史无限增长 | opencode / gsd-2: post-API 异步检查，每次 run 结束都评估 | P1 ✅ |
-| 保留策略粗糙 | 固定保留末尾 6 条消息 | gsd-2: 按 token 预算保留（20K tokens），自动适应消息长短 | P2 |
-| 压缩摘要质量低 | 自由生成摘要，无结构约束 | claude-code: 模板化（目标 / 进展 / 关键决策 / 下一步 / 相关文件）| P2 |
+| 保留策略粗糙 | 固定保留末尾 6 条消息 | claude-code: effectiveWindow - 20K - 13K 自适应阈值；snip 保留最近 4 对 | P2 ✅ |
+| 压缩摘要质量低 | 自由生成摘要，无结构约束 | claude-code: 9 段结构化模板（Primary Request / Key Concepts / Files / Errors / Problem Solving / All User Messages / Pending / Current Work / Next Step）| P2 ✅ |
 | 压缩后不恢复文件 | 压缩后关键文件内容丢失 | claude-code: 压缩后重注入最多 5 个关键文件（25K token 预算）| P3 |
 | 无溢出恢复 | API 报 context overflow 直接失败 | opencode / claude-code / gsd-2: 移除错误消息 + 压缩 + 自动重试 1 次 | P1 ✅ |
 | Token 估算不准 | chars/4 启发式 | opencode: JSON.stringify 实际序列化计算（准确但有开销）| P3 |
@@ -450,70 +450,36 @@ Bot 的知识来自两个独立来源，运行时同时检索：
 **1. 工具结果 Head+Tail 截断** ✅
 
 `_TOOL_RESULT_MAX_CHARS = 2_000`，`_default_output_truncator` 改为 head(1K) + tail(1K)，中间插 `[... N 字符已省略 ...]`。
-- 文件：`executors/plugins/tool_loop_v1.py` 第 375 行
+- 文件：`executors/plugins/tool_loop_v1.py`
 
 **2. 跨 run 历史压缩（Pre-run Compaction）** ✅
 
-每次 `run()` 开始时，在 stream_start 后检查 DB 加载的初始 `messages` token 量。超过模型窗口 50% 阈值则调 `_compact_messages` 压缩后再进入工具循环。
-- 文件：`executors/plugins/tool_loop_v1.py` 第 593 行
+每次 `run()` 开始时先执行 Strategy 1 微压缩，再检查 token 量，超过 `_PRE_RUN_TOKEN_THRESHOLD`（20K）则调 `compact.compact_conversation` 压缩。
+- 文件：`executors/compact.py`；`executors/plugins/tool_loop_v1.py`
 
 **3. API 溢出恢复（Overflow Recovery）** ✅
 
-新增 `AIContextOverflowError(AIError)` 子类（`ai_client.py`），在 `_once_openai_compat` / `_once_claude` 中检测 400/413 响应体中的 overflow 关键词。工具循环捕获后移除末尾 assistant 消息 → 压缩 → 重试 1 次；二次失败则降级为普通 AIError。
-- 文件：`ai_client.py` 第 14 行；`executors/plugins/tool_loop_v1.py` 第 661 行
+新增 `AIContextOverflowError(AIError)` 子类（`ai_client.py`），在三个捕获点（工具循环、`_stream_final`、`_finalize_reply`）均改用 `compact.compact_conversation` 压缩后重试。
+- 文件：`ai_client.py`；`executors/plugins/tool_loop_v1.py`
 
 ---
 
-#### P2 — 提升质量，值得做
+#### P2 — 提升质量 ✅ 全部完成（2026-05-27，AutoCompact 重写）
 
-**4. Token 预算保留策略（替换固定 6 条）**
+**4. 自适应 Token 阈值（替换固定比例）** ✅
 
-把 `_COMPACTION_KEEP_RECENT = 6` 改为 token 预算方式：
+Claude Code 公式：`effectiveWindow = contextWindow - MAX_OUTPUT_TOKENS_FOR_SUMMARY(20K)`；`threshold = effectiveWindow - AUTOCOMPACT_BUFFER_TOKENS(13K)`。Snip 在 70% 窗口时提前触发。
+- 文件：`executors/compact.py` `autocompact_threshold()` / `snip_threshold()`
 
-```python
-COMPACTION_KEEP_RECENT_TOKENS = 20_000  # gsd-2 默认值
+**5. 结构化压缩摘要模板（9 段）** ✅
 
-# 从末尾倒序累加 token，直到预算用完
-def _find_keep_from(messages, budget=COMPACTION_KEEP_RECENT_TOKENS):
-    total = 0
-    for i in range(len(messages) - 1, -1, -1):
-        total += _estimate_tokens([messages[i]])
-        if total > budget:
-            return i + 1
-    return 0
-```
+参考 Claude Code `BASE_COMPACT_PROMPT`，完整 9 段：Primary Request / Key Technical Concepts / Files and Code Sections / Errors and Fixes / Problem Solving / All User Messages / Pending Tasks / Current Work / Optional Next Step。带 `<analysis>` 草稿区（压缩后 strip）和 `<summary>` 正文。
+- 文件：`executors/compact.py` `_COMPACT_SYSTEM_PROMPT` / `format_compact_summary()`
 
-- 参考：gsd-2 `COMPACTION_KEEP_RECENT_TOKENS = 20_000`
-- 好处：消息短时保留更多条，消息长时不保留太多，自动适应
+**6. DB 历史软删除归档** ✅
 
-**5. 结构化压缩摘要模板**
-
-给压缩 AI 调用加模板约束，确保摘要可机读、可复用：
-
-```
-请将以下对话历史压缩为结构化摘要，使用以下格式：
-
-## 目标
-（本次对话用户想达成什么）
-
-## 已完成
-（已执行的操作和产出）
-
-## 进行中 / 阻塞
-（尚未完成的任务）
-
-## 关键决策
-（重要的技术或产品决定）
-
-## 下一步
-（明确的后续行动）
-
-## 相关文件
-（被读取或修改过的文件路径）
-```
-
-- 参考：claude-code `sessionMemoryCompact.ts` 模板
-- 好处：摘要结构稳定，下次 run 注入时 AI 能快速定位"上次做到哪了"
+`maybe_compact_db_history()`：post-run 后台任务，超 30K tokens 时生成 9 段摘要存入 DB，老消息 `is_deleted=1` 软删除；下次 run 加载时 `_bot_recent()` 过滤 deleted，看到的是摘要 + 最近 10 条消息。
+- 文件：`executors/compact.py`；`database.py` `save_compaction_summary()`；`bot_orchestrator.py`
 
 ---
 
@@ -587,19 +553,27 @@ POST_COMPACT_FILES_BUDGET = 25_000
 ### 实现顺序建议
 
 ```
-P1（稳定性）✅ 已完成:
+P1（稳定性）✅ 全部完成:
   1. Head+Tail 截断     ✅ tool_loop_v1.py _default_output_truncator，2K chars head+tail
-  2. 溢出恢复           ✅ ai_client.py AIContextOverflowError + tool_loop_v1 重试逻辑
-  3. 跨 run 压缩检查    ✅ tool_loop_v1 pre-run compaction，窗口 50% 阈值
+  2. 溢出恢复           ✅ ai_client.py AIContextOverflowError + compact.compact_conversation 三点覆盖
+  3. 跨 run 压缩检查    ✅ pre-run Strategy 1 + compact_conversation，20K token 阈值
 
-P2（质量）:
-  4. Token 预算保留     ← 替换 _COMPACTION_KEEP_RECENT，1小时
-  5. 结构化摘要模板     ← 修改 _compact_messages prompt，1小时
+P2（质量）✅ 全部完成（AutoCompact 重写）:
+  4. 自适应 Token 阈值  ✅ compact.autocompact_threshold()，Claude Code 公式
+  5. 结构化摘要模板     ✅ compact._COMPACT_SYSTEM_PROMPT，9 段 + <analysis> 草稿区
+  6. DB 历史归档        ✅ compact.maybe_compact_db_history()，软删除 + save_compaction_summary
 
-P3（精细化）:
-  6. Token 估算精度提升 ← 改用 JSON 序列化，1小时
-  7. 压缩后文件重注入   ← 需要文件提取 + workspace 读取
-  8. 文件操作跟踪       ← 需要工具调用钩子配合
+AutoCompact 5 策略（参考 Claude Code，2026-05-27）✅:
+  Strategy 1  计数式微压缩      ✅ compact.apply_tool_result_microcompact()，保留最近 5 个工具结果
+  Strategy 2  Snip              ✅ compact.snip_if_needed()，70% 窗口阈值，保留最近 4 对对话
+  Strategy 3  Session Memory    ✅ compact._try_session_memory_compact()，增量摘要复用已有摘要
+  Strategy 4  AI 全量摘要       ✅ compact._ai_compact()，9 段结构化 + format_compact_summary()
+  Strategy 5  Cached Microcompact ✅ ai_client._once_claude() context_management + beta header，仅 Claude provider
+
+P3（精细化）- 待定:
+  6. Token 估算精度提升 ← 改用 JSON 序列化（opencode 方式）
+  7. 压缩后文件重注入   ← 从摘要提取文件列表 + workspace 读取（claude-code 方式）
+  8. 文件操作跟踪       ← 工具调用钩子记录 read/write 路径（gsd-2 方式）
 ```
 
 ---

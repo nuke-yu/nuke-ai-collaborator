@@ -2,6 +2,7 @@ import unittest
 import json
 import sys
 import os
+from unittest.mock import AsyncMock, MagicMock, patch
 
 # Add backend directory to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -136,6 +137,142 @@ class TestClaudeMessageFormatting(unittest.TestCase):
             {"role": "user", "content": "hello"}
         ]
         self.assertEqual(_to_claude_messages(messages), expected)
+
+
+# ---------------------------------------------------------------------------
+# Tests for use_cached_microcompact (Strategy 5)
+# ---------------------------------------------------------------------------
+
+class TestCachedMicrocompact(unittest.IsolatedAsyncioTestCase):
+    """Verify _once_claude injects the correct header/body for Strategy 5,
+    and call_ai_once threads the parameter through."""
+
+    def _make_mock_response(self, content_text="ok"):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "content": [{"type": "text", "text": content_text}]
+        }
+        mock_resp.raise_for_status = MagicMock()
+        return mock_resp
+
+    def _make_mock_client(self, mock_resp):
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=mock_resp)
+        cm = MagicMock()
+        cm.__aenter__ = AsyncMock(return_value=mock_client)
+        cm.__aexit__ = AsyncMock(return_value=False)
+        return cm, mock_client
+
+    async def test_once_claude_adds_headers_and_body_when_enabled(self):
+        from ai_client import _once_claude
+        mock_resp = self._make_mock_response()
+        mock_cm, mock_client = self._make_mock_client(mock_resp)
+
+        with patch("ai_client.httpx.AsyncClient", return_value=mock_cm):
+            await _once_claude(
+                api_key="test-key",
+                model="claude-opus-4-7",
+                system_prompt="sp",
+                messages=[{"role": "user", "content": "hi"}],
+                temperature=0.7,
+                max_tokens=1024,
+                tools=None,
+                use_cached_microcompact=True,
+            )
+
+        call_kwargs = mock_client.post.call_args
+        headers = call_kwargs.kwargs["headers"]
+        body = call_kwargs.kwargs["json"]
+        self.assertEqual(headers.get("anthropic-beta"), "context-management-2025-09-19")
+        self.assertIn("context_management", body)
+        self.assertEqual(body["context_management"], {"type": "clear_tool_uses_20250919"})
+
+    async def test_once_claude_no_headers_when_disabled(self):
+        from ai_client import _once_claude
+        mock_resp = self._make_mock_response()
+        mock_cm, mock_client = self._make_mock_client(mock_resp)
+
+        with patch("ai_client.httpx.AsyncClient", return_value=mock_cm):
+            await _once_claude(
+                api_key="test-key",
+                model="claude-opus-4-7",
+                system_prompt="sp",
+                messages=[{"role": "user", "content": "hi"}],
+                temperature=0.7,
+                max_tokens=1024,
+                tools=None,
+                use_cached_microcompact=False,
+            )
+
+        call_kwargs = mock_client.post.call_args
+        headers = call_kwargs.kwargs["headers"]
+        body = call_kwargs.kwargs["json"]
+        self.assertNotIn("anthropic-beta", headers)
+        self.assertNotIn("context_management", body)
+
+    async def test_once_claude_default_is_disabled(self):
+        from ai_client import _once_claude
+        mock_resp = self._make_mock_response()
+        mock_cm, mock_client = self._make_mock_client(mock_resp)
+
+        with patch("ai_client.httpx.AsyncClient", return_value=mock_cm):
+            await _once_claude(
+                api_key="test-key",
+                model="claude-opus-4-7",
+                system_prompt="sp",
+                messages=[{"role": "user", "content": "hi"}],
+                temperature=0.7,
+                max_tokens=1024,
+                tools=None,
+                # use_cached_microcompact not passed → default False
+            )
+
+        call_kwargs = mock_client.post.call_args
+        headers = call_kwargs.kwargs["headers"]
+        self.assertNotIn("anthropic-beta", headers)
+
+    async def test_call_ai_once_threads_cached_mc_to_claude(self):
+        """call_ai_once with provider='claude' must pass use_cached_microcompact to _once_claude."""
+        from ai_client import call_ai_once
+        captured = {}
+
+        async def fake_once_claude(api_key, model, system_prompt, messages,
+                                   temperature, max_tokens, tools,
+                                   use_cached_microcompact=False):
+            captured["use_cached_microcompact"] = use_cached_microcompact
+            return {"type": "text", "content": "ok"}
+
+        with patch("ai_client._require_key", return_value="fake-key"), \
+             patch("ai_client._once_claude", new=fake_once_claude):
+            await call_ai_once(
+                "sp", [{"role": "user", "content": "hi"}],
+                provider="claude", model="claude-opus-4-7",
+                use_cached_microcompact=True,
+            )
+
+        self.assertTrue(captured.get("use_cached_microcompact"))
+
+    async def test_call_ai_once_non_claude_ignores_cached_mc(self):
+        """Non-Claude providers should not attempt to pass use_cached_microcompact."""
+        from ai_client import call_ai_once
+        captured = {}
+
+        async def fake_once_openai(url, api_key, model, system_prompt,
+                                   messages, temperature, max_tokens, tools):
+            captured["called"] = True
+            return {"type": "text", "content": "ok"}
+
+        with patch("ai_client._require_key", return_value="fake-key"), \
+             patch("ai_client._once_openai_compat", new=fake_once_openai):
+            await call_ai_once(
+                "sp", [{"role": "user", "content": "hi"}],
+                provider="deepseek", model="deepseek-chat",
+                use_cached_microcompact=True,  # passed but should be ignored for non-claude
+            )
+
+        self.assertTrue(captured.get("called"))
+
 
 if __name__ == "__main__":
     unittest.main()

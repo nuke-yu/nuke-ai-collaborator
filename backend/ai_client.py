@@ -238,7 +238,8 @@ async def _once_openai_compat(url: str, api_key: str, model: str, system_prompt:
 
 async def _once_claude(api_key: str, model: str, system_prompt: str,
                         messages: list, temperature: float, max_tokens: int,
-                        tools: list | None) -> dict:
+                        tools: list | None,
+                        use_cached_microcompact: bool = False) -> dict:
     body = {
         "model": model, "max_tokens": max_tokens, "temperature": temperature,
         "system": system_prompt, "messages": _to_claude_messages(messages),
@@ -249,11 +250,18 @@ async def _once_claude(api_key: str, model: str, system_prompt: str,
              "input_schema": t["function"]["parameters"]}
             for t in tools
         ]
+    headers = {
+        "x-api-key": api_key,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+    }
+    if use_cached_microcompact:
+        body["context_management"] = {"type": "clear_tool_uses_20250919"}
+        headers["anthropic-beta"] = "context-management-2025-09-19"
     async with httpx.AsyncClient(timeout=60) as client:
         resp = await client.post(
             "https://api.anthropic.com/v1/messages",
-            headers={"x-api-key": api_key, "anthropic-version": "2023-06-01",
-                     "content-type": "application/json"},
+            headers=headers,
             json=body,
         )
         if resp.status_code in (400, 413):
@@ -293,6 +301,7 @@ async def call_ai_once(
     temperature: float = 0.7,
     max_tokens: int = 4096,
     tools: list[dict] | None = None,
+    use_cached_microcompact: bool = False,
 ) -> dict:
     """
     Single non-streaming AI call with optional tool support.
@@ -313,7 +322,8 @@ async def call_ai_once(
         elif provider == "claude":
             api_key = _require_key(keys, "anthropic", "Anthropic")
             return await _once_claude(api_key, model, system_prompt,
-                                      messages, temperature, max_tokens, tools)
+                                      messages, temperature, max_tokens, tools,
+                                      use_cached_microcompact=use_cached_microcompact)
         elif provider == "ollama":
             url = f"{keys['ollama_url']}/v1/chat/completions"
             return await _once_openai_compat(url, "", model, system_prompt,
