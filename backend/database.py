@@ -340,6 +340,40 @@ async def soft_delete_message(db, msg_id: int):
     await db.execute("UPDATE messages SET is_deleted=1 WHERE id=?", (msg_id,))
     await db.commit()
 
+async def save_compaction_summary(
+    db, group_id: int, bot_id: int, summary: str, keep_ids: set[int]
+) -> int:
+    """Save a compaction summary message and soft-delete old messages outside keep_ids.
+
+    Returns the new summary message id.
+    keep_ids: set of message ids to preserve (recent messages + any pinned).
+    """
+    content = f"【历史摘要】\n{summary}"
+    async with db.execute(
+        "INSERT INTO messages (group_id, member_id, content) VALUES (?, ?, ?)",
+        (group_id, bot_id, content)
+    ) as cur:
+        summary_id = cur.lastrowid
+    await db.commit()
+
+    # Soft-delete everything in this group except the summary and the kept messages
+    if keep_ids:
+        placeholders = ",".join("?" * len(keep_ids))
+        await db.execute(
+            f"UPDATE messages SET is_deleted=1 "
+            f"WHERE group_id=? AND (is_deleted IS NULL OR is_deleted=0) "
+            f"AND id NOT IN ({placeholders}) AND id != ?",
+            (group_id, *sorted(keep_ids), summary_id)
+        )
+    else:
+        await db.execute(
+            "UPDATE messages SET is_deleted=1 "
+            "WHERE group_id=? AND (is_deleted IS NULL OR is_deleted=0) AND id != ?",
+            (group_id, summary_id)
+        )
+    await db.commit()
+    return summary_id
+
 async def get_message_meta(db, msg_id: int):
     async with db.execute("SELECT id, group_id, member_id FROM messages WHERE id=?", (msg_id,)) as cur:
         row = await cur.fetchone()

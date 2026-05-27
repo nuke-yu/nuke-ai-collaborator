@@ -213,10 +213,11 @@ async def dispatch_bots(group_id: int, triggered: list, content: str, sender: di
     ctx = {'recent': recent}
 
     def _bot_recent(bot):
+        active = [m for m in ctx['recent'] if not m.get('is_deleted')]
         cleared = bot.get("context_cleared_at")
         if cleared:
-            return [m for m in ctx['recent'] if m.get("created_at", "") > cleared]
-        return ctx['recent']
+            return [m for m in active if m.get("created_at", "") > cleared]
+        return active
 
     human_senders = [m for m in recent if m["sender_type"] != "bot"]
     initiator_name = human_senders[0]["sender_name"] if human_senders else sender["name"]

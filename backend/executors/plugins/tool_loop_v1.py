@@ -12,7 +12,7 @@ from executors.base import (
     PluginManifest, ToolDef, WorkspaceConfig, CollabConfig, build_group_section,
 )
 from executors import tool_executor, registry as _executor_registry
-from database import get_db, save_message, get_messages
+from database import get_db, save_message, get_messages, save_compaction_summary
 from ai_client import call_ai_once, call_ai_stream_messages, AIError, AIContextOverflowError
 from memory import get_memory_context, add_to_chroma, maybe_summarize
 from role_router import build_context_message
@@ -138,7 +138,12 @@ async def _spawn_agent_handler(bot_name: str, task: str, context: dict = None) -
 
 _COMPACTION_RATIO = 0.60          # context window 用量超过 60% 触发压缩
 _COMPACTION_KEEP_RECENT = 6      # 末尾保留的消息条数不压缩（参考 openclaw/opencode 的 recent turns 设计）
-_PRE_RUN_TOKEN_THRESHOLD = 20_000  # 跨 run 预压缩阈值（固定，不随模型窗口缩放）
+_PRE_RUN_TOKEN_THRESHOLD = 20_000    # 跨 run 预压缩阈值（固定，不随模型窗口缩放）
+_DB_COMPACTION_TOKEN_THRESHOLD = 30_000  # DB 历史压缩触发阈值
+_DB_COMPACTION_KEEP_RECENT = 10          # 压缩时保留最近 N 条消息不删除
+
+# group_id -> True: 防止同一个群同时触发多次 DB 压缩
+_db_compaction_locks: set[int] = set()
 
 # 各模型 context window（tokens）— 换模型不用改压缩逻辑
 _MODEL_CONTEXT_WINDOWS: dict[str, int] = {
@@ -276,6 +281,75 @@ async def _compact_messages(
         summary = f"（{len(old_msgs)} 条历史消息已截断）"
 
     return [{"role": "user", "content": f"【历史摘要】\n{summary}"}] + recent_msgs
+
+
+async def _maybe_compact_db_history(
+    group_id: int,
+    bot_id: int,
+    provider: str,
+    model: str,
+    temperature: float,
+    broadcaster,
+) -> None:
+    """Post-run DB-level history compaction.
+
+    If active (non-deleted) group messages exceed _DB_COMPACTION_TOKEN_THRESHOLD,
+    generate a summary, save it as a message, and soft-delete the old messages.
+    The next run will load only the summary + recent messages.
+    """
+    if group_id in _db_compaction_locks:
+        return
+    _db_compaction_locks.add(group_id)
+    try:
+        async with get_db() as db:
+            all_msgs = await get_messages(db, group_id, limit=200)
+
+        active = [m for m in all_msgs if not m.get("is_deleted")]
+        total_tokens = sum(len(m.get("content") or "") for m in active) // 4
+        if total_tokens <= _DB_COMPACTION_TOKEN_THRESHOLD:
+            return
+
+        to_keep = active[-_DB_COMPACTION_KEEP_RECENT:]
+        to_summarize = active[:-_DB_COMPACTION_KEEP_RECENT]
+        if not to_summarize:
+            return
+
+        keep_ids = {m["id"] for m in to_keep}
+        lines = [
+            f"[{m.get('sender_name', '?')}({m.get('sender_type', '?')})]: "
+            f"{(m.get('content') or '')[:500]}"
+            for m in to_summarize
+        ]
+        history_text = "\n".join(lines)
+
+        summarize_prompt = (
+            "你是一个对话摘要助手。请将以下对话历史简洁地总结为一段摘要，"
+            "保留关键决策、已执行的操作和重要结论。用中文回答，200-400字。"
+        )
+        try:
+            result = await call_ai_once(
+                summarize_prompt,
+                [{"role": "user", "content": f"请总结以下对话历史：\n\n{history_text}"}],
+                provider, model, temperature, 1024,
+            )
+            summary = result["content"] if result["type"] == "text" else ""
+        except Exception:
+            return
+
+        if not summary:
+            return
+
+        async with get_db() as db:
+            summary_id = await save_compaction_summary(db, group_id, bot_id, summary, keep_ids)
+
+        await broadcaster.broadcast(group_id, {
+            "type": "db_compaction",
+            "summary_id": summary_id,
+            "deleted_count": len(to_summarize),
+            "message": f"DB 历史已压缩（{total_tokens:,} tokens），{len(to_summarize)} 条旧消息归档",
+        })
+    finally:
+        _db_compaction_locks.discard(group_id)
 
 
 async def _before_finalize_hook(
@@ -832,6 +906,9 @@ class ToolLoopV1(BotExecutor):
         ]
         asyncio.create_task(add_to_chroma(msg_id, full_text, bot.get("role") or "", bot["id"]))
         asyncio.create_task(maybe_summarize(ctx.group_id, bot["id"], bot.get("role") or bot["name"], [bot["id"]]))
+        asyncio.create_task(_maybe_compact_db_history(
+            ctx.group_id, bot["id"], provider, model_name, temperature, ctx.broadcaster
+        ))
         asyncio.create_task(append_log(
             bot["id"], full_text,
             user_message=ctx.user_message,
