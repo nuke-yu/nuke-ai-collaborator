@@ -44,7 +44,10 @@ export function useWebSocket(groupId, memberId, onMessage) {
     connect()
     return () => {
       clearTimeout(retryTimer.current)
-      ws.current?.close()
+      if (ws.current) {
+        ws.current.onclose = null
+        ws.current.close()
+      }
     }
   }, [connect])
 

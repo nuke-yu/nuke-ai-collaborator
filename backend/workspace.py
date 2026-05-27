@@ -2,7 +2,7 @@ import asyncio
 from pathlib import Path
 from datetime import date, datetime
 
-WORKSPACE_ROOT = Path(__file__).parent / "workspaces"
+from skills.constants import WORKSPACE_ROOT, LEARNED_ACTIVE as _LEARNED_ACTIVE, LEARNED_DRAFT as _LEARNED_DRAFT
 
 _SUBDIRS = ["skills", "logs"]
 
@@ -44,11 +44,23 @@ async def read_file(bot_id: int, path: str) -> str:
         return f"[读取错误] {e}"
 
 
+_WRITE_PROTECTED = {"MEMORY.md"}
+
+
 async def write_file(bot_id: int, path: str, content: str) -> str:
     ws = bot_workspace(bot_id)
     p = _safe_path(ws, path)
     if p is None:
         return f"[错误] 非法路径: {path}"
+    if p.name in _WRITE_PROTECTED:
+        return f"[受保护] {p.name} 是永久记忆文件，Bot 无法覆盖。如需追加记录，请通过工作区面板手动编辑。"
+    # Redirect learned/active writes → learned/draft (requires user approval)
+    rel = str(p.relative_to(ws)).replace("\\", "/")
+    if rel.startswith(_LEARNED_ACTIVE):
+        draft_path = ws / _LEARNED_DRAFT / p.name
+        draft_path.parent.mkdir(parents=True, exist_ok=True)
+        draft_path.write_text(content, encoding="utf-8")
+        return f"__DRAFT_WRITTEN__:{p.name}"   # sentinel for broadcast
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(content, encoding="utf-8")
     return f"已写入 {path}（{len(content)} 字符）"
@@ -64,142 +76,6 @@ async def list_workspace(bot_id: int) -> str:
         lines.append(f"{indent}{icon} {p.name}")
     return "\n".join(lines) if lines else "（工作区为空）"
 
-
-# ---------------------------------------------------------------------------
-# Skill helpers — directory-first, flat-file fallback
-# ---------------------------------------------------------------------------
-
-def _skill_path(skills_dir: Path, name: str) -> tuple[Path | None, str]:
-    """Return (path, kind) for a skill. Directory structure takes priority."""
-    dir_skill = skills_dir / name / "SKILL.md"
-    if dir_skill.exists():
-        return dir_skill, "md"
-    flat_md = skills_dir / f"{name}.md"
-    if flat_md.exists():
-        return flat_md, "md"
-    flat_py = skills_dir / f"{name}.py"
-    if flat_py.exists():
-        return flat_py, "py"
-    return None, ""
-
-
-def _parse_frontmatter(content: str) -> dict:
-    """Extract fields from YAML frontmatter (--- delimited). Returns {} if none."""
-    lines = content.splitlines()
-    if not lines or lines[0].strip() != "---":
-        return {}
-    end = None
-    for i, line in enumerate(lines[1:], 1):
-        if line.strip() == "---":
-            end = i
-            break
-    if end is None:
-        return {}
-    fm: dict = {}
-    for line in lines[1:end]:
-        if ":" not in line:
-            continue
-        key, _, val = line.partition(":")
-        key = key.strip()
-        val = val.strip().strip("\"'")
-        if key == "name":
-            fm["name"] = val
-        elif key == "description":
-            fm["description"] = val
-        elif key == "when_to_use":
-            fm["when_to_use"] = val
-        elif key == "always":
-            fm["always"] = val.lower() in ("true", "yes", "1")
-    return fm
-
-
-def _parse_skill_meta(path: Path) -> dict:
-    """Return {description, always} for a skill file. Frontmatter takes priority."""
-    try:
-        content = path.read_text(encoding="utf-8")
-        fm = _parse_frontmatter(content)
-        description = fm.get("description", "")
-        always = fm.get("always", False)
-        if not description:
-            # Fallback: first non-empty line outside frontmatter
-            in_fm = content.startswith("---")
-            skipped_open = False
-            for line in content.splitlines():
-                if line.strip() == "---":
-                    if not skipped_open:
-                        skipped_open = True
-                        continue
-                    in_fm = False
-                    continue
-                if in_fm:
-                    continue
-                clean = line.strip().lstrip("#").strip()
-                if clean:
-                    description = clean
-                    break
-        return {"description": description, "always": always,
-                "when_to_use": fm.get("when_to_use", "")}
-    except Exception:
-        return {"description": "", "always": False}
-
-
-def list_skills(bot_id: int) -> list[dict]:
-    """Return available skills as [{name, type, description, always}].
-    Parses frontmatter for description and always flag.
-    Scans both directory-style (name/SKILL.md) and flat files (name.md/.py).
-    """
-    ws = bot_workspace(bot_id)
-    skills_dir = ws / "skills"
-    if not skills_dir.exists():
-        return []
-    seen: set = set()
-    result = []
-
-    for p in sorted(skills_dir.iterdir()):
-        if p.is_dir():
-            skill_file = p / "SKILL.md"
-            if skill_file.exists():
-                seen.add(p.name)
-                meta = _parse_skill_meta(skill_file)
-                result.append({"name": p.name, "type": "md", **meta})
-        elif p.suffix == ".md" and p.stem not in seen:
-            seen.add(p.stem)
-            meta = _parse_skill_meta(p)
-            result.append({"name": p.stem, "type": "md", **meta})
-        elif p.suffix == ".py" and p.stem not in seen:
-            seen.add(p.stem)
-            result.append({"name": p.stem, "type": "py",
-                           "description": "(代码技能，M3)", "always": False})
-
-    return result
-
-
-def load_always_skills(bot_id: int) -> list[dict]:
-    """Return full content for skills with always: true — [{name, content}]."""
-    ws = bot_workspace(bot_id)
-    result = []
-    for skill in list_skills(bot_id):
-        if not skill.get("always"):
-            continue
-        path, kind = _skill_path(ws / "skills", skill["name"])
-        if path and kind == "md":
-            try:
-                result.append({"name": skill["name"], "content": path.read_text(encoding="utf-8")})
-            except Exception:
-                pass
-    return result
-
-
-async def run_skill(bot_id: int, name: str, args: str = "") -> str:
-    ws = bot_workspace(bot_id)
-    path, kind = _skill_path(ws / "skills", name)
-    if path is None:
-        available = [s["name"] for s in list_skills(bot_id)]
-        hint = f"，当前可用：{available}" if available else "，skills/ 目录为空"
-        return f"[未找到技能 '{name}']{hint}"
-    if kind == "py":
-        return f"[技能 {name}.py 需要代码沙箱支持（M3 实现）]"
-    return path.read_text(encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -303,15 +179,38 @@ async def init_bot_workspace(bot: dict):
 - 不超出当前任务范围擅自扩展
 """
 
+    memory = f"""# {name} · 长期记忆
+
+> 这是 {name} 的永久记忆文件，由用户维护，Bot 无法覆盖。
+> 记录能力图谱、项目经历、重要决策和长期偏好。
+
+## 能力图谱
+
+（记录擅长的领域和技术栈）
+
+## 项目经历
+
+（记录参与过的项目和主要贡献）
+
+## 重要决策 & 偏好
+
+（记录用户的重要决定、风格偏好、约定俗成的做法）
+
+## 备注
+
+"""
+
     for filename, content in [
         ("IDENTITY.md", identity),
         ("SOUL.md", soul),
         ("BOOTSTRAP.md", bootstrap),
         ("AGENT.md", agent),
+        ("MEMORY.md", memory),
     ]:
         p = ws / filename
         if not p.exists():
             p.write_text(content, encoding="utf-8")
+
 
 
 def list_workspace_tree(bot_id: int) -> list[dict]:
@@ -328,6 +227,8 @@ async def init_group_workspace(group_id: int, group_name: str = ""):
     """Create default shared workspace files for a newly created group."""
     ws = group_workspace(group_id)
     (ws / "deliverables").mkdir(exist_ok=True)
+    (ws / "skills").mkdir(exist_ok=True)
+    (ws.parent / "runs").mkdir(exist_ok=True)  # workspaces/group_{id}/runs/
 
     display = group_name or f"群组 {group_id}"
     today = date.today().isoformat()
@@ -379,15 +280,140 @@ async def init_all_bots(bots: list[dict]):
             await init_bot_workspace(bot)
 
 
-async def append_log(bot_id: int, entry: str):
-    """Append a timestamped entry to today's log file (non-blocking)."""
+async def append_log(
+    bot_id: int,
+    reply: str,
+    *,
+    user_message: str = "",
+    sender_name: str = "",
+    tool_calls: list[str] | None = None,
+    iterations: int = 0,
+    executor: str = "",
+):
+    """Append a structured timestamped entry to today's log file (non-blocking).
+
+    Args:
+        reply:        Bot's final reply text.
+        user_message: The user message that triggered this run.
+        sender_name:  Display name of the sender.
+        tool_calls:   List of tool names called (may contain duplicates).
+        iterations:   Number of tool-loop iterations executed.
+        executor:     Executor plugin id (e.g. 'tool_loop_v1').
+    """
     ws = bot_workspace(bot_id)
     log_file = ws / "logs" / f"{date.today().isoformat()}.md"
     ts = datetime.now().strftime("%H:%M")
-    text = f"\n## {ts}\n\n{entry.strip()}\n"
+
+    parts = [f"## {ts}"]
+    if sender_name or user_message:
+        who = f"@{sender_name}" if sender_name else ""
+        parts.append(f"\n**用户{(' · ' + who) if who else ''}：** {user_message[:200].strip()}")
+    if tool_calls:
+        from collections import Counter
+        counts = Counter(tool_calls)
+        summary = "、".join(f"{name} ×{n}" if n > 1 else name for name, n in counts.items())
+        parts.append(f"**工具：** {summary}")
+        if iterations:
+            parts.append(f"**迭代：** {iterations} 轮")
+    elif executor:
+        parts.append(f"**执行器：** {executor}")
+    reply_preview = reply.strip()[:200]
+    if len(reply.strip()) > 200:
+        reply_preview += "…"
+    parts.append(f"**回复：** {reply_preview}")
+
+    text = "\n".join(parts) + "\n"
 
     def _write():
         with open(log_file, "a", encoding="utf-8") as f:
-            f.write(text)
+            f.write("\n" + text)
+
+    await asyncio.to_thread(_write)
+
+
+async def archive_run(
+    group_id: int,
+    run_id: str,
+    bot: dict,
+    *,
+    user_message: str = "",
+    sender_name: str = "",
+    tool_records: list[dict] | None = None,
+    reply: str = "",
+    iterations: int = 0,
+    model: str = "",
+    executor: str = "",
+):
+    """Write a full execution record to workspaces/group_{id}/runs/.
+
+    One file per run, named YYYY-MM-DD_HHMMSS_{run_id[:8]}.md.
+    tool_records: list of {"name": str, "args": dict, "result": str}.
+    """
+    runs_dir = WORKSPACE_ROOT / f"group_{group_id}" / "runs"
+    runs_dir.mkdir(parents=True, exist_ok=True)
+
+    now = datetime.now()
+    filename = f"{now.strftime('%Y-%m-%d_%H%M%S')}_{run_id[:8]}.md"
+    run_file = runs_dir / filename
+
+    _RESULT_PREVIEW = 500
+
+    lines = [
+        f"# Run · {bot.get('name', '')} · {now.strftime('%Y-%m-%d %H:%M:%S')}",
+        "",
+        f"- **Group:** {group_id}",
+        f"- **Bot:** {bot.get('name', '')} (id={bot.get('id', '')})",
+        f"- **Executor:** {executor}",
+        f"- **Model:** {model}",
+        f"- **Run ID:** {run_id}",
+        "",
+        "---",
+        "",
+        "## Input",
+        "",
+        f"**From:** @{sender_name}" if sender_name else "**From:** (unknown)",
+        "",
+        f"> {user_message[:500].strip()}" if user_message else "> (no message)",
+        "",
+        "---",
+        "",
+        "## Execution",
+        "",
+        f"**Iterations:** {iterations}",
+        f"**Tools called:** {len(tool_records or [])}",
+        "",
+    ]
+
+    for i, rec in enumerate(tool_records or [], 1):
+        import json as _json
+        args_str = _json.dumps(rec.get("args", {}), ensure_ascii=False)
+        result_preview = rec.get("result", "")[:_RESULT_PREVIEW]
+        if len(rec.get("result", "")) > _RESULT_PREVIEW:
+            result_preview += "…"
+        lines += [
+            f"### Tool {i} — {rec.get('name', '')}",
+            "",
+            f"**Args:** `{args_str}`",
+            "",
+            "**Result:**",
+            "```",
+            result_preview,
+            "```",
+            "",
+        ]
+
+    lines += [
+        "---",
+        "",
+        "## Output",
+        "",
+        reply.strip()[:2000] + ("…" if len(reply.strip()) > 2000 else ""),
+        "",
+    ]
+
+    text = "\n".join(lines)
+
+    def _write():
+        run_file.write_text(text, encoding="utf-8")
 
     await asyncio.to_thread(_write)

@@ -1,3 +1,4 @@
+import asyncio
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
@@ -63,6 +64,8 @@ class ExecutionContext:
     workflow_suffix: str = ""
     group_name: str = ""
     group_announcement: str = ""
+    steer_channel: asyncio.Queue | None = None
+    spawn_depth: int = 0
 
 
 @dataclass

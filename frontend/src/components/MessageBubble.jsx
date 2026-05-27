@@ -206,6 +206,7 @@ export default function MessageBubble({ msg, isTyping, currentMemberId, members 
               ))}
               <button
                 onClick={(e) => { e.stopPropagation(); setShowEmojiPicker(p => !p) }}
+                onMouseDown={(e) => e.stopPropagation()}
                 className="text-xs text-gray-500 hover:text-gray-300 leading-none px-0.5"
                 title="更多表情"
               >＋</button>

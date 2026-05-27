@@ -29,15 +29,37 @@ export default function SearchPanel({ groupId, onClose, onJump }) {
   useEffect(() => { inputRef.current?.focus() }, [])
 
   useEffect(() => {
+    setQuery('')
+    setResults([])
+    setLoading(false)
+  }, [groupId])
+
+  useEffect(() => {
+    let active = true
     clearTimeout(timerRef.current)
-    if (!query.trim()) { setResults([]); return }
+    if (!query.trim()) {
+      setResults([])
+      setLoading(false)
+      return
+    }
     setLoading(true)
     timerRef.current = setTimeout(async () => {
-      const data = await searchMessages(groupId, query.trim())
-      setResults(data)
-      setLoading(false)
+      try {
+        const data = await searchMessages(groupId, query.trim())
+        if (active) {
+          setResults(data)
+          setLoading(false)
+        }
+      } catch (err) {
+        if (active) {
+          setLoading(false)
+        }
+      }
     }, 300)
-    return () => clearTimeout(timerRef.current)
+    return () => {
+      active = false
+      clearTimeout(timerRef.current)
+    }
   }, [query, groupId])
 
   return (

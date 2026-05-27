@@ -1,6 +1,12 @@
 import { useState, useEffect, useCallback } from 'react'
+import SkillPanel from './SkillPanel'
 
-export default function WorkspacePanel({ bot, onClose }) {
+export default function WorkspacePanel({ bot, groupId, onClose }) {
+  const [showSkills, setShowSkills] = useState(false)
+  if (showSkills) {
+    return <SkillPanel bot={bot} groupId={groupId} onClose={() => setShowSkills(false)} />
+  }
+
   const [tree, setTree] = useState([])
   const [selected, setSelected] = useState(null)
   const [content, setContent] = useState('')
@@ -60,6 +66,12 @@ export default function WorkspacePanel({ bot, onClose }) {
           <div className="px-3 py-3 border-b border-gray-700">
             <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-0.5">工作区</div>
             <div className="text-sm text-white font-medium truncate">{bot.name}</div>
+            <button
+              onClick={() => setShowSkills(true)}
+              className="mt-2 w-full text-xs px-2 py-1.5 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/40 text-indigo-300 text-left transition-colors flex items-center gap-1.5"
+            >
+              <span>⚡</span> Skill 管理
+            </button>
           </div>
           <div className="flex-1 overflow-y-auto py-2">
             {tree.length === 0 && (

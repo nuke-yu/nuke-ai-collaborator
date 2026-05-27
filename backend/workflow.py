@@ -72,12 +72,12 @@ async def _build_history(group_id: int) -> list[dict]:
 
 
 def _parse_tickets(message: str) -> list[str]:
-    match = re.search(r'TICKETS:\s*\n((?:\d+\..+\n?)+)', message, re.IGNORECASE)
+    match = re.search(r'TICKETS:\s*\n((?:(?:\d+\.|[-*+])\s+.+\n?)+)', message, re.IGNORECASE)
     if match:
-        items = re.findall(r'\d+\.\s+(.+)', match.group(1))
+        items = re.findall(r'(?:\d+\.|[-*+])\s+(.+)', match.group(1))
         if items:
             return [t.strip() for t in items[:20]]
-    items = re.findall(r'^\s*\d+\.\s+(.+)$', message, re.MULTILINE)
+    items = re.findall(r'^\s*(?:\d+\.|[-*+])\s+(.+)$', message, re.MULTILINE)
     if len(items) >= 2:
         return [t.strip() for t in items[:20]]
     return ["本次迭代任务"]
@@ -230,7 +230,7 @@ async def _trigger_single_stage(group_id: int, prev_stage: dict, next_bot: dict)
         max_tokens = next_bot.get("max_tokens", 4096)
         async for chunk in call_ai_stream(system_prompt, history, trigger_msg, provider, model, temperature, max_tokens):
             full += chunk
-            await manager.broadcast(group_id, {"type": "stream_chunk", "temp_id": f"wf_{msg_id}", "chunk": chunk})
+            await manager.broadcast(group_id, {"type": "stream_chunk", "temp_id": f"wf_{msg_id}", "delta": chunk})
     except AIError as e:
         full = f"[错误] {e}"
 
@@ -320,7 +320,7 @@ async def _trigger_pool_bot(group_id: int, bot: dict, ticket: str, pool_stage: d
         async for chunk in call_ai_stream(system_prompt, history, trigger_msg, provider, model, temperature, max_tokens):
             full += chunk
             await manager.broadcast(group_id, {
-                "type": "stream_chunk", "temp_id": f"pool_{msg_id}", "chunk": chunk
+                "type": "stream_chunk", "temp_id": f"pool_{msg_id}", "delta": chunk
             })
     except AIError as e:
         full = f"[错误] {e}"

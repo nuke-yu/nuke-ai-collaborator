@@ -241,8 +241,11 @@ _MSG_SQL = """
 
 def _row_to_msg(r):
     reply_to = {"id": r[8], "sender_name": r[10], "content": r[9]} if r[8] else None
+    created_at = r[4]
+    if created_at and "Z" not in created_at and "+" not in created_at:
+        created_at = created_at.replace(" ", "T") + "Z"
     return {"id": r[0], "group_id": r[1], "member_id": r[2], "content": r[3],
-            "created_at": r[4], "sender_name": r[5], "sender_type": r[6],
+            "created_at": created_at, "sender_name": r[5], "sender_type": r[6],
             "avatar_color": r[7], "reply_to": reply_to,
             "edited_at": r[11], "is_deleted": bool(r[12]),
             "file_url": r[13], "file_name": r[14], "file_size": r[15], "file_type": r[16],

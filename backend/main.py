@@ -18,6 +18,7 @@ from workspace_routes import router as workspace_router
 from config import read_config, write_config, _preview, FIELDS
 from executors import registry
 from workspace import init_all_bots, init_group_workspace
+from skills.watcher import watcher
 import os
 
 
@@ -37,7 +38,9 @@ async def lifespan(app: FastAPI):
             groups = await cur.fetchall()
     for gid, gname in groups:
         await init_group_workspace(gid, gname)
+    watcher.start(asyncio.get_event_loop())
     yield
+    watcher.stop()
 
 
 app = FastAPI(lifespan=lifespan)
@@ -145,10 +148,12 @@ async def websocket_endpoint(websocket: WebSocket, group_id: int, member_id: int
                 group_info = await get_group(db, group_id) or {}
 
             if triggered:
-                await dispatch_bots(group_id, triggered, content or "", sender, recent,
-                                    all_bots, all_members,
-                                    group_name=group_info.get("name", ""),
-                                    group_announcement=group_info.get("announcement", ""))
+                asyncio.create_task(dispatch_bots(
+                    group_id, triggered, content or "", sender, recent,
+                    all_bots, all_members,
+                    group_name=group_info.get("name", ""),
+                    group_announcement=group_info.get("announcement", ""),
+                ))
 
     except WebSocketDisconnect:
         gone_id = manager.disconnect(websocket, group_id)

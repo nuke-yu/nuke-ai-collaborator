@@ -27,10 +27,17 @@ const MessageInput = forwardRef(function MessageInput({ onSend, members = [], di
 
   useImperativeHandle(ref, () => ({ uploadFile: handleUpload }))
 
-  // 组件卸载（切换群组）时保存草稿
+  // 同步重置输入框内容（切换群组加载新草稿）
   useEffect(() => {
-    return () => { onDraftSave?.(groupId, textRef.current) }
-  }, [])
+    setText(defaultValue)
+  }, [groupId, defaultValue])
+
+  // 切换群组/卸载组件时，保存当前群组的草稿
+  useEffect(() => {
+    return () => {
+      onDraftSave?.(groupId, textRef.current)
+    }
+  }, [groupId, onDraftSave])
 
   useEffect(() => {
     if (replyingTo) textareaRef.current?.focus()
@@ -249,6 +256,7 @@ const MessageInput = forwardRef(function MessageInput({ onSend, members = [], di
           />
           <button
             onClick={() => setShowEmojiPicker(p => !p)}
+            onMouseDown={(e) => e.stopPropagation()}
             disabled={disabled}
             className={`text-lg leading-none flex-shrink-0 transition-colors disabled:opacity-30 ${showEmojiPicker ? 'text-yellow-400' : 'text-gray-500 hover:text-gray-300'}`}
             title="表情"

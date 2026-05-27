@@ -79,6 +79,7 @@ export default function ChatWindow({ memberId, isDark, onToggleTheme }) {
 
   useEffect(() => {
     if (!activeGroupId) return
+    let active = true
     setTyping(null)
     setUnreadCounts(prev => ({ ...prev, [activeGroupId]: 0 }))
 
@@ -94,23 +95,37 @@ export default function ChatWindow({ memberId, isDark, onToggleTheme }) {
       setHasMore(false)
     }
 
-    fetchPins(activeGroupId).then(setPins)
+    fetchPins(activeGroupId).then(data => {
+      if (active) setPins(data)
+    })
     fetchGroupInfo(activeGroupId).then(({ group, members }) => {
-      setGroup(group)
-      setMembers(members)
-      setMembersCache(prev => ({ ...prev, [activeGroupId]: members }))
+      if (active) {
+        setGroup(group)
+        setMembers(members)
+        setMembersCache(prev => ({ ...prev, [activeGroupId]: members }))
+      }
     })
     fetchReactions(activeGroupId).then(data => {
-      setReactionMap(data)
-      setReactionCache(prev => ({ ...prev, [activeGroupId]: data }))
+      if (active) {
+        setReactionMap(data)
+        setReactionCache(prev => ({ ...prev, [activeGroupId]: data }))
+      }
     })
     fetchMessages(activeGroupId).then(({ messages, has_more }) => {
-      setMessages(messages)
-      setHasMore(has_more)
-      setMessagesCache(prev => ({ ...prev, [activeGroupId]: { messages, hasMore: has_more } }))
-      setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'instant' }), 0)
+      if (active) {
+        setMessages(messages)
+        setHasMore(has_more)
+        setMessagesCache(prev => ({ ...prev, [activeGroupId]: { messages, hasMore: has_more } }))
+        setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'instant' }), 0)
+      }
     })
-    fetch(`/api/groups/${activeGroupId}/workflow`).then(r => r.json()).then(setWorkflow)
+    fetch(`/api/groups/${activeGroupId}/workflow`).then(r => r.json()).then(data => {
+      if (active) setWorkflow(data)
+    })
+
+    return () => {
+      active = false
+    }
   }, [activeGroupId])
 
   const loadMore = useCallback(async () => {
@@ -213,6 +228,8 @@ export default function ChatWindow({ memberId, isDark, onToggleTheme }) {
       })
     } else if (data.type === 'workflow_update') {
       setWorkflow(data.active ? data : null)
+    } else if (data.type === 'skills_changed') {
+      window.dispatchEvent(new CustomEvent('skills_changed', { detail: data }))
     }
   }
 
@@ -318,6 +335,15 @@ export default function ChatWindow({ memberId, isDark, onToggleTheme }) {
         onOpenAddMember={() => setShowAddMember(true)}
         onEditMember={(m) => setEditingMember(m)}
         onOpenWorkspace={(m) => setWorkspaceBot(m)}
+        onAutoReplySaved={(memberId, text) => {
+          setMembers(prev => prev.map(m => m.id === memberId ? { ...m, auto_reply: text } : m))
+          setMembersCache(prev => ({
+            ...prev,
+            [activeGroupId]: (prev[activeGroupId] || []).map(m =>
+              m.id === memberId ? { ...m, auto_reply: text } : m
+            )
+          }))
+        }}
         onRemoveMember={async (id) => {
           await fetch(`/api/groups/${activeGroupId}/members/${id}`, { method: 'DELETE' })
           setMembers(prev => prev.filter(m => m.id !== id))
@@ -339,7 +365,7 @@ export default function ChatWindow({ memberId, isDark, onToggleTheme }) {
       {showAddMember && (
         <MemberList
           onAddMember={async (form) => {
-            const result = await addMember(activeGroupId, form.name, form.type, form.role, form.system_prompt, form.avatar_color, form.model_provider, form.model_name)
+            const result = await addMember(activeGroupId, form)
             const { members: updated } = await fetchGroupInfo(activeGroupId)
             setMembers(updated)
             setMembersCache(prev => ({ ...prev, [activeGroupId]: updated }))

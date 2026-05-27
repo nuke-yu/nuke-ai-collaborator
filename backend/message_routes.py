@@ -132,9 +132,16 @@ async def search_group_messages(group_id: int, q: str, limit: int = 30):
             ORDER BY m.id DESC LIMIT ?
         """, (group_id, f"%{q}%", limit)) as cur:
             rows = await cur.fetchall()
-    return [{"id": r[0], "group_id": r[1], "member_id": r[2], "content": r[3],
-             "created_at": r[4], "sender_name": r[5], "sender_type": r[6], "avatar_color": r[7]}
-            for r in rows]
+    result = []
+    for r in rows:
+        created_at = r[4]
+        if created_at and "Z" not in created_at and "+" not in created_at:
+            created_at = created_at.replace(" ", "T") + "Z"
+        result.append({
+            "id": r[0], "group_id": r[1], "member_id": r[2], "content": r[3],
+            "created_at": created_at, "sender_name": r[5], "sender_type": r[6], "avatar_color": r[7]
+        })
+    return result
 
 
 @router.get("/api/groups/{group_id}/messages")

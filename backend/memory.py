@@ -56,28 +56,27 @@ async def retrieve_relevant(bot_id: int, query: str, top_k: int = 3) -> list:
 
 
 # ── 摘要压缩（超过阈值时把老消息压成要点，存 SQLite）─────────────────
-async def maybe_summarize(bot_id: int, role: str, member_ids: list):
+async def maybe_summarize(group_id: int, bot_id: int, role: str, member_ids: list):
     from ai_client import call_ai
     if not member_ids:
         return
     try:
-        ph = ",".join("?" * len(member_ids))
         async with get_db() as db:
-            # 跨群组查询：只按 member_id 过滤，不限 group_id
-            async with db.execute(
-                f"SELECT id, content FROM messages WHERE member_id IN ({ph}) ORDER BY id",
-                member_ids
-            ) as cur:
-                role_msgs = await cur.fetchall()
-
             async with db.execute(
                 "SELECT covered_through_id FROM role_summaries WHERE bot_id=? ORDER BY id DESC LIMIT 1",
                 (bot_id,)
             ) as cur:
                 last = await cur.fetchone()
 
-        last_id = last[0] if last else 0
-        new_msgs = [(r[0], r[1]) for r in role_msgs if r[0] > last_id]
+            last_id = last[0] if last else 0
+
+            ph = ",".join("?" * len(member_ids))
+            # 跨群组查询：只按 member_id 过滤，不限 group_id，且在 SQL 中直接按 id 过滤以防内存溢出 (DFT-008)
+            async with db.execute(
+                f"SELECT id, content FROM messages WHERE member_id IN ({ph}) AND id > ? ORDER BY id",
+                member_ids + [last_id]
+            ) as cur:
+                new_msgs = await cur.fetchall()
 
         if len(new_msgs) < SUMMARY_THRESHOLD:
             return
@@ -91,9 +90,10 @@ async def maybe_summarize(bot_id: int, role: str, member_ids: list):
         )
 
         async with get_db() as db:
+            # 插入时显式传入 group_id 以满足 NOT NULL 约束 (DFT-007)
             await db.execute(
-                "INSERT INTO role_summaries (bot_id, role, summary, covered_through_id) VALUES (?, ?, ?, ?)",
-                (bot_id, role, summary, batch[-1][0])
+                "INSERT INTO role_summaries (bot_id, group_id, role, summary, covered_through_id) VALUES (?, ?, ?, ?, ?)",
+                (bot_id, group_id, role, summary, batch[-1][0])
             )
             await db.commit()
     except Exception:

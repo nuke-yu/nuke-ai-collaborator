@@ -8,6 +8,7 @@ export default function GroupList({
   isDark = true, onToggleTheme,
   onlineSet = new Set(),
   currentMemberId,
+  onAutoReplySaved,
   className = '',
 }) {
   const [creating, setCreating] = useState(false)
@@ -163,7 +164,7 @@ export default function GroupList({
         member={autoReplyTarget}
         onClose={() => setAutoReplyTarget(null)}
         onSaved={(text) => {
-          autoReplyTarget.auto_reply = text
+          onAutoReplySaved?.(autoReplyTarget.id, text)
           setAutoReplyTarget(null)
         }}
       />

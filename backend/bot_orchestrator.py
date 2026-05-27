@@ -12,6 +12,25 @@ import workflow as wf
 # group_id -> bot_id: 记录当前哪个 bot 持有会话
 active_bot: dict[int, int] = {}
 
+# Steer registry: (group_id, bot_id) -> Queue of injected messages for running bots
+_steer_queues: dict[tuple[int, int], asyncio.Queue] = {}
+
+_MAX_FOLLOWUP_DEPTH = 5  # Max chained follow-up runs per bot session
+
+
+def _start_steer(group_id: int, bot_id: int) -> asyncio.Queue:
+    q: asyncio.Queue = asyncio.Queue()
+    _steer_queues[(group_id, bot_id)] = q
+    return q
+
+
+def _stop_steer(group_id: int, bot_id: int) -> None:
+    _steer_queues.pop((group_id, bot_id), None)
+
+
+def get_steer_queue(group_id: int, bot_id: int) -> asyncio.Queue | None:
+    return _steer_queues.get((group_id, bot_id))
+
 
 def _with_personality(base_prompt: str, bot: dict) -> str:
     p = (bot.get("personality_prompt") or "").strip()
@@ -124,7 +143,7 @@ async def auto_continue_if_needed(group_id: int, bot: dict, all_members: list, m
         if not ai_reply:
             break
         asyncio.create_task(add_to_chroma(bot_msg_id, ai_reply, bot["role"] or "", bot["id"]))
-        asyncio.create_task(maybe_summarize(bot["id"], bot["role"] or bot["name"], [bot["id"]]))
+        asyncio.create_task(maybe_summarize(group_id, bot["id"], bot["role"] or bot["name"], [bot["id"]]))
         if any(f"@{m['name']}" in ai_reply for m in all_members):
             break
 
@@ -174,6 +193,23 @@ async def dispatch_bots(group_id: int, triggered: list, content: str, sender: di
                          recent: list, all_bots: list, all_members: list,
                          group_name: str = "", group_announcement: str = ""):
     """执行触发的 bot 列表：竞速、顺序、续写、交接。"""
+    # Steer running bots instead of launching a new execution for them
+    still_triggered = []
+    for bot in triggered:
+        steer_q = get_steer_queue(group_id, bot["id"])
+        if steer_q is not None:
+            await steer_q.put(content)
+            await manager.broadcast(group_id, {
+                "type": "steer_queued",
+                "member_id": bot["id"],
+                "message": content[:300],
+            })
+        else:
+            still_triggered.append(bot)
+    triggered = still_triggered
+    if not triggered:
+        return
+
     ctx = {'recent': recent}
 
     def _bot_recent(bot):
@@ -199,6 +235,7 @@ async def dispatch_bots(group_id: int, triggered: list, content: str, sender: di
     async def race_role_group(bots):
         if len(bots) == 1:
             bot = bots[0]
+            steer_q = _start_steer(group_id, bot["id"])
             ctx = ExecutionContext(
                 bot=bot, group_id=group_id, user_message=content,
                 sender=sender, history=_bot_recent(bot),
@@ -207,11 +244,45 @@ async def dispatch_bots(group_id: int, triggered: list, content: str, sender: di
                 workflow_suffix=wf.system_suffix(group_id),
                 group_name=group_name,
                 group_announcement=group_announcement,
+                steer_channel=steer_q,
             )
-            result = await registry.get(bot.get("executor_id", "simple_v1")).run(ctx)
+            try:
+                result = await registry.get(bot.get("executor_id", "simple_v1")).run(ctx)
+            finally:
+                _stop_steer(group_id, bot["id"])
             if not result.full_text:
                 return
             await wf.check_and_advance(group_id, result.full_text, bot["id"])
+
+            # Process messages that arrived too late to be steered mid-run (followUp chain)
+            for _ in range(_MAX_FOLLOWUP_DEPTH):
+                if steer_q.empty():
+                    break
+                follow_msg = steer_q.get_nowait()
+                await manager.broadcast(group_id, {
+                    "type": "followup_start",
+                    "member_id": bot["id"],
+                    "message": follow_msg[:200],
+                })
+                async with get_db() as db:
+                    follow_recent = await get_messages(db, group_id)
+                steer_q = _start_steer(group_id, bot["id"])
+                follow_ctx = ExecutionContext(
+                    bot=bot, group_id=group_id, user_message=follow_msg,
+                    sender=sender, history=follow_recent,
+                    all_bots=all_bots, all_members=all_members,
+                    broadcaster=manager,
+                    workflow_suffix=wf.system_suffix(group_id),
+                    group_name=group_name,
+                    group_announcement=group_announcement,
+                    steer_channel=steer_q,
+                )
+                try:
+                    follow_result = await registry.get(bot.get("executor_id", "simple_v1")).run(follow_ctx)
+                finally:
+                    _stop_steer(group_id, bot["id"])
+                if follow_result.full_text:
+                    await wf.check_and_advance(group_id, follow_result.full_text, bot["id"])
             return
 
         tasks = {asyncio.create_task(call_bot(b)): b for b in bots}
@@ -239,7 +310,7 @@ async def dispatch_bots(group_id: int, triggered: list, content: str, sender: di
             "content": ai_reply,
             "created_at": bot_recent[-1]["created_at"] if bot_recent else "",
         })
-        asyncio.create_task(maybe_summarize(winner_bot["id"], winner_bot["role"] or winner_bot["name"], [winner_bot["id"]]))
+        asyncio.create_task(maybe_summarize(group_id, winner_bot["id"], winner_bot["role"] or winner_bot["name"], [winner_bot["id"]]))
 
     role_groups: dict[str, list] = {}
     for bot in triggered:

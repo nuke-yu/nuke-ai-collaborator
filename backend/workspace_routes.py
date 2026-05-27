@@ -1,6 +1,9 @@
 from fastapi import APIRouter, HTTPException
 from database import get_db, get_member
-from workspace import list_workspace_tree, read_file, write_file, _safe_path, bot_workspace, init_bot_workspace
+from workspace import (
+    list_workspace_tree, read_file, write_file, bot_workspace, init_bot_workspace,
+)
+from skills import list_skills_all, update_skill_status, approve_draft_skill, reject_draft_skill
 
 router = APIRouter()
 
@@ -50,3 +53,50 @@ async def init_workspace(member_id: int):
         raise HTTPException(404, "Bot not found")
     await init_bot_workspace(bot)
     return {"ok": True, "files": list_workspace_tree(member_id)}
+
+
+# ---------------------------------------------------------------------------
+# Skill status API
+# ---------------------------------------------------------------------------
+
+@router.get("/api/members/{member_id}/skills")
+async def get_skills(member_id: int, group_id: int | None = None):
+    async with get_db() as db:
+        bot = await get_member(db, member_id)
+    if not bot or bot["type"] != "bot":
+        raise HTTPException(404, "Bot not found")
+    skills = list_skills_all(member_id, group_id=group_id, role=bot.get("role"))
+    return {"skills": skills}
+
+
+@router.put("/api/members/{member_id}/skills/{skill_name}/status")
+async def set_skill_status(member_id: int, skill_name: str, body: dict):
+    async with get_db() as db:
+        bot = await get_member(db, member_id)
+    if not bot or bot["type"] != "bot":
+        raise HTTPException(404, "Bot not found")
+    new_status = body.get("status")
+    if new_status not in ("active", "disabled"):
+        raise HTTPException(400, "status must be 'active' or 'disabled'")
+    result = update_skill_status(member_id, skill_name, new_status)
+    return {"ok": True, "message": result}
+
+
+@router.post("/api/members/{member_id}/skills/learned/{skill_name}/approve")
+async def approve_skill(member_id: int, skill_name: str):
+    async with get_db() as db:
+        bot = await get_member(db, member_id)
+    if not bot or bot["type"] != "bot":
+        raise HTTPException(404, "Bot not found")
+    result = approve_draft_skill(member_id, skill_name)
+    return {"ok": True, "message": result}
+
+
+@router.post("/api/members/{member_id}/skills/learned/{skill_name}/reject")
+async def reject_skill(member_id: int, skill_name: str):
+    async with get_db() as db:
+        bot = await get_member(db, member_id)
+    if not bot or bot["type"] != "bot":
+        raise HTTPException(404, "Bot not found")
+    result = reject_draft_skill(member_id, skill_name)
+    return {"ok": True, "message": result}

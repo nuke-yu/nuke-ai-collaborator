@@ -18,8 +18,12 @@ def should_bot_respond(message: str, bot_name: str, bot_role: str) -> bool:
     return any(kw in msg_lower for kw in keywords)
 
 def build_context_message(message: str, sender_name: str, recent_messages: list) -> tuple:
+    history_source = recent_messages
+    if history_source and history_source[-1].get("content") == message and history_source[-1].get("sender_name") == sender_name:
+        history_source = history_source[:-1]
+
     history = []
-    for msg in recent_messages[-8:]:
+    for msg in history_source[-8:]:
         role = "assistant" if msg["sender_type"] == "bot" else "user"
         history.append({
             "role": role,
@@ -27,3 +31,4 @@ def build_context_message(message: str, sender_name: str, recent_messages: list)
         })
     user_message = f"[{sender_name}]: {message}"
     return history, user_message
+

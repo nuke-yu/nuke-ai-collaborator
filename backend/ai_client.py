@@ -13,6 +13,15 @@ def _keys():
 class AIError(Exception):
     pass
 
+class AIContextOverflowError(AIError):
+    """Raised when the API rejects the request due to context length exceeding model limit."""
+    pass
+
+_OVERFLOW_KEYWORDS = (
+    "context_length_exceeded", "maximum context length",
+    "too many tokens", "context window", "prompt is too long",
+)
+
 def _require_key(keys: dict, name: str, label: str) -> str:
     val = keys.get(name, "")
     if not val:
@@ -130,14 +139,22 @@ async def _stream_claude(model: str, system_prompt: str, messages: list, api_key
 
 def _to_claude_messages(messages: list[dict]) -> list[dict]:
     """Convert OpenAI-format messages (no system) to Claude format."""
-    result = []
+    raw_result = []
     for m in messages:
         role = m.get("role")
         if role == "tool":
-            result.append({
-                "role": "user",
-                "content": [{"type": "tool_result", "tool_use_id": m["tool_call_id"], "content": m["content"]}],
-            })
+            tool_block = {
+                "type": "tool_result",
+                "tool_use_id": m["tool_call_id"],
+                "content": m.get("content") or ""
+            }
+            if raw_result and raw_result[-1]["role"] == "user" and isinstance(raw_result[-1]["content"], list):
+                raw_result[-1]["content"].append(tool_block)
+            else:
+                raw_result.append({
+                    "role": "user",
+                    "content": [tool_block],
+                })
         elif role == "assistant" and m.get("tool_calls"):
             content = []
             if m.get("content"):
@@ -149,10 +166,26 @@ def _to_claude_messages(messages: list[dict]) -> list[dict]:
                     "name": tc["function"]["name"],
                     "input": json.loads(args) if isinstance(args, str) else args,
                 })
-            result.append({"role": "assistant", "content": content})
+            raw_result.append({"role": "assistant", "content": content})
         else:
-            result.append({"role": role, "content": m.get("content", "")})
-    return result
+            raw_result.append({"role": role, "content": m.get("content", "")})
+
+    # 合并连续的同角色消息（例如连续的 user、user）以防 Anthropic API 报错
+    merged_result = []
+    for m in raw_result:
+        if m["role"] == "system":
+            continue
+        if merged_result and merged_result[-1]["role"] == m["role"]:
+            prev = merged_result[-1]
+            def to_blocks(content):
+                if isinstance(content, str):
+                    return [{"type": "text", "text": content}] if content else []
+                return content
+            prev["content"] = to_blocks(prev["content"]) + to_blocks(m["content"])
+        else:
+            merged_result.append(m)
+
+    return merged_result
 
 
 async def _once_openai_compat(url: str, api_key: str, model: str, system_prompt: str,
@@ -166,6 +199,13 @@ async def _once_openai_compat(url: str, api_key: str, model: str, system_prompt:
     headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
     async with httpx.AsyncClient(timeout=60) as client:
         resp = await client.post(url, headers=headers, json=body)
+        if resp.status_code in (400, 413):
+            try:
+                err_msg = str(resp.json().get("error", {}).get("message", ""))
+            except Exception:
+                err_msg = resp.text[:500]
+            if any(k in err_msg.lower() for k in _OVERFLOW_KEYWORDS):
+                raise AIContextOverflowError(err_msg)
         resp.raise_for_status()
         data = resp.json()
     choice = data["choices"][0]
@@ -200,6 +240,14 @@ async def _once_claude(api_key: str, model: str, system_prompt: str,
                      "content-type": "application/json"},
             json=body,
         )
+        if resp.status_code in (400, 413):
+            try:
+                err_body = resp.json()
+                err_msg = str(err_body.get("error", {}).get("message", ""))
+            except Exception:
+                err_msg = resp.text[:500]
+            if any(k in err_msg.lower() for k in _OVERFLOW_KEYWORDS):
+                raise AIContextOverflowError(err_msg)
         resp.raise_for_status()
         data = resp.json()
     text_parts, tool_uses = [], []
@@ -256,6 +304,8 @@ async def call_ai_once(
                                              messages, temperature, max_tokens, None)
         else:
             raise AIError(f"不支持的模型提供商: {provider}")
+    except AIContextOverflowError:
+        raise
     except AIError:
         raise
     except httpx.TimeoutException:
@@ -334,7 +384,8 @@ async def call_ai_stream(system_prompt: str, history: list, user_message: str,
             api_key = _require_key(keys, "anthropic", "Anthropic")
             hist = [m for m in history[-10:] if m["role"] in ("user", "assistant")]
             hist.append({"role": "user", "content": user_message})
-            async for chunk in _stream_claude(model, system_prompt, hist, api_key, temperature, max_tokens):
+            claude_msgs = _to_claude_messages(hist)
+            async for chunk in _stream_claude(model, system_prompt, claude_msgs, api_key, temperature, max_tokens):
                 yield chunk
 
         else:

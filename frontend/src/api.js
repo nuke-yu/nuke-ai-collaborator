@@ -103,11 +103,25 @@ export function exportGroupUrl(groupId, format = 'markdown') {
   return `/api/groups/${groupId}/export?format=${format}`
 }
 
-export async function addMember(groupId, name, type = 'human', role = null, system_prompt = null, avatar_color = '#f59e0b', model_provider = 'deepseek', model_name = 'deepseek-chat') {
+export async function addMember(groupId, payload, type = 'human', role = null, system_prompt = null, avatar_color = '#f59e0b', model_provider = 'deepseek', model_name = 'deepseek-chat') {
+  let bodyObj = {};
+  if (typeof payload === 'string') {
+    bodyObj = {
+      name: payload,
+      type,
+      role,
+      system_prompt,
+      avatar_color,
+      model_provider,
+      model_name
+    };
+  } else {
+    bodyObj = payload;
+  }
   const res = await fetch(`/api/groups/${groupId}/members`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, type, role, system_prompt, avatar_color, model_provider, model_name })
+    body: JSON.stringify(bodyObj)
   })
   return res.json()
 }

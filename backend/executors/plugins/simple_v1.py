@@ -9,6 +9,7 @@ from database import get_db, save_message, get_messages
 from ai_client import call_ai_stream, AIError
 from memory import get_memory_context, add_to_chroma, maybe_summarize
 from role_router import build_context_message
+from workspace import append_log
 
 
 def _with_personality(base_prompt: str, bot: dict) -> str:
@@ -84,6 +85,12 @@ class SimpleV1(BotExecutor):
         })
 
         asyncio.create_task(add_to_chroma(msg_id, full_text, bot.get("role") or "", bot["id"]))
-        asyncio.create_task(maybe_summarize(bot["id"], bot.get("role") or bot["name"], [bot["id"]]))
+        asyncio.create_task(maybe_summarize(ctx.group_id, bot["id"], bot.get("role") or bot["name"], [bot["id"]]))
+        asyncio.create_task(append_log(
+            bot["id"], full_text,
+            user_message=ctx.user_message,
+            sender_name=ctx.sender.get("name", ""),
+            executor=self.executor_id,
+        ))
 
         return ExecutionResult(full_text=full_text, msg_id=msg_id)

@@ -75,9 +75,16 @@ async def add_member(group_id: int, req: AddMemberRequest):
             existing = await cur.fetchone()
         if existing:
             return {"id": existing[0], "name": req.name, "type": req.type}
+        config_str = json.dumps(req.executor_config or {})
         async with db.execute(
-            "INSERT INTO members (group_id, name, type, role, system_prompt, avatar_color, model_provider, model_name) VALUES (?,?,?,?,?,?,?,?)",
-            (group_id, req.name, req.type, req.role, req.system_prompt, req.avatar_color, req.model_provider, req.model_name)
+            """INSERT INTO members (
+                group_id, name, type, role, system_prompt, avatar_color,
+                model_provider, model_name, temperature, max_tokens,
+                personality_prompt, executor_id, executor_config, done_keyword
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (group_id, req.name, req.type, req.role, req.system_prompt, req.avatar_color,
+             req.model_provider, req.model_name, req.temperature, req.max_tokens,
+             req.personality_prompt or None, req.executor_id, config_str, req.done_keyword or None)
         ) as cur:
             await db.commit()
             bot_id = cur.lastrowid
