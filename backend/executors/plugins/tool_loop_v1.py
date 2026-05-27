@@ -20,6 +20,58 @@ from workspace import load_context_files, format_context_blocks, append_log, arc
 from skills import list_skills, load_always_skills, filter_skills_by_context
 import executors.compact as compact
 
+_DOOM_LOOP_THRESHOLD = 5
+
+
+async def _execute_tool_call(name: str, arguments: dict, context: dict) -> str:
+    """Thin wrapper around tool_executor.execute — extracted so tests can mock it."""
+    return await tool_executor.execute(name, arguments, context=context)
+
+
+async def _tool_loop_core(
+    system_prompt: str,
+    messages: list,
+    provider: str,
+    model_name: str,
+    temperature: float,
+    max_tokens: int,
+    tool_schemas: list,
+    max_iter: int = 10,
+) -> str:
+    """Minimal tool-calling loop used by tests (no broadcaster, no compaction, no DB).
+
+    Returns the final text response, or a doom-loop protection message if
+    ``_DOOM_LOOP_THRESHOLD`` consecutive tool-only iterations occur.
+    """
+    messages = list(messages)
+    iter_count = 0
+    _consecutive_tool_only = 0
+    while iter_count < max_iter:
+        iter_count += 1
+        result = await call_ai_once(
+            system_prompt, messages, provider, model_name,
+            temperature, max_tokens, tool_schemas,
+        )
+        if result["type"] == "tool_calls":
+            _consecutive_tool_only += 1
+            if _consecutive_tool_only >= _DOOM_LOOP_THRESHOLD:
+                return f"[循环保护] 连续 {_consecutive_tool_only} 次工具调用，已终止循环"
+            messages.append(result["assistant_message"])
+            for call in result["calls"]:
+                tool_result = await _execute_tool_call(
+                    call["name"], call.get("arguments", {}), context={}
+                )
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": call.get("id", ""),
+                    "name": call["name"],
+                    "content": tool_result,
+                })
+        else:
+            _consecutive_tool_only = 0
+            return result.get("content", "")
+    return "[达到最大工具调用次数，任务未完成]"
+
 
 async def _before_finalize_hook(
     draft: str,
@@ -341,6 +393,7 @@ class ToolLoopV1(BotExecutor):
                 }
                 iter_count = 0
                 _overflow_recovered = False
+                _consecutive_tool_only = 0
                 tool_records: list[dict] = []
                 _active_schemas = tool_schemas  # may be narrowed by skill allowed-tools
                 while iter_count < max_iter:
@@ -381,6 +434,10 @@ class ToolLoopV1(BotExecutor):
                             use_cached_microcompact=_use_cached_mc,
                         )
                     if result["type"] == "tool_calls":
+                        _consecutive_tool_only += 1
+                        if _consecutive_tool_only >= _DOOM_LOOP_THRESHOLD:
+                            full_text = f"[循环保护] 连续 {_consecutive_tool_only} 次工具调用，已终止循环"
+                            break
                         messages.append(result["assistant_message"])
                         for call in result["calls"]:
                             await ctx.broadcaster.broadcast(ctx.group_id, {
@@ -491,6 +548,7 @@ class ToolLoopV1(BotExecutor):
                                 "member_id": bot["id"], "message": steer_text[:300],
                             })
                     else:
+                        _consecutive_tool_only = 0
                         # Tools resolved — stream the final answer properly
                         await _finalize_reply()
                         break

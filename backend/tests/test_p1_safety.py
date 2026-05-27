@@ -88,3 +88,78 @@ class TestSensitivePathHandlers(unittest.IsolatedAsyncioTestCase):
         result = await _handle_read_local_file("/nonexistent/normal/file.txt")
         self.assertNotIn("安全拒绝", result)
         self.assertIn("文件不存在", result)
+
+
+# ---------------------------------------------------------------------------
+# Doom loop protection
+# ---------------------------------------------------------------------------
+
+class TestDoomLoopProtection(unittest.IsolatedAsyncioTestCase):
+    """Verify the tool loop breaks after _DOOM_LOOP_THRESHOLD consecutive tool-only iterations."""
+
+    async def _run_loop(self, responses: list) -> str:
+        """Helper: run _tool_loop_core with a fake AI that returns canned responses."""
+        from executors.plugins.tool_loop_v1 import _tool_loop_core
+
+        call_count = 0
+
+        async def fake_call_ai_once(system_prompt, messages, provider, model,
+                                    temperature, max_tokens, tools=None, **kwargs):
+            nonlocal call_count
+            resp = responses[min(call_count, len(responses) - 1)]
+            call_count += 1
+            return resp
+
+        with patch("executors.plugins.tool_loop_v1.call_ai_once", new=fake_call_ai_once):
+            with patch("executors.plugins.tool_loop_v1._execute_tool_call",
+                       new=AsyncMock(return_value="tool output")):
+                result = await _tool_loop_core(
+                    system_prompt="sys",
+                    messages=[{"role": "user", "content": "hi"}],
+                    provider="claude",
+                    model_name="claude-opus-4-7",
+                    temperature=0.7,
+                    max_tokens=4096,
+                    tool_schemas=[{"name": "run_shell"}],
+                    max_iter=50,
+                )
+        return result
+
+    async def test_doom_loop_triggers_after_threshold(self):
+        """After THRESHOLD consecutive tool-call-only responses, loop breaks with protection message."""
+        from executors.plugins.tool_loop_v1 import _DOOM_LOOP_THRESHOLD
+        tool_only = {
+            "type": "tool_calls",
+            "calls": [{"name": "run_shell", "arguments": {"command": "echo hi"}, "id": "c1"}],
+            "assistant_message": {"role": "assistant", "content": ""},
+        }
+        result = await self._run_loop([tool_only] * (_DOOM_LOOP_THRESHOLD + 2))
+        self.assertIn("循环保护", result)
+
+    async def test_doom_loop_does_not_trigger_below_threshold(self):
+        """THRESHOLD-1 tool calls followed by a text response — no protection message."""
+        from executors.plugins.tool_loop_v1 import _DOOM_LOOP_THRESHOLD
+        tool_only = {
+            "type": "tool_calls",
+            "calls": [{"name": "run_shell", "arguments": {"command": "echo hi"}, "id": "c1"}],
+            "assistant_message": {"role": "assistant", "content": ""},
+        }
+        text = {"type": "text", "content": "done"}
+        responses = [tool_only] * (_DOOM_LOOP_THRESHOLD - 1) + [text]
+        result = await self._run_loop(responses)
+        self.assertEqual(result, "done")
+
+    async def test_doom_loop_counter_resets_after_text_response(self):
+        """Counter resets to 0 after a text response; a second streak below threshold also passes."""
+        from executors.plugins.tool_loop_v1 import _DOOM_LOOP_THRESHOLD
+        tool_only = {
+            "type": "tool_calls",
+            "calls": [{"name": "run_shell", "arguments": {"command": "echo hi"}, "id": "c1"}],
+            "assistant_message": {"role": "assistant", "content": ""},
+        }
+        text_end = {"type": "text", "content": "end"}
+        # THRESHOLD-1 tool calls, then text (resets), then THRESHOLD-1 more tool calls, then text end
+        responses = ([tool_only] * (_DOOM_LOOP_THRESHOLD - 1) + [text_end]
+                     + [tool_only] * (_DOOM_LOOP_THRESHOLD - 1) + [text_end])
+        result = await self._run_loop(responses)
+        self.assertEqual(result, "end")
