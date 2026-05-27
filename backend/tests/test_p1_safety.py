@@ -149,6 +149,17 @@ class TestDoomLoopProtection(unittest.IsolatedAsyncioTestCase):
         result = await self._run_loop(responses)
         self.assertEqual(result, "done")
 
+    async def test_doom_loop_triggers_at_exact_threshold(self):
+        """Exactly THRESHOLD consecutive tool-only responses triggers the protection."""
+        from executors.plugins.tool_loop_v1 import _DOOM_LOOP_THRESHOLD
+        tool_only = {
+            "type": "tool_calls",
+            "calls": [{"name": "run_shell", "arguments": {"command": "echo hi"}}],
+            "assistant_message": {"role": "assistant", "content": ""},
+        }
+        result = await self._run_loop([tool_only] * _DOOM_LOOP_THRESHOLD)
+        self.assertIn("循环保护", result)
+
     async def test_doom_loop_counter_resets_after_text_response(self):
         """Counter resets to 0 after a text response; a second streak below threshold also passes."""
         from executors.plugins.tool_loop_v1 import _DOOM_LOOP_THRESHOLD

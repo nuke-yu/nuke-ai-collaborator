@@ -20,7 +20,7 @@ from workspace import load_context_files, format_context_blocks, append_log, arc
 from skills import list_skills, load_always_skills, filter_skills_by_context
 import executors.compact as compact
 
-_DOOM_LOOP_THRESHOLD = 5
+_DOOM_LOOP_THRESHOLD = 5  # breaks on the Nth consecutive tool-only iteration (inclusive)
 
 
 async def _execute_tool_call(name: str, arguments: dict, context: dict) -> str:
