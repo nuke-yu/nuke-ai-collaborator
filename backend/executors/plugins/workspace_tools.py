@@ -6,6 +6,7 @@ Kept separate from the execution loop so tool definitions (stable) don't
 intermingle with the AI loop logic (frequently changed).
 """
 import asyncio
+import fnmatch
 import os
 import sys
 from pathlib import Path
@@ -216,6 +217,67 @@ def _build_skills_xml(skills: list[dict], model_name: str) -> tuple[str, set[str
 
 
 # ---------------------------------------------------------------------------
+# Sensitive path protection
+# ---------------------------------------------------------------------------
+
+# Sensitive path prefixes — expanded at runtime with Path.expanduser()
+_SENSITIVE_PATH_PREFIXES = [
+    "~/.ssh",
+    "~/.aws",
+    "~/.gnupg",
+    "~/.config/gcloud",
+    "~/.kube",
+]
+
+# Sensitive filename patterns (fnmatch style)
+_SENSITIVE_FILENAME_PATTERNS = [
+    ".env",
+    ".env.*",
+    "*.pem",
+    "*.key",
+    "id_rsa",
+    "id_rsa.*",
+    "id_ed25519",
+    "id_ed25519.*",
+    "credentials",
+    ".netrc",
+    "*.pfx",
+    "*.p12",
+]
+
+# Filenames explicitly allowed despite matching a broad pattern above
+_SENSITIVE_FILENAME_ALLOWLIST = {
+    ".env.example",
+    ".env.sample",
+    ".env.template",
+}
+
+
+def _is_sensitive_path(path: str) -> bool:
+    """Return True if path points to a sensitive location that must not be read or written."""
+    p = Path(path).expanduser()
+    p_str = str(p)
+    filename = p.name
+
+    # Allowlist check first
+    if filename in _SENSITIVE_FILENAME_ALLOWLIST:
+        return False
+
+    # Directory prefix check
+    for prefix in _SENSITIVE_PATH_PREFIXES:
+        expanded = str(Path(prefix).expanduser())
+        if p_str.startswith(expanded):
+            return True
+
+    # Filename pattern check
+    for pattern in _SENSITIVE_FILENAME_PATTERNS:
+        if fnmatch.fnmatch(filename, pattern):
+            return True
+
+    return False
+
+
+# ---------------------------------------------------------------------------
 # Tool execution hooks
 # ---------------------------------------------------------------------------
 
@@ -331,6 +393,8 @@ async def _handle_run_shell(
 
 
 async def _handle_read_local_file(path: str, context: dict = None) -> str:
+    if _is_sensitive_path(path):
+        return f"[安全拒绝] 不允许读取敏感路径：{path}"
     try:
         return Path(path).read_text(encoding="utf-8")
     except FileNotFoundError:
@@ -340,6 +404,8 @@ async def _handle_read_local_file(path: str, context: dict = None) -> str:
 
 
 async def _handle_write_local_file(path: str, content: str, context: dict = None) -> str:
+    if _is_sensitive_path(path):
+        return f"[安全拒绝] 不允许写入敏感路径：{path}"
     try:
         p = Path(path)
         p.parent.mkdir(parents=True, exist_ok=True)
