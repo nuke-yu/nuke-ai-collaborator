@@ -1,3 +1,4 @@
+import asyncio
 import json
 import httpx
 from config import get_key
@@ -16,6 +17,32 @@ class AIError(Exception):
 class AIContextOverflowError(AIError):
     """Raised when the API rejects the request due to context length exceeding model limit."""
     pass
+
+
+class AIRateLimitError(AIError):
+    """Raised on HTTP 429 rate limit. Carries recommended wait time in seconds."""
+    def __init__(self, wait_seconds: float = 2.0):
+        self.wait_seconds = wait_seconds
+        super().__init__(f"API 限流，建议等待 {wait_seconds:.1f}s 后重试")
+
+
+_AI_RETRY_MAX = 3
+
+
+def _parse_retry_after(headers: dict) -> float:
+    """Parse retry-after-ms or retry-after from response headers. Returns seconds."""
+    if val := headers.get("retry-after-ms"):
+        try:
+            return float(val) / 1000
+        except (ValueError, TypeError):
+            pass
+    if val := headers.get("retry-after"):
+        try:
+            return float(val)
+        except (ValueError, TypeError):
+            pass
+    return 2.0
+
 
 _OVERFLOW_KEYWORDS = (
     "context_length_exceeded", "maximum context length",
@@ -215,6 +242,9 @@ async def _once_openai_compat(url: str, api_key: str, model: str, system_prompt:
     headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
     async with httpx.AsyncClient(timeout=60) as client:
         resp = await client.post(url, headers=headers, json=body)
+        if resp.status_code == 429:
+            wait = _parse_retry_after(dict(resp.headers))
+            raise AIRateLimitError(wait)
         if resp.status_code in (400, 413):
             try:
                 err_msg = str(resp.json().get("error", {}).get("message", ""))
@@ -264,6 +294,9 @@ async def _once_claude(api_key: str, model: str, system_prompt: str,
             headers=headers,
             json=body,
         )
+        if resp.status_code == 429:
+            wait = _parse_retry_after(dict(resp.headers))
+            raise AIRateLimitError(wait)
         if resp.status_code in (400, 413):
             try:
                 err_body = resp.json()
@@ -293,6 +326,33 @@ async def _once_claude(api_key: str, model: str, system_prompt: str,
     return {"type": "text", "content": "".join(text_parts)}
 
 
+async def _dispatch_once(
+    provider: str, model: str, keys: dict,
+    system_prompt: str, messages: list,
+    temperature: float, max_tokens: int,
+    tools: list | None, use_cached_microcompact: bool,
+) -> dict:
+    """Single provider dispatch — no retry logic. Called by call_ai_once."""
+    if provider in ("deepseek", "openai"):
+        url = ("https://api.deepseek.com/v1/chat/completions" if provider == "deepseek"
+               else "https://api.openai.com/v1/chat/completions")
+        label = "DeepSeek" if provider == "deepseek" else "OpenAI"
+        api_key = _require_key(keys, "deepseek" if provider == "deepseek" else "openai", label)
+        return await _once_openai_compat(url, api_key, model, system_prompt,
+                                         messages, temperature, max_tokens, tools)
+    elif provider == "claude":
+        api_key = _require_key(keys, "anthropic", "Anthropic")
+        return await _once_claude(api_key, model, system_prompt,
+                                  messages, temperature, max_tokens, tools,
+                                  use_cached_microcompact=use_cached_microcompact)
+    elif provider == "ollama":
+        url = f"{keys['ollama_url']}/v1/chat/completions"
+        return await _once_openai_compat(url, "", model, system_prompt,
+                                         messages, temperature, max_tokens, None)
+    else:
+        raise AIError(f"不支持的模型提供商: {provider}")
+
+
 async def call_ai_once(
     system_prompt: str,
     messages: list[dict],
@@ -302,44 +362,44 @@ async def call_ai_once(
     max_tokens: int = 4096,
     tools: list[dict] | None = None,
     use_cached_microcompact: bool = False,
+    fallback_model: str = "",
 ) -> dict:
-    """
-    Single non-streaming AI call with optional tool support.
-    messages: OpenAI-format list (no system message).
-    Returns:
-      {"type": "text", "content": "..."}
-      {"type": "tool_calls", "calls": [...], "assistant_message": {...}}
+    """Single non-streaming AI call with retry on rate limit.
+
+    Retries up to _AI_RETRY_MAX times with exponential backoff on HTTP 429.
+    If fallback_model is set, tries it once after main model retries are exhausted.
     """
     keys = _keys()
-    try:
-        if provider in ("deepseek", "openai"):
-            url = ("https://api.deepseek.com/v1/chat/completions" if provider == "deepseek"
-                   else "https://api.openai.com/v1/chat/completions")
-            label = "DeepSeek" if provider == "deepseek" else "OpenAI"
-            api_key = _require_key(keys, "deepseek" if provider == "deepseek" else "openai", label)
-            return await _once_openai_compat(url, api_key, model, system_prompt,
-                                             messages, temperature, max_tokens, tools)
-        elif provider == "claude":
-            api_key = _require_key(keys, "anthropic", "Anthropic")
-            return await _once_claude(api_key, model, system_prompt,
-                                      messages, temperature, max_tokens, tools,
-                                      use_cached_microcompact=use_cached_microcompact)
-        elif provider == "ollama":
-            url = f"{keys['ollama_url']}/v1/chat/completions"
-            return await _once_openai_compat(url, "", model, system_prompt,
-                                             messages, temperature, max_tokens, None)
-        else:
-            raise AIError(f"不支持的模型提供商: {provider}")
-    except AIContextOverflowError:
-        raise
-    except AIError:
-        raise
-    except httpx.TimeoutException:
-        raise AIError("AI 响应超时，请稍后重试")
-    except httpx.HTTPStatusError as e:
-        raise AIError(f"AI 服务异常（{e.response.status_code}）")
-    except Exception as e:
-        raise AIError(f"AI 调用失败：{str(e)}")
+    models_to_try = [model]
+    if fallback_model and fallback_model != model:
+        models_to_try.append(fallback_model)
+
+    last_error: Exception | None = None
+    for try_model in models_to_try:
+        for attempt in range(_AI_RETRY_MAX):
+            try:
+                return await _dispatch_once(
+                    provider, try_model, keys, system_prompt, messages,
+                    temperature, max_tokens, tools, use_cached_microcompact,
+                )
+            except AIRateLimitError as e:
+                last_error = e
+                if attempt < _AI_RETRY_MAX - 1:
+                    wait = max(e.wait_seconds, 2.0 ** attempt)
+                    await asyncio.sleep(wait)
+                # On last attempt: fall through to next model (if any)
+            except AIContextOverflowError:
+                raise
+            except AIError:
+                raise
+            except httpx.TimeoutException:
+                raise AIError("AI 响应超时，请稍后重试")
+            except httpx.HTTPStatusError as e:
+                raise AIError(f"AI 服务异常（{e.response.status_code}）")
+            except Exception as e:
+                raise AIError(f"AI 调用失败：{str(e)}")
+
+    raise AIError(f"API 限流，已重试 {_AI_RETRY_MAX} 次仍失败") from last_error
 
 
 async def call_ai_stream_messages(

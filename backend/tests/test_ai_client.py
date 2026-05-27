@@ -274,5 +274,82 @@ class TestCachedMicrocompact(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(captured.get("called"))
 
 
+class TestRetryAndRateLimit(unittest.IsolatedAsyncioTestCase):
+
+    def test_parse_retry_after_ms(self):
+        from ai_client import _parse_retry_after
+        self.assertAlmostEqual(_parse_retry_after({"retry-after-ms": "5000"}), 5.0)
+
+    def test_parse_retry_after_seconds(self):
+        from ai_client import _parse_retry_after
+        self.assertAlmostEqual(_parse_retry_after({"retry-after": "3"}), 3.0)
+
+    def test_parse_retry_after_ms_takes_priority(self):
+        from ai_client import _parse_retry_after
+        self.assertAlmostEqual(_parse_retry_after({"retry-after-ms": "2000", "retry-after": "10"}), 2.0)
+
+    def test_parse_retry_after_no_header_returns_default(self):
+        from ai_client import _parse_retry_after
+        self.assertAlmostEqual(_parse_retry_after({}), 2.0)
+
+    def test_parse_retry_after_invalid_value_returns_default(self):
+        from ai_client import _parse_retry_after
+        self.assertAlmostEqual(_parse_retry_after({"retry-after": "not-a-number"}), 2.0)
+
+    async def test_call_ai_once_retries_on_rate_limit_and_succeeds(self):
+        from ai_client import call_ai_once
+        call_count = 0
+
+        async def fake_dispatch(provider, model, keys, sp, msgs, temp, max_tok, tools, use_cached_mc):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                from ai_client import AIRateLimitError
+                raise AIRateLimitError(0.001)  # tiny wait for test speed
+            return {"type": "text", "content": "ok"}
+
+        with patch("ai_client._dispatch_once", new=fake_dispatch), \
+             patch("ai_client._keys", return_value={}), \
+             patch("ai_client.asyncio.sleep", new=AsyncMock()):
+            result = await call_ai_once("sp", [{"role": "user", "content": "hi"}],
+                                        provider="deepseek", model="deepseek-chat")
+
+        self.assertEqual(result["content"], "ok")
+        self.assertEqual(call_count, 2)
+
+    async def test_call_ai_once_exhausted_raises_ai_error(self):
+        from ai_client import call_ai_once, AIError, AIRateLimitError
+
+        async def always_rate_limit(provider, model, keys, sp, msgs, temp, max_tok, tools, use_cached_mc):
+            raise AIRateLimitError(0.001)
+
+        with patch("ai_client._dispatch_once", new=always_rate_limit), \
+             patch("ai_client._keys", return_value={}), \
+             patch("ai_client.asyncio.sleep", new=AsyncMock()):
+            with self.assertRaises(AIError):
+                await call_ai_once("sp", [{"role": "user", "content": "hi"}],
+                                   provider="deepseek", model="deepseek-chat")
+
+    async def test_call_ai_once_uses_fallback_model_after_rate_limit(self):
+        from ai_client import call_ai_once, AIRateLimitError
+        tried_models = []
+
+        async def fake_dispatch(provider, model, keys, sp, msgs, temp, max_tok, tools, use_cached_mc):
+            tried_models.append(model)
+            if model == "main-model":
+                raise AIRateLimitError(0.001)
+            return {"type": "text", "content": "fallback ok"}
+
+        with patch("ai_client._dispatch_once", new=fake_dispatch), \
+             patch("ai_client._keys", return_value={}), \
+             patch("ai_client.asyncio.sleep", new=AsyncMock()):
+            result = await call_ai_once("sp", [{"role": "user", "content": "hi"}],
+                                        provider="deepseek", model="main-model",
+                                        fallback_model="fallback-model")
+
+        self.assertIn("fallback-model", tried_models)
+        self.assertEqual(result["content"], "fallback ok")
+
+
 if __name__ == "__main__":
     unittest.main()
