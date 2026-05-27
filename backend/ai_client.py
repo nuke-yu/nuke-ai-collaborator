@@ -71,6 +71,14 @@ async def _stream_openai_compat(url: str, api_key: str, model: str, messages: li
             headers={"Authorization": f"Bearer {api_key}"},
             json={"model": model, "messages": messages, "temperature": temperature, "max_tokens": max_tokens, "stream": True},
         ) as response:
+            if response.status_code in (400, 413):
+                body = await response.aread()
+                try:
+                    err_msg = str(json.loads(body).get("error", {}).get("message", ""))
+                except Exception:
+                    err_msg = body.decode(errors="replace")[:500]
+                if any(k in err_msg.lower() for k in _OVERFLOW_KEYWORDS):
+                    raise AIContextOverflowError(err_msg)
             response.raise_for_status()
             async for line in response.aiter_lines():
                 if not line.startswith("data: "):
@@ -124,6 +132,14 @@ async def _stream_claude(model: str, system_prompt: str, messages: list, api_key
                 "stream": True,
             },
         ) as response:
+            if response.status_code in (400, 413):
+                body = await response.aread()
+                try:
+                    err_msg = str(json.loads(body).get("error", {}).get("message", ""))
+                except Exception:
+                    err_msg = body.decode(errors="replace")[:500]
+                if any(k in err_msg.lower() for k in _OVERFLOW_KEYWORDS):
+                    raise AIContextOverflowError(err_msg)
             response.raise_for_status()
             async for line in response.aiter_lines():
                 if not line.startswith("data: "):
@@ -346,6 +362,8 @@ async def call_ai_stream_messages(
                 yield chunk
         else:
             raise AIError(f"不支持的模型提供商: {provider}")
+    except AIContextOverflowError:
+        raise
     except AIError:
         raise
     except httpx.TimeoutException:

@@ -138,6 +138,7 @@ async def _spawn_agent_handler(bot_name: str, task: str, context: dict = None) -
 
 _COMPACTION_RATIO = 0.60          # context window 用量超过 60% 触发压缩
 _COMPACTION_KEEP_RECENT = 6      # 末尾保留的消息条数不压缩（参考 openclaw/opencode 的 recent turns 设计）
+_PRE_RUN_TOKEN_THRESHOLD = 20_000  # 跨 run 预压缩阈值（固定，不随模型窗口缩放）
 
 # 各模型 context window（tokens）— 换模型不用改压缩逻辑
 _MODEL_CONTEXT_WINDOWS: dict[str, int] = {
@@ -594,26 +595,39 @@ class ToolLoopV1(BotExecutor):
 
         # P1 #3: Cross-run pre-run compaction — compact DB-loaded history if already too long
         _pre_tokens = _estimate_tokens(messages)
-        _pre_threshold = _compaction_threshold(model_name) // 2
-        if _pre_tokens > _pre_threshold:
+        if _pre_tokens > _PRE_RUN_TOKEN_THRESHOLD:
             messages = await _compact_messages(messages, system_prompt, provider, model_name, temperature)
             await ctx.broadcaster.broadcast(ctx.group_id, {
                 "type": "compaction", "temp_id": temp_id,
-                "message": f"历史已预压缩（{_pre_tokens:,} tokens > {_pre_threshold:,}）",
+                "message": f"历史已预压缩（{_pre_tokens:,} tokens > {_PRE_RUN_TOKEN_THRESHOLD:,}）",
             })
 
         async def _stream_final():
-            nonlocal full_text
-            async for chunk in call_ai_stream_messages(
-                system_prompt, messages, provider, model_name, temperature, max_tokens
-            ):
-                full_text += chunk
+            nonlocal full_text, messages
+            try:
+                async for chunk in call_ai_stream_messages(
+                    system_prompt, messages, provider, model_name, temperature, max_tokens
+                ):
+                    full_text += chunk
+                    await ctx.broadcaster.broadcast(ctx.group_id, {
+                        "type": "stream_chunk", "temp_id": temp_id, "delta": chunk,
+                    })
+            except AIContextOverflowError:
+                messages = await _compact_messages(messages, system_prompt, provider, model_name, temperature)
                 await ctx.broadcaster.broadcast(ctx.group_id, {
-                    "type": "stream_chunk", "temp_id": temp_id, "delta": chunk,
+                    "type": "compaction", "temp_id": temp_id,
+                    "message": "流式回复溢出，已压缩后重试",
                 })
+                async for chunk in call_ai_stream_messages(
+                    system_prompt, messages, provider, model_name, temperature, max_tokens
+                ):
+                    full_text += chunk
+                    await ctx.broadcaster.broadcast(ctx.group_id, {
+                        "type": "stream_chunk", "temp_id": temp_id, "delta": chunk,
+                    })
 
         async def _finalize_reply():
-            nonlocal full_text
+            nonlocal full_text, messages
             if not bf_config or not bf_config.get("reviewer_prompt"):
                 await _stream_final()
                 return
@@ -623,6 +637,14 @@ class ToolLoopV1(BotExecutor):
                     system_prompt, snap, provider, model_name, temperature, max_tokens
                 )
                 draft = gen["content"] if gen["type"] == "text" else ""
+            except AIContextOverflowError:
+                messages = await _compact_messages(messages, system_prompt, provider, model_name, temperature)
+                await ctx.broadcaster.broadcast(ctx.group_id, {
+                    "type": "compaction", "temp_id": temp_id,
+                    "message": "最终回复溢出，已压缩后重试",
+                })
+                await _stream_final()
+                return
             except Exception:
                 await _stream_final()
                 return
