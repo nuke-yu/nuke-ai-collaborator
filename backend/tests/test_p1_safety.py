@@ -61,9 +61,12 @@ class TestSensitivePathDetection(unittest.TestCase):
         self.assertTrue(self._is_sensitive("/certs/server.PEM"))
 
     def test_dotenv_with_dotdot_traversal(self):
-        # path traversal: resolve() should normalize this
-        # ~/.aws/../project/.env — .env part should still be caught
-        self.assertTrue(self._is_sensitive("/project/.env"))
+        """resolve() normalizes '..' traversal before checking filename."""
+        import tempfile, os
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env_path = os.path.join(tmpdir, ".env")
+            traversal = os.path.join(tmpdir, "subdir", "..", ".env")
+            self.assertTrue(self._is_sensitive(traversal))
 
 
 class TestSensitivePathHandlers(unittest.IsolatedAsyncioTestCase):

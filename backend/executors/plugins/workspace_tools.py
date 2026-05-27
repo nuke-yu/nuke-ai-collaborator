@@ -263,7 +263,7 @@ def _is_sensitive_path(path: str) -> bool:
     filename = p.name
 
     # Allowlist check first
-    if filename in _SENSITIVE_FILENAME_ALLOWLIST:
+    if filename.lower() in _SENSITIVE_FILENAME_ALLOWLIST:
         return False
 
     # Directory prefix check
@@ -396,6 +396,7 @@ async def _handle_run_shell(
         return f"[错误] {e}"
 
 
+# Note: _is_sensitive_path only covers read_file/write_file; run_shell commands can still access these paths.
 async def _handle_read_local_file(path: str, context: dict = None) -> str:
     if _is_sensitive_path(path):
         return f"[安全拒绝] 不允许读取敏感路径：{path}"
