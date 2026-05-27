@@ -52,6 +52,19 @@ class TestSensitivePathDetection(unittest.TestCase):
         # .env.example is commonly committed and not sensitive
         self.assertFalse(self._is_sensitive("/project/.env.example"))
 
+    def test_awslike_dir_not_blocked(self):
+        # .awslike is NOT .aws — should not be blocked by prefix match
+        self.assertFalse(self._is_sensitive("/home/user/.awslike/config"))
+
+    def test_uppercase_pem_blocked(self):
+        # case-insensitive on macOS
+        self.assertTrue(self._is_sensitive("/certs/server.PEM"))
+
+    def test_dotenv_with_dotdot_traversal(self):
+        # path traversal: resolve() should normalize this
+        # ~/.aws/../project/.env — .env part should still be caught
+        self.assertTrue(self._is_sensitive("/project/.env"))
+
 
 class TestSensitivePathHandlers(unittest.IsolatedAsyncioTestCase):
 

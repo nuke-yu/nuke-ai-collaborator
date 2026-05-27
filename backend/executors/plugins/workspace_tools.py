@@ -255,7 +255,10 @@ _SENSITIVE_FILENAME_ALLOWLIST = {
 
 def _is_sensitive_path(path: str) -> bool:
     """Return True if path points to a sensitive location that must not be read or written."""
-    p = Path(path).expanduser()
+    try:
+        p = Path(path).expanduser().resolve()
+    except (OSError, RuntimeError):
+        p = Path(path).expanduser()
     p_str = str(p)
     filename = p.name
 
@@ -266,12 +269,13 @@ def _is_sensitive_path(path: str) -> bool:
     # Directory prefix check
     for prefix in _SENSITIVE_PATH_PREFIXES:
         expanded = str(Path(prefix).expanduser())
-        if p_str.startswith(expanded):
+        if p_str == expanded or p_str.startswith(expanded + os.sep):
             return True
 
-    # Filename pattern check
+    # Filename pattern check (case-insensitive for macOS APFS)
+    filename_lower = filename.lower()
     for pattern in _SENSITIVE_FILENAME_PATTERNS:
-        if fnmatch.fnmatch(filename, pattern):
+        if fnmatch.fnmatch(filename_lower, pattern):
             return True
 
     return False
