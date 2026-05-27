@@ -296,6 +296,10 @@ class TestRetryAndRateLimit(unittest.IsolatedAsyncioTestCase):
         from ai_client import _parse_retry_after
         self.assertAlmostEqual(_parse_retry_after({"retry-after": "not-a-number"}), 2.0)
 
+    def test_parse_retry_after_titlecase_header(self):
+        from ai_client import _parse_retry_after
+        self.assertAlmostEqual(_parse_retry_after({"Retry-After": "5"}), 5.0)
+
     async def test_call_ai_once_retries_on_rate_limit_and_succeeds(self):
         from ai_client import call_ai_once
         call_count = 0

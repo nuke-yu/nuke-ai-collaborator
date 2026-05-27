@@ -31,12 +31,13 @@ _AI_RETRY_MAX = 3
 
 def _parse_retry_after(headers: dict) -> float:
     """Parse retry-after-ms or retry-after from response headers. Returns seconds."""
-    if val := headers.get("retry-after-ms"):
+    h = {k.lower(): v for k, v in headers.items()}
+    if val := h.get("retry-after-ms"):
         try:
             return float(val) / 1000
         except (ValueError, TypeError):
             pass
-    if val := headers.get("retry-after"):
+    if val := h.get("retry-after"):
         try:
             return float(val)
         except (ValueError, TypeError):
