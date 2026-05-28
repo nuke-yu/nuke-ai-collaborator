@@ -97,13 +97,13 @@
 | 84 | 协作 | followUp() 后续消息队列（run 结束后剩余 steer → 独立新 run） | M3 | ✅ |
 | 85 | 协作 | 子 Agent 派生（spawn_agent，同步等待，spawn_depth 防递归） | M3 | ✅ |
 | 86 | 协作 | 定时任务（cron / heartbeat，Bot 周期性自主执行） | M4 | ⬜ |
-| 87 | 协作 | 后台 spawn_agent（background: true，父 Agent 不阻塞，结果 steer 注回） | P4 | ⬜ |
+| 87 | 协作 | 后台 spawn_agent（background: true，父 Agent 不阻塞，结果 steer 注回） | P4 | ✅ |
 | 88 | 协作 | once / asyncRewake Hook（一次性 hook；exit code=2 唤醒主模型） | P4 | ⬜ |
 | 89 | 协作 | 子 Agent 任务恢复（session_id 复用已有 context，续传不重建） | P4 | ⬜ |
 | 90 | 平台 | 可视化工作流编排（n8n 风格拖拽） | M4 | ⬜ |
 | 91 | 平台 | Azure OpenAI 企业认证（Device Code Flow + token refresh） | M4 | ⬜ |
 
-> ✅ 已完成：81 项　　⬜ 未做：10 项　　合计：91 项
+> ✅ 已完成：82 项　　⬜ 未做：9 项　　合计：91 项
 
 ---
 
@@ -698,16 +698,16 @@ P3（精细化）:
 | 1 | 图片理解 | ⬆ | S | ⬜ | `call_ai_once` 携带图片 URL，视觉模型直接可用；改动集中在 `ai_client.py` + `main.py` 消息解析 |
 | 2 | 定时任务（cron / heartbeat） | ⬆ | M | ⬜ | Bot 周期性自主执行（日报、监控、定时提醒）；需调度器 + bootstrap-only 轻量执行模式 |
 | 3 | 压缩后文件重注入（从摘要提取） | ➡ | S | ✅ | `compact.build_file_contents_for_reinject()`：modified 优先，最多 5 文件 / 25K 预算，相对路径解析到 `bot_ws(bot_id)`；`_build_reinject()` 组合三段内容 |
-| 4 | 工具并发执行 | ➡ | M | ⬜ | 同一轮 tool_calls 中，只读工具（`read_file` / `list_workspace` / `read_local_file`）用 `asyncio.gather()` 并行；写入工具串行；改动 `tool_loop_v1.py` tool 执行循环 |
+| 4 | 工具并发执行 | ➡ | M | ✅ | `ToolDef.concurrency_safe` 标记；只读工具 `asyncio.gather()` 并行；写入工具串行 |
 | 5 | Hook 条件过滤 | ➡ | M | ✅ | `_HookEntry(fn, condition)` 存储条件；`_condition_matches()` 用 fnmatch glob 匹配工具名+任意参数值；`add_before/after_hook(condition=)` 新增关键字参数；向后兼容（condition=None = 始终运行） |
 | 6 | 用户 Abort | ➡ | M | ✅ | `_running_tasks[group_id]` 存 dispatch task；WS `abort` 消息 → `task.cancel()`；`tool_loop_v1` 捕获 `CancelledError` 广播 `stream_aborted` 后 re-raise；`run_shell` 捕获后 `proc.kill()` 再 re-raise |
-| 7 | react_v1 插件 | ⬆ | L | ⬜ | Thought → Action → Observation 推理循环；提升复杂任务推理质量；需新插件 + manifest |
+| 7 | react_v1 插件 | ⬆ | L | ✅ | Thought → Action → Observation 循环；自由文本解析；重复 Action 保护；react_* WS 事件 |
 | 8 | 权限系统：基础规则模型 | ➡ | M | ✅ | `permissions/models.py`：Rule / Ruleset / _PendingRequest；独立包隔离 |
 | 9 | 权限系统：决策 Pipeline | ➡ | M | ✅ | `permissions/engine.py`：bypass→deny→allow→dontAsk→子Agent拒绝→ask挂起 |
 | 10 | 权限系统：规则持久化 + 前端 UI | ➡ | M | ✅ | SQLite always / 内存 once；`PermissionRequestModal.jsx` 弹窗；`permissions/routes.py` CRUD API |
 | 11 | 权限系统：全局权限模式 | ➡ | S | ✅ | Bot 配置页三档切换（default/bypass/dontAsk）；写入 executor_config.permission_mode |
 | 12 | 权限系统：Subagent 权限继承 | ➡ | M | ✅ | spawn_agent 透传父 ruleset（含 bypass 模式）；spawn_depth>0 时 ask→deny |
-| 13 | 后台 spawn_agent | ➡ | L | ⬜ | `spawn_agent` 支持 `background: true`；父 Agent 继续运行；子 Agent 结果通过 Mailbox / steer 注回；需 asyncio.Task 管理 |
+| 13 | 后台 spawn_agent | ➡ | L | ✅ | `spawn_agent(background=True)` 立即返回 task_id；`_run_bg_agent` 用父 broadcaster 并发执行；完成后 `parent_steer.put(result)` 注回；`_bg_tasks` 字典跟踪清理；`execution_ctx["steer_channel"]` 传递父队列引用 |
 | 14 | once / asyncRewake Hook | ➡ | M | ⬜ | hook 支持 `once: true`（触发后自动注销）和 `asyncRewake`（exit code=2 时唤醒主模型追加处理）；改动 `tool_executor` hook 注册 + 执行 |
 | 15 | 子 Agent 任务恢复 | ➡ | L | ⬜ | `spawn_agent` 传 `session_id` 可复用已有子 Agent context，续传而不重建；需 session store + ExecutionContext 序列化 |
 | 16 | 项目知识库集成 | ⬆ | L | ⬜ | Bot 创建时绑定项目知识来源；对话时双轨检索（项目 KB + 个人记忆）；需向量库 + 检索管道 |

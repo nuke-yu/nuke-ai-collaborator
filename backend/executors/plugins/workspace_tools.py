@@ -110,12 +110,13 @@ _WORKSPACE_TOOLS = [
     ),
     ToolDef(
         name="spawn_agent",
-        description="派生子 Agent：将子任务委托给另一个 Bot 同步执行，等待结果返回后继续",
+        description="派生子 Agent：将子任务委托给另一个 Bot 执行。background=true 时立即返回，子 Agent 在后台运行，完成后结果自动注回当前对话",
         parameters={
             "type": "object",
             "properties": {
-                "bot_name": {"type": "string", "description": "目标 Bot 的名称"},
-                "task":     {"type": "string", "description": "委托给子 Agent 的具体任务描述"},
+                "bot_name":   {"type": "string",  "description": "目标 Bot 的名称"},
+                "task":       {"type": "string",  "description": "委托给子 Agent 的具体任务描述"},
+                "background": {"type": "boolean", "description": "后台运行，立即返回不等待结果", "default": False},
             },
             "required": ["bot_name", "task"],
         },
@@ -128,6 +129,9 @@ _WORKSPACE_TOOLS = [
 
 _SPAWN_MAX_DEPTH = 3
 
+# Running background sub-agent tasks: task_id → asyncio.Task
+_bg_tasks: dict[str, asyncio.Task] = {}
+
 
 class _NullBroadcaster:
     """Silent broadcaster for sub-agent runs — suppresses all WS events."""
@@ -135,7 +139,36 @@ class _NullBroadcaster:
         pass
 
 
-async def _spawn_agent_handler(bot_name: str, task: str, context: dict = None) -> str:
+async def _run_bg_agent(
+    sub_ctx: ExecutionContext,
+    bot_name: str,
+    parent_steer: "asyncio.Queue | None",
+    task_id: str,
+) -> None:
+    """Run a sub-agent in the background and inject result into parent's steer channel."""
+    try:
+        result = await _executor_registry.get(
+            sub_ctx.bot.get("executor_id", "simple_v1")
+        ).run(sub_ctx)
+        reply = result.full_text or "[子 Agent 未返回内容]"
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:
+        reply = f"[后台子Agent 执行错误] {e}"
+    finally:
+        _bg_tasks.pop(task_id, None)
+
+    if parent_steer is not None:
+        await parent_steer.put(f"[后台子Agent「{bot_name}」已完成]\n{reply}")
+
+    await sub_ctx.broadcaster.broadcast(sub_ctx.group_id, {
+        "type": "bg_agent_done",
+        "bot_name": bot_name,
+        "preview": reply[:300],
+    })
+
+
+async def _spawn_agent_handler(bot_name: str, task: str, background: bool = False, context: dict = None) -> str:
     ctx = context or {}
     group_id    = ctx.get("group_id")
     all_bots    = ctx.get("all_bots", [])
@@ -150,6 +183,7 @@ async def _spawn_agent_handler(bot_name: str, task: str, context: dict = None) -
         available = "、".join(b["name"] for b in all_bots) or "（无）"
         return f"[spawn_agent] 未找到 Bot「{bot_name}」。可用：{available}"
 
+    broadcaster = ctx.get("broadcaster") if background else _NullBroadcaster()
     sub_ctx = ExecutionContext(
         bot=target,
         group_id=group_id,
@@ -158,10 +192,19 @@ async def _spawn_agent_handler(bot_name: str, task: str, context: dict = None) -
         history=[],
         all_bots=all_bots,
         all_members=all_members,
-        broadcaster=_NullBroadcaster(),
+        broadcaster=broadcaster,
         spawn_depth=spawn_depth + 1,
-        ruleset=ctx.get("ruleset"),  # inherit parent's ruleset (including mode)
+        ruleset=ctx.get("ruleset"),
     )
+
+    if background:
+        import uuid as _uuid
+        task_id = _uuid.uuid4().hex
+        parent_steer = ctx.get("steer_channel")
+        bg = asyncio.create_task(_run_bg_agent(sub_ctx, bot_name, parent_steer, task_id))
+        _bg_tasks[task_id] = bg
+        return f"[后台子Agent 已启动] Bot「{bot_name}」正在后台执行，完成后结果将自动注回对话。task_id={task_id}"
+
     try:
         result = await _executor_registry.get(
             target.get("executor_id", "simple_v1")

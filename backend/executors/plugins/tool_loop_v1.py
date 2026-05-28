@@ -405,6 +405,7 @@ class ToolLoopV1(BotExecutor):
                     "spawn_depth": ctx.spawn_depth,
                     "broadcaster": ctx.broadcaster,
                     "ruleset": _ruleset,
+                    "steer_channel": ctx.steer_channel,
                 }
                 iter_count = 0
                 _overflow_recovered = False
