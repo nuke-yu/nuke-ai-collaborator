@@ -18,6 +18,7 @@ from memory import get_memory_context, add_to_chroma, maybe_summarize
 from role_router import build_context_message
 from workspace import load_context_files, format_context_blocks, append_log, archive_run
 from skills import list_skills_all, load_always_skills, filter_skills_by_context
+from skills.constants import bot_ws as _bot_ws
 import executors.compact as compact
 
 _DOOM_LOOP_THRESHOLD = 5  # breaks on the Nth consecutive tool-only iteration (inclusive)
@@ -291,11 +292,13 @@ class ToolLoopV1(BotExecutor):
         _file_tracker: dict[str, str] = {}
 
         def _build_reinject() -> str:
-            """Combine static workspace context with live file-tracker XML for re-injection."""
+            """Combine static workspace context, file-tracker XML, and live file contents."""
             ft_xml = compact.build_file_tracker_xml(_file_tracker)
-            if not ft_xml:
-                return context_text
-            return f"{context_text}\n\n{ft_xml}" if context_text else ft_xml
+            file_contents = compact.build_file_contents_for_reinject(
+                _file_tracker, workspace_dir=str(_bot_ws(bot["id"]))
+            )
+            parts = [p for p in [context_text, ft_xml, file_contents] if p]
+            return "\n\n".join(parts)
 
         # Strategy 1 (pre-run): clear stale tool results from DB-loaded history
         messages = compact.apply_tool_result_microcompact(messages)

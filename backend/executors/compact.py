@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import re
 import logging
+from pathlib import Path
 from typing import Optional
 
 from ai_client import call_ai_once
@@ -126,6 +127,64 @@ def build_file_tracker_xml(tracker: dict[str, str]) -> str:
         lines.append(f"  <modified>{p}</modified>")
     lines.append("</file_operations>")
     return "\n".join(lines)
+
+
+def build_file_contents_for_reinject(
+    tracker: dict[str, str],
+    workspace_dir: str | None = None,
+    max_files: int = REINJECT_MAX_FILES,
+    budget: int = REINJECT_CONTEXT_BUDGET,
+) -> str:
+    """Read tracked files and return their contents as XML for re-injection after compaction.
+
+    Modified files are prioritised over read-only files.
+    Relative paths are resolved against workspace_dir; absolute paths are read directly.
+    Returns empty string when tracker is empty or no files are readable.
+    """
+    if not tracker:
+        return ""
+
+    modified = [p for p, s in tracker.items() if s == "modified"]
+    read_only = [p for p, s in tracker.items() if s == "read"]
+    candidates = (modified + read_only)[:max_files]
+
+    parts: list[str] = []
+    used = 0
+
+    for raw_path in candidates:
+        try:
+            p = Path(raw_path)
+            if not p.is_absolute() and workspace_dir:
+                p = Path(workspace_dir) / p
+            content = p.read_text(encoding="utf-8")
+        except Exception:
+            continue
+
+        if not content:
+            continue
+
+        remaining = budget - used
+        if remaining <= 0:
+            break
+
+        header = f'  <file path="{raw_path}">'
+        footer = "  </file>"
+        overhead = len(header) + len(footer) + 2
+
+        if len(content) + overhead > remaining:
+            available = remaining - overhead - 30
+            if available < 100:
+                break
+            content = content[:available] + "\n[...已截断]"
+
+        entry = f"{header}\n{content}\n{footer}"
+        parts.append(entry)
+        used += len(entry) + 1
+
+    if not parts:
+        return ""
+
+    return "<file_contents>\n" + "\n".join(parts) + "\n</file_contents>"
 
 
 def autocompact_threshold(model_name: str) -> int:

@@ -578,9 +578,9 @@ P3（精细化）:
   6. Token 估算精度提升   ✅ compact.estimate_tokens() 已用 json.dumps 序列化长度 // 4（opencode 方式）
   7. 文件操作跨压缩跟踪   ✅ tool_loop_v1 _file_tracker dict + compact.build_file_tracker_xml()，
                              afterToolCall 钩子记录 read/write 路径，压缩时写入 XML 重注入（gsd-2 方式）
-  8. 压缩后文件重注入（从摘要提取）← 未做：启动文件（AGENT/BOOTSTRAP/IDENTITY/MEMORY）已随 context_text 重注入；
-                                     但「从摘要提取最近操作文件并重读内容」（claude-code 方式）尚未实现；
-                                     文件：compact.py + tool_loop_v1.py _build_reinject()
+  8. 压缩后文件重注入（从摘要提取）✅ compact.build_file_contents_for_reinject()：从 _file_tracker 读取
+                                     modified 优先、read 次之，最多 5 文件 / 25K 预算；相对路径解析到
+                                     bot_ws(bot_id)；_build_reinject() 组合 context_text + ft_xml + file_contents
 ```
 
 ---
@@ -591,16 +591,27 @@ P3（精细化）:
 
 > 影响面：⬆ 高 / ➡ 中 / ⬇ 低　实现成本：S 小 / M 中 / L 大 / XL 极大
 
-| 优先 | 功能 | 影响面 | 成本 | 说明 |
-|------|------|--------|------|------|
-| 1 | 图片理解 | ⬆ | S | `call_ai_once` 携带图片 URL，视觉模型直接可用；改动集中在 `ai_client.py` + `main.py` 消息解析 |
-| 2 | 定时任务（cron / heartbeat） | ⬆ | M | Bot 周期性自主执行（日报、监控、定时提醒）；需调度器 + bootstrap-only 轻量执行模式 |
-| 3 | 压缩后文件重注入（从摘要提取） | ➡ | S | 当前仅重注入固定启动文件；缺：从压缩摘要提取「最近操作过的文件路径」并重读内容注入（claude-code 方式）；改动 `compact.py` + `tool_loop_v1._build_reinject()` |
-| 4 | react_v1 插件 | ⬆ | L | Thought → Action → Observation 推理循环；提升复杂任务推理质量；需新插件 + manifest |
-| 5 | 项目知识库集成 | ⬆ | L | Bot 创建时绑定项目知识来源；对话时双轨检索（项目 KB + 个人记忆）；需向量库 + 检索管道 |
-| 6 | 代码执行沙箱（容器隔离） | ➡ | L | Docker 容器执行，每次起/销毁；挂载 `bot_{id}/workspace/`；替换现有 run_shell 方案 |
-| 7 | 可视化工作流编排（n8n 风格） | ➡ | XL | 拖拽配置多 Bot 协作流程；纯 UX 增强，功能层已支持 |
-| 8 | Azure OpenAI 企业认证 | ⬇ | M | Device Code Flow + token refresh；企业内网场景专用；改动 `ai_client.py` / `main.py` / 前端 |
+| 优先 | 功能 | 影响面 | 成本 | 状态 | 说明 |
+|------|------|--------|------|------|------|
+| 1 | 图片理解 | ⬆ | S | ⬜ | `call_ai_once` 携带图片 URL，视觉模型直接可用；改动集中在 `ai_client.py` + `main.py` 消息解析 |
+| 2 | 定时任务（cron / heartbeat） | ⬆ | M | ⬜ | Bot 周期性自主执行（日报、监控、定时提醒）；需调度器 + bootstrap-only 轻量执行模式 |
+| 3 | 压缩后文件重注入（从摘要提取） | ➡ | S | ✅ | `compact.build_file_contents_for_reinject()`：modified 优先，最多 5 文件 / 25K 预算，相对路径解析到 `bot_ws(bot_id)`；`_build_reinject()` 组合三段内容 |
+| 4 | 工具并发执行 | ➡ | M | ⬜ | 同一轮 tool_calls 中，只读工具（`read_file` / `list_workspace` / `read_local_file`）用 `asyncio.gather()` 并行；写入工具串行；改动 `tool_loop_v1.py` tool 执行循环 |
+| 5 | Hook 条件过滤 | ➡ | M | ⬜ | `ToolDef` 或 hook 注册时支持 `if: "run_shell(git *)"` 正则，不匹配则跳过该 hook；改动 `tool_executor` before/after hook 调度逻辑 |
+| 6 | 用户 Abort | ➡ | M | ⬜ | WebSocket 接收 `abort` 消息 → `asyncio.Task.cancel()` 终止当前 `run()`；广播 `stream_aborted` 事件；改动 `main.py` dispatch + `tool_loop_v1.py` |
+| 7 | react_v1 插件 | ⬆ | L | ⬜ | Thought → Action → Observation 推理循环；提升复杂任务推理质量；需新插件 + manifest |
+| 8 | 权限系统：基础规则模型 | ➡ | M | ⬜ | `Rule = {permission, pattern, action}` 三态 allow/ask/deny；`Ruleset` 挂 Bot 配置；独立模块 `permissions.py` |
+| 9 | 权限系统：决策 Pipeline | ➡ | M | ⬜ | 敏感路径兜底 → deny 规则 → allow 规则 → ask；ask 时广播事件挂起工具调用，等用户 approve/deny WebSocket 回复 |
+| 10 | 权限系统：规则持久化 | ➡ | M | ⬜ | `always` 回复写 SQLite；`once` 只存内存；前端 approve/deny UI；改动 DB schema + `main.py` + 前端 |
+| 11 | 权限系统：全局权限模式 | ➡ | S | ⬜ | `default` / `bypassPermissions` / `dontAsk` 三档；Bot 配置页可选；注入 ExecutionContext |
+| 12 | 权限系统：Subagent 权限继承 | ➡ | M | ⬜ | 子 Agent 权限 ⊆ 父 Agent；`spawn_agent` 时显式裁剪 Ruleset；默认禁用危险工具 |
+| 13 | 后台 spawn_agent | ➡ | L | ⬜ | `spawn_agent` 支持 `background: true`；父 Agent 继续运行；子 Agent 结果通过 Mailbox / steer 注回；需 asyncio.Task 管理 |
+| 14 | once / asyncRewake Hook | ➡ | M | ⬜ | hook 支持 `once: true`（触发后自动注销）和 `asyncRewake`（exit code=2 时唤醒主模型追加处理）；改动 `tool_executor` hook 注册 + 执行 |
+| 15 | 子 Agent 任务恢复 | ➡ | L | ⬜ | `spawn_agent` 传 `session_id` 可复用已有子 Agent context，续传而不重建；需 session store + ExecutionContext 序列化 |
+| 16 | 项目知识库集成 | ⬆ | L | ⬜ | Bot 创建时绑定项目知识来源；对话时双轨检索（项目 KB + 个人记忆）；需向量库 + 检索管道 |
+| 17 | 代码执行沙箱（容器隔离） | ➡ | L | ⬜ | Docker 容器执行，每次起/销毁；挂载 `bot_{id}/workspace/`；替换现有 run_shell 方案 |
+| 18 | 可视化工作流编排（n8n 风格） | ➡ | XL | ⬜ | 拖拽配置多 Bot 协作流程；纯 UX 增强，功能层已支持 |
+| 19 | Azure OpenAI 企业认证 | ⬇ | M | ⬜ | Device Code Flow + token refresh；企业内网场景专用；改动 `ai_client.py` / `main.py` / 前端 |
 
 ---
 
