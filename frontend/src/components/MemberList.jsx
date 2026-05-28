@@ -134,10 +134,43 @@ export default function MemberList({ onAddMember, onEditMember, onClose, initial
   const [bootstrapLoaded, setBootstrapLoaded] = useState(false)
   const [agent, setAgent] = useState('')
   const [agentLoaded, setAgentLoaded] = useState(false)
+  const [permRules, setPermRules] = useState([])
+  const [newRule, setNewRule] = useState({ tool_pattern: '', args_pattern: '', action: 'allow' })
 
   useEffect(() => {
     fetch('/api/plugins').then(r => r.json()).then(setPlugins).catch(() => {})
   }, [])
+
+  useEffect(() => {
+    if (isEdit && initialData?.id && form.type === 'bot') {
+      fetch(`/api/members/${initialData.id}/permissions`)
+        .then(r => r.ok ? r.json() : [])
+        .then(setPermRules)
+        .catch(() => {})
+    }
+  }, [isEdit, initialData?.id, form.type])
+
+  const addPermRule = async () => {
+    if (!newRule.tool_pattern.trim()) return
+    const res = await fetch(`/api/members/${initialData.id}/permissions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newRule),
+    })
+    if (res.ok) {
+      const { id } = await res.json()
+      setPermRules(prev => [...prev, { ...newRule, id }])
+      setNewRule({ tool_pattern: '', args_pattern: '', action: 'allow' })
+    }
+  }
+
+  const deletePermRule = async (ruleId) => {
+    await fetch(`/api/members/${initialData.id}/permissions/${ruleId}`, { method: 'DELETE' })
+    setPermRules(prev => prev.filter(r => r.id !== ruleId))
+  }
+
+  const permMode = form.executor_config?.permission_mode || 'default'
+  const setPermMode = (val) => setField({ executor_config: { ...form.executor_config, permission_mode: val } })
 
   useEffect(() => {
     if (isEdit && initialData?.id && form.type === 'bot') {
@@ -389,6 +422,71 @@ export default function MemberList({ onAddMember, onEditMember, onClose, initial
                   onChange={(e) => setAgent(e.target.value)}
                 />
               </div>
+
+              <div className="border-t border-gray-700 pt-3">
+                <label className="text-xs text-gray-400 mb-2 block font-medium">权限模式</label>
+                <div className="flex gap-2">
+                  {[
+                    { val: 'default',            label: '默认',     desc: '未知工具询问用户' },
+                    { val: 'bypassPermissions',  label: '全部允许', desc: '跳过所有权限检查' },
+                    { val: 'dontAsk',            label: '全部拒绝', desc: '未授权工具直接拒绝' },
+                  ].map(opt => (
+                    <button
+                      key={opt.val}
+                      onClick={() => setPermMode(opt.val)}
+                      title={opt.desc}
+                      className={`flex-1 text-xs py-1.5 rounded-lg border transition-colors ${
+                        permMode === opt.val
+                          ? 'border-indigo-500 bg-indigo-600/20 text-indigo-300'
+                          : 'border-gray-700 bg-gray-900 text-gray-400 hover:border-gray-600'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {isEdit && (
+                <div className="border-t border-gray-700 pt-3">
+                  <label className="text-xs text-gray-400 mb-2 block font-medium">权限规则</label>
+                  <div className="space-y-1 mb-2">
+                    {permRules.length === 0 && (
+                      <p className="text-xs text-gray-600 italic">暂无规则，未命中时按权限模式处理</p>
+                    )}
+                    {permRules.map(rule => (
+                      <div key={rule.id} className="flex items-center gap-2 bg-gray-900 rounded-lg px-2 py-1.5">
+                        <span className={`text-xs px-1.5 py-0.5 rounded font-mono ${rule.action === 'allow' ? 'bg-green-900/40 text-green-400' : 'bg-red-900/40 text-red-400'}`}>
+                          {rule.action}
+                        </span>
+                        <span className="text-xs font-mono text-gray-300 flex-1 truncate">{rule.tool_pattern}</span>
+                        {rule.args_pattern && (
+                          <span className="text-xs font-mono text-gray-500 truncate max-w-[80px]">({rule.args_pattern})</span>
+                        )}
+                        <button onClick={() => deletePermRule(rule.id)} className="text-gray-600 hover:text-red-400 text-xs transition-colors ml-auto">✕</button>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="flex gap-1.5">
+                    <input
+                      className="flex-1 bg-gray-900 text-gray-200 rounded-lg px-2 py-1.5 text-xs font-mono outline-none focus:ring-1 focus:ring-indigo-500"
+                      placeholder="工具名（如 run_shell）"
+                      value={newRule.tool_pattern}
+                      onChange={e => setNewRule(r => ({ ...r, tool_pattern: e.target.value }))}
+                      onKeyDown={e => e.key === 'Enter' && addPermRule()}
+                    />
+                    <select
+                      className="bg-gray-900 text-gray-300 rounded-lg px-2 py-1.5 text-xs outline-none focus:ring-1 focus:ring-indigo-500"
+                      value={newRule.action}
+                      onChange={e => setNewRule(r => ({ ...r, action: e.target.value }))}
+                    >
+                      <option value="allow">allow</option>
+                      <option value="deny">deny</option>
+                    </select>
+                    <button onClick={addPermRule} className="bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg px-3 py-1.5 text-xs transition-colors">+</button>
+                  </div>
+                </div>
+              )}
 
               {plugins.length > 0 && (
                 <div className="border-t border-gray-700 pt-3">

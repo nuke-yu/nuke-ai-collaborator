@@ -61,5 +61,11 @@ export function useWebSocket(groupId, memberId, onMessage) {
     }
   }, [])
 
-  return { send, connected, reconnecting }
+  const sendRaw = useCallback((payload) => {
+    if (ws.current?.readyState === WebSocket.OPEN) {
+      ws.current.send(JSON.stringify(payload))
+    }
+  }, [])
+
+  return { send, sendRaw, connected, reconnecting }
 }

@@ -19,6 +19,7 @@ from workspace_routes import router as workspace_router
 from config import read_config, write_config, _preview, FIELDS
 from executors import registry
 from workspace import init_all_bots, init_group_workspace
+from permissions.routes import router as permissions_router
 from skills.watcher import watcher
 import os
 
@@ -63,6 +64,7 @@ app.include_router(group_router)
 app.include_router(template_router)
 app.include_router(workflow_router)
 app.include_router(workspace_router)
+app.include_router(permissions_router)
 
 
 @app.get("/api/plugins")

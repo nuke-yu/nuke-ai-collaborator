@@ -14,6 +14,7 @@ import AnnouncementBar from './AnnouncementBar'
 import WorkflowBar from './WorkflowBar'
 import WorkflowStartModal from './WorkflowStartModal'
 import WorkspacePanel from './WorkspacePanel'
+import PermissionRequestModal from './PermissionRequestModal'
 
 export default function ChatWindow({ memberId, isDark, onToggleTheme }) {
   const [groups, setGroups] = useState([])
@@ -52,6 +53,7 @@ export default function ChatWindow({ memberId, isDark, onToggleTheme }) {
   const [showStats, setShowStats] = useState(false)
   const [stats, setStats] = useState([])
   const [showExportMenu, setShowExportMenu] = useState(false)
+  const [permRequest, setPermRequest] = useState(null)
   const { notify } = useNotifications()
   const bottomRef = useRef(null)
   const scrollRef = useRef(null)
@@ -194,6 +196,10 @@ export default function ChatWindow({ memberId, isDark, onToggleTheme }) {
       setMessages(finalize)
       syncCache(finalize)
       if (data.member_id !== memberId) notify(data.sender_name, data.preview)
+    } else if (data.type === 'stream_aborted') {
+      setMessages(prev => prev.filter(m => m.temp_id !== data.temp_id))
+    } else if (data.type === 'permission_request') {
+      setPermRequest(data)
     } else if (data.type === 'stream_error') {
       setMessages(prev => prev.filter(m => m.temp_id !== data.temp_id))
       setError(data.message)
@@ -233,7 +239,13 @@ export default function ChatWindow({ memberId, isDark, onToggleTheme }) {
     }
   }
 
-  const { send, connected, reconnecting } = useWebSocket(activeGroupId, memberId, handleWsMessage)
+  const { send, sendRaw, connected, reconnecting } = useWebSocket(activeGroupId, memberId, handleWsMessage)
+  const isStreaming = messages.some(m => m.streaming)
+  const handleAbort = () => sendRaw({ type: 'abort', group_id: activeGroupId })
+  const handlePermResponse = (requestId, approved, persistence) => {
+    sendRaw({ type: 'permission_response', request_id: requestId, approved, persistence })
+    setPermRequest(null)
+  }
 
   const saveGroupName = async () => {
     const name = groupNameDraft.trim()
@@ -637,6 +649,19 @@ export default function ChatWindow({ memberId, isDark, onToggleTheme }) {
           {typing && <MessageBubble msg={typing} isTyping />}
           <div ref={bottomRef} />
         </div>
+        {isStreaming && (
+          <div className="px-4 py-1 flex justify-center">
+            <button
+              onClick={handleAbort}
+              className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-red-400 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-full px-3 py-1 transition-colors"
+            >
+              <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
+                <rect x="6" y="6" width="12" height="12" rx="1" />
+              </svg>
+              停止生成
+            </button>
+          </div>
+        )}
         <MessageInput
           ref={messageInputRef}
           key={activeGroupId}
@@ -649,6 +674,9 @@ export default function ChatWindow({ memberId, isDark, onToggleTheme }) {
           replyingTo={replyingTo}
           onCancelReply={() => setReplyingTo(null)}
         />
+        {permRequest && (
+          <PermissionRequestModal request={permRequest} onRespond={handlePermResponse} />
+        )}
       </div>
       {showSearch && activeGroupId && (
         <SearchPanel groupId={activeGroupId} onClose={() => setShowSearch(false)} onJump={handleJump} />

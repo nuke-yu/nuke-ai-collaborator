@@ -702,11 +702,11 @@ P3（精细化）:
 | 5 | Hook 条件过滤 | ➡ | M | ✅ | `_HookEntry(fn, condition)` 存储条件；`_condition_matches()` 用 fnmatch glob 匹配工具名+任意参数值；`add_before/after_hook(condition=)` 新增关键字参数；向后兼容（condition=None = 始终运行） |
 | 6 | 用户 Abort | ➡ | M | ✅ | `_running_tasks[group_id]` 存 dispatch task；WS `abort` 消息 → `task.cancel()`；`tool_loop_v1` 捕获 `CancelledError` 广播 `stream_aborted` 后 re-raise；`run_shell` 捕获后 `proc.kill()` 再 re-raise |
 | 7 | react_v1 插件 | ⬆ | L | ⬜ | Thought → Action → Observation 推理循环；提升复杂任务推理质量；需新插件 + manifest |
-| 8 | 权限系统：基础规则模型 | ➡ | M | ⬜ | `Rule = {permission, pattern, action}` 三态 allow/ask/deny；`Ruleset` 挂 Bot 配置；独立模块 `permissions.py` |
-| 9 | 权限系统：决策 Pipeline | ➡ | M | ⬜ | 敏感路径兜底 → deny 规则 → allow 规则 → ask；ask 时广播事件挂起工具调用，等用户 approve/deny WebSocket 回复 |
-| 10 | 权限系统：规则持久化 | ➡ | M | ⬜ | `always` 回复写 SQLite；`once` 只存内存；前端 approve/deny UI；改动 DB schema + `main.py` + 前端 |
-| 11 | 权限系统：全局权限模式 | ➡ | S | ⬜ | `default` / `bypassPermissions` / `dontAsk` 三档；Bot 配置页可选；注入 ExecutionContext |
-| 12 | 权限系统：Subagent 权限继承 | ➡ | M | ⬜ | 子 Agent 权限 ⊆ 父 Agent；`spawn_agent` 时显式裁剪 Ruleset；默认禁用危险工具 |
+| 8 | 权限系统：基础规则模型 | ➡ | M | ✅ | `permissions/models.py`：Rule / Ruleset / _PendingRequest；独立包隔离 |
+| 9 | 权限系统：决策 Pipeline | ➡ | M | ✅ | `permissions/engine.py`：bypass→deny→allow→dontAsk→子Agent拒绝→ask挂起 |
+| 10 | 权限系统：规则持久化 + 前端 UI | ➡ | M | ✅ | SQLite always / 内存 once；`PermissionRequestModal.jsx` 弹窗；`permissions/routes.py` CRUD API |
+| 11 | 权限系统：全局权限模式 | ➡ | S | ✅ | Bot 配置页三档切换（default/bypass/dontAsk）；写入 executor_config.permission_mode |
+| 12 | 权限系统：Subagent 权限继承 | ➡ | M | ✅ | spawn_agent 透传父 ruleset（含 bypass 模式）；spawn_depth>0 时 ask→deny |
 | 13 | 后台 spawn_agent | ➡ | L | ⬜ | `spawn_agent` 支持 `background: true`；父 Agent 继续运行；子 Agent 结果通过 Mailbox / steer 注回；需 asyncio.Task 管理 |
 | 14 | once / asyncRewake Hook | ➡ | M | ⬜ | hook 支持 `once: true`（触发后自动注销）和 `asyncRewake`（exit code=2 时唤醒主模型追加处理）；改动 `tool_executor` hook 注册 + 执行 |
 | 15 | 子 Agent 任务恢复 | ➡ | L | ⬜ | `spawn_agent` 传 `session_id` 可复用已有子 Agent context，续传而不重建；需 session store + ExecutionContext 序列化 |
