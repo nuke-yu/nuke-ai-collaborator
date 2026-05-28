@@ -1,17 +1,34 @@
-from .constants import bot_ws
+from .constants import bot_ws, WORKSPACE_ROOT, SYSTEM_SKILLS_ROOT, ROLES_ROOT
 from .metadata import skill_path, parse_skill_meta
-from .discovery import list_skills
+from .discovery import list_skills, list_skills_all
 from .processor import process_skill_content
 
 
-def load_always_skills(bot_id: int) -> list[dict]:
-    """Return full content for skills with always: true — [{name, content}]."""
-    ws = bot_ws(bot_id)
+def _skills_dir_for_layer(layer: str, bot_id: int,
+                           group_id: int | None, role: str | None):
+    """Return the skills directory Path for a given layer."""
+    if layer == "system":
+        return SYSTEM_SKILLS_ROOT
+    if layer == "group" and group_id:
+        return WORKSPACE_ROOT / f"group_{group_id}" / "shared" / "skills"
+    if layer == "role" and role:
+        return ROLES_ROOT / role / "skills"
+    if layer == "learned":
+        return bot_ws(bot_id) / "skills" / "learned" / "active"
+    return bot_ws(bot_id) / "skills"
+
+
+def load_always_skills(bot_id: int, group_id: int | None = None,
+                       role: str | None = None) -> list[dict]:
+    """Return full content for skills with always: true across all four layers."""
+    skills = list_skills_all(bot_id, group_id=group_id, role=role)
     result = []
-    for skill in list_skills(bot_id):
+    for skill in skills:
         if not skill.get("always"):
             continue
-        path, kind = skill_path(ws / "skills", skill["name"])
+        skills_dir = _skills_dir_for_layer(skill.get("layer", "personal"),
+                                           bot_id, group_id, role)
+        path, kind = skill_path(skills_dir, skill["name"])
         if path and kind == "md":
             try:
                 result.append({"name": skill["name"], "content": path.read_text(encoding="utf-8")})

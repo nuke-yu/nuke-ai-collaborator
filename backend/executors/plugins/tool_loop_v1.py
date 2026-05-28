@@ -17,7 +17,7 @@ from ai_client import call_ai_once, call_ai_stream_messages, AIError, AIContextO
 from memory import get_memory_context, add_to_chroma, maybe_summarize
 from role_router import build_context_message
 from workspace import load_context_files, format_context_blocks, append_log, archive_run
-from skills import list_skills, load_always_skills, filter_skills_by_context
+from skills import list_skills_all, load_always_skills, filter_skills_by_context
 import executors.compact as compact
 
 _DOOM_LOOP_THRESHOLD = 5  # breaks on the Nth consecutive tool-only iteration (inclusive)
@@ -216,7 +216,8 @@ class ToolLoopV1(BotExecutor):
         always_skills = []
         skills_xml = ""
         if self.manifest.workspace.skill_discovery:
-            raw_skills = list_skills(bot["id"])
+            raw_skills = list_skills_all(bot["id"], group_id=ctx.group_id,
+                                         role=bot.get("role"))
             lazy_candidates = [
                 s for s in raw_skills
                 if not s.get("always")
@@ -236,7 +237,8 @@ class ToolLoopV1(BotExecutor):
                     inj = "metadata" if s["name"] in injected_names else None
                     skills_snapshot.append({**s, "injected": inj})
             if any(s.get("always") for s in raw_skills if s.get("status", "active") != "disabled"):
-                always_skills = load_always_skills(bot["id"])
+                always_skills = load_always_skills(bot["id"], ctx.group_id,
+                                                   bot.get("role"))
 
         context_prefix = ""
         if context_text:
