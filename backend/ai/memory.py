@@ -2,7 +2,7 @@ import asyncio
 from functools import partial
 import chromadb
 from chromadb.utils import embedding_functions
-from database import get_db
+from db import get_db
 
 SUMMARY_THRESHOLD = 15
 
@@ -57,7 +57,7 @@ async def retrieve_relevant(bot_id: int, query: str, top_k: int = 3) -> list:
 
 # ── 摘要压缩（超过阈值时把老消息压成要点，存 SQLite）─────────────────
 async def maybe_summarize(group_id: int, bot_id: int, role: str, member_ids: list):
-    from ai_client import call_ai
+    from ai.client import call_ai
     if not member_ids:
         return
     try:

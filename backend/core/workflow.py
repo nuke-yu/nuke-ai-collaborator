@@ -1,7 +1,7 @@
 import asyncio
 import random
 import re
-from database import get_db, get_messages, save_message, update_message
+from db import get_db, get_messages, save_message, update_message
 from ws_manager import manager
 
 # group_id -> { stages: [stage_dict,...], current: int }
@@ -207,7 +207,7 @@ async def _trigger_next(group_id: int, prev_stage: dict, next_stage: dict):
 
 
 async def _trigger_single_stage(group_id: int, prev_stage: dict, next_bot: dict):
-    from ai_client import call_ai_stream, AIError
+    from ai.client import call_ai_stream, AIError
     await asyncio.sleep(0.5)
     history = await _build_history(group_id)
     trigger_msg = f"请开始你（{next_bot['name']} · {next_bot.get('role', '')}）的工作。"
@@ -286,7 +286,7 @@ async def _trigger_pool_stage(group_id: int, prev_stage: dict, pool_stage: dict)
 
 
 async def _trigger_pool_bot(group_id: int, bot: dict, ticket: str, pool_stage: dict):
-    from ai_client import call_ai_stream, AIError
+    from ai.client import call_ai_stream, AIError
     history = await _build_history(group_id)
 
     s = _state.get(group_id)

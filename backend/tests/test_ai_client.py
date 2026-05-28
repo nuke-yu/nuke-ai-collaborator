@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 # Add backend directory to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from ai_client import _to_claude_messages
+from ai.client import _to_claude_messages
 
 class TestClaudeMessageFormatting(unittest.TestCase):
 
@@ -165,11 +165,11 @@ class TestCachedMicrocompact(unittest.IsolatedAsyncioTestCase):
         return cm, mock_client
 
     async def test_once_claude_adds_headers_and_body_when_enabled(self):
-        from ai_client import _once_claude
+        from ai.client import _once_claude
         mock_resp = self._make_mock_response()
         mock_cm, mock_client = self._make_mock_client(mock_resp)
 
-        with patch("ai_client.httpx.AsyncClient", return_value=mock_cm):
+        with patch("ai.client.httpx.AsyncClient", return_value=mock_cm):
             await _once_claude(
                 api_key="test-key",
                 model="claude-opus-4-7",
@@ -189,11 +189,11 @@ class TestCachedMicrocompact(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(body["context_management"], {"type": "clear_tool_uses_20250919"})
 
     async def test_once_claude_no_headers_when_disabled(self):
-        from ai_client import _once_claude
+        from ai.client import _once_claude
         mock_resp = self._make_mock_response()
         mock_cm, mock_client = self._make_mock_client(mock_resp)
 
-        with patch("ai_client.httpx.AsyncClient", return_value=mock_cm):
+        with patch("ai.client.httpx.AsyncClient", return_value=mock_cm):
             await _once_claude(
                 api_key="test-key",
                 model="claude-opus-4-7",
@@ -212,11 +212,11 @@ class TestCachedMicrocompact(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("context_management", body)
 
     async def test_once_claude_default_is_disabled(self):
-        from ai_client import _once_claude
+        from ai.client import _once_claude
         mock_resp = self._make_mock_response()
         mock_cm, mock_client = self._make_mock_client(mock_resp)
 
-        with patch("ai_client.httpx.AsyncClient", return_value=mock_cm):
+        with patch("ai.client.httpx.AsyncClient", return_value=mock_cm):
             await _once_claude(
                 api_key="test-key",
                 model="claude-opus-4-7",
@@ -234,7 +234,7 @@ class TestCachedMicrocompact(unittest.IsolatedAsyncioTestCase):
 
     async def test_call_ai_once_threads_cached_mc_to_claude(self):
         """call_ai_once with provider='claude' must pass use_cached_microcompact to _once_claude."""
-        from ai_client import call_ai_once
+        from ai.client import call_ai_once
         captured = {}
 
         async def fake_once_claude(api_key, model, system_prompt, messages,
@@ -243,8 +243,8 @@ class TestCachedMicrocompact(unittest.IsolatedAsyncioTestCase):
             captured["use_cached_microcompact"] = use_cached_microcompact
             return {"type": "text", "content": "ok"}
 
-        with patch("ai_client._require_key", return_value="fake-key"), \
-             patch("ai_client._once_claude", new=fake_once_claude):
+        with patch("ai.client._require_key", return_value="fake-key"), \
+             patch("ai.client._once_claude", new=fake_once_claude):
             await call_ai_once(
                 "sp", [{"role": "user", "content": "hi"}],
                 provider="claude", model="claude-opus-4-7",
@@ -255,7 +255,7 @@ class TestCachedMicrocompact(unittest.IsolatedAsyncioTestCase):
 
     async def test_call_ai_once_non_claude_ignores_cached_mc(self):
         """Non-Claude providers should not attempt to pass use_cached_microcompact."""
-        from ai_client import call_ai_once
+        from ai.client import call_ai_once
         captured = {}
 
         async def fake_once_openai(url, api_key, model, system_prompt,
@@ -263,8 +263,8 @@ class TestCachedMicrocompact(unittest.IsolatedAsyncioTestCase):
             captured["called"] = True
             return {"type": "text", "content": "ok"}
 
-        with patch("ai_client._require_key", return_value="fake-key"), \
-             patch("ai_client._once_openai_compat", new=fake_once_openai):
+        with patch("ai.client._require_key", return_value="fake-key"), \
+             patch("ai.client._once_openai_compat", new=fake_once_openai):
             await call_ai_once(
                 "sp", [{"role": "user", "content": "hi"}],
                 provider="deepseek", model="deepseek-chat",
@@ -277,44 +277,44 @@ class TestCachedMicrocompact(unittest.IsolatedAsyncioTestCase):
 class TestRetryAndRateLimit(unittest.IsolatedAsyncioTestCase):
 
     def test_parse_retry_after_ms(self):
-        from ai_client import _parse_retry_after
+        from ai.client import _parse_retry_after
         self.assertAlmostEqual(_parse_retry_after({"retry-after-ms": "5000"}), 5.0)
 
     def test_parse_retry_after_seconds(self):
-        from ai_client import _parse_retry_after
+        from ai.client import _parse_retry_after
         self.assertAlmostEqual(_parse_retry_after({"retry-after": "3"}), 3.0)
 
     def test_parse_retry_after_ms_takes_priority(self):
-        from ai_client import _parse_retry_after
+        from ai.client import _parse_retry_after
         self.assertAlmostEqual(_parse_retry_after({"retry-after-ms": "2000", "retry-after": "10"}), 2.0)
 
     def test_parse_retry_after_no_header_returns_default(self):
-        from ai_client import _parse_retry_after
+        from ai.client import _parse_retry_after
         self.assertAlmostEqual(_parse_retry_after({}), 2.0)
 
     def test_parse_retry_after_invalid_value_returns_default(self):
-        from ai_client import _parse_retry_after
+        from ai.client import _parse_retry_after
         self.assertAlmostEqual(_parse_retry_after({"retry-after": "not-a-number"}), 2.0)
 
     def test_parse_retry_after_titlecase_header(self):
-        from ai_client import _parse_retry_after
+        from ai.client import _parse_retry_after
         self.assertAlmostEqual(_parse_retry_after({"Retry-After": "5"}), 5.0)
 
     async def test_call_ai_once_retries_on_rate_limit_and_succeeds(self):
-        from ai_client import call_ai_once
+        from ai.client import call_ai_once
         call_count = 0
 
         async def fake_dispatch(provider, model, keys, sp, msgs, temp, max_tok, tools, use_cached_mc):
             nonlocal call_count
             call_count += 1
             if call_count == 1:
-                from ai_client import AIRateLimitError
+                from ai.client import AIRateLimitError
                 raise AIRateLimitError(0.001)  # tiny wait for test speed
             return {"type": "text", "content": "ok"}
 
-        with patch("ai_client._dispatch_once", new=fake_dispatch), \
-             patch("ai_client._keys", return_value={}), \
-             patch("ai_client.asyncio.sleep", new=AsyncMock()):
+        with patch("ai.client._dispatch_once", new=fake_dispatch), \
+             patch("ai.client._keys", return_value={}), \
+             patch("ai.client.asyncio.sleep", new=AsyncMock()):
             result = await call_ai_once("sp", [{"role": "user", "content": "hi"}],
                                         provider="deepseek", model="deepseek-chat")
 
@@ -322,20 +322,20 @@ class TestRetryAndRateLimit(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(call_count, 2)
 
     async def test_call_ai_once_exhausted_raises_ai_error(self):
-        from ai_client import call_ai_once, AIError, AIRateLimitError
+        from ai.client import call_ai_once, AIError, AIRateLimitError
 
         async def always_rate_limit(provider, model, keys, sp, msgs, temp, max_tok, tools, use_cached_mc):
             raise AIRateLimitError(0.001)
 
-        with patch("ai_client._dispatch_once", new=always_rate_limit), \
-             patch("ai_client._keys", return_value={}), \
-             patch("ai_client.asyncio.sleep", new=AsyncMock()):
+        with patch("ai.client._dispatch_once", new=always_rate_limit), \
+             patch("ai.client._keys", return_value={}), \
+             patch("ai.client.asyncio.sleep", new=AsyncMock()):
             with self.assertRaises(AIError):
                 await call_ai_once("sp", [{"role": "user", "content": "hi"}],
                                    provider="deepseek", model="deepseek-chat")
 
     async def test_call_ai_once_uses_fallback_model_after_rate_limit(self):
-        from ai_client import call_ai_once, AIRateLimitError
+        from ai.client import call_ai_once, AIRateLimitError
         tried_models = []
 
         async def fake_dispatch(provider, model, keys, sp, msgs, temp, max_tok, tools, use_cached_mc):
@@ -344,9 +344,9 @@ class TestRetryAndRateLimit(unittest.IsolatedAsyncioTestCase):
                 raise AIRateLimitError(0.001)
             return {"type": "text", "content": "fallback ok"}
 
-        with patch("ai_client._dispatch_once", new=fake_dispatch), \
-             patch("ai_client._keys", return_value={}), \
-             patch("ai_client.asyncio.sleep", new=AsyncMock()):
+        with patch("ai.client._dispatch_once", new=fake_dispatch), \
+             patch("ai.client._keys", return_value={}), \
+             patch("ai.client.asyncio.sleep", new=AsyncMock()):
             result = await call_ai_once("sp", [{"role": "user", "content": "hi"}],
                                         provider="deepseek", model="main-model",
                                         fallback_model="fallback-model")

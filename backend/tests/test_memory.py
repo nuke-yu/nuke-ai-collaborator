@@ -7,8 +7,8 @@ import asyncio
 # Add backend directory to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import database
-import memory
+import db as database
+import ai.memory as memory
 
 # Use a test database to isolate tests
 TEST_DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "test_chat.db")
@@ -41,7 +41,7 @@ class TestMemorySummarization(unittest.IsolatedAsyncioTestCase):
             except Exception:
                 pass
 
-    @patch("ai_client.call_ai", new=mock_call_ai)
+    @patch("ai.client.call_ai", new=mock_call_ai)
     async def test_maybe_summarize_lifecycle_and_constraints(self):
         """Test DFT-007 (group_id not null constraint) and DFT-008 (id > last_id SQL constraint)."""
         # 1. Insert 16 messages for MemoryBot (member_id = 2) to trigger summary (threshold = 15)

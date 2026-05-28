@@ -7,7 +7,7 @@ import asyncio
 # Add backend directory to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import database
+import db as database
 TEST_DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "test_chat.db")
 database.DB_PATH = TEST_DB_PATH
 

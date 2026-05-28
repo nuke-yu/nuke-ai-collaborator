@@ -2,7 +2,7 @@ import uuid
 import pathlib
 import re
 from fastapi import APIRouter, HTTPException, UploadFile, File
-from database import (get_db, get_messages, get_message_meta, update_message, soft_delete_message,
+from db import (get_db, get_messages, get_message_meta, update_message, soft_delete_message,
                       toggle_reaction, get_reactions_for_message, get_reactions_for_group,
                       pin_message, unpin_message, get_pinned_messages)
 from ws_manager import manager

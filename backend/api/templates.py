@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from database import get_db
+from db import get_db
 from models import RoleTemplateRequest
 
 router = APIRouter()

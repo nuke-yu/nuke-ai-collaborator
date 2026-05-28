@@ -1,5 +1,5 @@
 import asyncio
-from database import init_db, get_db
+from db import init_db, get_db
 
 async def seed():
     await init_db()

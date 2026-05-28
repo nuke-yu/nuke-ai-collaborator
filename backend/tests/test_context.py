@@ -5,7 +5,7 @@ import os
 # Add backend directory to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from role_router import build_context_message
+from core.role_router import build_context_message
 
 class TestBuildContextMessage(unittest.TestCase):
     def test_build_context_no_duplication(self):

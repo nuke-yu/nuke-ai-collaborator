@@ -12,11 +12,11 @@ from executors.plugins.workspace_tools import (
     _build_skills_xml, _with_personality,
     register_workspace_tools,
 )
-from database import get_db, save_message, get_messages
+from db import get_db, save_message, get_messages
 import permissions
-from ai_client import call_ai_once, call_ai_stream_messages, AIError, AIContextOverflowError
-from memory import get_memory_context, add_to_chroma, maybe_summarize
-from role_router import build_context_message
+from ai.client import call_ai_once, call_ai_stream_messages, AIError, AIContextOverflowError
+from ai.memory import get_memory_context, add_to_chroma, maybe_summarize
+from core.role_router import build_context_message
 from workspace import load_context_files, format_context_blocks, append_log, archive_run
 from skills import list_skills_all, load_always_skills, filter_skills_by_context
 from skills.constants import bot_ws as _bot_ws

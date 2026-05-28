@@ -5,10 +5,10 @@ from executors.base import (
     BotExecutor, ExecutionContext, ExecutionResult,
     PluginManifest, WorkspaceConfig, CollabConfig, build_group_section,
 )
-from database import get_db, save_message, get_messages
-from ai_client import call_ai_stream, AIError
-from memory import get_memory_context, add_to_chroma, maybe_summarize
-from role_router import build_context_message
+from db import get_db, save_message, get_messages
+from ai.client import call_ai_stream, AIError
+from ai.memory import get_memory_context, add_to_chroma, maybe_summarize
+from core.role_router import build_context_message
 from workspace import append_log
 
 

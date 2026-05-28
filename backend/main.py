@@ -6,16 +6,16 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from database import init_db, get_db, get_member, get_members, get_group, save_message, get_messages
+from db import init_db, get_db, get_member, get_members, get_group, save_message, get_messages
 import permissions
 from ws_manager import manager
 from models import AddMemberRequest  # noqa: keep models importable via main
-from bot_orchestrator import select_triggered_bots, dispatch_bots, mark_read, send_auto_reply
-from message_routes import router as message_router, UPLOAD_DIR
-from group_routes import router as group_router
-from template_routes import router as template_router
-from workflow_routes import router as workflow_router
-from workspace_routes import router as workspace_router
+from core.orchestrator import select_triggered_bots, dispatch_bots, mark_read, send_auto_reply
+from api.messages import router as message_router, UPLOAD_DIR
+from api.groups import router as group_router
+from api.templates import router as template_router
+from api.workflow import router as workflow_router
+from api.workspace import router as workspace_router
 from config import read_config, write_config, _preview, FIELDS
 from executors import registry
 from workspace import init_all_bots, init_group_workspace

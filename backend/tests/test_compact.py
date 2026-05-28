@@ -890,7 +890,7 @@ class TestMaybeCompactDbHistory(unittest.IsolatedAsyncioTestCase):
     async def test_skips_when_lock_held(self):
         compact._db_compaction_locks.add(1)
         broadcaster = AsyncMock()
-        with patch("database.get_db") as mock_get_db:
+        with patch("db.get_db") as mock_get_db:
             await compact.maybe_compact_db_history(1, 42, "deepseek", "deepseek-chat", 0.7, broadcaster)
         mock_get_db.assert_not_called()
         broadcaster.broadcast.assert_not_called()
@@ -901,8 +901,8 @@ class TestMaybeCompactDbHistory(unittest.IsolatedAsyncioTestCase):
         # Under-threshold messages
         msgs = self._make_db_messages(5, chars_each=10)
         mock_db = MagicMock()
-        with patch("database.get_db", return_value=self._make_mock_db_cm(mock_db)), \
-             patch("database.get_messages", new=AsyncMock(return_value=msgs)):
+        with patch("db.get_db", return_value=self._make_mock_db_cm(mock_db)), \
+             patch("db.get_messages", new=AsyncMock(return_value=msgs)):
             await compact.maybe_compact_db_history(1, 42, "deepseek", "deepseek-chat", 0.7, broadcaster)
         self.assertNotIn(1, compact._db_compaction_locks)
 
@@ -913,9 +913,9 @@ class TestMaybeCompactDbHistory(unittest.IsolatedAsyncioTestCase):
         msgs = self._make_db_messages(5, chars_each=10)
         broadcaster = AsyncMock()
         mock_db = MagicMock()
-        with patch("database.get_db", return_value=self._make_mock_db_cm(mock_db)), \
-             patch("database.get_messages", new=AsyncMock(return_value=msgs)), \
-             patch("database.save_compaction_summary", new=AsyncMock()) as mock_save:
+        with patch("db.get_db", return_value=self._make_mock_db_cm(mock_db)), \
+             patch("db.get_messages", new=AsyncMock(return_value=msgs)), \
+             patch("db.save_compaction_summary", new=AsyncMock()) as mock_save:
             await compact.maybe_compact_db_history(1, 42, "deepseek", "deepseek-chat", 0.7, broadcaster)
         mock_save.assert_not_called()
         broadcaster.broadcast.assert_not_called()
@@ -931,9 +931,9 @@ class TestMaybeCompactDbHistory(unittest.IsolatedAsyncioTestCase):
         mock_db = MagicMock()
         summary_id = 999
 
-        with patch("database.get_db", return_value=self._make_mock_db_cm(mock_db)), \
-             patch("database.get_messages", new=AsyncMock(return_value=msgs)), \
-             patch("database.save_compaction_summary", new=AsyncMock(return_value=summary_id)) as mock_save, \
+        with patch("db.get_db", return_value=self._make_mock_db_cm(mock_db)), \
+             patch("db.get_messages", new=AsyncMock(return_value=msgs)), \
+             patch("db.save_compaction_summary", new=AsyncMock(return_value=summary_id)) as mock_save, \
              patch.object(compact, "compact_conversation",
                           new=AsyncMock(return_value=[_user("【历史摘要】\nsummary text")])):
             await compact.maybe_compact_db_history(1, 42, "deepseek", "deepseek-chat", 0.7, broadcaster)
@@ -954,16 +954,16 @@ class TestMaybeCompactDbHistory(unittest.IsolatedAsyncioTestCase):
             m["is_deleted"] = True
         broadcaster = AsyncMock()
         mock_db = MagicMock()
-        with patch("database.get_db", return_value=self._make_mock_db_cm(mock_db)), \
-             patch("database.get_messages", new=AsyncMock(return_value=msgs)), \
-             patch("database.save_compaction_summary", new=AsyncMock()) as mock_save:
+        with patch("db.get_db", return_value=self._make_mock_db_cm(mock_db)), \
+             patch("db.get_messages", new=AsyncMock(return_value=msgs)), \
+             patch("db.save_compaction_summary", new=AsyncMock()) as mock_save:
             await compact.maybe_compact_db_history(1, 42, "deepseek", "deepseek-chat", 0.7, broadcaster)
         mock_save.assert_not_called()
 
     async def test_lock_released_on_exception(self):
         """Lock must be released even if an unexpected exception occurs."""
         broadcaster = AsyncMock()
-        with patch("database.get_db", side_effect=RuntimeError("DB error")):
+        with patch("db.get_db", side_effect=RuntimeError("DB error")):
             await compact.maybe_compact_db_history(1, 42, "deepseek", "deepseek-chat", 0.7, broadcaster)
         self.assertNotIn(1, compact._db_compaction_locks)
 

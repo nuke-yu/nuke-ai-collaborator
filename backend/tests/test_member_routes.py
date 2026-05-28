@@ -9,7 +9,7 @@ from pathlib import Path
 # Add backend directory to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import database
+import db as database
 import workspace
 
 # Configure test database and workspaces paths

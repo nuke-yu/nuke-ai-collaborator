@@ -1,13 +1,13 @@
 import asyncio
 import uuid
-from database import get_db, get_messages, save_message
+from db import get_db, get_messages, save_message
 from ws_manager import manager
-from ai_client import call_ai, call_ai_stream, AIError
-from role_router import should_bot_respond, build_context_message
-from memory import maybe_summarize, get_memory_context, add_to_chroma
+from ai.client import call_ai, call_ai_stream, AIError
+from core.role_router import should_bot_respond, build_context_message
+from ai.memory import maybe_summarize, get_memory_context, add_to_chroma
 from executors.base import ExecutionContext
 from executors import registry
-import workflow as wf
+import core.workflow as wf
 
 # group_id -> bot_id: 记录当前哪个 bot 持有会话
 active_bot: dict[int, int] = {}

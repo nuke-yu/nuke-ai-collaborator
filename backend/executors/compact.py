@@ -18,7 +18,7 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-from ai_client import call_ai_once
+from ai.client import call_ai_once
 
 logger = logging.getLogger(__name__)
 
@@ -648,7 +648,7 @@ async def maybe_compact_db_history(
         return
     _db_compaction_locks.add(group_id)
     try:
-        from database import get_db, get_messages, save_compaction_summary
+        from db import get_db, get_messages, save_compaction_summary
 
         async with get_db() as db:
             all_msgs = await get_messages(db, group_id, limit=200)
