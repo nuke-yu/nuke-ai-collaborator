@@ -14,6 +14,7 @@ _defs: dict[str, ToolDef] = {}
 class _HookEntry:
     fn: Callable
     condition: str | None = None  # None = always run
+    once: bool = False            # True = remove after first firing
 
 
 _before_hooks: list[_HookEntry] = []
@@ -64,31 +65,33 @@ def register(tool_def: ToolDef, handler: Callable) -> None:
     _defs[tool_def.name] = tool_def
 
 
-def add_before_hook(hook: Callable, *, condition: str | None = None) -> None:
+def add_before_hook(hook: Callable, *, condition: str | None = None, once: bool = False) -> None:
     """Register a before-tool hook (idempotent per fn+condition pair).
 
     condition: optional fnmatch filter, e.g. "run_shell(git *)"
-               hook is skipped when the tool call does not match.
+    once:      if True, the hook removes itself after firing once.
 
     Hook signature: async (name: str, arguments: dict, context: dict) -> dict | None
     Return {"block": True, "reason": "..."} to block execution; None to allow.
     """
     if not any(e.fn is hook and e.condition == condition for e in _before_hooks):
-        _before_hooks.append(_HookEntry(fn=hook, condition=condition))
+        _before_hooks.append(_HookEntry(fn=hook, condition=condition, once=once))
 
 
-def add_after_hook(hook: Callable, *, condition: str | None = None) -> None:
+def add_after_hook(hook: Callable, *, condition: str | None = None, once: bool = False) -> None:
     """Register an after-tool hook (idempotent per fn+condition pair).
 
-    condition: optional fnmatch filter, e.g. "write_file(*.py)"
-               hook is skipped when the tool call does not match.
+    condition:    optional fnmatch filter, e.g. "write_file(*.py)"
+    once:         if True, the hook removes itself after firing once.
 
     Hook signature: async (name: str, arguments: dict, result: str, context: dict) -> str | None
     Return a new string to replace the result; None to leave it unchanged.
     Hooks run in registration order; each receives the (possibly transformed) result.
+    asyncRewake:  hook may call `await context["rewake_queue"].put("message")` to inject
+                  a [系统唤醒] message into the next AI round.
     """
     if not any(e.fn is hook and e.condition == condition for e in _after_hooks):
-        _after_hooks.append(_HookEntry(fn=hook, condition=condition))
+        _after_hooks.append(_HookEntry(fn=hook, condition=condition, once=once))
 
 
 def clear_before_hooks() -> None:
@@ -107,15 +110,24 @@ async def execute(name: str, arguments: dict, context: dict | None = None) -> st
     ctx = context or {}
 
     # Before hooks — first block wins; skipped when condition doesn't match
+    _before_fired_once: list[_HookEntry] = []
     for entry in _before_hooks:
         if entry.condition and not _condition_matches(entry.condition, name, arguments):
             continue
         try:
             verdict = await entry.fn(name, arguments, ctx)
+            if entry.once:
+                _before_fired_once.append(entry)
             if verdict and verdict.get("block"):
+                for e in _before_fired_once:
+                    _before_hooks.remove(e)
                 return f"[已拦截] {verdict.get('reason', '被安全策略拦截')}"
         except Exception as e:
+            for fe in _before_fired_once:
+                _before_hooks.remove(fe)
             return f"[钩子错误] {e}"
+    for e in _before_fired_once:
+        _before_hooks.remove(e)
 
     if name not in _handlers:
         return f"[错误] 工具 '{name}' 尚未实现"
@@ -132,15 +144,20 @@ async def execute(name: str, arguments: dict, context: dict | None = None) -> st
         tool_result = f"[执行错误] {e}"
 
     # After hooks — each may transform the result; skipped when condition doesn't match
+    _after_fired_once: list[_HookEntry] = []
     for entry in _after_hooks:
         if entry.condition and not _condition_matches(entry.condition, name, arguments):
             continue
         try:
             transformed = await entry.fn(name, arguments, tool_result, ctx)
+            if entry.once:
+                _after_fired_once.append(entry)
             if transformed is not None:
                 tool_result = transformed
         except Exception as e:
             tool_result += f"\n[after-hook 错误] {e}"
+    for e in _after_fired_once:
+        _after_hooks.remove(e)
 
     return tool_result
 

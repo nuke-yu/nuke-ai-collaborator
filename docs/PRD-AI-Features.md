@@ -98,12 +98,12 @@
 | 85 | 协作 | 子 Agent 派生（spawn_agent，同步等待，spawn_depth 防递归） | M3 | ✅ |
 | 86 | 协作 | 定时任务（cron / heartbeat，Bot 周期性自主执行） | M4 | ⬜ |
 | 87 | 协作 | 后台 spawn_agent（background: true，父 Agent 不阻塞，结果 steer 注回） | P4 | ✅ |
-| 88 | 协作 | once / asyncRewake Hook（一次性 hook；exit code=2 唤醒主模型） | P4 | ⬜ |
+| 88 | 协作 | once / asyncRewake Hook（一次性 hook；exit code=2 唤醒主模型） | P4 | ✅ |
 | 89 | 协作 | 子 Agent 任务恢复（session_id 复用已有 context，续传不重建） | P4 | ⬜ |
 | 90 | 平台 | 可视化工作流编排（n8n 风格拖拽） | M4 | ⬜ |
 | 91 | 平台 | Azure OpenAI 企业认证（Device Code Flow + token refresh） | M4 | ⬜ |
 
-> ✅ 已完成：82 项　　⬜ 未做：9 项　　合计：91 项
+> ✅ 已完成：83 项　　⬜ 未做：8 项　　合计：91 项
 
 ---
 
@@ -708,7 +708,7 @@ P3（精细化）:
 | 11 | 权限系统：全局权限模式 | ➡ | S | ✅ | Bot 配置页三档切换（default/bypass/dontAsk）；写入 executor_config.permission_mode |
 | 12 | 权限系统：Subagent 权限继承 | ➡ | M | ✅ | spawn_agent 透传父 ruleset（含 bypass 模式）；spawn_depth>0 时 ask→deny |
 | 13 | 后台 spawn_agent | ➡ | L | ✅ | `spawn_agent(background=True)` 立即返回 task_id；`_run_bg_agent` 用父 broadcaster 并发执行；完成后 `parent_steer.put(result)` 注回；`_bg_tasks` 字典跟踪清理；`execution_ctx["steer_channel"]` 传递父队列引用 |
-| 14 | once / asyncRewake Hook | ➡ | M | ⬜ | hook 支持 `once: true`（触发后自动注销）和 `asyncRewake`（exit code=2 时唤醒主模型追加处理）；改动 `tool_executor` hook 注册 + 执行 |
+| 14 | once / asyncRewake Hook | ➡ | M | ✅ | `_HookEntry.once=True` 触发后自动摘除；`add_before/after_hook(once=True)`；asyncRewake：after-hook 向 `context["rewake_queue"]` put 消息，tool_loop_v1 每轮 drain 并以 `[系统唤醒]` 注入对话，广播 `rewake_injected` WS 事件 |
 | 15 | 子 Agent 任务恢复 | ➡ | L | ⬜ | `spawn_agent` 传 `session_id` 可复用已有子 Agent context，续传而不重建；需 session store + ExecutionContext 序列化 |
 | 16 | 项目知识库集成 | ⬆ | L | ⬜ | Bot 创建时绑定项目知识来源；对话时双轨检索（项目 KB + 个人记忆）；需向量库 + 检索管道 |
 | 17 | 代码执行沙箱（容器隔离） | ➡ | L | ⬜ | Docker 容器执行，每次起/销毁；挂载 `bot_{id}/workspace/`；替换现有 run_shell 方案 |

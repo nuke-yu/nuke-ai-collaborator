@@ -396,6 +396,7 @@ class ToolLoopV1(BotExecutor):
                 # No tools registered yet — pure streaming, same UX as simple_v1
                 await _finalize_reply()
             else:
+                _rewake_queue: asyncio.Queue = asyncio.Queue()
                 execution_ctx = {
                     "bot_id": bot["id"],
                     "group_id": ctx.group_id,
@@ -406,6 +407,7 @@ class ToolLoopV1(BotExecutor):
                     "broadcaster": ctx.broadcaster,
                     "ruleset": _ruleset,
                     "steer_channel": ctx.steer_channel,
+                    "rewake_queue": _rewake_queue,
                 }
                 iter_count = 0
                 _overflow_recovered = False
@@ -601,6 +603,17 @@ class ToolLoopV1(BotExecutor):
                             await ctx.broadcaster.broadcast(ctx.group_id, {
                                 "type": "steer_injected", "temp_id": temp_id,
                                 "member_id": bot["id"], "message": steer_text[:300],
+                            })
+                        # Drain rewake messages from asyncRewake hooks
+                        if not _rewake_queue.empty():
+                            rewakes = []
+                            while not _rewake_queue.empty():
+                                rewakes.append(_rewake_queue.get_nowait())
+                            rewake_text = "\n".join(rewakes)
+                            messages.append({"role": "user", "content": f"[系统唤醒] {rewake_text}"})
+                            await ctx.broadcaster.broadcast(ctx.group_id, {
+                                "type": "rewake_injected", "temp_id": temp_id,
+                                "member_id": bot["id"], "message": rewake_text[:300],
                             })
                     else:
                         _consecutive_tool_only = 0
