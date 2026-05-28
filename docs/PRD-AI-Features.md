@@ -25,7 +25,7 @@
 | 12 | 执行引擎 | simple_v1 插件（单次 AI 调用 + 流式） | M1 | ✅ |
 | 13 | 执行引擎 | tool_loop_v1 插件（多轮工具调用循环，≤10 轮） | M1 | ✅ |
 | 14 | 执行引擎 | 死循环保护（连续 5 次纯工具调用强制 break） | P1 | ✅ |
-| 15 | 执行引擎 | react_v1 插件（Thought → Action → Observation） | M4 | ⬜ |
+| 15 | 执行引擎 | react_v1 插件（Thought → Action → Observation） | M4 | ✅ |
 | 16 | 记忆 | Bot 个人经验记忆（Chroma + 摘要，跨群组携带） | M0 | ✅ |
 | 17 | 记忆 | MEMORY.md 长期手写记忆（startup 注入，write 保护） | M2 | ✅ |
 | 18 | 知识 | 项目知识库集成（双轨检索：项目 KB + 个人记忆） | M4 | ⬜ |
@@ -103,7 +103,7 @@
 | 90 | 平台 | 可视化工作流编排（n8n 风格拖拽） | M4 | ⬜ |
 | 91 | 平台 | Azure OpenAI 企业认证（Device Code Flow + token refresh） | M4 | ⬜ |
 
-> ✅ 已完成：72 项　　⬜ 未做：19 项　　合计：91 项
+> ✅ 已完成：73 项　　⬜ 未做：18 项　　合计：91 项
 
 ---
 
@@ -163,7 +163,7 @@ Bot 的推理循环、工具调用方式、记忆使用策略均由执行引擎�
 | `tool_loop_v1` 插件 | M1 | ✅ 已完成 | 多轮工具调用循环（≤10 轮）：AI → 工具请求 → 结果注入 → 继续，直至完成 |
 | Context Compaction（上下文自动压缩） | M1 | ✅ 已完成 | AutoCompact 5 策略（参考 Claude Code）：Strategy 1 计数式微压缩 / Strategy 2 Snip / Strategy 3 Session Memory 增量摘要 / Strategy 4 九段结构化 AI 全量摘要 / Strategy 5 Cached Microcompact（Claude only）；电路熔断器；DB 软删除归档；broadcast strategy 字段 |
 | 死循环保护（Doom Loop） | P1 | ✅ 已完成 | `_DOOM_LOOP_THRESHOLD = 5`；`_consecutive_tool_only` 计数器在工具循环内逐轮递增，AI 返回文本时归零；连续 5 次纯工具调用后强制 break，回复 `[循环保护] 连续 N 次工具调用，已终止循环` |
-| `react_v1` 插件 | M4 | ⬜ 未做 | ReAct 推理循环：Thought → Action → Observation |
+| `react_v1` 插件 | M4 | ✅ 已完成 | ReAct 推理循环：Thought → Action → Observation；自由文本解析（无需 provider 函数调用）；`react_thought / react_action / react_observation` WS 事件；最多 20 轮；重复 Action 保护 |
 
 **插件 manifest 示例：**
 ```

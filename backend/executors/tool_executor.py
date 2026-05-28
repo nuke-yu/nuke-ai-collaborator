@@ -14,24 +14,26 @@ def register(tool_def: ToolDef, handler: Callable):
 
 
 def add_before_hook(hook: Callable):
-    """Register a before-tool hook.
+    """Register a before-tool hook (idempotent — same function won't be added twice).
 
     Signature: async (name: str, arguments: dict, context: dict) -> dict | None
     Return {"block": True, "reason": "..."} to block execution.
     Return None to allow.
     """
-    _before_hooks.append(hook)
+    if hook not in _before_hooks:
+        _before_hooks.append(hook)
 
 
 def add_after_hook(hook: Callable):
-    """Register an after-tool hook.
+    """Register an after-tool hook (idempotent — same function won't be added twice).
 
     Signature: async (name: str, arguments: dict, result: str, context: dict) -> str | None
     Return a new string to replace the result.
     Return None to leave the result unchanged.
     Hooks run in registration order; each receives the (possibly transformed) result.
     """
-    _after_hooks.append(hook)
+    if hook not in _after_hooks:
+        _after_hooks.append(hook)
 
 
 def clear_before_hooks():
