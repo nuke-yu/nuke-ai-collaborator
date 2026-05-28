@@ -197,6 +197,14 @@ export default function ChatWindow({ memberId, isDark, onToggleTheme }) {
       setMessages(finalize)
       syncCache(finalize)
       if (data.member_id !== memberId) notify(data.sender_name, data.preview)
+    } else if (data.type === 'compaction') {
+      const marker = {
+        _compact_marker: true,
+        id: `compact-${Date.now()}`,
+        strategy: data.strategy,
+        message: data.message,
+      }
+      setMessages(prev => [...prev, marker])
     } else if (data.type === 'stream_aborted') {
       setMessages(prev => prev.filter(m => m.temp_id !== data.temp_id))
     } else if (data.type === 'permission_request') {
@@ -235,6 +243,10 @@ export default function ChatWindow({ memberId, isDark, onToggleTheme }) {
       })
     } else if (data.type === 'workflow_update') {
       setWorkflow(data.active ? data : null)
+    } else if (data.type === 'skills_loaded') {
+      setMessages(prev => prev.map(m =>
+        m.temp_id === data.temp_id ? { ...m, skills_loaded: data.skills } : m
+      ))
     } else if (data.type === 'skills_changed') {
       window.dispatchEvent(new CustomEvent('skills_changed', { detail: data }))
     } else if (data.type === 'skill_draft_added') {
@@ -628,6 +640,18 @@ export default function ChatWindow({ memberId, isDark, onToggleTheme }) {
               if (msgDay === today) dateLabel = '今天'
               else if (msgDay === yesterday) dateLabel = '昨天'
               else dateLabel = new Date(msg.created_at).toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' })
+            }
+            if (msg._compact_marker) {
+              return (
+                <div key={msg.id} className="flex items-center gap-3 py-2 my-2 px-4">
+                  <div className="flex-1 h-px bg-indigo-900/50" />
+                  <span className="text-[11px] text-indigo-400/70 flex-shrink-0 flex items-center gap-1.5">
+                    <span>⚡</span>
+                    <span>{msg.message || '上下文已压缩'}</span>
+                  </span>
+                  <div className="flex-1 h-px bg-indigo-900/50" />
+                </div>
+              )
             }
             return (
               <Fragment key={msg.id ?? msg.temp_id}>

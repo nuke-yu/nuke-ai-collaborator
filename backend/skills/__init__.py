@@ -1,5 +1,5 @@
 from .constants import bot_ws, group_ws, WORKSPACE_ROOT, SYSTEM_SKILLS_ROOT, ROLES_ROOT
-from .metadata import skill_path, parse_frontmatter, parse_skill_meta
+from .metadata import skill_path, parse_frontmatter, parse_skill_meta, strip_frontmatter
 from .discovery import list_skills, list_skills_all
 from .lifecycle import write_to_draft, update_skill_status, approve_draft_skill, reject_draft_skill
 from .loader import load_always_skills, run_skill
@@ -9,7 +9,7 @@ from .watcher import watcher
 
 __all__ = [
     "bot_ws", "group_ws", "WORKSPACE_ROOT", "SYSTEM_SKILLS_ROOT", "ROLES_ROOT",
-    "skill_path", "parse_frontmatter", "parse_skill_meta",
+    "skill_path", "parse_frontmatter", "parse_skill_meta", "strip_frontmatter",
     "list_skills", "list_skills_all",
     "write_to_draft", "update_skill_status", "approve_draft_skill", "reject_draft_skill",
     "load_always_skills", "run_skill",

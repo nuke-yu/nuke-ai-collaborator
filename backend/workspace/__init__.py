@@ -5,6 +5,7 @@ from datetime import date, datetime
 from skills.constants import WORKSPACE_ROOT, LEARNED_ACTIVE as _LEARNED_ACTIVE, LEARNED_DRAFT as _LEARNED_DRAFT
 
 _SUBDIRS = ["skills", "logs"]
+_HISTORY_LIMIT = 10
 
 
 def bot_workspace(bot_id: int) -> Path:
@@ -47,6 +48,58 @@ async def read_file(bot_id: int, path: str) -> str:
 _WRITE_PROTECTED = {"MEMORY.md"}
 
 
+def _history_dir(ws: Path, p: Path) -> Path:
+    rel = p.relative_to(ws)
+    parent_str = str(rel.parent)
+    stem = rel.stem
+    if parent_str == ".":
+        return ws / ".history" / stem
+    return ws / ".history" / parent_str / stem
+
+
+def _save_to_history(ws: Path, p: Path) -> None:
+    try:
+        existing = p.read_text(encoding="utf-8")
+        hdir = _history_dir(ws, p)
+        hdir.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now().strftime("%Y%m%dT%H%M%S")
+        (hdir / f"{ts}.md").write_text(existing, encoding="utf-8")
+        versions = sorted(hdir.glob("*.md"), key=lambda f: f.name)
+        while len(versions) > _HISTORY_LIMIT:
+            versions.pop(0).unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
+def list_file_history(bot_id: int, path: str) -> list[dict]:
+    ws = bot_workspace(bot_id)
+    p = _safe_path(ws, path)
+    if p is None:
+        return []
+    hdir = _history_dir(ws, p)
+    if not hdir.exists():
+        return []
+    versions = sorted(hdir.glob("*.md"), key=lambda f: f.name, reverse=True)
+    return [{"ts": f.stem, "size": f.stat().st_size} for f in versions]
+
+
+def read_file_history_version(bot_id: int, path: str, ts: str) -> str:
+    ws = bot_workspace(bot_id)
+    p = _safe_path(ws, path)
+    if p is None:
+        return "[错误] 非法路径"
+    if not ts.replace("T", "").isdigit():
+        return "[错误] 非法版本标识"
+    hdir = _history_dir(ws, p)
+    version_file = hdir / f"{ts}.md"
+    if not version_file.exists():
+        return "[版本不存在]"
+    try:
+        return version_file.read_text(encoding="utf-8")
+    except Exception as e:
+        return f"[读取错误] {e}"
+
+
 async def write_file(bot_id: int, path: str, content: str) -> str:
     ws = bot_workspace(bot_id)
     p = _safe_path(ws, path)
@@ -66,6 +119,13 @@ async def write_file(bot_id: int, path: str, content: str) -> str:
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(content, encoding="utf-8")
         return f"__DRAFT_WRITTEN__:{p.name}"
+    # Save history before overwriting if content differs
+    if p.exists():
+        try:
+            if p.read_text(encoding="utf-8") != content:
+                _save_to_history(ws, p)
+        except Exception:
+            pass
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(content, encoding="utf-8")
     return f"已写入 {path}（{len(content)} 字符）"
@@ -223,7 +283,9 @@ def list_workspace_tree(bot_id: int) -> list[dict]:
     ws = bot_workspace(bot_id)
     result = []
     for p in sorted(ws.rglob("*")):
-        rel = str(p.relative_to(ws))
+        rel = str(p.relative_to(ws)).replace("\\", "/")
+        if rel.startswith(".history"):
+            continue
         result.append({"path": rel, "name": p.name, "is_dir": p.is_dir()})
     return result
 

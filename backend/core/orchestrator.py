@@ -138,7 +138,8 @@ async def auto_continue_if_needed(group_id: int, bot: dict, all_members: list, m
             break
         history, _ = build_context_message("", "系统", recent)
         system_prompt = _with_personality(bot["system_prompt"] or f"你是{bot['name']}，{bot['role']}。", bot)
-        memory = await get_memory_context(bot["id"], bot["role"] or "", "继续代码")
+        last_user_msg = next((m["content"] for m in reversed(recent) if m["sender_type"] != "bot"), "继续代码")
+        memory = await get_memory_context(bot["id"], bot["role"] or "", last_user_msg)
         if memory:
             system_prompt += f"\n\n{memory}"
         ai_reply, bot_msg_id = await stream_bot_response(

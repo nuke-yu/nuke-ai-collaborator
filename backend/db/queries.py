@@ -71,13 +71,16 @@ async def get_member_stats(db, group_id: int):
 async def save_message(db, group_id: int, member_id: int, content: str,
                        reply_to_id: int = None, file_url: str = None,
                        file_name: str = None, file_size: int = None,
-                       file_type: str = None, is_auto_reply: bool = False):
+                       file_type: str = None, is_auto_reply: bool = False,
+                       input_tokens: int = None, output_tokens: int = None):
     async with db.execute(
         "INSERT INTO messages (group_id, member_id, content, reply_to_id, "
-        "file_url, file_name, file_size, file_type, is_auto_reply) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "file_url, file_name, file_size, file_type, is_auto_reply, "
+        "input_tokens, output_tokens) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (group_id, member_id, content, reply_to_id,
-         file_url, file_name, file_size, file_type, int(is_auto_reply))
+         file_url, file_name, file_size, file_type, int(is_auto_reply),
+         input_tokens, output_tokens)
     ) as cur:
         await db.commit()
         return cur.lastrowid

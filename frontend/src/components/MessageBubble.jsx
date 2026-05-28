@@ -135,6 +135,41 @@ const mdComponents = {
   },
 }
 
+function SkillsStrip({ skills }) {
+  const [open, setOpen] = useState(false)
+  const injected = skills.filter(s => s.injected)
+  if (!injected.length) return null
+  return (
+    <div className="mb-1.5 text-xs text-gray-500">
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="flex items-center gap-1 hover:text-gray-300 transition-colors"
+      >
+        <span>⚡</span>
+        <span>{injected.length} 个技能已加载</span>
+        <span className="text-gray-600 ml-0.5">{open ? '▲' : '▼'}</span>
+      </button>
+      {open && (
+        <div className="flex flex-wrap gap-1 mt-1">
+          {injected.map(s => (
+            <span
+              key={s.name}
+              title={s.injected === 'full' ? '常驻技能' : '按需注入'}
+              className={`px-1.5 py-0.5 rounded text-xs ${
+                s.injected === 'full'
+                  ? 'bg-green-900/40 text-green-400 border border-green-800/50'
+                  : 'bg-indigo-900/40 text-indigo-400 border border-indigo-800/50'
+              }`}
+            >
+              {s.name}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 const QUICK_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🎉', '🤔', '👏']
 
 export default function MessageBubble({ msg, isTyping, currentMemberId, members = [], readMap = {}, onReply, reactions = {}, onReact, isPinned, onPin, onUnpin, highlighted = false }) {
@@ -198,6 +233,11 @@ export default function MessageBubble({ msg, isTyping, currentMemberId, members 
           <span className="text-xs text-gray-500">
             {msg.created_at ? new Date(msg.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : ''}
           </span>
+          {(msg.input_tokens || msg.output_tokens) && (
+            <span className="text-[10px] text-gray-600 hover:text-gray-400 cursor-default transition-colors" title={`输入 ${msg.input_tokens ?? 0} tokens · 输出 ${msg.output_tokens ?? 0} tokens`}>
+              {((msg.input_tokens ?? 0) + (msg.output_tokens ?? 0)).toLocaleString()}t
+            </span>
+          )}
           {isPinned && <span className="text-xs text-yellow-600 ml-1">📌</span>}
           {!msg.streaming && !msg.is_deleted && (
             <span className={`${showEmojiPicker ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'} flex items-center gap-1 transition-all relative`}>
@@ -239,6 +279,9 @@ export default function MessageBubble({ msg, isTyping, currentMemberId, members 
               <p className="text-xs text-gray-500 truncate">{msg.reply_to.content.slice(0, 80)}{msg.reply_to.content.length > 80 ? '...' : ''}</p>
             </div>
           </div>
+        )}
+        {msg.skills_loaded?.length > 0 && (
+          <SkillsStrip skills={msg.skills_loaded} />
         )}
         {msg.is_deleted ? (
           <p className="text-sm text-gray-500 italic">此消息已撤回</p>

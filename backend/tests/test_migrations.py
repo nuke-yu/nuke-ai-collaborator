@@ -17,7 +17,7 @@ import aiosqlite
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import db as database
-from db.migrations import run_migrations, migration_001, MIGRATIONS
+from db.migrations import run_migrations, migration_001, migration_002, MIGRATIONS
 from db.schema import init_db
 
 
@@ -360,6 +360,88 @@ class TestInitDbIntegration(MigrationTestCase):
             cur = await conn.execute("SELECT COUNT(*) FROM role_templates")
             count = (await cur.fetchone())[0]
         self.assertGreater(count, 0, "应有默认角色模板")
+
+    async def test_new_db_messages_has_token_columns(self):
+        """新装 DB 的 messages 表包含 input_tokens 和 output_tokens 列（migration_002）。"""
+        await init_db()
+        async with self._connect() as conn:
+            cols = set(await _table_columns(conn, "messages"))
+        self.assertIn("input_tokens", cols)
+        self.assertIn("output_tokens", cols)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 四、migration_002 — token 列
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestMigration002(MigrationTestCase):
+
+    async def _make_pre_002_db(self):
+        """建一个包含 migration_001 列、但缺少 migration_002 列的 DB。"""
+        async with aiosqlite.connect(self._db_path) as conn:
+            await conn.executescript(_OLD_SCHEMA)
+            await migration_001(conn)
+            await conn.commit()
+
+    async def test_adds_input_tokens_column(self):
+        """migration_002 为 messages 表添加 input_tokens 列。"""
+        await self._make_pre_002_db()
+        async with self._connect() as conn:
+            await migration_002(conn)
+            cols = await _table_columns(conn, "messages")
+        self.assertIn("input_tokens", cols)
+
+    async def test_adds_output_tokens_column(self):
+        """migration_002 为 messages 表添加 output_tokens 列。"""
+        await self._make_pre_002_db()
+        async with self._connect() as conn:
+            await migration_002(conn)
+            cols = await _table_columns(conn, "messages")
+        self.assertIn("output_tokens", cols)
+
+    async def test_token_columns_default_null(self):
+        """新插入的消息行，token 列默认值为 NULL。"""
+        orig_path = database.DB_PATH
+        database.DB_PATH = self._db_path
+        try:
+            await init_db()
+            async with self._connect() as conn:
+                await conn.execute(
+                    "INSERT INTO groups (name) VALUES ('g')"
+                )
+                await conn.execute(
+                    "INSERT INTO members (group_id, name, type) VALUES (1, 'u', 'human')"
+                )
+                await conn.execute(
+                    "INSERT INTO messages (group_id, member_id, content) VALUES (1, 1, 'hi')"
+                )
+                await conn.commit()
+                cur = await conn.execute(
+                    "SELECT input_tokens, output_tokens FROM messages LIMIT 1"
+                )
+                row = await cur.fetchone()
+        finally:
+            database.DB_PATH = orig_path
+        self.assertIsNone(row[0])
+        self.assertIsNone(row[1])
+
+    async def test_idempotent_on_new_schema_db(self):
+        """migration_002 在已有列时静默跳过，不抛异常。"""
+        orig_path = database.DB_PATH
+        database.DB_PATH = self._db_path
+        try:
+            await init_db()
+            async with self._connect() as conn:
+                await migration_002(conn)  # second run must not raise
+        finally:
+            database.DB_PATH = orig_path
+
+    async def test_idempotent_on_old_db_repeat_call(self):
+        """migration_002 在旧 DB 上多次执行不报错。"""
+        await self._make_pre_002_db()
+        async with self._connect() as conn:
+            await migration_002(conn)
+            await migration_002(conn)
 
 
 if __name__ == "__main__":

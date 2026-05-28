@@ -31,7 +31,7 @@ _MSG_SQL = """
            m.reply_to_id, rm.content, rmb.name,
            m.edited_at, m.is_deleted,
            m.file_url, m.file_name, m.file_size, m.file_type,
-           m.is_auto_reply
+           m.is_auto_reply, m.input_tokens, m.output_tokens
     FROM messages m
     JOIN members mb ON m.member_id = mb.id
     LEFT JOIN messages rm ON m.reply_to_id = rm.id
@@ -51,4 +51,6 @@ def _row_to_msg(r):
         "edited_at": r[11], "is_deleted": bool(r[12]),
         "file_url": r[13], "file_name": r[14], "file_size": r[15], "file_type": r[16],
         "is_auto_reply": bool(r[17]) if len(r) > 17 else False,
+        "input_tokens": r[18] if len(r) > 18 else None,
+        "output_tokens": r[19] if len(r) > 19 else None,
     }

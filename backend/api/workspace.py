@@ -2,8 +2,14 @@ from fastapi import APIRouter, HTTPException
 from db import get_db, get_member
 from workspace import (
     list_workspace_tree, read_file, write_file, bot_workspace, init_bot_workspace,
+    list_file_history, read_file_history_version,
 )
-from skills import list_skills_all, update_skill_status, approve_draft_skill, reject_draft_skill
+from skills import (
+    list_skills_all, update_skill_status, approve_draft_skill, reject_draft_skill,
+    skill_path, strip_frontmatter,
+    WORKSPACE_ROOT, SYSTEM_SKILLS_ROOT, ROLES_ROOT, bot_ws as _skills_bot_ws,
+)
+from ai.client import call_ai_once, AIError
 
 router = APIRouter()
 
@@ -90,6 +96,74 @@ async def approve_skill(member_id: int, skill_name: str):
         raise HTTPException(404, "Bot not found")
     result = approve_draft_skill(member_id, skill_name)
     return {"ok": True, "message": result}
+
+
+@router.post("/api/members/{member_id}/skills/{skill_name}/test")
+async def test_skill(member_id: int, skill_name: str, body: dict):
+    async with get_db() as db:
+        bot = await get_member(db, member_id)
+    if not bot or bot["type"] != "bot":
+        raise HTTPException(404, "Bot not found")
+    message = (body.get("message") or "").strip()
+    if not message:
+        raise HTTPException(400, "message required")
+    group_id = body.get("group_id")
+    skills = list_skills_all(member_id, group_id=group_id, role=bot.get("role"))
+    skill_info = next((s for s in skills if s["name"] == skill_name), None)
+    if not skill_info:
+        raise HTTPException(404, f"技能 '{skill_name}' 不存在")
+    # Locate the skill file across all layers
+    layer = skill_info.get("layer", "personal")
+    if layer == "system":
+        sdir = SYSTEM_SKILLS_ROOT
+    elif layer == "group" and group_id:
+        sdir = WORKSPACE_ROOT / f"group_{group_id}" / "shared" / "skills"
+    elif layer == "role" and bot.get("role"):
+        from skills.constants import ROLES_ROOT as _ROLES
+        sdir = _ROLES / bot["role"] / "skills"
+    elif layer == "learned":
+        sdir = _skills_bot_ws(member_id) / "skills" / "learned" / "active"
+    else:
+        sdir = _skills_bot_ws(member_id) / "skills"
+    path, kind = skill_path(sdir, skill_name)
+    if path is None or kind != "md":
+        raise HTTPException(404, "技能文件未找到")
+    raw = path.read_text(encoding="utf-8")
+    system_prompt = strip_frontmatter(raw).strip() or f"你是一个助手。"
+    try:
+        result = await call_ai_once(
+            system_prompt=system_prompt,
+            messages=[{"role": "user", "content": message}],
+            provider=bot.get("model_provider", "deepseek"),
+            model=bot.get("model_name", "deepseek-chat"),
+            temperature=bot.get("temperature", 0.7),
+            max_tokens=min(int(bot.get("max_tokens") or 4096), 1024),
+        )
+    except AIError as e:
+        raise HTTPException(502, str(e))
+    response = result.get("content", "") if result["type"] == "text" else "[工具调用响应，不适用于测试]"
+    return {"response": response}
+
+
+@router.get("/api/members/{member_id}/workspace/history")
+async def get_file_history(member_id: int, path: str):
+    async with get_db() as db:
+        bot = await get_member(db, member_id)
+    if not bot or bot["type"] != "bot":
+        raise HTTPException(404, "Bot not found")
+    return {"path": path, "versions": list_file_history(member_id, path)}
+
+
+@router.get("/api/members/{member_id}/workspace/history/version")
+async def get_history_version(member_id: int, path: str, ts: str):
+    async with get_db() as db:
+        bot = await get_member(db, member_id)
+    if not bot or bot["type"] != "bot":
+        raise HTTPException(404, "Bot not found")
+    content = read_file_history_version(member_id, path, ts)
+    if content.startswith("[错误]") or content.startswith("[版本不存在]"):
+        raise HTTPException(404, content)
+    return {"path": path, "ts": ts, "content": content}
 
 
 @router.post("/api/members/{member_id}/skills/learned/{skill_name}/reject")

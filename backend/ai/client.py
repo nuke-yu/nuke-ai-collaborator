@@ -257,14 +257,16 @@ async def _once_openai_compat(url: str, api_key: str, model: str, system_prompt:
         data = resp.json()
     choice = data["choices"][0]
     msg = choice["message"]
+    raw_usage = data.get("usage", {})
+    usage = {"input_tokens": raw_usage.get("prompt_tokens", 0), "output_tokens": raw_usage.get("completion_tokens", 0)}
     if choice.get("finish_reason") == "tool_calls" and msg.get("tool_calls"):
         calls = [
             {"id": tc["id"], "name": tc["function"]["name"],
              "arguments": json.loads(tc["function"]["arguments"])}
             for tc in msg["tool_calls"]
         ]
-        return {"type": "tool_calls", "calls": calls, "assistant_message": msg}
-    return {"type": "text", "content": msg.get("content", "")}
+        return {"type": "tool_calls", "calls": calls, "assistant_message": msg, "usage": usage}
+    return {"type": "text", "content": msg.get("content", ""), "usage": usage}
 
 
 async def _once_claude(api_key: str, model: str, system_prompt: str,
@@ -314,6 +316,8 @@ async def _once_claude(api_key: str, model: str, system_prompt: str,
             text_parts.append(block["text"])
         elif block["type"] == "tool_use":
             tool_uses.append({"id": block["id"], "name": block["name"], "arguments": block["input"]})
+    raw_usage = data.get("usage", {})
+    usage = {"input_tokens": raw_usage.get("input_tokens", 0), "output_tokens": raw_usage.get("output_tokens", 0)}
     if tool_uses:
         assistant_msg = {
             "role": "assistant", "content": None,
@@ -323,8 +327,8 @@ async def _once_claude(api_key: str, model: str, system_prompt: str,
                 for u in tool_uses
             ],
         }
-        return {"type": "tool_calls", "calls": tool_uses, "assistant_message": assistant_msg}
-    return {"type": "text", "content": "".join(text_parts)}
+        return {"type": "tool_calls", "calls": tool_uses, "assistant_message": assistant_msg, "usage": usage}
+    return {"type": "text", "content": "".join(text_parts), "usage": usage}
 
 
 async def _dispatch_once(

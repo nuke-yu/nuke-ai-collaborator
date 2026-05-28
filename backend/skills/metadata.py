@@ -70,6 +70,17 @@ def parse_frontmatter(content: str) -> dict:
     return fm
 
 
+def strip_frontmatter(content: str) -> str:
+    """Return content with YAML frontmatter (--- block) removed."""
+    lines = content.splitlines(keepends=True)
+    if not lines or lines[0].strip() != "---":
+        return content
+    for i, line in enumerate(lines[1:], 1):
+        if line.strip() == "---":
+            return "".join(lines[i + 1:]).lstrip("\n")
+    return content
+
+
 def parse_skill_meta(path: Path) -> dict:
     """Return metadata dict for a skill file. Frontmatter takes priority."""
     try:

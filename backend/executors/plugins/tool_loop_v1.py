@@ -295,6 +295,8 @@ class ToolLoopV1(BotExecutor):
         temperature = bot.get("temperature", 0.7)
         max_tokens = bot.get("max_tokens", 4096)
         full_text = ""
+        _total_input_tokens = 0
+        _total_output_tokens = 0
         _use_cached_mc = compact.should_use_cached_microcompact(provider)
 
         # Cross-compaction file tracker: path → "read" | "modified"
@@ -451,6 +453,9 @@ class ToolLoopV1(BotExecutor):
                             temperature, max_tokens, _active_schemas,
                             use_cached_microcompact=_use_cached_mc,
                         )
+                    _u = result.get("usage") or {}
+                    _total_input_tokens += _u.get("input_tokens", 0)
+                    _total_output_tokens += _u.get("output_tokens", 0)
                     if result["type"] == "tool_calls":
                         _consecutive_tool_only += 1
                         if _consecutive_tool_only >= _DOOM_LOOP_THRESHOLD:
@@ -644,7 +649,11 @@ class ToolLoopV1(BotExecutor):
             return ExecutionResult(full_text=full_text, msg_id=None)
 
         async with get_db() as db:
-            msg_id = await save_message(db, ctx.group_id, bot["id"], full_text)
+            msg_id = await save_message(
+                db, ctx.group_id, bot["id"], full_text,
+                input_tokens=_total_input_tokens or None,
+                output_tokens=_total_output_tokens or None,
+            )
             recent = await get_messages(db, ctx.group_id)
 
         await ctx.broadcaster.broadcast(ctx.group_id, {

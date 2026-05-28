@@ -355,5 +355,196 @@ class TestRetryAndRateLimit(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["content"], "fallback ok")
 
 
+# ---------------------------------------------------------------------------
+# Tests for token usage extraction (_once_openai_compat, _once_claude)
+# ---------------------------------------------------------------------------
+
+class TestTokenUsageExtraction(unittest.IsolatedAsyncioTestCase):
+    """Verify that _once_openai_compat and _once_claude return a 'usage' dict."""
+
+    # ── openai-compat ────────────────────────────────────────────────────────
+
+    def _make_openai_resp(self, content="hi", prompt_tokens=10, completion_tokens=5,
+                          tool_calls=None, finish_reason=None):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.raise_for_status = MagicMock()
+        msg = {"content": content}
+        if tool_calls:
+            msg["tool_calls"] = tool_calls
+        mock_resp.json.return_value = {
+            "choices": [{"message": msg, "finish_reason": finish_reason or "stop"}],
+            "usage": {"prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens},
+        }
+        return mock_resp
+
+    async def test_openai_text_response_includes_usage(self):
+        from ai.client import _once_openai_compat
+        mock_resp = self._make_openai_resp(prompt_tokens=20, completion_tokens=8)
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=mock_resp)
+        cm = MagicMock()
+        cm.__aenter__ = AsyncMock(return_value=mock_client)
+        cm.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("ai.client.httpx.AsyncClient", return_value=cm):
+            result = await _once_openai_compat(
+                url="https://api.deepseek.com/v1/chat/completions",
+                api_key="key", model="deepseek-chat",
+                system_prompt="sp", messages=[{"role": "user", "content": "hi"}],
+                temperature=0.7, max_tokens=256, tools=None,
+            )
+
+        self.assertEqual(result["type"], "text")
+        self.assertIn("usage", result)
+        self.assertEqual(result["usage"]["input_tokens"], 20)
+        self.assertEqual(result["usage"]["output_tokens"], 8)
+
+    async def test_openai_tool_calls_response_includes_usage(self):
+        from ai.client import _once_openai_compat
+        tool_calls = [{
+            "id": "c1", "type": "function",
+            "function": {"name": "run_shell", "arguments": '{"cmd": "ls"}'},
+        }]
+        mock_resp = self._make_openai_resp(
+            prompt_tokens=30, completion_tokens=15,
+            tool_calls=tool_calls, finish_reason="tool_calls",
+        )
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=mock_resp)
+        cm = MagicMock()
+        cm.__aenter__ = AsyncMock(return_value=mock_client)
+        cm.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("ai.client.httpx.AsyncClient", return_value=cm):
+            result = await _once_openai_compat(
+                url="https://api.deepseek.com/v1/chat/completions",
+                api_key="key", model="deepseek-chat",
+                system_prompt="sp", messages=[{"role": "user", "content": "hi"}],
+                temperature=0.7, max_tokens=256, tools=None,
+            )
+
+        self.assertEqual(result["type"], "tool_calls")
+        self.assertIn("usage", result)
+        self.assertEqual(result["usage"]["input_tokens"], 30)
+        self.assertEqual(result["usage"]["output_tokens"], 15)
+
+    async def test_openai_missing_usage_field_returns_zeros(self):
+        """If the API omits 'usage', input_tokens and output_tokens default to 0."""
+        from ai.client import _once_openai_compat
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.json.return_value = {
+            "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}],
+            # no 'usage' key
+        }
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=mock_resp)
+        cm = MagicMock()
+        cm.__aenter__ = AsyncMock(return_value=mock_client)
+        cm.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("ai.client.httpx.AsyncClient", return_value=cm):
+            result = await _once_openai_compat(
+                url="https://api.deepseek.com/v1/chat/completions",
+                api_key="key", model="deepseek-chat",
+                system_prompt="sp", messages=[{"role": "user", "content": "hi"}],
+                temperature=0.7, max_tokens=256, tools=None,
+            )
+
+        self.assertEqual(result["usage"]["input_tokens"], 0)
+        self.assertEqual(result["usage"]["output_tokens"], 0)
+
+    # ── claude ───────────────────────────────────────────────────────────────
+
+    def _make_claude_resp(self, text="hello", input_tokens=12, output_tokens=7,
+                          tool_use_blocks=None):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.raise_for_status = MagicMock()
+        content = [{"type": "text", "text": text}]
+        if tool_use_blocks:
+            content.extend(tool_use_blocks)
+        mock_resp.json.return_value = {
+            "content": content,
+            "usage": {"input_tokens": input_tokens, "output_tokens": output_tokens},
+        }
+        return mock_resp
+
+    async def test_claude_text_response_includes_usage(self):
+        from ai.client import _once_claude
+        mock_resp = self._make_claude_resp(input_tokens=12, output_tokens=7)
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=mock_resp)
+        cm = MagicMock()
+        cm.__aenter__ = AsyncMock(return_value=mock_client)
+        cm.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("ai.client.httpx.AsyncClient", return_value=cm):
+            result = await _once_claude(
+                api_key="test-key", model="claude-opus-4-7",
+                system_prompt="sp", messages=[{"role": "user", "content": "hi"}],
+                temperature=0.7, max_tokens=256, tools=None,
+            )
+
+        self.assertEqual(result["type"], "text")
+        self.assertIn("usage", result)
+        self.assertEqual(result["usage"]["input_tokens"], 12)
+        self.assertEqual(result["usage"]["output_tokens"], 7)
+
+    async def test_claude_tool_calls_response_includes_usage(self):
+        from ai.client import _once_claude
+        mock_resp = self._make_claude_resp(
+            input_tokens=25, output_tokens=10,
+            tool_use_blocks=[{
+                "type": "tool_use", "id": "tu1",
+                "name": "run_shell", "input": {"cmd": "pwd"},
+            }],
+        )
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=mock_resp)
+        cm = MagicMock()
+        cm.__aenter__ = AsyncMock(return_value=mock_client)
+        cm.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("ai.client.httpx.AsyncClient", return_value=cm):
+            result = await _once_claude(
+                api_key="test-key", model="claude-opus-4-7",
+                system_prompt="sp", messages=[{"role": "user", "content": "hi"}],
+                temperature=0.7, max_tokens=256, tools=None,
+            )
+
+        self.assertEqual(result["type"], "tool_calls")
+        self.assertIn("usage", result)
+        self.assertEqual(result["usage"]["input_tokens"], 25)
+        self.assertEqual(result["usage"]["output_tokens"], 10)
+
+    async def test_claude_missing_usage_returns_zeros(self):
+        from ai.client import _once_claude
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.json.return_value = {
+            "content": [{"type": "text", "text": "ok"}],
+            # no 'usage' key
+        }
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=mock_resp)
+        cm = MagicMock()
+        cm.__aenter__ = AsyncMock(return_value=mock_client)
+        cm.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("ai.client.httpx.AsyncClient", return_value=cm):
+            result = await _once_claude(
+                api_key="test-key", model="claude-opus-4-7",
+                system_prompt="sp", messages=[{"role": "user", "content": "hi"}],
+                temperature=0.7, max_tokens=256, tools=None,
+            )
+
+        self.assertEqual(result["usage"]["input_tokens"], 0)
+        self.assertEqual(result["usage"]["output_tokens"], 0)
+
+
 if __name__ == "__main__":
     unittest.main()

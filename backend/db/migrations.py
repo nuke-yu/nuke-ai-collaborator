@@ -50,12 +50,27 @@ async def migration_001(db):
     await db.commit()
 
 
+async def migration_002(db):
+    """Add token usage columns to messages table."""
+    stmts = [
+        "ALTER TABLE messages ADD COLUMN input_tokens INTEGER DEFAULT NULL",
+        "ALTER TABLE messages ADD COLUMN output_tokens INTEGER DEFAULT NULL",
+    ]
+    for sql in stmts:
+        try:
+            await db.execute(sql)
+        except Exception:
+            pass
+    await db.commit()
+
+
 # ---------------------------------------------------------------------------
 # Registry — append new migrations here, never reorder or remove existing ones
 # ---------------------------------------------------------------------------
 
 MIGRATIONS: list = [
     migration_001,
+    migration_002,
 ]
 
 # ---------------------------------------------------------------------------
