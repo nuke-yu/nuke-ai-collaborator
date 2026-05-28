@@ -1,7 +1,109 @@
 # PRD — AI 功能路线图
 
-> 最后更新：2026-05-28（M4 Skill frontmatter `model` 字段实现）
+> 最后更新：2026-05-28
 > 项目：nuke-ai-collaborator
+
+---
+
+## 功能总览（全景一览表）
+
+> ✅ 已完成　⬜ 未做　　优先级：M0-M4 = 里程碑；P1-P4 = 补丁优先级
+
+| # | 维度 | 功能 | 优先级 | 状态 |
+|---|------|------|--------|------|
+| 1 | 身份 | 角色模板库（一键添加） | M0 | ✅ |
+| 2 | 身份 | Bot 编辑（提示词 / 模型） | M0 | ✅ |
+| 3 | 人格 | Bot 人格配置（temperature / max_tokens） | M0 | ✅ |
+| 4 | 人格 | Bot 性格系统（5 维度滑块 → 行为指令集） | M0 | ✅ |
+| 5 | 智能 | 流式输出（打字机效果） | M0 | ✅ |
+| 6 | 智能 | 多模型支持（OpenAI / Ollama / Claude） | M0 | ✅ |
+| 7 | 智能 | API 限流重试 + fallback_model | P1 | ✅ |
+| 8 | 智能 | 图片理解（视觉模型） | M4 | ⬜ |
+| 9 | 执行引擎 | 插件化执行引擎框架（BotExecutor ABC + Registry） | M1 | ✅ |
+| 10 | 执行引擎 | 热加载机制（importlib + POST /api/plugins/reload） | M1 | ✅ |
+| 11 | 执行引擎 | 执行引擎 UI 配置（Bot 编辑页切换插件） | M1 | ✅ |
+| 12 | 执行引擎 | simple_v1 插件（单次 AI 调用 + 流式） | M1 | ✅ |
+| 13 | 执行引擎 | tool_loop_v1 插件（多轮工具调用循环，≤10 轮） | M1 | ✅ |
+| 14 | 执行引擎 | 死循环保护（连续 5 次纯工具调用强制 break） | P1 | ✅ |
+| 15 | 执行引擎 | react_v1 插件（Thought → Action → Observation） | M4 | ⬜ |
+| 16 | 记忆 | Bot 个人经验记忆（Chroma + 摘要，跨群组携带） | M0 | ✅ |
+| 17 | 记忆 | MEMORY.md 长期手写记忆（startup 注入，write 保护） | M2 | ✅ |
+| 18 | 知识 | 项目知识库集成（双轨检索：项目 KB + 个人记忆） | M4 | ⬜ |
+| 19 | 工作区 | Bot 私有工作区文件系统（IDENTITY / SOUL / BOOTSTRAP / skills / logs） | M1 | ✅ |
+| 20 | 工作区 | Skill 发现 + frontmatter 解析（name / description / always） | M1 | ✅ |
+| 21 | 工作区 | Skill always 常驻注入（全文注入 system prompt） | M1 | ✅ |
+| 22 | 工作区 | 日志写回（logs/YYYY-MM-DD.md，工具统计 + 迭代轮数） | M2 | ✅ |
+| 23 | 工作区 | 群组共享工作区初始化（group_{id}/shared/） | M2 | ✅ |
+| 24 | 工作区 | BOARD.md 任务看板（多 Bot 协作状态 source of truth） | M2 | ✅ |
+| 25 | 工作区 | deliverables/ 交付物目录 | M2 | ✅ |
+| 26 | 工作区 | Skill 注入格式升级（`<available_skills>` XML） | M2 | ✅ |
+| 27 | 工作区 | Skill `when_to_use` 字段（调用时机提示） | M2 | ✅ |
+| 28 | 工作区 | L1 General Skills（system/skills/，5 个内置通用技能） | M2 | ✅ |
+| 29 | 工作区 | L2 Group Skills（group_{id}/shared/skills/，领域通用） | M2 | ✅ |
+| 30 | 工作区 | L3 Role Skills（roles/{role}/skills/，角色专属） | M2 | ✅ |
+| 31 | 工作区 | L1/L2/L3 运行时注入修复（list_skills_all + _skills_dir_for_layer） | P1 | ✅ |
+| 32 | 工作区 | L4 Learned Skills 草稿审批（write → draft/ → 用户审批 → active/） | M3 | ✅ |
+| 33 | 工作区 | `learns: true` frontmatter（执行后自动触发写回总结） | M3 | ✅ |
+| 34 | 工作区 | Skill 生命周期模块重构（backend/skills/ 独立包） | M3 | ✅ |
+| 35 | 工作区 | `status` / `layer` frontmatter 字段 | M2 | ✅ |
+| 36 | 工作区 | list_skills() 四层合并 + 状态返回（L1→L2→L3→L4→personal） | M2 | ✅ |
+| 37 | 工作区 | Session 注入事件广播（skills_loaded，标记注入状态） | M2 | ✅ |
+| 38 | 工作区 | Skill 状态面板 UI（SkillPanel.jsx，层级 / toggle / 审批） | M2 | ✅ |
+| 39 | 工作区 | Skill 热更新（watchdog + 300ms debounce + skills_changed WS） | M3 | ✅ |
+| 40 | 工作区 | Skill token 预算控制（1% context window，单条 250 char 截断） | M3 | ✅ |
+| 41 | 工作区 | Skill Filter 上下文过滤（when_to_use 关键词匹配） | M3 | ✅ |
+| 42 | 工作区 | Skill 路径条件激活（`paths:` glob frontmatter） | M3 | ✅ |
+| 43 | 工作区 | Skill Fork 子 Agent（`context: fork`，独立 AI 调用） | M3 | ✅ |
+| 44 | 工作区 | Skill 目录结构 + 脚本执行（SKILL.md + `` ```! `` / `` !`cmd` `` 嵌入） | M3 | ✅ |
+| 45 | 工作区 | 工作流执行日志归档（group_{id}/runs/ 每次有工具调用写档） | M3 | ✅ |
+| 46 | 工具 | Bot 工具调用 / Function Calling（tool_executor 注册表） | M1 | ✅ |
+| 47 | 工具 | run_shell / read_local_file / write_local_file（跨平台） | M1 | ✅ |
+| 48 | 工具 | run_shell `background` 参数（后台启动，返回 PID） | M1 | ✅ |
+| 49 | 工具 | Skill `max_iterations` frontmatter（动态扩展执行上限） | M1 | ✅ |
+| 50 | 工具 | beforeToolCall 安全钩子（危险命令黑名单拦截） | M1 | ✅ |
+| 51 | 工具 | 敏感路径兜底保护（~/.ssh / .env / *.pem 等，路径穿越防护） | P1 | ✅ |
+| 52 | 工具 | afterToolCall 结果钩子（工具结果超 20K → head+tail 各 10K 截断） | M3 | ✅ |
+| 53 | 工具 | 代码执行沙箱（Skill 目录结构 + run_shell，跨平台） | M3 | ✅ |
+| 54 | 工具 | Skill `allowed-tools` 白名单（限制 skill 可调用工具范围） | M3 | ✅ |
+| 55 | 工具 | Skill `model` frontmatter（skill 执行时覆盖模型选择） | M4 | ✅ |
+| 56 | 工具 | 工具并发执行（只读工具 asyncio.gather，写入工具串行） | P2 | ⬜ |
+| 57 | 工具 | Hook 条件过滤（`if:` 正则匹配工具名+参数，不匹配跳过 hook） | P2 | ⬜ |
+| 58 | 工具 | 代码执行沙箱（容器隔离，Docker 每次起/销毁） | M4 | ⬜ |
+| 59 | 压缩 | 工具结果 Head+Tail 截断（20K，各 10K） | P1 | ✅ |
+| 60 | 压缩 | 跨 run 历史压缩（pre-run Strategy 1 + compact_conversation） | P1 | ✅ |
+| 61 | 压缩 | API 溢出恢复（AIContextOverflowError + 压缩 + 重试） | P1 | ✅ |
+| 62 | 压缩 | 自适应 Token 阈值（Claude Code 公式：window - 20K - 13K） | P2 | ✅ |
+| 63 | 压缩 | 结构化压缩摘要模板（9 段 + \<analysis\> 草稿区） | P2 | ✅ |
+| 64 | 压缩 | DB 历史软删除归档（maybe_compact_db_history，post-run 异步） | P2 | ✅ |
+| 65 | 压缩 | Strategy 1 计数式微压缩（保留最近 5 个工具结果） | P2 | ✅ |
+| 66 | 压缩 | Strategy 2 Snip（70% 窗口阈值，保留最近 4 对对话） | P2 | ✅ |
+| 67 | 压缩 | Strategy 3 Session Memory（增量摘要复用已有摘要） | P2 | ✅ |
+| 68 | 压缩 | Strategy 4 AI 全量摘要（9 段结构化 + format_compact_summary） | P2 | ✅ |
+| 69 | 压缩 | Strategy 5 Cached Microcompact（Anthropic context_management，Claude only） | P2 | ✅ |
+| 70 | 压缩 | Token 估算精度（json.dumps 序列化长度 // 4） | P3 | ✅ |
+| 71 | 压缩 | 文件操作跨压缩跟踪（_file_tracker + build_file_tracker_xml XML） | P3 | ✅ |
+| 72 | 压缩 | 压缩后文件重注入（build_file_contents_for_reinject，modified 优先） | P3 | ✅ |
+| 73 | 权限 | 基础规则模型（Rule = {permission, pattern, action}，三态 allow/ask/deny） | P3 | ⬜ |
+| 74 | 权限 | 决策 Pipeline（敏感路径兜底 → deny → allow → ask，ask 挂起等回复） | P3 | ⬜ |
+| 75 | 权限 | 规则持久化（always → SQLite；once → 内存；前端 approve/deny UI） | P3 | ⬜ |
+| 76 | 权限 | 全局权限模式（default / bypassPermissions / dontAsk 三档） | P3 | ⬜ |
+| 77 | 权限 | Subagent 权限继承（子 Agent 权限 ⊆ 父 Agent，spawn 时裁剪） | P3 | ⬜ |
+| 78 | 用户体验 | 用户 Abort（WebSocket abort → asyncio.Task.cancel()） | P2 | ⬜ |
+| 79 | 协作 | 自定义工作流（关键词驱动角色链，done_keyword 推进） | M0 | ✅ |
+| 80 | 协作 | 并行任务池（TICKETS 格式，多 Bot 队列认领） | M0 | ✅ |
+| 81 | 协作 | @all 顺序协作（同角色竞速，不同角色顺序执行） | M0 | ✅ |
+| 82 | 协作 | Before-finalize 质量钩子（审查 Bot APPROVED/REJECTED，可重试） | M3 | ✅ |
+| 83 | 协作 | steer() 中途打断（运行中注入新指令，工具轮边界消费） | M3 | ✅ |
+| 84 | 协作 | followUp() 后续消息队列（run 结束后剩余 steer → 独立新 run） | M3 | ✅ |
+| 85 | 协作 | 子 Agent 派生（spawn_agent，同步等待，spawn_depth 防递归） | M3 | ✅ |
+| 86 | 协作 | 定时任务（cron / heartbeat，Bot 周期性自主执行） | M4 | ⬜ |
+| 87 | 协作 | 后台 spawn_agent（background: true，父 Agent 不阻塞，结果 steer 注回） | P4 | ⬜ |
+| 88 | 协作 | once / asyncRewake Hook（一次性 hook；exit code=2 唤醒主模型） | P4 | ⬜ |
+| 89 | 协作 | 子 Agent 任务恢复（session_id 复用已有 context，续传不重建） | P4 | ⬜ |
+| 90 | 平台 | 可视化工作流编排（n8n 风格拖拽） | M4 | ⬜ |
+| 91 | 平台 | Azure OpenAI 企业认证（Device Code Flow + token refresh） | M4 | ⬜ |
+
+> ✅ 已完成：72 项　　⬜ 未做：19 项　　合计：91 项
 
 ---
 
