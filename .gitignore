@@ -22,4 +22,5 @@ frontend/dist/
 # OS
 .DS_Store
 Thumbs.db
-workspaces/
+backend/workspaces/bot_*/
+backend/workspaces/group_*/
