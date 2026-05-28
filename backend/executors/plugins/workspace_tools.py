@@ -393,6 +393,12 @@ async def _handle_run_shell(
         if err:
             parts.append(f"stderr:\n{err}")
         return "\n".join(parts)
+    except asyncio.CancelledError:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+        raise
     except asyncio.TimeoutError:
         return f"[超时] 命令执行超过 {timeout} 秒"
     except Exception as e:

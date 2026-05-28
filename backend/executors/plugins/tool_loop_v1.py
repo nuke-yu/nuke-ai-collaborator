@@ -599,6 +599,11 @@ class ToolLoopV1(BotExecutor):
                 if not full_text:
                     full_text = "[达到最大工具调用次数，任务未完成]"
 
+        except asyncio.CancelledError:
+            await ctx.broadcaster.broadcast(ctx.group_id, {
+                "type": "stream_aborted", "temp_id": temp_id, "member_id": bot["id"],
+            })
+            raise
         except AIError as e:
             await ctx.broadcaster.broadcast(ctx.group_id, {
                 "type": "stream_error", "temp_id": temp_id, "message": str(e),

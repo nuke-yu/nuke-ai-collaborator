@@ -45,6 +45,10 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
+# Track running dispatch tasks per group so abort can cancel them
+_running_tasks: dict[int, asyncio.Task] = {}
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -114,6 +118,12 @@ async def websocket_endpoint(websocket: WebSocket, group_id: int, member_id: int
                     await mark_read(group_id, member_id, msg_id)
                 continue
 
+            if payload.get("type") == "abort":
+                task = _running_tasks.get(group_id)
+                if task and not task.done():
+                    task.cancel()
+                continue
+
             content = payload.get("content", "").strip()
             file_url = payload.get("file_url")
             file_name = payload.get("file_name")
@@ -148,12 +158,14 @@ async def websocket_endpoint(websocket: WebSocket, group_id: int, member_id: int
                 group_info = await get_group(db, group_id) or {}
 
             if triggered:
-                asyncio.create_task(dispatch_bots(
+                task = asyncio.create_task(dispatch_bots(
                     group_id, triggered, content or "", sender, recent,
                     all_bots, all_members,
                     group_name=group_info.get("name", ""),
                     group_announcement=group_info.get("announcement", ""),
                 ))
+                _running_tasks[group_id] = task
+                task.add_done_callback(lambda _: _running_tasks.pop(group_id, None))
 
     except WebSocketDisconnect:
         gone_id = manager.disconnect(websocket, group_id)

@@ -88,7 +88,7 @@
 | 75 | 权限 | 规则持久化（always → SQLite；once → 内存；前端 approve/deny UI） | P3 | ⬜ |
 | 76 | 权限 | 全局权限模式（default / bypassPermissions / dontAsk 三档） | P3 | ⬜ |
 | 77 | 权限 | Subagent 权限继承（子 Agent 权限 ⊆ 父 Agent，spawn 时裁剪） | P3 | ⬜ |
-| 78 | 用户体验 | 用户 Abort（WebSocket abort → asyncio.Task.cancel()） | P2 | ⬜ |
+| 78 | 用户体验 | 用户 Abort（WebSocket abort → asyncio.Task.cancel()） | P2 | ✅ |
 | 79 | 协作 | 自定义工作流（关键词驱动角色链，done_keyword 推进） | M0 | ✅ |
 | 80 | 协作 | 并行任务池（TICKETS 格式，多 Bot 队列认领） | M0 | ✅ |
 | 81 | 协作 | @all 顺序协作（同角色竞速，不同角色顺序执行） | M0 | ✅ |
@@ -103,7 +103,7 @@
 | 90 | 平台 | 可视化工作流编排（n8n 风格拖拽） | M4 | ⬜ |
 | 91 | 平台 | Azure OpenAI 企业认证（Device Code Flow + token refresh） | M4 | ⬜ |
 
-> ✅ 已完成：75 项　　⬜ 未做：16 项　　合计：91 项
+> ✅ 已完成：76 项　　⬜ 未做：15 项　　合计：91 项
 
 ---
 
@@ -700,7 +700,7 @@ P3（精细化）:
 | 3 | 压缩后文件重注入（从摘要提取） | ➡ | S | ✅ | `compact.build_file_contents_for_reinject()`：modified 优先，最多 5 文件 / 25K 预算，相对路径解析到 `bot_ws(bot_id)`；`_build_reinject()` 组合三段内容 |
 | 4 | 工具并发执行 | ➡ | M | ⬜ | 同一轮 tool_calls 中，只读工具（`read_file` / `list_workspace` / `read_local_file`）用 `asyncio.gather()` 并行；写入工具串行；改动 `tool_loop_v1.py` tool 执行循环 |
 | 5 | Hook 条件过滤 | ➡ | M | ✅ | `_HookEntry(fn, condition)` 存储条件；`_condition_matches()` 用 fnmatch glob 匹配工具名+任意参数值；`add_before/after_hook(condition=)` 新增关键字参数；向后兼容（condition=None = 始终运行） |
-| 6 | 用户 Abort | ➡ | M | ⬜ | WebSocket 接收 `abort` 消息 → `asyncio.Task.cancel()` 终止当前 `run()`；广播 `stream_aborted` 事件；改动 `main.py` dispatch + `tool_loop_v1.py` |
+| 6 | 用户 Abort | ➡ | M | ✅ | `_running_tasks[group_id]` 存 dispatch task；WS `abort` 消息 → `task.cancel()`；`tool_loop_v1` 捕获 `CancelledError` 广播 `stream_aborted` 后 re-raise；`run_shell` 捕获后 `proc.kill()` 再 re-raise |
 | 7 | react_v1 插件 | ⬆ | L | ⬜ | Thought → Action → Observation 推理循环；提升复杂任务推理质量；需新插件 + manifest |
 | 8 | 权限系统：基础规则模型 | ➡ | M | ⬜ | `Rule = {permission, pattern, action}` 三态 allow/ask/deny；`Ruleset` 挂 Bot 配置；独立模块 `permissions.py` |
 | 9 | 权限系统：决策 Pipeline | ➡ | M | ⬜ | 敏感路径兜底 → deny 规则 → allow 规则 → ask；ask 时广播事件挂起工具调用，等用户 approve/deny WebSocket 回复 |
