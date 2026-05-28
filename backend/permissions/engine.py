@@ -1,41 +1,21 @@
 """
-permissions.py — Rule model, decision pipeline, and ask-suspension mechanism.
+Decision pipeline and ask-suspension mechanism.
 
-Decision order per tool call:
+Pipeline order per tool call:
   1. bypassPermissions mode → allow
   2. deny rules → deny
   3. allow rules → allow
   4. dontAsk mode → deny
-  5. ask → suspend, broadcast permission_request, await user response
-  6. default → allow (no matching rule)
+  5. sub-agent (spawn_depth > 0) → deny (can't show UI)
+  6. ask → suspend, broadcast permission_request, await user response
+  7. default fallthrough → allow
 """
 import asyncio
 import fnmatch
 import uuid
-from dataclasses import dataclass, field
 from typing import Any
 
-
-@dataclass
-class Rule:
-    tool_pattern: str
-    args_pattern: str = ""
-    action: str = "allow"   # "allow" | "deny"
-    id: int | None = None   # DB row id; None for in-memory once-rules
-
-
-@dataclass
-class Ruleset:
-    rules: list[Rule] = field(default_factory=list)
-    mode: str = "default"   # "default" | "bypassPermissions" | "dontAsk"
-
-
-@dataclass
-class _PendingRequest:
-    future: "asyncio.Future[tuple[bool, str]]"
-    bot_id: int
-    tool_name: str
-    arguments: dict
+from .models import Rule, Ruleset, _PendingRequest
 
 
 # In-memory "once" rules per bot_id (cleared on process restart)
@@ -89,15 +69,15 @@ async def check(
         if rule.action == "allow" and _matches(rule, tool_name, arguments):
             return {"action": "allow"}
 
-    # 4. dontAsk → deny without asking
+    # 4. dontAsk → deny without prompting
     if ruleset.mode == "dontAsk":
         return {"action": "deny", "reason": "dontAsk 模式：未授权工具调用被拒绝"}
 
-    # 5. Sub-agents can't show UI — treat unknown as deny
+    # 5. Sub-agents can't show UI
     if spawn_depth > 0:
         return {"action": "deny", "reason": "子 Agent 无法请求权限：工具未预授权"}
 
-    # 6. ask — suspend execution and wait for user
+    # 6. ask — suspend and wait for user response
     request_id = str(uuid.uuid4())
     future: asyncio.Future = asyncio.get_event_loop().create_future()
     _pending[request_id] = _PendingRequest(

@@ -17,7 +17,6 @@ import workspace as _ws
 from skills import run_skill
 import executors.compact as compact
 import permissions
-from database import save_permission_rule as _save_permission_rule
 
 # ---------------------------------------------------------------------------
 # Platform detection
@@ -353,7 +352,7 @@ async def _permission_check_hook(name: str, arguments: dict, context: dict) -> d
 
     if result.get("persist_rule"):
         rule = result["persist_rule"]
-        asyncio.create_task(_save_permission_rule(
+        asyncio.create_task(permissions.save_rule(
             context.get("bot_id"), rule.tool_pattern, rule.args_pattern, rule.action
         ))
 

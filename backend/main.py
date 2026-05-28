@@ -6,7 +6,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from database import init_db, get_db, get_member, get_members, get_group, save_message, get_messages, save_permission_rule
+from database import init_db, get_db, get_member, get_members, get_group, save_message, get_messages
 import permissions
 from ws_manager import manager
 from models import AddMemberRequest  # noqa: keep models importable via main
@@ -131,7 +131,7 @@ async def websocket_endpoint(websocket: WebSocket, group_id: int, member_id: int
                 persistence = payload.get("persistence", "once")  # "once" | "always"
                 req = permissions.resolve(request_id, approved, persistence)
                 if req and approved and persistence == "always":
-                    asyncio.create_task(save_permission_rule(
+                    asyncio.create_task(permissions.save_rule(
                         req.bot_id, req.tool_name, "", "allow"
                     ))
                 continue

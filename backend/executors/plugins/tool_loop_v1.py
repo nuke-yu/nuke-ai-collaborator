@@ -12,7 +12,7 @@ from executors.plugins.workspace_tools import (
     _build_skills_xml, _with_personality,
     register_workspace_tools,
 )
-from database import get_db, save_message, get_messages, load_permission_rules
+from database import get_db, save_message, get_messages
 import permissions
 from ai_client import call_ai_once, call_ai_stream_messages, AIError, AIContextOverflowError
 from memory import get_memory_context, add_to_chroma, maybe_summarize
@@ -207,11 +207,8 @@ class ToolLoopV1(BotExecutor):
             _ruleset = ctx.ruleset
         else:
             perm_mode = (bot.get("executor_config") or {}).get("permission_mode", "default")
-            raw_rules = await load_permission_rules(bot["id"])
-            _ruleset = permissions.Ruleset(
-                rules=[permissions.Rule(**r) for r in raw_rules],
-                mode=perm_mode,
-            )
+            db_rules = await permissions.load_rules(bot["id"])
+            _ruleset = permissions.Ruleset(rules=db_rules, mode=perm_mode)
 
         history, user_msg = build_context_message(ctx.user_message, ctx.sender["name"], ctx.history)
         base = _with_personality(
