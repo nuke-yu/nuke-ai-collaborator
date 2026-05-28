@@ -39,6 +39,7 @@ _WORKSPACE_TOOLS = [
             "properties": {"path": {"type": "string", "description": "相对于工作区根目录的路径"}},
             "required": ["path"],
         },
+        concurrency_safe=True,
     ),
     ToolDef(
         name="write_file",
@@ -56,6 +57,7 @@ _WORKSPACE_TOOLS = [
         name="list_workspace",
         description="列出 Bot 工作区的目录结构",
         parameters={"type": "object", "properties": {}},
+        concurrency_safe=True,
     ),
     ToolDef(
         name="run_skill",
@@ -91,6 +93,7 @@ _WORKSPACE_TOOLS = [
             "properties": {"path": {"type": "string", "description": "文件的绝对路径"}},
             "required": ["path"],
         },
+        concurrency_safe=True,
     ),
     ToolDef(
         name="write_local_file",

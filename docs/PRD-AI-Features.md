@@ -66,7 +66,7 @@
 | 53 | 工具 | 代码执行沙箱（Skill 目录结构 + run_shell，跨平台） | M3 | ✅ |
 | 54 | 工具 | Skill `allowed-tools` 白名单（限制 skill 可调用工具范围） | M3 | ✅ |
 | 55 | 工具 | Skill `model` frontmatter（skill 执行时覆盖模型选择） | M4 | ✅ |
-| 56 | 工具 | 工具并发执行（只读工具 asyncio.gather，写入工具串行） | P2 | ⬜ |
+| 56 | 工具 | 工具并发执行（只读工具 asyncio.gather，写入工具串行） | P2 | ✅ |
 | 57 | 工具 | Hook 条件过滤（`if:` 正则匹配工具名+参数，不匹配跳过 hook） | P2 | ⬜ |
 | 58 | 工具 | 代码执行沙箱（容器隔离，Docker 每次起/销毁） | M4 | ⬜ |
 | 59 | 压缩 | 工具结果 Head+Tail 截断（20K，各 10K） | P1 | ✅ |
@@ -103,7 +103,7 @@
 | 90 | 平台 | 可视化工作流编排（n8n 风格拖拽） | M4 | ⬜ |
 | 91 | 平台 | Azure OpenAI 企业认证（Device Code Flow + token refresh） | M4 | ⬜ |
 
-> ✅ 已完成：73 项　　⬜ 未做：18 项　　合计：91 项
+> ✅ 已完成：74 项　　⬜ 未做：17 项　　合计：91 项
 
 ---
 

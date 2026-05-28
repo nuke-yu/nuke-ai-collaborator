@@ -82,6 +82,12 @@ async def execute(name: str, arguments: dict, context: dict | None = None) -> st
     return tool_result
 
 
+def is_concurrency_safe(name: str) -> bool:
+    """Return True if the tool is read-only and safe to run in parallel with other safe tools."""
+    td = _defs.get(name)
+    return td.concurrency_safe if td else False
+
+
 def get_schemas(names: list[str]) -> list[dict]:
     """Return OpenAI-format tool schemas for the given tool names."""
     result = []

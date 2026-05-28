@@ -444,91 +444,130 @@ class ToolLoopV1(BotExecutor):
                             full_text = f"[循环保护] 连续 {_consecutive_tool_only} 次工具调用，已终止循环"
                             break
                         messages.append(result["assistant_message"])
-                        for call in result["calls"]:
-                            await ctx.broadcaster.broadcast(ctx.group_id, {
-                                "type": "tool_call", "temp_id": temp_id,
-                                "tool": call["name"], "args": call["arguments"],
-                            })
-                            tool_result = await tool_executor.execute(
-                                call["name"], call["arguments"], context=execution_ctx
-                            )
-                            # Track file reads/writes for cross-compaction persistence
-                            _fpath = call["arguments"].get("path", "")
-                            if _fpath:
-                                if call["name"] in compact._FILE_WRITE_TOOLS:
-                                    _file_tracker[_fpath] = "modified"
-                                elif call["name"] in compact._FILE_READ_TOOLS:
-                                    _file_tracker.setdefault(_fpath, "read")
-                            # skill 指定了 max_iterations → 动态扩展上限
-                            if call["name"] == "run_skill":
-                                skill_max = execution_ctx.pop("skill_max_iterations", None)
-                                if skill_max and skill_max > max_iter:
-                                    max_iter = skill_max
-                                # learns: true → 注入提示，要求 bot 写执行总结到 draft/
-                                skill_learns = execution_ctx.pop("skill_learns", None)
-                                if skill_learns:
-                                    messages.append({
-                                        "role": "user",
-                                        "content": (
-                                            f"[系统] 技能「{skill_learns}」声明了 learns: true。"
-                                            f"请将本次执行的关键发现、规律或改进点总结为一个新技能，"
-                                            f"用 write_file 写入 `skills/learned/draft/{skill_learns}-learned.md`，"
-                                            f"使用标准 frontmatter（name/description/layer: learned/status: draft）。"
-                                        ),
-                                    })
-                                # context: fork → run skill in isolated sub-agent AI call
-                                if tool_result == "__SKILL_FORK__":
-                                    fork_info = execution_ctx.pop("skill_fork", {})
-                                    fork_name = fork_info.get("name", "unknown")
-                                    await ctx.broadcaster.broadcast(ctx.group_id, {
-                                        "type": "skill_fork_start", "temp_id": temp_id,
-                                        "member_id": bot["id"], "skill_name": fork_name,
-                                    })
-                                    fork_task = fork_info.get("args") or execution_ctx.get("user_message", "")
-                                    fork_allowed = fork_info.get("allowed_tools", [])
-                                    fork_schemas = (
-                                        [s for s in tool_schemas if s.get("name") in fork_allowed]
-                                        if fork_allowed else None
-                                    )
-                                    fork_model = fork_info.get("model") or model_name
-                                    tool_result = await _run_fork_skill(
-                                        fork_info.get("content", ""),
-                                        fork_task,
-                                        provider, fork_model, temperature,
-                                        tool_schemas=fork_schemas,
-                                    )
-                                    await ctx.broadcaster.broadcast(ctx.group_id, {
-                                        "type": "skill_fork_end", "temp_id": temp_id,
-                                        "member_id": bot["id"], "skill_name": fork_name,
-                                        "result": tool_result[:300],
-                                    })
-                            # Detect draft sentinel from write_file redirect
-                            display_result = tool_result
-                            if (call["name"] == "write_file"
-                                    and tool_result.startswith("__DRAFT_WRITTEN__:")):
-                                skill_name = tool_result.split(":", 1)[1]
-                                display_result = f"已写入草稿技能「{skill_name}」，等待用户审批后生效。"
+                        calls = result["calls"]
+
+                        # Parallel execution when every call in this round is concurrency-safe
+                        _run_parallel = (
+                            len(calls) > 1
+                            and all(tool_executor.is_concurrency_safe(c["name"]) for c in calls)
+                        )
+                        if _run_parallel:
+                            for call in calls:
                                 await ctx.broadcaster.broadcast(ctx.group_id, {
-                                    "type": "skill_draft_added",
-                                    "member_id": bot["id"],
-                                    "skill_name": skill_name,
-                                    "message": f"{bot['name']} 写入了新的自学技能「{skill_name}」，请在 Skill 管理面板审批。",
+                                    "type": "tool_call", "temp_id": temp_id,
+                                    "tool": call["name"], "args": call["arguments"],
                                 })
-                            tool_records.append({
-                                "name": call["name"],
-                                "args": call["arguments"],
-                                "result": display_result,
-                            })
-                            messages.append({
-                                "role": "tool",
-                                "tool_call_id": call["id"],
-                                "name": call["name"],
-                                "content": display_result,
-                            })
-                            await ctx.broadcaster.broadcast(ctx.group_id, {
-                                "type": "tool_result", "temp_id": temp_id,
-                                "tool": call["name"], "result": display_result[:300],
-                            })
+                            raw_results = await asyncio.gather(*[
+                                tool_executor.execute(c["name"], c["arguments"], context=execution_ctx)
+                                for c in calls
+                            ])
+                            for call, tool_result in zip(calls, raw_results):
+                                _fpath = call["arguments"].get("path", "")
+                                if _fpath and call["name"] in compact._FILE_READ_TOOLS:
+                                    _file_tracker.setdefault(_fpath, "read")
+                                tool_records.append({
+                                    "name": call["name"],
+                                    "args": call["arguments"],
+                                    "result": tool_result,
+                                })
+                                messages.append({
+                                    "role": "tool",
+                                    "tool_call_id": call["id"],
+                                    "name": call["name"],
+                                    "content": tool_result,
+                                })
+                                await ctx.broadcaster.broadcast(ctx.group_id, {
+                                    "type": "tool_result", "temp_id": temp_id,
+                                    "tool": call["name"], "result": tool_result[:300],
+                                })
+                        else:
+                            # Serial execution — full post-processing per call
+                            # (skill side-effects, draft sentinel, fork, etc.)
+                            for call in calls:
+                                await ctx.broadcaster.broadcast(ctx.group_id, {
+                                    "type": "tool_call", "temp_id": temp_id,
+                                    "tool": call["name"], "args": call["arguments"],
+                                })
+                                tool_result = await tool_executor.execute(
+                                    call["name"], call["arguments"], context=execution_ctx
+                                )
+                                # Track file reads/writes for cross-compaction persistence
+                                _fpath = call["arguments"].get("path", "")
+                                if _fpath:
+                                    if call["name"] in compact._FILE_WRITE_TOOLS:
+                                        _file_tracker[_fpath] = "modified"
+                                    elif call["name"] in compact._FILE_READ_TOOLS:
+                                        _file_tracker.setdefault(_fpath, "read")
+                                # skill 指定了 max_iterations → 动态扩展上限
+                                if call["name"] == "run_skill":
+                                    skill_max = execution_ctx.pop("skill_max_iterations", None)
+                                    if skill_max and skill_max > max_iter:
+                                        max_iter = skill_max
+                                    # learns: true → 注入提示，要求 bot 写执行总结到 draft/
+                                    skill_learns = execution_ctx.pop("skill_learns", None)
+                                    if skill_learns:
+                                        messages.append({
+                                            "role": "user",
+                                            "content": (
+                                                f"[系统] 技能「{skill_learns}」声明了 learns: true。"
+                                                f"请将本次执行的关键发现、规律或改进点总结为一个新技能，"
+                                                f"用 write_file 写入 `skills/learned/draft/{skill_learns}-learned.md`，"
+                                                f"使用标准 frontmatter（name/description/layer: learned/status: draft）。"
+                                            ),
+                                        })
+                                    # context: fork → run skill in isolated sub-agent AI call
+                                    if tool_result == "__SKILL_FORK__":
+                                        fork_info = execution_ctx.pop("skill_fork", {})
+                                        fork_name = fork_info.get("name", "unknown")
+                                        await ctx.broadcaster.broadcast(ctx.group_id, {
+                                            "type": "skill_fork_start", "temp_id": temp_id,
+                                            "member_id": bot["id"], "skill_name": fork_name,
+                                        })
+                                        fork_task = fork_info.get("args") or execution_ctx.get("user_message", "")
+                                        fork_allowed = fork_info.get("allowed_tools", [])
+                                        fork_schemas = (
+                                            [s for s in tool_schemas if s.get("name") in fork_allowed]
+                                            if fork_allowed else None
+                                        )
+                                        fork_model = fork_info.get("model") or model_name
+                                        tool_result = await _run_fork_skill(
+                                            fork_info.get("content", ""),
+                                            fork_task,
+                                            provider, fork_model, temperature,
+                                            tool_schemas=fork_schemas,
+                                        )
+                                        await ctx.broadcaster.broadcast(ctx.group_id, {
+                                            "type": "skill_fork_end", "temp_id": temp_id,
+                                            "member_id": bot["id"], "skill_name": fork_name,
+                                            "result": tool_result[:300],
+                                        })
+                                # Detect draft sentinel from write_file redirect
+                                display_result = tool_result
+                                if (call["name"] == "write_file"
+                                        and tool_result.startswith("__DRAFT_WRITTEN__:")):
+                                    skill_name = tool_result.split(":", 1)[1]
+                                    display_result = f"已写入草稿技能「{skill_name}」，等待用户审批后生效。"
+                                    await ctx.broadcaster.broadcast(ctx.group_id, {
+                                        "type": "skill_draft_added",
+                                        "member_id": bot["id"],
+                                        "skill_name": skill_name,
+                                        "message": f"{bot['name']} 写入了新的自学技能「{skill_name}」，请在 Skill 管理面板审批。",
+                                    })
+                                tool_records.append({
+                                    "name": call["name"],
+                                    "args": call["arguments"],
+                                    "result": display_result,
+                                })
+                                messages.append({
+                                    "role": "tool",
+                                    "tool_call_id": call["id"],
+                                    "name": call["name"],
+                                    "content": display_result,
+                                })
+                                await ctx.broadcaster.broadcast(ctx.group_id, {
+                                    "type": "tool_result", "temp_id": temp_id,
+                                    "tool": call["name"], "result": display_result[:300],
+                                })
                         # Post-tool-round: 3-strategy compaction pipeline
                         # Strategy 1: clear stale tool results (count-based)
                         messages = compact.apply_tool_result_microcompact(messages)

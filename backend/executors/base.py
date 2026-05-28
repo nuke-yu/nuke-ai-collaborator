@@ -9,6 +9,7 @@ class ToolDef:
     name: str
     description: str
     parameters: dict = field(default_factory=lambda: {"type": "object", "properties": {}})
+    concurrency_safe: bool = False  # True = read-only, safe to run in parallel with other safe tools
 
 
 @dataclass
@@ -36,7 +37,7 @@ class PluginManifest:
     def to_dict(self) -> dict:
         return {
             "description": self.description,
-            "tools": [{"name": t.name, "description": t.description} for t in self.tools],
+            "tools": [{"name": t.name, "description": t.description, "concurrency_safe": t.concurrency_safe} for t in self.tools],
             "memory_layers": self.memory_layers,
             "workspace": {
                 "startup_files": self.workspace.startup_files,
