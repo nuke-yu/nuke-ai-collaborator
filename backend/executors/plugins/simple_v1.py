@@ -73,6 +73,15 @@ class SimpleV1(BotExecutor):
             })
             return ExecutionResult(full_text="", msg_id=None)
 
+        # Sub-agents: close stream animation then return without DB/memory ops
+        if ctx.spawn_depth > 0:
+            await ctx.broadcaster.broadcast(ctx.group_id, {
+                "type": "stream_end", "temp_id": temp_id, "id": None,
+                "member_id": bot["id"], "sender_name": bot["name"],
+                "preview": full_text[:100], "created_at": "",
+            })
+            return ExecutionResult(full_text=full_text, msg_id=None)
+
         async with get_db() as db:
             msg_id = await save_message(db, ctx.group_id, bot["id"], full_text)
             recent = await get_messages(db, ctx.group_id)

@@ -373,8 +373,13 @@ class ReactV1(BotExecutor):
             })
             return ExecutionResult(full_text="", msg_id=None)
 
-        # Sub-agents return early — no DB, no memory, no broadcasts
+        # Sub-agents: close stream animation then return without DB/memory ops
         if ctx.spawn_depth > 0:
+            await ctx.broadcaster.broadcast(ctx.group_id, {
+                "type": "stream_end", "temp_id": temp_id, "id": None,
+                "member_id": bot["id"], "sender_name": bot["name"],
+                "preview": full_text[:100], "created_at": "",
+            })
             return ExecutionResult(full_text=full_text, msg_id=None)
 
         async with get_db() as db:
