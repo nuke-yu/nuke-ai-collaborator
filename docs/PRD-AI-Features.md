@@ -43,6 +43,7 @@ Bot = 身份 × 人格 × 智能 × 记忆 × 知识 × 工作区 × 工具 × �
 |---|---|---|---|
 | 流式输出（打字机效果） | M0 | ✅ 已完成 | SSE + WebSocket 逐 token 推送 |
 | 多模型支持（OpenAI / Ollama / Claude） | M0 | ✅ 已完成 | 后端多 provider，前端可选模型 |
+| API 限流重试 + fallback_model | P1 | ✅ 已完成 | `AIRateLimitError(wait_seconds)` 子类；`_parse_retry_after` 解析 `retry-after-ms` / `retry-after` header（大小写不敏感）；指数退避 `max(server_hint, 2^attempt)`，最多 3 次重试；`call_ai_once` 新增 `fallback_model` 参数，主模型耗尽重试后自动切换备用模型 |
 | 图片理解 | M4 | ⬜ 未做 | 上传图片时携带 URL 给视觉模型 |
 
 ---
@@ -59,6 +60,7 @@ Bot 的推理循环、工具调用方式、记忆使用策略均由执行引擎�
 | `simple_v1` 插件 | M1 | ✅ 已完成 | 现有逻辑提取：单次 AI 调用 + 流式输出 + 自动记忆积累 |
 | `tool_loop_v1` 插件 | M1 | ✅ 已完成 | 多轮工具调用循环（≤10 轮）：AI → 工具请求 → 结果注入 → 继续，直至完成 |
 | Context Compaction（上下文自动压缩） | M1 | ✅ 已完成 | AutoCompact 5 策略（参考 Claude Code）：Strategy 1 计数式微压缩 / Strategy 2 Snip / Strategy 3 Session Memory 增量摘要 / Strategy 4 九段结构化 AI 全量摘要 / Strategy 5 Cached Microcompact（Claude only）；电路熔断器；DB 软删除归档；broadcast strategy 字段 |
+| 死循环保护（Doom Loop） | P1 | ✅ 已完成 | `_DOOM_LOOP_THRESHOLD = 5`；`_consecutive_tool_only` 计数器在工具循环内逐轮递增，AI 返回文本时归零；连续 5 次纯工具调用后强制 break，回复 `[循环保护] 连续 N 次工具调用，已终止循环` |
 | `react_v1` 插件 | M4 | ⬜ 未做 | ReAct 推理循环：Thought → Action → Observation |
 
 **插件 manifest 示例：**
@@ -191,7 +193,8 @@ PM / 用户 → 任何时候读 BOARD.md，全局进度一目了然
 | **四层 Skill 架构** | | | |
 | L1 General Skills（系统级通用技能） | M2 | ✅ 已完成 | `system/skills/` 5 个内置技能：read-file / write-file / search-code / create-skill / run-tests；`layer: system` 只读 |
 | L2 Group Skills（群组领域技能） | M2 | ✅ 已完成 | `group_{id}/shared/skills/` 目录，群组创建时自动初始化（空目录，用户 / Bot 可写入领域技能） |
-| L3 Role Skills（角色专属技能） | M2 | ✅ 已完成 | `roles/{role}/skills/` 预置技能：developer(4) / pm(2) / qa(2)；`list_skills_all()` 运行时按 role 读取，跟角色走不跟 Bot 走 |
+| L3 Role Skills（角色专属技能） | M2 | ✅ 已完成 | `roles/{role}/skills/` 预置技能：developer(4) / pm(2) / qa(2)；跟角色走不跟 Bot 走 |
+| L1/L2/L3 运行时注入修复 | P1 | ✅ 已完成 | `tool_loop_v1` 原使用 `list_skills(bot_id)`（仅 personal 层），改为 `list_skills_all(bot_id, group_id, role)`；`load_always_skills` 同步升级，新增 `_skills_dir_for_layer()` 按层解析路径，L1/L2/L3 always-skill 可正确加载全文 |
 | L4 Learned Skills 草稿审批机制 | M3 | ✅ 已完成 | `write_file` 拦截 `learned/active/` 写入并重定向到 `draft/`；bot 直接写 `draft/` 也支持；写入后广播 `skill_draft_added` 事件；system prompt 内置写法指令；`approve/reject` API + SkillPanel UI 完整 |
 | `learns: true` frontmatter | M3 | ✅ 已完成 | `_parse_frontmatter` 解析 `learns` 字段；`run_skill` 执行后在 `ctx` 设 `skill_learns` 标记；`tool_loop_v1` 检测到标记后向 messages 注入提示，要求 bot 把执行总结 write_file 到 `learned/draft/` |
 | **Skill 生命周期模块重构** | M3 | ✅ 已完成 | 所有 skill 逻辑从 `workspace.py` 抽取到独立 `backend/skills/` 包：`constants`（路径常量）/ `metadata`（frontmatter 解析）/ `discovery`（四层扫描）/ `lifecycle`（状态管理 + 草稿审批）/ `loader`（加载 + 执行）；`workspace.py` 只保留文件 I/O；`workspace_routes.py` 和 `tool_loop_v1.py` 改用 `from skills import …` |
@@ -314,7 +317,8 @@ Bot 发现可复用规律
 | run_shell `background` 参数 | M1 | ✅ 已完成 | `background: true` 后台启动进程（uvicorn 等长驻服务），立即返回 PID 不阻塞 |
 | Skill `max_iterations` frontmatter | M1 | ✅ 已完成 | skill 文件可声明 `max_iterations: 25`，调用时动态扩展执行上限，支持长流程任务 |
 | beforeToolCall 安全钩子 | M1 | ✅ 已完成 | 工具调用前拦截危险命令，内置黑名单（rm -rf /、mkfs、shutdown 等），可扩展（参考 GSD-2） |
-| afterToolCall 结果钩子 | M3 | ✅ 已完成 | `tool_executor.add_after_hook(hook)`，签名 `async (name, arguments, result, context) -> str | None`；链式执行，返回新字符串则替换结果，返回 None 保持不变；内置 `_default_output_truncator`：单条工具结果超 20,000 字符时截断并附注省略字符数，防止 context window 被大输出塞满 |
+| 敏感路径兜底保护 | P1 | ✅ 已完成 | `_is_sensitive_path()` 防护 `read_local_file` / `write_local_file`；前缀匹配（`~/.ssh` / `~/.aws` / `~/.gnupg` / `~/.config/gcloud` / `~/.kube`，含 `os.sep` 边界防止 `.awslike` 误判）；filename fnmatch（`.env.*` / `*.pem` / `*.key` / `id_rsa*` / `id_ed25519*` / `credentials` / `.netrc` / `*.pfx` / `*.p12`，大小写不敏感）；allowlist（`.env.example/.sample/.template`，大小写不敏感）；`.resolve()` 阻断 `..` 路径穿越与 symlink 绕过 |
+| afterToolCall 结果钩子 | M3 | ✅ 已完成 | `tool_executor.add_after_hook(hook)`，签名 `async (name, arguments, result, context) -> str | None`；链式执行，返回新字符串则替换结果，返回 None 保持不变；内置 `_default_output_truncator`：单条工具结果超 20,000 字符时截断为 head(10K)+tail(10K)，中间插 `[... N 字符已省略 ...]`，防止 context window 被大输出塞满 |
 | 代码执行沙箱（subprocess） | M3 | ✅ 已完成（重新定义） | 对齐 claude-code / opencode 设计，不直接执行 `.py`；改为 skill 目录结构（`SKILL.md` + 伴随脚本），`processor.py` 处理管道支持 `` ```! `` / `` !`cmd` `` 在 prompt 中嵌入 shell 命令并在发给 AI 前执行替换，AI 通过 `run_shell` 执行目录内脚本；flat `.py` stub 提示路径。无需 subprocess 沙箱，天然跨平台 |
 | 代码执行沙箱（容器隔离） | M4 | ⬜ 未做 | 用 Docker 容器执行代码，每次执行起容器、执行完销毁；文件系统挂载限制为 `bot_{id}/workspace/`，网络可选隔离；替换 M3 subprocess 方案 |
 
@@ -433,7 +437,7 @@ Bot 的知识来自两个独立来源，运行时同时检索：
 
 | 问题 | 当前实现 | 参考方案 | 优先级 |
 |---|---|---|---|
-| 工具结果截断丢尾部 | 超 20K 整体砍头，尾部关键信号（exit code / pass/fail）丢失 | gsd-2: head+tail 各 1K，中间插 `[... N more ...]` | P1 ✅ |
+| 工具结果截断丢尾部 | 超 20K 整体砍头，尾部关键信号（exit code / pass/fail）丢失 | gsd-2: head+tail 各 10K，中间插 `[... N more ...]` | P1 ✅ |
 | 跨 run 历史不压缩 | Compaction 只在 tool loop 内触发，两次对话之间历史无限增长 | opencode / gsd-2: post-API 异步检查，每次 run 结束都评估 | P1 ✅ |
 | 保留策略粗糙 | 固定保留末尾 6 条消息 | claude-code: effectiveWindow - 20K - 13K 自适应阈值；snip 保留最近 4 对 | P2 ✅ |
 | 压缩摘要质量低 | 自由生成摘要，无结构约束 | claude-code: 9 段结构化模板（Primary Request / Key Concepts / Files / Errors / Problem Solving / All User Messages / Pending / Current Work / Next Step）| P2 ✅ |
@@ -449,8 +453,8 @@ Bot 的知识来自两个独立来源，运行时同时检索：
 
 **1. 工具结果 Head+Tail 截断** ✅
 
-`_TOOL_RESULT_MAX_CHARS = 2_000`，`_default_output_truncator` 改为 head(1K) + tail(1K)，中间插 `[... N 字符已省略 ...]`。
-- 文件：`executors/plugins/tool_loop_v1.py`
+`_TOOL_RESULT_MAX_CHARS = 20_000`，`_default_output_truncator` 改为 head(10K) + tail(10K)，中间插 `[... N 字符已省略 ...]`。
+- 文件：`executors/plugins/workspace_tools.py`
 
 **2. 跨 run 历史压缩（Pre-run Compaction）** ✅
 
@@ -554,7 +558,7 @@ POST_COMPACT_FILES_BUDGET = 25_000
 
 ```
 P1（稳定性）✅ 全部完成:
-  1. Head+Tail 截断     ✅ tool_loop_v1.py _default_output_truncator，2K chars head+tail
+  1. Head+Tail 截断     ✅ workspace_tools.py _default_output_truncator，20K chars head+tail（各 10K）
   2. 溢出恢复           ✅ ai_client.py AIContextOverflowError + compact.compact_conversation 三点覆盖
   3. 跨 run 压缩检查    ✅ pre-run Strategy 1 + compact_conversation，20K token 阈值
 
@@ -570,11 +574,33 @@ AutoCompact 5 策略（参考 Claude Code，2026-05-27）✅:
   Strategy 4  AI 全量摘要       ✅ compact._ai_compact()，9 段结构化 + format_compact_summary()
   Strategy 5  Cached Microcompact ✅ ai_client._once_claude() context_management + beta header，仅 Claude provider
 
-P3（精细化）- 待定:
-  6. Token 估算精度提升 ← 改用 JSON 序列化（opencode 方式）
-  7. 压缩后文件重注入   ← 从摘要提取文件列表 + workspace 读取（claude-code 方式）
-  8. 文件操作跟踪       ← 工具调用钩子记录 read/write 路径（gsd-2 方式）
+P3（精细化）:
+  6. Token 估算精度提升   ✅ compact.estimate_tokens() 已用 json.dumps 序列化长度 // 4（opencode 方式）
+  7. 文件操作跨压缩跟踪   ✅ tool_loop_v1 _file_tracker dict + compact.build_file_tracker_xml()，
+                             afterToolCall 钩子记录 read/write 路径，压缩时写入 XML 重注入（gsd-2 方式）
+  8. 压缩后文件重注入（从摘要提取）← 未做：启动文件（AGENT/BOOTSTRAP/IDENTITY/MEMORY）已随 context_text 重注入；
+                                     但「从摘要提取最近操作文件并重读内容」（claude-code 方式）尚未实现；
+                                     文件：compact.py + tool_loop_v1.py _build_reinject()
 ```
+
+---
+
+---
+
+## 待实现 Feature 清单（按影响面 × 实现成本排序）
+
+> 影响面：⬆ 高 / ➡ 中 / ⬇ 低　实现成本：S 小 / M 中 / L 大 / XL 极大
+
+| 优先 | 功能 | 影响面 | 成本 | 说明 |
+|------|------|--------|------|------|
+| 1 | 图片理解 | ⬆ | S | `call_ai_once` 携带图片 URL，视觉模型直接可用；改动集中在 `ai_client.py` + `main.py` 消息解析 |
+| 2 | 定时任务（cron / heartbeat） | ⬆ | M | Bot 周期性自主执行（日报、监控、定时提醒）；需调度器 + bootstrap-only 轻量执行模式 |
+| 3 | 压缩后文件重注入（从摘要提取） | ➡ | S | 当前仅重注入固定启动文件；缺：从压缩摘要提取「最近操作过的文件路径」并重读内容注入（claude-code 方式）；改动 `compact.py` + `tool_loop_v1._build_reinject()` |
+| 4 | react_v1 插件 | ⬆ | L | Thought → Action → Observation 推理循环；提升复杂任务推理质量；需新插件 + manifest |
+| 5 | 项目知识库集成 | ⬆ | L | Bot 创建时绑定项目知识来源；对话时双轨检索（项目 KB + 个人记忆）；需向量库 + 检索管道 |
+| 6 | 代码执行沙箱（容器隔离） | ➡ | L | Docker 容器执行，每次起/销毁；挂载 `bot_{id}/workspace/`；替换现有 run_shell 方案 |
+| 7 | 可视化工作流编排（n8n 风格） | ➡ | XL | 拖拽配置多 Bot 协作流程；纯 UX 增强，功能层已支持 |
+| 8 | Azure OpenAI 企业认证 | ⬇ | M | Device Code Flow + token refresh；企业内网场景专用；改动 `ai_client.py` / `main.py` / 前端 |
 
 ---
 
