@@ -95,6 +95,8 @@ async def approve_skill(member_id: int, skill_name: str):
     if not bot or bot["type"] != "bot":
         raise HTTPException(404, "Bot not found")
     result = approve_draft_skill(member_id, skill_name)
+    if result.startswith("["):
+        raise HTTPException(404, result)
     return {"ok": True, "message": result}
 
 
@@ -173,4 +175,6 @@ async def reject_skill(member_id: int, skill_name: str):
     if not bot or bot["type"] != "bot":
         raise HTTPException(404, "Bot not found")
     result = reject_draft_skill(member_id, skill_name)
+    if result.startswith("["):
+        raise HTTPException(404, result)
     return {"ok": True, "message": result}

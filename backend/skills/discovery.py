@@ -79,9 +79,10 @@ def list_skills_all(bot_id: int, group_id: int | None = None,
         for s in _scan_dir(ROLES_ROOT / role / "skills", "role"):
             merged[s["name"]] = s
 
-    # L4 Learned/active
+    # L4 Learned/active — directory location is the source of truth for status
     ws = bot_ws(bot_id)
     for s in _scan_dir(ws / "skills" / "learned" / "active", "learned"):
+        s["status"] = "active"
         merged[s["name"]] = s
 
     # Personal (overrides all earlier layers)
