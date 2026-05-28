@@ -121,7 +121,7 @@ workspaces/
 | BOOTSTRAP.md | 每次 Bot 响应时 | user 消息前缀 |
 | IDENTITY.md | 每次 Bot 响应时 | user 消息前缀 |
 | SOUL.md | Bot 主动调用 read_file 时 | 工具调用（懒加载）|
-| MEMORY.md | Bot 主动调用 read_file 时 | 工具调用（懒加载）|
+| MEMORY.md | 每次 Bot 响应时 | user 消息前缀（startup_files 注入，write_file 写保护）|
 | skills/name/SKILL.md | AI 决定调用该技能时 | run_skill 工具（懒加载）|
 | logs/YYYY-MM-DD.md | 每次 Bot 响应结束后 | append_log 追加写入 |
 
