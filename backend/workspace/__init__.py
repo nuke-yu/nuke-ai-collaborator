@@ -54,13 +54,18 @@ async def write_file(bot_id: int, path: str, content: str) -> str:
         return f"[错误] 非法路径: {path}"
     if p.name in _WRITE_PROTECTED:
         return f"[受保护] {p.name} 是永久记忆文件，Bot 无法覆盖。如需追加记录，请通过工作区面板手动编辑。"
-    # Redirect learned/active writes → learned/draft (requires user approval)
     rel = str(p.relative_to(ws)).replace("\\", "/")
+    # Redirect learned/active writes → learned/draft (requires user approval)
     if rel.startswith(_LEARNED_ACTIVE):
         draft_path = ws / _LEARNED_DRAFT / p.name
         draft_path.parent.mkdir(parents=True, exist_ok=True)
         draft_path.write_text(content, encoding="utf-8")
         return f"__DRAFT_WRITTEN__:{p.name}"   # sentinel for broadcast
+    # Direct writes to learned/draft/ also return sentinel so tool_loop broadcasts
+    if rel.startswith(_LEARNED_DRAFT):
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(content, encoding="utf-8")
+        return f"__DRAFT_WRITTEN__:{p.name}"
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(content, encoding="utf-8")
     return f"已写入 {path}（{len(content)} 字符）"

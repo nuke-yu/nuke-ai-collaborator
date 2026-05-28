@@ -9,6 +9,7 @@ export default function GroupList({
   onlineSet = new Set(),
   currentMemberId,
   onAutoReplySaved,
+  skillDraftBots = new Set(),
   className = '',
 }) {
   const [creating, setCreating] = useState(false)
@@ -105,7 +106,10 @@ export default function GroupList({
                     <span className={`text-xs truncate flex-1 ${onlineSet.has(m.id) ? 'text-gray-300' : 'text-gray-500'}`}>{m.name}</span>
                     {m.type === 'bot' && (
                       <>
-                        <span className="group-hover:hidden text-xs text-gray-600 flex-shrink-0">🤖</span>
+                        {skillDraftBots.has(m.id)
+                          ? <span className="group-hover:hidden text-xs text-yellow-400 flex-shrink-0" title="有待审批的 Skill">⚡</span>
+                          : <span className="group-hover:hidden text-xs text-gray-600 flex-shrink-0">🤖</span>
+                        }
                         <button
                           onClick={() => { if (activeGroupId !== g.id) onSelect(g.id); onEditMember?.(m) }}
                           className="hidden group-hover:flex items-center justify-center w-5 h-5 rounded hover:bg-indigo-500/20 text-gray-500 hover:text-indigo-400 flex-shrink-0 transition-colors"
@@ -115,10 +119,13 @@ export default function GroupList({
                         </button>
                         <button
                           onClick={() => { if (activeGroupId !== g.id) onSelect(g.id); onOpenWorkspace?.(m) }}
-                          className="hidden group-hover:flex items-center justify-center w-5 h-5 rounded hover:bg-emerald-500/20 text-gray-500 hover:text-emerald-400 flex-shrink-0 transition-colors"
-                          title="工作区文件"
+                          className="hidden group-hover:flex items-center justify-center w-5 h-5 rounded hover:bg-emerald-500/20 text-gray-500 hover:text-emerald-400 flex-shrink-0 transition-colors relative"
+                          title={skillDraftBots.has(m.id) ? '有待审批的 Skill' : '工作区文件'}
                         >
                           <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3h18v18H3z"/><path d="M3 9h18M9 21V9"/></svg>
+                          {skillDraftBots.has(m.id) && (
+                            <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-yellow-400 rounded-full" />
+                          )}
                         </button>
                       </>
                     )}

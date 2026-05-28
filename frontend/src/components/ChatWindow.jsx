@@ -31,6 +31,7 @@ export default function ChatWindow({ memberId, isDark, onToggleTheme }) {
   const [showAddMember, setShowAddMember] = useState(false)
   const [editingMember, setEditingMember] = useState(null)
   const [workspaceBot, setWorkspaceBot] = useState(null)
+  const [skillDraftBots, setSkillDraftBots] = useState(new Set()) // bot IDs with pending draft skills
   const [error, setError] = useState(null)
   const [workflow, setWorkflow] = useState(null)
   const [showWorkflowStart, setShowWorkflowStart] = useState(false)
@@ -236,6 +237,11 @@ export default function ChatWindow({ memberId, isDark, onToggleTheme }) {
       setWorkflow(data.active ? data : null)
     } else if (data.type === 'skills_changed') {
       window.dispatchEvent(new CustomEvent('skills_changed', { detail: data }))
+    } else if (data.type === 'skill_draft_added') {
+      window.dispatchEvent(new CustomEvent('skills_changed', { detail: { ...data, source: 'bot' } }))
+      if (data.member_id) {
+        setSkillDraftBots(prev => new Set([...prev, data.member_id]))
+      }
     }
   }
 
@@ -346,7 +352,11 @@ export default function ChatWindow({ memberId, isDark, onToggleTheme }) {
         membersCache={membersCache}
         onOpenAddMember={() => setShowAddMember(true)}
         onEditMember={(m) => setEditingMember(m)}
-        onOpenWorkspace={(m) => setWorkspaceBot(m)}
+        skillDraftBots={skillDraftBots}
+        onOpenWorkspace={(m) => {
+          setWorkspaceBot(m)
+          setSkillDraftBots(prev => { const next = new Set(prev); next.delete(m.id); return next })
+        }}
         onAutoReplySaved={(memberId, text) => {
           setMembers(prev => prev.map(m => m.id === memberId ? { ...m, auto_reply: text } : m))
           setMembersCache(prev => ({
