@@ -1,4 +1,5 @@
 import aiosqlite
+from db.migrations import run_migrations
 
 _DEFAULT_TEMPLATES = [
     ("代码助手", "代码助手", "#3b82f6",
@@ -79,55 +80,75 @@ async def init_db():
     async with aiosqlite.connect(_db.DB_PATH) as conn:
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS groups (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                name         TEXT NOT NULL,
+                announcement TEXT DEFAULT NULL,
+                created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS members (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                group_id INTEGER NOT NULL,
-                name TEXT NOT NULL,
-                type TEXT NOT NULL CHECK(type IN ('human', 'bot')),
-                role TEXT,
-                system_prompt TEXT,
-                avatar_color TEXT DEFAULT '#6366f1',
+                id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                group_id         INTEGER NOT NULL,
+                name             TEXT NOT NULL,
+                type             TEXT NOT NULL CHECK(type IN ('human', 'bot')),
+                role             TEXT,
+                system_prompt    TEXT,
+                avatar_color     TEXT    DEFAULT '#6366f1',
+                model_provider   TEXT    DEFAULT 'deepseek',
+                model_name       TEXT    DEFAULT 'deepseek-chat',
+                auto_reply       TEXT    DEFAULT NULL,
+                context_cleared_at TEXT  DEFAULT NULL,
+                temperature      REAL    DEFAULT 0.7,
+                max_tokens       INTEGER DEFAULT 4096,
+                personality_prompt TEXT  DEFAULT NULL,
+                executor_id      TEXT    DEFAULT 'simple_v1',
+                executor_config  TEXT    DEFAULT '{}',
+                done_keyword     TEXT    DEFAULT NULL,
                 FOREIGN KEY (group_id) REFERENCES groups(id)
             )
         """)
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS messages (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                group_id INTEGER NOT NULL,
-                member_id INTEGER NOT NULL,
-                content TEXT NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (group_id) REFERENCES groups(id),
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                group_id    INTEGER NOT NULL,
+                member_id   INTEGER NOT NULL,
+                content     TEXT    NOT NULL,
+                reply_to_id INTEGER DEFAULT NULL,
+                edited_at   TIMESTAMP DEFAULT NULL,
+                is_deleted  INTEGER DEFAULT 0,
+                file_url    TEXT    DEFAULT NULL,
+                file_name   TEXT    DEFAULT NULL,
+                file_size   INTEGER DEFAULT NULL,
+                file_type   TEXT    DEFAULT NULL,
+                is_auto_reply INTEGER DEFAULT 0,
+                created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (group_id)  REFERENCES groups(id),
                 FOREIGN KEY (member_id) REFERENCES members(id)
             )
         """)
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS role_summaries (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                group_id INTEGER NOT NULL,
-                role TEXT NOT NULL,
-                summary TEXT NOT NULL,
+                id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+                group_id           INTEGER NOT NULL,
+                role               TEXT    NOT NULL,
+                summary            TEXT    NOT NULL,
                 covered_through_id INTEGER NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                bot_id             INTEGER DEFAULT NULL,
+                created_at         TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS message_embeddings (
                 message_id INTEGER PRIMARY KEY,
-                embedding TEXT NOT NULL,
+                embedding  TEXT NOT NULL,
                 FOREIGN KEY (message_id) REFERENCES messages(id)
             )
         """)
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS member_read (
-                member_id INTEGER NOT NULL,
-                group_id INTEGER NOT NULL,
+                member_id    INTEGER NOT NULL,
+                group_id     INTEGER NOT NULL,
                 last_read_id INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY (member_id, group_id)
             )
@@ -135,68 +156,43 @@ async def init_db():
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS message_reactions (
                 message_id INTEGER NOT NULL,
-                member_id INTEGER NOT NULL,
-                emoji TEXT NOT NULL,
+                member_id  INTEGER NOT NULL,
+                emoji      TEXT    NOT NULL,
                 PRIMARY KEY (message_id, member_id, emoji),
                 FOREIGN KEY (message_id) REFERENCES messages(id)
             )
         """)
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS pinned_messages (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                group_id INTEGER NOT NULL,
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                group_id   INTEGER NOT NULL,
                 message_id INTEGER NOT NULL,
-                pinned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                pinned_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(group_id, message_id),
                 FOREIGN KEY (message_id) REFERENCES messages(id)
             )
         """)
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS role_templates (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                role TEXT NOT NULL,
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                name         TEXT NOT NULL,
+                role         TEXT NOT NULL,
                 system_prompt TEXT NOT NULL,
                 avatar_color TEXT DEFAULT '#6366f1'
             )
         """)
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS permission_rules (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                bot_id INTEGER NOT NULL,
-                tool_pattern TEXT NOT NULL,
-                args_pattern TEXT NOT NULL DEFAULT '',
-                action TEXT NOT NULL DEFAULT 'allow',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                bot_id       INTEGER NOT NULL,
+                tool_pattern TEXT    NOT NULL,
+                args_pattern TEXT    NOT NULL DEFAULT '',
+                action       TEXT    NOT NULL DEFAULT 'allow',
+                created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (bot_id) REFERENCES members(id)
             )
         """)
-        for col_sql in [
-            "ALTER TABLE messages ADD COLUMN reply_to_id INTEGER",
-            "ALTER TABLE messages ADD COLUMN edited_at TIMESTAMP",
-            "ALTER TABLE messages ADD COLUMN is_deleted INTEGER DEFAULT 0",
-            "ALTER TABLE messages ADD COLUMN file_url TEXT",
-            "ALTER TABLE messages ADD COLUMN file_name TEXT",
-            "ALTER TABLE messages ADD COLUMN file_size INTEGER",
-            "ALTER TABLE messages ADD COLUMN file_type TEXT",
-            "ALTER TABLE members ADD COLUMN model_provider TEXT DEFAULT 'deepseek'",
-            "ALTER TABLE members ADD COLUMN model_name TEXT DEFAULT 'deepseek-chat'",
-            "ALTER TABLE members ADD COLUMN auto_reply TEXT DEFAULT NULL",
-            "ALTER TABLE groups ADD COLUMN announcement TEXT DEFAULT NULL",
-            "ALTER TABLE messages ADD COLUMN is_auto_reply INTEGER DEFAULT 0",
-            "ALTER TABLE members ADD COLUMN context_cleared_at TEXT DEFAULT NULL",
-            "ALTER TABLE members ADD COLUMN temperature REAL DEFAULT 0.7",
-            "ALTER TABLE members ADD COLUMN max_tokens INTEGER DEFAULT 4096",
-            "ALTER TABLE role_summaries ADD COLUMN bot_id INTEGER DEFAULT NULL",
-            "ALTER TABLE members ADD COLUMN personality_prompt TEXT DEFAULT NULL",
-            "ALTER TABLE members ADD COLUMN executor_id TEXT DEFAULT 'simple_v1'",
-            "ALTER TABLE members ADD COLUMN executor_config TEXT DEFAULT '{}'",
-            "ALTER TABLE members ADD COLUMN done_keyword TEXT DEFAULT NULL",
-        ]:
-            try:
-                await conn.execute(col_sql)
-                await conn.commit()
-            except Exception:
-                pass
+        await conn.commit()
+        await run_migrations(conn)
         await _seed_templates(conn)
         await conn.commit()
