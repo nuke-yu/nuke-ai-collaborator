@@ -67,7 +67,7 @@
 | 54 | 工具 | Skill `allowed-tools` 白名单（限制 skill 可调用工具范围） | M3 | ✅ |
 | 55 | 工具 | Skill `model` frontmatter（skill 执行时覆盖模型选择） | M4 | ✅ |
 | 56 | 工具 | 工具并发执行（只读工具 asyncio.gather，写入工具串行） | P2 | ✅ |
-| 57 | 工具 | Hook 条件过滤（`if:` 正则匹配工具名+参数，不匹配跳过 hook） | P2 | ⬜ |
+| 57 | 工具 | Hook 条件过滤（`if:` 正则匹配工具名+参数，不匹配跳过 hook） | P2 | ✅ |
 | 58 | 工具 | 代码执行沙箱（容器隔离，Docker 每次起/销毁） | M4 | ⬜ |
 | 59 | 压缩 | 工具结果 Head+Tail 截断（20K，各 10K） | P1 | ✅ |
 | 60 | 压缩 | 跨 run 历史压缩（pre-run Strategy 1 + compact_conversation） | P1 | ✅ |
@@ -103,7 +103,7 @@
 | 90 | 平台 | 可视化工作流编排（n8n 风格拖拽） | M4 | ⬜ |
 | 91 | 平台 | Azure OpenAI 企业认证（Device Code Flow + token refresh） | M4 | ⬜ |
 
-> ✅ 已完成：74 项　　⬜ 未做：17 项　　合计：91 项
+> ✅ 已完成：75 项　　⬜ 未做：16 项　　合计：91 项
 
 ---
 
@@ -699,7 +699,7 @@ P3（精细化）:
 | 2 | 定时任务（cron / heartbeat） | ⬆ | M | ⬜ | Bot 周期性自主执行（日报、监控、定时提醒）；需调度器 + bootstrap-only 轻量执行模式 |
 | 3 | 压缩后文件重注入（从摘要提取） | ➡ | S | ✅ | `compact.build_file_contents_for_reinject()`：modified 优先，最多 5 文件 / 25K 预算，相对路径解析到 `bot_ws(bot_id)`；`_build_reinject()` 组合三段内容 |
 | 4 | 工具并发执行 | ➡ | M | ⬜ | 同一轮 tool_calls 中，只读工具（`read_file` / `list_workspace` / `read_local_file`）用 `asyncio.gather()` 并行；写入工具串行；改动 `tool_loop_v1.py` tool 执行循环 |
-| 5 | Hook 条件过滤 | ➡ | M | ⬜ | `ToolDef` 或 hook 注册时支持 `if: "run_shell(git *)"` 正则，不匹配则跳过该 hook；改动 `tool_executor` before/after hook 调度逻辑 |
+| 5 | Hook 条件过滤 | ➡ | M | ✅ | `_HookEntry(fn, condition)` 存储条件；`_condition_matches()` 用 fnmatch glob 匹配工具名+任意参数值；`add_before/after_hook(condition=)` 新增关键字参数；向后兼容（condition=None = 始终运行） |
 | 6 | 用户 Abort | ➡ | M | ⬜ | WebSocket 接收 `abort` 消息 → `asyncio.Task.cancel()` 终止当前 `run()`；广播 `stream_aborted` 事件；改动 `main.py` dispatch + `tool_loop_v1.py` |
 | 7 | react_v1 插件 | ⬆ | L | ⬜ | Thought → Action → Observation 推理循环；提升复杂任务推理质量；需新插件 + manifest |
 | 8 | 权限系统：基础规则模型 | ➡ | M | ⬜ | `Rule = {permission, pattern, action}` 三态 allow/ask/deny；`Ruleset` 挂 Bot 配置；独立模块 `permissions.py` |
