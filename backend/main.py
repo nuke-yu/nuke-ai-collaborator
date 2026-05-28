@@ -9,6 +9,8 @@ from fastapi.staticfiles import StaticFiles
 from db import init_db, get_db, get_member, get_members, get_group, save_message, get_messages
 import permissions
 from ws_manager import manager
+from bus import bus, ws_adapter
+from bus.events import Presence, Message
 from models import AddMemberRequest  # noqa: keep models importable via main
 from core.orchestrator import select_triggered_bots, dispatch_bots, mark_read, send_auto_reply
 from api.messages import router as message_router, UPLOAD_DIR
@@ -41,7 +43,9 @@ async def lifespan(app: FastAPI):
     for gid, gname in groups:
         await init_group_workspace(gid, gname)
     watcher.start(asyncio.get_event_loop())
+    adapter_task = asyncio.create_task(ws_adapter(bus))
     yield
+    adapter_task.cancel()
     watcher.stop()
 
 
@@ -102,8 +106,9 @@ async def save_config(data: dict):
 @app.websocket("/ws/{group_id}/{member_id}")
 async def websocket_endpoint(websocket: WebSocket, group_id: int, member_id: int):
     await manager.connect(websocket, group_id, member_id)
+    # online_members 只发给当前连接者，不走 bus
     await websocket.send_json({"type": "online_members", "member_ids": manager.get_online_member_ids(group_id)})
-    await manager.broadcast(group_id, {"type": "presence", "member_id": member_id, "online": True})
+    await bus.publish(Presence(group_id=group_id, member_id=member_id, online=True))
 
     async with get_db() as db:
         async with db.execute("SELECT MAX(id) FROM messages WHERE group_id=?", (group_id,)) as cur:
@@ -156,7 +161,7 @@ async def websocket_endpoint(websocket: WebSocket, group_id: int, member_id: int
                                             file_url, file_name, file_size, file_type)
                 recent = await get_messages(db, group_id)
                 saved = next((m for m in recent if m["id"] == msg_id), {})
-                await manager.broadcast(group_id, {"type": "message", **saved})
+                await bus.publish(Message(group_id=group_id, **{k: v for k, v in saved.items() if k != "group_id"}))
                 await mark_read(group_id, member_id, msg_id)
 
                 mentioned_names = set(re.findall(r'@(\S+)', content or ""))
@@ -184,4 +189,4 @@ async def websocket_endpoint(websocket: WebSocket, group_id: int, member_id: int
     except WebSocketDisconnect:
         gone_id = manager.disconnect(websocket, group_id)
         if gone_id:
-            await manager.broadcast(group_id, {"type": "presence", "member_id": gone_id, "online": False})
+            await bus.publish(Presence(group_id=group_id, member_id=gone_id, online=False))

@@ -125,19 +125,126 @@ Key 保存在 `backend/app_config.json`，不会上传到任何第三方。
 
 ---
 
+## Architecture：消息总线（Event Bus）
+
+后端采用内部事件总线将业务逻辑与 WebSocket 传输层解耦，设计参考 [OpenCode](https://github.com/opencode-ai/opencode) 的 PubSub 双通道架构。
+
+### 分层结构
+
+```
+业务逻辑（orchestrator / permissions / executors）
+       ↓  bus.publish(TypedEvent)  /  bus.broadcast(group_id, dict)
+EventBus（asyncio Queue，typed channel + wildcard channel）
+       ↓  wildcard 订阅
+WS Adapter（唯一知道 WSManager 的地方）
+       ↓  manager.broadcast(group_id, payload)
+WSManager（连接注册表，纯传输层）
+       ↓  ws.send_json × N
+浏览器
+```
+
+### 模块说明
+
+```
+backend/bus/
+├── events.py   # 28 种 typed event 定义（@event 装饰器 + 中心注册表）
+├── engine.py   # EventBus 核心：typed / wildcard 双通道，Subscription 上下文管理器
+├── adapter.py  # wildcard 订阅 → manager.broadcast，服务启动时以后台 Task 运行
+└── __init__.py # 导出 bus 单例、publish、ws_adapter
+```
+
+### 两种发布接口
+
+```python
+# 1. Typed event（orchestrator / main.py 使用）
+from bus import bus
+from bus.events import StreamChunk
+
+await bus.publish(StreamChunk(group_id=1, temp_id="t", delta="hello"))
+
+# 2. 兼容接口（executor 插件使用，call site 不变）
+await ctx.broadcaster.broadcast(ctx.group_id, {"type": "tool_call", ...})
+# ctx.broadcaster 就是 bus，broadcast() 走同一条路进 EventBus
+```
+
+### 订阅方式
+
+```python
+# typed 订阅（只收指定 type）
+sub = bus.subscribe(StreamChunk)
+payload = await sub._queue.get()
+
+# wildcard 订阅（收所有事件）
+async with bus.subscribe_all() as sub:
+    async for payload in sub:
+        ...  # adapter 用这个
+```
+
+### 完整事件流（以 Bot 流式回复为例）
+
+```
+用户发消息 → main.py 收到 WS 文本
+    → bus.publish(Message(...))
+    → dispatch_bots → stream_bot_response
+        → bus.publish(StreamStart(...))
+        → bus.publish(StreamChunk(...)) × N
+        → bus.publish(StreamEnd(...))
+
+每个 publish：
+    EventBus._dispatch → wildcard Queue.put(payload)
+    → ws_adapter 取出 → 去掉 group_id → manager.broadcast(group_id, out)
+    → WSManager 遍历连接 → ws.send_json(out) × N 个浏览器
+```
+
+### 已定义事件类型（28 种）
+
+| 分类 | 事件 |
+|------|------|
+| 流式输出 | `stream_start` · `stream_chunk` · `stream_error` · `stream_end` · `stream_aborted` |
+| 消息 | `message` · `read` |
+| 在线状态 | `presence` |
+| Bot 状态 | `typing` · `error` · `steer_queued` · `followup_start` · `steer_injected` · `rewake_injected` |
+| 工具执行 | `tool_call` · `tool_result` |
+| ReAct | `react_thought` · `react_action` · `react_observation` |
+| Compaction | `compaction` |
+| Skill | `skills_loaded` · `skill_fork_start` · `skill_fork_end` · `skill_draft_added` |
+| 权限审批 | `before_finalize_review` · `before_finalize_approved` · `before_finalize_rejected` · `permission_asked` |
+
+---
+
 ## Project Structure
 
 ```
 nuke-ai-collaborator/
 ├── backend/
-│   ├── main.py          # FastAPI 路由、WebSocket 处理
-│   ├── database.py      # SQLite 数据层
-│   ├── ws_manager.py    # WebSocket 连接管理 & 在线状态
-│   ├── ai_client.py     # 多模型 AI 流式调用
-│   ├── models.py        # Pydantic 请求模型
-│   ├── config.py        # API Key 配置管理
-│   ├── role_router.py   # Bot 角色路由逻辑
-│   └── memory.py        # 对话摘要 & 上下文
+│   ├── main.py              # FastAPI 入口、WebSocket 端点、lifespan
+│   ├── ws_manager.py        # WebSocket 连接管理（纯传输层）
+│   ├── models.py            # Pydantic 请求模型
+│   ├── config.py            # API Key 配置管理
+│   ├── bus/                 # 消息总线（见上方架构说明）
+│   │   ├── events.py        # 28 种 typed event
+│   │   ├── engine.py        # EventBus 核心
+│   │   ├── adapter.py       # WS 推送适配层
+│   │   └── __init__.py
+│   ├── core/
+│   │   ├── orchestrator.py  # Bot 调度、流式广播
+│   │   ├── role_router.py   # Bot 角色路由逻辑
+│   │   └── workflow.py      # 工作流状态机
+│   ├── db/
+│   │   ├── schema.py        # 建表 DDL
+│   │   ├── queries.py       # 数据库查询
+│   │   └── models.py        # ORM 模型
+│   ├── ai/
+│   │   ├── client.py        # 多模型 AI 流式调用
+│   │   └── memory.py        # 对话摘要 & 上下文
+│   ├── executors/           # Bot executor 插件系统
+│   │   ├── base.py          # ExecutionContext / BotExecutor 基类
+│   │   ├── registry.py      # executor 注册与发现
+│   │   └── plugins/         # simple_v1 · react_v1 · tool_loop_v1
+│   ├── permissions/         # 权限引擎
+│   ├── skills/              # Skill 发现与加载
+│   ├── workspace/           # Bot workspace 初始化
+│   └── api/                 # REST 路由（groups · messages · templates · workflow · workspace）
 └── frontend/
     └── src/
         ├── components/
@@ -153,9 +260,9 @@ nuke-ai-collaborator/
         │   ├── ApiKeyManager.jsx    # API Key 管理
         │   └── MemberList.jsx       # 添加成员
         ├── hooks/
-        │   ├── useWebSocket.js      # WebSocket 连接
+        │   ├── useWebSocket.js      # WebSocket 连接 & 重连
         │   └── useNotifications.js  # 浏览器通知
-        └── api.js                   # API 请求封装
+        └── api.js                   # REST API 请求封装
 ```
 
 ---

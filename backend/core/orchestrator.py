@@ -1,7 +1,12 @@
 import asyncio
 import uuid
 from db import get_db, get_messages, save_message
-from ws_manager import manager
+from bus import bus
+from bus.events import (
+    StreamStart, StreamChunk, StreamError, StreamEnd,
+    Message, Read, Typing, Error,
+    SteerQueued, FollowupStart,
+)
 from ai.client import call_ai, call_ai_stream, AIError
 from core.role_router import should_bot_respond, build_context_message
 from ai.memory import maybe_summarize, get_memory_context, add_to_chroma
@@ -68,11 +73,11 @@ async def stream_bot_response(group_id: int, bot: dict, system_prompt: str,
                                history: list, user_msg: str):
     """流式广播 bot 回复，保存到 DB，返回 (full_text, msg_id) 或 (None, None)"""
     temp_id = str(uuid.uuid4())
-    await manager.broadcast(group_id, {
-        "type": "stream_start", "temp_id": temp_id,
-        "member_id": bot["id"], "sender_name": bot["name"],
-        "sender_type": "bot", "avatar_color": bot["avatar_color"],
-    })
+    await bus.publish(StreamStart(
+        group_id=group_id, temp_id=temp_id,
+        member_id=bot["id"], sender_name=bot["name"],
+        sender_type="bot", avatar_color=bot["avatar_color"],
+    ))
     provider = bot.get("model_provider", "deepseek")
     model = bot.get("model_name", "deepseek-chat")
     temperature = bot.get("temperature", 0.7)
@@ -81,20 +86,20 @@ async def stream_bot_response(group_id: int, bot: dict, system_prompt: str,
     try:
         async for chunk in call_ai_stream(system_prompt, history, user_msg, provider, model, temperature, max_tokens):
             full_text += chunk
-            await manager.broadcast(group_id, {"type": "stream_chunk", "temp_id": temp_id, "delta": chunk})
+            await bus.publish(StreamChunk(group_id=group_id, temp_id=temp_id, delta=chunk))
     except AIError as e:
-        await manager.broadcast(group_id, {"type": "stream_error", "temp_id": temp_id, "message": str(e)})
+        await bus.publish(StreamError(group_id=group_id, temp_id=temp_id, message=str(e)))
         return None, None
 
     async with get_db() as db:
         msg_id = await save_message(db, group_id, bot["id"], full_text)
         recent = await get_messages(db, group_id)
-    await manager.broadcast(group_id, {
-        "type": "stream_end", "temp_id": temp_id, "id": msg_id,
-        "member_id": bot["id"], "sender_name": bot["name"],
-        "preview": full_text[:100],
-        "created_at": recent[-1]["created_at"] if recent else "",
-    })
+    await bus.publish(StreamEnd(
+        group_id=group_id, temp_id=temp_id, id=msg_id,
+        member_id=bot["id"], sender_name=bot["name"],
+        preview=full_text[:100],
+        created_at=recent[-1]["created_at"] if recent else "",
+    ))
     return full_text, msg_id
 
 
@@ -106,7 +111,7 @@ async def mark_read(group_id: int, member_id: int, msg_id: int):
             (member_id, group_id, msg_id)
         )
         await db.commit()
-    await manager.broadcast(group_id, {"type": "read", "member_id": member_id, "last_read_id": msg_id})
+    await bus.publish(Read(group_id=group_id, member_id=member_id, last_read_id=msg_id))
 
 
 async def send_auto_reply(group_id: int, member: dict, reply_to_id: int):
@@ -116,7 +121,7 @@ async def send_auto_reply(group_id: int, member: dict, reply_to_id: int):
                                     reply_to_id=reply_to_id, is_auto_reply=True)
         recent = await get_messages(db, group_id)
         saved = next((m for m in recent if m["id"] == msg_id), {})
-    await manager.broadcast(group_id, {"type": "message", **saved})
+    await bus.publish(Message(group_id=group_id, **{k: v for k, v in saved.items() if k != "group_id"}))
 
 
 async def auto_continue_if_needed(group_id: int, bot: dict, all_members: list, max_iter: int = 5):
@@ -199,11 +204,7 @@ async def dispatch_bots(group_id: int, triggered: list, content: str, sender: di
         steer_q = get_steer_queue(group_id, bot["id"])
         if steer_q is not None:
             await steer_q.put(content)
-            await manager.broadcast(group_id, {
-                "type": "steer_queued",
-                "member_id": bot["id"],
-                "message": content[:300],
-            })
+            await bus.publish(SteerQueued(group_id=group_id, member_id=bot["id"], message=content[:300]))
         else:
             still_triggered.append(bot)
     triggered = still_triggered
@@ -241,7 +242,7 @@ async def dispatch_bots(group_id: int, triggered: list, content: str, sender: di
                 bot=bot, group_id=group_id, user_message=content,
                 sender=sender, history=_bot_recent(bot),
                 all_bots=all_bots, all_members=all_members,
-                broadcaster=manager,
+                broadcaster=bus,
                 workflow_suffix=wf.system_suffix(group_id),
                 group_name=group_name,
                 group_announcement=group_announcement,
@@ -260,11 +261,7 @@ async def dispatch_bots(group_id: int, triggered: list, content: str, sender: di
                 if steer_q.empty():
                     break
                 follow_msg = steer_q.get_nowait()
-                await manager.broadcast(group_id, {
-                    "type": "followup_start",
-                    "member_id": bot["id"],
-                    "message": follow_msg[:200],
-                })
+                await bus.publish(FollowupStart(group_id=group_id, member_id=bot["id"], message=follow_msg[:200]))
                 async with get_db() as db:
                     follow_recent = await get_messages(db, group_id)
                 steer_q = _start_steer(group_id, bot["id"])
@@ -272,7 +269,7 @@ async def dispatch_bots(group_id: int, triggered: list, content: str, sender: di
                     bot=bot, group_id=group_id, user_message=follow_msg,
                     sender=sender, history=follow_recent,
                     all_bots=all_bots, all_members=all_members,
-                    broadcaster=manager,
+                    broadcaster=bus,
                     workflow_suffix=wf.system_suffix(group_id),
                     group_name=group_name,
                     group_announcement=group_announcement,
@@ -288,29 +285,29 @@ async def dispatch_bots(group_id: int, triggered: list, content: str, sender: di
 
         tasks = {asyncio.create_task(call_bot(b)): b for b in bots}
         for b in bots:
-            await manager.broadcast(group_id, {"type": "typing", "sender_name": b["name"], "avatar_color": b["avatar_color"]})
+            await bus.publish(Typing(group_id=group_id, sender_name=b["name"], avatar_color=b["avatar_color"]))
         done, pending = await asyncio.wait(tasks.keys(), return_when=asyncio.FIRST_COMPLETED)
         for t in pending:
             t.cancel()
         try:
             winner_bot, ai_reply = done.pop().result()
         except AIError as e:
-            await manager.broadcast(group_id, {"type": "error", "message": str(e)})
+            await bus.publish(Error(group_id=group_id, message=str(e)))
             return
         except Exception as e:
-            await manager.broadcast(group_id, {"type": "error", "message": f"未知错误：{str(e)}"})
+            await bus.publish(Error(group_id=group_id, message=f"未知错误：{str(e)}"))
             return
         async with get_db() as db2:
             bot_msg_id = await save_message(db2, group_id, winner_bot["id"], ai_reply)
             bot_recent = await get_messages(db2, group_id)
         asyncio.create_task(add_to_chroma(bot_msg_id, ai_reply, winner_bot["role"] or "", winner_bot["id"]))
-        await manager.broadcast(group_id, {
-            "type": "message", "id": bot_msg_id,
-            "member_id": winner_bot["id"], "sender_name": winner_bot["name"],
-            "sender_type": "bot", "avatar_color": winner_bot["avatar_color"],
-            "content": ai_reply,
-            "created_at": bot_recent[-1]["created_at"] if bot_recent else "",
-        })
+        await bus.publish(Message(
+            group_id=group_id, id=bot_msg_id,
+            member_id=winner_bot["id"], sender_name=winner_bot["name"],
+            sender_type="bot", avatar_color=winner_bot["avatar_color"],
+            content=ai_reply,
+            created_at=bot_recent[-1]["created_at"] if bot_recent else "",
+        ))
         asyncio.create_task(maybe_summarize(group_id, winner_bot["id"], winner_bot["role"] or winner_bot["name"], [winner_bot["id"]]))
 
     role_groups: dict[str, list] = {}
