@@ -16,6 +16,8 @@ from executors import tool_executor, registry as _executor_registry
 import workspace as _ws
 from skills import run_skill
 import executors.compact as compact
+import permissions
+from database import save_permission_rule as _save_permission_rule
 
 # ---------------------------------------------------------------------------
 # Platform detection
@@ -159,6 +161,7 @@ async def _spawn_agent_handler(bot_name: str, task: str, context: dict = None) -
         all_members=all_members,
         broadcaster=_NullBroadcaster(),
         spawn_depth=spawn_depth + 1,
+        ruleset=ctx.get("ruleset"),  # inherit parent's ruleset (including mode)
     )
     try:
         result = await _executor_registry.get(
@@ -329,6 +332,34 @@ async def _default_shell_guard(name: str, arguments: dict, context: dict) -> dic
     return None
 
 
+async def _permission_check_hook(name: str, arguments: dict, context: dict) -> dict | None:
+    """Run the permission decision pipeline before every tool call."""
+    ruleset = context.get("ruleset")
+    if ruleset is None:
+        return None  # permission system not configured for this bot
+
+    result = await permissions.check(
+        tool_name=name,
+        arguments=arguments,
+        ruleset=ruleset,
+        bot_id=context.get("bot_id"),
+        broadcaster=context.get("broadcaster"),
+        group_id=context.get("group_id"),
+        spawn_depth=context.get("spawn_depth", 0),
+    )
+
+    if result["action"] == "deny":
+        return {"block": True, "reason": result.get("reason", "权限拒绝")}
+
+    if result.get("persist_rule"):
+        rule = result["persist_rule"]
+        asyncio.create_task(_save_permission_rule(
+            context.get("bot_id"), rule.tool_pattern, rule.args_pattern, rule.action
+        ))
+
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Prompt helper
 # ---------------------------------------------------------------------------
@@ -435,6 +466,7 @@ async def _handle_write_local_file(path: str, content: str, context: dict = None
 
 def register_workspace_tools() -> None:
     """Register all workspace tool handlers and hooks into the global tool_executor."""
+    tool_executor.add_before_hook(_permission_check_hook)
     tool_executor.add_before_hook(_default_shell_guard)
     tool_executor.add_after_hook(_default_output_truncator)
     handlers = {

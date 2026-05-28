@@ -92,6 +92,17 @@ async def init_db():
                 avatar_color TEXT DEFAULT '#6366f1'
             )
         """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS permission_rules (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                bot_id INTEGER NOT NULL,
+                tool_pattern TEXT NOT NULL,
+                args_pattern TEXT NOT NULL DEFAULT '',
+                action TEXT NOT NULL DEFAULT 'allow',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (bot_id) REFERENCES members(id)
+            )
+        """)
         for col_sql in [
             "ALTER TABLE messages ADD COLUMN reply_to_id INTEGER",
             "ALTER TABLE messages ADD COLUMN edited_at TIMESTAMP",
@@ -450,3 +461,29 @@ async def get_member(db, member_id: int):
     async with db.execute("SELECT * FROM members WHERE id = ?", (member_id,)) as cur:
         row = await cur.fetchone()
         return _row_to_member(row) if row else None
+
+
+async def load_permission_rules(bot_id: int) -> list[dict]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT id, tool_pattern, args_pattern, action FROM permission_rules WHERE bot_id=?",
+            (bot_id,),
+        ) as cur:
+            rows = await cur.fetchall()
+    return [{"id": r[0], "tool_pattern": r[1], "args_pattern": r[2], "action": r[3]} for r in rows]
+
+
+async def save_permission_rule(bot_id: int, tool_pattern: str, args_pattern: str = "", action: str = "allow") -> int:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute(
+            "INSERT INTO permission_rules (bot_id, tool_pattern, args_pattern, action) VALUES (?,?,?,?)",
+            (bot_id, tool_pattern, args_pattern, action),
+        )
+        await db.commit()
+        return cur.lastrowid
+
+
+async def delete_permission_rule(rule_id: int) -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM permission_rules WHERE id=?", (rule_id,))
+        await db.commit()

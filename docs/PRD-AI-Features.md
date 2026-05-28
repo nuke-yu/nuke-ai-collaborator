@@ -83,11 +83,11 @@
 | 70 | 压缩 | Token 估算精度（json.dumps 序列化长度 // 4） | P3 | ✅ |
 | 71 | 压缩 | 文件操作跨压缩跟踪（_file_tracker + build_file_tracker_xml XML） | P3 | ✅ |
 | 72 | 压缩 | 压缩后文件重注入（build_file_contents_for_reinject，modified 优先） | P3 | ✅ |
-| 73 | 权限 | 基础规则模型（Rule = {permission, pattern, action}，三态 allow/ask/deny） | P3 | ⬜ |
-| 74 | 权限 | 决策 Pipeline（敏感路径兜底 → deny → allow → ask，ask 挂起等回复） | P3 | ⬜ |
-| 75 | 权限 | 规则持久化（always → SQLite；once → 内存；前端 approve/deny UI） | P3 | ⬜ |
-| 76 | 权限 | 全局权限模式（default / bypassPermissions / dontAsk 三档） | P3 | ⬜ |
-| 77 | 权限 | Subagent 权限继承（子 Agent 权限 ⊆ 父 Agent，spawn 时裁剪） | P3 | ⬜ |
+| 73 | 权限 | 基础规则模型（Rule = {permission, pattern, action}，三态 allow/ask/deny） | P3 | ✅ |
+| 74 | 权限 | 决策 Pipeline（敏感路径兜底 → deny → allow → ask，ask 挂起等回复） | P3 | ✅ |
+| 75 | 权限 | 规则持久化（always → SQLite；once → 内存；前端 approve/deny UI） | P3 | ✅ |
+| 76 | 权限 | 全局权限模式（default / bypassPermissions / dontAsk 三档） | P3 | ✅ |
+| 77 | 权限 | Subagent 权限继承（子 Agent 权限 ⊆ 父 Agent，spawn 时裁剪） | P3 | ✅ |
 | 78 | 用户体验 | 用户 Abort（WebSocket abort → asyncio.Task.cancel()） | P2 | ✅ |
 | 79 | 协作 | 自定义工作流（关键词驱动角色链，done_keyword 推进） | M0 | ✅ |
 | 80 | 协作 | 并行任务池（TICKETS 格式，多 Bot 队列认领） | M0 | ✅ |
@@ -103,7 +103,7 @@
 | 90 | 平台 | 可视化工作流编排（n8n 风格拖拽） | M4 | ⬜ |
 | 91 | 平台 | Azure OpenAI 企业认证（Device Code Flow + token refresh） | M4 | ⬜ |
 
-> ✅ 已完成：76 项　　⬜ 未做：15 项　　合计：91 项
+> ✅ 已完成：81 项　　⬜ 未做：10 项　　合计：91 项
 
 ---
 

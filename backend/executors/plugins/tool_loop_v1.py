@@ -12,7 +12,8 @@ from executors.plugins.workspace_tools import (
     _build_skills_xml, _with_personality,
     register_workspace_tools,
 )
-from database import get_db, save_message, get_messages
+from database import get_db, save_message, get_messages, load_permission_rules
+import permissions
 from ai_client import call_ai_once, call_ai_stream_messages, AIError, AIContextOverflowError
 from memory import get_memory_context, add_to_chroma, maybe_summarize
 from role_router import build_context_message
@@ -200,6 +201,17 @@ class ToolLoopV1(BotExecutor):
         max_iter = (bot.get("executor_config") or {}).get("max_iterations", self.manifest.max_iterations)
         bf_config = (bot.get("executor_config") or {}).get("before_finalize")
         model_name = bot.get("model_name", "deepseek-chat")  # needed early for skill budget
+
+        # Build ruleset: inherit from parent spawn if provided, otherwise load from DB
+        if ctx.ruleset is not None:
+            _ruleset = ctx.ruleset
+        else:
+            perm_mode = (bot.get("executor_config") or {}).get("permission_mode", "default")
+            raw_rules = await load_permission_rules(bot["id"])
+            _ruleset = permissions.Ruleset(
+                rules=[permissions.Rule(**r) for r in raw_rules],
+                mode=perm_mode,
+            )
 
         history, user_msg = build_context_message(ctx.user_message, ctx.sender["name"], ctx.history)
         base = _with_personality(
@@ -395,6 +407,7 @@ class ToolLoopV1(BotExecutor):
                     "all_members": ctx.all_members,
                     "spawn_depth": ctx.spawn_depth,
                     "broadcaster": ctx.broadcaster,
+                    "ruleset": _ruleset,
                 }
                 iter_count = 0
                 _overflow_recovered = False

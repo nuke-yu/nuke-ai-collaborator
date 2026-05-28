@@ -67,6 +67,7 @@ class ExecutionContext:
     group_announcement: str = ""
     steer_channel: asyncio.Queue | None = None
     spawn_depth: int = 0
+    ruleset: Any = None       # permissions.Ruleset | None; None = no permission checking
 
 
 @dataclass
