@@ -774,6 +774,7 @@ class ToolLoopV1(BotExecutor):
                 "member_id": bot["id"], "sender_name": bot["name"],
                 "preview": full_text[:100], "created_at": "",
             })
+            await sessions.update_session_status(_session_id, "completed")
             return ExecutionResult(full_text=full_text, msg_id=None)
 
         async with get_db() as db:
