@@ -2,7 +2,8 @@ import asyncio
 import random
 import re
 from db import get_db, get_messages, save_message, update_message
-from ws_manager import manager
+from bus import bus
+from bus.events import StreamStart, StreamChunk, StreamEnd, WorkflowUpdate
 
 # group_id -> { stages: [stage_dict,...], current: int }
 _state: dict[int, dict] = {}
@@ -137,7 +138,7 @@ async def _post_system_msg(group_id: int, sender_bot: dict, text: str):
         ann_id = await save_message(db, group_id, sender_bot["id"], text)
         recent = await get_messages(db, group_id, limit=3)
     saved = next((m for m in recent if m["id"] == ann_id), {})
-    await manager.broadcast(group_id, {
+    await bus.broadcast(group_id, {
         "type": "message", **saved,
         "sender_name": "工作流系统", "avatar_color": "#6366f1",
     })
@@ -181,7 +182,7 @@ def _snapshot(group_id: int) -> dict:
 
 
 async def broadcast_state(group_id: int):
-    await manager.broadcast(group_id, {"type": "workflow_update", **_snapshot(group_id)})
+    await bus.publish(WorkflowUpdate(group_id=group_id, **_snapshot(group_id)))
 
 
 async def advance(group_id: int) -> bool:
@@ -192,7 +193,7 @@ async def advance(group_id: int) -> bool:
     s["current"] += 1
     if s["current"] >= len(s["stages"]):
         end(group_id)
-        await manager.broadcast(group_id, {"type": "workflow_update", "active": False, "done": True})
+        await bus.publish(WorkflowUpdate(group_id=group_id, active=False, done=True))
         return True
     await broadcast_state(group_id)
     asyncio.create_task(_trigger_next(group_id, prev_stage, s["stages"][s["current"]]))
@@ -217,28 +218,38 @@ async def _trigger_single_stage(group_id: int, prev_stage: dict, next_bot: dict)
 
     async with get_db() as db:
         msg_id = await save_message(db, group_id, next_bot["id"], "...")
-    await manager.broadcast(group_id, {
-        "type": "stream_start", "temp_id": f"wf_{msg_id}",
-        "member_id": next_bot["id"], "sender_name": next_bot["name"],
-        "sender_type": "bot", "avatar_color": next_bot["avatar_color"],
-    })
+    await bus.publish(StreamStart(
+        group_id=group_id, temp_id=f"wf_{msg_id}",
+        member_id=next_bot["id"], sender_name=next_bot["name"],
+        sender_type="bot", avatar_color=next_bot["avatar_color"],
+    ))
     full = ""
+    _usage_out: list = []
     try:
         provider = next_bot.get("model_provider", "deepseek")
         model = next_bot.get("model_name", "deepseek-chat")
         temperature = next_bot.get("temperature", 0.7)
         max_tokens = next_bot.get("max_tokens", 4096)
-        async for chunk in call_ai_stream(system_prompt, history, trigger_msg, provider, model, temperature, max_tokens):
+        async for chunk in call_ai_stream(system_prompt, history, trigger_msg, provider, model, temperature, max_tokens, usage_out=_usage_out):
             full += chunk
-            await manager.broadcast(group_id, {"type": "stream_chunk", "temp_id": f"wf_{msg_id}", "delta": chunk})
+            await bus.publish(StreamChunk(group_id=group_id, temp_id=f"wf_{msg_id}", delta=chunk))
     except AIError as e:
         full = f"[错误] {e}"
 
+    _u = _usage_out[0] if _usage_out else {}
     async with get_db() as db:
-        await update_message(db, msg_id, full)
+        await update_message(db, msg_id, full,
+                             input_tokens=_u.get("input_tokens") or None,
+                             output_tokens=_u.get("output_tokens") or None,
+                             cache_read_tokens=_u.get("cache_read_tokens") or None,
+                             cache_creation_tokens=_u.get("cache_creation_tokens") or None)
         recent2 = await get_messages(db, group_id, limit=5)
     saved = next((m for m in recent2 if m["id"] == msg_id), {})
-    await manager.broadcast(group_id, {"type": "stream_end", "temp_id": f"wf_{msg_id}", **saved})
+    await bus.publish(StreamEnd(
+        group_id=group_id, temp_id=f"wf_{msg_id}", id=msg_id,
+        member_id=next_bot["id"], sender_name=next_bot["name"],
+        preview=full[:100], created_at=saved.get("created_at", ""),
+    ))
     await check_and_advance(group_id, full, next_bot["id"])
 
 
@@ -275,7 +286,7 @@ async def _trigger_pool_stage(group_id: int, prev_stage: dict, pool_stage: dict)
         ann_id = await save_message(db, group_id, first_bot["id"], announcement)
         recent_ann = await get_messages(db, group_id, limit=3)
     saved_ann = next((m for m in recent_ann if m["id"] == ann_id), {})
-    await manager.broadcast(group_id, {
+    await bus.broadcast(group_id, {
         "type": "message", **saved_ann,
         "sender_name": "工作流系统", "avatar_color": "#6366f1",
     })
@@ -306,28 +317,36 @@ async def _trigger_pool_bot(group_id: int, bot: dict, ticket: str, pool_stage: d
 
     async with get_db() as db:
         msg_id = await save_message(db, group_id, bot["id"], "...")
-    await manager.broadcast(group_id, {
-        "type": "stream_start", "temp_id": f"pool_{msg_id}",
-        "member_id": bot["id"], "sender_name": bot["name"],
-        "sender_type": "bot", "avatar_color": bot["avatar_color"],
-    })
+    await bus.publish(StreamStart(
+        group_id=group_id, temp_id=f"pool_{msg_id}",
+        member_id=bot["id"], sender_name=bot["name"],
+        sender_type="bot", avatar_color=bot["avatar_color"],
+    ))
     full = ""
+    _usage_out: list = []
     try:
         provider = bot.get("model_provider", "deepseek")
         model = bot.get("model_name", "deepseek-chat")
         temperature = bot.get("temperature", 0.7)
         max_tokens = bot.get("max_tokens", 4096)
-        async for chunk in call_ai_stream(system_prompt, history, trigger_msg, provider, model, temperature, max_tokens):
+        async for chunk in call_ai_stream(system_prompt, history, trigger_msg, provider, model, temperature, max_tokens, usage_out=_usage_out):
             full += chunk
-            await manager.broadcast(group_id, {
-                "type": "stream_chunk", "temp_id": f"pool_{msg_id}", "delta": chunk
-            })
+            await bus.publish(StreamChunk(group_id=group_id, temp_id=f"pool_{msg_id}", delta=chunk))
     except AIError as e:
         full = f"[错误] {e}"
 
+    _u = _usage_out[0] if _usage_out else {}
     async with get_db() as db:
-        await update_message(db, msg_id, full)
+        await update_message(db, msg_id, full,
+                             input_tokens=_u.get("input_tokens") or None,
+                             output_tokens=_u.get("output_tokens") or None,
+                             cache_read_tokens=_u.get("cache_read_tokens") or None,
+                             cache_creation_tokens=_u.get("cache_creation_tokens") or None)
         recent2 = await get_messages(db, group_id, limit=5)
     saved = next((m for m in recent2 if m["id"] == msg_id), {})
-    await manager.broadcast(group_id, {"type": "stream_end", "temp_id": f"pool_{msg_id}", **saved})
+    await bus.publish(StreamEnd(
+        group_id=group_id, temp_id=f"pool_{msg_id}", id=msg_id,
+        member_id=bot["id"], sender_name=bot["name"],
+        preview=full[:100], created_at=saved.get("created_at", ""),
+    ))
     await check_and_advance(group_id, full, bot["id"])

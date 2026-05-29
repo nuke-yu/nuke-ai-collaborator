@@ -61,6 +61,9 @@ class TestAbortSignal(unittest.IsolatedAsyncioTestCase):
             patch(f"{_mod}.build_context_message", return_value=([], "hello")),
             patch(f"{_mod}.call_ai_stream_messages", new=_cancelled_stream),
             patch(f"{_mod}.append_log", new=AsyncMock()),
+            patch("sessions.create_session", new=AsyncMock()),
+            patch("sessions.append_event", new=AsyncMock()),
+            patch("sessions.update_session_status", new=AsyncMock()),
         ]
 
         for p in patches:

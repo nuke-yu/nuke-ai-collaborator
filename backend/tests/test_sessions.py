@@ -166,6 +166,46 @@ class TestSessionStore(unittest.IsolatedAsyncioTestCase):
         row = await get_session("s5")
         self.assertEqual(row["input_tokens"], 120)
         self.assertEqual(row["output_tokens"], 60)
+        # cache columns default to 0 when not provided
+        self.assertEqual(row["cache_read_tokens"], 0)
+        self.assertEqual(row["cache_creation_tokens"], 0)
+
+    async def test_get_session_includes_cost_usd(self):
+        from sessions.store import create_session, add_tokens, get_session
+        from ai.pricing import calculate_cost
+        await create_session(
+            session_id="s7", bot_id=1, group_id=1,
+            config={"system_prompt": "", "provider": "claude",
+                    "model_name": "claude-sonnet-4-5", "temperature": 0.7, "max_tokens": 4096},
+            user_message="z",
+        )
+        await add_tokens("s7", input_tokens=1000, output_tokens=500,
+                         cache_read_tokens=200, cache_creation_tokens=100)
+        row = await get_session("s7")
+        expected = calculate_cost("claude", "claude-sonnet-4-5", {
+            "input_tokens": 1000, "output_tokens": 500,
+            "cache_read_tokens": 200, "cache_creation_tokens": 100,
+        })
+        self.assertAlmostEqual(row["cost_usd"], expected, places=12)
+        self.assertGreater(row["cost_usd"], 0)
+
+    async def test_add_tokens_with_cache(self):
+        from sessions.store import create_session, add_tokens, get_session
+        await create_session(
+            session_id="s6", bot_id=1, group_id=1,
+            config={"system_prompt": "", "provider": "deepseek",
+                    "model_name": "deepseek-chat", "temperature": 0.7, "max_tokens": 4096},
+            user_message="z",
+        )
+        await add_tokens("s6", input_tokens=100, output_tokens=50,
+                         cache_read_tokens=30, cache_creation_tokens=10)
+        await add_tokens("s6", input_tokens=20, output_tokens=10,
+                         cache_read_tokens=5, cache_creation_tokens=2)
+        row = await get_session("s6")
+        self.assertEqual(row["input_tokens"], 120)
+        self.assertEqual(row["output_tokens"], 60)
+        self.assertEqual(row["cache_read_tokens"], 35)
+        self.assertEqual(row["cache_creation_tokens"], 12)
 
 
 class TestMessageReconstruction(unittest.IsolatedAsyncioTestCase):
@@ -242,6 +282,32 @@ class TestMessageReconstruction(unittest.IsolatedAsyncioTestCase):
         msgs = reconstruct_messages(config, events)
         roles = [m["role"] for m in msgs]
         self.assertEqual(roles, ["system", "user", "assistant"])
+
+    def test_reconstruct_warns_on_unknown_event_type(self):
+        from sessions.recovery import reconstruct_messages
+        config = {"system_prompt": "s", "provider": "deepseek"}
+        events = [
+            self._make_event("session_start", {"user_content": "do it"}),
+            self._make_event("user_interrupt", {"at_iter": 2}),  # unknown type
+        ]
+        with self.assertLogs("sessions.recovery", level="WARNING") as cm:
+            msgs = reconstruct_messages(config, events)
+        self.assertTrue(any("user_interrupt" in line for line in cm.output))
+        # unknown event must not add a message
+        self.assertEqual([m["role"] for m in msgs], ["system", "user"])
+
+    def test_reconstruct_no_warning_for_ignored_types(self):
+        from sessions.recovery import reconstruct_messages
+        import logging
+        config = {"system_prompt": "s", "provider": "deepseek"}
+        events = [
+            self._make_event("session_start", {"user_content": "do it"}),
+            self._make_event("tool_call", {"tool_name": "read_file"}),
+            self._make_event("child_fork", {"child_session_id": "c1"}),
+        ]
+        logger = logging.getLogger("sessions.recovery")
+        with self.assertNoLogs(logger, level="WARNING"):
+            reconstruct_messages(config, events)
 
 
 class TestRecoverAll(unittest.IsolatedAsyncioTestCase):

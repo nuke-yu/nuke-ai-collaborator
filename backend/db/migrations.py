@@ -137,12 +137,27 @@ async def migration_005(db):
     await db.commit()
 
 
+async def migration_006(db):
+    """Add cache token columns to agent_sessions for session-level aggregation."""
+    stmts = [
+        "ALTER TABLE agent_sessions ADD COLUMN cache_read_tokens INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE agent_sessions ADD COLUMN cache_creation_tokens INTEGER NOT NULL DEFAULT 0",
+    ]
+    for sql in stmts:
+        try:
+            await db.execute(sql)
+        except Exception:
+            pass
+    await db.commit()
+
+
 MIGRATIONS: list = [
     migration_001,
     migration_002,
     migration_003,
     migration_004,
     migration_005,
+    migration_006,
 ]
 
 # ---------------------------------------------------------------------------

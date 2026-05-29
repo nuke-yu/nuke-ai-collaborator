@@ -80,6 +80,8 @@ class SimpleV1(BotExecutor):
         _u = _usage_out[0] if _usage_out else {}
         _tokens_in = _u.get("input_tokens") or None
         _tokens_out = _u.get("output_tokens") or None
+        _cache_read = _u.get("cache_read_tokens") or None
+        _cache_creation = _u.get("cache_creation_tokens") or None
 
         # Sub-agents: close stream animation then return without DB/memory ops
         if ctx.spawn_depth > 0:
@@ -92,7 +94,9 @@ class SimpleV1(BotExecutor):
 
         async with get_db() as db:
             msg_id = await save_message(db, ctx.group_id, bot["id"], full_text,
-                                        input_tokens=_tokens_in, output_tokens=_tokens_out)
+                                        input_tokens=_tokens_in, output_tokens=_tokens_out,
+                                        cache_read_tokens=_cache_read,
+                                        cache_creation_tokens=_cache_creation)
             recent = await get_messages(db, ctx.group_id)
 
         await ctx.broadcaster.broadcast(ctx.group_id, {

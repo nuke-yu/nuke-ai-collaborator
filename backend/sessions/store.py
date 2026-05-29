@@ -2,6 +2,7 @@
 import json
 import aiosqlite
 import db as _db
+from ai.pricing import calculate_cost
 
 
 async def create_session(
@@ -49,7 +50,23 @@ async def get_session(session_id: str) -> dict | None:
         return None
     d = dict(row)
     d["config"] = json.loads(d.pop("config_json", "{}"))
+    d["cost_usd"] = _session_cost(d)
     return d
+
+
+def _session_cost(session: dict) -> float:
+    """Estimate total USD cost for a session from its config model + token totals."""
+    config = session.get("config") or {}
+    return calculate_cost(
+        config.get("provider", ""),
+        config.get("model_name", ""),
+        {
+            "input_tokens": session.get("input_tokens") or 0,
+            "output_tokens": session.get("output_tokens") or 0,
+            "cache_read_tokens": session.get("cache_read_tokens") or 0,
+            "cache_creation_tokens": session.get("cache_creation_tokens") or 0,
+        },
+    )
 
 
 async def get_events(session_id: str) -> list[dict]:
@@ -93,14 +110,23 @@ async def get_orphaned_sessions() -> list[dict]:
     return result
 
 
-async def add_tokens(session_id: str, input_tokens: int, output_tokens: int) -> None:
+async def add_tokens(
+    session_id: str,
+    input_tokens: int,
+    output_tokens: int,
+    cache_read_tokens: int = 0,
+    cache_creation_tokens: int = 0,
+) -> None:
     async with aiosqlite.connect(_db.DB_PATH) as conn:
         await conn.execute(
             """UPDATE agent_sessions
-               SET input_tokens  = input_tokens  + ?,
-                   output_tokens = output_tokens + ?,
-                   updated_at    = datetime('now')
+               SET input_tokens          = input_tokens          + ?,
+                   output_tokens         = output_tokens         + ?,
+                   cache_read_tokens     = cache_read_tokens     + ?,
+                   cache_creation_tokens = cache_creation_tokens + ?,
+                   updated_at            = datetime('now')
                WHERE id = ?""",
-            (input_tokens, output_tokens, session_id),
+            (input_tokens, output_tokens, cache_read_tokens,
+             cache_creation_tokens, session_id),
         )
         await conn.commit()

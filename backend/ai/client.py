@@ -131,6 +131,11 @@ async def _stream_openai_compat(url: str, api_key: str, model: str, messages: li
                         usage_out.append({
                             "input_tokens": raw.get("prompt_tokens", 0),
                             "output_tokens": raw.get("completion_tokens", 0),
+                            "cache_read_tokens": (
+                                raw.get("prompt_cache_hit_tokens") or
+                                (raw.get("prompt_tokens_details") or {}).get("cached_tokens") or 0
+                            ),
+                            "cache_creation_tokens": 0,
                         })
                 except (json.JSONDecodeError, KeyError, IndexError):
                     continue
@@ -198,14 +203,22 @@ async def _stream_claude(model: str, system_prompt: str, messages: list, api_key
                         if event_type == "message_start":
                             u = data.get("message", {}).get("usage", {})
                             if u:
-                                usage_out.append({"input_tokens": u.get("input_tokens", 0), "output_tokens": 0})
+                                usage_out.append({
+                                    "input_tokens": u.get("input_tokens", 0),
+                                    "output_tokens": 0,
+                                    "cache_read_tokens": u.get("cache_read_input_tokens", 0),
+                                    "cache_creation_tokens": u.get("cache_creation_input_tokens", 0),
+                                })
                         elif event_type == "message_delta":
                             u = data.get("usage", {})
                             if u:
                                 if usage_out:
                                     usage_out[-1]["output_tokens"] = u.get("output_tokens", 0)
                                 else:
-                                    usage_out.append({"input_tokens": 0, "output_tokens": u.get("output_tokens", 0)})
+                                    usage_out.append({
+                                        "input_tokens": 0, "output_tokens": u.get("output_tokens", 0),
+                                        "cache_read_tokens": 0, "cache_creation_tokens": 0,
+                                    })
                 except (json.JSONDecodeError, KeyError):
                     continue
 
@@ -298,7 +311,15 @@ async def _once_openai_compat(url: str, api_key: str, model: str, system_prompt:
     choice = data["choices"][0]
     msg = choice["message"]
     raw_usage = data.get("usage", {})
-    usage = {"input_tokens": raw_usage.get("prompt_tokens", 0), "output_tokens": raw_usage.get("completion_tokens", 0)}
+    usage = {
+        "input_tokens": raw_usage.get("prompt_tokens", 0),
+        "output_tokens": raw_usage.get("completion_tokens", 0),
+        "cache_read_tokens": (
+            raw_usage.get("prompt_cache_hit_tokens") or
+            (raw_usage.get("prompt_tokens_details") or {}).get("cached_tokens") or 0
+        ),
+        "cache_creation_tokens": 0,
+    }
     if choice.get("finish_reason") == "tool_calls" and msg.get("tool_calls"):
         calls = [
             {"id": tc["id"], "name": tc["function"]["name"],
@@ -357,7 +378,12 @@ async def _once_claude(api_key: str, model: str, system_prompt: str,
         elif block["type"] == "tool_use":
             tool_uses.append({"id": block["id"], "name": block["name"], "arguments": block["input"]})
     raw_usage = data.get("usage", {})
-    usage = {"input_tokens": raw_usage.get("input_tokens", 0), "output_tokens": raw_usage.get("output_tokens", 0)}
+    usage = {
+        "input_tokens": raw_usage.get("input_tokens", 0),
+        "output_tokens": raw_usage.get("output_tokens", 0),
+        "cache_read_tokens": raw_usage.get("cache_read_input_tokens", 0),
+        "cache_creation_tokens": raw_usage.get("cache_creation_input_tokens", 0),
+    }
     if tool_uses:
         assistant_msg = {
             "role": "assistant", "content": None,

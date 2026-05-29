@@ -190,6 +190,17 @@ class ReactObservation:
     observation: str
 
 
+# ─── 工作流 ───────────────────────────────────────────────────────────────────
+
+@event("workflow_update")
+class WorkflowUpdate:
+    group_id: int
+    active:   bool
+    stages:   list | None = None
+    current:  int | None  = None
+    done:     bool        = False
+
+
 # ─── Compaction ──────────────────────────────────────────────────────────────
 
 @event("compaction")

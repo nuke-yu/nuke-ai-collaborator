@@ -7,7 +7,7 @@ from bus.events import (
     Message, Read, Typing, Error,
     SteerQueued, FollowupStart,
 )
-from ai.client import call_ai, call_ai_stream, AIError
+from ai.client import call_ai, call_ai_stream, call_ai_once, AIError
 from core.role_router import should_bot_respond, build_context_message
 from ai.memory import maybe_summarize, get_memory_context, add_to_chroma
 from executors.base import ExecutionContext
@@ -83,16 +83,22 @@ async def stream_bot_response(group_id: int, bot: dict, system_prompt: str,
     temperature = bot.get("temperature", 0.7)
     max_tokens = bot.get("max_tokens", 4096)
     full_text = ""
+    _usage_out: list = []
     try:
-        async for chunk in call_ai_stream(system_prompt, history, user_msg, provider, model, temperature, max_tokens):
+        async for chunk in call_ai_stream(system_prompt, history, user_msg, provider, model, temperature, max_tokens, usage_out=_usage_out):
             full_text += chunk
             await bus.publish(StreamChunk(group_id=group_id, temp_id=temp_id, delta=chunk))
     except AIError as e:
         await bus.publish(StreamError(group_id=group_id, temp_id=temp_id, message=str(e)))
         return None, None
 
+    _u = _usage_out[0] if _usage_out else {}
     async with get_db() as db:
-        msg_id = await save_message(db, group_id, bot["id"], full_text)
+        msg_id = await save_message(db, group_id, bot["id"], full_text,
+                                    input_tokens=_u.get("input_tokens") or None,
+                                    output_tokens=_u.get("output_tokens") or None,
+                                    cache_read_tokens=_u.get("cache_read_tokens") or None,
+                                    cache_creation_tokens=_u.get("cache_creation_tokens") or None)
         recent = await get_messages(db, group_id)
     await bus.publish(StreamEnd(
         group_id=group_id, temp_id=temp_id, id=msg_id,
@@ -232,9 +238,15 @@ async def dispatch_bots(group_id: int, triggered: list, content: str, sender: di
         system_prompt = base_prompt + (f"\n\n{memory}" if memory else "")
         if "测试" in (bot["role"] or ""):
             system_prompt += f"\n\n完成测试报告后，在最后一行写：「@{initiator_name} 测试完成，任务全部完成！」"
-        ai_reply = await call_ai(system_prompt, history, user_msg,
-                                 bot.get("temperature", 0.7), bot.get("max_tokens", 4096))
-        return bot, ai_reply
+        result = await call_ai_once(
+            system_prompt, history + [{"role": "user", "content": user_msg}],
+            provider=bot.get("model_provider", "deepseek"),
+            model=bot.get("model_name", "deepseek-chat"),
+            temperature=bot.get("temperature", 0.7),
+            max_tokens=bot.get("max_tokens", 4096),
+        )
+        ai_reply = result.get("content", "") if result["type"] == "text" else ""
+        return bot, ai_reply, result.get("usage") or {}
 
     async def race_role_group(bots):
         if len(bots) == 1:
@@ -295,7 +307,7 @@ async def dispatch_bots(group_id: int, triggered: list, content: str, sender: di
         for t in pending:
             t.cancel()
         try:
-            winner_bot, ai_reply = done.pop().result()
+            winner_bot, ai_reply, _race_usage = done.pop().result()
         except AIError as e:
             await bus.publish(Error(group_id=group_id, message=str(e)))
             return
@@ -303,7 +315,11 @@ async def dispatch_bots(group_id: int, triggered: list, content: str, sender: di
             await bus.publish(Error(group_id=group_id, message=f"未知错误：{str(e)}"))
             return
         async with get_db() as db2:
-            bot_msg_id = await save_message(db2, group_id, winner_bot["id"], ai_reply)
+            bot_msg_id = await save_message(db2, group_id, winner_bot["id"], ai_reply,
+                                            input_tokens=_race_usage.get("input_tokens") or None,
+                                            output_tokens=_race_usage.get("output_tokens") or None,
+                                            cache_read_tokens=_race_usage.get("cache_read_tokens") or None,
+                                            cache_creation_tokens=_race_usage.get("cache_creation_tokens") or None)
             bot_recent = await get_messages(db2, group_id)
         asyncio.create_task(add_to_chroma(bot_msg_id, ai_reply, winner_bot["role"] or "", winner_bot["id"]))
         await bus.publish(Message(

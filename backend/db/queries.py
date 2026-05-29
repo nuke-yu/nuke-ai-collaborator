@@ -72,15 +72,16 @@ async def save_message(db, group_id: int, member_id: int, content: str,
                        reply_to_id: int = None, file_url: str = None,
                        file_name: str = None, file_size: int = None,
                        file_type: str = None, is_auto_reply: bool = False,
-                       input_tokens: int = None, output_tokens: int = None):
+                       input_tokens: int = None, output_tokens: int = None,
+                       cache_read_tokens: int = None, cache_creation_tokens: int = None):
     async with db.execute(
         "INSERT INTO messages (group_id, member_id, content, reply_to_id, "
         "file_url, file_name, file_size, file_type, is_auto_reply, "
-        "input_tokens, output_tokens) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (group_id, member_id, content, reply_to_id,
          file_url, file_name, file_size, file_type, int(is_auto_reply),
-         input_tokens, output_tokens)
+         input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens)
     ) as cur:
         await db.commit()
         return cur.lastrowid
@@ -117,10 +118,16 @@ async def update_member_full(db, member_id: int, data: dict):
     await db.commit()
 
 
-async def update_message(db, msg_id: int, content: str):
+async def update_message(db, msg_id: int, content: str,
+                          input_tokens: int = None, output_tokens: int = None,
+                          cache_read_tokens: int = None, cache_creation_tokens: int = None):
     await db.execute(
-        "UPDATE messages SET content=?, edited_at=CURRENT_TIMESTAMP WHERE id=?",
-        (content, msg_id)
+        "UPDATE messages SET content=?, edited_at=CURRENT_TIMESTAMP,"
+        " input_tokens=COALESCE(?, input_tokens),"
+        " output_tokens=COALESCE(?, output_tokens),"
+        " cache_read_tokens=COALESCE(?, cache_read_tokens),"
+        " cache_creation_tokens=COALESCE(?, cache_creation_tokens) WHERE id=?",
+        (content, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, msg_id)
     )
     await db.commit()
 

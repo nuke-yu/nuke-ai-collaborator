@@ -297,6 +297,8 @@ class ToolLoopV1(BotExecutor):
         )
 
         provider = bot.get("model_provider", "deepseek")
+        temperature = bot.get("temperature", 0.7)
+        max_tokens = bot.get("max_tokens", 4096)
 
         # Inject workspace context as prefix of the first user message
         # For multimodal (image) messages, preserve blocks; context prefix becomes a leading text block
@@ -341,8 +343,6 @@ class ToolLoopV1(BotExecutor):
                 "type": "skills_loaded", "temp_id": temp_id,
                 "member_id": bot["id"], "skills": skills_snapshot,
             })
-        temperature = bot.get("temperature", 0.7)
-        max_tokens = bot.get("max_tokens", 4096)
         full_text = ""
         _total_input_tokens = 0
         _total_output_tokens = 0
@@ -536,11 +536,14 @@ class ToolLoopV1(BotExecutor):
                         "input_tokens": _u.get("input_tokens", 0),
                         "output_tokens": _u.get("output_tokens", 0),
                     })
-                    if _u.get("input_tokens") or _u.get("output_tokens"):
+                    if (_u.get("input_tokens") or _u.get("output_tokens")
+                            or _u.get("cache_read_tokens") or _u.get("cache_creation_tokens")):
                         await sessions.add_tokens(
                             _session_id,
                             input_tokens=_u.get("input_tokens", 0),
                             output_tokens=_u.get("output_tokens", 0),
+                            cache_read_tokens=_u.get("cache_read_tokens", 0),
+                            cache_creation_tokens=_u.get("cache_creation_tokens", 0),
                         )
                     if result["type"] == "tool_calls":
                         _consecutive_tool_only += 1

@@ -252,6 +252,10 @@ class ReactV1(BotExecutor):
         iter_count  = 0
         tool_names_called: list[str] = []
         _action_counts: dict[str, int] = {}   # action_sig → repeat count
+        _total_input_tokens = 0
+        _total_output_tokens = 0
+        _total_cache_read_tokens = 0
+        _total_cache_creation_tokens = 0
 
         def _build_reinject() -> str:
             return context_text
@@ -281,6 +285,12 @@ class ReactV1(BotExecutor):
                         system_prompt, messages, provider, model_name,
                         temperature, max_tokens,
                     )
+
+                _u = result.get("usage") or {}
+                _total_input_tokens += _u.get("input_tokens", 0)
+                _total_output_tokens += _u.get("output_tokens", 0)
+                _total_cache_read_tokens += _u.get("cache_read_tokens", 0)
+                _total_cache_creation_tokens += _u.get("cache_creation_tokens", 0)
 
                 raw_text = result.get("content", "") if result["type"] == "text" else ""
                 if not raw_text:
@@ -383,7 +393,11 @@ class ReactV1(BotExecutor):
             return ExecutionResult(full_text=full_text, msg_id=None)
 
         async with get_db() as db:
-            msg_id = await save_message(db, ctx.group_id, bot["id"], full_text)
+            msg_id = await save_message(db, ctx.group_id, bot["id"], full_text,
+                                        input_tokens=_total_input_tokens or None,
+                                        output_tokens=_total_output_tokens or None,
+                                        cache_read_tokens=_total_cache_read_tokens or None,
+                                        cache_creation_tokens=_total_cache_creation_tokens or None)
             recent = await get_messages(db, ctx.group_id)
 
         await ctx.broadcaster.broadcast(ctx.group_id, {

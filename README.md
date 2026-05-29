@@ -99,6 +99,27 @@ POST   /api/cron-jobs/{id}/run     # 立即触发一次
 - **数据导出** — 导出聊天记录为 Markdown 或 JSON，含发言人、时间戳、回复关系
 - **使用统计** — 各成员发言数量统计，横向进度条可视化
 
+### 📊 Token 统计（完整覆盖）
+
+每条 AI 消息均记录四类 token —— `input_tokens` / `output_tokens` / `cache_read_tokens` / `cache_creation_tokens`，覆盖所有 AI 调用路径：
+
+| 路径 | 文件 | 说明 |
+|------|------|------|
+| 流式主回复 | `core/orchestrator.py` · `stream_bot_response` | `usage_out` → `save_message` |
+| 竞速路径 | `core/orchestrator.py` · `call_bot` | `call_ai_once` 返回值 → `save_message` |
+| 工作流链式阶段 | `core/workflow.py` · `_trigger_single_stage` | `usage_out` → `update_message` |
+| 工作流池式阶段 | `core/workflow.py` · `_trigger_pool_bot` | `usage_out` → `update_message` |
+| 最终流式回复 | `executors/plugins/tool_loop_v1.py` · `_stream_final` | 计入 `_total_input/output/cache_read/cache_creation_tokens` |
+| 质量审查 Hook | `executors/plugins/tool_loop_v1.py` · `_before_finalize_hook` | 每次 review/regen 均通过 `_acc_usage` 累加 |
+| Fork Skill | `executors/plugins/tool_loop_v1.py` · `_run_fork_skill` | `_acc_usage` → `usage_out` |
+| 草稿生成 | `executors/plugins/tool_loop_v1.py` · `_finalize_reply` | gen draft + hook tokens 一并汇总 |
+
+**Cache token 字段来源**：DeepSeek `prompt_cache_hit_tokens`、OpenAI `prompt_tokens_details.cached_tokens` 映射为 `cache_read_tokens`；Claude 的 `cache_read_input_tokens` / `cache_creation_input_tokens` 分别映射到 `cache_read_tokens` / `cache_creation_tokens`（仅 Claude 有写缓存概念）。非流式与流式（含 Claude `message_start` 事件）均已解析。
+
+**会话级聚合**：`tool_loop_v1` 每轮 `call_ai_once` 后调用 `sessions.add_tokens()`，把四类 token 累加进 `agent_sessions` 表（`migration_006` 新增 `cache_read_tokens` / `cache_creation_tokens` 两列），用于会话级用量统计与崩溃恢复。
+
+`db/queries.py` 中的 `update_message` 使用 `COALESCE(?, col)` 模式：传 `None` 保留数据库已有值，传整数则覆盖，对用户手动编辑消息无副作用。
+
 ---
 
 ## Getting Started

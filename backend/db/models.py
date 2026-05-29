@@ -1,5 +1,7 @@
 import json
 
+from ai.pricing import calculate_cost
+
 
 def _parse_json(val):
     try:
@@ -31,7 +33,9 @@ _MSG_SQL = """
            m.reply_to_id, rm.content, rmb.name,
            m.edited_at, m.is_deleted,
            m.file_url, m.file_name, m.file_size, m.file_type,
-           m.is_auto_reply, m.input_tokens, m.output_tokens
+           m.is_auto_reply, m.input_tokens, m.output_tokens,
+           m.cache_read_tokens, m.cache_creation_tokens,
+           mb.model_provider, mb.model_name
     FROM messages m
     JOIN members mb ON m.member_id = mb.id
     LEFT JOIN messages rm ON m.reply_to_id = rm.id
@@ -44,6 +48,20 @@ def _row_to_msg(r):
     created_at = r[4]
     if created_at and "Z" not in created_at and "+" not in created_at:
         created_at = created_at.replace(" ", "T") + "Z"
+    input_tokens = r[18] if len(r) > 18 else None
+    output_tokens = r[19] if len(r) > 19 else None
+    cache_read_tokens = r[20] if len(r) > 20 else None
+    cache_creation_tokens = r[21] if len(r) > 21 else None
+    provider = r[22] if len(r) > 22 else None
+    model = r[23] if len(r) > 23 else None
+    cost_usd = None
+    if provider and (input_tokens or output_tokens or cache_read_tokens or cache_creation_tokens):
+        cost_usd = calculate_cost(provider, model, {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "cache_read_tokens": cache_read_tokens,
+            "cache_creation_tokens": cache_creation_tokens,
+        })
     return {
         "id": r[0], "group_id": r[1], "member_id": r[2], "content": r[3],
         "created_at": created_at, "sender_name": r[5], "sender_type": r[6],
@@ -51,6 +69,9 @@ def _row_to_msg(r):
         "edited_at": r[11], "is_deleted": bool(r[12]),
         "file_url": r[13], "file_name": r[14], "file_size": r[15], "file_type": r[16],
         "is_auto_reply": bool(r[17]) if len(r) > 17 else False,
-        "input_tokens": r[18] if len(r) > 18 else None,
-        "output_tokens": r[19] if len(r) > 19 else None,
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "cache_read_tokens": cache_read_tokens,
+        "cache_creation_tokens": cache_creation_tokens,
+        "cost_usd": cost_usd,
     }
