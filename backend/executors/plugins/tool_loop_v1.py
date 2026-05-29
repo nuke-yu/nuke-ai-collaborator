@@ -1,6 +1,8 @@
 import asyncio
 import uuid
 import sys
+import json
+import sessions
 
 from executors.base import (
     BotExecutor, ExecutionContext, ExecutionResult,
@@ -23,6 +25,19 @@ from skills.constants import bot_ws as _bot_ws
 import executors.compact as compact
 
 _DOOM_LOOP_THRESHOLD = 5  # breaks on the Nth consecutive tool-only iteration (inclusive)
+
+
+def _acc_usage(target: list, result: dict) -> None:
+    """Append usage from a call_ai_once result into a shared accumulator list."""
+    u = result.get("usage") or {}
+    if not u:
+        return
+    target.append({
+        "input_tokens": u.get("input_tokens", 0),
+        "output_tokens": u.get("output_tokens", 0),
+        "cache_read_tokens": u.get("cache_read_tokens", 0),
+        "cache_creation_tokens": u.get("cache_creation_tokens", 0),
+    })
 
 
 async def _execute_tool_call(name: str, arguments: dict, context: dict) -> str:
@@ -88,6 +103,7 @@ async def _before_finalize_hook(
     group_id: int,
     temp_id: str,
     user_message: str,
+    usage_out: list | None = None,
 ) -> str:
     """Quality gate before finalizing a reply.
 
@@ -113,6 +129,8 @@ async def _before_finalize_hook(
                 [{"role": "user", "content": f"【用户问题】\n{user_message}\n\n【待审查回复】\n{cur_draft}"}],
                 provider, model_name, temperature, 512,
             )
+            if usage_out is not None:
+                _acc_usage(usage_out, review)
             feedback = review["content"] if review["type"] == "text" else ""
             approved = not feedback.strip().upper().startswith("REJECTED")
         except Exception:
@@ -138,6 +156,8 @@ async def _before_finalize_hook(
             regen = await call_ai_once(
                 system_prompt, cur_messages, provider, model_name, temperature, max_tokens,
             )
+            if usage_out is not None:
+                _acc_usage(usage_out, regen)
             if regen["type"] == "text":
                 cur_draft = regen["content"]
         except Exception:
@@ -153,6 +173,7 @@ async def _run_fork_skill(
     model: str,
     temperature: float,
     tool_schemas: list | None = None,
+    usage_out: list | None = None,
 ) -> str:
     """Execute a fork skill in an isolated single AI call.
 
@@ -166,6 +187,8 @@ async def _run_fork_skill(
             provider, model, temperature, 4096,
             tool_schemas or None,
         )
+        if usage_out is not None:
+            _acc_usage(usage_out, result)
         if result["type"] == "text":
             return result["content"]
         if result["type"] == "tool_calls":
@@ -288,6 +311,26 @@ class ToolLoopV1(BotExecutor):
         tool_schemas = tool_executor.get_schemas(tool_names)
 
         temp_id = str(uuid.uuid4())
+        _session_id = str(uuid.uuid4())
+        _session_config = {
+            "system_prompt": system_prompt,
+            "provider": provider,
+            "model_name": model_name,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        }
+        await sessions.create_session(
+            session_id=_session_id,
+            bot_id=bot["id"],
+            group_id=ctx.group_id,
+            config=_session_config,
+            user_message=ctx.user_message,
+            executor_id=self.executor_id,
+        )
+        await sessions.append_event(_session_id, "session_start", {
+            "user_content": user_content if isinstance(user_content, str)
+                            else json.dumps(user_content, ensure_ascii=False),
+        })
         await ctx.broadcaster.broadcast(ctx.group_id, {
             "type": "stream_start", "temp_id": temp_id,
             "member_id": bot["id"], "sender_name": bot["name"],
@@ -303,6 +346,8 @@ class ToolLoopV1(BotExecutor):
         full_text = ""
         _total_input_tokens = 0
         _total_output_tokens = 0
+        _total_cache_read_tokens = 0
+        _total_cache_creation_tokens = 0
         _use_cached_mc = compact.should_use_cached_microcompact(provider)
 
         # Cross-compaction file tracker: path → "read" | "modified"
@@ -333,16 +378,19 @@ class ToolLoopV1(BotExecutor):
             })
 
         async def _stream_final():
-            nonlocal full_text, messages
+            nonlocal full_text, messages, _total_input_tokens, _total_output_tokens, _total_cache_read_tokens, _total_cache_creation_tokens
+            _sf_usage: list = []
             try:
                 async for chunk in call_ai_stream_messages(
-                    system_prompt, messages, provider, model_name, temperature, max_tokens
+                    system_prompt, messages, provider, model_name, temperature, max_tokens,
+                    usage_out=_sf_usage,
                 ):
                     full_text += chunk
                     await ctx.broadcaster.broadcast(ctx.group_id, {
                         "type": "stream_chunk", "temp_id": temp_id, "delta": chunk,
                     })
             except AIContextOverflowError:
+                _sf_usage.clear()
                 messages = await compact.compact_conversation(
                     messages, system_prompt, provider, model_name, temperature,
                     context_text=_build_reinject(),
@@ -353,15 +401,21 @@ class ToolLoopV1(BotExecutor):
                     "message": "流式回复溢出，已压缩后重试",
                 })
                 async for chunk in call_ai_stream_messages(
-                    system_prompt, messages, provider, model_name, temperature, max_tokens
+                    system_prompt, messages, provider, model_name, temperature, max_tokens,
+                    usage_out=_sf_usage,
                 ):
                     full_text += chunk
                     await ctx.broadcaster.broadcast(ctx.group_id, {
                         "type": "stream_chunk", "temp_id": temp_id, "delta": chunk,
                     })
+            for _u in _sf_usage:
+                _total_input_tokens += _u.get("input_tokens", 0)
+                _total_output_tokens += _u.get("output_tokens", 0)
+                _total_cache_read_tokens += _u.get("cache_read_tokens", 0)
+                _total_cache_creation_tokens += _u.get("cache_creation_tokens", 0)
 
         async def _finalize_reply():
-            nonlocal full_text, messages
+            nonlocal full_text, messages, _total_input_tokens, _total_output_tokens, _total_cache_read_tokens, _total_cache_creation_tokens
             if not bf_config or not bf_config.get("reviewer_prompt"):
                 await _stream_final()
                 return
@@ -370,6 +424,11 @@ class ToolLoopV1(BotExecutor):
                 gen = await call_ai_once(
                     system_prompt, snap, provider, model_name, temperature, max_tokens
                 )
+                _gu = gen.get("usage") or {}
+                _total_input_tokens += _gu.get("input_tokens", 0)
+                _total_output_tokens += _gu.get("output_tokens", 0)
+                _total_cache_read_tokens += _gu.get("cache_read_tokens", 0)
+                _total_cache_creation_tokens += _gu.get("cache_creation_tokens", 0)
                 draft = gen["content"] if gen["type"] == "text" else ""
             except AIContextOverflowError:
                 messages = await compact.compact_conversation(
@@ -386,11 +445,18 @@ class ToolLoopV1(BotExecutor):
             except Exception:
                 await _stream_final()
                 return
+            _bf_usage: list = []
             approved_text = await _before_finalize_hook(
                 draft, snap, system_prompt, bf_config,
                 provider, model_name, temperature, max_tokens,
                 ctx.broadcaster, ctx.group_id, temp_id, ctx.user_message,
+                usage_out=_bf_usage,
             )
+            for _u in _bf_usage:
+                _total_input_tokens += _u.get("input_tokens", 0)
+                _total_output_tokens += _u.get("output_tokens", 0)
+                _total_cache_read_tokens += _u.get("cache_read_tokens", 0)
+                _total_cache_creation_tokens += _u.get("cache_creation_tokens", 0)
             full_text = approved_text
             chunk_size = 20
             for i in range(0, len(approved_text), chunk_size):
@@ -462,6 +528,20 @@ class ToolLoopV1(BotExecutor):
                     _u = result.get("usage") or {}
                     _total_input_tokens += _u.get("input_tokens", 0)
                     _total_output_tokens += _u.get("output_tokens", 0)
+                    _total_cache_read_tokens += _u.get("cache_read_tokens", 0)
+                    _total_cache_creation_tokens += _u.get("cache_creation_tokens", 0)
+                    await sessions.append_event(_session_id, "llm_response", {
+                        "content": result.get("content", ""),
+                        "tool_calls": (result.get("assistant_message") or {}).get("tool_calls"),
+                        "input_tokens": _u.get("input_tokens", 0),
+                        "output_tokens": _u.get("output_tokens", 0),
+                    })
+                    if _u.get("input_tokens") or _u.get("output_tokens"):
+                        await sessions.add_tokens(
+                            _session_id,
+                            input_tokens=_u.get("input_tokens", 0),
+                            output_tokens=_u.get("output_tokens", 0),
+                        )
                     if result["type"] == "tool_calls":
                         _consecutive_tool_only += 1
                         if _consecutive_tool_only >= _DOOM_LOOP_THRESHOLD:
@@ -481,11 +561,23 @@ class ToolLoopV1(BotExecutor):
                                     "type": "tool_call", "temp_id": temp_id,
                                     "tool": call["name"], "args": call["arguments"],
                                 })
+                                # WAL: write tool_call BEFORE parallel execution
+                                await sessions.append_event(_session_id, "tool_call", {
+                                    "tool_call_id": call["id"],
+                                    "tool_name": call["name"],
+                                    "arguments": call.get("arguments", {}),
+                                })
                             raw_results = await asyncio.gather(*[
                                 tool_executor.execute(c["name"], c["arguments"], context=execution_ctx)
                                 for c in calls
                             ])
                             for call, tool_result in zip(calls, raw_results):
+                                await sessions.append_event(_session_id, "tool_result", {
+                                    "tool_call_id": call["id"],
+                                    "tool_name": call["name"],
+                                    "result": tool_result,
+                                    "is_error": False,
+                                })
                                 _fpath = call["arguments"].get("path", "")
                                 if _fpath and call["name"] in compact._FILE_READ_TOOLS:
                                     _file_tracker.setdefault(_fpath, "read")
@@ -512,9 +604,20 @@ class ToolLoopV1(BotExecutor):
                                     "type": "tool_call", "temp_id": temp_id,
                                     "tool": call["name"], "args": call["arguments"],
                                 })
+                                await sessions.append_event(_session_id, "tool_call", {
+                                    "tool_call_id": call["id"],
+                                    "tool_name": call["name"],
+                                    "arguments": call.get("arguments", {}),
+                                })
                                 tool_result = await tool_executor.execute(
                                     call["name"], call["arguments"], context=execution_ctx
                                 )
+                                await sessions.append_event(_session_id, "tool_result", {
+                                    "tool_call_id": call["id"],
+                                    "tool_name": call["name"],
+                                    "result": tool_result,
+                                    "is_error": False,
+                                })
                                 # Track file reads/writes for cross-compaction persistence
                                 _fpath = call["arguments"].get("path", "")
                                 if _fpath:
@@ -554,12 +657,29 @@ class ToolLoopV1(BotExecutor):
                                             if fork_allowed else None
                                         )
                                         fork_model = fork_info.get("model") or model_name
+                                        _fork_usage: list = []
+                                        child_sid = str(uuid.uuid4())
+                                        await sessions.append_event(_session_id, "child_fork", {
+                                            "child_session_id": child_sid,
+                                            "skill_name": fork_name,
+                                        })
                                         tool_result = await _run_fork_skill(
                                             fork_info.get("content", ""),
                                             fork_task,
                                             provider, fork_model, temperature,
                                             tool_schemas=fork_schemas,
+                                            usage_out=_fork_usage,
                                         )
+                                        await sessions.append_event(_session_id, "child_join", {
+                                            "child_session_id": child_sid,
+                                            "skill_name": fork_name,
+                                            "result": tool_result,
+                                        })
+                                        for _u in _fork_usage:
+                                            _total_input_tokens += _u.get("input_tokens", 0)
+                                            _total_output_tokens += _u.get("output_tokens", 0)
+                                            _total_cache_read_tokens += _u.get("cache_read_tokens", 0)
+                                            _total_cache_creation_tokens += _u.get("cache_creation_tokens", 0)
                                         await ctx.broadcaster.broadcast(ctx.group_id, {
                                             "type": "skill_fork_end", "temp_id": temp_id,
                                             "member_id": bot["id"], "skill_name": fork_name,
@@ -635,11 +755,13 @@ class ToolLoopV1(BotExecutor):
                     full_text = "[达到最大工具调用次数，任务未完成]"
 
         except asyncio.CancelledError:
+            await sessions.update_session_status(_session_id, "failed")
             await ctx.broadcaster.broadcast(ctx.group_id, {
                 "type": "stream_aborted", "temp_id": temp_id, "member_id": bot["id"],
             })
             raise
         except AIError as e:
+            await sessions.update_session_status(_session_id, "failed")
             await ctx.broadcaster.broadcast(ctx.group_id, {
                 "type": "stream_error", "temp_id": temp_id, "message": str(e),
             })
@@ -659,6 +781,8 @@ class ToolLoopV1(BotExecutor):
                 db, ctx.group_id, bot["id"], full_text,
                 input_tokens=_total_input_tokens or None,
                 output_tokens=_total_output_tokens or None,
+                cache_read_tokens=_total_cache_read_tokens or None,
+                cache_creation_tokens=_total_cache_creation_tokens or None,
             )
             recent = await get_messages(db, ctx.group_id)
 
@@ -698,4 +822,5 @@ class ToolLoopV1(BotExecutor):
                 executor=self.executor_id,
             ))
 
+        await sessions.update_session_status(_session_id, "completed")
         return ExecutionResult(full_text=full_text, msg_id=msg_id)
