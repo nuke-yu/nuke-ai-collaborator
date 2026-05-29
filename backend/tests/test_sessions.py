@@ -168,5 +168,81 @@ class TestSessionStore(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(row["output_tokens"], 60)
 
 
+class TestMessageReconstruction(unittest.IsolatedAsyncioTestCase):
+
+    def _make_event(self, etype, payload):
+        return {"event_type": etype, "payload": payload}
+
+    def test_reconstruct_basic_conversation(self):
+        from sessions.recovery import reconstruct_messages
+        config = {"system_prompt": "You are a helper.", "provider": "deepseek"}
+        events = [
+            self._make_event("session_start", {"user_content": "What is 2+2?"}),
+            self._make_event("llm_response", {
+                "content": "It is 4.", "tool_calls": None,
+                "input_tokens": 10, "output_tokens": 5,
+            }),
+        ]
+        msgs = reconstruct_messages(config, events)
+        self.assertEqual(msgs[0], {"role": "system", "content": "You are a helper."})
+        self.assertEqual(msgs[1], {"role": "user", "content": "What is 2+2?"})
+        self.assertEqual(msgs[2], {"role": "assistant", "content": "It is 4."})
+        self.assertEqual(len(msgs), 3)
+
+    def test_reconstruct_with_tool_calls(self):
+        from sessions.recovery import reconstruct_messages
+        config = {"system_prompt": "sys", "provider": "deepseek"}
+        tool_call_block = [{"id": "tc1", "type": "function",
+                            "function": {"name": "read_file", "arguments": "{}"}}]
+        events = [
+            self._make_event("session_start", {"user_content": "Read the file"}),
+            self._make_event("llm_response", {
+                "content": "", "tool_calls": tool_call_block,
+                "input_tokens": 5, "output_tokens": 2,
+            }),
+            self._make_event("tool_call", {
+                "tool_call_id": "tc1", "tool_name": "read_file", "arguments": {"path": "a.txt"},
+            }),
+            self._make_event("tool_result", {
+                "tool_call_id": "tc1", "result": "file content", "is_error": False,
+            }),
+            self._make_event("llm_response", {
+                "content": "The file says: file content", "tool_calls": None,
+                "input_tokens": 10, "output_tokens": 8,
+            }),
+        ]
+        msgs = reconstruct_messages(config, events)
+        roles = [m["role"] for m in msgs]
+        self.assertEqual(roles, ["system", "user", "assistant", "tool", "assistant"])
+        self.assertEqual(msgs[3]["content"], "file content")
+        self.assertEqual(msgs[3]["tool_call_id"], "tc1")
+
+    def test_reconstruct_no_system_prompt(self):
+        from sessions.recovery import reconstruct_messages
+        config = {"system_prompt": "", "provider": "deepseek"}
+        events = [
+            self._make_event("session_start", {"user_content": "hello"}),
+        ]
+        msgs = reconstruct_messages(config, events)
+        self.assertEqual(msgs[0]["role"], "system")
+        self.assertEqual(msgs[1]["role"], "user")
+
+    def test_reconstruct_skips_child_fork_events(self):
+        from sessions.recovery import reconstruct_messages
+        config = {"system_prompt": "s", "provider": "deepseek"}
+        events = [
+            self._make_event("session_start", {"user_content": "do it"}),
+            self._make_event("child_fork", {"child_session_id": "c1", "skill_name": "sk"}),
+            self._make_event("child_join", {"child_session_id": "c1", "result": "done"}),
+            self._make_event("llm_response", {
+                "content": "finished", "tool_calls": None,
+                "input_tokens": 5, "output_tokens": 3,
+            }),
+        ]
+        msgs = reconstruct_messages(config, events)
+        roles = [m["role"] for m in msgs]
+        self.assertEqual(roles, ["system", "user", "assistant"])
+
+
 if __name__ == "__main__":
     unittest.main()
