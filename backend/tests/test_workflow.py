@@ -45,14 +45,15 @@ class TestWorkflowBroadcast(unittest.IsolatedAsyncioTestCase):
 
     @patch("ai.client.call_ai_stream", new=mock_call_ai_stream)
     async def test_trigger_single_stage_broadcast_format(self):
-        """Verify that _trigger_single_stage broadcasts chunks with 'delta' key and not 'chunk' key."""
-        from core.workflow import _trigger_single_stage, manager
-        
-        captured_messages = []
-        async def mock_broadcast(group_id, message):
-            captured_messages.append((group_id, message))
-            
-        with patch.object(manager, "broadcast", new=mock_broadcast):
+        """Verify that _trigger_single_stage publishes typed StreamChunk events with a 'delta' field."""
+        import core.workflow as workflow
+        from core.workflow import _trigger_single_stage
+
+        captured = []
+        async def mock_publish(event):
+            captured.append(event)
+
+        with patch.object(workflow.bus, "publish", new=mock_publish):
             next_bot = {
                 "id": 2,
                 "name": "WorkflowBot",
@@ -62,25 +63,24 @@ class TestWorkflowBroadcast(unittest.IsolatedAsyncioTestCase):
                 "personality_prompt": ""
             }
             await _trigger_single_stage(group_id=1, prev_stage={}, next_bot=next_bot)
-            
-            # Inspect the captured stream_chunk messages
-            chunk_messages = [msg for gid, msg in captured_messages if msg.get("type") == "stream_chunk"]
-            self.assertTrue(len(chunk_messages) > 0)
-            for msg in chunk_messages:
-                self.assertIn("delta", msg)
-                self.assertNotIn("chunk", msg)
-                self.assertIn(msg["delta"], ("Part 1", "Part 2"))
+
+            chunks = [e for e in captured if e.type == "stream_chunk"]
+            self.assertTrue(len(chunks) > 0)
+            for e in chunks:
+                self.assertTrue(hasattr(e, "delta"))
+                self.assertFalse(hasattr(e, "chunk"))
+                self.assertIn(e.delta, ("Part 1", "Part 2"))
 
     @patch("ai.client.call_ai_stream", new=mock_call_ai_stream)
     async def test_trigger_pool_bot_broadcast_format(self):
-        """Verify that _trigger_pool_bot broadcasts chunks with 'delta' key and not 'chunk' key."""
+        """Verify that _trigger_pool_bot publishes typed StreamChunk events with a 'delta' field."""
         import core.workflow as workflow
-        from core.workflow import _trigger_pool_bot, manager
-        
-        captured_messages = []
-        async def mock_broadcast(group_id, message):
-            captured_messages.append((group_id, message))
-            
+        from core.workflow import _trigger_pool_bot
+
+        captured = []
+        async def mock_publish(event):
+            captured.append(event)
+
         bot = {
             "id": 2,
             "name": "WorkflowBot",
@@ -89,7 +89,7 @@ class TestWorkflowBroadcast(unittest.IsolatedAsyncioTestCase):
             "system_prompt": "You are workflow bot",
             "personality_prompt": ""
         }
-        
+
         # Populate the workflow state so it doesn't return early
         workflow._state[1] = {
             "stages": [
@@ -97,17 +97,16 @@ class TestWorkflowBroadcast(unittest.IsolatedAsyncioTestCase):
             ],
             "current": 0
         }
-        
-        with patch.object(manager, "broadcast", new=mock_broadcast):
+
+        with patch.object(workflow.bus, "publish", new=mock_publish):
             await _trigger_pool_bot(group_id=1, bot=bot, ticket="Fix bug #123", pool_stage={"done_keyword": "完毕"})
-            
-            # Inspect the captured stream_chunk messages
-            chunk_messages = [msg for gid, msg in captured_messages if msg.get("type") == "stream_chunk"]
-            self.assertTrue(len(chunk_messages) > 0)
-            for msg in chunk_messages:
-                self.assertIn("delta", msg)
-                self.assertNotIn("chunk", msg)
-                self.assertIn(msg["delta"], ("Part 1", "Part 2"))
+
+            chunks = [e for e in captured if e.type == "stream_chunk"]
+            self.assertTrue(len(chunks) > 0)
+            for e in chunks:
+                self.assertTrue(hasattr(e, "delta"))
+                self.assertFalse(hasattr(e, "chunk"))
+                self.assertIn(e.delta, ("Part 1", "Part 2"))
 
 
 class TestWorkflowParseTickets(unittest.TestCase):

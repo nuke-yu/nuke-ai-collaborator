@@ -206,11 +206,12 @@ class TestWorkflowStageTokens(unittest.IsolatedAsyncioTestCase):
              patch.object(wf, "save_message", new=AsyncMock(return_value=5)), \
              patch.object(wf, "get_messages", new=AsyncMock(return_value=[])), \
              patch.object(wf, "get_db", return_value=fake_db_cm), \
-             patch.object(wf, "manager") as mock_mgr, \
+             patch.object(wf, "bus") as mock_bus, \
              patch.object(wf, "check_and_advance", new=AsyncMock()), \
              patch.object(wf, "_build_history", new=AsyncMock(return_value=[])), \
              patch.object(wf, "system_suffix", return_value=""):
-            mock_mgr.broadcast = AsyncMock()
+            mock_bus.publish = AsyncMock()
+            mock_bus.broadcast = AsyncMock()
             await _trigger_single_stage(1, {}, bot)
 
         self.assertEqual(updated_kwargs.get("input_tokens"), 15)
@@ -244,10 +245,11 @@ class TestWorkflowStageTokens(unittest.IsolatedAsyncioTestCase):
              patch.object(wf, "save_message", new=AsyncMock(return_value=7)), \
              patch.object(wf, "get_messages", new=AsyncMock(return_value=[])), \
              patch.object(wf, "get_db", return_value=fake_db_cm), \
-             patch.object(wf, "manager") as mock_mgr, \
+             patch.object(wf, "bus") as mock_bus, \
              patch.object(wf, "check_and_advance", new=AsyncMock()), \
              patch.object(wf, "_build_history", new=AsyncMock(return_value=[])):
-            mock_mgr.broadcast = AsyncMock()
+            mock_bus.publish = AsyncMock()
+            mock_bus.broadcast = AsyncMock()
             await _trigger_pool_bot(1, bot, "ticket-1", pool_stage)
 
         self.assertEqual(updated_kwargs.get("input_tokens"), 25)
