@@ -4,8 +4,8 @@ tests/test_token_completeness.py
 验证所有 AI 调用路径的 token 追踪完整性：
   1. orchestrator.stream_bot_response — 流式路径 usage_out → save_message
   2. orchestrator.call_bot (race path) — call_ai_once usage → save_message
-  3. workflow._trigger_single_stage   — 链式阶段 usage_out → update_message
-  4. workflow._trigger_pool_bot       — 池式阶段 usage_out → update_message
+  3. runner.run_unit                  — 工作流单元委派给 executor（token 持久化下沉到执行层）
+  4. （工作流 token 由 executor 经 save_message 写入，见 test_token_tracking）
   5. db.update_message                — 新签名保留旧 token、写入新 token
   6. tool_loop_v1._stream_final       — 流式最终回复 tokens 计入总量
   7. tool_loop_v1._before_finalize_hook — review/regen tokens 计入 usage_out
@@ -172,6 +172,10 @@ class TestCallBotRaceTokens(unittest.IsolatedAsyncioTestCase):
 # =============================================================================
 
 class TestWorkflowStageTokens(unittest.IsolatedAsyncioTestCase):
+    """工作流阶段的 token 持久化已下沉到执行层：runner 把工作单元委派给 executor，
+    executor 经 save_message 写入 token（见 test_token_tracking）。这里验证委派契约 ——
+    WorkUnit 的 trigger_msg / prompt_suffix 正确映射到 ExecutionContext，broadcaster=bus。
+    只要委派正确，token 完整性由执行层保证。"""
 
     def _make_bot_entry(self, bot_id=10):
         return {
@@ -182,78 +186,58 @@ class TestWorkflowStageTokens(unittest.IsolatedAsyncioTestCase):
             "temperature": 0.7, "max_tokens": 4096,
         }
 
-    async def test_chain_stage_tokens_written(self):
-        import core.workflow as wf
-        from core.workflow import _trigger_single_stage
+    async def _run_and_capture_ctx(self, unit):
+        from core import runner
+        from executors.base import ExecutionResult
+        from core.orchestration.base import OrchestratorStep
 
-        bot = self._make_bot_entry()
-        updated_kwargs = {}
+        captured = {}
 
-        async def fake_stream(sp, hist, msg, prov, model, temp, max_tok, usage_out=None):
-            if usage_out is not None:
-                usage_out.append({"input_tokens": 15, "output_tokens": 6})
-            yield "step output"
+        class FakeExec:
+            executor_id = "fake"
 
-        async def fake_update(db, msg_id, content, **kwargs):
-            updated_kwargs.update(kwargs)
+            async def run(self, ctx):
+                captured["ctx"] = ctx
+                return ExecutionResult(full_text="output", msg_id=5)
 
-        fake_db_cm = MagicMock()
-        fake_db_cm.__aenter__ = AsyncMock(return_value=MagicMock())
-        fake_db_cm.__aexit__ = AsyncMock(return_value=False)
+        class StubOrch:
+            def observe(self, gid, bid, resp):
+                return OrchestratorStep()
 
-        with patch("ai.client.call_ai_stream", new=fake_stream), \
-             patch.object(wf, "update_message", new=fake_update), \
-             patch.object(wf, "save_message", new=AsyncMock(return_value=5)), \
-             patch.object(wf, "get_messages", new=AsyncMock(return_value=[])), \
-             patch.object(wf, "get_db", return_value=fake_db_cm), \
-             patch.object(wf, "bus") as mock_bus, \
-             patch.object(wf, "check_and_advance", new=AsyncMock()), \
-             patch.object(wf, "_build_history", new=AsyncMock(return_value=[])), \
-             patch.object(wf, "system_suffix", return_value=""):
-            mock_bus.publish = AsyncMock()
-            mock_bus.broadcast = AsyncMock()
-            await _trigger_single_stage(1, {}, bot)
-
-        self.assertEqual(updated_kwargs.get("input_tokens"), 15)
-        self.assertEqual(updated_kwargs.get("output_tokens"), 6)
-
-    async def test_pool_bot_tokens_written(self):
-        import core.workflow as wf
-        from core.workflow import _trigger_pool_bot
-
-        bot = self._make_bot_entry()
-        updated_kwargs = {}
-
-        async def fake_stream(sp, hist, msg, prov, model, temp, max_tok, usage_out=None):
-            if usage_out is not None:
-                usage_out.append({"input_tokens": 25, "output_tokens": 10})
-            yield "pool output"
-
-        async def fake_update(db, msg_id, content, **kwargs):
-            updated_kwargs.update(kwargs)
+            def snapshot(self, gid):
+                return {"active": False}
 
         fake_db_cm = MagicMock()
         fake_db_cm.__aenter__ = AsyncMock(return_value=MagicMock())
         fake_db_cm.__aexit__ = AsyncMock(return_value=False)
 
-        pool_stage = {"done_keyword": "完毕"}
-        import core.workflow as _wf_mod
-        _wf_mod._state[1] = {"current": 0, "stages": [pool_stage]}
+        with patch.object(runner, "get_members", new=AsyncMock(return_value=[unit.bot])), \
+             patch.object(runner, "get_messages", new=AsyncMock(return_value=[])), \
+             patch.object(runner, "get_db", return_value=fake_db_cm), \
+             patch.object(runner.exec_registry, "get", return_value=FakeExec()):
+            await runner.run_unit(1, unit, StubOrch())
+        return captured["ctx"], runner
 
-        with patch("ai.client.call_ai_stream", new=fake_stream), \
-             patch.object(wf, "update_message", new=fake_update), \
-             patch.object(wf, "save_message", new=AsyncMock(return_value=7)), \
-             patch.object(wf, "get_messages", new=AsyncMock(return_value=[])), \
-             patch.object(wf, "get_db", return_value=fake_db_cm), \
-             patch.object(wf, "bus") as mock_bus, \
-             patch.object(wf, "check_and_advance", new=AsyncMock()), \
-             patch.object(wf, "_build_history", new=AsyncMock(return_value=[])):
-            mock_bus.publish = AsyncMock()
-            mock_bus.broadcast = AsyncMock()
-            await _trigger_pool_bot(1, bot, "ticket-1", pool_stage)
+    async def test_chain_stage_delegates_to_executor(self):
+        from core.orchestration.base import WorkUnit
+        bot = self._make_bot_entry()
+        unit = WorkUnit(bot=bot, executor_id="fake",
+                        trigger_msg="请开始你的工作。", prompt_suffix="[链式阶段]")
+        ctx, runner = await self._run_and_capture_ctx(unit)
+        self.assertEqual(ctx.user_message, "请开始你的工作。")
+        self.assertEqual(ctx.workflow_suffix, "[链式阶段]")
+        self.assertIs(ctx.broadcaster, runner.bus)
 
-        self.assertEqual(updated_kwargs.get("input_tokens"), 25)
-        self.assertEqual(updated_kwargs.get("output_tokens"), 10)
+    async def test_pool_bot_delegates_to_executor(self):
+        from core.orchestration.base import WorkUnit
+        bot = self._make_bot_entry()
+        unit = WorkUnit(bot=bot, executor_id="fake",
+                        trigger_msg="开始开发任务：ticket-1", prompt_suffix="[池式任务]",
+                        tag={"ticket": "ticket-1"})
+        ctx, runner = await self._run_and_capture_ctx(unit)
+        self.assertEqual(ctx.user_message, "开始开发任务：ticket-1")
+        self.assertEqual(ctx.workflow_suffix, "[池式任务]")
+        self.assertIs(ctx.broadcaster, runner.bus)
 
 
 # =============================================================================

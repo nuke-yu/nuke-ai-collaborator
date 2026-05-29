@@ -1,8 +1,7 @@
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 import sys
 import os
-import asyncio
 
 # Add backend directory to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -13,100 +12,159 @@ import db as database
 TEST_DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "test_chat.db")
 database.DB_PATH = TEST_DB_PATH
 
-# Mock call_ai_stream from ai_client to yield dummy tokens
-async def mock_call_ai_stream(*args, **kwargs):
-    yield "Part 1"
-    yield "Part 2"
 
-class TestWorkflowBroadcast(unittest.IsolatedAsyncioTestCase):
+def _bot_entry(bot_id=2, name="WorkflowBot"):
+    return {
+        "id": bot_id, "name": name, "role": "Developer",
+        "avatar_color": "#123456", "system_prompt": "You are workflow bot",
+        "personality_prompt": "",
+    }
 
-    async def asyncSetUp(self):
-        # Clean up database file if exists
-        if os.path.exists(TEST_DB_PATH):
-            os.remove(TEST_DB_PATH)
-        await database.init_db()
-        
-        # Insert a test group and bot
-        async with database.get_db() as db:
-            await db.execute("INSERT INTO groups (id, name) VALUES (1, 'Test Group')")
-            await db.execute(
-                "INSERT INTO members (id, group_id, name, type, role, avatar_color) VALUES (2, 1, 'WorkflowBot', 'bot', 'Developer', '#123456')"
-            )
-            await db.commit()
 
-    async def asyncTearDown(self):
-        if os.path.exists(TEST_DB_PATH):
-            try:
-                os.remove(TEST_DB_PATH)
-            except Exception:
-                pass
-        import core.workflow as workflow
-        workflow._state.clear()
+class TestOrchestratorFlow(unittest.TestCase):
+    """编排层是纯决策：给定状态 + 产出，返回 OrchestratorStep，不发事件、不调 AI。"""
 
-    @patch("ai.client.call_ai_stream", new=mock_call_ai_stream)
-    async def test_trigger_single_stage_broadcast_format(self):
-        """Verify that _trigger_single_stage publishes typed StreamChunk events with a 'delta' field."""
-        import core.workflow as workflow
-        from core.workflow import _trigger_single_stage
+    def setUp(self):
+        from core.orchestration.declarative import DeclarativeOrchestrator
+        self.orch = DeclarativeOrchestrator()
+
+    def _single(self, bid, name, keyword="完毕", executor_id=None):
+        s = {"id": bid, "name": name, "avatar_color": "#111",
+             "stage_type": "single", "done_keyword": keyword, "role": "Dev"}
+        if executor_id:
+            s["executor_id"] = executor_id
+        return s
+
+    def test_single_advances_on_keyword(self):
+        self.orch.begin(1, [self._single(1, "A"), self._single(2, "B")])
+        step = self.orch.observe(1, 1, "做完了 完毕")
+        self.assertTrue(step.broadcast_state)
+        self.assertEqual(len(step.next_units), 1)
+        self.assertEqual(step.next_units[0].bot["id"], 2)
+        self.assertFalse(step.done)
+
+    def test_single_no_keyword_no_advance(self):
+        self.orch.begin(1, [self._single(1, "A"), self._single(2, "B")])
+        step = self.orch.observe(1, 1, "还在沟通中")
+        self.assertEqual(step.next_units, [])
+        self.assertFalse(step.done)
+
+    def test_final_stage_marks_done_and_clears(self):
+        self.orch.begin(1, [self._single(1, "A")])
+        step = self.orch.observe(1, 1, "总结完毕")
+        self.assertTrue(step.done)
+        self.assertIsNone(self.orch.get(1))
+
+    def test_workunit_carries_executor_id(self):
+        self.orch.begin(1, [self._single(1, "A"), self._single(2, "B", executor_id="tool_loop_v1")])
+        step = self.orch.observe(1, 1, "完毕")
+        self.assertEqual(step.next_units[0].executor_id, "tool_loop_v1")
+
+    def test_pool_entry_assigns_tickets(self):
+        pool = {"stage_type": "pool", "done_keyword": "完毕",
+                "bots": [_bot_entry(10, "D1"), _bot_entry(11, "D2")]}
+        self.orch.begin(1, [self._single(1, "A"), pool])
+        # single A finishes and emits a TICKETS list → entering the pool
+        resp = "方案如下\nTICKETS:\n1. 任务甲\n2. 任务乙\n3. 任务丙\n完毕"
+        step = self.orch.observe(1, 1, resp)
+        # 2 bots each pick up one ticket initially, 1 queued
+        self.assertEqual(len(step.next_units), 2)
+        self.assertEqual(len(pool["in_progress"]), 2)
+        self.assertEqual(pool["ticket_queue"], ["任务丙"])
+        self.assertEqual(len(step.announcements), 1)
+
+
+class TestRunnerBroadcast(unittest.IsolatedAsyncioTestCase):
+    """runner.run_unit 把 broadcaster=bus 接给 executor，stream 事件经总线带 'delta'。"""
+
+    async def test_run_unit_streams_delta_via_executor(self):
+        from core import runner
+        from executors.base import ExecutionResult
+        from core.orchestration.base import OrchestratorStep
+        from core.orchestration.base import WorkUnit
+
+        class FakeExec:
+            executor_id = "fake"
+
+            async def run(self, ctx):
+                await ctx.broadcaster.broadcast(ctx.group_id, {
+                    "type": "stream_chunk", "temp_id": "x", "delta": "Part 1",
+                })
+                return ExecutionResult(full_text="Part 1", msg_id=99)
+
+        class StubOrch:
+            def observe(self, gid, bid, resp):
+                return OrchestratorStep()
+
+            def snapshot(self, gid):
+                return {"active": False}
 
         captured = []
-        async def mock_publish(event):
-            captured.append(event)
 
-        with patch.object(workflow.bus, "publish", new=mock_publish):
-            next_bot = {
-                "id": 2,
-                "name": "WorkflowBot",
-                "role": "Developer",
-                "avatar_color": "#123456",
-                "system_prompt": "You are workflow bot",
-                "personality_prompt": ""
-            }
-            await _trigger_single_stage(group_id=1, prev_stage={}, next_bot=next_bot)
+        async def cap(group_id, payload):
+            captured.append(payload)
 
-            chunks = [e for e in captured if e.type == "stream_chunk"]
-            self.assertTrue(len(chunks) > 0)
-            for e in chunks:
-                self.assertTrue(hasattr(e, "delta"))
-                self.assertFalse(hasattr(e, "chunk"))
-                self.assertIn(e.delta, ("Part 1", "Part 2"))
+        bot = _bot_entry()
+        unit = WorkUnit(bot=bot, executor_id="fake", trigger_msg="go", prompt_suffix="[stage]")
 
-    @patch("ai.client.call_ai_stream", new=mock_call_ai_stream)
-    async def test_trigger_pool_bot_broadcast_format(self):
-        """Verify that _trigger_pool_bot publishes typed StreamChunk events with a 'delta' field."""
-        import core.workflow as workflow
-        from core.workflow import _trigger_pool_bot
+        fake_db_cm = MagicMock()
+        fake_db_cm.__aenter__ = AsyncMock(return_value=MagicMock())
+        fake_db_cm.__aexit__ = AsyncMock(return_value=False)
 
-        captured = []
-        async def mock_publish(event):
-            captured.append(event)
+        with patch.object(runner, "get_members", new=AsyncMock(return_value=[bot])), \
+             patch.object(runner, "get_messages", new=AsyncMock(return_value=[])), \
+             patch.object(runner, "get_db", return_value=fake_db_cm), \
+             patch.object(runner.exec_registry, "get", return_value=FakeExec()), \
+             patch.object(runner.bus, "broadcast", new=cap):
+            await runner.run_unit(1, unit, StubOrch())
 
-        bot = {
-            "id": 2,
-            "name": "WorkflowBot",
-            "role": "Developer",
-            "avatar_color": "#123456",
-            "system_prompt": "You are workflow bot",
-            "personality_prompt": ""
-        }
+        chunks = [e for e in captured if e.get("type") == "stream_chunk"]
+        self.assertTrue(len(chunks) > 0)
+        for e in chunks:
+            self.assertIn("delta", e)
+            self.assertNotIn("chunk", e)
+            self.assertEqual(e["delta"], "Part 1")
 
-        # Populate the workflow state so it doesn't return early
-        workflow._state[1] = {
-            "stages": [
-                {"stage_type": "pool", "bots": [bot], "done_keyword": "完毕"}
-            ],
-            "current": 0
-        }
+    async def test_run_unit_maps_workunit_to_context(self):
+        """契约核心：WorkUnit 的 trigger_msg/prompt_suffix 映射到 ExecutionContext，broadcaster=bus。"""
+        from core import runner
+        from executors.base import ExecutionResult
+        from core.orchestration.base import OrchestratorStep, WorkUnit
 
-        with patch.object(workflow.bus, "publish", new=mock_publish):
-            await _trigger_pool_bot(group_id=1, bot=bot, ticket="Fix bug #123", pool_stage={"done_keyword": "完毕"})
+        captured = {}
 
-            chunks = [e for e in captured if e.type == "stream_chunk"]
-            self.assertTrue(len(chunks) > 0)
-            for e in chunks:
-                self.assertTrue(hasattr(e, "delta"))
-                self.assertFalse(hasattr(e, "chunk"))
-                self.assertIn(e.delta, ("Part 1", "Part 2"))
+        class FakeExec:
+            executor_id = "fake"
+
+            async def run(self, ctx):
+                captured["ctx"] = ctx
+                return ExecutionResult(full_text="done", msg_id=1)
+
+        class StubOrch:
+            def observe(self, gid, bid, resp):
+                return OrchestratorStep()
+
+            def snapshot(self, gid):
+                return {"active": False}
+
+        bot = _bot_entry()
+        unit = WorkUnit(bot=bot, executor_id="fake",
+                        trigger_msg="请开始你的工作。", prompt_suffix="[阶段指令]")
+
+        fake_db_cm = MagicMock()
+        fake_db_cm.__aenter__ = AsyncMock(return_value=MagicMock())
+        fake_db_cm.__aexit__ = AsyncMock(return_value=False)
+
+        with patch.object(runner, "get_members", new=AsyncMock(return_value=[bot])), \
+             patch.object(runner, "get_messages", new=AsyncMock(return_value=[])), \
+             patch.object(runner, "get_db", return_value=fake_db_cm), \
+             patch.object(runner.exec_registry, "get", return_value=FakeExec()):
+            await runner.run_unit(1, unit, StubOrch())
+
+        ctx = captured["ctx"]
+        self.assertEqual(ctx.user_message, "请开始你的工作。")
+        self.assertEqual(ctx.workflow_suffix, "[阶段指令]")
+        self.assertIs(ctx.broadcaster, runner.bus)
 
 
 class TestWorkflowParseTickets(unittest.TestCase):
@@ -140,6 +198,6 @@ class TestWorkflowParseTickets(unittest.TestCase):
         msg = "No tickets list found here"
         self.assertEqual(_parse_tickets(msg), ["本次迭代任务"])
 
+
 if __name__ == "__main__":
     unittest.main()
-
