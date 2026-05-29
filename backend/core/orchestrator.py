@@ -197,7 +197,8 @@ async def check_handoff(group_id: int, all_bots: list, all_members: list,
 
 async def dispatch_bots(group_id: int, triggered: list, content: str, sender: dict,
                          recent: list, all_bots: list, all_members: list,
-                         group_name: str = "", group_announcement: str = ""):
+                         group_name: str = "", group_announcement: str = "",
+                         file_url: str | None = None, file_type: str | None = None):
     """执行触发的 bot 列表：竞速、顺序、续写、交接。"""
     # Steer running bots instead of launching a new execution for them
     still_triggered = []
@@ -248,6 +249,8 @@ async def dispatch_bots(group_id: int, triggered: list, content: str, sender: di
                 group_name=group_name,
                 group_announcement=group_announcement,
                 steer_channel=steer_q,
+                file_url=file_url,
+                file_type=file_type,
             )
             try:
                 result = await registry.get(bot.get("executor_id", "simple_v1")).run(ctx)
@@ -275,6 +278,7 @@ async def dispatch_bots(group_id: int, triggered: list, content: str, sender: di
                     group_name=group_name,
                     group_announcement=group_announcement,
                     steer_channel=steer_q,
+                    # follow-up messages don't carry the original file attachment
                 )
                 try:
                     follow_result = await registry.get(bot.get("executor_id", "simple_v1")).run(follow_ctx)

@@ -64,6 +64,25 @@ async def migration_002(db):
     await db.commit()
 
 
+async def migration_003(db):
+    """Add cron_jobs table for the scheduler plugin."""
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS cron_jobs (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            bot_id     INTEGER NOT NULL,
+            group_id   INTEGER NOT NULL,
+            cron_expr  TEXT    NOT NULL,
+            message    TEXT    NOT NULL,
+            label      TEXT    DEFAULT '',
+            enabled    INTEGER DEFAULT 1,
+            created_at TEXT    DEFAULT (datetime('now')),
+            FOREIGN KEY (bot_id)   REFERENCES members(id),
+            FOREIGN KEY (group_id) REFERENCES groups(id)
+        )
+    """)
+    await db.commit()
+
+
 # ---------------------------------------------------------------------------
 # Registry — append new migrations here, never reorder or remove existing ones
 # ---------------------------------------------------------------------------
@@ -71,6 +90,7 @@ async def migration_002(db):
 MIGRATIONS: list = [
     migration_001,
     migration_002,
+    migration_003,
 ]
 
 # ---------------------------------------------------------------------------

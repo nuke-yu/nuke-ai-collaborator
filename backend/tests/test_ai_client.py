@@ -546,5 +546,199 @@ class TestTokenUsageExtraction(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["usage"]["output_tokens"], 0)
 
 
+# ---------------------------------------------------------------------------
+# Tests for streaming usage capture (_stream_openai_compat, _stream_claude)
+# ---------------------------------------------------------------------------
+
+class TestStreamingUsageCapture(unittest.IsolatedAsyncioTestCase):
+    """Verify that _stream_openai_compat and _stream_claude populate usage_out."""
+
+    def _make_stream_mock(self, sse_lines: list):
+        """Build mock httpx streaming plumbing from a list of raw SSE line strings."""
+        async def aiter_lines():
+            for line in sse_lines:
+                yield line
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.aiter_lines = aiter_lines
+
+        stream_cm = MagicMock()
+        stream_cm.__aenter__ = AsyncMock(return_value=mock_resp)
+        stream_cm.__aexit__ = AsyncMock(return_value=False)
+
+        mock_client = MagicMock()
+        mock_client.stream = MagicMock(return_value=stream_cm)
+
+        client_cm = MagicMock()
+        client_cm.__aenter__ = AsyncMock(return_value=mock_client)
+        client_cm.__aexit__ = AsyncMock(return_value=False)
+
+        return client_cm, mock_client
+
+    # ── OpenAI-compat streaming ──────────────────────────────────────────────
+
+    async def test_stream_openai_usage_out_populated(self):
+        """Final SSE chunk with usage field populates usage_out correctly."""
+        from ai.client import _stream_openai_compat
+        lines = [
+            f"data: {json.dumps({'choices': [{'delta': {'content': 'hello '}}]})}",
+            f"data: {json.dumps({'choices': [{'delta': {'content': 'world'}}]})}",
+            f"data: {json.dumps({'choices': [{'delta': {}}], 'usage': {'prompt_tokens': 20, 'completion_tokens': 8}})}",
+            "data: [DONE]",
+        ]
+        client_cm, _ = self._make_stream_mock(lines)
+        usage_out: list = []
+
+        with patch("ai.client.httpx.AsyncClient", return_value=client_cm):
+            chunks = []
+            async for chunk in _stream_openai_compat(
+                url="https://api.deepseek.com/v1/chat/completions",
+                api_key="key", model="deepseek-chat",
+                messages=[{"role": "user", "content": "hi"}],
+                usage_out=usage_out,
+            ):
+                chunks.append(chunk)
+
+        self.assertEqual(chunks, ["hello ", "world"])
+        self.assertEqual(len(usage_out), 1)
+        self.assertEqual(usage_out[0]["input_tokens"], 20)
+        self.assertEqual(usage_out[0]["output_tokens"], 8)
+
+    async def test_stream_openai_no_usage_chunk_leaves_usage_out_empty(self):
+        """If no usage chunk arrives, usage_out stays empty."""
+        from ai.client import _stream_openai_compat
+        lines = [
+            f"data: {json.dumps({'choices': [{'delta': {'content': 'hi'}}]})}",
+            "data: [DONE]",
+        ]
+        client_cm, _ = self._make_stream_mock(lines)
+        usage_out: list = []
+
+        with patch("ai.client.httpx.AsyncClient", return_value=client_cm):
+            chunks = []
+            async for chunk in _stream_openai_compat(
+                url="https://api.deepseek.com/v1/chat/completions",
+                api_key="key", model="deepseek-chat",
+                messages=[{"role": "user", "content": "hi"}],
+                usage_out=usage_out,
+            ):
+                chunks.append(chunk)
+
+        self.assertEqual(chunks, ["hi"])
+        self.assertEqual(usage_out, [])
+
+    async def test_stream_openai_usage_out_none_omits_stream_options(self):
+        """When usage_out=None, stream_options must NOT be in the request body."""
+        from ai.client import _stream_openai_compat
+        client_cm, mock_client = self._make_stream_mock(["data: [DONE]"])
+
+        with patch("ai.client.httpx.AsyncClient", return_value=client_cm):
+            async for _ in _stream_openai_compat(
+                url="https://api.deepseek.com/v1/chat/completions",
+                api_key="key", model="deepseek-chat",
+                messages=[{"role": "user", "content": "hi"}],
+                usage_out=None,
+            ):
+                pass
+
+        body = mock_client.stream.call_args.kwargs["json"]
+        self.assertNotIn("stream_options", body)
+
+    async def test_stream_openai_usage_out_set_adds_stream_options(self):
+        """When usage_out is a list, stream_options must be added to the request body."""
+        from ai.client import _stream_openai_compat
+        client_cm, mock_client = self._make_stream_mock(["data: [DONE]"])
+
+        with patch("ai.client.httpx.AsyncClient", return_value=client_cm):
+            async for _ in _stream_openai_compat(
+                url="https://api.deepseek.com/v1/chat/completions",
+                api_key="key", model="deepseek-chat",
+                messages=[{"role": "user", "content": "hi"}],
+                usage_out=[],
+            ):
+                pass
+
+        body = mock_client.stream.call_args.kwargs["json"]
+        self.assertIn("stream_options", body)
+        self.assertEqual(body["stream_options"], {"include_usage": True})
+
+    # ── Claude streaming ─────────────────────────────────────────────────────
+
+    async def test_stream_claude_usage_out_populated(self):
+        """message_start + message_delta events populate usage_out correctly."""
+        from ai.client import _stream_claude
+        lines = [
+            f"data: {json.dumps({'type': 'message_start', 'message': {'usage': {'input_tokens': 12}}})}",
+            f"data: {json.dumps({'type': 'content_block_delta', 'delta': {'text': 'hi there'}})}",
+            f"data: {json.dumps({'type': 'message_delta', 'usage': {'output_tokens': 7}})}",
+        ]
+        client_cm, _ = self._make_stream_mock(lines)
+        usage_out: list = []
+
+        with patch("ai.client.httpx.AsyncClient", return_value=client_cm):
+            chunks = []
+            async for chunk in _stream_claude(
+                model="claude-sonnet-4-6",
+                system_prompt="sp",
+                messages=[{"role": "user", "content": "hi"}],
+                api_key="test-key",
+                usage_out=usage_out,
+            ):
+                chunks.append(chunk)
+
+        self.assertEqual(chunks, ["hi there"])
+        self.assertEqual(len(usage_out), 1)
+        self.assertEqual(usage_out[0]["input_tokens"], 12)
+        self.assertEqual(usage_out[0]["output_tokens"], 7)
+
+    async def test_stream_claude_usage_out_none_still_streams_content(self):
+        """When usage_out=None, usage events are silently ignored and content still yields."""
+        from ai.client import _stream_claude
+        lines = [
+            f"data: {json.dumps({'type': 'message_start', 'message': {'usage': {'input_tokens': 12}}})}",
+            f"data: {json.dumps({'type': 'content_block_delta', 'delta': {'text': 'hello'}})}",
+            f"data: {json.dumps({'type': 'message_delta', 'usage': {'output_tokens': 5}})}",
+        ]
+        client_cm, _ = self._make_stream_mock(lines)
+
+        with patch("ai.client.httpx.AsyncClient", return_value=client_cm):
+            chunks = []
+            async for chunk in _stream_claude(
+                model="claude-sonnet-4-6",
+                system_prompt="sp",
+                messages=[{"role": "user", "content": "hi"}],
+                api_key="test-key",
+                usage_out=None,
+            ):
+                chunks.append(chunk)
+
+        self.assertEqual(chunks, ["hello"])
+
+    async def test_stream_claude_message_delta_without_prior_start(self):
+        """message_delta without a preceding message_start initializes usage_out safely."""
+        from ai.client import _stream_claude
+        lines = [
+            f"data: {json.dumps({'type': 'message_delta', 'usage': {'output_tokens': 5}})}",
+        ]
+        client_cm, _ = self._make_stream_mock(lines)
+        usage_out: list = []
+
+        with patch("ai.client.httpx.AsyncClient", return_value=client_cm):
+            async for _ in _stream_claude(
+                model="claude-sonnet-4-6",
+                system_prompt="sp",
+                messages=[{"role": "user", "content": "hi"}],
+                api_key="test-key",
+                usage_out=usage_out,
+            ):
+                pass
+
+        self.assertEqual(len(usage_out), 1)
+        self.assertEqual(usage_out[0]["input_tokens"], 0)
+        self.assertEqual(usage_out[0]["output_tokens"], 5)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -92,12 +92,19 @@ async def call_ai(system_prompt: str, history: list, user_message: str,
         raise AIError(f"AI 调用失败：{str(e)}")
 
 async def _stream_openai_compat(url: str, api_key: str, model: str, messages: list,
-                                temperature: float = 0.7, max_tokens: int = 4096):
+                                temperature: float = 0.7, max_tokens: int = 4096,
+                                usage_out: list | None = None):
+    body = {
+        "model": model, "messages": messages,
+        "temperature": temperature, "max_tokens": max_tokens, "stream": True,
+    }
+    if usage_out is not None:
+        body["stream_options"] = {"include_usage": True}
     async with httpx.AsyncClient(timeout=120) as client:
         async with client.stream(
             "POST", url,
             headers={"Authorization": f"Bearer {api_key}"},
-            json={"model": model, "messages": messages, "temperature": temperature, "max_tokens": max_tokens, "stream": True},
+            json=body,
         ) as response:
             if response.status_code in (400, 413):
                 body = await response.aread()
@@ -115,9 +122,16 @@ async def _stream_openai_compat(url: str, api_key: str, model: str, messages: li
                 if data_str == "[DONE]":
                     break
                 try:
-                    delta = json.loads(data_str)["choices"][0]["delta"].get("content", "")
+                    data = json.loads(data_str)
+                    delta = data["choices"][0]["delta"].get("content", "")
                     if delta:
                         yield delta
+                    if usage_out is not None and "usage" in data and data["usage"]:
+                        raw = data["usage"]
+                        usage_out.append({
+                            "input_tokens": raw.get("prompt_tokens", 0),
+                            "output_tokens": raw.get("completion_tokens", 0),
+                        })
                 except (json.JSONDecodeError, KeyError, IndexError):
                     continue
 
@@ -142,7 +156,8 @@ async def _stream_ollama(model: str, messages: list, base_url: str = "http://loc
                     continue
 
 async def _stream_claude(model: str, system_prompt: str, messages: list, api_key: str = "",
-                         temperature: float = 0.7, max_tokens: int = 4096):
+                         temperature: float = 0.7, max_tokens: int = 4096,
+                         usage_out: list | None = None):
     async with httpx.AsyncClient(timeout=120) as client:
         async with client.stream(
             "POST", "https://api.anthropic.com/v1/messages",
@@ -174,10 +189,23 @@ async def _stream_claude(model: str, system_prompt: str, messages: list, api_key
                     continue
                 try:
                     data = json.loads(line[6:])
-                    if data.get("type") == "content_block_delta":
+                    event_type = data.get("type")
+                    if event_type == "content_block_delta":
                         delta = data.get("delta", {}).get("text", "")
                         if delta:
                             yield delta
+                    elif usage_out is not None:
+                        if event_type == "message_start":
+                            u = data.get("message", {}).get("usage", {})
+                            if u:
+                                usage_out.append({"input_tokens": u.get("input_tokens", 0), "output_tokens": 0})
+                        elif event_type == "message_delta":
+                            u = data.get("usage", {})
+                            if u:
+                                if usage_out:
+                                    usage_out[-1]["output_tokens"] = u.get("output_tokens", 0)
+                                else:
+                                    usage_out.append({"input_tokens": 0, "output_tokens": u.get("output_tokens", 0)})
                 except (json.JSONDecodeError, KeyError):
                     continue
 
@@ -212,7 +240,19 @@ def _to_claude_messages(messages: list[dict]) -> list[dict]:
                 })
             raw_result.append({"role": "assistant", "content": content})
         else:
-            raw_result.append({"role": role, "content": m.get("content", "")})
+            content = m.get("content", "")
+            if isinstance(content, list):
+                # Convert OpenAI image_url blocks to Claude image format
+                converted = []
+                for block in content:
+                    if block.get("type") == "image_url":
+                        url = (block.get("image_url") or {}).get("url", "")
+                        converted.append({"type": "image", "source": {"type": "url", "url": url}})
+                    else:
+                        converted.append(block)
+                raw_result.append({"role": role, "content": converted})
+            else:
+                raw_result.append({"role": role, "content": content})
 
     # 合并连续的同角色消息（例如连续的 user、user）以防 Anthropic API 报错
     merged_result = []
@@ -414,6 +454,7 @@ async def call_ai_stream_messages(
     model: str = "deepseek-chat",
     temperature: float = 0.7,
     max_tokens: int = 4096,
+    usage_out: list | None = None,
 ):
     """Streaming call from pre-built OpenAI-format messages (no system). Used by tool_loop final response."""
     keys = _keys()
@@ -424,12 +465,12 @@ async def call_ai_stream_messages(
             label = "DeepSeek" if provider == "deepseek" else "OpenAI"
             api_key = _require_key(keys, "deepseek" if provider == "deepseek" else "openai", label)
             full_msgs = [{"role": "system", "content": system_prompt}] + messages
-            async for chunk in _stream_openai_compat(url, api_key, model, full_msgs, temperature, max_tokens):
+            async for chunk in _stream_openai_compat(url, api_key, model, full_msgs, temperature, max_tokens, usage_out=usage_out):
                 yield chunk
         elif provider == "claude":
             api_key = _require_key(keys, "anthropic", "Anthropic")
             claude_msgs = _to_claude_messages(messages)
-            async for chunk in _stream_claude(model, system_prompt, claude_msgs, api_key, temperature, max_tokens):
+            async for chunk in _stream_claude(model, system_prompt, claude_msgs, api_key, temperature, max_tokens, usage_out=usage_out):
                 yield chunk
         elif provider == "ollama":
             full_msgs = [{"role": "system", "content": system_prompt}] + messages
@@ -449,10 +490,22 @@ async def call_ai_stream_messages(
         raise AIError(f"AI 调用失败：{str(e)}")
 
 
-async def call_ai_stream(system_prompt: str, history: list, user_message: str,
+def _text_only(content: "str | list") -> str:
+    """Extract plain text from multimodal content, for providers without vision support."""
+    if isinstance(content, str):
+        return content
+    return " ".join(b.get("text", "") for b in content if b.get("type") == "text")
+
+
+async def call_ai_stream(system_prompt: str, history: list, user_message: "str | list",
                          provider: str = "deepseek", model: str = "deepseek-chat",
-                         temperature: float = 0.7, max_tokens: int = 4096):
-    """Unified streaming entry point for all providers."""
+                         temperature: float = 0.7, max_tokens: int = 4096,
+                         usage_out: list | None = None):
+    """Unified streaming entry point for all providers.
+
+    user_message may be a multimodal content list (OpenAI image_url format);
+    non-vision providers fall back to text-only.
+    """
     keys = _keys()
     try:
         if provider in ("deepseek", "openai"):
@@ -460,16 +513,18 @@ async def call_ai_stream(system_prompt: str, history: list, user_message: str,
                    else "https://api.openai.com/v1/chat/completions")
             label = "DeepSeek" if provider == "deepseek" else "OpenAI"
             api_key = _require_key(keys, "deepseek" if provider == "deepseek" else "openai", label)
+            # DeepSeek doesn't support vision; OpenAI does — keep list for openai, flatten for deepseek
+            user_content = user_message if provider == "openai" else _text_only(user_message)
             messages = [{"role": "system", "content": system_prompt}]
             messages.extend(history[-10:])
-            messages.append({"role": "user", "content": user_message})
-            async for chunk in _stream_openai_compat(url, api_key, model, messages, temperature, max_tokens):
+            messages.append({"role": "user", "content": user_content})
+            async for chunk in _stream_openai_compat(url, api_key, model, messages, temperature, max_tokens, usage_out=usage_out):
                 yield chunk
 
         elif provider == "ollama":
             messages = [{"role": "system", "content": system_prompt}]
             messages.extend(history[-10:])
-            messages.append({"role": "user", "content": user_message})
+            messages.append({"role": "user", "content": _text_only(user_message)})
             async for chunk in _stream_ollama(model, messages, keys["ollama_url"]):
                 yield chunk
 
@@ -478,7 +533,7 @@ async def call_ai_stream(system_prompt: str, history: list, user_message: str,
             hist = [m for m in history[-10:] if m["role"] in ("user", "assistant")]
             hist.append({"role": "user", "content": user_message})
             claude_msgs = _to_claude_messages(hist)
-            async for chunk in _stream_claude(model, system_prompt, claude_msgs, api_key, temperature, max_tokens):
+            async for chunk in _stream_claude(model, system_prompt, claude_msgs, api_key, temperature, max_tokens, usage_out=usage_out):
                 yield chunk
 
         else:

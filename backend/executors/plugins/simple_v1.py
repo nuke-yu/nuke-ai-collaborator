@@ -8,7 +8,7 @@ from executors.base import (
 from db import get_db, save_message, get_messages
 from ai.client import call_ai_stream, AIError
 from ai.memory import get_memory_context, add_to_chroma, maybe_summarize
-from core.role_router import build_context_message
+from core.role_router import build_context_message, build_image_content
 from workspace import append_log
 
 
@@ -31,9 +31,11 @@ class SimpleV1(BotExecutor):
 
     async def run(self, ctx: ExecutionContext) -> ExecutionResult:
         bot = ctx.bot
+        provider = bot.get("model_provider", "deepseek")
         history, user_msg = build_context_message(
             ctx.user_message, ctx.sender["name"], ctx.history
         )
+        user_content = build_image_content(user_msg, ctx.file_url, ctx.file_type, provider)
         base = _with_personality(
             bot["system_prompt"] or f"你是{bot['name']}，{bot.get('role', '')}。",
             bot,
@@ -55,13 +57,15 @@ class SimpleV1(BotExecutor):
         })
 
         full_text = ""
+        _usage_out: list = []
         try:
             async for chunk in call_ai_stream(
-                system_prompt, history, user_msg,
-                bot.get("model_provider", "deepseek"),
+                system_prompt, history, user_content,
+                provider,
                 bot.get("model_name", "deepseek-chat"),
                 bot.get("temperature", 0.7),
                 bot.get("max_tokens", 4096),
+                usage_out=_usage_out,
             ):
                 full_text += chunk
                 await ctx.broadcaster.broadcast(ctx.group_id, {
@@ -73,6 +77,10 @@ class SimpleV1(BotExecutor):
             })
             return ExecutionResult(full_text="", msg_id=None)
 
+        _u = _usage_out[0] if _usage_out else {}
+        _tokens_in = _u.get("input_tokens") or None
+        _tokens_out = _u.get("output_tokens") or None
+
         # Sub-agents: close stream animation then return without DB/memory ops
         if ctx.spawn_depth > 0:
             await ctx.broadcaster.broadcast(ctx.group_id, {
@@ -83,7 +91,8 @@ class SimpleV1(BotExecutor):
             return ExecutionResult(full_text=full_text, msg_id=None)
 
         async with get_db() as db:
-            msg_id = await save_message(db, ctx.group_id, bot["id"], full_text)
+            msg_id = await save_message(db, ctx.group_id, bot["id"], full_text,
+                                        input_tokens=_tokens_in, output_tokens=_tokens_out)
             recent = await get_messages(db, ctx.group_id)
 
         await ctx.broadcaster.broadcast(ctx.group_id, {

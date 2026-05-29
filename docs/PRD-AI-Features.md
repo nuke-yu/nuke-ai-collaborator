@@ -18,7 +18,7 @@
 | 5 | 智能 | 流式输出（打字机效果） | M0 | ✅ |
 | 6 | 智能 | 多模型支持（OpenAI / Ollama / Claude） | M0 | ✅ |
 | 7 | 智能 | API 限流重试 + fallback_model | P1 | ✅ |
-| 8 | 智能 | 图片理解（视觉模型） | M4 | ⬜ |
+| 8 | 智能 | 图片理解（视觉模型） | M4 | ✅ |
 | 9 | 执行引擎 | 插件化执行引擎框架（BotExecutor ABC + Registry） | M1 | ✅ |
 | 10 | 执行引擎 | 热加载机制（importlib + POST /api/plugins/reload） | M1 | ✅ |
 | 11 | 执行引擎 | 执行引擎 UI 配置（Bot 编辑页切换插件） | M1 | ✅ |
@@ -96,7 +96,7 @@
 | 83 | 协作 | steer() 中途打断（运行中注入新指令，工具轮边界消费） | M3 | ✅ |
 | 84 | 协作 | followUp() 后续消息队列（run 结束后剩余 steer → 独立新 run） | M3 | ✅ |
 | 85 | 协作 | 子 Agent 派生（spawn_agent，同步等待，spawn_depth 防递归） | M3 | ✅ |
-| 86 | 协作 | 定时任务（cron / heartbeat，Bot 周期性自主执行） | M4 | ⬜ |
+| 86 | 协作 | 定时任务（cron / heartbeat，Bot 周期性自主执行） | M4 | ✅ |
 | 87 | 协作 | 后台 spawn_agent（background: true，父 Agent 不阻塞，结果 steer 注回） | P4 | ✅ |
 | 88 | 协作 | once / asyncRewake Hook（一次性 hook；exit code=2 唤醒主模型） | P4 | ✅ |
 | 89 | 协作 | 子 Agent 任务恢复（session_id 复用已有 context，续传不重建） | P4 | ⬜ |
@@ -146,7 +146,7 @@ Bot = 身份 × 人格 × 智能 × 记忆 × 知识 × 工作区 × 工具 × �
 | 流式输出（打字机效果） | M0 | ✅ 已完成 | SSE + WebSocket 逐 token 推送 |
 | 多模型支持（OpenAI / Ollama / Claude） | M0 | ✅ 已完成 | 后端多 provider，前端可选模型 |
 | API 限流重试 + fallback_model | P1 | ✅ 已完成 | `AIRateLimitError(wait_seconds)` 子类；`_parse_retry_after` 解析 `retry-after-ms` / `retry-after` header（大小写不敏感）；指数退避 `max(server_hint, 2^attempt)`，最多 3 次重试；`call_ai_once` 新增 `fallback_model` 参数，主模型耗尽重试后自动切换备用模型 |
-| 图片理解 | M4 | ⬜ 未做 | 上传图片时携带 URL 给视觉模型 |
+| 图片理解 | M4 | ✅ 已完成 | `file_url`/`file_type` 经 `dispatch_bots` → `ExecutionContext` 流入各执行器；`build_image_content` 按 provider 构造 OpenAI image_url 格式或文本降级；`_to_claude_messages` 将 image_url 块转 Claude source.url 格式；DeepSeek/Ollama 降级为 `[附图：URL]` 纯文本 |
 
 ---
 
@@ -437,7 +437,7 @@ Bot 发现可复用规律
 | steer() 中途打断 | M3 | ✅ 已完成 | 用户向正在运行的 Bot 发送新消息时，`dispatch_bots` 检测 `_steer_queues` 注册表，若 Bot 在跑则把新消息放入其专属 `asyncio.Queue`（不起新 run）；`tool_loop_v1` 在每轮工具调用结束后检查 steer queue，将消息以 `[用户中途指令]` 格式追加到 messages，下一次 AI 调用即生效；`main.py` WebSocket 循环改为 `asyncio.create_task(dispatch_bots(...))` 非阻塞，保证 WS 可持续接收消息；广播 `steer_queued` / `steer_injected` WS 事件 |
 | followUp() 后续消息队列 | M3 | ✅ 已完成 | Bot run 结束后自动处理在 `steer_q` 中未被注入的消息（即 run 末期才到、没赶上工具边界的消息）；每条 followUp 消息都触发一个独立的新 run（刷新 history、独享新 steer_q、继续支持 steer 注入）；最多 `_MAX_FOLLOWUP_DEPTH=5` 层级联，防无限循环；广播 `followup_start` WS 事件；steer 和 followUp 共用同一 steer_q：mid-run 消费 = steer，run 结束后剩余 = followUp |
 | 子 Agent 派生 | M3 | ✅ 已完成 | 新增 `spawn_agent(bot_name, task)` 工具；父 bot 同步等待子 agent 执行完成并拿到结果作为工具返回值；子 agent 用 `_NullBroadcaster` 静默执行（不广播 WS 事件、不存 DB、不写记忆），结果透过 `tool_result` 事件对用户可见；`spawn_depth` 随 `ExecutionContext` 传递，超过 `_SPAWN_MAX_DEPTH=3` 拒绝派生防止递归；`execution_ctx` 新增 `all_bots / all_members / spawn_depth / broadcaster` 字段供 handler 使用；manifest `can_spawn_subagent=True` |
-| 定时任务（cron / heartbeat） | M4 | ⬜ 未做 | Bot 可配置周期性执行，支持轻量 bootstrap 模式 |
+| 定时任务（cron / heartbeat） | M4 | ✅ 已完成 | 独立 `scheduler/` 插件模块（store · engine · runner · router）；APScheduler 3.x AsyncIOScheduler；`migration_003` 新建 `cron_jobs` 表；`runner.py` 为唯一主系统耦合点（lazy import `dispatch_bots`）；REST API 6 个端点含立即触发；删除模块只需改 main.py 3 行 |
 
 ---
 
@@ -695,8 +695,8 @@ P3（精细化）:
 
 | 优先 | 功能 | 影响面 | 成本 | 状态 | 说明 |
 |------|------|--------|------|------|------|
-| 1 | 图片理解 | ⬆ | S | ⬜ | `call_ai_once` 携带图片 URL，视觉模型直接可用；改动集中在 `ai_client.py` + `main.py` 消息解析 |
-| 2 | 定时任务（cron / heartbeat） | ⬆ | M | ⬜ | Bot 周期性自主执行（日报、监控、定时提醒）；需调度器 + bootstrap-only 轻量执行模式 |
+| 1 | 图片理解 | ⬆ | S | ✅ | `file_url`/`file_type` 经 WebSocket payload → `dispatch_bots` → `ExecutionContext`；`build_image_content` 按 provider 构造多模态块；`_to_claude_messages` 自动转 Claude source.url 格式 |
+| 2 | 定时任务（cron / heartbeat） | ⬆ | M | ✅ | 独立 `scheduler/` 插件；APScheduler AsyncIOScheduler；`runner.py` 单点耦合；6 REST 端点；`migration_003` cron_jobs 表；删除模块零残留 |
 | 3 | 压缩后文件重注入（从摘要提取） | ➡ | S | ✅ | `compact.build_file_contents_for_reinject()`：modified 优先，最多 5 文件 / 25K 预算，相对路径解析到 `bot_ws(bot_id)`；`_build_reinject()` 组合三段内容 |
 | 4 | 工具并发执行 | ➡ | M | ✅ | `ToolDef.concurrency_safe` 标记；只读工具 `asyncio.gather()` 并行；写入工具串行 |
 | 5 | Hook 条件过滤 | ➡ | M | ✅ | `_HookEntry(fn, condition)` 存储条件；`_condition_matches()` 用 fnmatch glob 匹配工具名+任意参数值；`add_before/after_hook(condition=)` 新增关键字参数；向后兼容（condition=None = 始终运行） |

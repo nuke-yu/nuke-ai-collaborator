@@ -77,6 +77,22 @@
 
 最大单文件 **10 MB**，图片内嵌显示，其他文件显示下载卡片。
 
+### ⏰ 定时任务（Scheduler）
+
+- **Cron 式调度** — 标准 5 段 cron 表达式（`0 9 * * 1-5`），由 APScheduler 驱动，运行在同一进程 asyncio 循环
+- **插件式解耦** — 独立 `scheduler/` 模块，仅 `runner.py` 与主系统耦合；整体删除只需去掉 `main.py` 中 3 行代码
+- **REST 管理 API** — CRUD + toggle + 立即执行（`POST /api/cron-jobs/{id}/run`）
+- **持久化** — cron 规则存储于 `cron_jobs` 表，重启自动恢复
+
+```
+POST   /api/cron-jobs              # 创建定时任务
+GET    /api/cron-jobs              # 列表（支持 bot_id / group_id 过滤）
+PUT    /api/cron-jobs/{id}         # 修改
+DELETE /api/cron-jobs/{id}         # 删除
+POST   /api/cron-jobs/{id}/toggle  # 启用 / 禁用
+POST   /api/cron-jobs/{id}/run     # 立即触发一次
+```
+
 ### ⚙️ 管理
 
 - **API Key 管理** — 界面化配置各 AI 提供商的 Key，保存在本地 `app_config.json`
@@ -244,6 +260,7 @@ nuke-ai-collaborator/
 │   ├── permissions/         # 权限引擎
 │   ├── skills/              # Skill 发现与加载
 │   ├── workspace/           # Bot workspace 初始化
+│   ├── scheduler/           # 定时任务插件（APScheduler · store · runner · router）
 │   └── api/                 # REST 路由（groups · messages · templates · workflow · workspace）
 └── frontend/
     └── src/

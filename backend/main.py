@@ -23,6 +23,7 @@ from executors import registry
 from workspace import init_all_bots, init_group_workspace
 from permissions.routes import router as permissions_router
 from skills.watcher import watcher
+import scheduler
 import os
 
 
@@ -44,7 +45,9 @@ async def lifespan(app: FastAPI):
         await init_group_workspace(gid, gname)
     watcher.start(asyncio.get_event_loop())
     adapter_task = asyncio.create_task(ws_adapter(bus))
+    await scheduler.start()
     yield
+    scheduler.stop()
     adapter_task.cancel()
     watcher.stop()
 
@@ -69,6 +72,7 @@ app.include_router(template_router)
 app.include_router(workflow_router)
 app.include_router(workspace_router)
 app.include_router(permissions_router)
+app.include_router(scheduler.router)
 
 
 @app.get("/api/plugins")
@@ -182,6 +186,8 @@ async def websocket_endpoint(websocket: WebSocket, group_id: int, member_id: int
                     all_bots, all_members,
                     group_name=group_info.get("name", ""),
                     group_announcement=group_info.get("announcement", ""),
+                    file_url=file_url,
+                    file_type=file_type,
                 ))
                 _running_tasks[group_id] = task
                 task.add_done_callback(lambda _: _running_tasks.pop(group_id, None))

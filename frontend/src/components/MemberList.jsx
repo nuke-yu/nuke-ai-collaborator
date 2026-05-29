@@ -69,6 +69,23 @@ function generatePersonalityPrompt(sliders) {
   }).join('\n')
 }
 
+const CRON_PRESETS = [
+  { label: '工作日早 9 点',  value: '0 9 * * 1-5'  },
+  { label: '每天早 9 点',    value: '0 9 * * *'    },
+  { label: '每天午夜',       value: '0 0 * * *'    },
+  { label: '每小时整点',     value: '0 * * * *'    },
+  { label: '每 30 分钟',    value: '*/30 * * * *'  },
+  { label: '自定义…',        value: '__custom__'   },
+]
+
+const CRON_READABLE = {
+  '0 9 * * 1-5':  '工作日早 9 点',
+  '0 9 * * *':    '每天早 9 点',
+  '0 0 * * *':    '每天午夜',
+  '0 * * * *':    '每小时',
+  '*/30 * * * *': '每 30 分钟',
+}
+
 const INIT_FORM = {
   name: '', type: 'human', role: '', system_prompt: '', avatar_color: '#6366f1',
   model_provider: 'deepseek', model_name: 'deepseek-chat',
@@ -136,10 +153,25 @@ export default function MemberList({ onAddMember, onEditMember, onClose, initial
   const [agentLoaded, setAgentLoaded] = useState(false)
   const [permRules, setPermRules] = useState([])
   const [newRule, setNewRule] = useState({ tool_pattern: '', args_pattern: '', action: 'allow' })
+  const [cronJobs, setCronJobs] = useState([])
+  const [newCron, setNewCron] = useState({ cron_expr: '0 9 * * 1-5', message: '', label: '', enabled: true })
+  const [cronPreset, setCronPreset] = useState('0 9 * * 1-5')
+  const [cronCustom, setCronCustom] = useState(false)
+  const [cronErr, setCronErr] = useState('')
+  const [cronRunning, setCronRunning] = useState(null)
 
   useEffect(() => {
     fetch('/api/plugins').then(r => r.json()).then(setPlugins).catch(() => {})
   }, [])
+
+  useEffect(() => {
+    if (isEdit && initialData?.id && form.type === 'bot') {
+      fetch(`/api/cron-jobs?bot_id=${initialData.id}`)
+        .then(r => r.ok ? r.json() : { jobs: [] })
+        .then(d => setCronJobs(d.jobs || []))
+        .catch(() => {})
+    }
+  }, [isEdit, initialData?.id, form.type])
 
   useEffect(() => {
     if (isEdit && initialData?.id && form.type === 'bot') {
@@ -197,6 +229,54 @@ export default function MemberList({ onAddMember, onEditMember, onClose, initial
     setSliders(next)
     setField({ personality_prompt: generatePersonalityPrompt(next) })
   }, [sliders])
+
+  const handleCronPresetChange = (value) => {
+    setCronPreset(value)
+    if (value === '__custom__') {
+      setCronCustom(true)
+    } else {
+      setCronCustom(false)
+      setNewCron(c => ({ ...c, cron_expr: value }))
+    }
+  }
+
+  const addCronJob = async () => {
+    if (!newCron.message.trim()) return
+    setCronErr('')
+    const res = await fetch('/api/cron-jobs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...newCron, bot_id: initialData.id, group_id: initialData.group_id }),
+    })
+    if (res.ok) {
+      const job = await res.json()
+      setCronJobs(prev => [...prev, job])
+      setNewCron({ cron_expr: '0 9 * * 1-5', message: '', label: '', enabled: true })
+      setCronPreset('0 9 * * 1-5')
+      setCronCustom(false)
+    } else {
+      try { setCronErr((await res.json()).detail || '创建失败') } catch { setCronErr('创建失败') }
+    }
+  }
+
+  const toggleCronJob = async (jobId) => {
+    const res = await fetch(`/api/cron-jobs/${jobId}/toggle`, { method: 'POST' })
+    if (res.ok) {
+      const updated = await res.json()
+      setCronJobs(prev => prev.map(j => j.id === jobId ? updated : j))
+    }
+  }
+
+  const deleteCronJob = async (jobId) => {
+    await fetch(`/api/cron-jobs/${jobId}`, { method: 'DELETE' })
+    setCronJobs(prev => prev.filter(j => j.id !== jobId))
+  }
+
+  const runCronJobNow = async (jobId) => {
+    setCronRunning(jobId)
+    await fetch(`/api/cron-jobs/${jobId}/run`, { method: 'POST' }).catch(() => {})
+    setTimeout(() => setCronRunning(r => r === jobId ? null : r), 1500)
+  }
 
   const handleProviderChange = (provider) => {
     const models = PROVIDER_MODELS[provider]
@@ -522,6 +602,102 @@ export default function MemberList({ onAddMember, onEditMember, onClose, initial
                         </div>
                       </button>
                     ))}
+                  </div>
+                </div>
+              )}
+
+              {isEdit && (
+                <div className="border-t border-gray-700 pt-3">
+                  <label className="text-xs text-gray-400 mb-2 block font-medium">⏰ 定时任务</label>
+
+                  {/* existing jobs list */}
+                  <div className="space-y-1.5 mb-3">
+                    {cronJobs.length === 0 && (
+                      <p className="text-xs text-gray-600 italic">暂无定时任务</p>
+                    )}
+                    {cronJobs.map(job => (
+                      <div key={job.id} className="flex items-center gap-2 bg-gray-900 rounded-lg px-2.5 py-2">
+                        <button
+                          onClick={() => toggleCronJob(job.id)}
+                          title={job.enabled ? '点击禁用' : '点击启用'}
+                          className={`w-2 h-2 rounded-full flex-shrink-0 transition-colors ${job.enabled ? 'bg-green-400' : 'bg-gray-600'}`}
+                        />
+                        <div className="flex-1 min-w-0">
+                          {job.label && (
+                            <span className="text-xs text-indigo-300 font-medium mr-1.5">{job.label}</span>
+                          )}
+                          <span className="text-xs font-mono text-gray-400">
+                            {CRON_READABLE[job.cron_expr] || job.cron_expr}
+                          </span>
+                          <p className="text-xs text-gray-300 truncate mt-0.5">{job.message}</p>
+                        </div>
+                        <button
+                          onClick={() => runCronJobNow(job.id)}
+                          title="立即触发一次"
+                          className={`text-xs px-1.5 py-0.5 rounded transition-colors ${
+                            cronRunning === job.id
+                              ? 'text-yellow-400'
+                              : 'text-gray-500 hover:text-indigo-400'
+                          }`}
+                        >
+                          {cronRunning === job.id ? '…' : '▶'}
+                        </button>
+                        <button
+                          onClick={() => deleteCronJob(job.id)}
+                          className="text-gray-600 hover:text-red-400 text-xs transition-colors"
+                        >✕</button>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* add new job form */}
+                  <div className="bg-gray-900 rounded-lg p-2.5 space-y-2">
+                    <div className="flex gap-1.5">
+                      <input
+                        className="flex-1 bg-gray-800 text-gray-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:ring-1 focus:ring-indigo-500"
+                        placeholder="标签（选填）"
+                        value={newCron.label}
+                        onChange={e => setNewCron(c => ({ ...c, label: e.target.value }))}
+                      />
+                    </div>
+
+                    <div className="flex gap-1.5">
+                      <select
+                        className="bg-gray-800 text-gray-300 rounded-lg px-2 py-1.5 text-xs outline-none focus:ring-1 focus:ring-indigo-500 flex-shrink-0"
+                        value={cronPreset}
+                        onChange={e => handleCronPresetChange(e.target.value)}
+                      >
+                        {CRON_PRESETS.map(p => (
+                          <option key={p.value} value={p.value}>{p.label}</option>
+                        ))}
+                      </select>
+                      {cronCustom && (
+                        <input
+                          className="flex-1 bg-gray-800 text-gray-200 rounded-lg px-2 py-1.5 text-xs font-mono outline-none focus:ring-1 focus:ring-indigo-500"
+                          placeholder="分 时 日 月 周（如 0 9 * * 1-5）"
+                          value={newCron.cron_expr}
+                          onChange={e => setNewCron(c => ({ ...c, cron_expr: e.target.value }))}
+                        />
+                      )}
+                    </div>
+
+                    <div className="flex gap-1.5">
+                      <input
+                        className="flex-1 bg-gray-800 text-gray-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:ring-1 focus:ring-indigo-500"
+                        placeholder="触发时发送的消息，如「请生成今日日报」"
+                        value={newCron.message}
+                        onChange={e => setNewCron(c => ({ ...c, message: e.target.value }))}
+                        onKeyDown={e => e.key === 'Enter' && addCronJob()}
+                      />
+                      <button
+                        onClick={addCronJob}
+                        className="bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg px-3 py-1.5 text-xs transition-colors flex-shrink-0"
+                      >添加</button>
+                    </div>
+
+                    {cronErr && (
+                      <p className="text-xs text-red-400">{cronErr}</p>
+                    )}
                   </div>
                 </div>
               )}

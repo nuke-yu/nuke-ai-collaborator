@@ -17,6 +17,19 @@ def should_bot_respond(message: str, bot_name: str, bot_role: str) -> bool:
     keywords = role_keywords.get(bot_role, [])
     return any(kw in msg_lower for kw in keywords)
 
+def build_image_content(text: str, file_url: str | None, file_type: str | None,
+                        provider: str) -> "str | list":
+    """Return multimodal content (OpenAI image_url format) for vision providers; text fallback otherwise."""
+    if not file_url or not (file_type or "").startswith("image/"):
+        return text
+    if provider in ("openai", "claude"):
+        return [
+            {"type": "text", "text": text},
+            {"type": "image_url", "image_url": {"url": file_url}},
+        ]
+    return f"{text}\n[附图：{file_url}]"
+
+
 def build_context_message(message: str, sender_name: str, recent_messages: list) -> tuple:
     history_source = recent_messages
     if history_source and history_source[-1].get("content") == message and history_source[-1].get("sender_name") == sender_name:

@@ -16,7 +16,7 @@ from db import get_db, save_message, get_messages
 import permissions
 from ai.client import call_ai_once, call_ai_stream_messages, AIError, AIContextOverflowError
 from ai.memory import get_memory_context, add_to_chroma, maybe_summarize
-from core.role_router import build_context_message
+from core.role_router import build_context_message, build_image_content
 from workspace import load_context_files, format_context_blocks, append_log, archive_run
 from skills import list_skills_all, load_always_skills, filter_skills_by_context
 from skills.constants import bot_ws as _bot_ws
@@ -273,9 +273,17 @@ class ToolLoopV1(BotExecutor):
             + ctx.workflow_suffix
         )
 
+        provider = bot.get("model_provider", "deepseek")
+
         # Inject workspace context as prefix of the first user message
-        prefixed_user_msg = (context_prefix + user_msg) if context_prefix else user_msg
-        messages = list(history) + [{"role": "user", "content": prefixed_user_msg}]
+        # For multimodal (image) messages, preserve blocks; context prefix becomes a leading text block
+        user_content = build_image_content(user_msg, ctx.file_url, ctx.file_type, provider)
+        if context_prefix:
+            if isinstance(user_content, list):
+                user_content = [{"type": "text", "text": context_prefix}] + user_content
+            else:
+                user_content = context_prefix + user_content
+        messages = list(history) + [{"role": "user", "content": user_content}]
         tool_names = [t.name for t in self.manifest.tools]
         tool_schemas = tool_executor.get_schemas(tool_names)
 
@@ -290,8 +298,6 @@ class ToolLoopV1(BotExecutor):
                 "type": "skills_loaded", "temp_id": temp_id,
                 "member_id": bot["id"], "skills": skills_snapshot,
             })
-
-        provider = bot.get("model_provider", "deepseek")
         temperature = bot.get("temperature", 0.7)
         max_tokens = bot.get("max_tokens", 4096)
         full_text = ""
