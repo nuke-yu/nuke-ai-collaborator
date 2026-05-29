@@ -24,6 +24,7 @@ from workspace import init_all_bots, init_group_workspace
 from permissions.routes import router as permissions_router
 from skills.watcher import watcher
 import scheduler
+import sessions
 import os
 
 
@@ -46,6 +47,7 @@ async def lifespan(app: FastAPI):
     watcher.start(asyncio.get_event_loop())
     adapter_task = asyncio.create_task(ws_adapter(bus))
     await scheduler.start()
+    await sessions.recover_all()
     yield
     scheduler.stop()
     adapter_task.cancel()
