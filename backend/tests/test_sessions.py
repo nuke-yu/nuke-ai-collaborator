@@ -8,7 +8,6 @@ Covers:
 """
 import os
 import sys
-import asyncio
 import unittest
 from pathlib import Path
 

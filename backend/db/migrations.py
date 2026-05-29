@@ -102,7 +102,9 @@ async def migration_004(db):
             input_tokens  INTEGER NOT NULL DEFAULT 0,
             output_tokens INTEGER NOT NULL DEFAULT 0,
             created_at    TEXT DEFAULT (datetime('now')),
-            updated_at    TEXT DEFAULT (datetime('now'))
+            updated_at    TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY (bot_id)   REFERENCES members(id),
+            FOREIGN KEY (group_id) REFERENCES groups(id)
         )
     """)
     await db.execute("""
@@ -111,7 +113,8 @@ async def migration_004(db):
             session_id  TEXT NOT NULL,
             event_type  TEXT NOT NULL,
             payload     TEXT NOT NULL DEFAULT '{}',
-            created_at  TEXT DEFAULT (datetime('now'))
+            created_at  TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY (session_id) REFERENCES agent_sessions(id)
         )
     """)
     await db.execute(
