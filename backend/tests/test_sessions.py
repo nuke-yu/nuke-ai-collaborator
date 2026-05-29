@@ -244,5 +244,116 @@ class TestMessageReconstruction(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(roles, ["system", "user", "assistant"])
 
 
+class TestRecoverAll(unittest.IsolatedAsyncioTestCase):
+
+    async def asyncSetUp(self):
+        self._orig = _db_mod.DB_PATH
+        _use_test_db()
+        if Path(_TEST_DB).exists():
+            Path(_TEST_DB).unlink()
+        await init_db()
+        import aiosqlite
+        from db.migrations import run_migrations
+        async with aiosqlite.connect(_TEST_DB) as db:
+            await run_migrations(db)
+
+    async def asyncTearDown(self):
+        _restore_db(self._orig)
+        if Path(_TEST_DB).exists():
+            Path(_TEST_DB).unlink()
+
+    async def _create_orphan(self, sid, user_msg="hello", parent_id=None):
+        from sessions.store import create_session, append_event
+        await create_session(
+            session_id=sid, bot_id=99, group_id=1,
+            config={"system_prompt": "s", "provider": "deepseek",
+                    "model_name": "deepseek-chat", "temperature": 0.7, "max_tokens": 4096},
+            user_message=user_msg,
+            parent_id=parent_id,
+        )
+        await append_event(sid, "session_start", {"user_content": user_msg})
+
+    async def test_no_orphans_calls_nothing(self):
+        from sessions.recovery import recover_all
+        called = []
+        await recover_all(dispatcher=called.append)
+        self.assertEqual(called, [])
+
+    async def test_completed_session_not_recovered(self):
+        from sessions.store import create_session, update_session_status
+        from sessions.recovery import recover_all
+        await create_session(
+            session_id="done1", bot_id=1, group_id=1,
+            config={"system_prompt": "", "provider": "deepseek",
+                    "model_name": "deepseek-chat", "temperature": 0.7, "max_tokens": 4096},
+            user_message="x",
+        )
+        await update_session_status("done1", "completed")
+        called = []
+        await recover_all(dispatcher=called.append)
+        self.assertEqual(called, [])
+
+    async def test_orphan_with_only_start_event_dispatched(self):
+        from sessions.recovery import recover_all
+        from sessions.store import get_session
+        await self._create_orphan("orph1", "hello world")
+        dispatched = []
+        await recover_all(dispatcher=dispatched.append)
+        self.assertEqual(len(dispatched), 1)
+        payload = dispatched[0]
+        self.assertEqual(payload["session_id"], "orph1")
+        self.assertEqual(payload["bot_id"], 99)
+        self.assertEqual(payload["group_id"], 1)
+        self.assertIn("messages", payload)
+        # session_start gave us system + user messages
+        self.assertEqual(len(payload["messages"]), 2)
+        # session should now be marked as 'recovering'
+        row = await get_session("orph1")
+        self.assertEqual(row["status"], "recovering")
+
+    async def test_dangling_idempotent_tool_marked_for_retry(self):
+        from sessions.store import create_session, append_event
+        from sessions.recovery import recover_all
+        await create_session(
+            session_id="idem1", bot_id=1, group_id=1,
+            config={"system_prompt": "s", "provider": "deepseek",
+                    "model_name": "deepseek-chat", "temperature": 0.7, "max_tokens": 4096},
+            user_message="search",
+        )
+        await append_event("idem1", "session_start", {"user_content": "search"})
+        await append_event("idem1", "tool_call", {
+            "tool_call_id": "t1", "tool_name": "web_search", "arguments": {"query": "x"},
+        })
+        # no tool_result — process crashed before tool returned
+        dispatched = []
+        await recover_all(dispatcher=dispatched.append)
+        # idempotent tool → still dispatch (roll back to before tool_call)
+        self.assertEqual(len(dispatched), 1)
+        # dangling tool_call should NOT appear in reconstructed messages
+        msgs = dispatched[0]["messages"]
+        roles = [m["role"] for m in msgs]
+        self.assertNotIn("tool", roles)
+
+    async def test_dangling_side_effect_tool_marks_needs_review(self):
+        from sessions.store import create_session, append_event, get_session
+        from sessions.recovery import recover_all
+        await create_session(
+            session_id="side1", bot_id=1, group_id=1,
+            config={"system_prompt": "s", "provider": "deepseek",
+                    "model_name": "deepseek-chat", "temperature": 0.7, "max_tokens": 4096},
+            user_message="run shell",
+        )
+        await append_event("side1", "session_start", {"user_content": "run shell"})
+        await append_event("side1", "tool_call", {
+            "tool_call_id": "t2", "tool_name": "run_shell", "arguments": {"cmd": "rm -rf /"},
+        })
+        dispatched = []
+        await recover_all(dispatcher=dispatched.append)
+        # side-effectful → should NOT be dispatched
+        self.assertEqual(len(dispatched), 0)
+        row = await get_session("side1")
+        self.assertEqual(row["status"], "needs_review")
+
+
 if __name__ == "__main__":
     unittest.main()
