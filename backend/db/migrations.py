@@ -87,10 +87,59 @@ async def migration_003(db):
 # Registry — append new migrations here, never reorder or remove existing ones
 # ---------------------------------------------------------------------------
 
+async def migration_004(db):
+    """Add agent_sessions and session_events tables for crash-safe session recovery."""
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS agent_sessions (
+            id            TEXT PRIMARY KEY,
+            parent_id     TEXT DEFAULT NULL,
+            bot_id        INTEGER NOT NULL,
+            group_id      INTEGER NOT NULL,
+            status        TEXT NOT NULL DEFAULT 'running',
+            executor_id   TEXT NOT NULL DEFAULT 'tool_loop_v1',
+            config_json   TEXT NOT NULL DEFAULT '{}',
+            user_message  TEXT NOT NULL DEFAULT '',
+            input_tokens  INTEGER NOT NULL DEFAULT 0,
+            output_tokens INTEGER NOT NULL DEFAULT 0,
+            created_at    TEXT DEFAULT (datetime('now')),
+            updated_at    TEXT DEFAULT (datetime('now'))
+        )
+    """)
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS session_events (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id  TEXT NOT NULL,
+            event_type  TEXT NOT NULL,
+            payload     TEXT NOT NULL DEFAULT '{}',
+            created_at  TEXT DEFAULT (datetime('now'))
+        )
+    """)
+    await db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_session_events ON session_events(session_id, id)"
+    )
+    await db.commit()
+
+
+async def migration_005(db):
+    """Add cache token columns to messages table."""
+    stmts = [
+        "ALTER TABLE messages ADD COLUMN cache_read_tokens INTEGER DEFAULT NULL",
+        "ALTER TABLE messages ADD COLUMN cache_creation_tokens INTEGER DEFAULT NULL",
+    ]
+    for sql in stmts:
+        try:
+            await db.execute(sql)
+        except Exception:
+            pass
+    await db.commit()
+
+
 MIGRATIONS: list = [
     migration_001,
     migration_002,
     migration_003,
+    migration_004,
+    migration_005,
 ]
 
 # ---------------------------------------------------------------------------
