@@ -12,6 +12,8 @@ _SEND_TIMEOUT = 10.0
 class WSManager:
     def __init__(self):
         self.connections: Dict[int, List[tuple]] = {}
+        # Point 5: Concurrency Defense (DFT-047)
+        self._lock = asyncio.Lock()
 
     def stats(self) -> dict:
         """运行指标快照（DFT-057）：在线群数 / 总连接数 / 按群连接数。"""
@@ -28,27 +30,40 @@ class WSManager:
 
     async def connect(self, websocket: WebSocket, group_id: int, member_id: int):
         await websocket.accept()
-        if group_id not in self.connections:
-            self.connections[group_id] = []
-        self.connections[group_id].append((websocket, member_id))
+        async with self._lock:
+            if group_id not in self.connections:
+                self.connections[group_id] = []
+            self.connections[group_id].append((websocket, member_id))
 
-    def disconnect(self, websocket: WebSocket, group_id: int):
+    async def disconnect(self, websocket: WebSocket, group_id: int):
         """Remove connection. Returns member_id if they fully went offline, else None."""
+        async with self._lock:
+            return self._disconnect_sync(websocket, group_id)
+
+    def _disconnect_sync(self, websocket: WebSocket, group_id: int) -> int | None:
+        """Internal synchronous disconnect logic to be called under lock."""
         if group_id not in self.connections:
             return None
         gone_id = next((mid for ws, mid in self.connections[group_id] if ws == websocket), None)
         self.connections[group_id] = [
             (ws, mid) for ws, mid in self.connections[group_id] if ws != websocket
         ]
-        still_online = any(mid == gone_id for _, mid in self.connections[group_id])
+        if not self.connections[group_id]:
+            self.connections.pop(group_id)
+
+        still_online = any(mid == gone_id for _, mid in self.connections.get(group_id, []))
         return gone_id if gone_id and not still_online else None
 
     async def broadcast(self, group_id: int, message: dict):
-        if group_id not in self.connections:
-            return
+        # Prevent re-entrant calls from same-coroutine recursion (Point 5 & DFT-047)
         dead = []
-        # Use a list snapshot (shallow copy) to avoid RuntimeError if connections is modified concurrently (DFT-015)
-        for ws, _ in list(self.connections[group_id]):
+        async with self._lock:
+            if group_id not in self.connections:
+                return
+            # Take a snapshot under lock to iterate safely
+            current_group_conns = list(self.connections[group_id])
+
+        for ws, _ in current_group_conns:
             try:
                 # wait_for caps a slow/half-open client; on timeout the send is
                 # cancelled and the client dropped, so it can't stall the loop.
@@ -56,14 +71,20 @@ class WSManager:
             except Exception:
                 dead.append(ws)
         
+        if not dead:
+            return
+
         gone_ids = []
-        for ws in dead:
-            gone_id = self.disconnect(ws, group_id)
-            if gone_id:
-                gone_ids.append(gone_id)
+        async with self._lock:
+            for ws in dead:
+                gone_id = self._disconnect_sync(ws, group_id)
+                if gone_id:
+                    gone_ids.append(gone_id)
                 
         # Broadcast presence offline update for members who fully went offline (DFT-009)
+        # We do this OUTSIDE the lock to avoid deadlock and recursively.
         for gone_id in gone_ids:
+            # Note: We call broadcast again. Since we released the lock, this is safe.
             await self.broadcast(group_id, {"type": "presence", "member_id": gone_id, "online": False})
 
 manager = WSManager()

@@ -58,7 +58,7 @@ class TestWSManager(unittest.IsolatedAsyncioTestCase):
         
         # ws1 disconnects itself during send_json call to mutate self.connections list during iteration
         async def mock_send_json(message):
-            manager.disconnect(ws1, group_id=1)
+            await manager.disconnect(ws1, group_id=1)
             
         ws1.send_json = AsyncMock(side_effect=mock_send_json)
         
