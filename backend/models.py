@@ -19,6 +19,7 @@ class AddMemberRequest(BaseModel):
     executor_id: Optional[str] = "simple_v1"
     executor_config: Optional[dict] = None
     done_keyword: Optional[str] = None
+    traits: Optional[list[str]] = None
 
 class CreateGroupRequest(BaseModel):
     name: str

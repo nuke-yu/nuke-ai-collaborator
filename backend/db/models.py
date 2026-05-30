@@ -10,6 +10,14 @@ def _parse_json(val):
         return {}
 
 
+def _parse_json_list(val):
+    try:
+        parsed = json.loads(val)
+        return parsed if isinstance(parsed, list) else []
+    except Exception:
+        return []
+
+
 def _row_to_member(r):
     return {
         "id": r[0], "group_id": r[1], "name": r[2], "type": r[3],
@@ -24,6 +32,7 @@ def _row_to_member(r):
         "executor_id": r[14] if len(r) > 14 else "simple_v1",
         "executor_config": _parse_json(r[15]) if len(r) > 15 else {},
         "done_keyword": r[16] if len(r) > 16 else None,
+        "traits": _parse_json_list(r[17]) if len(r) > 17 else [],
     }
 
 

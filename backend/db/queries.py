@@ -104,16 +104,19 @@ async def update_member_full(db, member_id: int, data: dict):
     executor_config = data.get('executor_config', {})
     if not isinstance(executor_config, str):
         executor_config = json.dumps(executor_config)
+    traits = data.get('traits', [])
+    traits_json = json.dumps(traits) if isinstance(traits, list) else traits
+
     await db.execute(
         "UPDATE members SET name=?, role=?, system_prompt=?, avatar_color=?, "
         "model_provider=?, model_name=?, temperature=?, max_tokens=?, "
-        "personality_prompt=?, executor_id=?, executor_config=?, done_keyword=? WHERE id=?",
+        "personality_prompt=?, executor_id=?, executor_config=?, done_keyword=?, traits_json=? WHERE id=?",
         (data.get('name'), data.get('role'), data.get('system_prompt'),
          data.get('avatar_color'), data.get('model_provider'), data.get('model_name'),
          data.get('temperature', 0.7), data.get('max_tokens', 4096),
          data.get('personality_prompt') or None,
          data.get('executor_id', 'simple_v1'), executor_config,
-         data.get('done_keyword') or None, member_id)
+         data.get('done_keyword') or None, traits_json, member_id)
     )
     await db.commit()
 

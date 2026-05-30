@@ -215,6 +215,15 @@ async def migration_010(db):
     await db.commit()
 
 
+async def migration_011(db):
+    """Add traits_json column to members table for atomic skill composition."""
+    try:
+        await db.execute("ALTER TABLE members ADD COLUMN traits_json TEXT DEFAULT '[]'")
+    except Exception:
+        pass
+    await db.commit()
+
+
 MIGRATIONS: list = [
     migration_001,
     migration_002,
@@ -226,7 +235,9 @@ MIGRATIONS: list = [
     migration_008,
     migration_009,
     migration_010,
+    migration_011,
 ]
+
 
 
 
