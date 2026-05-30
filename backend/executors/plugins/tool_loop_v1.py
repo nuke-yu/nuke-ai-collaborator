@@ -20,6 +20,7 @@ from ai.memory import get_memory_context, add_to_chroma, maybe_summarize
 from core.role_router import build_context_message, build_image_content
 from workspace import load_context_files, format_context_blocks, append_log, archive_run
 from skills import list_skills_all, load_always_skills, filter_skills_by_context
+from skills.traits import load_traits
 from skills.constants import bot_ws as _bot_ws
 import executors.compact as compact
 from core.orchestration.ai_service import AIService
@@ -282,10 +283,16 @@ class ToolLoopV1(BotExecutor):
             always_section = "\n\n【常驻技能 · 始终激活】\n" + "\n\n".join(parts)
 
         group_section = build_group_section(ctx)
+        
+        # Point 4: Trait-based Skill Mounting
+        bot_traits = bot.get("traits", [])
+        traits_section = load_traits(bot_traits)
+        
         os_info = f"Windows (PowerShell)" if _IS_WINDOWS else f"{sys.platform} (shell: /bin/sh)"
         system_prompt_base = (
             base
             + (f"\n\n{memory}" if memory else "")
+            + traits_section
             + (f"\n\n【群组信息】\n{group_section}" if group_section else "")
             + always_section
             + f"\n\n【运行环境】\nOS: {os_info}\n路径分隔符: {'\\\\' if _IS_WINDOWS else '/'}\n使用 run_shell 执行命令时请使用适合当前 OS 的语法。"
