@@ -1,0 +1,120 @@
+import os
+import sys
+import unittest
+from pathlib import Path
+from unittest.mock import AsyncMock, patch, MagicMock
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import db as _db_mod
+from db.schema import init_db
+
+_HERE = Path(__file__).parent.parent
+_TEST_DB = str(_HERE / "test_dynamic_context.db")
+
+class TestDynamicContext(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self._orig = _db_mod.DB_PATH
+        _db_mod.DB_PATH = _TEST_DB
+        if Path(_TEST_DB).exists():
+            Path(_TEST_DB).unlink()
+        await init_db()
+        import aiosqlite
+        from db.migrations import run_migrations
+        async with aiosqlite.connect(_TEST_DB) as db:
+            await run_migrations(db)
+        
+        # Seed parents
+        async with aiosqlite.connect(_TEST_DB) as db:
+            await db.execute("INSERT INTO groups (id, name) VALUES (1, 'g')")
+            await db.execute("INSERT INTO members (id, group_id, name, type) VALUES (1, 1, 'WorkerBot', 'bot')")
+            await db.commit()
+
+    async def asyncTearDown(self):
+        _db_mod.DB_PATH = self._orig
+        if Path(_TEST_DB).exists():
+            Path(_TEST_DB).unlink()
+
+    async def test_tool_loop_refreshes_context_each_iter(self):
+        from executors.plugins.tool_loop_v1 import ToolLoopV1
+        from executors.base import ExecutionContext
+        
+        bot = {
+            "id": 1, "name": "Bot", "role": "dev", "avatar_color": "#fff",
+            "type": "bot", "system_prompt": "orig", "model_provider": "deepseek",
+            "model_name": "deepseek-chat", "temperature": 0.7, "max_tokens": 4096,
+            "executor_config": {},
+        }
+        ctx = ExecutionContext(
+            bot=bot, group_id=1, user_message="task",
+            sender={"id": 2, "name": "Human", "type": "human"},
+            history=[], all_bots=[bot], all_members=[bot],
+            broadcaster=AsyncMock(),
+        )
+
+        # Mock load_context_files to return different content on each call
+        side_effects = [
+            [{"source": "group", "name": "BOARD.md", "content": "ver 1"}],
+            [{"source": "group", "name": "BOARD.md", "content": "ver 2"}],
+            [{"source": "group", "name": "BOARD.md", "content": "ver 3"}],
+            [{"source": "group", "name": "BOARD.md", "content": "ver 4"}],
+            [{"source": "group", "name": "BOARD.md", "content": "ver 5"}],
+            [{"source": "group", "name": "BOARD.md", "content": "ver 6"}],
+            [{"source": "group", "name": "BOARD.md", "content": "ver 7"}],
+            [{"source": "group", "name": "BOARD.md", "content": "ver 8"}],
+            [{"source": "group", "name": "BOARD.md", "content": "ver 9"}],
+            [{"source": "group", "name": "BOARD.md", "content": "ver 10"}],
+        ]
+        mock_load = AsyncMock(side_effect=side_effects)
+
+        captured_prompts = []
+        async def mock_call_ai(*args, **kwargs):
+            captured_prompts.append(args[0]) # system_prompt is the first arg
+            # Return a tool call for first two times to trigger more iterations
+            if len(captured_prompts) < 3:
+                return {
+                    "type": "tool_calls", 
+                    "calls": [{"id": f"tc{len(captured_prompts)}", "name": "read_file", "arguments": {"path": "a.txt"}}],
+                    "assistant_message": {"role": "assistant", "content": "calling tool", "tool_calls": []},
+                    "usage": {}
+                }
+            return {"type": "text", "content": "done", "usage": {}}
+
+        m = "executors.plugins.tool_loop_v1."
+        with patch(m + "load_context_files", new=mock_load), \
+             patch(m + "call_ai_once", new=mock_call_ai), \
+             patch(m + "get_memory_context", new=AsyncMock(return_value="")), \
+             patch(m + "list_skills_all", return_value=[]), \
+             patch(m + "sessions.create_session", new=AsyncMock()), \
+             patch(m + "sessions.append_event", new=AsyncMock()), \
+             patch(m + "sessions.save_snapshot", new=AsyncMock()), \
+             patch(m + "sessions.add_tokens", new=AsyncMock()), \
+             patch(m + "sessions.update_session_status", new=AsyncMock()), \
+             patch(m + "save_message", new=AsyncMock(return_value=1)), \
+             patch(m + "get_messages", new=AsyncMock(return_value=[])), \
+             patch(m + "append_log", new=AsyncMock()), \
+             patch("executors.plugins.tool_loop_v1.tool_executor.execute", new=AsyncMock(return_value="tool result")), \
+             patch("executors.plugins.tool_loop_v1.tool_executor.get_schemas", return_value=[{"function": {"name": "read_file"}}]), \
+             patch("permissions.load_rules", new=AsyncMock(return_value=[])):
+            
+            executor = ToolLoopV1()
+            await executor.run(ctx)
+
+        # Verify load_context_files was called multiple times
+        # 1 (start) + 3 (loop starts) + 2 (auto_compact calls in first 2 tool rounds) = 6
+        self.assertEqual(mock_load.call_count, 6)
+
+        
+        # Verify that each AI call received a different version of the context
+        # Initial: ver 1
+        # Iter 1: refreshes to ver 2 -> prompt has ver 2
+        # After Iter 1: auto_compact calls _build_reinject -> ver 3
+        # Iter 2: refreshes to ver 4 -> prompt has ver 4
+        # After Iter 2: auto_compact calls _build_reinject -> ver 5
+        # Iter 3: refreshes to ver 6 -> prompt has ver 6
+        self.assertIn("ver 2", captured_prompts[0])
+        self.assertIn("ver 4", captured_prompts[1])
+        self.assertIn("ver 6", captured_prompts[2])
+
+if __name__ == "__main__":
+    unittest.main()

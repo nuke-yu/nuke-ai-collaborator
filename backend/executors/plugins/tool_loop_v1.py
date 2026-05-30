@@ -239,6 +239,34 @@ class ToolLoopV1(BotExecutor):
         )
         memory = await get_memory_context(bot["id"], bot.get("role") or "", ctx.user_message)
 
+        skills_snapshot = []
+        always_skills = []
+        skills_xml = ""
+        if self.manifest.workspace.skill_discovery:
+            raw_skills = list_skills_all(bot["id"], group_id=ctx.group_id,
+                                         role=bot.get("role"))
+            lazy_candidates = [
+                s for s in raw_skills
+                if not s.get("always")
+                and s.get("status", "active") != "disabled"
+                and s.get("user_invocable", True)
+            ]
+            lazy_candidates = filter_skills_by_context(lazy_candidates, ctx.user_message)
+            skills_xml, injected_names = _build_skills_xml(lazy_candidates, model_name)
+            for s in raw_skills:
+                if s.get("status", "active") == "disabled":
+                    skills_snapshot.append({**s, "injected": None})
+                elif s.get("always"):
+                    skills_snapshot.append({**s, "injected": "full"})
+                elif not s.get("user_invocable", True):
+                    skills_snapshot.append({**s, "injected": None})
+                else:
+                    inj = "metadata" if s["name"] in injected_names else None
+                    skills_snapshot.append({**s, "injected": inj})
+            if any(s.get("always") for s in raw_skills if s.get("status", "active") != "disabled"):
+                always_skills = load_always_skills(bot["id"], ctx.group_id,
+                                                   bot.get("role"))
+
         # Build context prefix (moved logic to a helper for dynamic refreshing)
         async def _get_fresh_context_prefix():
             blocks = await load_context_files(
