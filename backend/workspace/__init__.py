@@ -1,11 +1,32 @@
 import asyncio
+import threading
 from pathlib import Path
 from datetime import date, datetime
+from typing import Dict
 
 from skills.constants import WORKSPACE_ROOT, LEARNED_ACTIVE as _LEARNED_ACTIVE, LEARNED_DRAFT as _LEARNED_DRAFT
 
 _SUBDIRS = ["skills", "logs"]
 _HISTORY_LIMIT = 10
+
+# Point 5: VFS Path-based Locking
+# Registry of registries, keyed by event loop ID to avoid 'different event loop' errors in tests
+_LOOP_REGISTRIES: Dict[int, Dict[Path, asyncio.Lock]] = {}
+_REGISTRY_LOCK = threading.Lock()
+
+def _get_path_lock(path: Path) -> asyncio.Lock:
+    """Return a path-specific lock bound to the current event loop."""
+    loop = asyncio.get_running_loop()
+    loop_id = id(loop)
+    resolved = path.resolve()
+    
+    with _REGISTRY_LOCK:
+        if loop_id not in _LOOP_REGISTRIES:
+            _LOOP_REGISTRIES[loop_id] = {}
+        registry = _LOOP_REGISTRIES[loop_id]
+        if resolved not in registry:
+            registry[resolved] = asyncio.Lock()
+        return registry[resolved]
 
 
 def bot_workspace(bot_id: int) -> Path:
@@ -39,10 +60,13 @@ async def read_file(bot_id: int, path: str) -> str:
         return f"[错误] 非法路径: {path}"
     if not p.exists():
         return f"[文件不存在] {path}"
-    try:
-        return await asyncio.to_thread(p.read_text, encoding="utf-8")
-    except Exception as e:
-        return f"[读取错误] {e}"
+    
+    lock = _get_path_lock(p)
+    async with lock:
+        try:
+            return await asyncio.to_thread(p.read_text, encoding="utf-8")
+        except Exception as e:
+            return f"[读取错误] {e}"
 
 
 _WRITE_PROTECTED = {"MEMORY.md"}
@@ -109,30 +133,33 @@ async def write_file(bot_id: int, path: str, content: str) -> str:
         return f"[受保护] {p.name} 是永久记忆文件，Bot 无法覆盖。如需追加记录，请通过工作区面板手动编辑。"
     rel = str(p.relative_to(ws)).replace("\\", "/")
 
-    def _do_write() -> str:
-        # Redirect learned/active writes → learned/draft (requires user approval)
-        if rel.startswith(_LEARNED_ACTIVE):
-            draft_path = ws / _LEARNED_DRAFT / p.name
-            draft_path.parent.mkdir(parents=True, exist_ok=True)
-            draft_path.write_text(content, encoding="utf-8")
-            return f"__DRAFT_WRITTEN__:{p.name}"   # sentinel for broadcast
-        # Direct writes to learned/draft/ also return sentinel so tool_loop broadcasts
-        if rel.startswith(_LEARNED_DRAFT):
+    lock = _get_path_lock(p)
+    async with lock:
+        def _do_write() -> str:
+            # Redirect learned/active writes → learned/draft (requires user approval)
+            if rel.startswith(_LEARNED_ACTIVE):
+                draft_path = ws / _LEARNED_DRAFT / p.name
+                draft_path.parent.mkdir(parents=True, exist_ok=True)
+                draft_path.write_text(content, encoding="utf-8")
+                return f"__DRAFT_WRITTEN__:{p.name}"   # sentinel for broadcast
+            # Direct writes to learned/draft/ also return sentinel so tool_loop broadcasts
+            if rel.startswith(_LEARNED_DRAFT):
+                p.parent.mkdir(parents=True, exist_ok=True)
+                p.write_text(content, encoding="utf-8")
+                return f"__DRAFT_WRITTEN__:{p.name}"
+            # Save history before overwriting if content differs
+            if p.exists():
+                try:
+                    if p.read_text(encoding="utf-8") != content:
+                        _save_to_history(ws, p)
+                except Exception:
+                    pass
             p.parent.mkdir(parents=True, exist_ok=True)
             p.write_text(content, encoding="utf-8")
-            return f"__DRAFT_WRITTEN__:{p.name}"
-        # Save history before overwriting if content differs
-        if p.exists():
-            try:
-                if p.read_text(encoding="utf-8") != content:
-                    _save_to_history(ws, p)
-            except Exception:
-                pass
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(content, encoding="utf-8")
-        return f"已写入 {path}（{len(content)} 字符）"
+            return f"已写入 {path}（{len(content)} 字符）"
 
-    return await asyncio.to_thread(_do_write)
+        return await asyncio.to_thread(_do_write)
+
 
 
 async def list_workspace(bot_id: int) -> str:
