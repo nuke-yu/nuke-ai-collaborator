@@ -323,7 +323,10 @@ async def dispatch_bots(group_id: int, triggered: list, content: str, sender: di
                 file_type=file_type,
             )
             try:
-                result = await registry.get(bot.get("executor_id", "simple_v1")).run(ctx)
+                target_executor = bot.get("executor_id") or "tool_loop_v1"
+                if target_executor == "simple_v1" or target_executor == "react_v1":
+                     target_executor = "tool_loop_v1"
+                result = await registry.get(target_executor).run(ctx)
             finally:
                 _stop_steer(group_id, bot["id"])
             if not result.full_text:
@@ -352,7 +355,10 @@ async def dispatch_bots(group_id: int, triggered: list, content: str, sender: di
                     # follow-up messages don't carry the original file attachment
                 )
                 try:
-                    follow_result = await registry.get(bot.get("executor_id", "simple_v1")).run(follow_ctx)
+                    target_executor = bot.get("executor_id") or "tool_loop_v1"
+                    if target_executor == "simple_v1" or target_executor == "react_v1":
+                         target_executor = "tool_loop_v1"
+                    follow_result = await registry.get(target_executor).run(follow_ctx)
                 finally:
                     _stop_steer(group_id, bot["id"])
                 if follow_result.full_text:
