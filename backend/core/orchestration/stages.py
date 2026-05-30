@@ -220,6 +220,231 @@ class PoolStage(StageType):
         )
 
 
+class DiscussionStage(StageType):
+    """讨论阶段：成员轮流发言（round-robin），循环讨论固定轮数，最后一轮给出结论再推进。
+
+    与 single/pool 都不同的流转模式：严格串行（同一时刻只有一位发言），靠"轮次计数"终止，
+    既不是单人独占，也不是按任务认领。spec 里用 `rounds` 配置总轮数（默认 6）。
+    （插拔验证用：新增本类完全不需要改 declarative.py 编排器核心。）
+    """
+    name = "discussion"
+
+    def _rounds(self, stage: dict) -> int:
+        return int(stage.get("rounds", 6))
+
+    def current_pool_bots(self, stage: dict) -> list[int] | None:
+        speaker = stage.get("speaker")
+        return [speaker] if speaker is not None else [b["id"] for b in stage["bots"]]
+
+    def display_name(self, stage: dict) -> str:
+        return stage.get("name", "讨论组")
+
+    def enter(self, ctx: StageCtx, prev_output: str) -> OrchestratorStep:
+        stage = ctx.stage
+        bots = stage["bots"]
+        stage["round"] = 1
+        stage["speaker"] = bots[0]["id"]
+
+        step = OrchestratorStep(broadcast_state=True)
+        names = "、".join(b["name"] for b in bots)
+        step.announcements.append(SystemMessage(
+            f"💬 讨论开始（共 {self._rounds(stage)} 轮）：{names}", bots[0]["id"]))
+        step.next_units.append(self._unit(ctx, bots[0], 1))
+        return step
+
+    def observe(self, ctx: StageCtx, bot_id: int, response: str) -> OrchestratorStep:
+        stage = ctx.stage
+        if bot_id is None or bot_id != stage.get("speaker"):
+            return OrchestratorStep()
+
+        rnd = stage.get("round", 1)
+        if rnd >= self._rounds(stage):
+            # 最后一轮发言完毕 → 推进到下一阶段
+            return ctx.orch._advance(ctx.group_id, prev_output=response)
+
+        bots = stage["bots"]
+        nxt = bots[rnd % len(bots)]  # 下一位发言者（round-robin）
+        stage["round"] = rnd + 1
+        stage["speaker"] = nxt["id"]
+
+        step = OrchestratorStep(broadcast_state=True)
+        step.next_units.append(self._unit(ctx, nxt, rnd + 1))
+        return step
+
+    def snapshot(self, stage: dict) -> dict:
+        bots = stage["bots"]
+        return {
+            "stage_type": "discussion",
+            "bots": [{"id": b["id"], "name": b["name"], "avatar_color": b["avatar_color"]}
+                     for b in bots],
+            "round": stage.get("round", 0),
+            "rounds": self._rounds(stage),
+            "speaker": stage.get("speaker"),
+        }
+
+    def _unit(self, ctx: StageCtx, bot: dict, rnd: int) -> WorkUnit:
+        total = self._rounds(ctx.stage)
+        if rnd >= total:
+            task = "这是最后一轮，请综合前面所有人的讨论，给出最终结论。"
+        else:
+            task = "请基于前面的讨论发表你的观点（认同、补充或反驳，并说明理由）。"
+        suffix = (
+            f"\n\n[工作流 {ctx.idx+1}/{ctx.total}] 讨论第 {rnd}/{total} 轮，轮到你（{bot['name']}）发言。\n{task}"
+        )
+        return WorkUnit(
+            bot=bot,
+            executor_id=bot.get("executor_id", "simple_v1"),
+            trigger_msg=f"第 {rnd} 轮发言（{bot['name']}）。",
+            prompt_suffix=suffix,
+        )
+
+
+class VerificationStage(StageType):
+    """验证阶段：多 bot 对同一任务各出方案 → 互相投票 → 票高者的方案胜出并带着它推进。
+
+    两阶段流转：
+      propose: 全员并行产出方案（每人一份，针对同一任务）
+      vote:    全员阅读所有方案并投票，计票后选出最优
+    与 pool（认领各自不同任务）、discussion（串行轮流发言）机制都不同。
+    （插拔验证用：新增本类完全不需要改 declarative.py 编排器核心。）
+    """
+    name = "verification"
+
+    def current_pool_bots(self, stage: dict) -> list[int] | None:
+        pending = stage.get("pending")
+        if pending is not None:
+            return list(pending)
+        return [b["id"] for b in stage["bots"]]
+
+    def display_name(self, stage: dict) -> str:
+        return stage.get("name", "验证小组")
+
+    def enter(self, ctx: StageCtx, prev_output: str) -> OrchestratorStep:
+        stage = ctx.stage
+        bots = stage["bots"]
+        stage["phase"] = "propose"
+        stage["pending"] = [b["id"] for b in bots]
+        stage["proposals"] = {}
+        stage["votes"] = {}
+
+        step = OrchestratorStep(broadcast_state=True)
+        names = "、".join(b["name"] for b in bots)
+        step.announcements.append(SystemMessage(
+            f"🔬 验证开始：{len(bots)} 位成员针对同一任务各自给出方案 —— {names}", bots[0]["id"]))
+        for bot in bots:
+            step.next_units.append(self._propose_unit(ctx, bot))
+        return step
+
+    def observe(self, ctx: StageCtx, bot_id: int, response: str) -> OrchestratorStep:
+        if ctx.stage.get("phase") == "vote":
+            return self._observe_vote(ctx, bot_id, response)
+        return self._observe_propose(ctx, bot_id, response)
+
+    def _observe_propose(self, ctx: StageCtx, bot_id: int, response: str) -> OrchestratorStep:
+        stage = ctx.stage
+        pending = stage.get("pending", [])
+        if bot_id is None or bot_id not in pending:
+            return OrchestratorStep()
+        pending.remove(bot_id)
+        stage.setdefault("proposals", {})[bot_id] = response
+        if pending:
+            return OrchestratorStep(broadcast_state=True)
+        return self._begin_vote(ctx)  # 全员出完方案 → 进入投票
+
+    def _begin_vote(self, ctx: StageCtx) -> OrchestratorStep:
+        stage = ctx.stage
+        bots = stage["bots"]
+        stage["phase"] = "vote"
+        stage["pending"] = [b["id"] for b in bots]
+
+        step = OrchestratorStep(broadcast_state=True)
+        step.announcements.append(SystemMessage(
+            "🗳️ 方案已全部提交，进入投票：请各自选出你认为最优的方案。", bots[0]["id"]))
+        for bot in bots:
+            step.next_units.append(self._vote_unit(ctx, bot))
+        return step
+
+    def _observe_vote(self, ctx: StageCtx, bot_id: int, response: str) -> OrchestratorStep:
+        stage = ctx.stage
+        pending = stage.get("pending", [])
+        if bot_id is None or bot_id not in pending:
+            return OrchestratorStep()
+        pending.remove(bot_id)
+        voted = self._parse_vote(stage, response)
+        if voted is not None:
+            stage.setdefault("votes", {})[bot_id] = voted
+        if pending:
+            return OrchestratorStep(broadcast_state=True)
+        return self._finish(ctx)  # 全员投完 → 计票 → 推进
+
+    def _finish(self, ctx: StageCtx) -> OrchestratorStep:
+        stage = ctx.stage
+        bots = stage["bots"]
+        votes = stage.get("votes", {})
+        tally: dict[int, int] = {}
+        for v in votes.values():
+            tally[v] = tally.get(v, 0) + 1
+        winner_id = max(tally, key=lambda k: tally[k]) if tally else bots[0]["id"]
+        winner = next((b for b in bots if b["id"] == winner_id), bots[0])
+        stage["winner"] = winner_id
+        winning_text = stage.get("proposals", {}).get(winner_id, "")
+
+        step = OrchestratorStep(broadcast_state=True)
+        step.announcements.append(SystemMessage(
+            f"🏆 投票结束，**{winner['name']}** 的方案胜出（{tally.get(winner_id, 0)} 票）。", winner_id))
+        adv = ctx.orch._advance(ctx.group_id, prev_output=winning_text)
+        step.next_units.extend(adv.next_units)
+        step.announcements.extend(adv.announcements)
+        step.done = adv.done
+        return step
+
+    def _parse_vote(self, stage: dict, response: str) -> int | None:
+        m = re.search(r'投票[：:]\s*(.+)', response)
+        scope = m.group(1) if m else response
+        for bot in stage["bots"]:
+            if bot["name"] in scope:
+                return bot["id"]
+        return None
+
+    def snapshot(self, stage: dict) -> dict:
+        bots = stage["bots"]
+        return {
+            "stage_type": "verification",
+            "bots": [{"id": b["id"], "name": b["name"], "avatar_color": b["avatar_color"]}
+                     for b in bots],
+            "phase": stage.get("phase", "propose"),
+            "proposals_in": len(stage.get("proposals", {})),
+            "votes_in": len(stage.get("votes", {})),
+            "winner": stage.get("winner"),
+            "total": len(bots),
+        }
+
+    def _propose_unit(self, ctx: StageCtx, bot: dict) -> WorkUnit:
+        suffix = (
+            f"\n\n[工作流 {ctx.idx+1}/{ctx.total}] 验证·出方案：你和其他成员针对同一任务独立给出各自的完整方案。"
+            f"请清晰描述方案与理由（稍后大家会投票选出最优）。"
+        )
+        return WorkUnit(
+            bot=bot,
+            executor_id=bot.get("executor_id", "simple_v1"),
+            trigger_msg=f"请给出你的方案（{bot['name']}）。",
+            prompt_suffix=suffix,
+        )
+
+    def _vote_unit(self, ctx: StageCtx, bot: dict) -> WorkUnit:
+        names = "、".join(b["name"] for b in ctx.stage["bots"])
+        suffix = (
+            f"\n\n[工作流 {ctx.idx+1}/{ctx.total}] 验证·投票：请阅读前面所有人的方案（{names}），"
+            f"选出你认为最优的一个。在回复末尾用「投票：<名字>」给出选择并说明理由。"
+        )
+        return WorkUnit(
+            bot=bot,
+            executor_id=bot.get("executor_id", "simple_v1"),
+            trigger_msg=f"请投票（{bot['name']}）。",
+            prompt_suffix=suffix,
+        )
+
+
 # ── 阶段类型注册表（可插拔） ──────────────────────────────────────────────────
 
 _STAGE_TYPES: dict[str, StageType] = {}
@@ -240,3 +465,5 @@ def all_stage_types() -> list[str]:
 
 register_stage_type(SingleStage())
 register_stage_type(PoolStage())
+register_stage_type(DiscussionStage())
+register_stage_type(VerificationStage())

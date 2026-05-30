@@ -73,6 +73,78 @@ class TestOrchestratorFlow(unittest.TestCase):
         self.assertEqual(pool["ticket_queue"], ["任务丙"])
         self.assertEqual(len(step.announcements), 1)
 
+    def test_pluggable_discussion_stage(self):
+        """插拔验证：discussion 是注册进来的新 stage_type，编排器核心未改动也能驱动它。
+
+        讨论 = 串行轮流发言（round-robin）+ 轮次终止，与 single/pool 都不同。
+        """
+        from core.orchestration import all_stage_types
+        self.assertIn("discussion", all_stage_types())
+
+        bots = [_bot_entry(30, "X"), _bot_entry(31, "Y"), _bot_entry(32, "Z")]
+        disc = {"stage_type": "discussion", "rounds": 5, "bots": bots}
+        self.orch.begin(1, [self._single(1, "A"), disc])
+
+        # single A 完成 → 进入讨论：只派 1 个 WorkUnit（第 1 位发言者）
+        step = self.orch.observe(1, 1, "完毕")
+        self.assertEqual(len(step.next_units), 1)
+        self.assertEqual(step.next_units[0].bot["id"], 30)
+        self.assertEqual(disc["round"], 1)
+        # 路由：当前只有发言者一人 active
+        self.assertEqual(self.orch.current_pool_bots(1), [30])
+        self.assertIsNone(self.orch.current_bot(1))
+
+        # round-robin：X→Y→Z→X→Y，每次只下一位
+        order = [30, 31, 32, 30]
+        for i, speaker in enumerate(order):
+            s = self.orch.observe(1, speaker, "我说完了")
+            self.assertFalse(s.done)
+            self.assertEqual(len(s.next_units), 1)
+            self.assertEqual(s.next_units[0].bot["id"], order[i + 1] if i + 1 < len(order) else 31)
+        self.assertEqual(disc["round"], 5)
+
+        # 非当前发言者的消息被忽略（不推进）
+        ignored = self.orch.observe(1, 32, "插嘴")
+        self.assertEqual(ignored.next_units, [])
+
+        # 第 5 轮（最后一轮）发言者 Y 完成 → 这是最后阶段 → done
+        final = self.orch.observe(1, 31, "最终结论")
+        self.assertTrue(final.done)
+        self.assertIsNone(self.orch.get(1))
+
+    def test_pluggable_verification_stage(self):
+        """插拔验证：verification 两阶段（出方案→投票）的新 stage_type，编排器核心未改动。"""
+        from core.orchestration import all_stage_types
+        self.assertIn("verification", all_stage_types())
+
+        bots = [_bot_entry(40, "Alpha"), _bot_entry(41, "Beta"), _bot_entry(42, "Gamma")]
+        ver = {"stage_type": "verification", "bots": bots}
+        self.orch.begin(1, [self._single(1, "A"), ver])
+
+        # A 完成 → propose 阶段：3 个方案 unit 并行
+        step = self.orch.observe(1, 1, "完毕")
+        self.assertEqual(ver["phase"], "propose")
+        self.assertEqual(len(step.next_units), 3)
+        self.assertEqual(set(self.orch.current_pool_bots(1)), {40, 41, 42})
+
+        # 三人各出方案，最后一人触发进入投票
+        self.orch.observe(1, 40, "方案甲")
+        self.orch.observe(1, 41, "方案乙")
+        s = self.orch.observe(1, 42, "方案丙")
+        self.assertEqual(ver["phase"], "vote")
+        self.assertEqual(len(s.next_units), 3)
+        self.assertEqual(ver["proposals"][41], "方案乙")
+
+        # 投票：Beta 得 2 票胜出
+        self.orch.observe(1, 40, "我选 投票：Beta")
+        self.orch.observe(1, 41, "投票：Beta")
+        final = self.orch.observe(1, 42, "投票：Alpha")
+
+        # 最后阶段 → done；winner=41(Beta)
+        self.assertTrue(final.done)
+        self.assertEqual(ver["winner"], 41)
+        self.assertIsNone(self.orch.get(1))
+
 
 class TestRunnerBroadcast(unittest.IsolatedAsyncioTestCase):
     """runner.run_unit 把 broadcaster=bus 接给 executor，stream 事件经总线带 'delta'。"""
