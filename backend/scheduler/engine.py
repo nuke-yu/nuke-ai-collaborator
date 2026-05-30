@@ -26,9 +26,12 @@ def _parse_cron(expr: str) -> CronTrigger | None:
         return None
     minute, hour, day, month, day_of_week = parts
     try:
+        # DFT-040: pin to UTC so cron fields are interpreted consistently
+        # regardless of host local timezone / DST shifts. A pre-built trigger
+        # keeps its own tz when added to the scheduler, so this must be set here.
         return CronTrigger(
             minute=minute, hour=hour, day=day,
-            month=month, day_of_week=day_of_week,
+            month=month, day_of_week=day_of_week, timezone="UTC",
         )
     except Exception:
         return None
@@ -42,7 +45,9 @@ def validate_cron_expr(expr: str) -> bool:
 async def start() -> None:
     """Load all enabled jobs from DB and start the scheduler. Called at app startup."""
     global _scheduler
-    _scheduler = AsyncIOScheduler()
+    # DFT-040: run the scheduler in UTC; cron_jobs.created_at is stored UTC too,
+    # so all time handling stays in one timezone (frontend converts to local).
+    _scheduler = AsyncIOScheduler(timezone="UTC")
     jobs = await list_jobs(enabled_only=True)
     for job in jobs:
         _schedule(job)

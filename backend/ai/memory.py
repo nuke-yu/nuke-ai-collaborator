@@ -1,8 +1,11 @@
 import asyncio
+import logging
 from functools import partial
 import chromadb
 from chromadb.utils import embedding_functions
 from db import get_db
+
+log = logging.getLogger(__name__)
 
 SUMMARY_THRESHOLD = 15
 
@@ -97,7 +100,7 @@ async def maybe_summarize(group_id: int, bot_id: int, role: str, member_ids: lis
             )
             await db.commit()
     except Exception:
-        pass
+        log.exception("maybe_summarize failed (bot_id=%s, group_id=%s)", bot_id, group_id)
 
 
 # ── 组合记忆上下文（注入 system prompt）──────────────────────────────
@@ -116,7 +119,7 @@ async def get_memory_context(bot_id: int, role: str, query: str) -> str:
             combined = "\n".join(r[0] for r in reversed(summaries))
             parts.append(f"【我的历史经验摘要】\n{combined}")
     except Exception:
-        pass
+        log.exception("get_memory_context: loading role summaries failed (bot_id=%s)", bot_id)
 
     # 2. 语义检索（Chroma，Bot 个人知识库）
     relevant = await retrieve_relevant(bot_id, query)

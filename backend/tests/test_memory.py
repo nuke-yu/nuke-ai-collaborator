@@ -110,5 +110,32 @@ class TestMemorySummarization(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(rows[0]["covered_through_id"], 15)
         self.assertEqual(rows[1]["covered_through_id"], 30)
 
+class TestMemorySilentFailureLogging(unittest.IsolatedAsyncioTestCase):
+    """DFT-043: maybe_summarize / get_memory_context 不再 try/except: pass 静默吞错，
+    改为记录日志但不阻断主流程。"""
+
+    async def test_maybe_summarize_logs_on_error_and_does_not_raise(self):
+        with patch("ai.memory.get_db", side_effect=RuntimeError("db-boom-summarize")):
+            with self.assertLogs("ai.memory", level="ERROR") as cm:
+                # member_ids 非空以越过早返回；get_db 抛错被捕获并记日志
+                await memory.maybe_summarize(group_id=1, bot_id=2, role="r", member_ids=[2])
+        self.assertTrue(
+            any("db-boom-summarize" in line for line in cm.output),
+            f"异常详情应进日志，实际: {cm.output}",
+        )
+
+    async def test_get_memory_context_logs_on_error_and_returns_string(self):
+        # 隔离 chroma：retrieve_relevant 返回空，避免触发 embedding 模型下载
+        with patch("ai.memory.retrieve_relevant", new=AsyncMock(return_value=[])), \
+             patch("ai.memory.get_db", side_effect=RuntimeError("db-boom-context")):
+            with self.assertLogs("ai.memory", level="ERROR") as cm:
+                result = await memory.get_memory_context(bot_id=2, role="r", query="q")
+        self.assertIsInstance(result, str)
+        self.assertTrue(
+            any("db-boom-context" in line for line in cm.output),
+            f"异常详情应进日志，实际: {cm.output}",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

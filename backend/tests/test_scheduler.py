@@ -224,6 +224,21 @@ class TestSchedulerEngine(unittest.IsolatedAsyncioTestCase):
             with self.subTest(expr=expr):
                 self.assertFalse(validate_cron_expr(expr))
 
+    # --- timezone (DFT-040) ---
+
+    def test_parse_cron_interpreted_in_utc(self):
+        """_parse_cron 生成的 CronTrigger 以 UTC 解释，不随宿主本地时区/DST 平移。"""
+        from scheduler.engine import _parse_cron
+        trigger = _parse_cron("0 9 * * *")
+        self.assertIsNotNone(trigger)
+        self.assertEqual(str(trigger.timezone), "UTC")
+
+    async def test_scheduler_runs_in_utc(self):
+        """AsyncIOScheduler 以 UTC 时区运行。"""
+        import scheduler.engine as eng
+        await eng.start()
+        self.assertEqual(str(eng._scheduler.timezone), "UTC")
+
     # --- start / stop ---
 
     async def test_start_creates_running_scheduler(self):

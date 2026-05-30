@@ -2,13 +2,13 @@
 
 ## 进度总览 (Progress Dashboard)
 
-> 更新：2026-05-30 · 全量 **57** 项，已修 **41**，待修 **16**
+> 更新：2026-05-30 · 全量 **57** 项，已修 **43**，待修 **14**
 
 | 批次 | 范围 | 总数 | 已修 | 待修 |
 | :--- | :--- | :---: | :---: | :---: |
 | 历史缺陷 | DFT-001 ~ 016 | 16 | 16 ✅ | 0 |
-| 架构师 Review | DFT-017 ~ 057 | 41 | 25 ✅ | 16 |
-| **合计** | — | **57** | **41** | **16** |
+| 架构师 Review | DFT-017 ~ 057 | 41 | 27 ✅ | 14 |
+| **合计** | — | **57** | **43** | **14** |
 
 架构师 Review 按严重度：🔴 Critical 7（已修 7）· 🟠 High 12（已修 12）· 🟡 Medium 17 · 🟢 Low 5（已修 5）。
 
@@ -39,10 +39,10 @@
 | DFT-037 | 🟡 | ⛔未修复 | 三 executor 复制生命周期已漂移 |
 | DFT-038 | 🟡 | ✅已修复 | 迁移 `except` 吞所有异常仍记成功 |
 | DFT-039 | 🟡 | ⛔未修复 | 调度器重启 >1min 静默丢任务 |
-| DFT-040 | 🟡 | ⛔未修复 | 调度器无 timezone，DST 平移 |
+| DFT-040 | 🟡 | ✅已修复 | 调度器无 timezone，DST 平移 |
 | DFT-041 | 🟡 | ✅已修复 | **[架构重构]** 工作流解析问题已随 Stage 1 的 **RDManager (看板事件中枢)** 和 Stage 2 的 **Durable Locks** 解决。系统通过内部事件总线 (`TicketCreated` 等) 实现强类型派单。 |
 | DFT-042 | 🟡 | ✅已修复 | **[架构重构]** 同 DFT-041，RDManager 的 `_last_tickets` 状态机与持久化 Ticket 库防重入。 |
-| DFT-043 | 🟡 | ⛔未修复 | AI 记忆 `try/except: pass` 静默失效 |
+| DFT-043 | 🟡 | ✅已修复 | AI 记忆 `try/except: pass` 静默失效 |
 | DFT-044 | 🟡 | ⛔未修复 | 权限 `_matches` 嵌套参数失配可绕 |
 | DFT-045 | 🟡 | ✅已修复 | **[架构重构]** 技能系统的“手写解析器/冗余”问题已被 Stage 4 的 **Trait-based Skill Mounting (原子特征挂载)** 降维打击。系统现在支持细粒度的 Traits UI 组装，降低了大型复合 Skill 的维护压力。 |
 | DFT-046 | 🟡 | ⛔未修复 | skill 发现同步 IO 阻塞事件循环 |
@@ -128,10 +128,10 @@
 | **DFT-037** | **执行引擎**<br>[react_v1.py](backend/executors/plugins/react_v1.py) vs [tool_loop_v1.py](backend/executors/plugins/tool_loop_v1.py) | 🟡 | 三个 executor 复制 ~150 行生命周期且已漂移（react 缺 WAL/archive/before_finalize、doom-loop 策略不同、skill 快照构建不同）。 | 任一修复需手工镜像到其它 executor，易遗漏。 | 同 DFT-036，三 executor 共享生命周期脚手架，差异点用 hook/manifest 表达。 |
 | **DFT-038** ✅ | **DB 迁移**<br>[migrations.py](backend/db/migrations.py#L46) | 🟡 | `except Exception: pass` 既吞"duplicate column"也吞 `database is locked`/磁盘满/语法错误，且仍记为已应用。 | schema 残缺而 `_schema_version` 谎报成功，永不重试。 | **已修复**：新增模块级助手 `_safe_add_column(db, sql)`——只 `except sqlite3.OperationalError` 且 `"duplicate column" in str(e).lower()` 时静默跳过（幂等重跑的良性情况），其余 `OperationalError`（`database is locked`/磁盘满/`no such table`/语法错误）一律 `raise` 上抛。错误从 `migration_fn` 冒泡出 `run_migrations`，使其在 `INSERT INTO _schema_version` 之前中断 → 失败的迁移**不计版本**，下次启动重试，不再谎报成功留下残缺 schema。把 7 处 `try/except: pass`（migration_001/002/005/006 的循环 + 008/011/012 的单语句）全部替换为该助手。单测 `tests/test_migrations.py` 新增 `TestMigrationErrorPropagation`（3 例：duplicate 仍吞、非 duplicate 上抛、失败迁移不前进版本）；既有 `TestRunMigrations` 3 例的「裸空库」setup 改为先建基础表（对齐生产 `schema.init_db` 先建表再迁移的真实流程，原 setup 实为依赖被移除的吞错行为）；全套 28 例全绿。 |
 | **DFT-039** | **调度器**<br>[scheduler/engine.py](backend/scheduler/engine.py#L69) | 🟡 | `misfire_grace_time=60`+`coalesce=True`，重启超 1 分钟即静默丢失定时任务，无 last_run/next_run 审计。 | 部署/重启 >1min 静默跳过定时任务，无记录。 | 持久化 last_run/next_run；启动时对错过的 job 做 catch-up 或至少告警；按需调大 misfire_grace_time。 |
-| **DFT-040** | **调度器**<br>[scheduler/engine.py](backend/scheduler/engine.py#L45) | 🟡 | `AsyncIOScheduler()` 无 timezone，用宿主本地时区解释 cron，但 `created_at` 存 UTC，混用。 | DST/服务器迁移会整体平移所有任务触发时间。 | `AsyncIOScheduler(timezone="UTC")`，cron 统一 UTC 解释，前端展示再转本地。 |
+| **DFT-040** ✅ | **调度器**<br>[scheduler/engine.py](backend/scheduler/engine.py#L45) | 🟡 | `AsyncIOScheduler()` 无 timezone，用宿主本地时区解释 cron，但 `created_at` 存 UTC，混用。 | DST/服务器迁移会整体平移所有任务触发时间。 | **已修复**：`start()` 改 `AsyncIOScheduler(timezone="UTC")`；并在 `_parse_cron` 里给 `CronTrigger(..., timezone="UTC")`——因 APScheduler 中**预构建的 trigger 加入调度器后保留自身 tz**（不继承 scheduler tz），故必须在构造 trigger 处显式钉 UTC，否则仍按宿主本地时区（实测 Asia/Shanghai）解释。两处一致后 cron 字段与 `created_at` 统一 UTC，DST/迁移不再平移触发时间（前端展示时转本地）。单测 `tests/test_scheduler.py` 新增 2 例（`_parse_cron` trigger tz==UTC、`start()` 后 `_scheduler.timezone`==UTC）；既有调度器全套 + 路由 E2E 共 41 例全绿。 |
 | **DFT-041** | **工作流**<br>[workflow.py](backend/core/workflow.py#L75) | 🟡 | `_parse_tickets` 解析失败时伪造单个 `["本次迭代任务"]`。 | 工作流"成功"却几乎啥都没干，无失败信号（开发团队其余 bot 全 idle）。 | 解析失败不伪造，发系统消息提示上游重发或标 stage 失败，不静默推进。 |
 | **DFT-042** | **工作流**<br>[workflow.py](backend/core/workflow.py#L267) | 🟡 | `_trigger_pool_stage` 无幂等守卫，重入会 `random.shuffle`+清空 `in_progress/ticket_queue/completed`。 | 重复 advance/重试时抹掉进行中的工作与已完成票据历史。 | 开头加 `if stage.get("in_progress"): return` 幂等守卫。 |
-| **DFT-043** | **AI 记忆**<br>[ai/memory.py](backend/ai/memory.py#L99) | 🟡 | `maybe_summarize`/`get_memory_context` 整体 `try/except: pass`。 | 记忆压缩静默失效无任何日志，生产几乎无法排障。 | except 改为 `log.exception`，记录但不阻断主流程。 |
+| **DFT-043** ✅ | **AI 记忆**<br>[ai/memory.py](backend/ai/memory.py#L99) | 🟡 | `maybe_summarize`/`get_memory_context` 整体 `try/except: pass`。 | 记忆压缩静默失效无任何日志，生产几乎无法排障。 | **已修复**：新增模块级 `log = logging.getLogger(__name__)`；`maybe_summarize` 的兜底 `except` 改 `log.exception("maybe_summarize failed (bot_id=…, group_id=…)")`，`get_memory_context` 加载历史摘要的 `except` 改 `log.exception(...)`——均记录完整 traceback 但**不阻断主流程**（记忆是增强项，失败应可排障而非吞掉）。`_query_sync` 的 chroma `except` 保持返回 `[]`（语义检索降级合理，但后续可补日志）。单测 `tests/test_memory.py` 新增 `TestMemorySilentFailureLogging`（2 例：patch `get_db` 抛错，断言 `maybe_summarize`/`get_memory_context` 经 `assertLogs("ai.memory", ERROR)` 记录异常详情且不抛、`get_memory_context` 仍返回 str）；既有摘要生命周期测试全绿。 |
 | **DFT-044** | **权限引擎**<br>[engine.py](backend/permissions/engine.py#L28) | 🟡 | `_matches` 只对顶层 `arguments.values()` 的 `str(v)` 做 fnmatch；dict/list 被转成 Python repr。 | 针对命令原文写的 deny 规则对嵌套参数静默失配 → 可被参数结构绕过。 | 对 dict/list 递归展开或匹配其 JSON 序列化串；`run_shell` 专门匹配 `command` 字段原文。 |
 | **DFT-045** | **技能系统**<br>[metadata.py](backend/skills/metadata.py#L18) | 🟡 | 手写非 YAML 解析器（按首个 `:` 切分），不支持 block scalar/含冒号值/flow list。 | 标准 YAML 的 frontmatter 字段被静默丢弃或截断，`allowed-tools` 解析可能误判。 | 改用 `yaml.safe_load`（无 RCE 风险），删手写解析器。 |
 | **DFT-046** | **技能系统**<br>[discovery.py](backend/skills/discovery.py) | 🟡 | 每条消息构建 skill 列表时在事件循环上同步 `iterdir/exists/read_text`（五层）。 | skill 多/文件大时阻塞整个事件循环。 | 文件 IO 用 `asyncio.to_thread` 包裹；或 watcher 维护内存缓存，请求路径只读缓存。 |
