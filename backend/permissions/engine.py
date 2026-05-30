@@ -53,11 +53,17 @@ def _matches(rule: Rule, tool_name: str, arguments: dict) -> bool:
     if not fnmatch.fnmatch(tool_name, rule.tool_pattern):
         return False
     if rule.args_pattern:
-        return any(
-            fnmatch.fnmatch(str(v), rule.args_pattern)
-            for v in arguments.values()
-            if v is not None
-        )
+        # DFT-044: Recursive search in nested arguments to prevent bypass
+        def search_nested(val: Any) -> bool:
+            if isinstance(val, (str, int, float, bool)) or val is None:
+                return fnmatch.fnmatch(str(val), rule.args_pattern)
+            if isinstance(val, dict):
+                return any(search_nested(v) for v in val.values())
+            if isinstance(val, list):
+                return any(search_nested(v) for v in val)
+            return fnmatch.fnmatch(str(val), rule.args_pattern)
+
+        return any(search_nested(v) for v in arguments.values())
     return True
 
 
