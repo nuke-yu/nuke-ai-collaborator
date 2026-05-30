@@ -520,25 +520,40 @@ async def _handle_run_shell(
     work_dir, err = _resolve_shell_cwd(cwd, bot_id)
     if err:
         return f"[安全拒绝] {err}"
+    
+    # 强制上限，防止 Bot 瞎传参数导致永远阻塞
+    _max_timeout = min(timeout, 300) # Max 5 minutes even if requested more
     sandbox_env = _sandbox_env()
+    
+    # Wrap command in a subshell with ulimit (virtual memory limit) to prevent OOM
+    # Linux/Mac support: ulimit -v 524288 limits to ~512MB
+    # We use 'ulimit -v 524288 2>/dev/null; exec "$@"' via bash -c
+    safe_cmd = f"ulimit -v 524288 2>/dev/null; {cmd}"
+    
     try:
         if background:
             proc = await asyncio.create_subprocess_exec(
-                *_DEFAULT_SHELL, cmd,
+                *_DEFAULT_SHELL, safe_cmd,
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.DEVNULL,
                 cwd=str(work_dir),
                 env=sandbox_env,
+                # Start new session so background task doesn't die when parent shell exits
+                start_new_session=True if not _IS_WINDOWS else False
             )
             return f"已在后台启动（PID: {proc.pid}），命令：{cmd}"
+            
         proc = await asyncio.create_subprocess_exec(
-            *_DEFAULT_SHELL, cmd,
+            *_DEFAULT_SHELL, safe_cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=str(work_dir),
             env=sandbox_env,
         )
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        
+        # Enforce strict timeout
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=_max_timeout)
+        
         out = stdout.decode(errors="replace").strip()
         err = stderr.decode(errors="replace").strip()
         parts = [f"exit_code: {proc.returncode}"]
@@ -547,6 +562,7 @@ async def _handle_run_shell(
         if err:
             parts.append(f"stderr:\n{err}")
         return "\n".join(parts)
+        
     except asyncio.CancelledError:
         try:
             proc.kill()
@@ -554,9 +570,13 @@ async def _handle_run_shell(
             pass
         raise
     except asyncio.TimeoutError:
-        return f"[超时] 命令执行超过 {timeout} 秒"
+        try:
+            proc.kill()
+        except Exception:
+            pass
+        return f"[安全拦截] 命令执行超时（超过 {_max_timeout} 秒已被强行终止）"
     except Exception as e:
-        return f"[错误] {e}"
+        return f"[系统错误] {e}"
 
 
 # Note: _is_sensitive_path only covers read_file/write_file; run_shell commands can still access these paths.
