@@ -73,6 +73,22 @@ class DeclarativeOrchestrator(Orchestrator):
             "current": s["current"],
         }
 
+    # ── 持久化 / 崩溃恢复 ───────────────────────────────────────────────────────
+
+    def serialize(self, group_id: int) -> dict | None:
+        return self._state.get(group_id)
+
+    def restore(self, group_id: int, state: dict) -> None:
+        for st in state.get("stages", []):
+            stage_handler(st).rehydrate(st)
+        self._state[group_id] = state
+
+    def resume_units(self, group_id: int) -> list:
+        ctx = self._ctx(group_id)
+        if ctx is None:
+            return []
+        return stage_handler(ctx.stage).resume(ctx)
+
     # ── 流转决策（纯函数，返回 OrchestratorStep） ────────────────────────────────
 
     def begin(self, group_id: int, ordered_stages: list) -> OrchestratorStep:

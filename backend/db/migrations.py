@@ -151,6 +151,26 @@ async def migration_006(db):
     await db.commit()
 
 
+async def migration_007(db):
+    """Add workflow_state table for crash-safe workflow/orchestration recovery.
+
+    The orchestrator (DeclarativeOrchestrator) holds workflow progress in an
+    in-memory dict; this table is its durable snapshot (one row per group),
+    overwritten whenever the workflow state changes and cleared on completion.
+    """
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS workflow_state (
+            group_id        INTEGER PRIMARY KEY,
+            orchestrator_id TEXT NOT NULL DEFAULT 'workflow_v1',
+            state_json      TEXT NOT NULL DEFAULT '{}',
+            status          TEXT NOT NULL DEFAULT 'active',
+            updated_at      TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY (group_id) REFERENCES groups(id)
+        )
+    """)
+    await db.commit()
+
+
 MIGRATIONS: list = [
     migration_001,
     migration_002,
@@ -158,6 +178,7 @@ MIGRATIONS: list = [
     migration_004,
     migration_005,
     migration_006,
+    migration_007,
 ]
 
 # ---------------------------------------------------------------------------

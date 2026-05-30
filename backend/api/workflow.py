@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException
 from db import get_db, get_members
 from ws_manager import manager
 import core.workflow as wf
+from core import workflow_store
 
 router = APIRouter()
 
@@ -48,5 +49,6 @@ async def next_workflow(group_id: int):
 @router.delete("/api/groups/{group_id}/workflow")
 async def end_workflow(group_id: int):
     wf.end(group_id)
+    await workflow_store.clear_state(group_id)
     await manager.broadcast(group_id, {"type": "workflow_update", "active": False})
     return {"ok": True}

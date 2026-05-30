@@ -168,6 +168,133 @@ class TestOrchestratorFlow(unittest.TestCase):
         self.assertIsNone(self.orch.get(1))
 
 
+class TestWorkflowPersistence(unittest.TestCase):
+    """崩溃恢复：serialize → JSON round-trip → restore 必须保住状态，
+    并能 resume_units 重新派发在飞工作单元。重点测 int bot_id key 经 JSON 后的修复。"""
+
+    def setUp(self):
+        from core.orchestration.declarative import DeclarativeOrchestrator
+        self.orch = DeclarativeOrchestrator()
+
+    def _roundtrip(self, group_id):
+        """模拟落盘 + 重启：serialize → JSON dumps/loads → 新编排器 restore。"""
+        import json
+        from core.orchestration.declarative import DeclarativeOrchestrator
+        blob = json.loads(json.dumps(self.orch.serialize(group_id), ensure_ascii=False))
+        fresh = DeclarativeOrchestrator()
+        fresh.restore(group_id, blob)
+        return fresh
+
+    def _single(self, bid, name, keyword="完毕"):
+        return {"id": bid, "name": name, "avatar_color": "#111",
+                "stage_type": "single", "done_keyword": keyword, "role": "Dev"}
+
+    def test_single_serialize_restore_keeps_position(self):
+        self.orch.begin(1, [self._single(1, "A"), self._single(2, "B")])
+        self.orch.observe(1, 1, "完毕")  # 推进到第二阶段
+        fresh = self._roundtrip(1)
+        self.assertEqual(fresh.get(1)["current"], 1)
+        self.assertEqual(fresh.current_bot(1)["id"], 2)
+        # single 由用户对话驱动，恢复后不重派单元
+        self.assertEqual(fresh.resume_units(1), [])
+
+    def test_pool_rehydrate_int_keys_and_resume(self):
+        """pool 的 in_progress 用 int bot_id 做 key，JSON 后变 str —— restore 必须还原。"""
+        pool = {"stage_type": "pool", "done_keyword": "完毕",
+                "bots": [_bot_entry(10, "D1"), _bot_entry(11, "D2")]}
+        self.orch.begin(1, [self._single(1, "A"), pool])
+        self.orch.observe(1, 1, "TICKETS:\n1. 任务甲\n2. 任务乙\n完毕")
+
+        fresh = self._roundtrip(1)
+        ip = fresh.get(1)["stages"][1]["in_progress"]
+        self.assertEqual(set(ip.keys()), {10, 11})  # int, 不是 "10"/"11"
+        # resume 重新派发两个在飞 ticket 的 unit
+        units = fresh.resume_units(1)
+        self.assertEqual(len(units), 2)
+        self.assertEqual({u.bot["id"] for u in units}, {10, 11})
+        # 恢复后 observe 仍能按 int key 命中并推进
+        step = fresh.observe(1, 10, "完毕")
+        self.assertNotIn(10, fresh.get(1)["stages"][1]["in_progress"])
+        self.assertTrue(step.broadcast_state)
+
+    def test_discussion_resume_redispatches_current_speaker(self):
+        bots = [_bot_entry(30, "X"), _bot_entry(31, "Y")]
+        disc = {"stage_type": "discussion", "rounds": 4, "bots": bots}
+        self.orch.begin(1, [self._single(1, "A"), disc])
+        self.orch.observe(1, 1, "完毕")        # speaker=30, round=1
+        self.orch.observe(1, 30, "我说完了")   # speaker=31, round=2
+
+        fresh = self._roundtrip(1)
+        units = fresh.resume_units(1)
+        self.assertEqual(len(units), 1)
+        self.assertEqual(units[0].bot["id"], 31)
+        self.assertEqual(fresh.get(1)["stages"][1]["round"], 2)
+
+    def test_verification_rehydrate_and_resume(self):
+        bots = [_bot_entry(40, "Alpha"), _bot_entry(41, "Beta"), _bot_entry(42, "Gamma")]
+        ver = {"stage_type": "verification", "bots": bots}
+        self.orch.begin(1, [self._single(1, "A"), ver])
+        self.orch.observe(1, 1, "完毕")        # propose, pending=[40,41,42]
+        self.orch.observe(1, 40, "方案甲")     # pending=[41,42], proposals{40:...}
+
+        fresh = self._roundtrip(1)
+        stage = fresh.get(1)["stages"][1]
+        self.assertEqual(set(stage["proposals"].keys()), {40})  # int key 还原
+        self.assertEqual(stage["phase"], "propose")
+        # resume 重派两个未出方案的人
+        units = fresh.resume_units(1)
+        self.assertEqual({u.bot["id"] for u in units}, {41, 42})
+        # 恢复后继续：剩两人出完方案 → 进入投票
+        fresh.observe(1, 41, "方案乙")
+        s = fresh.observe(1, 42, "方案丙")
+        self.assertEqual(fresh.get(1)["stages"][1]["phase"], "vote")
+        self.assertEqual(len(s.next_units), 3)
+
+    def test_serialize_none_after_end(self):
+        self.orch.begin(1, [self._single(1, "A")])
+        self.orch.observe(1, 1, "完毕")  # 最后阶段 → done → end → state 清空
+        self.assertIsNone(self.orch.serialize(1))
+
+
+class TestWorkflowStoreDB(unittest.IsolatedAsyncioTestCase):
+    """workflow_store 的落盘/读取/清除（真实 SQLite，验证 ON CONFLICT 覆写与 active 过滤）。"""
+
+    async def asyncSetUp(self):
+        await database.init_db()
+        from core import workflow_store
+        self.store = workflow_store
+        # FK(groups) 已开启 —— 先确保 group 行存在
+        async with database.connect() as conn:
+            await conn.execute("INSERT OR IGNORE INTO groups (id, name) VALUES (?, ?)", (901, "wf-test"))
+            await conn.execute("DELETE FROM workflow_state WHERE group_id = ?", (901,))
+            await conn.commit()
+
+    async def asyncTearDown(self):
+        async with database.connect() as conn:
+            await conn.execute("DELETE FROM workflow_state WHERE group_id = ?", (901,))
+            await conn.commit()
+
+    async def test_save_load_clear_roundtrip(self):
+        state = {"stages": [{"stage_type": "single"}], "current": 0}
+        await self.store.save_state(901, "workflow_v1", state)
+        rows = await self.store.load_all_active()
+        mine = [r for r in rows if r["group_id"] == 901]
+        self.assertEqual(len(mine), 1)
+        self.assertEqual(mine[0]["orchestrator_id"], "workflow_v1")
+        self.assertEqual(mine[0]["state"], state)
+
+        # ON CONFLICT 覆写：同 group 再存一次只更新，不新增行
+        await self.store.save_state(901, "workflow_v1", {"stages": [], "current": 3})
+        rows = await self.store.load_all_active()
+        mine = [r for r in rows if r["group_id"] == 901]
+        self.assertEqual(len(mine), 1)
+        self.assertEqual(mine[0]["state"]["current"], 3)
+
+        await self.store.clear_state(901)
+        rows = await self.store.load_all_active()
+        self.assertEqual([r for r in rows if r["group_id"] == 901], [])
+
+
 class TestRunnerBroadcast(unittest.IsolatedAsyncioTestCase):
     """runner.run_unit 把 broadcaster=bus 接给 executor，stream 事件经总线带 'delta'。"""
 

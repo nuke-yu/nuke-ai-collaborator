@@ -12,6 +12,7 @@ from bus.events import WorkflowUpdate
 from core.orchestration import parse_tickets
 from core.orchestration import registry as orch_registry
 from core.runner import apply_step
+from core import workflow_store
 
 # 规范单例：runner 与门面共用同一个编排器实例（同一份状态）
 _orch = orch_registry.get("workflow_v1")
@@ -55,6 +56,10 @@ def end(group_id: int) -> None:
 
 async def broadcast_state(group_id: int) -> None:
     await bus.publish(WorkflowUpdate(group_id=group_id, **_orch.snapshot(group_id)))
+    blob = _orch.serialize(group_id)
+    if blob is not None:
+        await workflow_store.save_state(
+            group_id, getattr(_orch, "orchestrator_id", "workflow_v1"), blob)
 
 
 # ── 流转（决策交编排器，副作用交 runner） ─────────────────────────────────────

@@ -54,5 +54,18 @@ class Orchestrator(ABC):
         """给 WorkflowUpdate 用的状态快照。"""
         return {"active": False}
 
+    # ── 持久化 / 崩溃恢复（默认无能力，可选实现） ──
+    def serialize(self, group_id: int) -> dict | None:
+        """落盘用的完整内部状态（None = 无可持久化状态）。与 snapshot 不同：
+        snapshot 是给前端看的精简视图，serialize 要能完整还原 self._state。"""
+        return None
+
+    def restore(self, group_id: int, state: dict) -> None:
+        """重启时把 serialize 出来的状态装回内部（含必要的类型修复）。"""
+
+    def resume_units(self, group_id: int) -> list:
+        """恢复后需要重新派发的在飞工作单元（list[WorkUnit]）。"""
+        return []
+
     def info(self) -> dict:
         return {"orchestrator_id": self.orchestrator_id}

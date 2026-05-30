@@ -70,6 +70,16 @@ class StageType(ABC):
     def snapshot(self, stage: dict) -> dict:
         """WorkflowUpdate 用的单阶段序列化。"""
 
+    # ── 崩溃恢复 ──
+    def rehydrate(self, stage: dict) -> None:
+        """JSON round-trip 后修复 stage 内的类型（如 int bot_id key 被转成 str）。
+        默认无需修复；用 int key 的阶段类型（pool/verification）需覆写。"""
+
+    def resume(self, ctx: StageCtx) -> list:
+        """崩溃恢复后需要重新派发的在飞工作单元（list[WorkUnit]）。
+        默认无（如 single 由用户对话驱动，重启后用户继续发言即可）。"""
+        return []
+
 
 class SingleStage(StageType):
     name = "single"
@@ -234,6 +244,19 @@ class PoolStage(StageType):
         step.broadcast_state = True
         return step
 
+    def rehydrate(self, stage: dict) -> None:
+        ip = stage.get("in_progress")
+        if isinstance(ip, dict):
+            stage["in_progress"] = {int(k): v for k, v in ip.items()}
+
+    def resume(self, ctx: StageCtx) -> list:
+        units = []
+        for bot_id, ticket in ctx.stage.get("in_progress", {}).items():
+            bot = next((b for b in ctx.stage["bots"] if b["id"] == bot_id), None)
+            if bot:
+                units.append(self._unit(ctx, bot, ticket))
+        return units
+
     def snapshot(self, stage: dict) -> dict:
         in_prog = stage.get("in_progress", {})
         done_tickets = stage.get("completed_tickets", [])
@@ -314,6 +337,14 @@ class DiscussionStage(StageType):
         step = OrchestratorStep(broadcast_state=True)
         step.next_units.append(self._unit(ctx, nxt, rnd + 1))
         return step
+
+    def resume(self, ctx: StageCtx) -> list:
+        stage = ctx.stage
+        speaker = stage.get("speaker")
+        if speaker is None:
+            return []
+        bot = next((b for b in stage["bots"] if b["id"] == speaker), None)
+        return [self._unit(ctx, bot, stage.get("round", 1))] if bot else []
 
     def snapshot(self, stage: dict) -> dict:
         bots = stage["bots"]
@@ -449,6 +480,23 @@ class VerificationStage(StageType):
             if bot["name"] in scope:
                 return bot["id"]
         return None
+
+    def rehydrate(self, stage: dict) -> None:
+        for key in ("proposals", "votes"):
+            d = stage.get(key)
+            if isinstance(d, dict):
+                stage[key] = {int(k): v for k, v in d.items()}
+
+    def resume(self, ctx: StageCtx) -> list:
+        stage = ctx.stage
+        vote_phase = stage.get("phase") == "vote"
+        units = []
+        for bot_id in stage.get("pending", []):
+            bot = next((b for b in stage["bots"] if b["id"] == bot_id), None)
+            if not bot:
+                continue
+            units.append(self._vote_unit(ctx, bot) if vote_phase else self._propose_unit(ctx, bot))
+        return units
 
     def snapshot(self, stage: dict) -> dict:
         bots = stage["bots"]
