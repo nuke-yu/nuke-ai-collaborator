@@ -120,8 +120,9 @@ class TestBeforeHookCondition:
 
     def test_hook_blocks_when_condition_matches(self):
         te.add_before_hook(_make_async(block_with_reason="blocked"), condition="run_shell")
-        result = _run(te.execute("run_shell", {"cmd": "ls"}, {}))
+        result, is_error = _run(te.execute("run_shell", {"cmd": "ls"}, {}))
         assert "[已拦截]" in result
+        assert is_error is True
         assert "blocked" in result
 
     def test_args_condition_fires_only_for_matching_args(self):
@@ -174,8 +175,8 @@ class TestOnceHooks:
 
     def test_once_blocking_hook_removed_after_block(self):
         te.add_before_hook(_make_async(block_with_reason="one-time-block"), once=True)
-        first = _run(te.execute("run_shell", {}, {}))
-        second = _run(te.execute("run_shell", {}, {}))
+        first, _ = _run(te.execute("run_shell", {}, {}))
+        second, _ = _run(te.execute("run_shell", {}, {}))
         assert "[已拦截]" in first
         assert "[已拦截]" not in second  # hook gone after first fire
 
@@ -229,7 +230,7 @@ class TestAfterHookTransform:
             return "replaced"
 
         te.add_after_hook(hook)
-        result = _run(te.execute("run_shell", {}, {}))
+        result, _ = _run(te.execute("run_shell", {}, {}))
         assert result == "replaced"
 
     def test_after_hook_returning_none_preserves_result(self):
@@ -237,7 +238,7 @@ class TestAfterHookTransform:
             return None  # no-op
 
         te.add_after_hook(hook)
-        result = _run(te.execute("run_shell", {}, {}))
+        result, _ = _run(te.execute("run_shell", {}, {}))
         assert result == "original"
 
     def test_after_hooks_chain(self):
@@ -249,9 +250,8 @@ class TestAfterHookTransform:
 
         te.add_after_hook(hook1)
         te.add_after_hook(hook2)
-        result = _run(te.execute("run_shell", {}, {}))
+        result, _ = _run(te.execute("run_shell", {}, {}))
         assert result == "original+h1+h2"
-
 
 # ---------------------------------------------------------------------------
 # asyncRewake queue injection
@@ -285,5 +285,6 @@ class TestAsyncRewake:
                 await q.put("wake")
 
         te.add_after_hook(rewake_hook)
-        result = _run(te.execute("run_shell", {}, {}))
+        result, _ = _run(te.execute("run_shell", {}, {}))
         assert result == "done"
+

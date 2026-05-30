@@ -119,12 +119,14 @@ def _claim_once(hooks: list, entry: _HookEntry) -> bool:
 # Execution
 # ---------------------------------------------------------------------------
 
-async def execute(name: str, arguments: dict, context: dict | None = None) -> str:
+async def execute(name: str, arguments: dict, context: dict | None = None) -> tuple[str, bool]:
+    """Execute a tool and return (result_string, is_error).
+    
+    Point 1: Accurate Error Tracking (DFT-034).
+    """
     ctx = context or {}
 
     # Before hooks — first block wins; skipped when condition doesn't match.
-    # DFT-026: iterate a snapshot (a concurrent execute() may mutate the global
-    # list) and claim `once` hooks before firing so they fire exactly once.
     for entry in list(_before_hooks):
         if entry.condition and not _condition_matches(entry.condition, name, arguments):
             continue
@@ -133,13 +135,14 @@ async def execute(name: str, arguments: dict, context: dict | None = None) -> st
         try:
             verdict = await entry.fn(name, arguments, ctx)
             if verdict and verdict.get("block"):
-                return f"[已拦截] {verdict.get('reason', '被安全策略拦截')}"
+                return f"[已拦截] {verdict.get('reason', '被安全策略拦截')}", True
         except Exception as e:
-            return f"[钩子错误] {e}"
+            return f"[钩子错误] {e}", True
 
     if name not in _handlers:
-        return f"[错误] 工具 '{name}' 尚未实现"
+        return f"[错误] 工具 '{name}' 尚未实现", True
 
+    is_error = False
     try:
         handler = _handlers[name]
         sig = inspect.signature(handler)
@@ -148,11 +151,17 @@ async def execute(name: str, arguments: dict, context: dict | None = None) -> st
         else:
             tool_result = await handler(**arguments)
         tool_result = str(tool_result) if tool_result is not None else "完成"
+        
+        # Heuristic: if the output starts with [错误] or [执行错误], consider it an error
+        # In a more robust system, the handler would raise a specific exception.
+        if tool_result.startswith("[错误]") or tool_result.startswith("[执行错误]"):
+            is_error = True
+            
     except Exception as e:
         tool_result = f"[执行错误] {e}"
+        is_error = True
 
-    # After hooks — each may transform the result; skipped when condition doesn't match.
-    # DFT-026: snapshot iteration + claim `once` before firing (see before-hook note).
+    # After hooks
     for entry in list(_after_hooks):
         if entry.condition and not _condition_matches(entry.condition, name, arguments):
             continue
@@ -164,8 +173,9 @@ async def execute(name: str, arguments: dict, context: dict | None = None) -> st
                 tool_result = transformed
         except Exception as e:
             tool_result += f"\n[after-hook 错误] {e}"
+            is_error = True
 
-    return tool_result
+    return tool_result, is_error
 
 
 # ---------------------------------------------------------------------------

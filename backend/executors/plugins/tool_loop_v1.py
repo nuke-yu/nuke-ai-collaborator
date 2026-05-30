@@ -538,12 +538,12 @@ class ToolLoopV1(BotExecutor):
                                 tool_executor.execute(c["name"], c["arguments"], context=execution_ctx)
                                 for c in calls
                             ])
-                            for call, tool_result in zip(calls, raw_results):
+                            for call, (tool_result, is_error) in zip(calls, raw_results):
                                 await ctx.interaction.append_session_event(_session_id, "tool_result", {
                                     "tool_call_id": call["id"],
                                     "tool_name": call["name"],
                                     "result": tool_result,
-                                    "is_error": False,
+                                    "is_error": is_error,
                                 })
                                 _fpath = call["arguments"].get("path", "")
                                 if _fpath and call["name"] in compact._FILE_READ_TOOLS:
@@ -579,14 +579,14 @@ class ToolLoopV1(BotExecutor):
                                     "tool_name": call["name"],
                                     "arguments": call.get("arguments", {}),
                                 })
-                                tool_result = await tool_executor.execute(
+                                tool_result, is_error = await tool_executor.execute(
                                     call["name"], call["arguments"], context=execution_ctx
                                 )
                                 await ctx.interaction.append_session_event(_session_id, "tool_result", {
                                     "tool_call_id": call["id"],
                                     "tool_name": call["name"],
                                     "result": tool_result,
-                                    "is_error": False,
+                                    "is_error": is_error,
                                 })
                                 # Track file reads/writes for cross-compaction persistence
                                 _fpath = call["arguments"].get("path", "")
