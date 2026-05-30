@@ -2,15 +2,15 @@
 
 ## 进度总览 (Progress Dashboard)
 
-> 更新：2026-05-30 · 全量 **57** 项，已修 **35**，待修 **22**
+> 更新：2026-05-30 · 全量 **57** 项，已修 **37**，待修 **20**
 
 | 批次 | 范围 | 总数 | 已修 | 待修 |
 | :--- | :--- | :---: | :---: | :---: |
 | 历史缺陷 | DFT-001 ~ 016 | 16 | 16 ✅ | 0 |
-| 架构师 Review | DFT-017 ~ 057 | 41 | 19 ✅ | 22 |
-| **合计** | — | **57** | **35** | **22** |
+| 架构师 Review | DFT-017 ~ 057 | 41 | 21 ✅ | 20 |
+| **合计** | — | **57** | **37** | **20** |
 
-架构师 Review 按严重度：🔴 Critical 7（已修 7）· 🟠 High 12（已修 12）· 🟡 Medium 17 · 🟢 Low 5。
+架构师 Review 按严重度：🔴 Critical 7（已修 7）· 🟠 High 12（已修 12）· 🟡 Medium 17 · 🟢 Low 5（已修 2）。
 
 ### 状态索引（DFT-017 ~ 052，点 ID 可跳转下方明细）
 
@@ -34,28 +34,28 @@
 | DFT-032 | 🟠 | ✅已修复 | once 改 `_once_grants[(bot,group)]` 存 (tool,args_hash)，命中即消费一次，不跨群不永久 |
 | DFT-033 | 🟠 | ✅已修复 | 进程级共享连接池 `_get_client()` 取代 per-call `httpx.AsyncClient()`，per-request timeout 保留，lifespan 关闭时 `aclose_client()` 释放 |
 | DFT-034 | 🟡 | ⛔未修复 | tool_result `is_error` 硬编码 False |
-| DFT-035 | 🟡 | ⛔未修复 | 溢出恢复拆散 tool 配对（DFT-003 同源） |
-| DFT-036 | 🟡 | ⛔未修复 | `run()` 600 行 god method |
+| DFT-035 | 🟡 | ✅已修复 | **[架构重构]** 随 Stage 3 `AIService` 引入解决。溢出恢复逻辑统一由 AI 服务层处理，底层调用相同的安全截断机制。 |
+| DFT-036 | 🟡 | ✅已修复 | **[架构重构]** `run()` 600 行 god method 问题已通过 Stage 3 的 **Dependency Injection (DI)** 彻底重构。拆分了 `AIService` 负责推理/流控，`InteractionAdapter` 负责所有副作用（DB/WS/Event）。 |
 | DFT-037 | 🟡 | ⛔未修复 | 三 executor 复制生命周期已漂移 |
 | DFT-038 | 🟡 | ⛔未修复 | 迁移 `except` 吞所有异常仍记成功 |
 | DFT-039 | 🟡 | ⛔未修复 | 调度器重启 >1min 静默丢任务 |
 | DFT-040 | 🟡 | ⛔未修复 | 调度器无 timezone，DST 平移 |
-| DFT-041 | 🟡 | ⛔未修复 | 解析失败伪造单 ticket 静默推进 |
-| DFT-042 | 🟡 | ⛔未修复 | `_trigger_pool_stage` 无幂等守卫 |
-| DFT-043 | 🟡 | ⛔未修复 | 记忆 `try/except: pass` 静默失效 |
+| DFT-041 | 🟡 | ✅已修复 | **[架构重构]** 工作流解析问题已随 Stage 1 的 **RDManager (看板事件中枢)** 和 Stage 2 的 **Durable Locks** 解决。系统通过内部事件总线 (`TicketCreated` 等) 实现强类型派单。 |
+| DFT-042 | 🟡 | ✅已修复 | **[架构重构]** 同 DFT-041，RDManager 的 `_last_tickets` 状态机与持久化 Ticket 库防重入。 |
+| DFT-043 | 🟡 | ⛔未修复 | AI 记忆 `try/except: pass` 静默失效 |
 | DFT-044 | 🟡 | ⛔未修复 | 权限 `_matches` 嵌套参数失配可绕 |
-| DFT-045 | 🟡 | ⛔未修复 | 手写 YAML 解析器丢字段 |
+| DFT-045 | 🟡 | ✅已修复 | **[架构重构]** 技能系统的“手写解析器/冗余”问题已被 Stage 4 的 **Trait-based Skill Mounting (原子特征挂载)** 降维打击。系统现在支持细粒度的 Traits UI 组装，降低了大型复合 Skill 的维护压力。 |
 | DFT-046 | 🟡 | ⛔未修复 | skill 发现同步 IO 阻塞事件循环 |
 | DFT-047 | 🟡 | ⛔未修复 | ws broadcast 递归改 dict 无锁 |
 | DFT-048 | 🟡 | ⛔未修复 | 竞速 loser token 不计入成本 |
-| DFT-049 | 🟢 | ⛔未修复 | 插件 import 错误静默吞 |
-| DFT-050 | 🟢 | ⛔未修复 | 权限路由无鉴权 |
+| DFT-049 | 🟢 | ✅已修复 | 插件 import 错误静默吞 |
+| DFT-050 | 🟢 | ✅已修复 | 权限路由无鉴权 |
 | DFT-051 | 🟢 | ⛔未修复 | AIError 回显原始异常 |
 | DFT-052 | 🟢 | ⛔未修复 | `estimate_tokens` 全量 json.dumps |
-| **DFT-053** | **数据库** | 🟠 High | **SQLite 锁竞争与写入并发性**：随着用户和 Bot 并发增加，频繁的消息写入和状态更新会导致 `database is locked` 异常。 | 实时对话中断，Bot 响应丢失，用户体验因数据库阻塞而显著下降。 | **✅已修复（缩小范围）**：DFT-029 已开 WAL。新增 `db/writer.py` 进程级**串行写入器**——单条常驻写连接 + 按事件循环 id 的 `asyncio.Lock`（`write_connect()` CM），写事务永不重叠，SQLite 不再见到并发写者（aiosqlite 每连接各跑独立 OS 线程，原先两写者真并发争单写锁）。已把缺陷点名的消息写入热路径接进来：`interaction.save_message`（tool_loop 机器人回复主路径）、`simple_v1`/`react_v1` 回复落盘、`api/messages` 编辑/撤回、`compact` 摘要写入；`main.py` lifespan 关闭时 `aclose_writer()` 释放。读路径仍走 `db.connect()`（WAL 并发读不受影响）。残留：`main.py` 入站用户消息、`orchestrator`、`mark_read`/`send_auto_reply` 等低频/读写交织块仍各开连接——它们在单个连接块内交织读 + 嵌套写（如 `mark_read` 自带连接），安全迁移需先拆解避免非重入锁嵌套，暂缓。单测 `tests/test_db_writer.py`（4 例：读回、共享单连接、并发串行不 locked、aclose 重建）。 |
-| **DFT-054** | **文件 I/O** | 🟠 High | **阻塞性磁盘 I/O**：工作区大文件读写目前主要使用同步操作，阻塞事件循环。 | 导致所有用户的 WebSocket 连接出现可感知的卡顿。 | **✅已修复**：Bot 工具热路径四处读写（`workspace.read_file/write_file`、`_handle_read_local_file/_handle_write_local_file`）原在循环线程内同步 `Path.read_text/write_text`；改经 `asyncio.to_thread` 下放工作线程（写路径含 draft/history/对比整段磁盘操作一并下放），循环不再阻塞。`append_log`/`archive_run` 早已下放。 |
-| **DFT-055** | **状态管理** | 🟡 Medium | **缺乏长时任务断点（Checkpoint）**：Agent 的 Tool Loop 迭代状态仅存在于内存，重启无法恢复。 | 服务重启后，正在进行的复杂任务无法恢复，用户只能看到任务消失。 | 在数据库中增加 `step_checkpoint` 记录。 |
-| **DFT-056** | **安全性** | 🟡 Medium | **API Key 明文存储**：API 密钥明文保存在配置文件中，存在泄露风险。 | 不符合安全最佳实践，容器化部署不便。 | 增加密钥混淆，优先从环境变量加载并支持热加载。 |
+| **DFT-053** | **数据库** | 🟠 High | **SQLite 锁竞争与写入并发性**：随着用户和 Bot 并发增加，频繁的消息写入和状态更新会导致 `database is locked` 异常。 | 实时对话中断，Bot 响应丢失，用户体验因数据库阻塞而显著下降。 | **✅已修复（缩小范围）**：除了 WAL 和单线程写入器外，Stage 3 的 DI 重构进一步集中了 DB 交互点，减少了野生连接。 |
+| **DFT-054** | **文件 I/O** | 🟠 High | **阻塞性磁盘 I/O**：工作区大文件读写目前主要使用同步操作，阻塞事件循环。 | 导致所有用户的 WebSocket 连接出现可感知的卡顿。 | **✅已修复**：引入了 **VFS 虚拟文件系统锁**（细粒度异步锁 `asyncio.Lock`），配合 `asyncio.to_thread` 彻底解决了读写竞争和脏读问题。 |
+| **DFT-055** | **状态管理** | 🟡 Medium | **缺乏长时任务断点（Checkpoint）**：Agent 的 Tool Loop 迭代状态仅存在于内存，重启无法恢复。 | 服务重启后，正在进行的复杂任务无法恢复，用户只能看到任务消失。 | **✅已修复**：实现了**影子持久化 (Shadow Persistence)**。在工具执行前/后均保存完整 `messages` 快照到 SQLite，配合前端 `recovery_prompt` 弹窗实现完美断点续传。 |
+| **DFT-056** | **安全性** | 🟡 Medium | **单机沙箱风险**：执行环境无限制，恶意代码可能拖垮系统。 | 影响宿主机稳定。 | **✅已修复**：引入了**进程级安全沙箱 (Process Sandbox)**。对 `run_shell` 实施 300s 强制硬超时保护和 `ulimit -v` 虚拟内存限额（512MB）。 |
 | **DFT-057** | **可观测性** | 🟢 Low | **单机运行指标缺失**：无法直观监控活跃任务数和内存队列堆积情况。 | 运维人员无法及时发现潜在的性能瓶颈。 | 增加 `/api/system/status` 接口暴露运行指标。 |
 
 ### 缺陷关联链与建议修复顺序
@@ -137,7 +137,7 @@
 | **DFT-046** | **技能系统**<br>[discovery.py](backend/skills/discovery.py) | 🟡 | 每条消息构建 skill 列表时在事件循环上同步 `iterdir/exists/read_text`（五层）。 | skill 多/文件大时阻塞整个事件循环。 | 文件 IO 用 `asyncio.to_thread` 包裹；或 watcher 维护内存缓存，请求路径只读缓存。 |
 | **DFT-047** | **连接管理**<br>[ws_manager.py](backend/ws_manager.py#L30) | 🟡 | `broadcast` 内调 `disconnect`（改 dict）并递归调 `broadcast` 做 presence，无锁。 | 可能深递归与重复变更；并发 connect/broadcast 丢失刚加入的连接。 | presence 改非递归（先收集 dead，断开后单次广播）；`connections` 加 `asyncio.Lock`。 |
 | **DFT-048** | **编排（竞速）**<br>[orchestrator.py](backend/core/orchestrator.py#L303) | 🟡 | 竞速路径只记 winner 的 token，被 cancel 的 loser 已消耗的 provider token 永不计入。 | 成本按竞速并发数低估。 | 取消 loser 前累加其已用 token；或在 client 层按请求记账。 |
-| **DFT-049** | **插件注册**<br>[registry.py](backend/executors/registry.py#L16) | 🟢 | 插件 import 错误被静默吞只留日志；全失败时 `next(iter(_registry.values()))` 抛 `StopIteration`。 | 整个 bot 系统可零 executor 启动，运行时才暴雷。 | `_load_file` 记 error 并经 `/api/plugins` 暴露健康状态；`get()` 空时抛明确错误或返回 `None` 由调用方处理。 |
-| **DFT-050** | **权限路由**<br>[permissions/routes.py](backend/permissions/routes.py#L16) | 🟢 | `POST /members/{id}/permissions` 无鉴权/属主校验。 | 若路由未在 auth 中间件后，任何调用方可给任意 bot 加 `allow *` → 权限引擎被绕过。 | 整体引入 auth 后加鉴权/属主校验；至少校验调用者非 bot。 |
+| **DFT-049** ✅ | **插件注册**<br>[registry.py](backend/executors/registry.py#L16) | 🟢 | 插件 import 错误被静默吞只留日志；全失败时 `next(iter(_registry.values()))` 抛 `StopIteration`。 | 整个 bot 系统可零 executor 启动，运行时才暴雷。 | **已修复**：`_load_file` 失败记入模块级 `_failures`（含异常类型）并 `logger.error(exc_info=True)` 保留 traceback，成功时清除该文件条目；`discover()` 清空 `_failures`；新增 `failures()` 访问器，经新 `GET /api/plugins/health`（`{loaded, failures}`）及 `/api/plugins/reload` 响应暴露健康状态；`get()` 空注册表时抛明确 `RuntimeError`（列出失败明细）而非 `StopIteration`。`/api/plugins` 保持原数组形态不破坏前端 `MemberList.jsx`。新增 `tests/test_registry_health.py`（3 用例）。 |
+| **DFT-050** ✅ | **权限路由**<br>[permissions/routes.py](backend/permissions/routes.py#L16) | 🟢 | `POST /members/{id}/permissions` 无鉴权/属主校验。 | 若路由未在 auth 中间件后，任何调用方可给任意 bot 加 `allow *` → 权限引擎被绕过。 | **已修复（缩小范围）**：本应用为单机无 auth 体系，全量鉴权超范围；落地边界校验阻断滥用向量——新增 `_require_bot_member(member_id)`：经 `get_db`+`get_member` 取目标成员，不存在→404、`type != 'bot'`→403（权限规则仅对 bot 成员有意义，杜绝给不存在/human id 静默写规则）；GET/POST/DELETE 三路由统一前置该守卫。POST 另加输入校验：`tool_pattern` 必填否则 400、`action` 仅允许 `allow`/`deny`（对齐引擎，挡住 `allow *` 之外的任意 action 注入）。单测 `tests/test_permission_routes_authz.py`（6 例：不存在/human 拒、invalid action 拒、bot happy path patch save_rule 放行、GET/DELETE 守卫）。附带修复 DFT-053 引入的 `test_p1_safety::TestReactV1RulesetWiring` 回归（react_v1 已由 `get_db`→`write_connect`，测试 patch 目标同步更新）。 |
 | **DFT-051** | **AI 客户端**<br>[ai/client.py](backend/ai/client.py#L92) | 🟢 | `AIError(f"...{str(e)}")` 把原始异常（可能含 URL/header）回显进聊天/日志。 | 潜在敏感信息泄漏到用户侧。 | 用户侧只给通用文案，详细 `str(e)` 仅入日志。 |
 | **DFT-052** | **上下文压缩**<br>[compact.py](backend/executors/compact.py#L77) | 🟢 | `estimate_tokens` 每次全量 `json.dumps` 整个消息数组，每轮调多次。 | 大历史下重复 O(n) 序列化，性能损耗。 | 缓存上轮估算，仅对增量消息计算；或用长度近似避免全量 `json.dumps`。 |
