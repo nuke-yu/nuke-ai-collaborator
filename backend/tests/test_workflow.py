@@ -73,6 +73,28 @@ class TestOrchestratorFlow(unittest.TestCase):
         self.assertEqual(pool["ticket_queue"], ["任务丙"])
         self.assertEqual(len(step.announcements), 1)
 
+    def test_pool_expertise_priority_claim(self):
+        """擅长领域的 bot 高优先级认领对应任务；无人擅长的任务回到默认认领。"""
+        fe = {**_bot_entry(10, "FE"), "expertise": ["前端", "UI"]}
+        be = {**_bot_entry(11, "BE"), "expertise": ["后端", "API"]}
+        pool = {"stage_type": "pool", "done_keyword": "完毕", "bots": [fe, be]}
+        self.orch.begin(1, [self._single(1, "A"), pool])
+
+        resp = "TICKETS:\n1. 实现登录 API 鉴权\n2. 搭建首页 UI\n完毕"
+        self.orch.observe(1, 1, resp)
+        # 命中领域优先：后端领 API 任务，前端领 UI 任务（与任务列表顺序无关）
+        self.assertEqual(pool["in_progress"][11], "实现登录 API 鉴权")
+        self.assertEqual(pool["in_progress"][10], "搭建首页 UI")
+
+    def test_pool_no_expertise_falls_back_to_default(self):
+        """都不擅长时回到默认：每人仍各领一个，不报错。"""
+        pool = {"stage_type": "pool", "done_keyword": "完毕",
+                "bots": [_bot_entry(10, "D1"), _bot_entry(11, "D2")]}
+        self.orch.begin(1, [self._single(1, "A"), pool])
+        self.orch.observe(1, 1, "TICKETS:\n1. 任务甲\n2. 任务乙\n完毕")
+        self.assertEqual(len(pool["in_progress"]), 2)
+        self.assertEqual(set(pool["in_progress"].values()), {"任务甲", "任务乙"})
+
     def test_pluggable_discussion_stage(self):
         """插拔验证：discussion 是注册进来的新 stage_type，编排器核心未改动也能驱动它。
 

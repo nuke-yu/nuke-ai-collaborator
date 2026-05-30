@@ -129,25 +129,69 @@ class PoolStage(StageType):
         stage = ctx.stage
         tickets = parse_tickets(prev_output)
         bots = list(stage["bots"])
-        random.shuffle(bots)
+        pairs, queue = self._assign(bots, tickets)
 
-        initial = min(len(bots), len(tickets))
-        stage["ticket_queue"] = list(tickets[initial:])
-        stage["in_progress"] = {bots[i]["id"]: tickets[i] for i in range(initial)}
+        stage["ticket_queue"] = queue
+        stage["in_progress"] = {b["id"]: t for b, t in pairs}
         stage["completed_tickets"] = []
         stage["idle_bots"] = []
 
+        assigned = {b["id"] for b, _ in pairs}
         lines = [f"🎯 共 {len(tickets)} 个开发任务，{len(bots)} 位开发者开始认领！"]
-        for i in range(initial):
-            lines.append(f"✅ **{bots[i]['name']}** 认领了「{tickets[i]}」")
-        for bot in bots[initial:]:
-            lines.append(f"⏳ **{bot['name']}** 等待认领")
+        for b, t in pairs:
+            lines.append(f"✅ **{b['name']}** 认领了「{t}」")
+        for b in bots:
+            if b["id"] not in assigned:
+                lines.append(f"⏳ **{b['name']}** 等待认领")
 
         step = OrchestratorStep(broadcast_state=True)
         step.announcements.append(SystemMessage("\n".join(lines), bots[0]["id"]))
-        for i in range(initial):
-            step.next_units.append(self._unit(ctx, bots[i], tickets[i]))
+        for b, t in pairs:
+            step.next_units.append(self._unit(ctx, b, t))
         return step
+
+    def _assign(self, bots: list[dict], tickets: list[str]) -> tuple[list, list]:
+        """把任务分给 bot：擅长该任务的优先认领，无人擅长的任务回到默认（随机）认领。
+
+        返回 (pairs, queue)：pairs=[(bot, ticket)] 立即开工；queue=排队待领的任务。
+        pairs 数量 = min(len(bots), len(tickets))。
+        """
+        available = list(bots)
+        pairs: list[tuple[dict, str]] = []
+        unmatched: list[str] = []
+
+        # 第一轮：擅长优先 —— 按任务顺序，每个任务挑当前可用 bot 里得分最高者
+        for ticket in tickets:
+            best, best_score = None, 0
+            for bot in available:
+                score = self._expertise_score(bot, ticket)
+                if score > best_score:
+                    best, best_score = bot, score
+            if best is not None:
+                available.remove(best)
+                pairs.append((best, ticket))
+            else:
+                unmatched.append(ticket)
+
+        # 第二轮：无人擅长的任务回到默认 —— 随机认领
+        random.shuffle(available)
+        queue: list[str] = []
+        for ticket in unmatched:
+            if available:
+                pairs.append((available.pop(0), ticket))
+            else:
+                queue.append(ticket)
+        return pairs, queue
+
+    def _expertise_score(self, bot: dict, ticket: str) -> int:
+        """bot 对某任务的擅长度：擅长关键词在任务文本里命中的个数。0 表示不擅长。"""
+        kws = bot.get("expertise")
+        if isinstance(kws, str):
+            kws = re.split(r'[,，、/\s]+', kws)
+        if not kws:
+            kws = re.split(r'[,，、/\s]+', bot.get("role") or "")
+        t = ticket.lower()
+        return sum(1 for k in kws if k and k.strip() and k.strip().lower() in t)
 
     def observe(self, ctx: StageCtx, bot_id: int, response: str) -> OrchestratorStep:
         stage = ctx.stage
