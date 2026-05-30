@@ -51,6 +51,7 @@ class TestEventRegistry(unittest.TestCase):
             "skill_fork_start", "skill_fork_end", "skill_draft_added",
             "before_finalize_review", "before_finalize_approved", "before_finalize_rejected",
             "permission_asked",
+            "rd_ticket_created", "rd_code_committed", "rd_task_failed",
         }
         self.assertEqual(expected, set(_registry.keys()))
 

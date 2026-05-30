@@ -24,16 +24,16 @@ class TestRDManager(unittest.IsolatedAsyncioTestCase):
 ## In Progress
 | JIRA-3 | Working | Med |
 """
-        tickets = rd_manager._parse_backlog(content)
-        self.assertEqual(len(tickets), 2)
+        tickets = rd_manager._parse_board(content)
+        self.assertEqual(len(tickets), 3)
         self.assertIn("JIRA-1", tickets)
         self.assertEqual(tickets["JIRA-1"]["title"], "Task 1")
-        self.assertEqual(tickets["JIRA-2"]["priority"], "Low")
-        self.assertNotIn("JIRA-3", tickets) # Should not be in backlog
+        self.assertEqual(tickets["JIRA-2"]["status"], "backlog")
+        self.assertIn("JIRA-3", tickets) 
 
     async def test_detect_new_ticket(self):
         group_id = 888
-        rd_manager._last_tickets[group_id] = {"JIRA-1"}
+        rd_manager._last_tickets[group_id] = {"JIRA-1": "backlog"}
         
         # Mock file content
         content = """
@@ -48,7 +48,8 @@ class TestRDManager(unittest.IsolatedAsyncioTestCase):
         mock_path.read_text.return_value = content
         
         with patch("core.orchestration.rd_manager.group_workspace", return_value=MagicMock(__truediv__=lambda s, x: mock_path)), \
-             patch("bus.bus.publish", new=AsyncMock()) as mock_publish:
+             patch("bus.bus.publish", new=AsyncMock()) as mock_publish, \
+             patch("core.orchestration.rd_manager.write_file", new=AsyncMock()):
             
             await rd_manager.check_board(group_id)
             
@@ -57,10 +58,9 @@ class TestRDManager(unittest.IsolatedAsyncioTestCase):
             ev = mock_publish.call_args[0][0]
             self.assertIsInstance(ev, TicketCreated)
             self.assertEqual(ev.ticket_id, "JIRA-2")
-            self.assertEqual(ev.priority, "High")
             
             # Cache should be updated
-            self.assertEqual(rd_manager._last_tickets[group_id], {"JIRA-1", "JIRA-2"})
+            self.assertEqual(rd_manager._last_tickets[group_id], {"JIRA-1": "backlog", "JIRA-2": "backlog"})
 
 if __name__ == "__main__":
     unittest.main()

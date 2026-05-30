@@ -379,26 +379,29 @@ class TestRecoverAll(unittest.IsolatedAsyncioTestCase):
         await recover_all(dispatcher=called.append)
         self.assertEqual(called, [])
 
-    async def test_orphan_with_only_start_event_dispatched(self):
+    async def test_orphan_with_only_start_event_awaiting_recovery(self):
         from sessions.recovery import recover_all
         from sessions.store import get_session
         await self._create_orphan("orph1", "hello world")
-        dispatched = []
-        await recover_all(dispatcher=dispatched.append)
-        self.assertEqual(len(dispatched), 1)
-        payload = dispatched[0]
-        self.assertEqual(payload["session_id"], "orph1")
-        self.assertEqual(payload["bot_id"], 99)
-        self.assertEqual(payload["group_id"], 1)
-        self.assertIn("messages", payload)
-        # session_start gave us system + user messages
-        self.assertEqual(len(payload["messages"]), 2)
-        # session should now be marked as 'recovering'
-        row = await get_session("orph1")
-        self.assertEqual(row["status"], "recovering")
+        
+        # Mock dependencies
+        from unittest.mock import AsyncMock, patch
+        with patch("db.get_member", new=AsyncMock(return_value={"name": "Bot"})), \
+             patch("ws_manager.manager.broadcast", new=AsyncMock()) as mock_broadcast:
+            
+            await recover_all()
+            
+            # session should now be marked as 'awaiting_recovery'
+            row = await get_session("orph1")
+            self.assertEqual(row["status"], "awaiting_recovery")
+            
+            # Verify broadcast was sent
+            mock_broadcast.assert_called_once()
+            args = mock_broadcast.call_args[0][1]
+            self.assertEqual(args["type"], "recovery_prompt")
 
-    async def test_dangling_idempotent_tool_marked_for_retry(self):
-        from sessions.store import create_session, append_event
+    async def test_dangling_idempotent_tool_awaiting_recovery(self):
+        from sessions.store import create_session, append_event, get_session
         from sessions.recovery import recover_all
         await create_session(
             session_id="idem1", bot_id=1, group_id=1,
@@ -410,15 +413,15 @@ class TestRecoverAll(unittest.IsolatedAsyncioTestCase):
         await append_event("idem1", "tool_call", {
             "tool_call_id": "t1", "tool_name": "web_search", "arguments": {"query": "x"},
         })
-        # no tool_result — process crashed before tool returned
-        dispatched = []
-        await recover_all(dispatcher=dispatched.append)
-        # idempotent tool → still dispatch (roll back to before tool_call)
-        self.assertEqual(len(dispatched), 1)
-        # dangling tool_call should NOT appear in reconstructed messages
-        msgs = dispatched[0]["messages"]
-        roles = [m["role"] for m in msgs]
-        self.assertNotIn("tool", roles)
+        
+        from unittest.mock import AsyncMock, patch
+        with patch("db.get_member", new=AsyncMock(return_value={"name": "Bot"})), \
+             patch("ws_manager.manager.broadcast", new=AsyncMock()):
+            
+            await recover_all()
+            
+            row = await get_session("idem1")
+            self.assertEqual(row["status"], "awaiting_recovery")
 
     async def test_dangling_side_effect_tool_marks_needs_review(self):
         from sessions.store import create_session, append_event, get_session

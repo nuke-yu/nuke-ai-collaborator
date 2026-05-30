@@ -44,10 +44,7 @@ def _make_stream_mock(sse_lines: list):
     mock_client = MagicMock()
     mock_client.stream = MagicMock(return_value=stream_cm)
 
-    client_cm = MagicMock()
-    client_cm.__aenter__ = AsyncMock(return_value=mock_client)
-    client_cm.__aexit__ = AsyncMock(return_value=False)
-    return client_cm, mock_client
+    return mock_client
 
 
 # =============================================================================
@@ -69,11 +66,9 @@ class TestOnceOpenAICompatCacheTokens(unittest.IsolatedAsyncioTestCase):
 
         mock_client = MagicMock()
         mock_client.post = AsyncMock(return_value=mock_resp)
-        client_cm = MagicMock()
-        client_cm.__aenter__ = AsyncMock(return_value=mock_client)
-        client_cm.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("httpx.AsyncClient", return_value=client_cm):
+        # Patch _get_client instead of httpx.AsyncClient because client.py now uses a shared singleton
+        with patch("ai.client._get_client", return_value=mock_client):
             return await _once_openai_compat(
                 "https://api.deepseek.com/v1/chat/completions",
                 "sk-key", "deepseek-chat",
@@ -128,11 +123,8 @@ class TestOnceClaudeCacheTokens(unittest.IsolatedAsyncioTestCase):
 
         mock_client = MagicMock()
         mock_client.post = AsyncMock(return_value=mock_resp)
-        client_cm = MagicMock()
-        client_cm.__aenter__ = AsyncMock(return_value=mock_client)
-        client_cm.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("httpx.AsyncClient", return_value=client_cm):
+        with patch("ai.client._get_client", return_value=mock_client):
             return await _once_claude(
                 "sk-ant-key", "claude-3-5-sonnet-20241022",
                 "sys", [], 0.7, 4096, None,
@@ -171,13 +163,13 @@ class TestStreamOpenAICompatCacheTokens(unittest.IsolatedAsyncioTestCase):
             "choices": [{"delta": {"content": ""}}],
             "usage": usage_payload,
         })
-        client_cm, _ = _make_stream_mock([
+        mock_client = _make_stream_mock([
             'data: {"choices":[{"delta":{"content":"hello"}}]}',
             usage_line,
             "data: [DONE]",
         ])
         usage_out = []
-        with patch("httpx.AsyncClient", return_value=client_cm):
+        with patch("ai.client._get_client", return_value=mock_client):
             async for _ in _stream_openai_compat(
                 "https://api.deepseek.com/v1/chat/completions",
                 "sk-key", "deepseek-chat", [],
@@ -227,9 +219,9 @@ class TestStreamClaudeCacheTokens(unittest.IsolatedAsyncioTestCase):
             'data: {"type":"content_block_delta","delta":{"text":"hi"}}',
             'data: {"type":"message_delta","usage":{"output_tokens":5}}',
         ]
-        client_cm, _ = _make_stream_mock(lines)
+        mock_client = _make_stream_mock(lines)
         usage_out = []
-        with patch("httpx.AsyncClient", return_value=client_cm):
+        with patch("ai.client._get_client", return_value=mock_client):
             async for _ in _stream_claude(
                 "claude-3-5-sonnet-20241022", "sys", [], "sk-ant-key",
                 usage_out=usage_out,
