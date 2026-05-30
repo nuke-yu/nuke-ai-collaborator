@@ -23,5 +23,6 @@ class Ruleset:
 class _PendingRequest:
     future: "asyncio.Future[tuple[bool, str]]"
     bot_id: int
+    group_id: int
     tool_name: str
     arguments: dict

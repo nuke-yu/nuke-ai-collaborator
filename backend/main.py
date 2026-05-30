@@ -145,7 +145,7 @@ async def websocket_endpoint(websocket: WebSocket, group_id: int, member_id: int
                 request_id = payload.get("request_id", "")
                 approved = bool(payload.get("approved", False))
                 persistence = payload.get("persistence", "once")  # "once" | "always"
-                req = permissions.resolve(request_id, approved, persistence)
+                req = permissions.resolve(request_id, approved, persistence, group_id=group_id)
                 if req and approved and persistence == "always":
                     bg.spawn(permissions.save_rule(
                         req.bot_id, req.tool_name, "", "allow"
@@ -199,3 +199,8 @@ async def websocket_endpoint(websocket: WebSocket, group_id: int, member_id: int
         gone_id = manager.disconnect(websocket, group_id)
         if gone_id:
             await bus.publish(Presence(group_id=group_id, member_id=gone_id, online=False))
+        # DFT-031: if the group has no clients left, nobody can answer an
+        # outstanding permission prompt — deny them so the suspended tool loops
+        # don't hang forever holding _pending entries.
+        if not manager.get_online_member_ids(group_id):
+            permissions.cancel_pending_for_group(group_id)

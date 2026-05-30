@@ -12,17 +12,33 @@ Pipeline order per tool call:
 """
 import asyncio
 import fnmatch
+import hashlib
+import json
 import uuid
 from typing import Any
 
 from .models import Rule, Ruleset, _PendingRequest
 
 
-# In-memory "once" rules per bot_id (cleared on process restart)
-_once_rules: dict[int, list[Rule]] = {}
+# Default-deny an unanswered ask after this many seconds. Backstops the case
+# where the connection stays open but nobody responds (DFT-031): without it the
+# tool-loop coroutine awaits forever and _pending grows unbounded.
+_ASK_TIMEOUT_SECONDS = 300
+
+# "once" grants scoped to (bot_id, group_id) → list of (tool_name, args_hash).
+# Each grant auto-allows exactly ONE future identical call, then is consumed
+# (DFT-032). Keying by group + the specific call stops "once" from leaking into
+# other groups or becoming a permanent blanket allow.
+_once_grants: dict[tuple[int, int], list[tuple[str, str]]] = {}
 
 # Pending ask futures keyed by request_id
 _pending: dict[str, _PendingRequest] = {}
+
+
+def _args_hash(arguments: dict) -> str:
+    return hashlib.sha256(
+        json.dumps(arguments, sort_keys=True, default=str).encode()
+    ).hexdigest()
 
 
 def _matches(rule: Rule, tool_name: str, arguments: dict) -> bool:
@@ -35,6 +51,21 @@ def _matches(rule: Rule, tool_name: str, arguments: dict) -> bool:
             if v is not None
         )
     return True
+
+
+def _consume_once_grant(bot_id: int, group_id: int, tool_name: str, arguments: dict) -> bool:
+    """Return True (and remove the grant) iff a once-grant matches this exact call."""
+    key = (bot_id, group_id)
+    grants = _once_grants.get(key)
+    if not grants:
+        return False
+    target = (tool_name, _args_hash(arguments))
+    if target in grants:
+        grants.remove(target)
+        if not grants:
+            _once_grants.pop(key, None)
+        return True
+    return False
 
 
 async def check(
@@ -56,32 +87,34 @@ async def check(
     if ruleset.mode == "bypassPermissions":
         return {"action": "allow"}
 
-    # Merge persistent (DB-loaded) rules with in-memory once-rules
-    all_rules = list(ruleset.rules) + _once_rules.get(bot_id, [])
-
     # 2. deny rules take priority
-    for rule in all_rules:
+    for rule in ruleset.rules:
         if rule.action == "deny" and _matches(rule, tool_name, arguments):
             return {"action": "deny", "reason": f"规则拒绝: {rule.tool_pattern}"}
 
-    # 3. allow rules
-    for rule in all_rules:
+    # 3. persistent allow rules
+    for rule in ruleset.rules:
         if rule.action == "allow" and _matches(rule, tool_name, arguments):
             return {"action": "allow"}
 
-    # 4. dontAsk → deny without prompting
+    # 4. once-grant for this exact (bot, group, tool, args) — consumed on use
+    if _consume_once_grant(bot_id, group_id, tool_name, arguments):
+        return {"action": "allow"}
+
+    # 5. dontAsk → deny without prompting
     if ruleset.mode == "dontAsk":
         return {"action": "deny", "reason": "dontAsk 模式：未授权工具调用被拒绝"}
 
-    # 5. Sub-agents can't show UI
+    # 6. Sub-agents can't show UI
     if spawn_depth > 0:
         return {"action": "deny", "reason": "子 Agent 无法请求权限：工具未预授权"}
 
-    # 6. ask — suspend and wait for user response
+    # 7. ask — suspend and wait for user response
     request_id = str(uuid.uuid4())
     future: asyncio.Future = asyncio.get_event_loop().create_future()
     _pending[request_id] = _PendingRequest(
-        future=future, bot_id=bot_id, tool_name=tool_name, arguments=arguments,
+        future=future, bot_id=bot_id, group_id=group_id,
+        tool_name=tool_name, arguments=arguments,
     )
 
     await broadcaster.broadcast(group_id, {
@@ -92,29 +125,56 @@ async def check(
     })
 
     try:
-        approved, persistence = await future
+        approved, persistence = await asyncio.wait_for(future, _ASK_TIMEOUT_SECONDS)
+    except asyncio.TimeoutError:
+        return {"action": "deny",
+                "reason": f"权限请求超时（{_ASK_TIMEOUT_SECONDS}s 未响应），已自动拒绝"}
     finally:
         _pending.pop(request_id, None)
 
     if not approved:
         return {"action": "deny", "reason": "用户拒绝授权"}
 
-    new_rule = Rule(tool_pattern=tool_name, args_pattern="", action="allow")
     if persistence == "once":
-        _once_rules.setdefault(bot_id, []).append(new_rule)
+        _once_grants.setdefault((bot_id, group_id), []).append(
+            (tool_name, _args_hash(arguments))
+        )
         return {"action": "allow"}
     # persistence == "always" → caller saves to DB
-    return {"action": "allow", "persist_rule": new_rule}
+    return {"action": "allow",
+            "persist_rule": Rule(tool_pattern=tool_name, args_pattern="", action="allow")}
 
 
-def resolve(request_id: str, approved: bool, persistence: str = "once") -> "_PendingRequest | None":
+def resolve(request_id: str, approved: bool, persistence: str = "once",
+            group_id: int | None = None) -> "_PendingRequest | None":
     """
     Called from main.py when user responds to a permission_request.
     Returns the _PendingRequest so the caller can persist an "always" rule.
     Returns None if request_id is unknown or already resolved.
+
+    DFT-031: when group_id is given it must match the request's group, so a
+    client connected to one group cannot approve another group's tool call.
     """
     req = _pending.get(request_id)
     if not req or req.future.done():
         return None
+    if group_id is not None and req.group_id != group_id:
+        return None
     req.future.set_result((approved, persistence))
     return req
+
+
+def cancel_pending_for_group(group_id: int) -> int:
+    """Deny every still-pending ask for a group; returns how many were cancelled.
+
+    DFT-031: called when the group's last client disconnects — nobody can answer
+    the prompt anymore, so resolve the suspended tool calls as denied instead of
+    leaving their coroutines awaiting forever. Resolving (rather than cancelling)
+    the future keeps real task-abort CancelledError propagation intact (DFT-027).
+    """
+    n = 0
+    for req in list(_pending.values()):
+        if req.group_id == group_id and not req.future.done():
+            req.future.set_result((False, "once"))
+            n += 1
+    return n

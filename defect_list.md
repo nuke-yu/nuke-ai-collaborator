@@ -2,15 +2,15 @@
 
 ## 进度总览 (Progress Dashboard)
 
-> 更新：2026-05-30 · 全量 **57** 项，已修 **29**，待修 **28**
+> 更新：2026-05-30 · 全量 **57** 项，已修 **31**，待修 **26**
 
 | 批次 | 范围 | 总数 | 已修 | 待修 |
 | :--- | :--- | :---: | :---: | :---: |
 | 历史缺陷 | DFT-001 ~ 016 | 16 | 16 ✅ | 0 |
-| 架构师 Review | DFT-017 ~ 057 | 41 | 13 ✅ | 28 |
-| **合计** | — | **57** | **29** | **28** |
+| 架构师 Review | DFT-017 ~ 057 | 41 | 15 ✅ | 26 |
+| **合计** | — | **57** | **31** | **26** |
 
-架构师 Review 按严重度：🔴 Critical 7（已修 7）· 🟠 High 12（已修 6）· 🟡 Medium 17 · 🟢 Low 5。
+架构师 Review 按严重度：🔴 Critical 7（已修 7）· 🟠 High 12（已修 8）· 🟡 Medium 17 · 🟢 Low 5。
 
 ### 状态索引（DFT-017 ~ 052，点 ID 可跳转下方明细）
 
@@ -30,8 +30,8 @@
 | DFT-028 | 🟠 | ✅已修复 | 统一 `db.connect()` helper 连接即 `PRAGMA foreign_keys=ON`，所有 store 走该 helper |
 | DFT-029 | 🟠 | ✅已修复 | 同一 helper 连接即 `journal_mode=WAL`+`busy_timeout=5000`，缓解并发 `database is locked` |
 | DFT-030 | 🟠 | ⛔未修复 | 全局单消费队列队头阻塞 |
-| DFT-031 | 🟠 | ⛔未修复 | 权限 future 无 timeout、resolve 无鉴权 |
-| DFT-032 | 🟠 | ⛔未修复 | once 规则进程级全局永久放行 |
+| DFT-031 | 🟠 | ✅已修复 | ask future 加 300s timeout→deny；resolve 按 group_id 鉴权；末位客户端断开 `cancel_pending_for_group` 兜底 |
+| DFT-032 | 🟠 | ✅已修复 | once 改 `_once_grants[(bot,group)]` 存 (tool,args_hash)，命中即消费一次，不跨群不永久 |
 | DFT-033 | 🟠 | ⛔未修复 | httpx client per-call、流未关闭 |
 | DFT-034 | 🟡 | ⛔未修复 | tool_result `is_error` 硬编码 False |
 | DFT-035 | 🟡 | ⛔未修复 | 溢出恢复拆散 tool 配对（DFT-003 同源） |
@@ -64,6 +64,7 @@
 - **会话恢复链**：DFT-017（签名错误，✅ 已止崩）→ DFT-018（resume 入口，✅ 根因已修）→ DFT-019（`recovering` 泄漏，✅ 随 018 用同一 session_id 续写自然解决）。017 只是让它不崩，018 让恢复真正可用，019 随 018 收口。整链 ✅ 已闭环。
 - **并发 / 后台任务链**：DFT-025（task 生命周期）+ DFT-026（无锁共享状态）+ DFT-027（abort 失效）✅ 已一并治理。核心是新增 `core/bg.py` 后台任务登记处（只依赖标准库，无项目 import 避免环）：`spawn()` 持有强引用防 GC + `add_done_callback` 落异常日志（DFT-025）；`spawn_group(group_id, coro)` 再按群登记，`abort_group(group_id)` 一次取消整条工作流链（DFT-027，旧实现只 cancel 最初 dispatch、且 done_callback 会误删后到任务的登记）。**复核发现 DFT-026 大部分已被编排重构消解**——`PoolStage.observe`/`_advance`/`enter` 等全是同步纯函数，单线程 asyncio 下 RMW 原子，不会串票/跳阶段；真正残留只有 `tool_executor` 全局钩子表在并发 `execute()` 下边 `await` 边 `list.remove()`（`ValueError: x not in list`），已改快照迭代 + `once` 钩子 claim-before-fire（移除即占用，保证恰好一次且不崩）。**附带修复测试隔离泄漏**：`test_tool_executor_hooks.py` 在 `setup_method` 向全局 `tool_executor._defs` 注册了名为 `run_shell` 的 ToolDef（与 workspace 真实工具同名）却从不清理，泄漏到后续 `test_abort_signal.py`——后者用 `get_schemas()` 构造 `tool_schemas` 时被这条残留撑成非空，使 `tool_loop_v1` 偏离纯流式分支（走未被 patch 的 `call_ai_once`）→ abort 测试拿到 `stream_error` 而非 `stream_aborted`。已加 module 级 autouse teardown fixture，在每个用例后 `clear_before_hooks/clear_after_hooks` + 清空 `_defs/_handlers`。
 - **持久化链**：DFT-028（外键）+ DFT-029（WAL / busy_timeout）✅ 已合并进同一个 `db.connect()` helper——连接建立即套用 `foreign_keys=ON`+`journal_mode=WAL`+`busy_timeout=5000`；sessions/scheduler/permissions store 及 schema init 全部改走该 helper。FK 启用后顺带暴露并修正了若干测试夹具的悬空引用（需先 seed 父行）。
+- **权限链**：DFT-031（ask 永久挂起 + resolve 无鉴权 + 断连不清理）+ DFT-032（once 进程级永久全局放行）✅ 已一并治理。`engine.check()` 的 ask 分支改 `asyncio.wait_for(future, 300s)`，超时 `TimeoutError` → deny 并 `finally` 清 `_pending`；`_PendingRequest` 加 `group_id`，`resolve(..., group_id=)` 校验请求归属（A 群客户端不能批 B 群的调用）；新增 `cancel_pending_for_group()`——末位客户端断开时（`main.py` WebSocketDisconnect）把该群所有挂起 ask **resolve 成 deny**（而非 cancel，保留 DFT-027 真 abort 的 CancelledError 传播）。DFT-032 把 `_once_rules: dict[bot,list[Rule]]` 换成 `_once_grants: dict[(bot,group), list[(tool, args_hash)]]`：批准 once 只登记「该 bot+群+工具+这组参数」一张一次性票，`_consume_once_grant` 命中即移除——不跨群、不永久、参数敏感；deny 规则仍先于 once-grant 判定。
 - **上下文配对**：DFT-035 与已修的 DFT-003 同源不同代码路径，应抽 `_safe_truncate_boundary` helper 复用。
 
 ### 参考项目对标结论（安全组，来自 gsd-2 / opencode 源码比对）
@@ -117,8 +118,8 @@
 | **DFT-028** | **持久化**<br>[db/__init__.py](backend/db/__init__.py#L7) | 🟠 ✅已修 | 全代码无任何 `PRAGMA foreign_keys=ON`（SQLite 默认 OFF）。 | 所有 FK（`session_events.session_id`/`cron_jobs.bot_id` 等）不生效，可插入悬空引用、删 bot 留孤儿。 | **已修**：`db/__init__.py` 新增 `@asynccontextmanager connect(path=None)`，连接建立后立即 `PRAGMA foreign_keys=ON`（同时 WAL+busy_timeout，见 DFT-029）；`get_db()` 委托给它；`sessions/store.py`（7 处）/`scheduler/store.py`（6 处）/`permissions/db.py`（3 处，保留自身 `_DB_PATH`）/`db/schema.py` init 全部改走 `_db.connect()`。FK 启用后顺带修正 `test_sessions.py`/`test_recovery_resume.py` 夹具——先 seed `groups`/`members` 父行再插 session。单测 `tests/test_db_pragmas.py::test_foreign_keys_enforced_on_insert`。 |
 | **DFT-029** | **持久化**<br>[sessions/store.py](backend/sessions/store.py) · [scheduler/store.py](backend/scheduler/store.py) | 🟠 ✅已修 | 连接-per-调用，无 WAL、无 `busy_timeout`，默认 rollback journal 写互斥阻塞读。 | 多 bot 并发写 `session_events/add_tokens/save_message` 时超 5s 默认超时 → `OperationalError: database is locked` → 会话被标 `failed` 丢弃。 | **已修（与 DFT-028 同一 helper）**：`db.connect()` 连接即 `PRAGMA journal_mode=WAL`（写不再阻塞读）+ `PRAGMA busy_timeout=5000`（并发写等待而非立即报错）；所有 store 共用该 helper。单测 `tests/test_db_pragmas.py`（5 例）验证 WAL/busy_timeout/foreign_keys 均生效。 |
 | **DFT-030** | **事件总线**<br>[adapter.py](backend/bus/adapter.py#L24) · [engine.py](backend/bus/engine.py#L80) | 🟠 | 所有 group 所有事件汇入一个 `subscribe_all()` 队列、单任务串行消费，`send_json` 无写超时；队列无 `maxsize`。 | 一个半开连接的慢客户端卡住整个 app 事件投递（全局队头阻塞）；消费者落后则内存无界增长。 | 每个 WS 连接独立 subscribe + 独立消费任务；`send_json` 加超时，慢客户端单独断开；队列设 `maxsize`，满则丢弃/断开。 |
-| **DFT-031** | **权限引擎**<br>[engine.py](backend/permissions/engine.py#L81) | 🟠 | `await future` 无 timeout；`resolve()` 仅按 `request_id` 匹配无鉴权。 | 用户关页面 → 协程永久挂起占着 tool loop，`_pending` 无界增长；任何拿到 `request_id` 的客户端可批准他人 bot 的工具调用。 | `asyncio.wait_for(future, timeout)` 超时默认拒绝；WS 断开时 cancel 该连接所有 pending；`resolve` 校验 request 属于该 group/调用者。 |
-| **DFT-032** | **权限引擎**<br>[engine.py](backend/permissions/engine.py#L21) | 🟠 | `_once_rules[bot_id]` 进程级全局，"once" 实际是"重启前、所有群、永久放行"。 | 用户"仅此一次"的意图被放大为跨群永久授权。 | key 改为 `(bot_id, group_id, tool_name, args_hash)`，并设单次消费（用后即删）或 TTL。 |
+| **DFT-031** | **权限引擎**<br>[engine.py](backend/permissions/engine.py#L81) | 🟠 ✅已修 | `await future` 无 timeout；`resolve()` 仅按 `request_id` 匹配无鉴权。 | 用户关页面 → 协程永久挂起占着 tool loop，`_pending` 无界增长；任何拿到 `request_id` 的客户端可批准他人 bot 的工具调用。 | **已修**：ask 分支改 `asyncio.wait_for(future, _ASK_TIMEOUT_SECONDS=300)`，`TimeoutError`→deny，`finally` 清 `_pending`；`_PendingRequest` 加 `group_id` 字段，`resolve(request_id, approved, persistence, group_id=)` 校验 `req.group_id==group_id` 否则返回 None（A 群客户端不能批 B 群）；新增 `cancel_pending_for_group(group_id)`——`main.py` WebSocketDisconnect 在该群在线数归零时调用，把所有挂起 ask `future.set_result((False,"once"))`（resolve 成 deny 而非 cancel，保留 DFT-027 真 abort 的 CancelledError 传播）。单测 `tests/test_permissions.py` TestAskTimeout/TestCancelPendingForGroup/TestResolveAuthz。 |
+| **DFT-032** | **权限引擎**<br>[engine.py](backend/permissions/engine.py#L21) | 🟠 ✅已修 | `_once_rules[bot_id]` 进程级全局，"once" 实际是"重启前、所有群、永久放行"。 | 用户"仅此一次"的意图被放大为跨群永久授权。 | **已修**：`_once_rules: dict[bot,list[Rule]]` 换成 `_once_grants: dict[(bot_id,group_id), list[(tool_name, args_hash)]]`；批准 once 仅 `setdefault((bot,group),[]).append((tool, _args_hash(args)))` 登记一张一次性票；`check()` 第 4 步 `_consume_once_grant` 命中即 `remove`（用后即删，不跨群、不永久、参数敏感，`_args_hash` 用 sha256(json sort_keys)）；deny 规则仍先于 once-grant。单测 `tests/test_permissions.py` TestOnceGrantSemantics（消费/不跨群/参数敏感/deny 优先）。 |
 | **DFT-033** | **AI 客户端**<br>[ai/client.py](backend/ai/client.py) | 🟠 | 每次 AI 调用新建 `httpx.AsyncClient`，无连接池；流式生成器在消费方提前中断时 response/socket 到 GC 才释放。 | 每次请求/重试都做 TLS 握手增加延迟；高负载下泄漏文件描述符。 | app 生命周期内共享单个 `AsyncClient`（lifespan 创建、依赖注入）；流式路径 try/finally 显式 `aclose()` 或确保生成器关闭。 |
 | **DFT-034** | **执行引擎**<br>[tool_loop_v1.py](backend/executors/plugins/tool_loop_v1.py#L582) | 🟡 | `tool_result` 事件 `is_error` 串/并行路径都硬编码 `False`，即便工具返回 `[执行错误]`/`[安全拒绝]`。 | WAL/审计无法区分成功与失败/被拦截；恢复时把错误当成功结果回放。 | `tool_executor.execute` 返回 `(result, is_error)` 或抛特定异常；loop 据此写 WAL `is_error`。 |
 | **DFT-035** | **上下文压缩**<br>[tool_loop_v1.py](backend/executors/plugins/tool_loop_v1.py#L508) · [compact.py](backend/executors/compact.py#L276) | 🟡 | 溢出恢复与 `snip_if_needed` 仍会拆散 `assistant(tool_calls)↔tool` 配对（DFT-003 同类问题、不同代码路径）。 | 产生孤儿 `tool_use_id` → Claude 400，`_overflow_recovered` 已 True 则直接 `AIError` 杀掉整个 run。 | 把 DFT-003 的配对保护抽成 `_safe_truncate_boundary` helper，复用到 overflow recovery 与 `snip_if_needed`；删 `assistant(tool_calls)` 必须连带其 tool 结果。 |
