@@ -180,6 +180,27 @@ async def migration_008(db):
     await db.commit()
 
 
+async def migration_009(db):
+    """Create tickets table for persistent task tracking and archiving."""
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS tickets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticket_id TEXT NOT NULL,
+            group_id INTEGER NOT NULL,
+            title TEXT,
+            status TEXT DEFAULT 'backlog', -- backlog, in_progress, done
+            assignee_id INTEGER,
+            priority TEXT,
+            metadata_json TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            completed_at TIMESTAMP,
+            UNIQUE(group_id, ticket_id)
+        )
+    """)
+    await db.commit()
+
+
 MIGRATIONS: list = [
     migration_001,
     migration_002,
@@ -189,7 +210,9 @@ MIGRATIONS: list = [
     migration_006,
     migration_007,
     migration_008,
+    migration_009,
 ]
+
 
 
 # ---------------------------------------------------------------------------
