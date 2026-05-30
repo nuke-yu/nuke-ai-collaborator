@@ -104,6 +104,16 @@ async def reload_plugins():
     return {"loaded": loaded, "failures": registry.failures()}
 
 
+@app.get("/api/system/status")
+async def system_status():
+    """DFT-057：单机运行指标，便于运维监控活跃任务数与内存队列堆积。"""
+    return {
+        "tasks": bg.stats(),
+        "websockets": manager.stats(),
+        "permissions": permissions.pending_stats(),
+    }
+
+
 @app.get("/api/config")
 async def get_config():
     cfg = read_config()

@@ -13,6 +13,14 @@ class WSManager:
     def __init__(self):
         self.connections: Dict[int, List[tuple]] = {}
 
+    def stats(self) -> dict:
+        """运行指标快照（DFT-057）：在线群数 / 总连接数 / 按群连接数。"""
+        return {
+            "groups_online": len(self.connections),
+            "total_connections": sum(len(c) for c in self.connections.values()),
+            "connections_by_group": {gid: len(c) for gid, c in self.connections.items()},
+        }
+
     def get_online_member_ids(self, group_id: int) -> list:
         if group_id not in self.connections:
             return []

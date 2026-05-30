@@ -35,6 +35,14 @@ _once_grants: dict[tuple[int, int], list[tuple[str, str]]] = {}
 _pending: dict[str, _PendingRequest] = {}
 
 
+def pending_stats() -> dict:
+    """运行指标快照（DFT-057）：待审批 ask 队列堆积数 + 在册一次性放行票数。"""
+    return {
+        "pending_requests": len(_pending),
+        "once_grants": sum(len(v) for v in _once_grants.values()),
+    }
+
+
 def _args_hash(arguments: dict) -> str:
     return hashlib.sha256(
         json.dumps(arguments, sort_keys=True, default=str).encode()

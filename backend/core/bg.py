@@ -63,6 +63,15 @@ def register_group(group_id: int, task: asyncio.Task) -> None:
     task.add_done_callback(_make_group_done(group_id))
 
 
+def stats() -> dict:
+    """运行指标快照（DFT-057）：在跑的后台任务数 + 按群的工作流链占用。"""
+    return {
+        "active_tasks": len(_bg_tasks),
+        "groups_with_active_tasks": len(_group_tasks),
+        "tasks_by_group": {gid: len(tasks) for gid, tasks in _group_tasks.items()},
+    }
+
+
 def abort_group(group_id: int) -> int:
     """取消某个群下所有仍在跑的 task，返回取消的数量。"""
     bucket = _group_tasks.get(group_id)
