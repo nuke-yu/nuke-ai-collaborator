@@ -12,7 +12,7 @@ from ws_manager import manager
 from bus import bus, ws_adapter
 from bus.events import Presence, Message
 from models import AddMemberRequest  # noqa: keep models importable via main
-from core.orchestrator import select_triggered_bots, dispatch_bots, mark_read, send_auto_reply
+from core.orchestrator import select_triggered_bots, dispatch_bots, mark_read, send_auto_reply, init_event_handlers
 from core import bg
 from core import runner
 from api.messages import router as message_router, UPLOAD_DIR
@@ -53,6 +53,7 @@ async def lifespan(app: FastAPI):
     adapter_task = asyncio.create_task(ws_adapter(bus))
     await scheduler.start()
     await rd_manager.start()
+    await init_event_handlers()
     # Restore orchestrator state BEFORE recovering sessions: a recovered tool_loop_v1
     # session that was a workflow stage unit must find its workflow already loaded so
     # its completion can advance the stage (sessions/recovery.py coordination).

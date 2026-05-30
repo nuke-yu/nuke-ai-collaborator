@@ -1,12 +1,69 @@
 import asyncio
 import uuid
-from db import get_db, get_messages, save_message
+from db import get_db, get_messages, save_message, get_members, get_group
 from bus import bus
 from bus.events import (
     StreamStart, StreamChunk, StreamError, StreamEnd,
     Message, Read, Typing, Error,
     SteerQueued, FollowupStart,
+    TicketCreated,  # TODO 1.3
 )
+
+...
+
+async def init_event_handlers():
+    """Initialize background event listeners for R&D automation."""
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    logger.info("Orchestrator: registering R&D event handlers...")
+    
+    async def _on_ticket_created(ev: dict):
+        group_id = ev["group_id"]
+        ticket_id = ev["ticket_id"]
+        title = ev["title"]
+        
+        async with get_db() as db:
+            all_members = await get_members(db, group_id)
+            group_info = await get_group(db, group_id) or {}
+            
+        all_bots = [m for m in all_members if m["type"] == "bot"]
+        # Find Dev bots
+        dev_bots = [b for b in all_bots if (b.get("role") or "").lower() == "dev"]
+        
+        if not dev_bots:
+            logger.warning("TicketCreated: no Dev bots found in group %d", group_id)
+            return
+
+        # Simple strategy: select the first one for now
+        target_bot = dev_bots[0]
+        
+        content = f"[系统通知] 发现新任务：{title} ({ticket_id})。请认领并开始执行。"
+        sender = {"id": 0, "name": "系统调度", "type": "system"}
+        
+        async with get_db() as db_m:
+            recent = await get_messages(db_m, group_id)
+            
+        logger.info("TicketCreated: auto-dispatching bot %s for ticket %s", target_bot["name"], ticket_id)
+        
+        # Trigger the bot
+        await dispatch_bots(
+            group_id, [target_bot], content, sender, recent,
+            all_bots, all_members,
+            group_name=group_info.get("name", ""),
+            group_announcement=group_info.get("announcement", ""),
+        )
+
+    async def _listener_loop():
+        sub = bus.subscribe(TicketCreated)
+        async with sub:
+            async for ev in sub:
+                try:
+                    await _on_ticket_created(ev)
+                except Exception:
+                    logger.exception("Error in TicketCreated handler")
+
+    asyncio.create_task(_listener_loop())
 from ai.client import call_ai, call_ai_stream, call_ai_once, AIError
 from core.role_router import should_bot_respond, build_context_message
 from ai.memory import maybe_summarize, get_memory_context, add_to_chroma
