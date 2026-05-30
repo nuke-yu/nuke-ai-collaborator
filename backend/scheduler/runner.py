@@ -10,10 +10,17 @@ log = logging.getLogger(__name__)
 _SYSTEM_SENDER = {"id": 0, "name": "系统调度器", "type": "system", "avatar_color": "#6b7280"}
 
 
-async def fire_job(bot_id: int, group_id: int, message: str) -> None:
+async def fire_job(bot_id: int, group_id: int, message: str, job_id: int | None = None) -> None:
     # Lazy import keeps the scheduler importable even if orchestrator fails to load
     from db import get_db, get_members, get_messages
     from core.orchestrator import dispatch_bots
+    from scheduler.store import update_last_run
+
+    if job_id:
+        try:
+            await update_last_run(job_id)
+        except Exception:
+            log.exception("scheduler: failed to update last_run_at for job %d", job_id)
 
     try:
         async with get_db() as db:

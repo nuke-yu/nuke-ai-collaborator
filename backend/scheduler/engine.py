@@ -74,10 +74,10 @@ def _schedule(job: dict) -> None:
     _scheduler.add_job(
         fire_job,
         trigger,
-        args=[job["bot_id"], job["group_id"], job["message"]],
+        args=[job["bot_id"], job["group_id"], job["message"], job["id"]],
         id=_apscheduler_job_id(job["id"]),
         replace_existing=True,
-        misfire_grace_time=60,
+        misfire_grace_time=3600, # DFT-039: allow 1h window for catch-up after restart
         coalesce=True,
     )
 

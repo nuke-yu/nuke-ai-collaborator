@@ -234,6 +234,15 @@ async def migration_012(db):
     await db.commit()
 
 
+async def migration_013(db):
+    """Add last_run_at column to cron_jobs for misfire detection and catch-up."""
+    try:
+        await db.execute("ALTER TABLE cron_jobs ADD COLUMN last_run_at TIMESTAMP")
+    except Exception:
+        pass
+    await db.commit()
+
+
 MIGRATIONS: list = [
     migration_001,
     migration_002,
@@ -247,7 +256,9 @@ MIGRATIONS: list = [
     migration_010,
     migration_011,
     migration_012,
+    migration_013,
 ]
+
 
 
 

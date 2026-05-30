@@ -91,6 +91,15 @@ async def toggle_job(job_id: int) -> dict:
     return _row_to_dict(row)
 
 
+async def update_last_run(job_id: int) -> None:
+    async with _db.connect() as conn:
+        await conn.execute(
+            "UPDATE cron_jobs SET last_run_at = datetime('now') WHERE id = ?",
+            (job_id,),
+        )
+        await conn.commit()
+
+
 async def delete_job(job_id: int) -> None:
     async with _db.connect() as conn:
         await conn.execute("DELETE FROM cron_jobs WHERE id = ?", (job_id,))
