@@ -513,5 +513,125 @@ class TestWorkflowParseTickets(unittest.TestCase):
         self.assertEqual(_parse_tickets(msg), ["本次迭代任务"])
 
 
+class TestOrchestratorContractDefaults(unittest.TestCase):
+    """ABC 默认实现：只实现 begin/observe 的最小编排器，门面依赖的查询/流转方法
+    必须有安全默认（曾经这些方法只存在于 DeclarativeOrchestrator，第二实现一接入就崩）。"""
+
+    def _bare(self):
+        from core.orchestration.base import Orchestrator, OrchestratorStep
+
+        class Bare(Orchestrator):
+            orchestrator_id = "bare_test"
+
+            def begin(self, group_id, spec):
+                return OrchestratorStep()
+
+            def observe(self, group_id, bot_id, response):
+                return OrchestratorStep()
+
+        return Bare()
+
+    def test_defaults_are_safe(self):
+        from core.orchestration.base import OrchestratorStep
+        o = self._bare()
+        self.assertIsNone(o.current_bot(1))
+        self.assertIsNone(o.current_pool_bots(1))
+        self.assertEqual(o.system_suffix(1), "")
+        self.assertIsNone(o.serialize(1))
+        self.assertEqual(o.resume_units(1), [])
+        self.assertIsNone(o.end(1))  # no-op, must not raise
+        step = o.advance(1)
+        self.assertIsInstance(step, OrchestratorStep)
+        self.assertFalse(step.done)
+
+
+class TestRoundRobinOrchestrator(unittest.TestCase):
+    """第二编排器（plugins/round_robin.py）独立验证编排契约：纯决策、可序列化、可恢复。"""
+
+    def setUp(self):
+        from core.orchestration.plugins.round_robin import RoundRobinOrchestrator
+        self.orch = RoundRobinOrchestrator()
+        self.bots = [{"id": 1, "name": "A"}, {"id": 2, "name": "B"}]
+
+    def test_begin_dispatches_first_speaker(self):
+        step = self.orch.begin(10, {"bots": self.bots, "rounds": 2})
+        self.assertTrue(step.broadcast_state)
+        self.assertEqual(len(step.next_units), 1)
+        self.assertEqual(step.next_units[0].bot["id"], 1)
+        self.assertEqual(self.orch.current_bot(10)["id"], 1)
+
+    def test_observe_rotates_and_wraps_rounds(self):
+        self.orch.begin(11, {"bots": self.bots, "rounds": 2})
+        s1 = self.orch.observe(11, 1, "r1 a")
+        self.assertEqual(s1.next_units[0].bot["id"], 2)       # 轮到 B
+        s2 = self.orch.observe(11, 2, "r1 b")                  # B 说完 → 第2轮 A
+        self.assertEqual(s2.next_units[0].bot["id"], 1)
+        snap = self.orch.snapshot(11)
+        self.assertEqual(snap["round"], 2)
+
+    def test_done_after_all_rounds(self):
+        self.orch.begin(12, {"bots": self.bots, "rounds": 1})
+        self.orch.observe(12, 1, "a")
+        step = self.orch.observe(12, 2, "b")                   # 1 轮跑满
+        self.assertTrue(step.done)
+        self.assertEqual(self.orch.snapshot(12), {"active": False})  # end 已清状态
+
+    def test_observe_ignores_wrong_bot(self):
+        self.orch.begin(13, {"bots": self.bots, "rounds": 1})
+        step = self.orch.observe(13, 2, "B 抢话")              # 当前应是 A
+        self.assertEqual(step.next_units, [])
+        self.assertEqual(self.orch.current_bot(13)["id"], 1)
+
+    def test_serialize_restore_resume(self):
+        self.orch.begin(14, {"bots": self.bots, "rounds": 3})
+        self.orch.observe(14, 1, "a")                          # 游标到 B
+        blob = self.orch.serialize(14)
+        import json
+        blob = json.loads(json.dumps(blob))                    # 模拟落库往返
+        fresh = type(self.orch)()
+        fresh.restore(14, blob)
+        self.assertEqual(fresh.current_bot(14)["id"], 2)
+        units = fresh.resume_units(14)
+        self.assertEqual([u.bot["id"] for u in units], [2])
+
+
+class TestOrchestratorPluggability(unittest.IsolatedAsyncioTestCase):
+    """registry 发现第二编排器；门面按 group 路由到不同编排器且互相隔离。"""
+
+    def test_registry_discovers_plugin(self):
+        from core.orchestration import registry
+        ids = registry.reload()
+        self.assertIn("workflow_v1", ids)
+        self.assertIn("round_robin_v1", ids)
+        self.assertEqual(registry.get("does_not_exist").orchestrator_id, "workflow_v1")
+
+    def test_facade_routes_per_group(self):
+        import core.workflow as wf
+        g_rr, g_wf = 7501, 7502
+        wf._orch.end(g_wf)
+        wf.end(g_rr)
+        try:
+            # round_robin 组：begin 通过门面 start（忽略返回的 step，仅建状态）
+            wf.start(g_rr, {"bots": [{"id": 1, "name": "A"}, {"id": 2, "name": "B"}], "rounds": 1},
+                     "round_robin_v1")
+            # 默认 workflow_v1 组：单阶段
+            wf.start(g_wf, [{"id": 9, "name": "Z", "avatar_color": "#111",
+                             "stage_type": "single", "done_keyword": "完毕", "role": "Dev"}])
+
+            self.assertEqual(wf.current_bot(g_rr)["id"], 1)     # 路由到 round_robin
+            self.assertEqual(wf.current_bot(g_wf)["id"], 9)     # 路由到 declarative
+            self.assertTrue(wf.is_workflow_participant(g_rr, 1))
+            self.assertFalse(wf.is_workflow_participant(g_rr, 9))
+
+            wf.end(g_rr)
+            self.assertNotIn(g_rr, wf._group_orch)              # 绑定已清
+            self.assertIsNone(wf.current_bot(g_rr))
+            self.assertEqual(wf.current_bot(g_wf)["id"], 9)     # 另一组不受影响
+        finally:
+            wf.end(g_rr)
+            wf._orch.end(g_wf)
+            wf._group_orch.pop(g_wf, None)
+
+
 if __name__ == "__main__":
     unittest.main()

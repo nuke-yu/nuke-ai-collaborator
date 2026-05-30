@@ -110,6 +110,15 @@ async def get_orphaned_sessions() -> list[dict]:
     return result
 
 
+async def save_snapshot(session_id: str, messages: list) -> None:
+    async with _db.connect() as conn:
+        await conn.execute(
+            "UPDATE agent_sessions SET last_snapshot_json = ?, updated_at = datetime('now') WHERE id = ?",
+            (json.dumps(messages, ensure_ascii=False), session_id),
+        )
+        await conn.commit()
+
+
 async def add_tokens(
     session_id: str,
     input_tokens: int,

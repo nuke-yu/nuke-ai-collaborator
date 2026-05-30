@@ -171,6 +171,15 @@ async def migration_007(db):
     await db.commit()
 
 
+async def migration_008(db):
+    """Add last_snapshot_json column to agent_sessions for full context snapshots."""
+    try:
+        await db.execute("ALTER TABLE agent_sessions ADD COLUMN last_snapshot_json TEXT")
+    except Exception:
+        pass
+    await db.commit()
+
+
 MIGRATIONS: list = [
     migration_001,
     migration_002,
@@ -179,7 +188,9 @@ MIGRATIONS: list = [
     migration_005,
     migration_006,
     migration_007,
+    migration_008,
 ]
+
 
 # ---------------------------------------------------------------------------
 # Runner

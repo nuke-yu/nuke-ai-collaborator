@@ -55,8 +55,10 @@ export default function ChatWindow({ memberId, isDark, onToggleTheme }) {
   const [stats, setStats] = useState([])
   const [showExportMenu, setShowExportMenu] = useState(false)
   const [permRequest, setPermRequest] = useState(null)
+  const [recoveryPrompts, setRecoveryPrompts] = useState([]) // Array of {session_id, bot_name, message, ...}
   const { notify } = useNotifications()
   const bottomRef = useRef(null)
+
   const scrollRef = useRef(null)
   const messageInputRef = useRef(null)
   const dragCounter = useRef(0)
@@ -209,6 +211,11 @@ export default function ChatWindow({ memberId, isDark, onToggleTheme }) {
       setMessages(prev => prev.filter(m => m.temp_id !== data.temp_id))
     } else if (data.type === 'permission_request') {
       setPermRequest(data)
+    } else if (data.type === 'recovery_prompt') {
+      setRecoveryPrompts(prev => {
+        if (prev.find(p => p.session_id === data.session_id)) return prev
+        return [...prev, data]
+      })
     } else if (data.type === 'stream_error') {
       setMessages(prev => prev.filter(m => m.temp_id !== data.temp_id))
       setError(data.message)
@@ -276,13 +283,32 @@ export default function ChatWindow({ memberId, isDark, onToggleTheme }) {
     setEditingGroupName(false)
   }
 
-  const saveAnnouncement = async (text) => {
-    await fetch(`/api/groups/${activeGroupId}`, {
+  const saveAnnouncement = (text) => {
+    fetch(`/api/groups/${activeGroupId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ announcement: text }),
     })
   }
+
+  const handleResume = async (sessionId) => {
+    try {
+      await resumeSession(sessionId)
+      setRecoveryPrompts(prev => prev.filter(p => p.session_id !== sessionId))
+    } catch (e) {
+      setError('无法恢复会话：' + e.message)
+    }
+  }
+
+  const handleCancelRecovery = async (sessionId) => {
+    try {
+      await cancelSessionRecovery(sessionId)
+      setRecoveryPrompts(prev => prev.filter(p => p.session_id !== sessionId))
+    } catch (e) {
+      setError('无法取消恢复：' + e.message)
+    }
+  }
+
 
   const handleJump = useCallback((msgId) => {
     setShowSearch(false)
@@ -590,6 +616,33 @@ export default function ChatWindow({ memberId, isDark, onToggleTheme }) {
             <button onClick={() => setError(null)} className="text-red-400 hover:text-red-200 ml-4">✕</button>
           </div>
         )}
+
+        {recoveryPrompts.map(p => (
+          <div key={p.session_id} className="mx-4 mt-2 px-4 py-3 bg-indigo-950/80 border border-indigo-700 rounded-lg text-sm text-indigo-100 flex flex-col gap-2 shadow-lg animate-in slide-in-from-top duration-300">
+            <div className="flex items-center justify-between">
+              <span className="font-semibold text-indigo-300">任务恢复提示</span>
+              <button onClick={() => handleCancelRecovery(p.session_id)} className="text-indigo-400 hover:text-indigo-200">✕</button>
+            </div>
+            <p>{p.message}</p>
+            {p.user_message && (
+              <p className="text-xs text-indigo-400 bg-black/30 p-2 rounded italic">“{p.user_message}”</p>
+            )}
+            <div className="flex gap-2 mt-1">
+              <button
+                onClick={() => handleResume(p.session_id)}
+                className="px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded text-xs transition-colors"
+              >
+                继续执行
+              </button>
+              <button
+                onClick={() => handleCancelRecovery(p.session_id)}
+                className="px-3 py-1 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded text-xs transition-colors"
+              >
+                放弃任务
+              </button>
+            </div>
+          </div>
+        ))}
 
         <div
           ref={scrollRef}

@@ -20,6 +20,7 @@ from api.groups import router as group_router
 from api.templates import router as template_router
 from api.workflow import router as workflow_router
 from api.workspace import router as workspace_router
+from api.sessions import router as sessions_router
 from config import read_config, write_config, _preview, FIELDS
 from executors import registry
 from workspace import init_all_bots, init_group_workspace
@@ -78,6 +79,7 @@ app.include_router(group_router)
 app.include_router(template_router)
 app.include_router(workflow_router)
 app.include_router(workspace_router)
+app.include_router(sessions_router)
 app.include_router(permissions_router)
 app.include_router(scheduler.router)
 

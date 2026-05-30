@@ -50,9 +50,29 @@ class Orchestrator(ABC):
     def observe(self, group_id: int, bot_id: int, response: str) -> OrchestratorStep:
         """某个 bot 跑完一轮，更新内部状态并返回下一步。"""
 
+    def end(self, group_id: int) -> None:
+        """结束编排，丢弃该 group 的内部状态。有状态的实现必须覆盖。"""
+
+    def advance(self, group_id: int, prev_output: str = "") -> OrchestratorStep:
+        """手动推进一步（API /next 用）。不支持手动推进的实现保持默认空步。"""
+        return OrchestratorStep()
+
     def snapshot(self, group_id: int) -> dict:
         """给 WorkflowUpdate 用的状态快照。"""
         return {"active": False}
+
+    # ── 当前在岗参与者（消费方 core.workflow / core.orchestrator 依赖） ──
+    def current_bot(self, group_id: int) -> dict | None:
+        """当前应当发言的单个 bot（无则 None，如池/并行阶段）。"""
+        return None
+
+    def current_pool_bots(self, group_id: int) -> list[int] | None:
+        """当前在岗的一组 bot id（无池语义则 None）。"""
+        return None
+
+    def system_suffix(self, group_id: int) -> str:
+        """注入给当前阶段 bot 的系统提示后缀（无则空串）。"""
+        return ""
 
     # ── 持久化 / 崩溃恢复（默认无能力，可选实现） ──
     def serialize(self, group_id: int) -> dict | None:

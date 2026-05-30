@@ -79,16 +79,20 @@ async def resume_workflows() -> None:
     （sessions.recover_all）单独恢复，这里不重复触发以免重复落库/调用工具。
     """
     from core.orchestration import registry as orch_registry
+    import core.workflow as wf
 
     rows = await workflow_store.load_all_active()
     for row in rows:
         group_id = row["group_id"]
-        orch = orch_registry.get(row.get("orchestrator_id") or "workflow_v1")
+        orchestrator_id = row.get("orchestrator_id") or "workflow_v1"
+        orch = orch_registry.get(orchestrator_id)
         try:
             orch.restore(group_id, row["state"])
         except Exception as e:
             log.error("workflow restore failed for group %s: %r", group_id, e)
             continue
+        # Route subsequent live observe (check_and_advance) to the right orchestrator.
+        wf.bind(group_id, orchestrator_id)
         await bus.publish(WorkflowUpdate(group_id=group_id, **orch.snapshot(group_id)))
         for unit in orch.resume_units(group_id):
             if unit.executor_id != "simple_v1":

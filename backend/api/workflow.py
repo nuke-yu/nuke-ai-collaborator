@@ -17,6 +17,18 @@ async def start_workflow(group_id: int, body: dict):
     async with get_db() as db:
         members = await get_members(db, group_id)
     bots = {m["id"]: m for m in members if m["type"] == "bot"}
+
+    orchestrator_id = body.get("orchestrator_id", "workflow_v1")
+    if orchestrator_id != "workflow_v1":
+        # 非内置编排器：spec 形状由各编排器自定，这里只做通用的 bot_id → 成员解析。
+        spec = dict(body.get("spec", {}))
+        if "bots" in spec:
+            spec["bots"] = [bots[bid] for bid in spec["bots"] if bid in bots]
+        if not spec.get("bots"):
+            raise HTTPException(400, "No bots specified")
+        await wf.apply(group_id, wf.start(group_id, spec, orchestrator_id))
+        return {"ok": True}
+
     stages_cfg = body.get("stages", [])
     ordered = []
     for cfg in stages_cfg:
@@ -35,8 +47,7 @@ async def start_workflow(group_id: int, body: dict):
                 ordered.append({**bot, "stage_type": "single", "done_keyword": cfg.get("done_keyword", "完毕")})
     if not ordered:
         raise HTTPException(400, "No bots specified")
-    wf.start(group_id, ordered)
-    await wf.broadcast_state(group_id)
+    await wf.apply(group_id, wf.start(group_id, ordered))
     return {"ok": True}
 
 

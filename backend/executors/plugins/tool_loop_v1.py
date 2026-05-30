@@ -549,7 +549,13 @@ class ToolLoopV1(BotExecutor):
                             full_text = f"[循环保护] 连续 {_consecutive_tool_only} 次工具调用，已终止循环"
                             break
                         messages.append(result["assistant_message"])
+                        
+                        # Point 5 & Point 2: Shadow Persistence (Intent)
+                        # Save full snapshot BEFORE executing tools
+                        await sessions.save_snapshot(_session_id, messages)
+
                         calls = result["calls"]
+
 
                         # Parallel execution when every call in this round is concurrency-safe
                         _run_parallel = (
@@ -593,6 +599,9 @@ class ToolLoopV1(BotExecutor):
                                     "name": call["name"],
                                     "content": tool_result,
                                 })
+                                # Point 5 & Point 2: Shadow Persistence (Result)
+                                await sessions.save_snapshot(_session_id, messages)
+                                
                                 await ctx.broadcaster.broadcast(ctx.group_id, {
                                     "type": "tool_result", "temp_id": temp_id,
                                     "tool": call["name"], "result": tool_result[:300],
@@ -709,6 +718,9 @@ class ToolLoopV1(BotExecutor):
                                     "name": call["name"],
                                     "content": display_result,
                                 })
+                                # Point 5 & Point 2: Shadow Persistence (Result)
+                                await sessions.save_snapshot(_session_id, messages)
+
                                 await ctx.broadcaster.broadcast(ctx.group_id, {
                                     "type": "tool_result", "temp_id": temp_id,
                                     "tool": call["name"], "result": display_result[:300],

@@ -83,39 +83,83 @@ async def recover_all(dispatcher=None) -> None:
 async def _recover_one(session: dict, dispatcher) -> None:
     sid = session["id"]
     config = session["config"]
-    events = await get_events(sid)
+    group_id = session["group_id"]
+    bot_id = session["bot_id"]
+    
+    # Point 2: Use full snapshot if available, otherwise reconstruct from events
+    snapshot_json = session.get("last_snapshot_json")
+    if snapshot_json:
+        import json
+        messages = json.loads(snapshot_json)
+        log.info("found full snapshot for session %s, using it for recovery", sid)
+    else:
+        events = await get_events(sid)
+        # Detect dangling tool_call (written before execution, no matching tool_result)
+        committed_results: set[str] = {
+            e["payload"]["tool_call_id"]
+            for e in events if e["event_type"] == "tool_result"
+        }
+        dangling = [
+            e for e in events
+            if e["event_type"] == "tool_call"
+            and e["payload"]["tool_call_id"] not in committed_results
+        ]
 
-    # Detect dangling tool_call (written before execution, no matching tool_result)
-    committed_results: set[str] = {
-        e["payload"]["tool_call_id"]
-        for e in events if e["event_type"] == "tool_result"
-    }
-    dangling = [
-        e for e in events
-        if e["event_type"] == "tool_call"
-        and e["payload"]["tool_call_id"] not in committed_results
-    ]
+        if dangling:
+            dangling_tool = dangling[0]["payload"]["tool_name"]
+            if dangling_tool not in IDEMPOTENT_TOOLS:
+                log.warning(
+                    "session %s has dangling side-effectful tool '%s', marking needs_review",
+                    sid, dangling_tool,
+                )
+                await update_session_status(sid, "needs_review")
+                return
+            # Idempotent tool: roll back to events before the dangling tool_call
+            cutoff_id = dangling[0]["id"]
+            events = [e for e in events if e["id"] < cutoff_id]
 
-    if dangling:
-        dangling_tool = dangling[0]["payload"]["tool_name"]
-        if dangling_tool not in IDEMPOTENT_TOOLS:
-            log.warning(
-                "session %s has dangling side-effectful tool '%s', marking needs_review",
-                sid, dangling_tool,
-            )
-            await update_session_status(sid, "needs_review")
-            return
-        # Idempotent tool: roll back to events before the dangling tool_call
-        cutoff_id = dangling[0]["id"]
-        events = [e for e in events if e["id"] < cutoff_id]
+        messages = reconstruct_messages(config, events)
 
-    messages = reconstruct_messages(config, events)
+    # Point 3: Notify group instead of auto-dispatching
+    # We update status to 'awaiting_recovery' to mark it as found but not yet resumed
+    await update_session_status(sid, "awaiting_recovery")
+    
+    from db import get_db, get_member
+    async with get_db() as db:
+        bot = await get_member(db, bot_id)
+    
+    bot_name = bot["name"] if bot else f"Bot {bot_id}"
+    
+    from ws_manager import manager as ws_manager
+    await ws_manager.broadcast(group_id, {
+        "type": "recovery_prompt",
+        "session_id": sid,
+        "bot_id": bot_id,
+        "bot_name": bot_name,
+        "user_message": session.get("user_message", "")[:200],
+        "message": f"检测到 {bot_name} 有未完成的任务。是否继续执行？",
+    })
+    log.info("sent recovery prompt for session %s to group %s", sid, group_id)
 
-    await update_session_status(sid, "recovering")
-    log.info("recovering session %s (%d events, %d messages)", sid, len(events), len(messages))
+
+async def resume_session(session_id: str) -> bool:
+    """Public API to trigger resumption of a session that is awaiting_recovery."""
+    from sessions.store import get_session
+    session = await get_session(session_id)
+    if not session or session["status"] != "awaiting_recovery":
+        return False
+    
+    config = session["config"]
+    snapshot_json = session.get("last_snapshot_json")
+    if snapshot_json:
+        import json
+        messages = json.loads(snapshot_json)
+    else:
+        events = await get_events(session_id)
+        messages = reconstruct_messages(config, events)
 
     payload = {
-        "session_id": sid,
+        "session_id": session_id,
         "bot_id": session["bot_id"],
         "group_id": session["group_id"],
         "config": config,
@@ -124,11 +168,11 @@ async def _recover_one(session: dict, dispatcher) -> None:
         "parent_id": session.get("parent_id"),
         "executor_id": session.get("executor_id", "tool_loop_v1"),
     }
+    
+    await update_session_status(session_id, "recovering")
+    asyncio.create_task(_dispatch_recovery(payload))
+    return True
 
-    if dispatcher is not None:
-        dispatcher(payload)
-    else:
-        asyncio.create_task(_dispatch_recovery(payload))
 
 
 async def _dispatch_recovery(payload: dict) -> None:
