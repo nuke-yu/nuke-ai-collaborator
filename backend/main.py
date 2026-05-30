@@ -189,7 +189,7 @@ async def websocket_endpoint(websocket: WebSocket, group_id: int, member_id: int
 
                 all_members = await get_members(db, group_id)
                 all_bots = [m for m in all_members if m["type"] == "bot"]
-                triggered = select_triggered_bots(content or "", all_bots, group_id)
+                triggered = await select_triggered_bots(content or "", all_bots, group_id)
                 group_info = await get_group(db, group_id) or {}
 
             if triggered:

@@ -201,6 +201,20 @@ async def migration_009(db):
     await db.commit()
 
 
+async def migration_010(db):
+    """Create group_locks table to persist the active bot state."""
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS group_locks (
+            group_id INTEGER PRIMARY KEY,
+            bot_id INTEGER NOT NULL,
+            locked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (group_id) REFERENCES groups(id),
+            FOREIGN KEY (bot_id) REFERENCES members(id)
+        )
+    """)
+    await db.commit()
+
+
 MIGRATIONS: list = [
     migration_001,
     migration_002,
@@ -211,7 +225,9 @@ MIGRATIONS: list = [
     migration_007,
     migration_008,
     migration_009,
+    migration_010,
 ]
+
 
 
 

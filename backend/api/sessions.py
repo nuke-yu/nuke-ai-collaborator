@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException
-from sessions import resume_session, update_session_status
+from sessions import resume_session, update_session_status, get_session
+from core.orchestration.locks import release_lock
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 
@@ -12,6 +13,9 @@ async def api_resume_session(session_id: str):
 
 @router.post("/{session_id}/cancel-recovery")
 async def api_cancel_recovery(session_id: str):
+    session = await get_session(session_id)
+    if session:
+        await release_lock(session["group_id"])
     # Simply mark the session as failed so it won't be prompted again
     await update_session_status(session_id, "failed")
-    return {"status": "ok", "message": "会话恢复已取消"}
+    return {"status": "ok", "message": "会话恢复已取消，已释放群组锁"}

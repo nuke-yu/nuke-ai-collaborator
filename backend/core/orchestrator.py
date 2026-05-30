@@ -72,8 +72,7 @@ from executors import registry
 from core import bg
 import core.workflow as wf
 
-# group_id -> bot_id: 记录当前哪个 bot 持有会话
-active_bot: dict[int, int] = {}
+from core.orchestration import locks
 
 # Steer registry: (group_id, bot_id) -> Queue of injected messages for running bots
 _steer_queues: dict[tuple[int, int], asyncio.Queue] = {}
@@ -100,8 +99,8 @@ def _with_personality(base_prompt: str, bot: dict) -> str:
     return base_prompt + f"\n\n【性格指令】\n{p}" if p else base_prompt
 
 
-def select_triggered_bots(content: str, all_bots: list, group_id: int) -> list[dict]:
-    """决定本条消息应该由哪些 bot 响应，同时维护 active_bot 锁。"""
+async def select_triggered_bots(content: str, all_bots: list, group_id: int) -> list[dict]:
+    """决定本条消息应该由哪些 bot 响应，同时维护 SQLite 持久化锁。"""
     wf_bot = wf.current_bot(group_id)
     wf_pool = wf.current_pool_bots(group_id)
     if wf_bot:
@@ -114,12 +113,12 @@ def select_triggered_bots(content: str, all_bots: list, group_id: int) -> list[d
         explicit = all_bots
     if explicit:
         if len(explicit) == 1:
-            active_bot[group_id] = explicit[0]["id"]
+            await locks.set_active_bot(group_id, explicit[0]["id"])
         else:
-            active_bot.pop(group_id, None)
+            await locks.release_lock(group_id)
         return explicit
 
-    locked_bot_id = active_bot.get(group_id)
+    locked_bot_id = await locks.get_active_bot(group_id)
     if locked_bot_id:
         locked = next((b for b in all_bots if b["id"] == locked_bot_id), None)
         return [locked] if locked else []
@@ -233,7 +232,7 @@ async def check_handoff(group_id: int, all_bots: list, all_members: list,
     mentioned_bots = [b for b in all_bots if f"@{b['name']}" in content and b["id"] != sender_id]
     if not mentioned_bots:
         if any(f"@{m['name']}" in content for m in all_members if m["type"] == "human"):
-            active_bot.pop(group_id, None)
+            await locks.release_lock(group_id)
         return
 
     human_msgs = [m for m in context_messages if m["sender_type"] != "bot"]
@@ -252,7 +251,7 @@ async def check_handoff(group_id: int, all_bots: list, all_members: list,
     if not ai_reply:
         return
     bg.spawn(add_to_chroma(bot_msg_id, ai_reply, target_bot["role"] or "", target_bot["id"]))
-    active_bot[group_id] = target_bot["id"]
+    await locks.set_active_bot(group_id, target_bot["id"])
     await auto_continue_if_needed(group_id, target_bot, all_members)
     async with get_db() as db_r:
         bot_recent = await get_messages(db_r, group_id)
@@ -409,5 +408,5 @@ async def dispatch_bots(group_id: int, triggered: list, content: str, sender: di
         if msg["sender_type"] != "bot":
             continue
         if not any(f"@{m['name']}" in msg["content"] for m in all_members):
-            active_bot[group_id] = msg["member_id"]
+            await locks.set_active_bot(group_id, msg["member_id"])
         break

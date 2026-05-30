@@ -7,60 +7,96 @@ from unittest.mock import AsyncMock, patch, MagicMock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import db as _db_mod
+from db.schema import init_db
 from core.orchestration.rd_manager import rd_manager
-from bus.events import ToolResult, TicketCreated
-from bus import bus
+from bus.events import TicketCreated
 
-class TestRDManager(unittest.IsolatedAsyncioTestCase):
-    async def test_parse_backlog(self):
+_HERE = Path(__file__).parent.parent
+_TEST_DB = str(_HERE / "test_rd_manager_v2.db")
+
+class TestRDManagerV2(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self._orig = _db_mod.DB_PATH
+        _db_mod.DB_PATH = _TEST_DB
+        if Path(_TEST_DB).exists():
+            Path(_TEST_DB).unlink()
+        await init_db()
+        import aiosqlite
+        from db.migrations import run_migrations
+        async with aiosqlite.connect(_TEST_DB) as db:
+            await run_migrations(db)
+        
+        # Seed parents
+        async with aiosqlite.connect(_TEST_DB) as db:
+            await db.execute("INSERT INTO groups (id, name) VALUES (1, 'g')")
+            await db.commit()
+
+    async def asyncTearDown(self):
+        _db_mod.DB_PATH = self._orig
+        if Path(_TEST_DB).exists():
+            Path(_TEST_DB).unlink()
+
+    async def test_archiving_logic(self):
+        group_id = 1
         content = """
 # Board
 ## Backlog
-| # | Task | Priority |
-|---|---|---|
-| JIRA-1 | Task 1 | High |
-| JIRA-2 | Task 2 | Low |
-
-## In Progress
-| JIRA-3 | Working | Med |
+| JIRA-1 | Task 1 | Medium |
+## Done
+| JIRA-2 | Completed Task | High | Done |
 """
-        tickets = rd_manager._parse_board(content)
-        self.assertEqual(len(tickets), 3)
-        self.assertIn("JIRA-1", tickets)
-        self.assertEqual(tickets["JIRA-1"]["title"], "Task 1")
-        self.assertEqual(tickets["JIRA-2"]["status"], "backlog")
-        self.assertIn("JIRA-3", tickets) 
-
-    async def test_detect_new_ticket(self):
-        group_id = 888
-        rd_manager._last_tickets[group_id] = {"JIRA-1": "backlog"}
-        
-        # Mock file content
-        content = """
-## Backlog
-| JIRA-1 | Old | Low |
-| JIRA-2 | New Task | High |
-"""
-        
-        # Patch group_workspace and board_path.read_text
+        # Mock board file
         mock_path = MagicMock()
         mock_path.exists.return_value = True
         mock_path.read_text.return_value = content
         
+        # Capture the archived board content
+        written_content = ""
+        async def mock_write(bot_id, path, text):
+            nonlocal written_content
+            written_content = text
+            return "ok"
+
         with patch("core.orchestration.rd_manager.group_workspace", return_value=MagicMock(__truediv__=lambda s, x: mock_path)), \
-             patch("bus.bus.publish", new=AsyncMock()) as mock_publish, \
-             patch("core.orchestration.rd_manager.write_file", new=AsyncMock()):
+             patch("core.orchestration.rd_manager.write_file", side_effect=mock_write), \
+             patch("bus.bus.publish", new=AsyncMock()):
             
             await rd_manager.check_board(group_id)
             
-            # Should have published one TicketCreated event for JIRA-2
-            mock_publish.assert_awaited_once()
-            ev = mock_publish.call_args[0][0]
-            self.assertIsInstance(ev, TicketCreated)
-            self.assertEqual(ev.ticket_id, "JIRA-2")
+            # 1. JIRA-2 should be removed from board
+            self.assertIn("JIRA-1", written_content)
+            self.assertNotIn("JIRA-2", written_content)
             
-            # Cache should be updated
-            self.assertEqual(rd_manager._last_tickets[group_id], {"JIRA-1": "backlog", "JIRA-2": "backlog"})
+            # 2. JIRA-2 should be in DB
+            from db import connect
+            async with connect() as db:
+                async with db.execute("SELECT ticket_id, status FROM tickets WHERE ticket_id='JIRA-2'") as cur:
+                    row = await cur.fetchone()
+            self.assertIsNotNone(row)
+            self.assertEqual(row[1], "done")
+
+    async def test_status_sync_to_db(self):
+        group_id = 1
+        content = """
+## In Progress
+| JIRA-100 | Working | Med |
+"""
+        mock_path = MagicMock()
+        mock_path.exists.return_value = True
+        mock_path.read_text.return_value = content
+
+        with patch("core.orchestration.rd_manager.group_workspace", return_value=MagicMock(__truediv__=lambda s, x: mock_path)), \
+             patch("bus.bus.publish", new=AsyncMock()):
+            
+            await rd_manager.check_board(group_id)
+            
+            from db import connect
+            async with connect() as db:
+                async with db.execute("SELECT status FROM tickets WHERE ticket_id='JIRA-100'") as cur:
+                    row = await cur.fetchone()
+            self.assertIsNotNone(row)
+            self.assertEqual(row[0], "in_progress")
 
 if __name__ == "__main__":
     unittest.main()
