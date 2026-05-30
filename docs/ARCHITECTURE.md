@@ -213,7 +213,45 @@ QA Bot    → 读 BOARD.md 找「已完成」→ 验收 → 更新状态「✅ �
 
 ---
 
-## 九、 基础设施与状态管理 (Infrastructure & State Management)
+## 八、 团队协作模式 (Multi-Agent System Workflow)
+
+项目模拟真实的研发团队协作场景，通过群组（Group）将不同角色的 Agent 与人类成员组织在一起：
+
+### 1. 角色链路
+- **BA Bot**：分析用户需求，生成架构背景，并创建结构化的任务（Jira Tickets）。
+- **架构 Bot**：根据业务背景提供技术选型、数据库设计和分布式方案。
+- **开发 Bot (Dev)**：通过领票机制（Claiming）认领任务。支持基于经验值的匹配或随机认领。
+- **质量 Bot (QA)**：监听开发提交，自动在本地环境启动验证并反馈测试结果。
+
+### 2. 核心协作逻辑：Event-Driven Task Claiming
+不同于简单的对话，Agent 之间通过**内部业务事件**进行深度耦合：
+- `TicketCreatedEvent` → 触发 Dev Bot 认领逻辑。
+- `CodeCommittedEvent` → 触发 QA Bot 自动测试逻辑。
+- `TestPassedEvent` → 触发人类/部署 Bot 介入。
+
+---
+
+## 九、 架构演进路线图 (Phase-based Roadmap)
+
+基于研发团队协作背景，架构优化的优先级分为三个阶段：
+
+### 阶段一：打通信息流（Data Consistency）
+- **动态工作区挂载**：解决 `tool_loop` 循环中文件上下文陈旧的问题。确保前序 Bot 写入的需求/代码，后续 Bot 在其推理循环内部能立即感知最新版本。
+- **文件变更嗅探**：当 `write_file` 工具被调用时，立即通过消息注入（In-context Injection）更新 Bot 的上下文，防止产生幻觉。
+
+### 阶段二：稳固工作流（Execution Resilience）
+- **任务级 Checkpoint**：针对编码、测试等长周期任务，在 SQLite 中记录 `session_checkpoint`。
+- **崩溃恢复协议**：服务器重启后，系统能够根据 Checkpoint 指针自动重建 `tool_loop` 状态，恢复挂起的任务，防止“任务僵死”。
+
+### 阶段三：智能化分发（Orchestration Upgrade）
+- **事件中心化**：将 `EventBus` 从简单的消息中转升级为“任务编排中心”。
+- **领票与竞速逻辑**：完善多 Bot 竞争任务时的加锁与分配算法，支持基于 Bot 技能标签的自动调度。
+
+---
+
+## 十、 基础设施与状态管理 (Infrastructure & State Management)
+... (保持原有内容并微调) ...
+
 
 项目致力于提供“零依赖、开箱即用”的单机协同体验，在架构设计上做出了以下核心决策：
 
@@ -221,15 +259,20 @@ QA Bot    → 读 BOARD.md 找「已完成」→ 验收 → 更新状态「✅ �
 *   **永久单机方案**：放弃水平扩展（Horizontal Scaling）需求，转向追求单机的**低延迟**、**高吞吐**和**高可靠性**。
 *   **No-Redis 决策**：为了降低部署门槛，不引入 Redis 或 NATS 等外部中间件。所有状态管理由 **Python 内存 + SQLite** 共同承担。
 
-### 2. 状态存储模型
-*   **内存态 (Transient State)**：活跃 Bot 锁 (`active_bot`)、Steer 消息队列 (`_steer_queues`)、WebSocket 连接池。
-    *   *优势*：极速响应，无序列化开销。
-*   **持久态 (Persistent State)**：消息记录、Token 统计、会话 Checkpoint、定时任务配置。
-    *   *优势*：崩溃可恢复，数据永久化。
+### 2. 状态存储模型 (State Model)
+- **群组级状态 (Group State / The Board)**：
+    - *存储*：`BOARD.md` (人类可读) + SQLite `groups` 表。
+    - *内容*：任务列表、当前谁在认领、项目公告。
+- **任务级状态 (Task State / Execution Context)**：
+    - *存储*：SQLite `session_checkpoint` + 内存队列。
+    - *内容*：Agent 具体的 Tool Loop 进度、已执行的工具结果、中间思考。
 
-### 3. 并发控制与性能优化
-*   **SQLite WAL 模式**：通过 `PRAGMA journal_mode=WAL;` 开启预写日志，实现读写并发，解决高频聊天时的锁竞争。
-*   **异步写入队列**：高频/非关键写入操作（如日志追加、统计更新）通过内存 Queue 缓冲，由单后台任务顺序写入 SQLite，保护数据库不被击穿。
+### 3. 并发控制与性能策略 (Concurrency Strategy)
+- **SQLite 优化**：强制开启 WAL 模式 (`PRAGMA journal_mode=WAL;`)，解决顺序执行下的读写冲突。
+- **策略性降级 (Strategic Deprioritization)**：
+    - **高并发写入队列**：由于研发团队协作的消息频次较低（分钟级而非秒级），暂不实施复杂的后台写入队列，优先保证 WAL 的稳定性。
+    - **前端排队 UI**：在团队协作模型中，用户更关注最终产出和 Timeline 历史，而非实时的毫秒级排队状态，因此实时进度条优先级调低。
+
 
 ---
 

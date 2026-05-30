@@ -239,45 +239,20 @@ class ToolLoopV1(BotExecutor):
         )
         memory = await get_memory_context(bot["id"], bot.get("role") or "", ctx.user_message)
 
-        # Build context prefix injected as user message (not system prompt)
-        context_blocks = await load_context_files(
-            bot["id"], ctx.group_id, self.manifest.workspace.startup_files
-        )
-        context_text = format_context_blocks(context_blocks)
+        # Build context prefix (moved logic to a helper for dynamic refreshing)
+        async def _get_fresh_context_prefix():
+            blocks = await load_context_files(
+                bot["id"], ctx.group_id, self.manifest.workspace.startup_files
+            )
+            text = format_context_blocks(blocks)
+            prefix = ""
+            if text:
+                prefix += f"【工作区文件】\n{text}\n\n"
+            if skills_xml:
+                prefix += f"{skills_xml}\n使用 run_skill(name=\"技能名\") 调用\n\n"
+            return prefix, text
 
-        skills_snapshot = []
-        always_skills = []
-        skills_xml = ""
-        if self.manifest.workspace.skill_discovery:
-            raw_skills = list_skills_all(bot["id"], group_id=ctx.group_id,
-                                         role=bot.get("role"))
-            lazy_candidates = [
-                s for s in raw_skills
-                if not s.get("always")
-                and s.get("status", "active") != "disabled"
-                and s.get("user_invocable", True)
-            ]
-            lazy_candidates = filter_skills_by_context(lazy_candidates, ctx.user_message)
-            skills_xml, injected_names = _build_skills_xml(lazy_candidates, model_name)
-            for s in raw_skills:
-                if s.get("status", "active") == "disabled":
-                    skills_snapshot.append({**s, "injected": None})
-                elif s.get("always"):
-                    skills_snapshot.append({**s, "injected": "full"})
-                elif not s.get("user_invocable", True):
-                    skills_snapshot.append({**s, "injected": None})
-                else:
-                    inj = "metadata" if s["name"] in injected_names else None
-                    skills_snapshot.append({**s, "injected": inj})
-            if any(s.get("always") for s in raw_skills if s.get("status", "active") != "disabled"):
-                always_skills = load_always_skills(bot["id"], ctx.group_id,
-                                                   bot.get("role"))
-
-        context_prefix = ""
-        if context_text:
-            context_prefix += f"【工作区文件】\n{context_text}\n\n"
-        if skills_xml:
-            context_prefix += f"{skills_xml}\n使用 run_skill(name=\"技能名\") 调用\n\n"
+        context_prefix, context_text = await _get_fresh_context_prefix()
 
         always_section = ""
         if always_skills:
@@ -286,7 +261,7 @@ class ToolLoopV1(BotExecutor):
 
         group_section = build_group_section(ctx)
         os_info = f"Windows (PowerShell)" if _IS_WINDOWS else f"{sys.platform} (shell: /bin/sh)"
-        system_prompt = (
+        system_prompt_base = (
             base
             + (f"\n\n{memory}" if memory else "")
             + (f"\n\n【群组信息】\n{group_section}" if group_section else "")
@@ -295,38 +270,32 @@ class ToolLoopV1(BotExecutor):
             + "\n\n【自学技能规则】\n当你发现可复用的规律或用户说「记住这个做法」时，用 write_file 将技能写入 `skills/learned/draft/<skill-name>.md`，系统会自动请求用户审批。禁止直接写入 `skills/learned/active/`。"
             + ctx.workflow_suffix
         )
+        system_prompt = system_prompt_base
 
         provider = bot.get("model_provider", "deepseek")
         temperature = bot.get("temperature", 0.7)
         max_tokens = bot.get("max_tokens", 4096)
 
-        # Inject workspace context as prefix of the first user message
-        # For multimodal (image) messages, preserve blocks; context prefix becomes a leading text block
+        # Build initial user content WITHOUT context prefix (will inject dynamically)
         user_content = build_image_content(user_msg, ctx.file_url, ctx.file_type, provider)
-        if context_prefix:
-            if isinstance(user_content, list):
-                user_content = [{"type": "text", "text": context_prefix}] + user_content
-            else:
-                user_content = context_prefix + user_content
+        
         _resuming = bool(ctx.resume_session_id)
         if _resuming:
             # DFT-018: continue the crashed session from its reconstructed WAL
-            # messages rather than re-running the task from group history (which
-            # would re-execute every already-completed side-effectful tool).
             resumed = list(ctx.resume_messages or [])
             if resumed and resumed[0].get("role") == "system":
-                resumed = resumed[1:]  # system prompt is supplied separately below
+                resumed = resumed[1:]  # system prompt is supplied separately
             messages = resumed
         else:
+            # Initial message contains only the user request
             messages = list(history) + [{"role": "user", "content": user_content}]
+
         tool_names = [t.name for t in self.manifest.tools]
         tool_schemas = tool_executor.get_schemas(tool_names)
 
         temp_id = str(uuid.uuid4())
         if _resuming:
             _session_id = ctx.resume_session_id
-            # DFT-019: move the orphan out of 'recovering' so it can't leak — the
-            # normal completed/failed writeback at the end now closes this session.
             await sessions.update_session_status(_session_id, "running")
         else:
             _session_id = str(uuid.uuid4())
@@ -369,14 +338,17 @@ class ToolLoopV1(BotExecutor):
         # Cross-compaction file tracker: path → "read" | "modified"
         _file_tracker: dict[str, str] = {}
 
-        def _build_reinject() -> str:
+        async def _build_reinject() -> str:
             """Combine static workspace context, file-tracker XML, and live file contents."""
+            # Point 2: Always fetch fresh context during reinjection
+            fresh_prefix, fresh_text = await _get_fresh_context_prefix()
             ft_xml = compact.build_file_tracker_xml(_file_tracker)
             file_contents = compact.build_file_contents_for_reinject(
                 _file_tracker, workspace_dir=str(_bot_ws(bot["id"]))
             )
-            parts = [p for p in [context_text, ft_xml, file_contents] if p]
+            parts = [p for p in [fresh_text, ft_xml, file_contents] if p]
             return "\n\n".join(parts)
+
 
         # Strategy 1 (pre-run): clear stale tool results from DB-loaded history
         messages = compact.apply_tool_result_microcompact(messages)
@@ -385,7 +357,7 @@ class ToolLoopV1(BotExecutor):
         if _pre_tokens > compact._PRE_RUN_TOKEN_THRESHOLD:
             messages = await compact.compact_conversation(
                 messages, system_prompt, provider, model_name, temperature,
-                context_text=_build_reinject(),
+                context_text=await _build_reinject(),
             )
             await ctx.broadcaster.broadcast(ctx.group_id, {
                 "type": "compaction", "temp_id": temp_id,
@@ -449,7 +421,7 @@ class ToolLoopV1(BotExecutor):
             except AIContextOverflowError:
                 messages = await compact.compact_conversation(
                     messages, system_prompt, provider, model_name, temperature,
-                    context_text=_build_reinject(),
+                    context_text=await _build_reinject(),
                 )
                 await ctx.broadcaster.broadcast(ctx.group_id, {
                     "type": "compaction", "temp_id": temp_id,
@@ -506,6 +478,15 @@ class ToolLoopV1(BotExecutor):
                 _active_schemas = tool_schemas  # may be narrowed by skill allowed-tools
                 while iter_count < max_iter:
                     iter_count += 1
+                    
+                    # Point 2: Dynamic Workspace Mounting
+                    # Refresh context prefix every turn so bot sees real-time file changes
+                    current_prefix, _ = await _get_fresh_context_prefix()
+                    
+                    # Update system prompt with fresh prefix if needed, or inject as system/user hint
+                    # Here we refresh the system_prompt to include the latest context
+                    system_prompt = system_prompt_base + (f"\n\n{current_prefix}" if current_prefix else "")
+
                     # If previous skill declared allowed-tools, narrow the schema list for this round
                     _skill_allowed = execution_ctx.pop("skill_allowed_tools", None)
                     if _skill_allowed is not None:
@@ -529,7 +510,7 @@ class ToolLoopV1(BotExecutor):
                             messages.pop()
                         messages = await compact.compact_conversation(
                             messages, system_prompt, provider, _iter_model, temperature,
-                            context_text=_build_reinject(),
+                            context_text=await _build_reinject(),
                         )
                         await ctx.broadcaster.broadcast(ctx.group_id, {
                             "type": "compaction", "temp_id": temp_id,
@@ -541,6 +522,7 @@ class ToolLoopV1(BotExecutor):
                             temperature, max_tokens, _active_schemas,
                             use_cached_microcompact=_use_cached_mc,
                         )
+
                     _u = result.get("usage") or {}
                     _total_input_tokens += _u.get("input_tokens", 0)
                     _total_output_tokens += _u.get("output_tokens", 0)
@@ -741,7 +723,7 @@ class ToolLoopV1(BotExecutor):
                             messages, model_name, ctx.group_id,
                             system_prompt, provider, temperature,
                             ctx.broadcaster, temp_id, bot["id"],
-                            context_text=_build_reinject(),
+                            context_text=await _build_reinject(),
                         )
                         # Inject any pending steer messages before the next AI call
                         if ctx.steer_channel and not ctx.steer_channel.empty():
