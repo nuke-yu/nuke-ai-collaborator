@@ -295,6 +295,28 @@ class TestWorkflowStoreDB(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([r for r in rows if r["group_id"] == 901], [])
 
 
+class TestRecoveryWorkflowCoordination(unittest.IsolatedAsyncioTestCase):
+    """崩溃恢复与工作流编排的协同：recover_all 走 _dispatch_recovery 绕过了
+    run_unit/check_and_advance，恢复完成后必须把"在岗参与者"的产出 observe 回编排器，
+    否则工作流卡死在当前阶段。非参与者 / 子代理（parent_id）不应推进。"""
+
+    def _single(self, bid, name, keyword="完毕"):
+        return {"id": bid, "name": name, "avatar_color": "#111",
+                "stage_type": "single", "done_keyword": keyword, "role": "Dev"}
+
+    def test_is_workflow_participant(self):
+        import core.workflow as wf
+        gid = 7001
+        wf._orch.end(gid)
+        wf.start(gid, [self._single(1, "A"), self._single(2, "B")])
+        try:
+            self.assertTrue(wf.is_workflow_participant(gid, 1))   # 当前单阶段 bot
+            self.assertFalse(wf.is_workflow_participant(gid, 2))  # 下一阶段，未在岗
+            self.assertFalse(wf.is_workflow_participant(999, 1))  # 无活跃工作流
+        finally:
+            wf._orch.end(gid)
+
+
 class TestRunnerBroadcast(unittest.IsolatedAsyncioTestCase):
     """runner.run_unit 把 broadcaster=bus 接给 executor，stream 事件经总线带 'delta'。"""
 

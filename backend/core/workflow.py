@@ -36,6 +36,19 @@ def current_pool_bots(group_id: int) -> list[int] | None:
     return _orch.current_pool_bots(group_id)
 
 
+def is_workflow_participant(group_id: int, bot_id: int) -> bool:
+    """某 bot 是否是当前工作流阶段的在岗参与者。
+
+    崩溃恢复走 sessions._dispatch_recovery（绕过 run_unit / check_and_advance），
+    完成后据此判断要不要把产出 observe 进编排器以推进工作流。无活跃工作流时返回 False。
+    """
+    wb = _orch.current_bot(group_id)
+    if wb and wb.get("id") == bot_id:
+        return True
+    wp = _orch.current_pool_bots(group_id)
+    return wp is not None and bot_id in wp
+
+
 def system_suffix(group_id: int) -> str:
     return _orch.system_suffix(group_id)
 
