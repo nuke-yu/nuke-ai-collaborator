@@ -1,0 +1,122 @@
+"""
+tests/test_workspace_async_io.py — DFT-054 文件 I/O 不阻塞事件循环
+
+Bot 工具的文件读写（read_file/write_file/read_local_file/write_local_file）原先
+在事件循环线程内直接 Path.read_text/write_text，大文件会卡住整个 app 的 WS 投递。
+改为经 asyncio.to_thread 下放到工作线程：验证阻塞调用发生在非循环线程，且结果正确。
+"""
+import asyncio
+import os
+import sys
+import tempfile
+import threading
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import workspace as ws
+from executors.plugins import workspace_tools as wt
+
+
+class _ThreadSpy:
+    """Records the thread id that the wrapped Path method runs on."""
+
+    def __init__(self, method_name):
+        self.method_name = method_name
+        self.tid = None
+        self._orig = getattr(Path, method_name)
+
+    def __get__(self, obj, objtype=None):
+        if obj is None:
+            return self
+        return lambda *a, **k: self(obj, *a, **k)
+
+    def __call__(self, this, *args, **kwargs):
+        self.tid = threading.get_ident()
+        return self._orig(this, *args, **kwargs)
+
+
+class TestLocalFileOffload(unittest.IsolatedAsyncioTestCase):
+
+    async def test_read_local_file_runs_off_loop_thread(self):
+        main_tid = threading.get_ident()
+        with tempfile.TemporaryDirectory() as d:
+            f = Path(d) / "x.txt"
+            f.write_text("hello", encoding="utf-8")
+            spy = _ThreadSpy("read_text")
+            with patch.object(Path, "read_text", spy):
+                result = await wt._handle_read_local_file(str(f))
+        self.assertEqual(result, "hello")
+        self.assertIsNotNone(spy.tid)
+        self.assertNotEqual(spy.tid, main_tid)
+
+    async def test_write_local_file_runs_off_loop_thread(self):
+        main_tid = threading.get_ident()
+        with tempfile.TemporaryDirectory() as d:
+            f = Path(d) / "sub" / "y.txt"
+            spy = _ThreadSpy("write_text")
+            with patch.object(Path, "write_text", spy):
+                result = await wt._handle_write_local_file(str(f), "data")
+            self.assertIn("已写入", result)
+            self.assertEqual(f.read_text(encoding="utf-8"), "data")
+        self.assertNotEqual(spy.tid, main_tid)
+
+
+class TestWorkspaceFileOffload(unittest.IsolatedAsyncioTestCase):
+
+    async def asyncSetUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self._patcher = patch.object(ws, "WORKSPACE_ROOT", Path(self._tmp.name).resolve())
+        self._patcher.start()
+
+    async def asyncTearDown(self):
+        self._patcher.stop()
+        self._tmp.cleanup()
+
+    async def test_read_file_runs_off_loop_thread(self):
+        main_tid = threading.get_ident()
+        await ws.write_file(7, "note.md", "body")
+        spy = _ThreadSpy("read_text")
+        with patch.object(Path, "read_text", spy):
+            result = await ws.read_file(7, "note.md")
+        self.assertEqual(result, "body")
+        self.assertNotEqual(spy.tid, main_tid)
+
+    async def test_write_file_runs_off_loop_thread(self):
+        main_tid = threading.get_ident()
+        spy = _ThreadSpy("write_text")
+        with patch.object(Path, "write_text", spy):
+            result = await ws.write_file(7, "note.md", "body")
+        self.assertIn("已写入", result)
+        self.assertEqual((Path(self._tmp.name) / "bot_7" / "note.md").read_text(encoding="utf-8"), "body")
+        self.assertNotEqual(spy.tid, main_tid)
+
+    async def test_write_file_does_not_block_loop(self):
+        """While a slow write is in flight, other coroutines keep running."""
+        ticks = 0
+
+        async def ticker():
+            nonlocal ticks
+            for _ in range(20):
+                await asyncio.sleep(0.01)
+                ticks += 1
+
+        import time
+        orig = Path.write_text
+
+        def slow_write(this, *a, **k):
+            time.sleep(0.2)
+            return orig(this, *a, **k)
+
+        t = asyncio.create_task(ticker())
+        with patch.object(Path, "write_text", slow_write):
+            await ws.write_file(7, "note.md", "body")
+        # loop kept ticking during the 0.2s blocking write → offloaded
+        self.assertGreater(ticks, 0)
+        await t
+
+
+if __name__ == "__main__":
+    unittest.main()

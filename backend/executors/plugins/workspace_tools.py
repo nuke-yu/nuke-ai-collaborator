@@ -564,7 +564,7 @@ async def _handle_read_local_file(path: str, context: dict = None) -> str:
     if _is_sensitive_path(path):
         return f"[安全拒绝] 不允许读取敏感路径：{path}"
     try:
-        return Path(path).read_text(encoding="utf-8")
+        return await asyncio.to_thread(Path(path).read_text, encoding="utf-8")
     except FileNotFoundError:
         return f"[文件不存在] {path}"
     except Exception as e:
@@ -576,8 +576,12 @@ async def _handle_write_local_file(path: str, content: str, context: dict = None
         return f"[安全拒绝] 不允许写入敏感路径：{path}"
     try:
         p = Path(path)
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(content, encoding="utf-8")
+
+        def _do_write() -> None:
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(content, encoding="utf-8")
+
+        await asyncio.to_thread(_do_write)
         return f"已写入 {path}（{len(content)} 字符）"
     except Exception as e:
         return f"[写入错误] {e}"
