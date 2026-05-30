@@ -2,7 +2,6 @@ import asyncio
 import uuid
 import sys
 import json
-import sessions
 
 from executors.base import (
     BotExecutor, ExecutionContext, ExecutionResult,
@@ -14,7 +13,7 @@ from executors.plugins.workspace_tools import (
     _build_skills_xml, _with_personality,
     register_workspace_tools,
 )
-from db import get_db, save_message, get_messages
+from db import get_db
 import permissions
 from ai.client import call_ai_once, call_ai_stream_messages, AIError, AIContextOverflowError
 from ai.memory import get_memory_context, add_to_chroma, maybe_summarize
@@ -324,7 +323,7 @@ class ToolLoopV1(BotExecutor):
         temp_id = str(uuid.uuid4())
         if _resuming:
             _session_id = ctx.resume_session_id
-            await sessions.update_session_status(_session_id, "running")
+            await ctx.interaction.update_session_status(_session_id, "running")
         else:
             _session_id = str(uuid.uuid4())
             _session_config = {
@@ -334,7 +333,7 @@ class ToolLoopV1(BotExecutor):
                 "temperature": temperature,
                 "max_tokens": max_tokens,
             }
-            await sessions.create_session(
+            await ctx.interaction.create_session(
                 session_id=_session_id,
                 bot_id=bot["id"],
                 group_id=ctx.group_id,
@@ -342,17 +341,17 @@ class ToolLoopV1(BotExecutor):
                 user_message=ctx.user_message,
                 executor_id=self.executor_id,
             )
-            await sessions.append_event(_session_id, "session_start", {
+            await ctx.interaction.append_session_event(_session_id, "session_start", {
                 "user_content": user_content if isinstance(user_content, str)
                                 else json.dumps(user_content, ensure_ascii=False),
             })
-        await ctx.broadcaster.broadcast(ctx.group_id, {
+        await ctx.interaction.broadcast(ctx.group_id, {
             "type": "stream_start", "temp_id": temp_id,
             "member_id": bot["id"], "sender_name": bot["name"],
             "sender_type": "bot", "avatar_color": bot["avatar_color"],
         })
         if skills_snapshot:
-            await ctx.broadcaster.broadcast(ctx.group_id, {
+            await ctx.interaction.broadcast(ctx.group_id, {
                 "type": "skills_loaded", "temp_id": temp_id,
                 "member_id": bot["id"], "skills": skills_snapshot,
             })
@@ -387,11 +386,14 @@ class ToolLoopV1(BotExecutor):
                 messages, system_prompt, provider, model_name, temperature,
                 context_text=await _build_reinject(),
             )
-            await ctx.broadcaster.broadcast(ctx.group_id, {
+            await ctx.interaction.broadcast(ctx.group_id, {
                 "type": "compaction", "temp_id": temp_id,
                 "strategy": "pre_run",
                 "message": f"历史已预压缩（{_pre_tokens:,} tokens > {compact._PRE_RUN_TOKEN_THRESHOLD:,}）",
             })
+
+        iter_count = 0
+        tool_records: list[dict] = []
 
         async def _stream_final():
             nonlocal full_text, messages, _total_input_tokens, _total_output_tokens, _total_cache_read_tokens, _total_cache_creation_tokens
@@ -402,16 +404,16 @@ class ToolLoopV1(BotExecutor):
                     usage_out=_sf_usage,
                 ):
                     full_text += chunk
-                    await ctx.broadcaster.broadcast(ctx.group_id, {
+                    await ctx.interaction.broadcast(ctx.group_id, {
                         "type": "stream_chunk", "temp_id": temp_id, "delta": chunk,
                     })
             except AIContextOverflowError:
                 _sf_usage.clear()
                 messages = await compact.compact_conversation(
                     messages, system_prompt, provider, model_name, temperature,
-                    context_text=_build_reinject(),
+                    context_text=await _build_reinject(),
                 )
-                await ctx.broadcaster.broadcast(ctx.group_id, {
+                await ctx.interaction.broadcast(ctx.group_id, {
                     "type": "compaction", "temp_id": temp_id,
                     "strategy": "overflow_recovery",
                     "message": "流式回复溢出，已压缩后重试",
@@ -421,7 +423,7 @@ class ToolLoopV1(BotExecutor):
                     usage_out=_sf_usage,
                 ):
                     full_text += chunk
-                    await ctx.broadcaster.broadcast(ctx.group_id, {
+                    await ctx.interaction.broadcast(ctx.group_id, {
                         "type": "stream_chunk", "temp_id": temp_id, "delta": chunk,
                     })
             for _u in _sf_usage:
@@ -451,7 +453,7 @@ class ToolLoopV1(BotExecutor):
                     messages, system_prompt, provider, model_name, temperature,
                     context_text=await _build_reinject(),
                 )
-                await ctx.broadcaster.broadcast(ctx.group_id, {
+                await ctx.interaction.broadcast(ctx.group_id, {
                     "type": "compaction", "temp_id": temp_id,
                     "strategy": "overflow_recovery",
                     "message": "最终回复溢出，已压缩后重试",
@@ -465,7 +467,7 @@ class ToolLoopV1(BotExecutor):
             approved_text = await _before_finalize_hook(
                 draft, snap, system_prompt, bf_config,
                 provider, model_name, temperature, max_tokens,
-                ctx.broadcaster, ctx.group_id, temp_id, ctx.user_message,
+                ctx.interaction, ctx.group_id, temp_id, ctx.user_message,
                 usage_out=_bf_usage,
             )
             for _u in _bf_usage:
@@ -476,7 +478,7 @@ class ToolLoopV1(BotExecutor):
             full_text = approved_text
             chunk_size = 20
             for i in range(0, len(approved_text), chunk_size):
-                await ctx.broadcaster.broadcast(ctx.group_id, {
+                await ctx.interaction.broadcast(ctx.group_id, {
                     "type": "stream_chunk", "temp_id": temp_id,
                     "delta": approved_text[i:i+chunk_size],
                 })
@@ -540,7 +542,7 @@ class ToolLoopV1(BotExecutor):
                             messages, system_prompt, provider, _iter_model, temperature,
                             context_text=await _build_reinject(),
                         )
-                        await ctx.broadcaster.broadcast(ctx.group_id, {
+                        await ctx.interaction.broadcast(ctx.group_id, {
                             "type": "compaction", "temp_id": temp_id,
                             "strategy": "overflow_recovery",
                             "message": "上下文溢出，已自动压缩并重试",
@@ -592,12 +594,12 @@ class ToolLoopV1(BotExecutor):
                         )
                         if _run_parallel:
                             for call in calls:
-                                await ctx.broadcaster.broadcast(ctx.group_id, {
+                                await ctx.interaction.broadcast(ctx.group_id, {
                                     "type": "tool_call", "temp_id": temp_id,
                                     "tool": call["name"], "args": call["arguments"],
                                 })
                                 # WAL: write tool_call BEFORE parallel execution
-                                await sessions.append_event(_session_id, "tool_call", {
+                                await ctx.interaction.append_session_event(_session_id, "tool_call", {
                                     "tool_call_id": call["id"],
                                     "tool_name": call["name"],
                                     "arguments": call.get("arguments", {}),
@@ -607,7 +609,7 @@ class ToolLoopV1(BotExecutor):
                                 for c in calls
                             ])
                             for call, tool_result in zip(calls, raw_results):
-                                await sessions.append_event(_session_id, "tool_result", {
+                                await ctx.interaction.append_session_event(_session_id, "tool_result", {
                                     "tool_call_id": call["id"],
                                     "tool_name": call["name"],
                                     "result": tool_result,
@@ -628,9 +630,9 @@ class ToolLoopV1(BotExecutor):
                                     "content": tool_result,
                                 })
                                 # Point 5 & Point 2: Shadow Persistence (Result)
-                                await sessions.save_snapshot(_session_id, messages)
+                                await ctx.interaction.save_session_snapshot(_session_id, messages)
                                 
-                                await ctx.broadcaster.broadcast(ctx.group_id, {
+                                await ctx.interaction.broadcast(ctx.group_id, {
                                     "type": "tool_result", "temp_id": temp_id,
                                     "tool": call["name"], "result": tool_result[:300],
                                 })
@@ -638,11 +640,11 @@ class ToolLoopV1(BotExecutor):
                             # Serial execution — full post-processing per call
                             # (skill side-effects, draft sentinel, fork, etc.)
                             for call in calls:
-                                await ctx.broadcaster.broadcast(ctx.group_id, {
+                                await ctx.interaction.broadcast(ctx.group_id, {
                                     "type": "tool_call", "temp_id": temp_id,
                                     "tool": call["name"], "args": call["arguments"],
                                 })
-                                await sessions.append_event(_session_id, "tool_call", {
+                                await ctx.interaction.append_session_event(_session_id, "tool_call", {
                                     "tool_call_id": call["id"],
                                     "tool_name": call["name"],
                                     "arguments": call.get("arguments", {}),
@@ -650,7 +652,7 @@ class ToolLoopV1(BotExecutor):
                                 tool_result = await tool_executor.execute(
                                     call["name"], call["arguments"], context=execution_ctx
                                 )
-                                await sessions.append_event(_session_id, "tool_result", {
+                                await ctx.interaction.append_session_event(_session_id, "tool_result", {
                                     "tool_call_id": call["id"],
                                     "tool_name": call["name"],
                                     "result": tool_result,
@@ -677,14 +679,14 @@ class ToolLoopV1(BotExecutor):
                                                 f"[系统] 技能「{skill_learns}」声明了 learns: true。"
                                                 f"请将本次执行的关键发现、规律或改进点总结为一个新技能，"
                                                 f"用 write_file 写入 `skills/learned/draft/{skill_learns}-learned.md`，"
-                                                f"使用标准 frontmatter（name/description/layer: learned/status: draft）。"
+                                                f"使用 standard frontmatter（name/description/layer: learned/status: draft）。"
                                             ),
                                         })
                                     # context: fork → run skill in isolated sub-agent AI call
                                     if tool_result == "__SKILL_FORK__":
                                         fork_info = execution_ctx.pop("skill_fork", {})
                                         fork_name = fork_info.get("name", "unknown")
-                                        await ctx.broadcaster.broadcast(ctx.group_id, {
+                                        await ctx.interaction.broadcast(ctx.group_id, {
                                             "type": "skill_fork_start", "temp_id": temp_id,
                                             "member_id": bot["id"], "skill_name": fork_name,
                                         })
@@ -697,7 +699,7 @@ class ToolLoopV1(BotExecutor):
                                         fork_model = fork_info.get("model") or model_name
                                         _fork_usage: list = []
                                         child_sid = str(uuid.uuid4())
-                                        await sessions.append_event(_session_id, "child_fork", {
+                                        await ctx.interaction.append_session_event(_session_id, "child_fork", {
                                             "child_session_id": child_sid,
                                             "skill_name": fork_name,
                                         })
@@ -708,7 +710,7 @@ class ToolLoopV1(BotExecutor):
                                             tool_schemas=fork_schemas,
                                             usage_out=_fork_usage,
                                         )
-                                        await sessions.append_event(_session_id, "child_join", {
+                                        await ctx.interaction.append_session_event(_session_id, "child_join", {
                                             "child_session_id": child_sid,
                                             "skill_name": fork_name,
                                             "result": tool_result,
@@ -718,7 +720,7 @@ class ToolLoopV1(BotExecutor):
                                             _total_output_tokens += _u.get("output_tokens", 0)
                                             _total_cache_read_tokens += _u.get("cache_read_tokens", 0)
                                             _total_cache_creation_tokens += _u.get("cache_creation_tokens", 0)
-                                        await ctx.broadcaster.broadcast(ctx.group_id, {
+                                        await ctx.interaction.broadcast(ctx.group_id, {
                                             "type": "skill_fork_end", "temp_id": temp_id,
                                             "member_id": bot["id"], "skill_name": fork_name,
                                             "result": tool_result[:300],
@@ -729,7 +731,7 @@ class ToolLoopV1(BotExecutor):
                                         and tool_result.startswith("__DRAFT_WRITTEN__:")):
                                     skill_name = tool_result.split(":", 1)[1]
                                     display_result = f"已写入草稿技能「{skill_name}」，等待用户审批后生效。"
-                                    await ctx.broadcaster.broadcast(ctx.group_id, {
+                                    await ctx.interaction.broadcast(ctx.group_id, {
                                         "type": "skill_draft_added",
                                         "member_id": bot["id"],
                                         "skill_name": skill_name,
@@ -747,9 +749,9 @@ class ToolLoopV1(BotExecutor):
                                     "content": display_result,
                                 })
                                 # Point 5 & Point 2: Shadow Persistence (Result)
-                                await sessions.save_snapshot(_session_id, messages)
+                                await ctx.interaction.save_session_snapshot(_session_id, messages)
 
-                                await ctx.broadcaster.broadcast(ctx.group_id, {
+                                await ctx.interaction.broadcast(ctx.group_id, {
                                     "type": "tool_result", "temp_id": temp_id,
                                     "tool": call["name"], "result": display_result[:300],
                                 })
@@ -810,25 +812,27 @@ class ToolLoopV1(BotExecutor):
 
         # Sub-agents: close the stream animation then return without DB/memory ops
         if ctx.spawn_depth > 0:
-            await ctx.broadcaster.broadcast(ctx.group_id, {
+            await ctx.interaction.broadcast(ctx.group_id, {
                 "type": "stream_end", "temp_id": temp_id, "id": None,
                 "member_id": bot["id"], "sender_name": bot["name"],
                 "preview": full_text[:100], "created_at": "",
             })
-            await sessions.update_session_status(_session_id, "completed")
+            await ctx.interaction.update_session_status(_session_id, "completed")
             return ExecutionResult(full_text=full_text, msg_id=None)
 
-        async with get_db() as db:
-            msg_id = await save_message(
-                db, ctx.group_id, bot["id"], full_text,
-                input_tokens=_total_input_tokens or None,
-                output_tokens=_total_output_tokens or None,
-                cache_read_tokens=_total_cache_read_tokens or None,
-                cache_creation_tokens=_total_cache_creation_tokens or None,
-            )
-            recent = await get_messages(db, ctx.group_id)
+        msg_id = await ctx.interaction.save_message(
+            ctx.group_id, bot["id"], full_text,
+            input_tokens=_total_input_tokens or None,
+            output_tokens=_total_output_tokens or None,
+            cache_read_tokens=_total_cache_read_tokens or None,
+            cache_creation_tokens=_total_cache_creation_tokens or None,
+        )
+        # Use get_messages from DB only for final broadcast timestamp if needed, 
+        # or simplify interaction.save_message to return it. 
+        # For now, we assume save_message handles DB context.
+        recent = [] # Simplified as we already saved it
 
-        await ctx.broadcaster.broadcast(ctx.group_id, {
+        await ctx.interaction.broadcast(ctx.group_id, {
             "type": "stream_end", "temp_id": temp_id, "id": msg_id,
             "member_id": bot["id"], "sender_name": bot["name"],
             "preview": full_text[:100],
@@ -842,7 +846,7 @@ class ToolLoopV1(BotExecutor):
         asyncio.create_task(add_to_chroma(msg_id, full_text, bot.get("role") or "", bot["id"]))
         asyncio.create_task(maybe_summarize(ctx.group_id, bot["id"], bot.get("role") or bot["name"], [bot["id"]]))
         asyncio.create_task(compact.maybe_compact_db_history(
-            ctx.group_id, bot["id"], provider, model_name, temperature, ctx.broadcaster
+            ctx.group_id, bot["id"], provider, model_name, temperature, ctx.interaction
         ))
         asyncio.create_task(append_log(
             bot["id"], full_text,
@@ -864,5 +868,5 @@ class ToolLoopV1(BotExecutor):
                 executor=self.executor_id,
             ))
 
-        await sessions.update_session_status(_session_id, "completed")
+        await ctx.interaction.update_session_status(_session_id, "completed")
         return ExecutionResult(full_text=full_text, msg_id=msg_id)

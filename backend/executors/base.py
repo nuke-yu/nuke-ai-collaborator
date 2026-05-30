@@ -52,6 +52,47 @@ class PluginManifest:
         }
 
 
+class InteractionAdapter(ABC):
+    """
+    Interface for side-effect dispatching (Point 3: Decoupling).
+    Abstracts DB storage, UI broadcasting, and session event logging.
+    """
+    @abstractmethod
+    async def create_session(self, **kwargs):
+        """Create a new agent execution session."""
+        pass
+
+    @abstractmethod
+    async def update_session_status(self, session_id: str, status: str):
+        """Update the status of a session (e.g., 'running', 'completed')."""
+        pass
+
+    @abstractmethod
+    async def broadcast(self, group_id: int, payload: dict):
+        """Broadcast a message to the UI (WebSocket)."""
+        pass
+
+    @abstractmethod
+    async def save_message(self, group_id: int, member_id: int, content: str, **kwargs) -> int:
+        """Save a message to the chat history database."""
+        pass
+
+    @abstractmethod
+    async def append_session_event(self, session_id: str, event_type: str, payload: dict):
+        """Log an audit event for the current execution session."""
+        pass
+
+    @abstractmethod
+    async def save_session_snapshot(self, session_id: str, messages: list):
+        """Persist a full context snapshot for crash recovery."""
+        pass
+
+    @abstractmethod
+    async def update_session_tokens(self, session_id: str, **usage):
+        """Add token usage metrics to the session."""
+        pass
+
+
 @dataclass
 class ExecutionContext:
     bot: dict
@@ -61,7 +102,8 @@ class ExecutionContext:
     history: list[dict]
     all_bots: list[dict]
     all_members: list[dict]
-    broadcaster: Any          # ws_manager.ConnectionManager
+    broadcaster: Any          # (DEPRECATED: Use interaction.broadcast instead)
+    interaction: InteractionAdapter = None  # Point 3: Side-effect dispatcher
     workflow_suffix: str = ""
     group_name: str = ""
     group_announcement: str = ""
