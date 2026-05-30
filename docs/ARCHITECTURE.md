@@ -231,7 +231,34 @@ QA Bot    → 读 BOARD.md 找「已完成」→ 验收 → 更新状态「✅ �
 
 ---
 
-## 九、 架构演进路线图 (Phase-based Roadmap)
+## 九、 能力装配系统：Traits vs. Skills (Feature Mounting)
+
+系统采用“静态特征”与“动态技能”分离的双轨制能力装配架构，实现了能力的高复用与低 Token 消耗。
+
+### 1. 核心概念区分
+*   **Traits (特征能力/内功)**：
+    *   *定义*：被动的、永远生效的行为准则或规范（如“Python 开发规范”、“Jira 协作约定”）。
+    *   *机制*：在前端 UI 的“特征”面板勾选。系统在运行时从 `system/traits/*.md` 原子池中提取内容，**静态缝合**到 Bot 的 System Prompt 中。
+    *   *优势*：避免重复编写庞大的 Prompt，实现“积木式” Bot 组装。
+*   **Skills (业务技能/招式)**：
+    *   *定义*：主动的、多步骤的复杂工作流或脚本（如“代码审查”、“执行单元测试”）。
+    *   *机制*：通过后端的 `run_skill` 工具**按需懒加载 (Lazy Load)**。系统只向模型提示可用技能的名称，不注入全文，直到被显式调用。
+    *   *优势*：极大节省上下文窗口，Bot 可以拥有成百上千的技能而不“失忆”。
+
+### 2. 基于文件树的技能级联解析 (Cascading Directory Resolution)
+Skill 不需要手动绑定到 Bot，而是采用**“代码即配置 (Configuration as Code)”**的物理目录覆盖策略。系统按以下优先级叠加载入 `.md` 技能文件：
+1.  **Group 级** (`group_{id}/shared/skills/`)：项目专有 SOP，优先级最高。
+2.  **Role 级** (`roles/{role_name}/skills/`)：岗位通用的专业能力。
+3.  **System 级** (`system/skills/`)：全员通用工具。
+4.  **Learned 级** (`bot_{id}/skills/learned/`)：Bot 在对话中自我总结的独家秘籍。
+
+### 3. 热更新与 UI 协同 (Hot Reload via UI)
+得益于工作区 (Workspace) 面板的设计，系统的能力赋能是**零停机**的：
+用户只需在前端文件树面板找到对应的层级目录（如 `roles/qa/skills/`），新建一个 `.md` 文件并保存。下一秒的对话中，所有 QA 角色的 Bot 将立刻通过 `list_skills_all()` 扫描到并掌握该新技能。
+
+---
+
+## 十、 架构演进路线图 (Phase-based Roadmap)
 
 基于研发团队协作背景，架构优化的优先级分为三个阶段：
 
