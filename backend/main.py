@@ -93,10 +93,15 @@ async def list_plugins():
     return registry.all_plugins()
 
 
+@app.get("/api/plugins/health")
+async def plugins_health():
+    return {"loaded": list(registry._registry.keys()), "failures": registry.failures()}
+
+
 @app.post("/api/plugins/reload")
 async def reload_plugins():
     loaded = registry.reload()
-    return {"loaded": loaded}
+    return {"loaded": loaded, "failures": registry.failures()}
 
 
 @app.get("/api/config")

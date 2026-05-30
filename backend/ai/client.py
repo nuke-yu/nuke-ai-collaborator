@@ -1,8 +1,11 @@
 import asyncio
 import json
+import logging
 import httpx
 from contextlib import asynccontextmanager
 from config import get_key
+
+logger = logging.getLogger(__name__)
 
 # DFT-033: one process-wide, connection-pooled AsyncClient instead of a fresh
 # httpx.AsyncClient() per call. Per-call clients did a new TLS handshake every
@@ -127,7 +130,8 @@ async def call_ai(system_prompt: str, history: list, user_message: str,
     except httpx.HTTPStatusError as e:
         raise AIError(f"AI 服务异常（{e.response.status_code}）")
     except Exception as e:
-        raise AIError(f"AI 调用失败：{str(e)}")
+        logger.error("AI call failed", exc_info=True)
+        raise AIError("AI 调用失败，请稍后重试") from e
 
 async def _stream_openai_compat(url: str, api_key: str, model: str, messages: list,
                                 temperature: float = 0.7, max_tokens: int = 4096,
@@ -510,7 +514,8 @@ async def call_ai_once(
             except httpx.HTTPStatusError as e:
                 raise AIError(f"AI 服务异常（{e.response.status_code}）")
             except Exception as e:
-                raise AIError(f"AI 调用失败：{str(e)}")
+                logger.error("AI call failed", exc_info=True)
+                raise AIError("AI 调用失败，请稍后重试") from e
 
     raise AIError(f"API 限流，已重试 {_AI_RETRY_MAX} 次仍失败") from last_error
 
@@ -555,7 +560,8 @@ async def call_ai_stream_messages(
     except httpx.HTTPStatusError as e:
         raise AIError(f"AI 服务异常（{e.response.status_code}）")
     except Exception as e:
-        raise AIError(f"AI 调用失败：{str(e)}")
+        logger.error("AI call failed", exc_info=True)
+        raise AIError("AI 调用失败，请稍后重试") from e
 
 
 def _text_only(content: "str | list") -> str:
@@ -614,4 +620,5 @@ async def call_ai_stream(system_prompt: str, history: list, user_message: "str |
     except httpx.HTTPStatusError as e:
         raise AIError(f"AI 服务异常（{e.response.status_code}），请检查 API Key 配置")
     except Exception as e:
-        raise AIError(f"AI 调用失败：{str(e)}")
+        logger.error("AI call failed", exc_info=True)
+        raise AIError("AI 调用失败，请稍后重试") from e

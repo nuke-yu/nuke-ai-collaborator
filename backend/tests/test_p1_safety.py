@@ -505,7 +505,7 @@ class TestReactV1RulesetWiring(unittest.IsolatedAsyncioTestCase):
              patch(m + "load_context_files", new=AsyncMock(return_value=[])), \
              patch(m + "format_context_blocks", return_value=""), \
              patch(m + "list_skills_all", return_value=[]), \
-             patch(m + "get_db", return_value=fake_db), \
+             patch(m + "write_connect", return_value=fake_db), \
              patch(m + "save_message", new=AsyncMock(return_value=1)), \
              patch(m + "get_messages", new=AsyncMock(return_value=[{"created_at": "now"}])), \
              patch(m + "add_to_chroma", new=AsyncMock()), \
