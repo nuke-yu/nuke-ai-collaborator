@@ -238,9 +238,9 @@ class ToolLoopV1(BotExecutor):
         always_skills = []
         skills_xml = ""
         if self.manifest.workspace.skill_discovery:
-            raw_skills = list_skills_all(bot["id"], group_id=ctx.group_id,
-                                         role=bot.get("role"))
+            raw_skills = await list_skills_all(bot["id"], group_id=ctx.group_id, role=bot.get("role"))
             lazy_candidates = [
+
                 s for s in raw_skills
                 if not s.get("always")
                 and s.get("status", "active") != "disabled"
@@ -259,8 +259,8 @@ class ToolLoopV1(BotExecutor):
                     inj = "metadata" if s["name"] in injected_names else None
                     skills_snapshot.append({**s, "injected": inj})
             if any(s.get("always") for s in raw_skills if s.get("status", "active") != "disabled"):
-                always_skills = load_always_skills(bot["id"], ctx.group_id,
-                                                   bot.get("role"))
+                always_skills = await load_always_skills(bot["id"], ctx.group_id, bot.get("role"))
+
 
         # Build context prefix (moved logic to a helper for dynamic refreshing)
         async def _get_fresh_context_prefix():

@@ -1,3 +1,4 @@
+import asyncio
 from pathlib import Path
 
 from .constants import WORKSPACE_ROOT, SYSTEM_SKILLS_ROOT, ROLES_ROOT, bot_ws
@@ -57,11 +58,15 @@ def list_skills(bot_id: int) -> list[dict]:
     return result
 
 
-def list_skills_all(bot_id: int, group_id: int | None = None,
-                    role: str | None = None) -> list[dict]:
-    """Four-layer scan: L1→L2→L3→L4→personal. Later layers override earlier.
-    Each record carries layer / status / injected fields.
-    """
+async def list_skills_all(bot_id: int, group_id: int | None = None,
+                         role: str | None = None) -> list[dict]:
+    """Asynchronous wrapper for four-layer scan to avoid blocking the event loop."""
+    return await asyncio.to_thread(_list_skills_all_sync, bot_id, group_id, role)
+
+
+def _list_skills_all_sync(bot_id: int, group_id: int | None = None,
+                        role: str | None = None) -> list[dict]:
+    """Internal synchronous implementation of four-layer scan."""
     merged: dict[str, dict] = {}
 
     # L1 System

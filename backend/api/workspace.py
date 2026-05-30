@@ -71,7 +71,7 @@ async def get_skills(member_id: int, group_id: int | None = None):
         bot = await get_member(db, member_id)
     if not bot or bot["type"] != "bot":
         raise HTTPException(404, "Bot not found")
-    skills = list_skills_all(member_id, group_id=group_id, role=bot.get("role"))
+    skills = await list_skills_all(member_id, group_id=group_id, role=bot.get("role"))
     return {"skills": skills}
 
 
@@ -110,7 +110,7 @@ async def test_skill(member_id: int, skill_name: str, body: dict):
     if not message:
         raise HTTPException(400, "message required")
     group_id = body.get("group_id")
-    skills = list_skills_all(member_id, group_id=group_id, role=bot.get("role"))
+    skills = await list_skills_all(member_id, group_id=group_id, role=bot.get("role"))
     skill_info = next((s for s in skills if s["name"] == skill_name), None)
     if not skill_info:
         raise HTTPException(404, f"技能 '{skill_name}' 不存在")

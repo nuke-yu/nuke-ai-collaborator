@@ -18,10 +18,10 @@ def _skills_dir_for_layer(layer: str, bot_id: int,
     return bot_ws(bot_id) / "skills"
 
 
-def load_always_skills(bot_id: int, group_id: int | None = None,
+async def load_always_skills(bot_id: int, group_id: int | None = None,
                        role: str | None = None) -> list[dict]:
     """Return full content for skills with always: true across all four layers."""
-    skills = list_skills_all(bot_id, group_id=group_id, role=role)
+    skills = await list_skills_all(bot_id, group_id=group_id, role=role)
     result = []
     for skill in skills:
         if not skill.get("always"):
