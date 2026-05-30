@@ -2,15 +2,17 @@
 
 ## 进度总览 (Progress Dashboard)
 
-> 更新：2026-05-30 · 全量 **57** 项，已修 **43**，待修 **14**
+> 更新：2026-05-30 · 全量 **57** 项，已修 **51**，待修 **6**
 
 | 批次 | 范围 | 总数 | 已修 | 待修 |
 | :--- | :--- | :---: | :---: | :---: |
 | 历史缺陷 | DFT-001 ~ 016 | 16 | 16 ✅ | 0 |
-| 架构师 Review | DFT-017 ~ 057 | 41 | 27 ✅ | 14 |
-| **合计** | — | **57** | **43** | **14** |
+| 架构师 Review | DFT-017 ~ 057 | 41 | 35 ✅ | 6 |
+| **合计** | — | **57** | **51** | **6** |
 
-架构师 Review 按严重度：🔴 Critical 7（已修 7）· 🟠 High 12（已修 12）· 🟡 Medium 17 · 🟢 Low 5（已修 5）。
+架构师 Review 按严重度：🔴 Critical 7（已修 7）· 🟠 High 12（已修 12）· 🟡 Medium 17（已修 11）· 🟢 Low 5（已修 5）。
+
+> 剩余 6 项均为 🟡 Medium：DFT-034（tool_result is_error 硬编码）· DFT-037（三 executor 生命周期漂移）· DFT-039（调度器 misfire 静默丢任务）· DFT-044（权限 `_matches` 嵌套参数失配可绕）· DFT-047（ws broadcast 递归改 dict 无锁）· DFT-048（竞速 loser token 不计成本）。
 
 ### 状态索引（DFT-017 ~ 052，点 ID 可跳转下方明细）
 
@@ -45,7 +47,7 @@
 | DFT-043 | 🟡 | ✅已修复 | AI 记忆 `try/except: pass` 静默失效 |
 | DFT-044 | 🟡 | ⛔未修复 | 权限 `_matches` 嵌套参数失配可绕 |
 | DFT-045 | 🟡 | ✅已修复 | **[架构重构]** 技能系统的“手写解析器/冗余”问题已被 Stage 4 的 **Trait-based Skill Mounting (原子特征挂载)** 降维打击。系统现在支持细粒度的 Traits UI 组装，降低了大型复合 Skill 的维护压力。 |
-| DFT-046 | 🟡 | ⛔未修复 | skill 发现同步 IO 阻塞事件循环 |
+| DFT-046 | 🟡 | ✅已修复 | skill 发现同步 IO 阻塞事件循环 |
 | DFT-047 | 🟡 | ⛔未修复 | ws broadcast 递归改 dict 无锁 |
 | DFT-048 | 🟡 | ⛔未修复 | 竞速 loser token 不计入成本 |
 | DFT-049 | 🟢 | ✅已修复 | 插件 import 错误静默吞 |
@@ -134,7 +136,7 @@
 | **DFT-043** ✅ | **AI 记忆**<br>[ai/memory.py](backend/ai/memory.py#L99) | 🟡 | `maybe_summarize`/`get_memory_context` 整体 `try/except: pass`。 | 记忆压缩静默失效无任何日志，生产几乎无法排障。 | **已修复**：新增模块级 `log = logging.getLogger(__name__)`；`maybe_summarize` 的兜底 `except` 改 `log.exception("maybe_summarize failed (bot_id=…, group_id=…)")`，`get_memory_context` 加载历史摘要的 `except` 改 `log.exception(...)`——均记录完整 traceback 但**不阻断主流程**（记忆是增强项，失败应可排障而非吞掉）。`_query_sync` 的 chroma `except` 保持返回 `[]`（语义检索降级合理，但后续可补日志）。单测 `tests/test_memory.py` 新增 `TestMemorySilentFailureLogging`（2 例：patch `get_db` 抛错，断言 `maybe_summarize`/`get_memory_context` 经 `assertLogs("ai.memory", ERROR)` 记录异常详情且不抛、`get_memory_context` 仍返回 str）；既有摘要生命周期测试全绿。 |
 | **DFT-044** | **权限引擎**<br>[engine.py](backend/permissions/engine.py#L28) | 🟡 | `_matches` 只对顶层 `arguments.values()` 的 `str(v)` 做 fnmatch；dict/list 被转成 Python repr。 | 针对命令原文写的 deny 规则对嵌套参数静默失配 → 可被参数结构绕过。 | 对 dict/list 递归展开或匹配其 JSON 序列化串；`run_shell` 专门匹配 `command` 字段原文。 |
 | **DFT-045** | **技能系统**<br>[metadata.py](backend/skills/metadata.py#L18) | 🟡 | 手写非 YAML 解析器（按首个 `:` 切分），不支持 block scalar/含冒号值/flow list。 | 标准 YAML 的 frontmatter 字段被静默丢弃或截断，`allowed-tools` 解析可能误判。 | 改用 `yaml.safe_load`（无 RCE 风险），删手写解析器。 |
-| **DFT-046** | **技能系统**<br>[discovery.py](backend/skills/discovery.py) | 🟡 | 每条消息构建 skill 列表时在事件循环上同步 `iterdir/exists/read_text`（五层）。 | skill 多/文件大时阻塞整个事件循环。 | 文件 IO 用 `asyncio.to_thread` 包裹；或 watcher 维护内存缓存，请求路径只读缓存。 |
+| **DFT-046** ✅ | **技能系统**<br>[discovery.py](backend/skills/discovery.py) | 🟡 | 每条消息构建 skill 列表时在事件循环上同步 `iterdir/exists/read_text`（五层）。 | skill 多/文件大时阻塞整个事件循环。 | **已修复**（提交 `71c65a7`）：`discovery.py` 把同步文件遍历抽成 `_list_skills_all_sync`，对外暴露 `async def list_skills_all(...)` 经 `asyncio.to_thread` 在线程池执行，不再阻塞事件循环；所有调用方（`tool_loop_v1.py`、`api/workspace.py`、`skills/loader.py`）已改 `await`。 |
 | **DFT-047** | **连接管理**<br>[ws_manager.py](backend/ws_manager.py#L30) | 🟡 | `broadcast` 内调 `disconnect`（改 dict）并递归调 `broadcast` 做 presence，无锁。 | 可能深递归与重复变更；并发 connect/broadcast 丢失刚加入的连接。 | presence 改非递归（先收集 dead，断开后单次广播）；`connections` 加 `asyncio.Lock`。 |
 | **DFT-048** | **编排（竞速）**<br>[orchestrator.py](backend/core/orchestrator.py#L303) | 🟡 | 竞速路径只记 winner 的 token，被 cancel 的 loser 已消耗的 provider token 永不计入。 | 成本按竞速并发数低估。 | 取消 loser 前累加其已用 token；或在 client 层按请求记账。 |
 | **DFT-049** ✅ | **插件注册**<br>[registry.py](backend/executors/registry.py#L16) | 🟢 | 插件 import 错误被静默吞只留日志；全失败时 `next(iter(_registry.values()))` 抛 `StopIteration`。 | 整个 bot 系统可零 executor 启动，运行时才暴雷。 | **已修复**：`_load_file` 失败记入模块级 `_failures`（含异常类型）并 `logger.error(exc_info=True)` 保留 traceback，成功时清除该文件条目；`discover()` 清空 `_failures`；新增 `failures()` 访问器，经新 `GET /api/plugins/health`（`{loaded, failures}`）及 `/api/plugins/reload` 响应暴露健康状态；`get()` 空注册表时抛明确 `RuntimeError`（列出失败明细）而非 `StopIteration`。`/api/plugins` 保持原数组形态不破坏前端 `MemberList.jsx`。新增 `tests/test_registry_health.py`（3 用例）。 |

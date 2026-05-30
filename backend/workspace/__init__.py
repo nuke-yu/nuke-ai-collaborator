@@ -53,8 +53,26 @@ def _safe_path(workspace: Path, relative: str) -> Path | None:
     return None
 
 
-async def read_file(bot_id: int, path: str) -> str:
+_SHARED_FILES = {"BOARD.md", "SPEC.md", "API_CONTRACT.md"}
+
+
+def _get_effective_ws(bot_id: int, path_str: str) -> Path:
+    """
+    Point 3: Group File Redirection.
+    Redirect shared files to group's shared folder; others to bot's private folder.
+    """
     ws = bot_workspace(bot_id)
+    if path_str in _SHARED_FILES or path_str.startswith("deliverables/"):
+        from db import connect_sync
+        with connect_sync() as conn:
+            row = conn.execute("SELECT group_id FROM members WHERE id = ?", (bot_id,)).fetchone()
+            if row:
+                return group_ws(row[0])
+    return ws
+
+
+async def read_file(bot_id: int, path: str) -> str:
+    ws = _get_effective_ws(bot_id, path)
     p = _safe_path(ws, path)
     if p is None:
         return f"[错误] 非法路径: {path}"
@@ -125,7 +143,7 @@ def read_file_history_version(bot_id: int, path: str, ts: str) -> str:
 
 
 async def write_file(bot_id: int, path: str, content: str) -> str:
-    ws = bot_workspace(bot_id)
+    ws = _get_effective_ws(bot_id, path)
     p = _safe_path(ws, path)
     if p is None:
         return f"[错误] 非法路径: {path}"
@@ -136,6 +154,27 @@ async def write_file(bot_id: int, path: str, content: str) -> str:
     lock = _get_path_lock(p)
     async with lock:
         def _do_write() -> str:
+            # Point 1: Emit CodeCommitted event if a code file is written
+            # (Heuristic: file in shared/ and has code suffix)
+            is_shared = ws.parent.name.startswith("group_")
+            if is_shared and p.suffix in {".py", ".js", ".ts", ".go", ".java"}:
+                from bus import publish
+                from bus.events import CodeCommitted
+                # We need group_id and ticket_id. 
+                # For this simple implementation, we'll try to find ticket_id in DB 
+                # or just use a generic 'auto' id.
+                from db import connect_sync
+                with connect_sync() as conn:
+                    row = conn.execute("SELECT group_id FROM members WHERE id = ?", (bot_id,)).fetchone()
+                    if row:
+                         asyncio.create_task(publish(CodeCommitted(
+                             group_id=row[0], 
+                             ticket_id="auto", # Ideally passed via context
+                             files=[path], 
+                             commit_msg=f"Auto-commit by Bot {bot_id}",
+                             author_id=bot_id
+                         )))
+
             # Redirect learned/active writes → learned/draft (requires user approval)
             if rel.startswith(_LEARNED_ACTIVE):
                 draft_path = ws / _LEARNED_DRAFT / p.name

@@ -6,7 +6,7 @@ from bus.events import (
     StreamStart, StreamChunk, StreamError, StreamEnd,
     Message, Read, Typing, Error,
     SteerQueued, FollowupStart,
-    TicketCreated,  # TODO 1.3
+    TicketCreated, CodeCommitted,  # Point 1 & 4
 )
 
 ...
@@ -52,16 +52,62 @@ async def init_event_handlers():
             all_bots, all_members,
             group_name=group_info.get("name", ""),
             group_announcement=group_info.get("announcement", ""),
+            active_ticket_id=ticket_id,
+        )
+
+    async def _on_code_committed(ev: dict):
+        group_id = ev["group_id"]
+        files = ev["files"]
+        ticket_id = ev["ticket_id"]
+        
+        async with get_db() as db:
+            all_members = await get_members(db, group_id)
+            group_info = await get_group(db, group_id) or {}
+
+        all_bots = [m for m in all_members if m["type"] == "bot"]
+        # Find QA bots
+        qa_bots = [b for b in all_bots if (b.get("role") or "").lower() == "qa"]
+        
+        if not qa_bots:
+            logger.warning("CodeCommitted: no QA bots found in group %d", group_id)
+            return
+
+        target_bot = qa_bots[0]
+        file_list = ", ".join(files)
+        content = f"[系统通知] 发现代码提交：{file_list}。请针对 Ticket {ticket_id} 执行本地测试流水线并反馈结果。"
+        sender = {"id": 0, "name": "系统调度", "type": "system"}
+        
+        async with get_db() as db_m:
+            recent = await get_messages(db_m, group_id)
+            
+        logger.info("CodeCommitted: auto-dispatching QA bot %s for files %s", target_bot["name"], file_list)
+        
+        await dispatch_bots(
+            group_id, [target_bot], content, sender, recent,
+            all_bots, all_members,
+            group_name=group_info.get("name", ""),
+            group_announcement=group_info.get("announcement", ""),
+            active_ticket_id=ticket_id,
         )
 
     async def _listener_loop():
-        sub = bus.subscribe(TicketCreated)
-        async with sub:
-            async for ev in sub:
-                try:
-                    await _on_ticket_created(ev)
-                except Exception:
-                    logger.exception("Error in TicketCreated handler")
+        # Subscribe to multiple domain events
+        sub_tc = bus.subscribe(TicketCreated)
+        sub_cc = bus.subscribe(CodeCommitted)
+        
+        async def handle_tc():
+            async with sub_tc:
+                async for ev in sub_tc:
+                    try: await _on_ticket_created(ev)
+                    except Exception: logger.exception("Error in TicketCreated handler")
+
+        async def handle_cc():
+            async with sub_cc:
+                async for ev in sub_cc:
+                    try: await _on_code_committed(ev)
+                    except Exception: logger.exception("Error in CodeCommitted handler")
+
+        await asyncio.gather(handle_tc(), handle_cc())
 
     asyncio.create_task(_listener_loop())
 from ai.client import call_ai, call_ai_stream, call_ai_once, AIError

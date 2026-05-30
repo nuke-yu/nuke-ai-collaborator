@@ -1,6 +1,6 @@
 import aiosqlite
 import os
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "chat.db")
 
@@ -18,6 +18,17 @@ async def connect(path: str | None = None):
         yield conn
     finally:
         await conn.close()
+
+
+@contextmanager
+def connect_sync(path: str | None = None):
+    """Synchronous connection for low-frequency lookups (e.g. workspace redirection)."""
+    import sqlite3
+    conn = sqlite3.connect(path if path is not None else DB_PATH)
+    try:
+        yield conn
+    finally:
+        conn.close()
 
 
 def get_db():
@@ -39,7 +50,7 @@ from db.queries import (       # noqa: E402
 )
 
 __all__ = [
-    "DB_PATH", "get_db", "connect", "write_connect", "aclose_writer", "init_db",
+    "DB_PATH", "get_db", "connect", "connect_sync", "write_connect", "aclose_writer", "init_db",
     "get_group", "get_members", "get_member",
     "get_messages", "get_all_messages", "get_member_stats",
     "save_message", "update_member_setting", "clear_bot_context",
