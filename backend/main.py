@@ -25,6 +25,7 @@ from executors import registry
 from workspace import init_all_bots, init_group_workspace
 from permissions.routes import router as permissions_router
 from skills.watcher import watcher
+from ai import client as ai_client
 import scheduler
 import sessions
 import os
@@ -58,6 +59,7 @@ async def lifespan(app: FastAPI):
     scheduler.stop()
     adapter_task.cancel()
     watcher.stop()
+    await ai_client.aclose_client()
 
 
 app = FastAPI(lifespan=lifespan)

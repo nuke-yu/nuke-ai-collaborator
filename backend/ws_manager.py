@@ -1,5 +1,13 @@
+import asyncio
 from fastapi import WebSocket
 from typing import Dict, List
+
+# DFT-030: cap how long a single client's send_json may block the shared
+# broadcast loop. A half-open TCP socket makes send_json await indefinitely,
+# stalling event delivery for the whole app (the bus adapter fans out through
+# here serially). On timeout we treat the client as dead and disconnect it.
+_SEND_TIMEOUT = 10.0
+
 
 class WSManager:
     def __init__(self):
@@ -34,7 +42,9 @@ class WSManager:
         # Use a list snapshot (shallow copy) to avoid RuntimeError if connections is modified concurrently (DFT-015)
         for ws, _ in list(self.connections[group_id]):
             try:
-                await ws.send_json(message)
+                # wait_for caps a slow/half-open client; on timeout the send is
+                # cancelled and the client dropped, so it can't stall the loop.
+                await asyncio.wait_for(ws.send_json(message), _SEND_TIMEOUT)
             except Exception:
                 dead.append(ws)
         

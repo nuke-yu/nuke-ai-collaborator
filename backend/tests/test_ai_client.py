@@ -169,7 +169,7 @@ class TestCachedMicrocompact(unittest.IsolatedAsyncioTestCase):
         mock_resp = self._make_mock_response()
         mock_cm, mock_client = self._make_mock_client(mock_resp)
 
-        with patch("ai.client.httpx.AsyncClient", return_value=mock_cm):
+        with patch("ai.client._get_client", return_value=mock_client):
             await _once_claude(
                 api_key="test-key",
                 model="claude-opus-4-7",
@@ -193,7 +193,7 @@ class TestCachedMicrocompact(unittest.IsolatedAsyncioTestCase):
         mock_resp = self._make_mock_response()
         mock_cm, mock_client = self._make_mock_client(mock_resp)
 
-        with patch("ai.client.httpx.AsyncClient", return_value=mock_cm):
+        with patch("ai.client._get_client", return_value=mock_client):
             await _once_claude(
                 api_key="test-key",
                 model="claude-opus-4-7",
@@ -216,7 +216,7 @@ class TestCachedMicrocompact(unittest.IsolatedAsyncioTestCase):
         mock_resp = self._make_mock_response()
         mock_cm, mock_client = self._make_mock_client(mock_resp)
 
-        with patch("ai.client.httpx.AsyncClient", return_value=mock_cm):
+        with patch("ai.client._get_client", return_value=mock_client):
             await _once_claude(
                 api_key="test-key",
                 model="claude-opus-4-7",
@@ -387,7 +387,7 @@ class TestTokenUsageExtraction(unittest.IsolatedAsyncioTestCase):
         cm.__aenter__ = AsyncMock(return_value=mock_client)
         cm.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("ai.client.httpx.AsyncClient", return_value=cm):
+        with patch("ai.client._get_client", return_value=mock_client):
             result = await _once_openai_compat(
                 url="https://api.deepseek.com/v1/chat/completions",
                 api_key="key", model="deepseek-chat",
@@ -416,7 +416,7 @@ class TestTokenUsageExtraction(unittest.IsolatedAsyncioTestCase):
         cm.__aenter__ = AsyncMock(return_value=mock_client)
         cm.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("ai.client.httpx.AsyncClient", return_value=cm):
+        with patch("ai.client._get_client", return_value=mock_client):
             result = await _once_openai_compat(
                 url="https://api.deepseek.com/v1/chat/completions",
                 api_key="key", model="deepseek-chat",
@@ -445,7 +445,7 @@ class TestTokenUsageExtraction(unittest.IsolatedAsyncioTestCase):
         cm.__aenter__ = AsyncMock(return_value=mock_client)
         cm.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("ai.client.httpx.AsyncClient", return_value=cm):
+        with patch("ai.client._get_client", return_value=mock_client):
             result = await _once_openai_compat(
                 url="https://api.deepseek.com/v1/chat/completions",
                 api_key="key", model="deepseek-chat",
@@ -481,7 +481,7 @@ class TestTokenUsageExtraction(unittest.IsolatedAsyncioTestCase):
         cm.__aenter__ = AsyncMock(return_value=mock_client)
         cm.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("ai.client.httpx.AsyncClient", return_value=cm):
+        with patch("ai.client._get_client", return_value=mock_client):
             result = await _once_claude(
                 api_key="test-key", model="claude-opus-4-7",
                 system_prompt="sp", messages=[{"role": "user", "content": "hi"}],
@@ -508,7 +508,7 @@ class TestTokenUsageExtraction(unittest.IsolatedAsyncioTestCase):
         cm.__aenter__ = AsyncMock(return_value=mock_client)
         cm.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("ai.client.httpx.AsyncClient", return_value=cm):
+        with patch("ai.client._get_client", return_value=mock_client):
             result = await _once_claude(
                 api_key="test-key", model="claude-opus-4-7",
                 system_prompt="sp", messages=[{"role": "user", "content": "hi"}],
@@ -535,7 +535,7 @@ class TestTokenUsageExtraction(unittest.IsolatedAsyncioTestCase):
         cm.__aenter__ = AsyncMock(return_value=mock_client)
         cm.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("ai.client.httpx.AsyncClient", return_value=cm):
+        with patch("ai.client._get_client", return_value=mock_client):
             result = await _once_claude(
                 api_key="test-key", model="claude-opus-4-7",
                 system_prompt="sp", messages=[{"role": "user", "content": "hi"}],
@@ -588,10 +588,10 @@ class TestStreamingUsageCapture(unittest.IsolatedAsyncioTestCase):
             f"data: {json.dumps({'choices': [{'delta': {}}], 'usage': {'prompt_tokens': 20, 'completion_tokens': 8}})}",
             "data: [DONE]",
         ]
-        client_cm, _ = self._make_stream_mock(lines)
+        client_cm, mock_client = self._make_stream_mock(lines)
         usage_out: list = []
 
-        with patch("ai.client.httpx.AsyncClient", return_value=client_cm):
+        with patch("ai.client._get_client", return_value=mock_client):
             chunks = []
             async for chunk in _stream_openai_compat(
                 url="https://api.deepseek.com/v1/chat/completions",
@@ -613,10 +613,10 @@ class TestStreamingUsageCapture(unittest.IsolatedAsyncioTestCase):
             f"data: {json.dumps({'choices': [{'delta': {'content': 'hi'}}]})}",
             "data: [DONE]",
         ]
-        client_cm, _ = self._make_stream_mock(lines)
+        client_cm, mock_client = self._make_stream_mock(lines)
         usage_out: list = []
 
-        with patch("ai.client.httpx.AsyncClient", return_value=client_cm):
+        with patch("ai.client._get_client", return_value=mock_client):
             chunks = []
             async for chunk in _stream_openai_compat(
                 url="https://api.deepseek.com/v1/chat/completions",
@@ -634,7 +634,7 @@ class TestStreamingUsageCapture(unittest.IsolatedAsyncioTestCase):
         from ai.client import _stream_openai_compat
         client_cm, mock_client = self._make_stream_mock(["data: [DONE]"])
 
-        with patch("ai.client.httpx.AsyncClient", return_value=client_cm):
+        with patch("ai.client._get_client", return_value=mock_client):
             async for _ in _stream_openai_compat(
                 url="https://api.deepseek.com/v1/chat/completions",
                 api_key="key", model="deepseek-chat",
@@ -651,7 +651,7 @@ class TestStreamingUsageCapture(unittest.IsolatedAsyncioTestCase):
         from ai.client import _stream_openai_compat
         client_cm, mock_client = self._make_stream_mock(["data: [DONE]"])
 
-        with patch("ai.client.httpx.AsyncClient", return_value=client_cm):
+        with patch("ai.client._get_client", return_value=mock_client):
             async for _ in _stream_openai_compat(
                 url="https://api.deepseek.com/v1/chat/completions",
                 api_key="key", model="deepseek-chat",
@@ -674,10 +674,10 @@ class TestStreamingUsageCapture(unittest.IsolatedAsyncioTestCase):
             f"data: {json.dumps({'type': 'content_block_delta', 'delta': {'text': 'hi there'}})}",
             f"data: {json.dumps({'type': 'message_delta', 'usage': {'output_tokens': 7}})}",
         ]
-        client_cm, _ = self._make_stream_mock(lines)
+        client_cm, mock_client = self._make_stream_mock(lines)
         usage_out: list = []
 
-        with patch("ai.client.httpx.AsyncClient", return_value=client_cm):
+        with patch("ai.client._get_client", return_value=mock_client):
             chunks = []
             async for chunk in _stream_claude(
                 model="claude-sonnet-4-6",
@@ -701,9 +701,9 @@ class TestStreamingUsageCapture(unittest.IsolatedAsyncioTestCase):
             f"data: {json.dumps({'type': 'content_block_delta', 'delta': {'text': 'hello'}})}",
             f"data: {json.dumps({'type': 'message_delta', 'usage': {'output_tokens': 5}})}",
         ]
-        client_cm, _ = self._make_stream_mock(lines)
+        client_cm, mock_client = self._make_stream_mock(lines)
 
-        with patch("ai.client.httpx.AsyncClient", return_value=client_cm):
+        with patch("ai.client._get_client", return_value=mock_client):
             chunks = []
             async for chunk in _stream_claude(
                 model="claude-sonnet-4-6",
@@ -722,10 +722,10 @@ class TestStreamingUsageCapture(unittest.IsolatedAsyncioTestCase):
         lines = [
             f"data: {json.dumps({'type': 'message_delta', 'usage': {'output_tokens': 5}})}",
         ]
-        client_cm, _ = self._make_stream_mock(lines)
+        client_cm, mock_client = self._make_stream_mock(lines)
         usage_out: list = []
 
-        with patch("ai.client.httpx.AsyncClient", return_value=client_cm):
+        with patch("ai.client._get_client", return_value=mock_client):
             async for _ in _stream_claude(
                 model="claude-sonnet-4-6",
                 system_prompt="sp",

@@ -1,7 +1,43 @@
 import asyncio
 import json
 import httpx
+from contextlib import asynccontextmanager
 from config import get_key
+
+# DFT-033: one process-wide, connection-pooled AsyncClient instead of a fresh
+# httpx.AsyncClient() per call. Per-call clients did a new TLS handshake every
+# request/retry and only released the socket at GC; a shared pooled client reuses
+# keep-alive connections and is closed deterministically on app shutdown.
+_client: "httpx.AsyncClient | None" = None
+
+
+def _get_client() -> httpx.AsyncClient:
+    global _client
+    if _client is None or _client.is_closed:
+        _client = httpx.AsyncClient(
+            limits=httpx.Limits(max_connections=100, max_keepalive_connections=20),
+        )
+    return _client
+
+
+@asynccontextmanager
+async def _shared_client():
+    """Borrow the shared client WITHOUT closing it on block exit.
+
+    Drop-in for the old `async with httpx.AsyncClient(...) as client:` shape so
+    call sites keep their structure; per-request timeouts are passed to each
+    .post()/.stream() call. Lifecycle is owned by aclose_client().
+    """
+    yield _get_client()
+
+
+async def aclose_client() -> None:
+    """Close the shared client; call on app shutdown (main.py lifespan)."""
+    global _client
+    if _client is not None and not _client.is_closed:
+        await _client.aclose()
+    _client = None
+
 
 def _keys():
     return {
@@ -58,11 +94,12 @@ def _require_key(keys: dict, name: str, label: str) -> str:
 
 async def get_embedding(text: str) -> list:
     api_key = _keys()["deepseek"]
-    async with httpx.AsyncClient(timeout=30) as client:
+    async with _shared_client() as client:
         response = await client.post(
             "https://api.deepseek.com/v1/embeddings",
             headers={"Authorization": f"Bearer {api_key}"},
             json={"model": "text-embedding-v2", "input": text[:2000], "encoding_format": "float"},
+            timeout=30,
         )
         response.raise_for_status()
         return response.json()["data"][0]["embedding"]
@@ -76,11 +113,12 @@ async def call_ai(system_prompt: str, history: list, user_message: str,
     messages.extend(history[-10:])
     messages.append({"role": "user", "content": user_message})
     try:
-        async with httpx.AsyncClient(timeout=60) as client:
+        async with _shared_client() as client:
             response = await client.post(
                 "https://api.deepseek.com/v1/chat/completions",
                 headers={"Authorization": f"Bearer {api_key}"},
                 json={"model": "deepseek-chat", "messages": messages, "temperature": temperature, "max_tokens": max_tokens},
+                timeout=60,
             )
             response.raise_for_status()
             return response.json()["choices"][0]["message"]["content"]
@@ -100,11 +138,12 @@ async def _stream_openai_compat(url: str, api_key: str, model: str, messages: li
     }
     if usage_out is not None:
         body["stream_options"] = {"include_usage": True}
-    async with httpx.AsyncClient(timeout=120) as client:
+    async with _shared_client() as client:
         async with client.stream(
             "POST", url,
             headers={"Authorization": f"Bearer {api_key}"},
             json=body,
+            timeout=120,
         ) as response:
             if response.status_code in (400, 413):
                 body = await response.aread()
@@ -141,10 +180,11 @@ async def _stream_openai_compat(url: str, api_key: str, model: str, messages: li
                     continue
 
 async def _stream_ollama(model: str, messages: list, base_url: str = "http://localhost:11434"):
-    async with httpx.AsyncClient(timeout=120) as client:
+    async with _shared_client() as client:
         async with client.stream(
             "POST", f"{base_url}/api/chat",
             json={"model": model, "messages": messages, "stream": True},
+            timeout=120,
         ) as response:
             response.raise_for_status()
             async for line in response.aiter_lines():
@@ -163,7 +203,7 @@ async def _stream_ollama(model: str, messages: list, base_url: str = "http://loc
 async def _stream_claude(model: str, system_prompt: str, messages: list, api_key: str = "",
                          temperature: float = 0.7, max_tokens: int = 4096,
                          usage_out: list | None = None):
-    async with httpx.AsyncClient(timeout=120) as client:
+    async with _shared_client() as client:
         async with client.stream(
             "POST", "https://api.anthropic.com/v1/messages",
             headers={
@@ -179,6 +219,7 @@ async def _stream_claude(model: str, system_prompt: str, messages: list, api_key
                 "messages": messages,
                 "stream": True,
             },
+            timeout=120,
         ) as response:
             if response.status_code in (400, 413):
                 body = await response.aread()
@@ -294,8 +335,8 @@ async def _once_openai_compat(url: str, api_key: str, model: str, system_prompt:
         body["tools"] = tools
         body["tool_choice"] = "auto"
     headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
-    async with httpx.AsyncClient(timeout=60) as client:
-        resp = await client.post(url, headers=headers, json=body)
+    async with _shared_client() as client:
+        resp = await client.post(url, headers=headers, json=body, timeout=60)
         if resp.status_code == 429:
             wait = _parse_retry_after(dict(resp.headers))
             raise AIRateLimitError(wait)
@@ -352,11 +393,12 @@ async def _once_claude(api_key: str, model: str, system_prompt: str,
     if use_cached_microcompact:
         body["context_management"] = {"type": "clear_tool_uses_20250919"}
         headers["anthropic-beta"] = "context-management-2025-09-19"
-    async with httpx.AsyncClient(timeout=60) as client:
+    async with _shared_client() as client:
         resp = await client.post(
             "https://api.anthropic.com/v1/messages",
             headers=headers,
             json=body,
+            timeout=60,
         )
         if resp.status_code == 429:
             wait = _parse_retry_after(dict(resp.headers))

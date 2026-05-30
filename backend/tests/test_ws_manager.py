@@ -7,6 +7,7 @@ import asyncio
 # Add backend directory to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import ws_manager
 from ws_manager import WSManager
 
 class TestWSManager(unittest.IsolatedAsyncioTestCase):
@@ -78,6 +79,59 @@ class TestWSManager(unittest.IsolatedAsyncioTestCase):
         # ws1 should be disconnected
         self.assertEqual(len(manager.connections[1]), 1)
         self.assertEqual(manager.connections[1][0][0], ws2)
+
+class _FakeWS:
+    """Minimal websocket double: send_json can hang forever (half-open client)."""
+
+    def __init__(self, hang=False):
+        self.hang = hang
+        self.sent = []
+        self._never = asyncio.Event()  # never set → send hangs
+
+    async def accept(self):
+        pass
+
+    async def send_json(self, message):
+        if self.hang:
+            await self._never.wait()
+        self.sent.append(message)
+
+
+class TestBroadcastSendTimeout(unittest.IsolatedAsyncioTestCase):
+    """DFT-030: a hanging send_json must not stall the shared broadcast loop."""
+
+    def setUp(self):
+        self._orig = ws_manager._SEND_TIMEOUT
+        ws_manager._SEND_TIMEOUT = 0.05
+
+    def tearDown(self):
+        ws_manager._SEND_TIMEOUT = self._orig
+
+    async def test_slow_client_times_out_and_is_removed(self):
+        mgr = WSManager()
+        fast = _FakeWS()
+        slow = _FakeWS(hang=True)
+        await mgr.connect(fast, group_id=1, member_id=10)
+        await mgr.connect(slow, group_id=1, member_id=20)
+
+        await asyncio.wait_for(mgr.broadcast(1, {"type": "x", "n": 1}), timeout=2)
+
+        self.assertIn({"type": "x", "n": 1}, fast.sent)
+        remaining = [ws for ws, _ in mgr.connections.get(1, [])]
+        self.assertIn(fast, remaining)
+        self.assertNotIn(slow, remaining)
+
+    async def test_broadcast_returns_promptly_despite_hang(self):
+        mgr = WSManager()
+        slow = _FakeWS(hang=True)
+        await mgr.connect(slow, group_id=2, member_id=30)
+
+        loop = asyncio.get_event_loop()
+        start = loop.time()
+        await asyncio.wait_for(mgr.broadcast(2, {"type": "y"}), timeout=2)
+        elapsed = loop.time() - start
+        self.assertLess(elapsed, 1.0)  # bounded by _SEND_TIMEOUT, not forever
+
 
 if __name__ == "__main__":
     unittest.main()
