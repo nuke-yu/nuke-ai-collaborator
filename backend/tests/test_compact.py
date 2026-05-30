@@ -80,15 +80,18 @@ class TestEstimateTokens(unittest.TestCase):
     def test_empty(self):
         self.assertEqual(compact.estimate_tokens([]), 0)
 
-    def test_single_short_message(self):
-        import json
-        msgs = [_user("hi")]
-        self.assertEqual(compact.estimate_tokens(msgs), len(json.dumps(msgs, ensure_ascii=False)) // 4)
+    def test_scales_with_content_length(self):
+        short = compact.estimate_tokens([_user("hi")])
+        long = compact.estimate_tokens([_user("a" * 400)])
+        self.assertGreater(long, short)
+        # coarse heuristic ≈ chars / 4
+        self.assertGreater(long, 80)
+        self.assertLess(long, 130)
 
-    def test_longer_content(self):
-        import json
-        msgs = [_user("a" * 400)]
-        self.assertEqual(compact.estimate_tokens(msgs), len(json.dumps(msgs, ensure_ascii=False)) // 4)
+    def test_multiple_messages_accumulate(self):
+        one = compact.estimate_tokens([_user("a" * 100)])
+        two = compact.estimate_tokens([_user("a" * 100), _asst("b" * 100)])
+        self.assertGreater(two, one)
 
     def test_list_content_serialised(self):
         msgs = [{"role": "assistant", "content": [{"type": "text", "text": "hello"}]}]
@@ -96,15 +99,25 @@ class TestEstimateTokens(unittest.TestCase):
         self.assertIsInstance(result, int)
         self.assertGreater(result, 0)
 
-    def test_multiple_messages(self):
-        import json
-        msgs = [_user("a" * 100), _asst("b" * 100)]
-        self.assertEqual(compact.estimate_tokens(msgs), len(json.dumps(msgs, ensure_ascii=False)) // 4)
-
-    def test_none_content_serialised(self):
-        import json
+    def test_none_content_does_not_crash(self):
         msgs = [{"role": "tool", "content": None, "name": "x"}]
-        self.assertEqual(compact.estimate_tokens(msgs), len(json.dumps(msgs, ensure_ascii=False)) // 4)
+        result = compact.estimate_tokens(msgs)
+        self.assertIsInstance(result, int)
+        self.assertGreaterEqual(result, 0)
+
+    def test_does_not_serialise_whole_array(self):
+        """DFT-052: must not json.dumps the entire message array on each call."""
+        msgs = [
+            _user("a" * 1000), _asst("b" * 1000),
+            {"role": "tool", "content": None, "name": "x"},
+        ]
+        with patch.object(
+            compact.json, "dumps",
+            side_effect=AssertionError("estimate_tokens must not json.dumps the full array"),
+        ):
+            result = compact.estimate_tokens(msgs)
+        self.assertIsInstance(result, int)
+        self.assertGreater(result, 400)
 
 
 class TestInjectContextAfterCompact(unittest.TestCase):

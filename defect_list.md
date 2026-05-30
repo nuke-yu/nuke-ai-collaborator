@@ -2,15 +2,15 @@
 
 ## 进度总览 (Progress Dashboard)
 
-> 更新：2026-05-30 · 全量 **57** 项，已修 **38**，待修 **19**
+> 更新：2026-05-30 · 全量 **57** 项，已修 **39**，待修 **18**
 
 | 批次 | 范围 | 总数 | 已修 | 待修 |
 | :--- | :--- | :---: | :---: | :---: |
 | 历史缺陷 | DFT-001 ~ 016 | 16 | 16 ✅ | 0 |
-| 架构师 Review | DFT-017 ~ 057 | 41 | 22 ✅ | 19 |
-| **合计** | — | **57** | **38** | **19** |
+| 架构师 Review | DFT-017 ~ 057 | 41 | 23 ✅ | 18 |
+| **合计** | — | **57** | **39** | **18** |
 
-架构师 Review 按严重度：🔴 Critical 7（已修 7）· 🟠 High 12（已修 12）· 🟡 Medium 17 · 🟢 Low 5（已修 3）。
+架构师 Review 按严重度：🔴 Critical 7（已修 7）· 🟠 High 12（已修 12）· 🟡 Medium 17 · 🟢 Low 5（已修 4）。
 
 ### 状态索引（DFT-017 ~ 052，点 ID 可跳转下方明细）
 
@@ -51,7 +51,7 @@
 | DFT-049 | 🟢 | ✅已修复 | 插件 import 错误静默吞 |
 | DFT-050 | 🟢 | ✅已修复 | 权限路由无鉴权 |
 | DFT-051 | 🟢 | ✅已修复 | AIError 回显原始异常 |
-| DFT-052 | 🟢 | ⛔未修复 | `estimate_tokens` 全量 json.dumps |
+| DFT-052 | 🟢 | ✅已修复 | `estimate_tokens` 全量 json.dumps |
 | **DFT-053** | **数据库** | 🟠 High | **SQLite 锁竞争与写入并发性**：随着用户和 Bot 并发增加，频繁的消息写入和状态更新会导致 `database is locked` 异常。 | 实时对话中断，Bot 响应丢失，用户体验因数据库阻塞而显著下降。 | **✅已修复（缩小范围）**：除了 WAL 和单线程写入器外，Stage 3 的 DI 重构进一步集中了 DB 交互点，减少了野生连接。 |
 | **DFT-054** | **文件 I/O** | 🟠 High | **阻塞性磁盘 I/O**：工作区大文件读写目前主要使用同步操作，阻塞事件循环。 | 导致所有用户的 WebSocket 连接出现可感知的卡顿。 | **✅已修复**：引入了 **VFS 虚拟文件系统锁**（细粒度异步锁 `asyncio.Lock`），配合 `asyncio.to_thread` 彻底解决了读写竞争和脏读问题。 |
 | **DFT-055** | **状态管理** | 🟡 Medium | **缺乏长时任务断点（Checkpoint）**：Agent 的 Tool Loop 迭代状态仅存在于内存，重启无法恢复。 | 服务重启后，正在进行的复杂任务无法恢复，用户只能看到任务消失。 | **✅已修复**：实现了**影子持久化 (Shadow Persistence)**。在工具执行前/后均保存完整 `messages` 快照到 SQLite，配合前端 `recovery_prompt` 弹窗实现完美断点续传。 |
@@ -140,4 +140,4 @@
 | **DFT-049** ✅ | **插件注册**<br>[registry.py](backend/executors/registry.py#L16) | 🟢 | 插件 import 错误被静默吞只留日志；全失败时 `next(iter(_registry.values()))` 抛 `StopIteration`。 | 整个 bot 系统可零 executor 启动，运行时才暴雷。 | **已修复**：`_load_file` 失败记入模块级 `_failures`（含异常类型）并 `logger.error(exc_info=True)` 保留 traceback，成功时清除该文件条目；`discover()` 清空 `_failures`；新增 `failures()` 访问器，经新 `GET /api/plugins/health`（`{loaded, failures}`）及 `/api/plugins/reload` 响应暴露健康状态；`get()` 空注册表时抛明确 `RuntimeError`（列出失败明细）而非 `StopIteration`。`/api/plugins` 保持原数组形态不破坏前端 `MemberList.jsx`。新增 `tests/test_registry_health.py`（3 用例）。 |
 | **DFT-050** ✅ | **权限路由**<br>[permissions/routes.py](backend/permissions/routes.py#L16) | 🟢 | `POST /members/{id}/permissions` 无鉴权/属主校验。 | 若路由未在 auth 中间件后，任何调用方可给任意 bot 加 `allow *` → 权限引擎被绕过。 | **已修复（缩小范围）**：本应用为单机无 auth 体系，全量鉴权超范围；落地边界校验阻断滥用向量——新增 `_require_bot_member(member_id)`：经 `get_db`+`get_member` 取目标成员，不存在→404、`type != 'bot'`→403（权限规则仅对 bot 成员有意义，杜绝给不存在/human id 静默写规则）；GET/POST/DELETE 三路由统一前置该守卫。POST 另加输入校验：`tool_pattern` 必填否则 400、`action` 仅允许 `allow`/`deny`（对齐引擎，挡住 `allow *` 之外的任意 action 注入）。单测 `tests/test_permission_routes_authz.py`（6 例：不存在/human 拒、invalid action 拒、bot happy path patch save_rule 放行、GET/DELETE 守卫）。附带修复 DFT-053 引入的 `test_p1_safety::TestReactV1RulesetWiring` 回归（react_v1 已由 `get_db`→`write_connect`，测试 patch 目标同步更新）。 |
 | **DFT-051** ✅ | **AI 客户端**<br>[ai/client.py](backend/ai/client.py#L92) | 🟢 | `AIError(f"...{str(e)}")` 把原始异常（可能含 URL/header）回显进聊天/日志。 | 潜在敏感信息泄漏到用户侧。 | **已修复**：确认 `simple_v1`/`orchestrator`/`tool_loop_v1`/`react_v1` 等消费方都对 `AIError` 做 `str(e)` 并广播成 `stream_error` 直达聊天——故原始 `str(e)`（请求 URL / Authorization header / 内网地址）会泄漏到用户侧。四处兜底 `except Exception as e: raise AIError(f"AI 调用失败：{str(e)}")`（`call_ai`/`call_ai_once`/`call_ai_stream_messages`/`call_ai_stream`）改为：`logger.error("AI call failed", exc_info=True)` 把完整 traceback 仅入服务端日志 + `raise AIError("AI 调用失败，请稍后重试") from e`——用户侧只见通用文案，`from e` 保留 `__cause__` 供日志链路但不进 `str()`。`HTTPStatusError` 分支只回显 `status_code`（非敏感）保持不变。新增模块级 `logger`。单测 `tests/test_ai_error_no_leak.py`（3 例：`call_ai`/`call_ai_stream`/`call_ai_stream_messages` 注入含 secret 的异常，断言 `str(AIError)` 不含 secret 且含通用文案，且 secret 经 exc_info 入日志）。既有 `tests/test_ai_client.py`+`test_ai_client_pool.py` 35 例全绿。 |
-| **DFT-052** | **上下文压缩**<br>[compact.py](backend/executors/compact.py#L77) | 🟢 | `estimate_tokens` 每次全量 `json.dumps` 整个消息数组，每轮调多次。 | 大历史下重复 O(n) 序列化，性能损耗。 | 缓存上轮估算，仅对增量消息计算；或用长度近似避免全量 `json.dumps`。 |
+| **DFT-052** ✅ | **上下文压缩**<br>[compact.py](backend/executors/compact.py#L77) | 🟢 | `estimate_tokens` 每次全量 `json.dumps` 整个消息数组，每轮调多次。 | 大历史下重复 O(n) 序列化，性能损耗。 | **已修复**：采用缺陷给定的“长度近似”方案，去掉全量 `json.dumps`——逐条消息累加 `content` 字符数（新增 `_content_chars()` 助手：`None`→0、`str`→`len`、其它/多模态 list→`len(str(...))` 兜底）+ `name` 长度 + `_PER_MESSAGE_OVERHEAD=8`（粗算 role/键/括号结构），最终 `// 4` 得估算，免去每次为整个数组分配巨型字符串并逐字符转义。`import json` 保留（仅供 TDD 守卫测试 patch）。`tests/test_compact.py` 重写 `TestEstimateTokens`：移除 5 个精确 `json.dumps` 等值断言，改属性断言（随内容长度单调、多消息累加、list/None content 不崩）+ `test_does_not_serialise_whole_array`（patch `compact.json.dumps` 抛错仍能返回 int 估算，证明不再序列化全数组）；全套 101 例全绿。 |

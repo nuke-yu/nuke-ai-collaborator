@@ -74,9 +74,31 @@ _db_compaction_locks: set[int] = set()
 # Token estimation & threshold helpers
 # ---------------------------------------------------------------------------
 
+_PER_MESSAGE_OVERHEAD = 8  # rough allowance for role/keys/braces structure
+
+
+def _content_chars(content) -> int:
+    if content is None:
+        return 0
+    if isinstance(content, str):
+        return len(content)
+    # list/multimodal or other non-string content — rare and small
+    return len(str(content))
+
+
 def estimate_tokens(messages: list[dict]) -> int:
-    """Coarse token estimate: JSON-serialised byte length / 4."""
-    return len(json.dumps(messages, ensure_ascii=False)) // 4
+    """Coarse token estimate ≈ serialised char length / 4.
+
+    Sums per-message content length plus a small structural overhead instead of
+    json.dumps-ing the whole array on every call. estimate_tokens runs several
+    times per turn (snip, auto-compact, session-memory, db-compaction); the old
+    full-array json.dumps allocated and escaped one giant string each time.
+    """
+    total = 0
+    for m in messages:
+        total += _content_chars(m.get("content"))
+        total += len(m.get("name") or "") + _PER_MESSAGE_OVERHEAD
+    return total // 4
 
 
 def inject_context_after_compact(
