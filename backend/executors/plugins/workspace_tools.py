@@ -512,6 +512,13 @@ async def _handle_run_skill(name: str, args: str = "", context: dict = None) -> 
     return await run_skill(bot_id, name, args, ctx=context) if bot_id else "[错误] 缺少 bot_id"
 
 
+def _allocate_free_port() -> int:
+    import socket
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(('', 0))
+        return s.getsockname()[1]
+
+
 async def _handle_run_shell(
     cmd: str, cwd: str = "", timeout: int = 30,
     background: bool = False, context: dict = None,
@@ -524,6 +531,12 @@ async def _handle_run_shell(
     # 强制上限，防止 Bot 瞎传参数导致永远阻塞
     _max_timeout = min(timeout, 300) # Max 5 minutes even if requested more
     sandbox_env = _sandbox_env()
+    
+    allocated_port = None
+    if "8080" in cmd or "port" in cmd.lower():
+        allocated_port = _allocate_free_port()
+        sandbox_env["APP_PORT"] = str(allocated_port)
+        sandbox_env["PORT"] = str(allocated_port)
     
     # Wrap command in a subshell with ulimit (virtual memory limit) to prevent OOM
     # Linux/Mac support: ulimit -v 524288 limits to ~512MB
@@ -541,7 +554,10 @@ async def _handle_run_shell(
                 # Start new session so background task doesn't die when parent shell exits
                 start_new_session=True if not _IS_WINDOWS else False
             )
-            return f"已在后台启动（PID: {proc.pid}），命令：{cmd}"
+            msg = f"已在后台启动（PID: {proc.pid}），命令：{cmd}"
+            if allocated_port:
+                msg += f"\n[端口分配] 系统已自动分配可用端口: {allocated_port} (注入为环境变量 PORT / APP_PORT)"
+            return msg
             
         proc = await asyncio.create_subprocess_exec(
             *_DEFAULT_SHELL, safe_cmd,
