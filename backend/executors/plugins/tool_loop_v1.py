@@ -22,6 +22,7 @@ from workspace import load_context_files, format_context_blocks, append_log, arc
 from skills import list_skills_all, load_always_skills, filter_skills_by_context
 from skills.constants import bot_ws as _bot_ws
 import executors.compact as compact
+from core.orchestration.ai_service import AIService
 
 _DOOM_LOOP_THRESHOLD = 5  # breaks on the Nth consecutive tool-only iteration (inclusive)
 
@@ -98,11 +99,8 @@ async def _before_finalize_hook(
     model_name: str,
     temperature: float,
     max_tokens: int,
-    broadcaster,
-    group_id: int,
-    temp_id: str,
+    ai_service: AIService,
     user_message: str,
-    usage_out: list | None = None,
 ) -> str:
     """Quality gate before finalizing a reply.
 
@@ -116,34 +114,33 @@ async def _before_finalize_hook(
     cur_draft = draft
 
     for attempt in range(max_retries + 1):
-        await broadcaster.broadcast(group_id, {
-            "type": "before_finalize_review", "temp_id": temp_id,
+        await ai_service.ctx.interaction.broadcast(ai_service.ctx.group_id, {
+            "type": "before_finalize_review", "temp_id": ai_service.temp_id,
             "attempt": attempt + 1, "max_retries": max_retries + 1,
         })
 
         approved, feedback = True, ""
         try:
-            review = await call_ai_once(
+            review = await ai_service.call(
                 reviewer_prompt,
                 [{"role": "user", "content": f"【用户问题】\n{user_message}\n\n【待审查回复】\n{cur_draft}"}],
-                provider, model_name, temperature, 512,
+                model_name, provider, temperature, 512,
+                auto_compact=False
             )
-            if usage_out is not None:
-                _acc_usage(usage_out, review)
             feedback = review["content"] if review["type"] == "text" else ""
             approved = not feedback.strip().upper().startswith("REJECTED")
         except Exception:
             break  # fail open
 
         if approved or attempt >= max_retries:
-            await broadcaster.broadcast(group_id, {
-                "type": "before_finalize_approved", "temp_id": temp_id,
+            await ai_service.ctx.interaction.broadcast(ai_service.ctx.group_id, {
+                "type": "before_finalize_approved", "temp_id": ai_service.temp_id,
                 "note": "" if approved else "retry budget exhausted",
             })
             break
 
-        await broadcaster.broadcast(group_id, {
-            "type": "before_finalize_rejected", "temp_id": temp_id,
+        await ai_service.ctx.interaction.broadcast(ai_service.ctx.group_id, {
+            "type": "before_finalize_rejected", "temp_id": ai_service.temp_id,
             "feedback": feedback[:300], "attempt": attempt + 1,
         })
 
@@ -152,11 +149,10 @@ async def _before_finalize_hook(
             {"role": "user", "content": f"[审查意见] {feedback}\n\n请根据以上意见修改回复。"},
         ]
         try:
-            regen = await call_ai_once(
-                system_prompt, cur_messages, provider, model_name, temperature, max_tokens,
+            regen = await ai_service.call(
+                system_prompt, cur_messages, model_name, provider, temperature, max_tokens,
+                auto_compact=False
             )
-            if usage_out is not None:
-                _acc_usage(usage_out, regen)
             if regen["type"] == "text":
                 cur_draft = regen["content"]
         except Exception:
@@ -171,8 +167,8 @@ async def _run_fork_skill(
     provider: str,
     model: str,
     temperature: float,
+    ai_service: AIService,
     tool_schemas: list | None = None,
-    usage_out: list | None = None,
 ) -> str:
     """Execute a fork skill in an isolated single AI call.
 
@@ -180,14 +176,13 @@ async def _run_fork_skill(
     tool_schemas: if provided, enables tool calling in the fork (allowed-tools whitelist).
     """
     try:
-        result = await call_ai_once(
+        result = await ai_service.call(
             skill_content,
             [{"role": "user", "content": task or "请执行此技能。"}],
-            provider, model, temperature, 4096,
-            tool_schemas or None,
+            model, provider, temperature, 4096,
+            tools=tool_schemas or None,
+            auto_compact=False
         )
-        if usage_out is not None:
-            _acc_usage(usage_out, result)
         if result["type"] == "text":
             return result["content"]
         if result["type"] == "tool_calls":
@@ -355,11 +350,8 @@ class ToolLoopV1(BotExecutor):
                 "type": "skills_loaded", "temp_id": temp_id,
                 "member_id": bot["id"], "skills": skills_snapshot,
             })
+            
         full_text = ""
-        _total_input_tokens = 0
-        _total_output_tokens = 0
-        _total_cache_read_tokens = 0
-        _total_cache_creation_tokens = 0
         _use_cached_mc = compact.should_use_cached_microcompact(provider)
 
         # Cross-compaction file tracker: path → "read" | "modified"
@@ -376,6 +368,8 @@ class ToolLoopV1(BotExecutor):
             parts = [p for p in [fresh_text, ft_xml, file_contents] if p]
             return "\n\n".join(parts)
 
+        # Point 4: Unified AI Service Layer
+        ai_service = AIService(ctx, _session_id, temp_id)
 
         # Strategy 1 (pre-run): clear stale tool results from DB-loaded history
         messages = compact.apply_tool_result_microcompact(messages)
@@ -396,85 +390,42 @@ class ToolLoopV1(BotExecutor):
         tool_records: list[dict] = []
 
         async def _stream_final():
-            nonlocal full_text, messages, _total_input_tokens, _total_output_tokens, _total_cache_read_tokens, _total_cache_creation_tokens
-            _sf_usage: list = []
+            nonlocal full_text, messages
             try:
-                async for chunk in call_ai_stream_messages(
-                    system_prompt, messages, provider, model_name, temperature, max_tokens,
-                    usage_out=_sf_usage,
+                async for chunk in ai_service.stream(
+                    system_prompt, messages, model_name, provider, temperature, max_tokens,
+                    reinject_fn=_build_reinject
                 ):
                     full_text += chunk
                     await ctx.interaction.broadcast(ctx.group_id, {
                         "type": "stream_chunk", "temp_id": temp_id, "delta": chunk,
                     })
-            except AIContextOverflowError:
-                _sf_usage.clear()
-                messages = await compact.compact_conversation(
-                    messages, system_prompt, provider, model_name, temperature,
-                    context_text=await _build_reinject(),
-                )
-                await ctx.interaction.broadcast(ctx.group_id, {
-                    "type": "compaction", "temp_id": temp_id,
-                    "strategy": "overflow_recovery",
-                    "message": "流式回复溢出，已压缩后重试",
+            except AIError as e:
+                 await ctx.interaction.broadcast(ctx.group_id, {
+                    "type": "stream_error", "temp_id": temp_id, "message": str(e),
                 })
-                async for chunk in call_ai_stream_messages(
-                    system_prompt, messages, provider, model_name, temperature, max_tokens,
-                    usage_out=_sf_usage,
-                ):
-                    full_text += chunk
-                    await ctx.interaction.broadcast(ctx.group_id, {
-                        "type": "stream_chunk", "temp_id": temp_id, "delta": chunk,
-                    })
-            for _u in _sf_usage:
-                _total_input_tokens += _u.get("input_tokens", 0)
-                _total_output_tokens += _u.get("output_tokens", 0)
-                _total_cache_read_tokens += _u.get("cache_read_tokens", 0)
-                _total_cache_creation_tokens += _u.get("cache_creation_tokens", 0)
 
         async def _finalize_reply():
-            nonlocal full_text, messages, _total_input_tokens, _total_output_tokens, _total_cache_read_tokens, _total_cache_creation_tokens
+            nonlocal full_text, messages
             if not bf_config or not bf_config.get("reviewer_prompt"):
                 await _stream_final()
                 return
             snap = list(messages)
             try:
-                gen = await call_ai_once(
-                    system_prompt, snap, provider, model_name, temperature, max_tokens
+                gen = await ai_service.call(
+                    system_prompt, snap, model_name, provider, temperature, max_tokens,
+                    reinject_fn=_build_reinject
                 )
-                _gu = gen.get("usage") or {}
-                _total_input_tokens += _gu.get("input_tokens", 0)
-                _total_output_tokens += _gu.get("output_tokens", 0)
-                _total_cache_read_tokens += _gu.get("cache_read_tokens", 0)
-                _total_cache_creation_tokens += _gu.get("cache_creation_tokens", 0)
                 draft = gen["content"] if gen["type"] == "text" else ""
-            except AIContextOverflowError:
-                messages = await compact.compact_conversation(
-                    messages, system_prompt, provider, model_name, temperature,
-                    context_text=await _build_reinject(),
-                )
-                await ctx.interaction.broadcast(ctx.group_id, {
-                    "type": "compaction", "temp_id": temp_id,
-                    "strategy": "overflow_recovery",
-                    "message": "最终回复溢出，已压缩后重试",
-                })
-                await _stream_final()
-                return
             except Exception:
                 await _stream_final()
                 return
-            _bf_usage: list = []
+
             approved_text = await _before_finalize_hook(
                 draft, snap, system_prompt, bf_config,
                 provider, model_name, temperature, max_tokens,
-                ctx.interaction, ctx.group_id, temp_id, ctx.user_message,
-                usage_out=_bf_usage,
+                ai_service, ctx.user_message,
             )
-            for _u in _bf_usage:
-                _total_input_tokens += _u.get("input_tokens", 0)
-                _total_output_tokens += _u.get("output_tokens", 0)
-                _total_cache_read_tokens += _u.get("cache_read_tokens", 0)
-                _total_cache_creation_tokens += _u.get("cache_creation_tokens", 0)
             full_text = approved_text
             chunk_size = 20
             for i in range(0, len(approved_text), chunk_size):
@@ -525,54 +476,26 @@ class ToolLoopV1(BotExecutor):
                         _active_schemas = tool_schemas
                     # If previous skill declared model, override for this round only
                     _iter_model = execution_ctx.pop("skill_model", None) or model_name
-                    # Overflow recovery — detect context overflow, compact, retry once
+                    # Overflow recovery & usage tracking now handled by AIService
                     try:
-                        result = await call_ai_once(
-                            system_prompt, messages, provider, _iter_model,
+                        result = await ai_service.call(
+                            system_prompt, messages, _iter_model, provider,
                             temperature, max_tokens, _active_schemas,
                             use_cached_microcompact=_use_cached_mc,
+                            reinject_fn=_build_reinject
                         )
-                    except AIContextOverflowError:
-                        if _overflow_recovered:
-                            raise AIError("上下文溢出，压缩后仍失败")
-                        _overflow_recovered = True
-                        if messages and messages[-1].get("role") == "assistant":
-                            messages.pop()
-                        messages = await compact.compact_conversation(
-                            messages, system_prompt, provider, _iter_model, temperature,
-                            context_text=await _build_reinject(),
-                        )
+                    except AIError as e:
                         await ctx.interaction.broadcast(ctx.group_id, {
-                            "type": "compaction", "temp_id": temp_id,
-                            "strategy": "overflow_recovery",
-                            "message": "上下文溢出，已自动压缩并重试",
+                            "type": "stream_error", "temp_id": temp_id, "message": str(e),
                         })
-                        result = await call_ai_once(
-                            system_prompt, messages, provider, _iter_model,
-                            temperature, max_tokens, _active_schemas,
-                            use_cached_microcompact=_use_cached_mc,
-                        )
+                        break
 
-                    _u = result.get("usage") or {}
-                    _total_input_tokens += _u.get("input_tokens", 0)
-                    _total_output_tokens += _u.get("output_tokens", 0)
-                    _total_cache_read_tokens += _u.get("cache_read_tokens", 0)
-                    _total_cache_creation_tokens += _u.get("cache_creation_tokens", 0)
-                    await sessions.append_event(_session_id, "llm_response", {
-                        "content": result.get("content", ""),
-                        "tool_calls": (result.get("assistant_message") or {}).get("tool_calls"),
-                        "input_tokens": _u.get("input_tokens", 0),
-                        "output_tokens": _u.get("output_tokens", 0),
-                    })
-                    if (_u.get("input_tokens") or _u.get("output_tokens")
-                            or _u.get("cache_read_tokens") or _u.get("cache_creation_tokens")):
-                        await sessions.add_tokens(
-                            _session_id,
-                            input_tokens=_u.get("input_tokens", 0),
-                            output_tokens=_u.get("output_tokens", 0),
-                            cache_read_tokens=_u.get("cache_read_tokens", 0),
-                            cache_creation_tokens=_u.get("cache_creation_tokens", 0),
-                        )
+                    if result["type"] == "text":
+                        _consecutive_tool_only = 0
+                        full_text = result["content"]
+                        await _finalize_reply()
+                        break
+                    
                     if result["type"] == "tool_calls":
                         _consecutive_tool_only += 1
                         if _consecutive_tool_only >= _DOOM_LOOP_THRESHOLD:
@@ -582,7 +505,7 @@ class ToolLoopV1(BotExecutor):
                         
                         # Point 5 & Point 2: Shadow Persistence (Intent)
                         # Save full snapshot BEFORE executing tools
-                        await sessions.save_snapshot(_session_id, messages)
+                        await ctx.interaction.save_session_snapshot(_session_id, messages)
 
                         calls = result["calls"]
 
@@ -774,7 +697,7 @@ class ToolLoopV1(BotExecutor):
                                 steers.append(ctx.steer_channel.get_nowait())
                             steer_text = "\n".join(steers)
                             messages.append({"role": "user", "content": f"[用户中途指令] {steer_text}"})
-                            await ctx.broadcaster.broadcast(ctx.group_id, {
+                            await ctx.interaction.broadcast(ctx.group_id, {
                                 "type": "steer_injected", "temp_id": temp_id,
                                 "member_id": bot["id"], "message": steer_text[:300],
                             })
@@ -785,7 +708,7 @@ class ToolLoopV1(BotExecutor):
                                 rewakes.append(_rewake_queue.get_nowait())
                             rewake_text = "\n".join(rewakes)
                             messages.append({"role": "user", "content": f"[系统唤醒] {rewake_text}"})
-                            await ctx.broadcaster.broadcast(ctx.group_id, {
+                            await ctx.interaction.broadcast(ctx.group_id, {
                                 "type": "rewake_injected", "temp_id": temp_id,
                                 "member_id": bot["id"], "message": rewake_text[:300],
                             })
@@ -798,14 +721,14 @@ class ToolLoopV1(BotExecutor):
                     full_text = "[达到最大工具调用次数，任务未完成]"
 
         except asyncio.CancelledError:
-            await sessions.update_session_status(_session_id, "failed")
-            await ctx.broadcaster.broadcast(ctx.group_id, {
+            await ctx.interaction.update_session_status(_session_id, "failed")
+            await ctx.interaction.broadcast(ctx.group_id, {
                 "type": "stream_aborted", "temp_id": temp_id, "member_id": bot["id"],
             })
             raise
         except AIError as e:
-            await sessions.update_session_status(_session_id, "failed")
-            await ctx.broadcaster.broadcast(ctx.group_id, {
+            await ctx.interaction.update_session_status(_session_id, "failed")
+            await ctx.interaction.broadcast(ctx.group_id, {
                 "type": "stream_error", "temp_id": temp_id, "message": str(e),
             })
             return ExecutionResult(full_text="", msg_id=None)
@@ -822,10 +745,10 @@ class ToolLoopV1(BotExecutor):
 
         msg_id = await ctx.interaction.save_message(
             ctx.group_id, bot["id"], full_text,
-            input_tokens=_total_input_tokens or None,
-            output_tokens=_total_output_tokens or None,
-            cache_read_tokens=_total_cache_read_tokens or None,
-            cache_creation_tokens=_total_cache_creation_tokens or None,
+            input_tokens=ai_service.usage.input_tokens or None,
+            output_tokens=ai_service.usage.output_tokens or None,
+            cache_read_tokens=ai_service.usage.cache_read_tokens or None,
+            cache_creation_tokens=ai_service.usage.cache_creation_tokens or None,
         )
         # Use get_messages from DB only for final broadcast timestamp if needed, 
         # or simplify interaction.save_message to return it. 
