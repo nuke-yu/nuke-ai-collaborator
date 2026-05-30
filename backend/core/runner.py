@@ -9,11 +9,16 @@ core/runner.py — 编排层与执行层之间的胶水
 """
 import asyncio
 
+import logging
+
 from db import get_db, get_members, get_messages, save_message
 from bus import bus
 from bus.events import WorkflowUpdate
+from core import bg, workflow_store
 from executors.base import ExecutionContext
 from executors import registry as exec_registry
+
+log = logging.getLogger(__name__)
 
 
 async def _post_system_msg(group_id: int, sender_bot_id: int, text: str) -> None:
@@ -33,10 +38,17 @@ async def apply_step(group_id: int, orch, step) -> None:
         await _post_system_msg(group_id, ann.sender_bot_id, ann.text)
     if step.broadcast_state:
         await bus.publish(WorkflowUpdate(group_id=group_id, **orch.snapshot(group_id)))
+        blob = orch.serialize(group_id)
+        if blob is not None:
+            await workflow_store.save_state(
+                group_id, getattr(orch, "orchestrator_id", "workflow_v1"), blob)
     if step.done:
         await bus.publish(WorkflowUpdate(group_id=group_id, active=False, done=True))
+        await workflow_store.clear_state(group_id)
     for unit in step.next_units:
-        asyncio.create_task(run_unit(group_id, unit, orch))
+        # DFT-025/027: hold a reference (no GC) + register to the group so a
+        # user abort cancels the whole workflow chain, not just the dispatch.
+        bg.spawn_group(group_id, run_unit(group_id, unit, orch))
 
 
 async def run_unit(group_id: int, unit, orch) -> None:
@@ -58,3 +70,29 @@ async def run_unit(group_id: int, unit, orch) -> None:
         return
     step = orch.observe(group_id, unit.bot["id"], result.full_text)
     await apply_step(group_id, orch, step)
+
+
+async def resume_workflows() -> None:
+    """启动时恢复崩溃前在跑的工作流：还原编排器状态、广播快照、重新派发在飞单元。
+
+    只重新派发 simple_v1 单元 —— tool_loop_v1 这类有副作用的执行器靠各自的 WAL
+    （sessions.recover_all）单独恢复，这里不重复触发以免重复落库/调用工具。
+    """
+    from core.orchestration import registry as orch_registry
+
+    rows = await workflow_store.load_all_active()
+    for row in rows:
+        group_id = row["group_id"]
+        orch = orch_registry.get(row.get("orchestrator_id") or "workflow_v1")
+        try:
+            orch.restore(group_id, row["state"])
+        except Exception as e:
+            log.error("workflow restore failed for group %s: %r", group_id, e)
+            continue
+        await bus.publish(WorkflowUpdate(group_id=group_id, **orch.snapshot(group_id)))
+        for unit in orch.resume_units(group_id):
+            if unit.executor_id != "simple_v1":
+                log.info("workflow group %s: skip resume of %s unit (handled by recover_all)",
+                         group_id, unit.executor_id)
+                continue
+            bg.spawn_group(group_id, run_unit(group_id, unit, orch))

@@ -70,6 +70,10 @@ class ExecutionContext:
     ruleset: Any = None       # permissions.Ruleset | None; None = no permission checking
     file_url: str | None = None
     file_type: str | None = None
+    # Crash recovery (DFT-018): when set, the executor continues this existing
+    # session from its reconstructed WAL messages instead of starting fresh.
+    resume_session_id: str | None = None
+    resume_messages: list | None = None
 
 
 @dataclass

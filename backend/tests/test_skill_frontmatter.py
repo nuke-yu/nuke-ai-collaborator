@@ -206,6 +206,7 @@ class TestRunSkillAllowedToolsSideEffect(unittest.IsolatedAsyncioTestCase):
         ctx = {}
         from skills import loader as _loader
         with patch.object(_loader, "bot_ws", return_value=ws), \
+             patch("skills.discovery.bot_ws", return_value=ws), \
              patch.object(_loader, "process_skill_content", new=AsyncMock(return_value="processed")):
             result = await _loader.run_skill(42, "test-skill", "", ctx=ctx)
 
@@ -219,6 +220,7 @@ class TestRunSkillAllowedToolsSideEffect(unittest.IsolatedAsyncioTestCase):
         ctx = {}
         from skills import loader as _loader
         with patch.object(_loader, "bot_ws", return_value=ws), \
+             patch("skills.discovery.bot_ws", return_value=ws), \
              patch.object(_loader, "process_skill_content", new=AsyncMock(return_value="processed")):
             await _loader.run_skill(42, "test-skill", "", ctx=ctx)
 
@@ -231,6 +233,7 @@ class TestRunSkillAllowedToolsSideEffect(unittest.IsolatedAsyncioTestCase):
         ctx = {}
         from skills import loader as _loader
         with patch.object(_loader, "bot_ws", return_value=ws), \
+             patch("skills.discovery.bot_ws", return_value=ws), \
              patch.object(_loader, "process_skill_content", new=AsyncMock(return_value="processed")):
             result = await _loader.run_skill(42, "test-skill", "my-args", ctx=ctx)
 
@@ -247,6 +250,7 @@ class TestRunSkillAllowedToolsSideEffect(unittest.IsolatedAsyncioTestCase):
         ctx = {}
         from skills import loader as _loader
         with patch.object(_loader, "bot_ws", return_value=ws), \
+             patch("skills.discovery.bot_ws", return_value=ws), \
              patch.object(_loader, "process_skill_content", new=AsyncMock(return_value="processed")):
             await _loader.run_skill(42, "test-skill", "", ctx=ctx)
 
@@ -259,6 +263,7 @@ class TestRunSkillAllowedToolsSideEffect(unittest.IsolatedAsyncioTestCase):
         ctx = {}
         from skills import loader as _loader
         with patch.object(_loader, "bot_ws", return_value=ws), \
+             patch("skills.discovery.bot_ws", return_value=ws), \
              patch.object(_loader, "process_skill_content", new=AsyncMock(return_value="processed")):
             await _loader.run_skill(42, "test-skill", "", ctx=ctx)
 
@@ -271,6 +276,7 @@ class TestRunSkillAllowedToolsSideEffect(unittest.IsolatedAsyncioTestCase):
         ctx = {}
         from skills import loader as _loader
         with patch.object(_loader, "bot_ws", return_value=ws), \
+             patch("skills.discovery.bot_ws", return_value=ws), \
              patch.object(_loader, "process_skill_content", new=AsyncMock(return_value="processed")):
             result = await _loader.run_skill(42, "test-skill", "my-args", ctx=ctx)
 

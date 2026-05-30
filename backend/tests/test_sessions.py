@@ -29,6 +29,24 @@ def _restore_db(orig):
     _db_mod.DB_PATH = orig
 
 
+async def _seed_parents(group_id: int = 1, bot_ids=(1, 99)):
+    # agent_sessions.bot_id/group_id are real FKs (DFT-028). Seed the parent
+    # rows so session inserts don't violate foreign_keys=ON.
+    import aiosqlite
+    async with aiosqlite.connect(_TEST_DB) as db:
+        await db.execute(
+            "INSERT OR IGNORE INTO groups (id, name) VALUES (?, ?)",
+            (group_id, "g"),
+        )
+        for bid in bot_ids:
+            await db.execute(
+                "INSERT OR IGNORE INTO members (id, group_id, name, type) "
+                "VALUES (?, ?, ?, 'bot')",
+                (bid, group_id, "bot"),
+            )
+        await db.commit()
+
+
 class TestMigration004(unittest.IsolatedAsyncioTestCase):
 
     async def asyncSetUp(self):
@@ -93,6 +111,7 @@ class TestSessionStore(unittest.IsolatedAsyncioTestCase):
         from db.migrations import run_migrations
         async with aiosqlite.connect(_TEST_DB) as db:
             await run_migrations(db)
+        await _seed_parents()
 
     async def asyncTearDown(self):
         _restore_db(self._orig)
@@ -322,6 +341,7 @@ class TestRecoverAll(unittest.IsolatedAsyncioTestCase):
         from db.migrations import run_migrations
         async with aiosqlite.connect(_TEST_DB) as db:
             await run_migrations(db)
+        await _seed_parents()
 
     async def asyncTearDown(self):
         _restore_db(self._orig)

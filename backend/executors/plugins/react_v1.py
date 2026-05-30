@@ -32,6 +32,7 @@ from core.role_router import build_context_message
 from workspace import load_context_files, format_context_blocks, append_log
 from skills import list_skills_all, load_always_skills, filter_skills_by_context
 import executors.compact as compact
+import permissions
 from skills.constants import bot_ws as _bot_ws
 
 _REACT_MAX_ITER = 20
@@ -166,6 +167,17 @@ class ReactV1(BotExecutor):
         temperature = bot.get("temperature", 0.7)
         max_tokens  = bot.get("max_tokens", 4096)
 
+        # Build ruleset so this bot's tools are permission-checked (DFT-024):
+        # inherit from a parent spawn if provided, else load from DB. Without
+        # this, react_v1 ran run_shell/write_file/spawn_agent with zero checks.
+        if ctx.ruleset is not None:
+            _ruleset = ctx.ruleset
+        else:
+            perm_mode = (bot.get("executor_config") or {}).get("permission_mode", "default")
+            _ruleset = permissions.Ruleset(
+                rules=await permissions.load_rules(bot["id"]), mode=perm_mode
+            )
+
         history, user_msg = build_context_message(
             ctx.user_message, ctx.sender["name"], ctx.history
         )
@@ -238,6 +250,7 @@ class ReactV1(BotExecutor):
             "sender_type": "bot", "avatar_color": bot["avatar_color"],
         })
 
+        _rewake_queue: asyncio.Queue = asyncio.Queue()
         execution_ctx = {
             "bot_id":      bot["id"],
             "group_id":    ctx.group_id,
@@ -246,6 +259,9 @@ class ReactV1(BotExecutor):
             "all_members": ctx.all_members,
             "spawn_depth": ctx.spawn_depth,
             "broadcaster": ctx.broadcaster,
+            "ruleset":     _ruleset,
+            "steer_channel": ctx.steer_channel,
+            "rewake_queue": _rewake_queue,
         }
 
         full_text   = ""
@@ -263,6 +279,16 @@ class ReactV1(BotExecutor):
         try:
             while iter_count < max_iter:
                 iter_count += 1
+
+                # Drain any rewakes queued by tools (e.g. spawned agents)
+                if not _rewake_queue.empty():
+                    rewakes = []
+                    while not _rewake_queue.empty():
+                        rewakes.append(_rewake_queue.get_nowait())
+                    messages.append({
+                        "role": "user",
+                        "content": "[系统唤醒] " + "\n".join(rewakes),
+                    })
 
                 # Overflow recovery (same pattern as tool_loop_v1)
                 try:

@@ -3,7 +3,7 @@ from .metadata import skill_path, parse_frontmatter, parse_skill_meta, strip_fro
 from .discovery import list_skills, list_skills_all
 from .lifecycle import write_to_draft, update_skill_status, approve_draft_skill, reject_draft_skill
 from .loader import load_always_skills, run_skill
-from .processor import substitute_arguments, execute_shell_in_prompt, process_skill_content
+from .processor import substitute_arguments, process_skill_content
 from .filter import filter_skills_by_context
 from .watcher import watcher
 
@@ -13,7 +13,7 @@ __all__ = [
     "list_skills", "list_skills_all",
     "write_to_draft", "update_skill_status", "approve_draft_skill", "reject_draft_skill",
     "load_always_skills", "run_skill",
-    "substitute_arguments", "execute_shell_in_prompt", "process_skill_content",
+    "substitute_arguments", "process_skill_content",
     "filter_skills_by_context",
     "watcher",
 ]

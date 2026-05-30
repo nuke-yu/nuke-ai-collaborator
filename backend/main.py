@@ -13,6 +13,8 @@ from bus import bus, ws_adapter
 from bus.events import Presence, Message
 from models import AddMemberRequest  # noqa: keep models importable via main
 from core.orchestrator import select_triggered_bots, dispatch_bots, mark_read, send_auto_reply
+from core import bg
+from core import runner
 from api.messages import router as message_router, UPLOAD_DIR
 from api.groups import router as group_router
 from api.templates import router as template_router
@@ -47,6 +49,10 @@ async def lifespan(app: FastAPI):
     watcher.start(asyncio.get_event_loop())
     adapter_task = asyncio.create_task(ws_adapter(bus))
     await scheduler.start()
+    # Restore orchestrator state BEFORE recovering sessions: a recovered tool_loop_v1
+    # session that was a workflow stage unit must find its workflow already loaded so
+    # its completion can advance the stage (sessions/recovery.py coordination).
+    await runner.resume_workflows()
     await sessions.recover_all()
     yield
     scheduler.stop()
@@ -55,9 +61,6 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
-
-# Track running dispatch tasks per group so abort can cancel them
-_running_tasks: dict[int, asyncio.Task] = {}
 
 
 app.add_middleware(
@@ -133,9 +136,9 @@ async def websocket_endpoint(websocket: WebSocket, group_id: int, member_id: int
                 continue
 
             if payload.get("type") == "abort":
-                task = _running_tasks.get(group_id)
-                if task and not task.done():
-                    task.cancel()
+                # DFT-027: cancel the whole group's task set (dispatch + any
+                # workflow-advancement tasks spawned downstream), not just one.
+                bg.abort_group(group_id)
                 continue
 
             if payload.get("type") == "permission_response":
@@ -144,7 +147,7 @@ async def websocket_endpoint(websocket: WebSocket, group_id: int, member_id: int
                 persistence = payload.get("persistence", "once")  # "once" | "always"
                 req = permissions.resolve(request_id, approved, persistence)
                 if req and approved and persistence == "always":
-                    asyncio.create_task(permissions.save_rule(
+                    bg.spawn(permissions.save_rule(
                         req.bot_id, req.tool_name, "", "allow"
                     ))
                 continue
@@ -175,7 +178,7 @@ async def websocket_endpoint(websocket: WebSocket, group_id: int, member_id: int
                     online_ids = set(manager.get_online_member_ids(group_id))
                     for m in await get_members(db, group_id):
                         if m["name"] in mentioned_names and m["id"] not in online_ids and m.get("auto_reply"):
-                            asyncio.create_task(send_auto_reply(group_id, m, msg_id))
+                            bg.spawn(send_auto_reply(group_id, m, msg_id))
 
                 all_members = await get_members(db, group_id)
                 all_bots = [m for m in all_members if m["type"] == "bot"]
@@ -183,7 +186,7 @@ async def websocket_endpoint(websocket: WebSocket, group_id: int, member_id: int
                 group_info = await get_group(db, group_id) or {}
 
             if triggered:
-                task = asyncio.create_task(dispatch_bots(
+                bg.spawn_group(group_id, dispatch_bots(
                     group_id, triggered, content or "", sender, recent,
                     all_bots, all_members,
                     group_name=group_info.get("name", ""),
@@ -191,8 +194,6 @@ async def websocket_endpoint(websocket: WebSocket, group_id: int, member_id: int
                     file_url=file_url,
                     file_type=file_type,
                 ))
-                _running_tasks[group_id] = task
-                task.add_done_callback(lambda _: _running_tasks.pop(group_id, None))
 
     except WebSocketDisconnect:
         gone_id = manager.disconnect(websocket, group_id)

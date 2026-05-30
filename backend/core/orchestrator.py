@@ -12,6 +12,7 @@ from core.role_router import should_bot_respond, build_context_message
 from ai.memory import maybe_summarize, get_memory_context, add_to_chroma
 from executors.base import ExecutionContext
 from executors import registry
+from core import bg
 import core.workflow as wf
 
 # group_id -> bot_id: 记录当前哪个 bot 持有会话
@@ -154,8 +155,8 @@ async def auto_continue_if_needed(group_id: int, bot: dict, all_members: list, m
         )
         if not ai_reply:
             break
-        asyncio.create_task(add_to_chroma(bot_msg_id, ai_reply, bot["role"] or "", bot["id"]))
-        asyncio.create_task(maybe_summarize(group_id, bot["id"], bot["role"] or bot["name"], [bot["id"]]))
+        bg.spawn(add_to_chroma(bot_msg_id, ai_reply, bot["role"] or "", bot["id"]))
+        bg.spawn(maybe_summarize(group_id, bot["id"], bot["role"] or bot["name"], [bot["id"]]))
         if any(f"@{m['name']}" in ai_reply for m in all_members):
             break
 
@@ -193,7 +194,7 @@ async def check_handoff(group_id: int, all_bots: list, all_members: list,
     ai_reply, bot_msg_id = await stream_bot_response(group_id, target_bot, system_prompt, history, handoff_prompt)
     if not ai_reply:
         return
-    asyncio.create_task(add_to_chroma(bot_msg_id, ai_reply, target_bot["role"] or "", target_bot["id"]))
+    bg.spawn(add_to_chroma(bot_msg_id, ai_reply, target_bot["role"] or "", target_bot["id"]))
     active_bot[group_id] = target_bot["id"]
     await auto_continue_if_needed(group_id, target_bot, all_members)
     async with get_db() as db_r:
@@ -321,7 +322,7 @@ async def dispatch_bots(group_id: int, triggered: list, content: str, sender: di
                                             cache_read_tokens=_race_usage.get("cache_read_tokens") or None,
                                             cache_creation_tokens=_race_usage.get("cache_creation_tokens") or None)
             bot_recent = await get_messages(db2, group_id)
-        asyncio.create_task(add_to_chroma(bot_msg_id, ai_reply, winner_bot["role"] or "", winner_bot["id"]))
+        bg.spawn(add_to_chroma(bot_msg_id, ai_reply, winner_bot["role"] or "", winner_bot["id"]))
         await bus.publish(Message(
             group_id=group_id, id=bot_msg_id,
             member_id=winner_bot["id"], sender_name=winner_bot["name"],
@@ -329,7 +330,7 @@ async def dispatch_bots(group_id: int, triggered: list, content: str, sender: di
             content=ai_reply,
             created_at=bot_recent[-1]["created_at"] if bot_recent else "",
         ))
-        asyncio.create_task(maybe_summarize(group_id, winner_bot["id"], winner_bot["role"] or winner_bot["name"], [winner_bot["id"]]))
+        bg.spawn(maybe_summarize(group_id, winner_bot["id"], winner_bot["role"] or winner_bot["name"], [winner_bot["id"]]))
 
     role_groups: dict[str, list] = {}
     for bot in triggered:

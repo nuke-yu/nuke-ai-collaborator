@@ -1,4 +1,3 @@
-import aiosqlite
 from db.migrations import run_migrations
 
 _DEFAULT_TEMPLATES = [
@@ -77,7 +76,7 @@ async def init_db():
     # Lazy import avoids circular dependency at import time while respecting
     # any DB_PATH override set before calling (e.g. test fixtures).
     import db as _db
-    async with aiosqlite.connect(_db.DB_PATH) as conn:
+    async with _db.connect() as conn:
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS groups (
                 id           INTEGER PRIMARY KEY AUTOINCREMENT,

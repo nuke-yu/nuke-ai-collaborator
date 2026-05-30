@@ -12,6 +12,23 @@ def _run(coro):
     return asyncio.run(coro)
 
 
+@pytest.fixture(autouse=True)
+def _restore_global_state():
+    """Clear module-global hooks AND the tool registry after every test.
+
+    These tests register a `run_shell` ToolDef into the global
+    tool_executor._defs (setup_method). Without this teardown it leaks into
+    later test files: test_abort_signal builds tool_schemas from get_schemas(),
+    and a leaked `run_shell` flips tool_loop_v1 off its pure-streaming branch,
+    breaking that test's isolation.
+    """
+    yield
+    te.clear_before_hooks()
+    te.clear_after_hooks()
+    te._defs.clear()
+    te._handlers.clear()
+
+
 def _make_async(return_value=None, block_with_reason: str | None = None):
     """Return an async hook function; optionally blocks with a reason."""
     async def hook(name, arguments, *args):
@@ -169,6 +186,30 @@ class TestOnceHooks:
         te.add_before_hook(hook)
         te.add_before_hook(hook)
         assert sum(1 for e in te._before_hooks if e.fn is hook) == 1
+
+    def test_concurrent_execute_with_once_hook_no_valueerror(self):
+        """DFT-026: two execute() calls racing the same `once` hook must not
+        crash with ValueError(list.remove) nor double-fire."""
+        fired = []
+
+        async def gate(name, arguments, ctx):
+            # yield control so both execute() coroutines interleave inside the
+            # before-hook loop before either removes the shared `once` entry
+            await asyncio.sleep(0)
+            fired.append(name)
+
+        te.add_before_hook(gate, once=True)
+
+        async def race():
+            return await asyncio.gather(
+                te.execute("run_shell", {}, {}),
+                te.execute("run_shell", {}, {}),
+            )
+
+        results = _run(race())  # must not raise
+        assert all("[钩子错误]" not in r for r in results)
+        assert len(fired) == 1  # once hook fired exactly once
+        assert not any(e.fn is gate for e in te._before_hooks)
 
 
 # ---------------------------------------------------------------------------

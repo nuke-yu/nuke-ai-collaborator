@@ -119,6 +119,7 @@ async def _recover_one(session: dict, dispatcher) -> None:
         "bot_id": session["bot_id"],
         "group_id": session["group_id"],
         "config": config,
+        "user_message": session.get("user_message", ""),
         "messages": messages,
         "parent_id": session.get("parent_id"),
         "executor_id": session.get("executor_id", "tool_loop_v1"),
@@ -131,14 +132,22 @@ async def _recover_one(session: dict, dispatcher) -> None:
 
 
 async def _dispatch_recovery(payload: dict) -> None:
-    """Re-dispatch a recovered session into the normal orchestrator flow.
+    """Resume a recovered session by continuing its reconstructed messages.
 
-    Lazy imports to avoid circular dependency at module load time.
+    DFT-018: this is a dedicated recovery entry — it does NOT go through
+    dispatch_bots (which rebuilds the conversation from group history and would
+    re-run every already-completed side-effectful tool). Instead it hands the
+    reconstructed WAL messages to the executor via ExecutionContext.resume_*,
+    reusing the same session_id so the completed/failed writeback closes the
+    orphan (DFT-019). Lazy imports avoid a circular dependency at load time.
     """
     from db import get_db, get_member, get_members, get_messages
-    from core.orchestrator import dispatch_bots
+    from executors import registry
+    from executors.base import ExecutionContext
+    from bus import bus
     from ws_manager import manager as ws_manager
 
+    sid = payload["session_id"]
     bot_id = payload["bot_id"]
     group_id = payload["group_id"]
 
@@ -148,13 +157,9 @@ async def _dispatch_recovery(payload: dict) -> None:
         history = await get_messages(db, group_id, limit=50)
 
     if not bot:
-        log.warning("recovery: bot %d not found, skipping session %s", bot_id, payload["session_id"])
-        await update_session_status(payload["session_id"], "failed")
+        log.warning("recovery: bot %d not found, skipping session %s", bot_id, sid)
+        await update_session_status(sid, "failed")
         return
-
-    system_sender = {
-        "id": 0, "name": "系统恢复", "type": "system", "avatar_color": "#6b7280",
-    }
 
     await ws_manager.broadcast(group_id, {
         "type": "message",
@@ -163,11 +168,36 @@ async def _dispatch_recovery(payload: dict) -> None:
         "sender_name": "系统",
     })
 
-    asyncio.create_task(dispatch_bots(
+    all_bots = [m for m in members if m["type"] == "bot"]
+    system_sender = {
+        "id": 0, "name": "系统恢复", "type": "system", "avatar_color": "#6b7280",
+    }
+    ctx = ExecutionContext(
+        bot=bot,
         group_id=group_id,
-        bots=[bot],
-        user_message=f"[任务恢复] {payload['config'].get('user_message', '')}",
+        user_message=payload.get("user_message", ""),
         sender=system_sender,
         history=history,
+        all_bots=all_bots,
         all_members=members,
-    ))
+        broadcaster=bus,
+        resume_session_id=sid,
+        resume_messages=payload["messages"],
+    )
+    try:
+        result = await registry.get(payload.get("executor_id", "tool_loop_v1")).run(ctx)
+    except Exception:
+        log.exception("recovery: executor run failed for session %s", sid)
+        await update_session_status(sid, "failed")
+        return
+
+    # Workflow coordination: _dispatch_recovery bypasses run_unit / check_and_advance,
+    # so a recovered TOP-LEVEL session belonging to an active workflow stage would
+    # otherwise leave the workflow stalled. Re-observe its output to advance the stage,
+    # exactly as live dispatch does. Sub-agents (parent_id set) and sessions whose bot
+    # is not the current participant are skipped. Requires the orchestrator state to be
+    # restored first (main.py runs resume_workflows before recover_all).
+    if result and result.full_text and not payload.get("parent_id"):
+        import core.workflow as wf
+        if wf.is_workflow_participant(group_id, bot_id):
+            await wf.check_and_advance(group_id, result.full_text, bot_id)

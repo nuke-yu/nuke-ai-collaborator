@@ -316,6 +316,77 @@ class TestRecoveryWorkflowCoordination(unittest.IsolatedAsyncioTestCase):
         finally:
             wf._orch.end(gid)
 
+    async def _run_recovery(self, gid, bot_id, parent_id, full_text):
+        """跑一次 _dispatch_recovery，patch 掉 DB/执行器/ws，并把 check_and_advance
+        换成 AsyncMock 以隔离"是否推进"这一决策（编排器内部流转已在别处测过）。"""
+        import db as dbmod
+        import core.workflow as wf
+        from sessions import recovery
+        from executors import registry as exec_reg
+        from executors.base import ExecutionResult
+        from ws_manager import manager as ws_manager
+
+        class FakeExec:
+            async def run(self, ctx):
+                return ExecutionResult(full_text=full_text, msg_id=5)
+
+        bot = {"id": bot_id, "name": "A", "type": "bot", "avatar_color": "#111", "role": "Dev"}
+        fake_db_cm = MagicMock()
+        fake_db_cm.__aenter__ = AsyncMock(return_value=MagicMock())
+        fake_db_cm.__aexit__ = AsyncMock(return_value=False)
+
+        payload = {
+            "session_id": "s1", "bot_id": bot_id, "group_id": gid,
+            "config": {}, "user_message": "", "messages": [],
+            "parent_id": parent_id, "executor_id": "tool_loop_v1",
+        }
+        advance = AsyncMock()
+        with patch.object(dbmod, "get_member", new=AsyncMock(return_value=bot)), \
+             patch.object(dbmod, "get_members", new=AsyncMock(return_value=[bot])), \
+             patch.object(dbmod, "get_messages", new=AsyncMock(return_value=[])), \
+             patch.object(dbmod, "get_db", return_value=fake_db_cm), \
+             patch.object(exec_reg, "get", return_value=FakeExec()), \
+             patch.object(ws_manager, "broadcast", new=AsyncMock()), \
+             patch.object(recovery, "update_session_status", new=AsyncMock()), \
+             patch.object(wf, "check_and_advance", new=advance):
+            await recovery._dispatch_recovery(payload)
+        return advance
+
+    async def test_recovery_advances_participant(self):
+        import core.workflow as wf
+        gid = 7002
+        wf._orch.end(gid)
+        wf.start(gid, [self._single(1, "A"), self._single(2, "B")])
+        try:
+            advance = await self._run_recovery(gid, bot_id=1, parent_id=None, full_text="干完了 完毕")
+            advance.assert_awaited_once_with(gid, "干完了 完毕", 1)
+        finally:
+            wf._orch.end(gid)
+
+    async def test_recovery_skips_non_participant(self):
+        import core.workflow as wf
+        gid = 7003
+        wf._orch.end(gid)
+        wf.start(gid, [self._single(1, "A"), self._single(2, "B")])
+        try:
+            # bot 2 不是当前阶段在岗者 → 不推进
+            advance = await self._run_recovery(gid, bot_id=2, parent_id=None, full_text="完毕")
+            advance.assert_not_awaited()
+        finally:
+            wf._orch.end(gid)
+
+    async def test_recovery_skips_subagent(self):
+        import core.workflow as wf
+        gid = 7004
+        wf._orch.end(gid)
+        wf.start(gid, [self._single(1, "A"), self._single(2, "B")])
+        try:
+            # bot 1 是参与者，但这是子代理会话（parent_id 非空）→ 不推进
+            advance = await self._run_recovery(gid, bot_id=1, parent_id="parent-1", full_text="完毕")
+            advance.assert_not_awaited()
+        finally:
+            wf._orch.end(gid)
+
 
 class TestRunnerBroadcast(unittest.IsolatedAsyncioTestCase):
     """runner.run_unit 把 broadcaster=bus 接给 executor，stream 事件经总线带 'delta'。"""

@@ -19,7 +19,7 @@ async def list_jobs(bot_id: int | None = None, group_id: int | None = None,
     if enabled_only:
         conditions.append("enabled = 1")
     where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
-    async with aiosqlite.connect(_db.DB_PATH) as conn:
+    async with _db.connect() as conn:
         conn.row_factory = aiosqlite.Row
         async with conn.execute(
             f"SELECT * FROM cron_jobs {where} ORDER BY id", params
@@ -29,7 +29,7 @@ async def list_jobs(bot_id: int | None = None, group_id: int | None = None,
 
 
 async def get_job(job_id: int) -> dict | None:
-    async with aiosqlite.connect(_db.DB_PATH) as conn:
+    async with _db.connect() as conn:
         conn.row_factory = aiosqlite.Row
         async with conn.execute(
             "SELECT * FROM cron_jobs WHERE id = ?", (job_id,)
@@ -40,7 +40,7 @@ async def get_job(job_id: int) -> dict | None:
 
 async def create_job(bot_id: int, group_id: int, cron_expr: str, message: str,
                      label: str = "", enabled: bool = True) -> dict:
-    async with aiosqlite.connect(_db.DB_PATH) as conn:
+    async with _db.connect() as conn:
         conn.row_factory = aiosqlite.Row
         cur = await conn.execute(
             """INSERT INTO cron_jobs (bot_id, group_id, cron_expr, message, label, enabled)
@@ -63,7 +63,7 @@ async def update_job(job_id: int, **fields) -> dict:
     if "enabled" in updates:
         updates["enabled"] = int(bool(updates["enabled"]))
     set_clause = ", ".join(f"{k} = ?" for k in updates)
-    async with aiosqlite.connect(_db.DB_PATH) as conn:
+    async with _db.connect() as conn:
         conn.row_factory = aiosqlite.Row
         await conn.execute(
             f"UPDATE cron_jobs SET {set_clause} WHERE id = ?",
@@ -78,7 +78,7 @@ async def update_job(job_id: int, **fields) -> dict:
 
 
 async def toggle_job(job_id: int) -> dict:
-    async with aiosqlite.connect(_db.DB_PATH) as conn:
+    async with _db.connect() as conn:
         conn.row_factory = aiosqlite.Row
         await conn.execute(
             "UPDATE cron_jobs SET enabled = 1 - enabled WHERE id = ?", (job_id,)
@@ -92,6 +92,6 @@ async def toggle_job(job_id: int) -> dict:
 
 
 async def delete_job(job_id: int) -> None:
-    async with aiosqlite.connect(_db.DB_PATH) as conn:
+    async with _db.connect() as conn:
         await conn.execute("DELETE FROM cron_jobs WHERE id = ?", (job_id,))
         await conn.commit()

@@ -1,26 +1,21 @@
 """Skill content transformation pipeline.
 
-Three independent steps that can be applied in any combination:
+Two steps that can be applied in any combination:
   1. substitute_arguments  — $ARGUMENTS / $ARGUMENTS[N] / $N placeholders
-  2. execute_shell_in_prompt — ```! block and !`inline` shell commands
-  3. process_skill_content  — orchestrates both (convenience entry-point)
+  2. process_skill_content  — orchestrates substitution + ${SKILL_DIR}
+
+NOTE (DFT-022): skill bodies do NOT execute embedded shell. The old
+```! / !`inline` mechanism ran commands via /bin/sh during skill loading,
+bypassing tool_executor's denylist + permission pipeline + sandbox — a bot
+that can write_file + run_skill could self-write a skill with an embedded `!`
+block and get arbitrary host code execution. Any shell work a skill needs
+must go through the run_shell tool (hook/permission/sandbox guarded); `!`
+markers in skill text are now inert and passed through verbatim.
 
 Keeping this module separate from loader.py means the pipeline can be
 reused, tested, or replaced without touching skill discovery or I/O.
 """
-import asyncio
 import re
-import sys
-from pathlib import Path
-
-_IS_WINDOWS = sys.platform == "win32"
-_SHELL_BASH = ["powershell.exe", "-NoProfile", "-Command"] if _IS_WINDOWS else ["/bin/sh", "-c"]
-_SHELL_PS   = ["powershell.exe", "-NoProfile", "-Command"]
-
-# ```!\ncmd\n``` block
-_BLOCK_RE  = re.compile(r'```!\s*\n?([\s\S]*?)\n?```')
-# !`cmd` inline — requires leading whitespace or start-of-line
-_INLINE_RE = re.compile(r'(^|[ \t])!`([^`]+)`', re.MULTILINE)
 
 
 # ---------------------------------------------------------------------------
@@ -57,77 +52,19 @@ def substitute_arguments(content: str, args: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Step 2 — shell command embedding
-# ---------------------------------------------------------------------------
-
-async def _run_shell_cmd(cmd: str, cwd: Path, use_powershell: bool) -> str:
-    shell = _SHELL_PS if use_powershell else _SHELL_BASH
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            *shell, cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=str(cwd),
-        )
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
-        out = stdout.decode(errors='replace').strip()
-        err = stderr.decode(errors='replace').strip()
-        parts = ([out] if out else []) + ([f'[stderr]\n{err}'] if err else [])
-        return '\n'.join(parts) or '[no output]'
-    except asyncio.TimeoutError:
-        return '[shell command timed out after 30s]'
-    except Exception as e:
-        return f'[shell error] {e}'
-
-
-async def execute_shell_in_prompt(
-    content: str, skill_dir: Path, use_powershell: bool = False
-) -> str:
-    """Execute ```! blocks and !`inline` commands; replace each with its output.
-
-    Commands run in parallel. Replacements applied end-to-start so earlier
-    offsets stay valid.
-    """
-    matches: list[tuple[int, int, str, str]] = []  # (start, end, cmd, prefix)
-
-    for m in _BLOCK_RE.finditer(content):
-        matches.append((m.start(), m.end(), m.group(1).strip(), ''))
-
-    if '!`' in content:
-        for m in _INLINE_RE.finditer(content):
-            matches.append((m.start(), m.end(), m.group(2).strip(), m.group(1)))
-
-    if not matches:
-        return content
-
-    outputs = await asyncio.gather(*[
-        _run_shell_cmd(cmd, skill_dir, use_powershell) for _, _, cmd, _ in matches
-    ])
-
-    for (start, end, _, prefix), output in sorted(
-        zip(matches, outputs), key=lambda x: x[0][0], reverse=True
-    ):
-        content = content[:start] + prefix + output + content[end:]
-
-    return content
-
-
-# ---------------------------------------------------------------------------
 # Convenience orchestrator
 # ---------------------------------------------------------------------------
 
 async def process_skill_content(
     content: str,
-    skill_dir: Path,
+    skill_dir,
     args: str = "",
-    use_powershell: bool = False,
 ) -> str:
-    """Apply the full transformation pipeline to skill content.
+    """Apply the transformation pipeline to skill content.
 
-    Order matches claude-code: argument substitution → ${SKILL_DIR} →
-    shell command execution.
+    Order matches claude-code: argument substitution → ${SKILL_DIR}.
+    Embedded `!` shell blocks are intentionally NOT executed (DFT-022).
     """
     content = substitute_arguments(content, args)
     content = content.replace("${SKILL_DIR}", str(skill_dir))
-    content = await execute_shell_in_prompt(content, skill_dir, use_powershell)
     return content

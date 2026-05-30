@@ -1,16 +1,42 @@
+import os
 from pathlib import Path
 
 
+def _is_safe_name(name: str) -> bool:
+    """Reject names that could escape skills_dir (path separators, parent refs)."""
+    if not name or name != name.strip():
+        return False
+    if os.path.isabs(name):
+        return False
+    return not ("/" in name or "\\" in name or ".." in name or "\x00" in name)
+
+
+def _contained(base: Path, target: Path) -> bool:
+    """True if target, fully resolved, stays inside base (blocks symlink escapes too)."""
+    try:
+        return target.resolve().is_relative_to(base.resolve())
+    except (OSError, ValueError):
+        return False
+
+
 def skill_path(skills_dir: Path, name: str) -> tuple[Path | None, str]:
-    """Return (path, kind) for a skill. Directory structure takes priority."""
+    """Return (path, kind) for a skill. Directory structure takes priority.
+
+    Defense-in-depth against path traversal: the model-supplied ``name`` is
+    rejected if it contains path separators / parent refs, and every candidate
+    must resolve to a location inside ``skills_dir``. The primary guard lives in
+    ``loader.run_skill`` (name must be a discovered skill).
+    """
+    if not _is_safe_name(name):
+        return None, ""
     dir_skill = skills_dir / name / "SKILL.md"
-    if dir_skill.exists():
+    if dir_skill.exists() and _contained(skills_dir, dir_skill):
         return dir_skill, "md"
     flat_md = skills_dir / f"{name}.md"
-    if flat_md.exists():
+    if flat_md.exists() and _contained(skills_dir, flat_md):
         return flat_md, "md"
     flat_py = skills_dir / f"{name}.py"
-    if flat_py.exists():
+    if flat_py.exists() and _contained(skills_dir, flat_py):
         return flat_py, "py"
     return None, ""
 

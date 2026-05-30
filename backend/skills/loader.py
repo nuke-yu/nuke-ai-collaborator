@@ -45,11 +45,16 @@ async def run_skill(bot_id: int, name: str, args: str = "", ctx: dict | None = N
     skills.  Sets ctx side-effect keys for the executor.
     """
     ws = bot_ws(bot_id)
-    path, kind = skill_path(ws / "skills", name)
-    if path is None:
-        available = [s["name"] for s in list_skills(bot_id)]
+    # Primary traversal guard: only resolve names that the discovery layer
+    # actually found (gsd-2 / opencode pattern — the model never gets to drive
+    # a raw filesystem path). skill_path() adds containment as defense-in-depth.
+    available = [s["name"] for s in list_skills(bot_id)]
+    if name not in available:
         hint = f"，当前可用：{available}" if available else "，skills/ 目录为空"
         return f"[未找到技能 '{name}']{hint}"
+    path, kind = skill_path(ws / "skills", name)
+    if path is None:
+        return f"[未找到技能 '{name}']"
     if kind == "py":
         return f"[{name}.py] 请使用 run_shell 执行此脚本：{path}"
 
@@ -59,11 +64,7 @@ async def run_skill(bot_id: int, name: str, args: str = "", ctx: dict | None = N
 
     # Base directory header + full transformation pipeline
     content = f"Base directory for this skill: {skill_dir}\n\n{raw}"
-    content = await process_skill_content(
-        content, skill_dir,
-        args=args,
-        use_powershell=meta.get("shell") == "powershell",
-    )
+    content = await process_skill_content(content, skill_dir, args=args)
 
     # Companion files (directory skills only)
     if path.name == "SKILL.md":

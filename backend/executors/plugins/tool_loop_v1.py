@@ -308,31 +308,47 @@ class ToolLoopV1(BotExecutor):
                 user_content = [{"type": "text", "text": context_prefix}] + user_content
             else:
                 user_content = context_prefix + user_content
-        messages = list(history) + [{"role": "user", "content": user_content}]
+        _resuming = bool(ctx.resume_session_id)
+        if _resuming:
+            # DFT-018: continue the crashed session from its reconstructed WAL
+            # messages rather than re-running the task from group history (which
+            # would re-execute every already-completed side-effectful tool).
+            resumed = list(ctx.resume_messages or [])
+            if resumed and resumed[0].get("role") == "system":
+                resumed = resumed[1:]  # system prompt is supplied separately below
+            messages = resumed
+        else:
+            messages = list(history) + [{"role": "user", "content": user_content}]
         tool_names = [t.name for t in self.manifest.tools]
         tool_schemas = tool_executor.get_schemas(tool_names)
 
         temp_id = str(uuid.uuid4())
-        _session_id = str(uuid.uuid4())
-        _session_config = {
-            "system_prompt": system_prompt,
-            "provider": provider,
-            "model_name": model_name,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-        }
-        await sessions.create_session(
-            session_id=_session_id,
-            bot_id=bot["id"],
-            group_id=ctx.group_id,
-            config=_session_config,
-            user_message=ctx.user_message,
-            executor_id=self.executor_id,
-        )
-        await sessions.append_event(_session_id, "session_start", {
-            "user_content": user_content if isinstance(user_content, str)
-                            else json.dumps(user_content, ensure_ascii=False),
-        })
+        if _resuming:
+            _session_id = ctx.resume_session_id
+            # DFT-019: move the orphan out of 'recovering' so it can't leak — the
+            # normal completed/failed writeback at the end now closes this session.
+            await sessions.update_session_status(_session_id, "running")
+        else:
+            _session_id = str(uuid.uuid4())
+            _session_config = {
+                "system_prompt": system_prompt,
+                "provider": provider,
+                "model_name": model_name,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+            }
+            await sessions.create_session(
+                session_id=_session_id,
+                bot_id=bot["id"],
+                group_id=ctx.group_id,
+                config=_session_config,
+                user_message=ctx.user_message,
+                executor_id=self.executor_id,
+            )
+            await sessions.append_event(_session_id, "session_start", {
+                "user_content": user_content if isinstance(user_content, str)
+                                else json.dumps(user_content, ensure_ascii=False),
+            })
         await ctx.broadcaster.broadcast(ctx.group_id, {
             "type": "stream_start", "temp_id": temp_id,
             "member_id": bot["id"], "sender_name": bot["name"],
@@ -493,7 +509,7 @@ class ToolLoopV1(BotExecutor):
                     # If previous skill declared allowed-tools, narrow the schema list for this round
                     _skill_allowed = execution_ctx.pop("skill_allowed_tools", None)
                     if _skill_allowed is not None:
-                        _active_schemas = [s for s in tool_schemas if s.get("name") in _skill_allowed] or tool_schemas
+                        _active_schemas = [s for s in tool_schemas if s["function"]["name"] in _skill_allowed]
                     else:
                         _active_schemas = tool_schemas
                     # If previous skill declared model, override for this round only
@@ -656,7 +672,7 @@ class ToolLoopV1(BotExecutor):
                                         fork_task = fork_info.get("args") or execution_ctx.get("user_message", "")
                                         fork_allowed = fork_info.get("allowed_tools", [])
                                         fork_schemas = (
-                                            [s for s in tool_schemas if s.get("name") in fork_allowed]
+                                            [s for s in tool_schemas if s["function"]["name"] in fork_allowed]
                                             if fork_allowed else None
                                         )
                                         fork_model = fork_info.get("model") or model_name

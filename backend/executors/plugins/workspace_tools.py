@@ -275,6 +275,10 @@ _SENSITIVE_PATH_PREFIXES = [
     "~/.gnupg",
     "~/.config/gcloud",
     "~/.kube",
+    "~/.docker",          # config.json holds registry auth tokens
+    "~/.config/gh",       # GitHub CLI oauth tokens
+    "~/.config/git",      # git credential store / config
+    "~/.password-store",  # pass(1) GPG-encrypted secrets
 ]
 
 # Sensitive filename patterns (fnmatch style)
@@ -291,6 +295,14 @@ _SENSITIVE_FILENAME_PATTERNS = [
     ".netrc",
     "*.pfx",
     "*.p12",
+    ".git-credentials",   # plaintext git http creds
+    ".npmrc",             # npm auth token
+    ".pypirc",            # PyPI upload token
+    ".dockercfg",         # legacy docker registry auth
+    "*.keystore",
+    "*.jks",
+    ".htpasswd",
+    "cookies.sqlite",     # Firefox cookie store
 ]
 
 # Filenames explicitly allowed despite matching a broad pattern above
@@ -347,6 +359,50 @@ _DANGEROUS_PATTERNS = [
     ("reboot",         "禁止重启命令"),
 ]
 
+# --- run_shell sandbox tier 1: env allowlist + cwd confinement -------------
+
+# Only these env vars (and LC_* locale vars) are passed to spawned shells.
+# Everything else — API keys, tokens, cloud creds — is stripped so a command
+# the model runs can't exfiltrate the host's secrets.
+_SHELL_ENV_ALLOW = {
+    "PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "LANGUAGE",
+    "TERM", "TMPDIR", "TZ", "PWD", "HOSTNAME",
+}
+_SHELL_ENV_ALLOW_PREFIX = ("LC_",)
+
+
+def _sandbox_env() -> dict:
+    """Build a minimal env for spawned shells, stripping host secrets."""
+    return {
+        k: v for k, v in os.environ.items()
+        if k in _SHELL_ENV_ALLOW or k.startswith(_SHELL_ENV_ALLOW_PREFIX)
+    }
+
+
+def _resolve_shell_cwd(cwd: str, bot_id) -> tuple[Path | None, str]:
+    """Confine the shell working directory to the bot's workspace.
+
+    Returns (path, "") on success or (None, reason) on rejection. An empty cwd
+    defaults to the workspace root; relative paths resolve under it; any target
+    that escapes the workspace (absolute path or '..' traversal) is rejected.
+    """
+    if bot_id is None:
+        return None, "缺少 bot_id，无法确定工作区"
+    root = _ws.bot_workspace(bot_id).resolve()
+    candidate = (cwd or "").strip()
+    if not candidate:
+        return root, ""
+    p = Path(candidate)
+    target = (p if p.is_absolute() else root / p)
+    try:
+        target = target.resolve()
+        if target.is_relative_to(root):
+            return target, ""
+    except (OSError, ValueError):
+        pass
+    return None, f"工作目录越界，必须位于工作区内：{cwd}"
+
+
 _TOOL_RESULT_MAX_CHARS = 20_000
 _TOOL_RESULT_HEAD_TAIL = _TOOL_RESULT_MAX_CHARS // 2
 
@@ -364,9 +420,17 @@ async def _default_output_truncator(
 
 
 async def _default_shell_guard(name: str, arguments: dict, context: dict) -> dict | None:
-    """Block dangerous shell commands before execution."""
+    """Block dangerous shell commands before execution.
+
+    Tier-2 backstop: run_shell is the highest-risk tool, so when no permission
+    ruleset is available to evaluate it (ruleset is None), fail closed rather
+    than open. The permission hook (_permission_check_hook) handles the case
+    where a ruleset *is* present — there it can ask/deny per the pipeline.
+    """
     if name != "run_shell":
         return None
+    if context.get("ruleset") is None:
+        return {"block": True, "reason": "run_shell 未接入权限系统（无 ruleset），出于安全已拒绝执行"}
     cmd = (arguments.get("cmd") or "").strip().lower()
     for pattern, reason in _DANGEROUS_PATTERNS:
         if pattern.lower() in cmd:
@@ -374,11 +438,24 @@ async def _default_shell_guard(name: str, arguments: dict, context: dict) -> dic
     return None
 
 
+# Tools that can escape the workspace or cause side effects. When no permission
+# ruleset is available to gate them (ruleset is None), fail closed rather than
+# open (DFT-024) — otherwise an executor that forgets to build a ruleset (e.g.
+# the old react_v1) would run these with zero checks. Read-only workspace tools
+# stay allowed so such a bot can still inspect its own workspace.
+_APPROVAL_REQUIRED_TOOLS = frozenset({
+    "run_shell", "write_file", "read_local_file", "write_local_file", "spawn_agent",
+})
+
+
 async def _permission_check_hook(name: str, arguments: dict, context: dict) -> dict | None:
     """Run the permission decision pipeline before every tool call."""
     ruleset = context.get("ruleset")
     if ruleset is None:
-        return None  # permission system not configured for this bot
+        if name in _APPROVAL_REQUIRED_TOOLS:
+            return {"block": True,
+                    "reason": f"{name} 未接入权限系统（无 ruleset），出于安全已拒绝执行"}
+        return None  # read-only workspace tools are safe without a ruleset
 
     result = await permissions.check(
         tool_name=name,
@@ -439,23 +516,27 @@ async def _handle_run_shell(
     cmd: str, cwd: str = "", timeout: int = 30,
     background: bool = False, context: dict = None,
 ) -> str:
-    work_dir = cwd.strip() or str(Path.home())
+    bot_id = (context or {}).get("bot_id")
+    work_dir, err = _resolve_shell_cwd(cwd, bot_id)
+    if err:
+        return f"[安全拒绝] {err}"
+    sandbox_env = _sandbox_env()
     try:
         if background:
             proc = await asyncio.create_subprocess_exec(
                 *_DEFAULT_SHELL, cmd,
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.DEVNULL,
-                cwd=work_dir,
-                env={**os.environ},
+                cwd=str(work_dir),
+                env=sandbox_env,
             )
             return f"已在后台启动（PID: {proc.pid}），命令：{cmd}"
         proc = await asyncio.create_subprocess_exec(
             *_DEFAULT_SHELL, cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            cwd=work_dir,
-            env={**os.environ},
+            cwd=str(work_dir),
+            env=sandbox_env,
         )
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
         out = stdout.decode(errors="replace").strip()
