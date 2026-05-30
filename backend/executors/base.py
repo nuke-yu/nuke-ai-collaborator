@@ -104,6 +104,7 @@ class ExecutionContext:
     all_members: list[dict]
     broadcaster: Any          # (DEPRECATED: Use interaction.broadcast instead)
     interaction: InteractionAdapter = None  # Point 3: Side-effect dispatcher
+    active_ticket_id: str | None = None      # Point 4: Current Jira ticket being worked on
     workflow_suffix: str = ""
     group_name: str = ""
     group_announcement: str = ""

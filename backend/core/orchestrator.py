@@ -261,7 +261,8 @@ async def check_handoff(group_id: int, all_bots: list, all_members: list,
 async def dispatch_bots(group_id: int, triggered: list, content: str, sender: dict,
                          recent: list, all_bots: list, all_members: list,
                          group_name: str = "", group_announcement: str = "",
-                         file_url: str | None = None, file_type: str | None = None):
+                         file_url: str | None = None, file_type: str | None = None,
+                         active_ticket_id: str | None = None):
     """执行触发的 bot 列表：竞速、顺序、续写、交接。"""
     # Steer running bots instead of launching a new execution for them
     still_triggered = []
@@ -315,6 +316,7 @@ async def dispatch_bots(group_id: int, triggered: list, content: str, sender: di
                 all_bots=all_bots, all_members=all_members,
                 broadcaster=bus,
                 interaction=interaction.StandardInteraction(),
+                active_ticket_id=active_ticket_id,
                 workflow_suffix=wf.system_suffix(group_id),
                 group_name=group_name,
                 group_announcement=group_announcement,
@@ -348,6 +350,7 @@ async def dispatch_bots(group_id: int, triggered: list, content: str, sender: di
                     all_bots=all_bots, all_members=all_members,
                     broadcaster=bus,
                     interaction=interaction.StandardInteraction(),
+                    active_ticket_id=active_ticket_id,
                     workflow_suffix=wf.system_suffix(group_id),
                     group_name=group_name,
                     group_announcement=group_announcement,
