@@ -383,6 +383,10 @@ Your task is to create a detailed summary of the conversation so far, paying clo
 to the user's explicit requests and previous actions. This summary will replace the full \
 conversation history to preserve context while fitting within the context window.
 
+CRITICAL INSTRUCTION: If you encounter contents from files named 'SPEC.md' or 'BOARD.md' \
+in the conversation, you MUST preserve their core structure and key requirements in your summary. \
+Do not over-compress business requirements or Jira ticket formats.
+
 Before writing the summary, use an <analysis> block to organize your thoughts \
 (this block will be stripped from the final output).
 

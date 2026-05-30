@@ -37,3 +37,15 @@ class StandardInteraction(InteractionAdapter):
             cache_read_tokens=usage.get("cache_read_tokens", 0),
             cache_creation_tokens=usage.get("cache_creation_tokens", 0)
         )
+        
+        # Point 4: Hang the cost on the current Jira Ticket if applicable
+        if "ticket_id" in usage and usage["cost_usd"]:
+            try:
+                async with write_connect() as db:
+                    await db.execute(
+                        "UPDATE tickets SET total_usd_cost = total_usd_cost + ? WHERE ticket_id = ?",
+                        (usage["cost_usd"], usage["ticket_id"])
+                    )
+                    await db.commit()
+            except Exception:
+                log.exception("Failed to update ticket cost")

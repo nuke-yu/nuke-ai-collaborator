@@ -154,6 +154,23 @@ class AIService:
 
     async def _sync_tokens(self):
         """Persist current usage to database via interaction adapter."""
+        usage_data = self.usage.to_dict()
+        
+        # Calculate USD cost
+        from ai.pricing import calculate_cost
+        cost = calculate_cost(
+            self.ctx.bot.get("model_provider", "deepseek"),
+            self.ctx.bot.get("model_name", "deepseek-chat"),
+            usage_data
+        )
+        usage_data["cost_usd"] = cost
+        
+        # Determine current ticket from execution context if available
+        # The RDManager could potentially inject this, or we can look it up based on the group's active workflow
+        ticket_id = getattr(self.ctx, "active_ticket_id", None)
+        if ticket_id:
+            usage_data["ticket_id"] = ticket_id
+            
         await self.ctx.interaction.update_session_tokens(
-            self.session_id, **self.usage.to_dict()
+            self.session_id, **usage_data
         )

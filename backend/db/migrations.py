@@ -224,6 +224,15 @@ async def migration_011(db):
     await db.commit()
 
 
+async def migration_012(db):
+    """Add total_usd_cost column to tickets table for token cost tracking."""
+    try:
+        await db.execute("ALTER TABLE tickets ADD COLUMN total_usd_cost REAL DEFAULT 0.0")
+    except Exception:
+        pass
+    await db.commit()
+
+
 MIGRATIONS: list = [
     migration_001,
     migration_002,
@@ -236,7 +245,9 @@ MIGRATIONS: list = [
     migration_009,
     migration_010,
     migration_011,
+    migration_012,
 ]
+
 
 
 
