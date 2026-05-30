@@ -5,7 +5,7 @@ from executors.base import (
     BotExecutor, ExecutionContext, ExecutionResult,
     PluginManifest, WorkspaceConfig, CollabConfig, build_group_section,
 )
-from db import get_db, save_message, get_messages
+from db import write_connect, save_message, get_messages
 from ai.client import call_ai_stream, AIError
 from ai.memory import get_memory_context, add_to_chroma, maybe_summarize
 from core.role_router import build_context_message, build_image_content
@@ -92,7 +92,7 @@ class SimpleV1(BotExecutor):
             })
             return ExecutionResult(full_text=full_text, msg_id=None)
 
-        async with get_db() as db:
+        async with write_connect() as db:
             msg_id = await save_message(db, ctx.group_id, bot["id"], full_text,
                                         input_tokens=_tokens_in, output_tokens=_tokens_out,
                                         cache_read_tokens=_cache_read,

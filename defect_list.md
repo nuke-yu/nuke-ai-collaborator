@@ -2,15 +2,15 @@
 
 ## 进度总览 (Progress Dashboard)
 
-> 更新：2026-05-30 · 全量 **57** 项，已修 **34**，待修 **23**
+> 更新：2026-05-30 · 全量 **57** 项，已修 **35**，待修 **22**
 
 | 批次 | 范围 | 总数 | 已修 | 待修 |
 | :--- | :--- | :---: | :---: | :---: |
 | 历史缺陷 | DFT-001 ~ 016 | 16 | 16 ✅ | 0 |
-| 架构师 Review | DFT-017 ~ 057 | 41 | 18 ✅ | 23 |
-| **合计** | — | **57** | **34** | **23** |
+| 架构师 Review | DFT-017 ~ 057 | 41 | 19 ✅ | 22 |
+| **合计** | — | **57** | **35** | **22** |
 
-架构师 Review 按严重度：🔴 Critical 7（已修 7）· 🟠 High 12（已修 11）· 🟡 Medium 17 · 🟢 Low 5。
+架构师 Review 按严重度：🔴 Critical 7（已修 7）· 🟠 High 12（已修 12）· 🟡 Medium 17 · 🟢 Low 5。
 
 ### 状态索引（DFT-017 ~ 052，点 ID 可跳转下方明细）
 
@@ -52,7 +52,7 @@
 | DFT-050 | 🟢 | ⛔未修复 | 权限路由无鉴权 |
 | DFT-051 | 🟢 | ⛔未修复 | AIError 回显原始异常 |
 | DFT-052 | 🟢 | ⛔未修复 | `estimate_tokens` 全量 json.dumps |
-| **DFT-053** | **数据库** | 🟠 High | **SQLite 锁竞争与写入并发性**：随着用户和 Bot 并发增加，频繁的消息写入和状态更新会导致 `database is locked` 异常。 | 实时对话中断，Bot 响应丢失，用户体验因数据库阻塞而显著下降。 | **已优化（DFT-029）**：开启 WAL 模式。后续应引入**异步写入队列**。 |
+| **DFT-053** | **数据库** | 🟠 High | **SQLite 锁竞争与写入并发性**：随着用户和 Bot 并发增加，频繁的消息写入和状态更新会导致 `database is locked` 异常。 | 实时对话中断，Bot 响应丢失，用户体验因数据库阻塞而显著下降。 | **✅已修复（缩小范围）**：DFT-029 已开 WAL。新增 `db/writer.py` 进程级**串行写入器**——单条常驻写连接 + 按事件循环 id 的 `asyncio.Lock`（`write_connect()` CM），写事务永不重叠，SQLite 不再见到并发写者（aiosqlite 每连接各跑独立 OS 线程，原先两写者真并发争单写锁）。已把缺陷点名的消息写入热路径接进来：`interaction.save_message`（tool_loop 机器人回复主路径）、`simple_v1`/`react_v1` 回复落盘、`api/messages` 编辑/撤回、`compact` 摘要写入；`main.py` lifespan 关闭时 `aclose_writer()` 释放。读路径仍走 `db.connect()`（WAL 并发读不受影响）。残留：`main.py` 入站用户消息、`orchestrator`、`mark_read`/`send_auto_reply` 等低频/读写交织块仍各开连接——它们在单个连接块内交织读 + 嵌套写（如 `mark_read` 自带连接），安全迁移需先拆解避免非重入锁嵌套，暂缓。单测 `tests/test_db_writer.py`（4 例：读回、共享单连接、并发串行不 locked、aclose 重建）。 |
 | **DFT-054** | **文件 I/O** | 🟠 High | **阻塞性磁盘 I/O**：工作区大文件读写目前主要使用同步操作，阻塞事件循环。 | 导致所有用户的 WebSocket 连接出现可感知的卡顿。 | **✅已修复**：Bot 工具热路径四处读写（`workspace.read_file/write_file`、`_handle_read_local_file/_handle_write_local_file`）原在循环线程内同步 `Path.read_text/write_text`；改经 `asyncio.to_thread` 下放工作线程（写路径含 draft/history/对比整段磁盘操作一并下放），循环不再阻塞。`append_log`/`archive_run` 早已下放。 |
 | **DFT-055** | **状态管理** | 🟡 Medium | **缺乏长时任务断点（Checkpoint）**：Agent 的 Tool Loop 迭代状态仅存在于内存，重启无法恢复。 | 服务重启后，正在进行的复杂任务无法恢复，用户只能看到任务消失。 | 在数据库中增加 `step_checkpoint` 记录。 |
 | **DFT-056** | **安全性** | 🟡 Medium | **API Key 明文存储**：API 密钥明文保存在配置文件中，存在泄露风险。 | 不符合安全最佳实践，容器化部署不便。 | 增加密钥混淆，优先从环境变量加载并支持热加载。 |

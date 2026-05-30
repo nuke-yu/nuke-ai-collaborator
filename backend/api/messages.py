@@ -2,7 +2,7 @@ import uuid
 import pathlib
 import re
 from fastapi import APIRouter, HTTPException, UploadFile, File
-from db import (get_db, get_messages, get_message_meta, update_message, soft_delete_message,
+from db import (get_db, write_connect, get_messages, get_message_meta, update_message, soft_delete_message,
                       toggle_reaction, get_reactions_for_message, get_reactions_for_group,
                       pin_message, unpin_message, get_pinned_messages)
 from ws_manager import manager
@@ -64,7 +64,7 @@ async def unpin_msg(group_id: int, msg_id: int):
 
 @router.put("/api/messages/{msg_id}")
 async def edit_message(msg_id: int, req: EditMessageRequest):
-    async with get_db() as db:
+    async with write_connect() as db:
         meta = await get_message_meta(db, msg_id)
         if not meta or meta["member_id"] != req.member_id:
             raise HTTPException(403, "无权编辑此消息")
@@ -75,7 +75,7 @@ async def edit_message(msg_id: int, req: EditMessageRequest):
 
 @router.delete("/api/messages/{msg_id}")
 async def withdraw_message(msg_id: int, member_id: int):
-    async with get_db() as db:
+    async with write_connect() as db:
         meta = await get_message_meta(db, msg_id)
         if not meta or meta["member_id"] != member_id:
             raise HTTPException(403, "无权撤回此消息")

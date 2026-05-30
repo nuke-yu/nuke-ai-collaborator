@@ -25,7 +25,7 @@ from executors.plugins.workspace_tools import (
     _build_skills_xml, _with_personality,
     register_workspace_tools,
 )
-from db import get_db, save_message, get_messages
+from db import write_connect, save_message, get_messages
 from ai.client import call_ai_once, AIError, AIContextOverflowError
 from ai.memory import get_memory_context, add_to_chroma, maybe_summarize
 from core.role_router import build_context_message
@@ -418,7 +418,7 @@ class ReactV1(BotExecutor):
             })
             return ExecutionResult(full_text=full_text, msg_id=None)
 
-        async with get_db() as db:
+        async with write_connect() as db:
             msg_id = await save_message(db, ctx.group_id, bot["id"], full_text,
                                         input_tokens=_total_input_tokens or None,
                                         output_tokens=_total_output_tokens or None,

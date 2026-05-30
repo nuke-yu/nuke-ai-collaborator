@@ -1,7 +1,7 @@
 import logging
 from executors.base import InteractionAdapter
 from bus import bus
-from db import get_db, save_message
+from db import write_connect, save_message
 import sessions
 
 log = logging.getLogger(__name__)
@@ -19,7 +19,7 @@ class StandardInteraction(InteractionAdapter):
         await bus.broadcast(group_id, payload)
 
     async def save_message(self, group_id: int, member_id: int, content: str, **kwargs) -> int:
-        async with get_db() as db:
+        async with write_connect() as db:
             return await save_message(db, group_id, member_id, content, **kwargs)
 
     async def append_session_event(self, session_id: str, event_type: str, payload: dict):

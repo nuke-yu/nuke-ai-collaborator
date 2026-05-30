@@ -24,6 +24,9 @@ def get_db():
     return connect()
 
 
+from db.writer import write_connect, aclose_writer  # noqa: E402
+
+
 from db.schema import init_db  # noqa: E402
 from db.queries import (       # noqa: E402
     get_group, get_members, get_member,
@@ -36,7 +39,7 @@ from db.queries import (       # noqa: E402
 )
 
 __all__ = [
-    "DB_PATH", "get_db", "connect", "init_db",
+    "DB_PATH", "get_db", "connect", "write_connect", "aclose_writer", "init_db",
     "get_group", "get_members", "get_member",
     "get_messages", "get_all_messages", "get_member_stats",
     "save_message", "update_member_setting", "clear_bot_context",

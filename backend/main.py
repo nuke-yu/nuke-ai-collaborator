@@ -6,7 +6,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from db import init_db, get_db, get_member, get_members, get_group, save_message, get_messages
+from db import init_db, get_db, get_member, get_members, get_group, save_message, get_messages, aclose_writer
 import permissions
 from ws_manager import manager
 from bus import bus, ws_adapter
@@ -64,6 +64,7 @@ async def lifespan(app: FastAPI):
     adapter_task.cancel()
     watcher.stop()
     await ai_client.aclose_client()
+    await aclose_writer()
 
 
 app = FastAPI(lifespan=lifespan)

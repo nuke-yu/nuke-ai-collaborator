@@ -648,7 +648,7 @@ async def maybe_compact_db_history(
         return
     _db_compaction_locks.add(group_id)
     try:
-        from db import get_db, get_messages, save_compaction_summary
+        from db import get_db, write_connect, get_messages, save_compaction_summary
 
         async with get_db() as db:
             all_msgs = await get_messages(db, group_id, limit=200)
@@ -692,7 +692,7 @@ async def maybe_compact_db_history(
         if not summary_text:
             return
 
-        async with get_db() as db:
+        async with write_connect() as db:
             summary_id = await save_compaction_summary(
                 db, group_id, bot_id, summary_text, keep_ids
             )
