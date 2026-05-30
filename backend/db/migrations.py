@@ -11,8 +11,30 @@ Adding a new migration:
 """
 
 import logging
+import sqlite3
 
 log = logging.getLogger(__name__)
+
+
+async def _safe_add_column(db, sql: str) -> None:
+    """Run an idempotent ADD COLUMN, swallowing ONLY the benign 'duplicate
+    column' case.
+
+    SQLite has no `ADD COLUMN IF NOT EXISTS`, so re-running a migration raises
+    `OperationalError: duplicate column name: X`, which is safe to ignore. Any
+    OTHER error (`database is locked`, disk full, malformed SQL, missing table)
+    is re-raised so the migration is NOT recorded in `_schema_version` and gets
+    retried on the next startup instead of silently leaving a half-applied
+    schema marked as success (DFT-038).
+    """
+    try:
+        await db.execute(sql)
+    except sqlite3.OperationalError as e:
+        if "duplicate column" in str(e).lower():
+            log.debug("column already present, skipping: %s", sql)
+            return
+        raise
+
 
 # ---------------------------------------------------------------------------
 # Migration functions
@@ -43,10 +65,7 @@ async def migration_001(db):
         "ALTER TABLE role_summaries ADD COLUMN bot_id INTEGER DEFAULT NULL",
     ]
     for sql in stmts:
-        try:
-            await db.execute(sql)
-        except Exception:
-            pass  # column already exists on new DBs or repeated runs
+        await _safe_add_column(db, sql)
     await db.commit()
 
 
@@ -57,10 +76,7 @@ async def migration_002(db):
         "ALTER TABLE messages ADD COLUMN output_tokens INTEGER DEFAULT NULL",
     ]
     for sql in stmts:
-        try:
-            await db.execute(sql)
-        except Exception:
-            pass
+        await _safe_add_column(db, sql)
     await db.commit()
 
 
@@ -130,10 +146,7 @@ async def migration_005(db):
         "ALTER TABLE messages ADD COLUMN cache_creation_tokens INTEGER DEFAULT NULL",
     ]
     for sql in stmts:
-        try:
-            await db.execute(sql)
-        except Exception:
-            pass
+        await _safe_add_column(db, sql)
     await db.commit()
 
 
@@ -144,10 +157,7 @@ async def migration_006(db):
         "ALTER TABLE agent_sessions ADD COLUMN cache_creation_tokens INTEGER NOT NULL DEFAULT 0",
     ]
     for sql in stmts:
-        try:
-            await db.execute(sql)
-        except Exception:
-            pass
+        await _safe_add_column(db, sql)
     await db.commit()
 
 
@@ -173,10 +183,7 @@ async def migration_007(db):
 
 async def migration_008(db):
     """Add last_snapshot_json column to agent_sessions for full context snapshots."""
-    try:
-        await db.execute("ALTER TABLE agent_sessions ADD COLUMN last_snapshot_json TEXT")
-    except Exception:
-        pass
+    await _safe_add_column(db, "ALTER TABLE agent_sessions ADD COLUMN last_snapshot_json TEXT")
     await db.commit()
 
 
@@ -217,19 +224,13 @@ async def migration_010(db):
 
 async def migration_011(db):
     """Add traits_json column to members table for atomic skill composition."""
-    try:
-        await db.execute("ALTER TABLE members ADD COLUMN traits_json TEXT DEFAULT '[]'")
-    except Exception:
-        pass
+    await _safe_add_column(db, "ALTER TABLE members ADD COLUMN traits_json TEXT DEFAULT '[]'")
     await db.commit()
 
 
 async def migration_012(db):
     """Add total_usd_cost column to tickets table for token cost tracking."""
-    try:
-        await db.execute("ALTER TABLE tickets ADD COLUMN total_usd_cost REAL DEFAULT 0.0")
-    except Exception:
-        pass
+    await _safe_add_column(db, "ALTER TABLE tickets ADD COLUMN total_usd_cost REAL DEFAULT 0.0")
     await db.commit()
 
 

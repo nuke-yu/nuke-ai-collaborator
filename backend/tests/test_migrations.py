@@ -17,7 +17,9 @@ import aiosqlite
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import db as database
-from db.migrations import run_migrations, migration_001, migration_002, MIGRATIONS
+from db.migrations import (
+    run_migrations, migration_001, migration_002, MIGRATIONS, _safe_add_column,
+)
 from db.schema import init_db
 
 
@@ -65,22 +67,31 @@ class MigrationTestCase(unittest.IsolatedAsyncioTestCase):
 
 class TestRunMigrations(MigrationTestCase):
 
+    async def _seed_base_schema(self, conn):
+        """生产流程下 init_db 先建基础表再迁移（schema.py）；这里同样先建好
+        基础表，避免迁移因 'no such table' 而（按 DFT-038 的新语义）上抛。"""
+        await conn.executescript(_OLD_SCHEMA)
+        await conn.commit()
+
     async def test_creates_schema_version_table(self):
-        """run_migrations 在空 DB 上创建 _schema_version 表。"""
+        """run_migrations 在已建基础表的 DB 上创建 _schema_version 表。"""
         async with self._connect() as conn:
+            await self._seed_base_schema(conn)
             self.assertFalse(await _has_table(conn, "_schema_version"))
             await run_migrations(conn)
             self.assertTrue(await _has_table(conn, "_schema_version"))
 
     async def test_fresh_db_reaches_current_version(self):
-        """空 DB 执行后版本号等于 MIGRATIONS 长度。"""
+        """基础表就绪后执行，版本号等于 MIGRATIONS 长度。"""
         async with self._connect() as conn:
+            await self._seed_base_schema(conn)
             await run_migrations(conn)
             self.assertEqual(await _get_version(conn), len(MIGRATIONS))
 
     async def test_idempotent_on_repeat_call(self):
         """连续两次调用不产生重复版本行，版本号不变。"""
         async with self._connect() as conn:
+            await self._seed_base_schema(conn)
             await run_migrations(conn)
             await run_migrations(conn)
             cur = await conn.execute("SELECT COUNT(*) FROM _schema_version")
@@ -442,6 +453,48 @@ class TestMigration002(MigrationTestCase):
         async with self._connect() as conn:
             await migration_002(conn)
             await migration_002(conn)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 五、DFT-038 — 迁移错误传播（不再吞 lock/磁盘满/语法错误并谎报成功）
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestMigrationErrorPropagation(MigrationTestCase):
+
+    async def test_safe_add_column_swallows_duplicate(self):
+        """重复列是良性情况，_safe_add_column 静默跳过。"""
+        async with self._connect() as conn:
+            await conn.execute("CREATE TABLE t (a INTEGER)")
+            # 不抛异常即通过
+            await _safe_add_column(conn, "ALTER TABLE t ADD COLUMN a INTEGER")
+
+    async def test_safe_add_column_reraises_non_duplicate(self):
+        """非'duplicate column'的 OperationalError（如表不存在）必须上抛，不被吞。"""
+        async with self._connect() as conn:
+            with self.assertRaises(aiosqlite.OperationalError):
+                await _safe_add_column(
+                    conn, "ALTER TABLE nonexistent_table ADD COLUMN x INTEGER"
+                )
+
+    async def test_failed_migration_does_not_advance_version(self):
+        """迁移内真实错误上抛后，_schema_version 不前进 → 下次启动会重试，不谎报成功。"""
+        async def boom(db):
+            # 表不存在 → OperationalError，非 duplicate column
+            await _safe_add_column(db, "ALTER TABLE does_not_exist ADD COLUMN x INTEGER")
+
+        async with self._connect() as conn:
+            import db.migrations as _mig
+            orig = list(_mig.MIGRATIONS)
+            _mig.MIGRATIONS[:] = [boom]
+            try:
+                with self.assertRaises(aiosqlite.OperationalError):
+                    await run_migrations(conn)
+                self.assertIsNone(
+                    await _get_version(conn),
+                    "失败的迁移不应被记入 _schema_version（表内应无版本行）",
+                )
+            finally:
+                _mig.MIGRATIONS[:] = orig
 
 
 if __name__ == "__main__":

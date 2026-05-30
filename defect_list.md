@@ -2,13 +2,13 @@
 
 ## 进度总览 (Progress Dashboard)
 
-> 更新：2026-05-30 · 全量 **57** 项，已修 **40**，待修 **17**
+> 更新：2026-05-30 · 全量 **57** 项，已修 **41**，待修 **16**
 
 | 批次 | 范围 | 总数 | 已修 | 待修 |
 | :--- | :--- | :---: | :---: | :---: |
 | 历史缺陷 | DFT-001 ~ 016 | 16 | 16 ✅ | 0 |
-| 架构师 Review | DFT-017 ~ 057 | 41 | 24 ✅ | 17 |
-| **合计** | — | **57** | **40** | **17** |
+| 架构师 Review | DFT-017 ~ 057 | 41 | 25 ✅ | 16 |
+| **合计** | — | **57** | **41** | **16** |
 
 架构师 Review 按严重度：🔴 Critical 7（已修 7）· 🟠 High 12（已修 12）· 🟡 Medium 17 · 🟢 Low 5（已修 5）。
 
@@ -37,7 +37,7 @@
 | DFT-035 | 🟡 | ✅已修复 | **[架构重构]** 随 Stage 3 `AIService` 引入解决。溢出恢复逻辑统一由 AI 服务层处理，底层调用相同的安全截断机制。 |
 | DFT-036 | 🟡 | ✅已修复 | **[架构重构]** `run()` 600 行 god method 问题已通过 Stage 3 的 **Dependency Injection (DI)** 彻底重构。拆分了 `AIService` 负责推理/流控，`InteractionAdapter` 负责所有副作用（DB/WS/Event）。 |
 | DFT-037 | 🟡 | ⛔未修复 | 三 executor 复制生命周期已漂移 |
-| DFT-038 | 🟡 | ⛔未修复 | 迁移 `except` 吞所有异常仍记成功 |
+| DFT-038 | 🟡 | ✅已修复 | 迁移 `except` 吞所有异常仍记成功 |
 | DFT-039 | 🟡 | ⛔未修复 | 调度器重启 >1min 静默丢任务 |
 | DFT-040 | 🟡 | ⛔未修复 | 调度器无 timezone，DST 平移 |
 | DFT-041 | 🟡 | ✅已修复 | **[架构重构]** 工作流解析问题已随 Stage 1 的 **RDManager (看板事件中枢)** 和 Stage 2 的 **Durable Locks** 解决。系统通过内部事件总线 (`TicketCreated` 等) 实现强类型派单。 |
@@ -126,7 +126,7 @@
 | **DFT-035** | **上下文压缩**<br>[tool_loop_v1.py](backend/executors/plugins/tool_loop_v1.py#L508) · [compact.py](backend/executors/compact.py#L276) | 🟡 | 溢出恢复与 `snip_if_needed` 仍会拆散 `assistant(tool_calls)↔tool` 配对（DFT-003 同类问题、不同代码路径）。 | 产生孤儿 `tool_use_id` → Claude 400，`_overflow_recovered` 已 True 则直接 `AIError` 杀掉整个 run。 | 把 DFT-003 的配对保护抽成 `_safe_truncate_boundary` helper，复用到 overflow recovery 与 `snip_if_needed`；删 `assistant(tool_calls)` 必须连带其 tool 结果。 |
 | **DFT-036** | **执行引擎**<br>[tool_loop_v1.py](backend/executors/plugins/tool_loop_v1.py#L222) | 🟡 | `run` 是 ~600 行 god method，混 8+ 职责、深层嵌套闭包改 `nonlocal` token 计数。 | 无法单元测试（仅 `_tool_loop_core` 可测且与真实循环漂移），维护风险高。 | 抽出 run scaffold（prompt 组装/skill 快照/session/compaction/dispatch/persist）到基类或 helper，`run` 只做编排。 |
 | **DFT-037** | **执行引擎**<br>[react_v1.py](backend/executors/plugins/react_v1.py) vs [tool_loop_v1.py](backend/executors/plugins/tool_loop_v1.py) | 🟡 | 三个 executor 复制 ~150 行生命周期且已漂移（react 缺 WAL/archive/before_finalize、doom-loop 策略不同、skill 快照构建不同）。 | 任一修复需手工镜像到其它 executor，易遗漏。 | 同 DFT-036，三 executor 共享生命周期脚手架，差异点用 hook/manifest 表达。 |
-| **DFT-038** | **DB 迁移**<br>[migrations.py](backend/db/migrations.py#L46) | 🟡 | `except Exception: pass` 既吞"duplicate column"也吞 `database is locked`/磁盘满/语法错误，且仍记为已应用。 | schema 残缺而 `_schema_version` 谎报成功，永不重试。 | 只捕获 `sqlite3.OperationalError` 且 message 含 "duplicate column"；其它异常上抛，失败不记版本。 |
+| **DFT-038** ✅ | **DB 迁移**<br>[migrations.py](backend/db/migrations.py#L46) | 🟡 | `except Exception: pass` 既吞"duplicate column"也吞 `database is locked`/磁盘满/语法错误，且仍记为已应用。 | schema 残缺而 `_schema_version` 谎报成功，永不重试。 | **已修复**：新增模块级助手 `_safe_add_column(db, sql)`——只 `except sqlite3.OperationalError` 且 `"duplicate column" in str(e).lower()` 时静默跳过（幂等重跑的良性情况），其余 `OperationalError`（`database is locked`/磁盘满/`no such table`/语法错误）一律 `raise` 上抛。错误从 `migration_fn` 冒泡出 `run_migrations`，使其在 `INSERT INTO _schema_version` 之前中断 → 失败的迁移**不计版本**，下次启动重试，不再谎报成功留下残缺 schema。把 7 处 `try/except: pass`（migration_001/002/005/006 的循环 + 008/011/012 的单语句）全部替换为该助手。单测 `tests/test_migrations.py` 新增 `TestMigrationErrorPropagation`（3 例：duplicate 仍吞、非 duplicate 上抛、失败迁移不前进版本）；既有 `TestRunMigrations` 3 例的「裸空库」setup 改为先建基础表（对齐生产 `schema.init_db` 先建表再迁移的真实流程，原 setup 实为依赖被移除的吞错行为）；全套 28 例全绿。 |
 | **DFT-039** | **调度器**<br>[scheduler/engine.py](backend/scheduler/engine.py#L69) | 🟡 | `misfire_grace_time=60`+`coalesce=True`，重启超 1 分钟即静默丢失定时任务，无 last_run/next_run 审计。 | 部署/重启 >1min 静默跳过定时任务，无记录。 | 持久化 last_run/next_run；启动时对错过的 job 做 catch-up 或至少告警；按需调大 misfire_grace_time。 |
 | **DFT-040** | **调度器**<br>[scheduler/engine.py](backend/scheduler/engine.py#L45) | 🟡 | `AsyncIOScheduler()` 无 timezone，用宿主本地时区解释 cron，但 `created_at` 存 UTC，混用。 | DST/服务器迁移会整体平移所有任务触发时间。 | `AsyncIOScheduler(timezone="UTC")`，cron 统一 UTC 解释，前端展示再转本地。 |
 | **DFT-041** | **工作流**<br>[workflow.py](backend/core/workflow.py#L75) | 🟡 | `_parse_tickets` 解析失败时伪造单个 `["本次迭代任务"]`。 | 工作流"成功"却几乎啥都没干，无失败信号（开发团队其余 bot 全 idle）。 | 解析失败不伪造，发系统消息提示上游重发或标 stage 失败，不静默推进。 |
