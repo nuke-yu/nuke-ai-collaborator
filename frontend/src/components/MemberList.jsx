@@ -93,7 +93,17 @@ const INIT_FORM = {
   personality_prompt: '',
   executor_id: 'simple_v1', executor_config: {},
   done_keyword: '',
+  traits: [],
 }
+
+const AVAILABLE_TRAITS = [
+  { id: 'python_dev', label: 'Python 后端', description: '遵循 Python 后端开发规范' },
+  { id: 'jira_reader', label: 'Jira 看板达人', description: '熟悉 BOARD.md 看板协作流程' },
+  { id: 'git_ops', label: 'Git 专家', description: '精通 Git 操作和规范' },
+  { id: 'code_reviewer', label: '代码审查员', description: '严格把控代码质量' },
+  { id: 'frontend_dev', label: '前端开发', description: '精通 React/Vue 等框架' },
+  { id: 'test_writer', label: '测试专家', description: '擅长编写高覆盖率单元测试' },
+]
 
 const DEFAULT_BOOTSTRAP = `# BOOTSTRAP.md
 
@@ -375,6 +385,22 @@ export default function MemberList({ onAddMember, onEditMember, onClose, initial
                   value={form.system_prompt}
                   onChange={(e) => setField({ system_prompt: e.target.value })}
                 />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs text-indigo-300 block">能力特征 (Traits)</label>
+                <div className="flex flex-wrap gap-2 mt-1">
+                  {AVAILABLE_TRAITS.map(trait => (
+                    <label key={trait.id} className={`flex items-center gap-2 text-sm px-3 py-1.5 rounded cursor-pointer transition-colors border ${form.traits?.includes(trait.id) ? 'bg-indigo-600/40 border-indigo-400 text-indigo-100' : 'bg-gray-800/40 border-gray-600 text-gray-400 hover:bg-gray-700/50'}`}>
+                      <input type="checkbox" checked={form.traits?.includes(trait.id)} onChange={e => {
+                        const newTraits = e.target.checked ? [...(form.traits || []), trait.id] : (form.traits || []).filter(t => t !== trait.id)
+                        setField({ traits: newTraits })
+                      }} className="hidden" />
+                      <span title={trait.description}>{trait.label}</span>
+                    </label>
+                  ))}
+                </div>
+                <p className="text-[10px] text-gray-500 mt-1">勾选后将自动挂载对应的原子能力，无需在提示词中重复编写。</p>
               </div>
 
               <div>
