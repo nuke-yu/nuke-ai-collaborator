@@ -26,6 +26,7 @@ from executors import registry
 from workspace import init_all_bots, init_group_workspace
 from permissions.routes import router as permissions_router
 from skills.watcher import watcher
+from core.orchestration.rd_manager import rd_manager
 from ai import client as ai_client
 import scheduler
 import sessions
@@ -51,6 +52,7 @@ async def lifespan(app: FastAPI):
     watcher.start(asyncio.get_event_loop())
     adapter_task = asyncio.create_task(ws_adapter(bus))
     await scheduler.start()
+    await rd_manager.start()
     # Restore orchestrator state BEFORE recovering sessions: a recovered tool_loop_v1
     # session that was a workflow stage unit must find its workflow already loaded so
     # its completion can advance the stage (sessions/recovery.py coordination).
