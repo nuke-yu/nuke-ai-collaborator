@@ -512,6 +512,10 @@ async def _handle_run_skill(name: str, args: str = "", context: dict = None) -> 
     return await run_skill(bot_id, name, args, ctx=context) if bot_id else "[错误] 缺少 bot_id"
 
 
+# --- run_shell sandbox tier 3: dynamic port allocation ----------------------
+
+_INTERCEPT_PORTS = {"8000", "8080", "3000", "5000", "5173", "80"}
+
 def _allocate_free_port() -> int:
     import socket
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -532,15 +536,23 @@ async def _handle_run_shell(
     _max_timeout = min(timeout, 300) # Max 5 minutes even if requested more
     sandbox_env = _sandbox_env()
     
+    # Point 6: Dynamic Port Interception & Allocation
+    # If the bot tries to use a common port, we switch it to a dynamic one
     allocated_port = None
-    if "8080" in cmd or "port" in cmd.lower():
-        allocated_port = _allocate_free_port()
-        sandbox_env["APP_PORT"] = str(allocated_port)
-        sandbox_env["PORT"] = str(allocated_port)
+    intercepted_port = None
+    # Sort by length descending to match 8080 before 80
+    for p in sorted(_INTERCEPT_PORTS, key=len, reverse=True):
+        if p in cmd:
+            intercepted_port = p
+            allocated_port = _allocate_free_port()
+            # Intercept by environment variable injection
+            sandbox_env["APP_PORT"] = str(allocated_port)
+            sandbox_env["PORT"] = str(allocated_port)
+            # Physical replacement in the command string as a backstop
+            cmd = cmd.replace(p, str(allocated_port))
+            break
     
     # Wrap command in a subshell with ulimit (virtual memory limit) to prevent OOM
-    # Linux/Mac support: ulimit -v 524288 limits to ~512MB
-    # We use 'ulimit -v 524288 2>/dev/null; exec "$@"' via bash -c
     safe_cmd = f"ulimit -v 524288 2>/dev/null; {cmd}"
     
     try:
@@ -572,7 +584,11 @@ async def _handle_run_shell(
         
         out = stdout.decode(errors="replace").strip()
         err = stderr.decode(errors="replace").strip()
-        parts = [f"exit_code: {proc.returncode}"]
+        parts = []
+        if intercepted_port:
+            parts.append(f"[安全拦截] 已将硬编码端口 {intercepted_port} 替换为动态端口 {allocated_port}")
+            
+        parts.append(f"exit_code: {proc.returncode}")
         if out:
             parts.append(f"stdout:\n{out}")
         if err:
