@@ -271,3 +271,36 @@ class PermissionAsked:
     bot_id:     int
     tool_name:  str
     args:       Any
+
+
+# ─── R&D Domain Events (研发业务领域事件) ───────────────────────────────────
+
+@event("rd_ticket_created")
+class TicketCreated:
+    """BA Bot 产生了新的 Jira Ticket 或任务。"""
+    group_id:    int
+    ticket_id:   str
+    title:       str
+    description: str
+    priority:    str = "medium"
+    creator_id:  int | None = None
+
+
+@event("rd_code_committed")
+class CodeCommitted:
+    """Dev Bot 完成了代码提交。"""
+    group_id:    int
+    ticket_id:   str
+    files:       list[str]
+    commit_msg:  str
+    author_id:   int
+
+
+@event("rd_task_failed")
+class TaskFailed:
+    """研发环节（开发、测试、部署）中途失败。"""
+    group_id:  int
+    ticket_id: str
+    reason:    str
+    stage:     str  # e.g., 'coding', 'testing'
+    bot_id:    int
