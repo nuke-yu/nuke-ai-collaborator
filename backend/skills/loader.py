@@ -48,7 +48,8 @@ async def run_skill(bot_id: int, name: str, args: str = "", ctx: dict | None = N
     # Primary traversal guard: only resolve names that the discovery layer
     # actually found (gsd-2 / opencode pattern — the model never gets to drive
     # a raw filesystem path). skill_path() adds containment as defense-in-depth.
-    available = [s["name"] for s in list_skills(bot_id)]
+    available_skills = await list_skills(bot_id)
+    available = [s["name"] for s in available_skills]
     if name not in available:
         hint = f"，当前可用：{available}" if available else "，skills/ 目录为空"
         return f"[未找到技能 '{name}']{hint}"

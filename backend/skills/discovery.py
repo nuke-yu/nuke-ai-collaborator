@@ -1,12 +1,13 @@
 import asyncio
 from pathlib import Path
+from typing import List, Dict, Optional
 
 from .constants import WORKSPACE_ROOT, SYSTEM_SKILLS_ROOT, ROLES_ROOT, bot_ws
 from .metadata import skill_path, parse_skill_meta
 
 
-def _scan_dir(path: Path, layer: str) -> list[dict]:
-    """Scan a skills directory and return skill list with layer tag."""
+def _scan_dir_sync(path: Path, layer: str) -> List[Dict]:
+    """Internal synchronous directory scanner."""
     if not path.exists():
         return []
     seen: set = set()
@@ -32,8 +33,13 @@ def _scan_dir(path: Path, layer: str) -> list[dict]:
     return result
 
 
-def list_skills(bot_id: int) -> list[dict]:
-    """List skills in bot's personal skills/ dir (no layer merging)."""
+async def list_skills(bot_id: int) -> List[Dict]:
+    """Asynchronous listing of skills in bot's personal skills/ dir."""
+    return await asyncio.to_thread(_list_skills_sync, bot_id)
+
+
+def _list_skills_sync(bot_id: int) -> List[Dict]:
+    """Internal synchronous personal skill list."""
     ws = bot_ws(bot_id)
     skills_dir = ws / "skills"
     if not skills_dir.exists():
@@ -58,35 +64,35 @@ def list_skills(bot_id: int) -> list[dict]:
     return result
 
 
-async def list_skills_all(bot_id: int, group_id: int | None = None,
-                         role: str | None = None) -> list[dict]:
+async def list_skills_all(bot_id: int, group_id: Optional[int] = None,
+                         role: Optional[str] = None) -> List[Dict]:
     """Asynchronous wrapper for four-layer scan to avoid blocking the event loop."""
     return await asyncio.to_thread(_list_skills_all_sync, bot_id, group_id, role)
 
 
-def _list_skills_all_sync(bot_id: int, group_id: int | None = None,
-                        role: str | None = None) -> list[dict]:
+def _list_skills_all_sync(bot_id: int, group_id: Optional[int] = None,
+                        role: Optional[str] = None) -> List[Dict]:
     """Internal synchronous implementation of four-layer scan."""
-    merged: dict[str, dict] = {}
+    merged: Dict[str, Dict] = {}
 
     # L1 System
-    for s in _scan_dir(SYSTEM_SKILLS_ROOT, "system"):
+    for s in _scan_dir_sync(SYSTEM_SKILLS_ROOT, "system"):
         merged[s["name"]] = s
 
     # L2 Group
     if group_id:
         group_path = WORKSPACE_ROOT / f"group_{group_id}" / "shared" / "skills"
-        for s in _scan_dir(group_path, "group"):
+        for s in _scan_dir_sync(group_path, "group"):
             merged[s["name"]] = s
 
     # L3 Role
     if role:
-        for s in _scan_dir(ROLES_ROOT / role / "skills", "role"):
+        for s in _scan_dir_sync(ROLES_ROOT / role / "skills", "role"):
             merged[s["name"]] = s
 
-    # L4 Learned/active — directory location is the source of truth for status
+    # L4 Learned/active
     ws = bot_ws(bot_id)
-    for s in _scan_dir(ws / "skills" / "learned" / "active", "learned"):
+    for s in _scan_dir_sync(ws / "skills" / "learned" / "active", "learned"):
         s["status"] = "active"
         merged[s["name"]] = s
 
@@ -111,11 +117,11 @@ def _list_skills_all_sync(bot_id: int, group_id: int | None = None,
                                    "description": "(代码技能)", "always": False,
                                    "status": "active", "when_to_use": "", "learns": False}
 
-    # L4 Draft — listed separately, never injected
+    # L4 Draft
     drafts = []
     draft_dir = ws / "skills" / "learned" / "draft"
     if draft_dir.exists():
-        for s in _scan_dir(draft_dir, "learned"):
+        for s in _scan_dir_sync(draft_dir, "learned"):
             s["status"] = "draft"
             drafts.append(s)
 
