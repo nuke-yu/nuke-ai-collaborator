@@ -6,3 +6,4 @@
   - 不要为了"保险"顺手把无关套件也带上，也不要每改一行就跑——以功能点为粒度。
 - **全套**（`python3 -m pytest`）只在两种情况跑：① commit 之前做一次回归把关；② 明确要求"跑全套"时。
 - python 命令是 `python3`（不是 `python3.11`）。
+- Review: ** any task before start, you must validate the alignment between the code change and requirement
