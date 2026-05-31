@@ -405,7 +405,7 @@ class ToolLoopV1(BotExecutor):
         tool_records: list[dict] = []
 
         async def _stream_final():
-            nonlocal full_text, messages
+            nonlocal full_text  # `messages` is only read/mutated in place (via ai_service), never rebound
             try:
                 async for chunk in ai_service.stream(
                     system_prompt, messages, model_name, provider, temperature, max_tokens,
@@ -421,7 +421,7 @@ class ToolLoopV1(BotExecutor):
                 })
 
         async def _finalize_reply():
-            nonlocal full_text, messages
+            nonlocal full_text  # `messages` is only read/mutated in place (via ai_service), never rebound
             if not bf_config or not bf_config.get("reviewer_prompt"):
                 await _stream_final()
                 return
@@ -468,7 +468,11 @@ class ToolLoopV1(BotExecutor):
                     "rewake_queue": _rewake_queue,
                 }
                 iter_count = 0
-                _overflow_recovered = False
+                # DFT-064: removed the dead `_overflow_recovered` guard — overflow
+                # recovery now lives entirely in ai_service (compact + single retry),
+                # and a repeat overflow surfaces as AIContextOverflowError (an AIError
+                # subclass) caught by _stream_final. Tool-call pairing is preserved by
+                # compact_conversation's split-boundary walk, not this flag.
                 _consecutive_tool_only = 0
                 tool_records: list[dict] = []
                 _active_schemas = tool_schemas  # may be narrowed by skill allowed-tools
