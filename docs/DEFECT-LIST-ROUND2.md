@@ -15,21 +15,34 @@
 | Part B · 架构级问题 | DFT-071 ~ 086 | 16 | 2 | 8 | 6 |
 | **合计** | — | **29** | **7** | **13** | **9** |
 
-> ⚠️ **测试前阻断项**：DFT-058 ~ 062（7 个 🔴 里的 5 个）会让**主流程直接崩**——当前**没有任何 bot 能跑完一轮**。建议今天测试前先修这 5 项。
+> **更新 2026-05-31 · 已修 6 项**（DFT-058 / 059 / 060 / 061 / 062 + 066），均带回归测试，全量 **521 passed in 10s**。剩 23 项未修（运行时 7 · 架构 16）。
+>
+> ✅ **测试前阻断项已全部清除**：DFT-058~062（曾让主流程直接崩、没有任何 bot 能跑完一轮）+ DFT-066（测试套件卡死跑不出绿色基线）已修复并推送到 main，主流程跑通，可正常测试。
+
+### 已修映射（commit）
+
+| DFT | commit | 验证 |
+| :--- | :--- | :--- |
+| DFT-058 | `fc8c598` | `tests/test_interaction_fallback.py` + 冒烟 `tests/test_smoke_dispatch.py`（`77c7e5e`） |
+| DFT-066 | `fc8c598` | 全量套件 9~10s 跑完并干净退出 |
+| DFT-059 | `123d7a7` | `tests/test_workspace_redirect.py` |
+| DFT-060 | `a5e1ee2` | `tests/test_fork_skill_usage.py` + token 套件 |
+| DFT-061 | `035ed0e` | eslint no-undef 清零 + `npm run build` |
+| DFT-062 | `d9e1719` | eslint rules-of-hooks 12→0 + `npm run build` |
 
 ### 状态索引
 
 | ID | 严重度 | 模块 | 一句话 | 核实 |
 | :--- | :---: | :--- | :--- | :---: |
-| DFT-058 | 🔴 | 编排/执行 | DI `interaction` 未接入任何生产构造点 → 全路径崩 | ✅ pyflakes+精读 |
-| DFT-059 | 🔴 | 工作区 | `group_ws` 未定义（应 `group_workspace`） | ✅ pyflakes |
-| DFT-060 | 🔴 | 执行引擎 | `_total_*_tokens` 未初始化即 `+=` | ✅ pyflakes |
-| DFT-061 | 🔴 | 前端 | `resumeSession`/`cancelSessionRecovery` 未 import | ✅ eslint no-undef |
-| DFT-062 | 🔴 | 前端 | `WorkspacePanel` hooks 条件调用 | ✅ eslint rules-of-hooks |
-| DFT-063 | 🟠 | 后台任务 | DFT-025 未完成：多处裸 `create_task` | ✅ grep+精读 |
-| DFT-064 | 🟠 | 上下文压缩 | 溢出恢复守卫死代码，DFT-035 在此路径可能失效 | ✅ pyflakes |
-| DFT-065 | 🟠 | 沙箱 | run_shell 端口拦截子串误匹配改坏命令 | ✅ 精读 |
-| DFT-066 | 🟠 | 测试 | 全量 `pytest` 跑不完（hang），无绿色基线 | ✅ 实跑 |
+| DFT-058 ✅已修 | 🔴 | 编排/执行 | DI `interaction` 未接入任何生产构造点 → 全路径崩 | `fc8c598` |
+| DFT-059 ✅已修 | 🔴 | 工作区 | `group_ws` 未定义（应 `group_workspace`） | `123d7a7` |
+| DFT-060 ✅已修 | 🔴 | 执行引擎 | `_total_*_tokens` 未初始化即 `+=` | `a5e1ee2` |
+| DFT-061 ✅已修 | 🔴 | 前端 | `resumeSession`/`cancelSessionRecovery` 未 import | `035ed0e` |
+| DFT-062 ✅已修 | 🔴 | 前端 | `WorkspacePanel` hooks 条件调用 | `d9e1719` |
+| DFT-063 | 🟠 | 后台任务 | DFT-025 未完成：多处裸 `create_task` | ⛔ 待修 |
+| DFT-064 | 🟠 | 上下文压缩 | 溢出恢复守卫死代码，DFT-035 在此路径可能失效 | ⛔ 待修 |
+| DFT-065 | 🟠 | 沙箱 | run_shell 端口拦截子串误匹配改坏命令 | ⛔ 待修 |
+| DFT-066 ✅已修 | 🟠 | 测试 | 全量 `pytest` 跑不完（hang），无绿色基线 | `fc8c598` |
 | DFT-067 | 🟠 | 执行注册 | `simple_v1`/`react_v1` 漂移 + 静默降级 | ✅ 精读 |
 | DFT-068 | 🟡 | 多处 | 死赋值 `messages`/`sections` | ✅ pyflakes |
 | DFT-069 | 🟡 | 前端 | set-state-in-effect ×8 / render 内 Date.now / 闭包陈旧 | ✅ eslint |
@@ -70,7 +83,7 @@
 
 - **影响**：用户 @bot → `main.py:212` 的 `bg.spawn_group(dispatch_bots(...))` 内 NameError 被 done_callback 吞进日志，**前端毫无反应**。工作流 / 恢复 / 子 agent 同理全崩。**测试桩（`tests/*` 均传 mock interaction）使全套测试假绿，完全掩盖了此问题**——与 DFT-017 同源。
 - **修复**：① `orchestrator.py` 顶部加 `from core.orchestration import interaction`；② `runner.py:62` / `recovery.py:219` / `workspace_tools.py:187` 补 `interaction=interaction.StandardInteraction()`。**根治（推荐）**：`tool_loop_v1` 在 `ctx.interaction is None` 时回退 `StandardInteraction()`，或设为 `ExecutionContext` 的 `default_factory`，避免"新增构造点又忘接"。
-- **状态**：⛔ 未修复
+- **状态**：✅ 已修复（`fc8c598`）—— 采用**根治方案**：`tool_loop_v1.run` 在 `ctx.interaction is None` 时回退 `StandardInteraction()`（单一真相源），并删除 orchestrator 两处未定义 `interaction` 引用；runner/recovery/spawn 经回退自然修好。单测 `tests/test_interaction_fallback.py` + 端到端冒烟 `tests/test_smoke_dispatch.py`（`77c7e5e`，不 mock interaction）。
 
 ## DFT-059 🔴 `group_ws` 未定义 → 共享文件路径 500
 
@@ -78,7 +91,7 @@
 - **问题**：`return group_ws(row[0])`，但本模块该作用域无 `group_ws`（模块级函数是 `group_workspace`，`:40`；`group_ws` 只是 `:242` 另一函数的局部变量）。
 - **影响**：真实 bot 读/写 `BOARD.md`/`SPEC.md`/`API_CONTRACT.md`/`deliverables/`（§协作主路径 + 前端 WorkspacePanel）→ `NameError → 500`。
 - **修复**：`group_ws(row[0])` → `group_workspace(row[0])` + 回归测试覆盖共享文件重定向。
-- **状态**：⛔ 未修复
+- **状态**：✅ 已修复（`123d7a7`）—— 单测 `tests/test_workspace_redirect.py`（共享文件重定向 / 私有文件 / 缺成员行回退）。
 
 ## DFT-060 🔴 `_total_*_tokens` 未初始化即 `+=` → fork skill 崩
 
@@ -86,7 +99,7 @@
 - **问题**：`_total_input_tokens / _total_output_tokens / _total_cache_read_tokens / _total_cache_creation_tokens` 在 fork skill 路径用 `+=`，但全文件**从未初始化**（grep 仅这 4 行）。README 声称走 `_acc_usage`，实际代码用的是这几个未定义变量。
 - **影响**：bot fork 子技能时 → `UnboundLocalError`，fork 路径崩。
 - **修复**：循环前初始化四个累加器为 0，或统一改用 `_acc_usage`/`AIUsage`。
-- **状态**：⛔ 未修复
+- **状态**：✅ 已修复（`a5e1ee2`）—— **实际比清单更深**：调用处还漏传必需的 `ai_service`、多传不存在的 `usage_out`（两个 TypeError）。改为传入父 `ai_service`，fork 子调用 token 自动汇入 `ai_service.usage`（最终落库的累加器），删除 `_fork_usage`/`_total_*`。单测 `tests/test_fork_skill_usage.py`，token 套件 39 passed。
 
 ## DFT-061 🔴 前端 `resumeSession`/`cancelSessionRecovery` 未 import → 恢复 UI 崩
 
@@ -94,7 +107,7 @@
 - **问题**：`handleResume`/`handleCancelRecovery` 调用这两个函数，但组件顶部 import（`:2`）未包含它们。
 - **影响**：崩溃恢复弹窗的"恢复 / 取消"按钮一点 → `ReferenceError`。
 - **修复**：在 `ChatWindow.jsx:2` 的 import 里补 `resumeSession, cancelSessionRecovery`。
-- **状态**：⛔ 未修复
+- **状态**：✅ 已修复（`035ed0e`）—— eslint no-undef 清零 + `npm run build` 通过。
 
 ## DFT-062 🔴 前端 `WorkspacePanel` hooks 条件调用 → 切换面板白屏
 
@@ -102,7 +115,7 @@
 - **问题**：`const [showSkills] = useState(...)` 后立即 `if (showSkills) return <SkillPanel/>`，早于其余 ~13 个 hooks（`:10-26`）。违反 Rules of Hooks（hooks 数量随渲染变化）。
 - **影响**：用户打开技能面板再关闭（切换 `showSkills`）→ React "rendered fewer/more hooks" 崩溃白屏。叠加 DFT-059，此面板前后端双断。
 - **修复**：把 `if (showSkills) return ...` 移到所有 hooks **之后**；或把 SkillPanel 切换提到父组件。
-- **状态**：⛔ 未修复
+- **状态**：✅ 已修复（`d9e1719`）—— early return 移到所有 hooks 之后。eslint rules-of-hooks 12→0 + `npm run build` 通过。
 
 ## DFT-063 🟠 DFT-025 未真正完成：多处裸 `create_task`
 
@@ -133,7 +146,7 @@
 - **现象**：`python3 -m pytest` 多次需强杀（exit 144）；带 `--timeout=20` 仍有进程残留。514 用例可正常 collect（无导入错误），但全量跑不完。疑似 WS 集成 / 子进程沙箱测试 hang（defect_list 自述"WS 集成测试在本机会挂"）。
 - **影响**：今天要测试，但回归网拿不到红/绿基线；CI 不可用。**且绿色子集掩盖了 DFT-058 全崩**。
 - **修复**：给 hang 用例加 `pytest-timeout` 硬超时并定位根因；隔离/标记需真实 socket 的集成测试；**补一个"真实 dispatch_bots 端到端、不 mock interaction"的冒烟测试**堵住 DFT-058 类漂移。
-- **状态**：⛔ 未修复
+- **状态**：✅ 已修复（`fc8c598`）—— **真因不是某个 test 卡，是进程退不出**：`aiosqlite` 每个连接跑在独立**非 daemon** 线程，被弃用的连接（如 DFT-063 孤儿任务里 `db.connect()` 的 `finally` 没执行）线程不退 → pytest 打完 `passed` 仍挂死。读（`db.connect`）+ 写（`db.writer`）连接线程在启动前改 `daemon=True`。全量 **521 passed in ~10s** 干净退出。冒烟测试见 `tests/test_smoke_dispatch.py`。
 
 ## DFT-067 🟠 `simple_v1`/`react_v1` 漂移 + 静默降级
 
@@ -297,8 +310,8 @@ cd backend && python3 -m pytest --timeout=20 -q
 
 ## 建议修复顺序
 
-1. **测试前阻断**（今天必修）：DFT-058 → 059 → 060 → 061 → 062（修完主流程才走得通）。
-2. **稳健性**：DFT-063 → 064 → 065 → 066（补冒烟测试 + 修测试网）。
+1. ✅ **测试前阻断**（已完成）：DFT-058 → 059 → 060 → 061 → 062 全修，主流程跑通。
+2. **稳健性**（部分完成）：~~DFT-066~~ ✅（测试网已修 + 冒烟测试已补）；剩 DFT-063 → 064 → 065。
 3. **架构 P0**：DFT-072（状态抽象划界）→ DFT-071（编排收敛）。
 4. **架构 P1**：DFT-073/076/077/078 + DFT-067。
 5. **其余 P2** 渐进清理。
