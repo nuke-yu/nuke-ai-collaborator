@@ -34,7 +34,16 @@ def _loop_state() -> dict:
 
 async def _get_write_conn(st: dict) -> aiosqlite.Connection:
     if st["conn"] is None:
-        conn = await aiosqlite.connect(DB_PATH)
+        # DFT-066: aiosqlite runs each connection on its own OS thread. This shared
+        # writer connection is only closed by aclose_writer() on graceful app
+        # shutdown — in tests (and any abnormal exit) nothing closes it, leaving a
+        # NON-daemon thread that blocks interpreter exit and hangs the process
+        # after the suite finishes. Mark the thread daemon before it starts so
+        # process exit is never blocked; each write is committed per-call, so an
+        # abrupt exit is WAL crash-safe.
+        conn = aiosqlite.connect(DB_PATH)
+        conn.daemon = True
+        conn = await conn
         await conn.execute("PRAGMA journal_mode=WAL")
         await conn.execute("PRAGMA busy_timeout=5000")
         await conn.execute("PRAGMA foreign_keys=ON")

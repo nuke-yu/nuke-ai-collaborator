@@ -10,7 +10,14 @@ async def connect(path: str | None = None):
     # DFT-028/029: single connect helper. WAL + busy_timeout avoid
     # "database is locked" under concurrent writers; foreign_keys=ON makes
     # SQLite actually enforce the FK constraints (it ignores them by default).
-    conn = await aiosqlite.connect(path if path is not None else DB_PATH)
+    # DFT-066: aiosqlite runs each connection on its own OS thread. If the
+    # `async with` is abandoned (e.g. a fire-and-forget task cancelled at loop
+    # teardown), the finally below never runs and a NON-daemon thread lingers,
+    # blocking process exit and hanging the test/run. Mark the thread daemon
+    # before it starts so an orphaned read connection can never block exit.
+    conn = aiosqlite.connect(path if path is not None else DB_PATH)
+    conn.daemon = True
+    conn = await conn
     try:
         await conn.execute("PRAGMA journal_mode=WAL")
         await conn.execute("PRAGMA busy_timeout=5000")

@@ -216,6 +216,13 @@ class ToolLoopV1(BotExecutor):
 
     async def run(self, ctx: ExecutionContext) -> ExecutionResult:
         bot = ctx.bot
+        # DFT-058: tool_loop depends on ctx.interaction for every side effect, but
+        # production callers (orchestrator / runner / recovery / spawn_agent) may
+        # leave it None. Fall back to the real adapter here so there is a single
+        # source of truth; tests still inject their own fake by setting it.
+        if ctx.interaction is None:
+            from core.orchestration.interaction import StandardInteraction
+            ctx.interaction = StandardInteraction()
         max_iter = (bot.get("executor_config") or {}).get("max_iterations", self.manifest.max_iterations)
         bf_config = (bot.get("executor_config") or {}).get("before_finalize")
         model_name = bot.get("model_name", "deepseek-chat")  # needed early for skill budget

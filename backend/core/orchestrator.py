@@ -361,7 +361,8 @@ async def dispatch_bots(group_id: int, triggered: list, content: str, sender: di
                 sender=sender, history=_bot_recent(bot),
                 all_bots=all_bots, all_members=all_members,
                 broadcaster=bus,
-                interaction=interaction.StandardInteraction(),
+                # interaction defaults to None → tool_loop falls back to the real
+                # StandardInteraction (DFT-058, single source of truth).
                 active_ticket_id=active_ticket_id,
                 workflow_suffix=wf.system_suffix(group_id),
                 group_name=group_name,
@@ -395,7 +396,7 @@ async def dispatch_bots(group_id: int, triggered: list, content: str, sender: di
                     sender=sender, history=follow_recent,
                     all_bots=all_bots, all_members=all_members,
                     broadcaster=bus,
-                    interaction=interaction.StandardInteraction(),
+                    # interaction defaults to None → tool_loop fallback (DFT-058).
                     active_ticket_id=active_ticket_id,
                     workflow_suffix=wf.system_suffix(group_id),
                     group_name=group_name,
