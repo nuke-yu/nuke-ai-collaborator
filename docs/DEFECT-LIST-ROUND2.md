@@ -15,7 +15,7 @@
 | Part B · 架构级问题 | DFT-071 ~ 086 | 16 | 2 | 8 | 6 |
 | **合计** | — | **29** | **7** | **13** | **9** |
 
-> **更新 2026-05-31 · 已修 7 项**（DFT-058 / 059 / 060 / 061 / 062 / 063 + 066），均带回归测试，全量 **522 passed in 10s**。剩 22 项未修（运行时 6 · 架构 16）。
+> **更新 2026-05-31 · 已修 8 项**（DFT-058 / 059 / 060 / 061 / 062 / 063 / 064 + 066），均带回归测试，全量 **524 passed in 10s**。剩 21 项未修（运行时 5 · 架构 16）。
 >
 > ✅ **测试前阻断项已全部清除**：DFT-058~062（曾让主流程直接崩、没有任何 bot 能跑完一轮）+ DFT-066（测试套件卡死跑不出绿色基线）已修复并推送到 main，主流程跑通，可正常测试。
 
@@ -30,6 +30,7 @@
 | DFT-061 | `035ed0e` | eslint no-undef 清零 + `npm run build` |
 | DFT-062 | `d9e1719` | eslint rules-of-hooks 12→0 + `npm run build` |
 | DFT-063 | `f0f331d` | `tests/test_bg_spawn_finalize.py`（spy `core.bg.spawn`） |
+| DFT-064 | `8ad5a32` | `tests/test_compact_overflow_pairing.py`（配对边界） |
 
 ### 状态索引
 
@@ -41,7 +42,7 @@
 | DFT-061 ✅已修 | 🔴 | 前端 | `resumeSession`/`cancelSessionRecovery` 未 import | `035ed0e` |
 | DFT-062 ✅已修 | 🔴 | 前端 | `WorkspacePanel` hooks 条件调用 | `d9e1719` |
 | DFT-063 ✅已修 | 🟠 | 后台任务 | DFT-025 未完成：多处裸 `create_task` | `f0f331d` |
-| DFT-064 | 🟠 | 上下文压缩 | 溢出恢复守卫死代码，DFT-035 在此路径可能失效 | ⛔ 待修 |
+| DFT-064 ✅已修 | 🟠 | 上下文压缩 | 溢出恢复守卫死代码（DFT-035 保护仍生效） | `8ad5a32` |
 | DFT-065 | 🟠 | 沙箱 | run_shell 端口拦截子串误匹配改坏命令 | ⛔ 待修 |
 | DFT-066 ✅已修 | 🟠 | 测试 | 全量 `pytest` 跑不完（hang），无绿色基线 | `fc8c598` |
 | DFT-067 | 🟠 | 执行注册 | `simple_v1`/`react_v1` 漂移 + 静默降级 | ✅ 精读 |
@@ -132,7 +133,7 @@
 - **问题**：overflow 逻辑迁到 `ai_service.stream`（内部 `messages[:]=...`）后，`tool_loop` 这里留了死声明/死变量。`_overflow_recovered` 守卫已不参与控制流。
 - **影响**：DFT-035 的"配对保护 + 二次溢出杀 run"在 ai_service 路径是否仍生效需复核；存在孤儿 `tool_use_id` → Claude 400 复发风险。
 - **修复**：复核 ai_service overflow 分支是否复用 `_safe_truncate_boundary` 配对保护；删死代码或重新接上守卫。
-- **状态**：⛔ 未修复（需复核）
+- **状态**：✅ 已修复（`8ad5a32`）—— **复核结论：配对保护未失效**，它位于 `compact_conversation` 的 split-boundary walk（步过 `tool` 消息，保留段不以孤儿 tool 开头），非独立 `_safe_truncate_boundary`；第二次溢出经 `AIContextOverflowError`（`AIError` 子类）被 `_stream_final` 优雅捕获。故本条为纯死代码清理：删 `_overflow_recovered` + 两处多余 `nonlocal messages`。单测 `tests/test_compact_overflow_pairing.py` 锁住边界配对。
 
 ## DFT-065 🟠 run_shell 端口拦截子串误匹配 → 命令被改坏
 
@@ -312,7 +313,7 @@ cd backend && python3 -m pytest --timeout=20 -q
 ## 建议修复顺序
 
 1. ✅ **测试前阻断**（已完成）：DFT-058 → 059 → 060 → 061 → 062 全修，主流程跑通。
-2. **稳健性**（部分完成）：~~DFT-066~~ ✅（测试网已修 + 冒烟测试已补）；~~DFT-063~~ ✅（fire-and-forget 收口）；剩 DFT-064 → 065。
+2. **稳健性**（部分完成）：~~DFT-066~~ ✅（测试网已修 + 冒烟测试已补）；~~DFT-063~~ ✅（fire-and-forget 收口）；~~DFT-064~~ ✅（死代码清理，保护已复核）；剩 DFT-065。
 3. **架构 P0**：DFT-072（状态抽象划界）→ DFT-071（编排收敛）。
 4. **架构 P1**：DFT-073/076/077/078 + DFT-067。
 5. **其余 P2** 渐进清理。
