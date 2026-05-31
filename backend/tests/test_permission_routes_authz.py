@@ -1,52 +1,49 @@
 """
 tests/test_permission_routes_authz.py — DFT-050 权限路由边界校验
-
-permissions/routes.py 的增删改路由原先无任何校验：任何调用方可对任意
-member_id（甚至不存在的、或 human 成员）写入 `allow *` 规则，绕过权限引擎。
-此应用为单机无 auth 体系，最小可行加固是边界校验：目标 member 必须存在且
-type=='bot'，否则拒绝；action 仅允许 allow/deny。
 """
 import os
 import sys
 import unittest
+import asyncio
 from unittest.mock import patch, AsyncMock
+from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-TEST_DB_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "test_permroutes.db"
-)
+_HERE = Path(__file__).parent.parent
+TEST_DB_NAME = "test_permroutes.db"
+TEST_DB_PATH = str(_HERE / TEST_DB_NAME)
 
 import db as database
-
+# Force the global DB path before importing app
 database.DB_PATH = TEST_DB_PATH
 
 from main import app
 from httpx import AsyncClient
 
-
 class TestPermissionRouteAuthz(unittest.IsolatedAsyncioTestCase):
 
     async def asyncSetUp(self):
+        # Ensure clean state
         if os.path.exists(TEST_DB_PATH):
-            os.remove(TEST_DB_PATH)
+            try: os.remove(TEST_DB_PATH)
+            except: pass
+            
         await database.init_db()
         async with database.get_db() as db:
-            await db.execute("INSERT INTO groups (id, name) VALUES (1, 'G')")
-            await db.execute(
-                "INSERT INTO members (id, group_id, name, type) VALUES (10, 1, 'Bot', 'bot')"
-            )
-            await db.execute(
-                "INSERT INTO members (id, group_id, name, type) VALUES (20, 1, 'Alice', 'human')"
-            )
+            # Check if seeded by migrations (some seeds might happen)
+            async with db.execute("SELECT COUNT(*) FROM groups WHERE id = 1") as cur:
+                row = await cur.fetchone()
+                if row[0] == 0:
+                    await db.execute("INSERT INTO groups (id, name) VALUES (1, 'G')")
+            
+            await db.execute("INSERT OR REPLACE INTO members (id, group_id, name, type) VALUES (10, 1, 'Bot', 'bot')")
+            await db.execute("INSERT OR REPLACE INTO members (id, group_id, name, type) VALUES (20, 1, 'Alice', 'human')")
             await db.commit()
 
     async def asyncTearDown(self):
-        if os.path.exists(TEST_DB_PATH):
-            try:
-                os.remove(TEST_DB_PATH)
-            except Exception:
-                pass
+        # We don't remove here to avoid locking issues between tests
+        pass
 
     async def test_add_rule_rejects_nonexistent_member(self):
         async with AsyncClient(app=app, base_url="http://test") as ac:
@@ -90,7 +87,6 @@ class TestPermissionRouteAuthz(unittest.IsolatedAsyncioTestCase):
         async with AsyncClient(app=app, base_url="http://test") as ac:
             r = await ac.delete("/api/members/20/permissions/1")
         self.assertEqual(r.status_code, 403)
-
 
 if __name__ == "__main__":
     unittest.main()

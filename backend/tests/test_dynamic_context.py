@@ -1,6 +1,7 @@
 import os
 import sys
 import unittest
+import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, patch, MagicMock
 
@@ -8,32 +9,40 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import db as _db_mod
 from db.schema import init_db
+from executors.base import InteractionAdapter
 
-_HERE = Path(__file__).parent.parent
-_TEST_DB = str(_HERE / "test_dynamic_context.db")
+_HERE = Path(__file__).parent.parent if 'Path' in locals() else os.path.dirname(__file__)
+_TEST_DB = str(os.path.join(os.path.dirname(_HERE), "test_dynamic_context.db"))
+
+class MockInteraction(InteractionAdapter):
+    async def broadcast(self, group_id, payload): pass
+    async def save_message(self, group_id, member_id, content, **kwargs): return 1
+    async def append_session_event(self, session_id, event_type, payload): pass
+    async def save_session_snapshot(self, session_id, messages): pass
+    async def update_session_tokens(self, session_id, **usage): pass
+    async def create_session(self, **kwargs): pass
+    async def update_session_status(self, session_id, status): pass
 
 class TestDynamicContext(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self._orig = _db_mod.DB_PATH
         _db_mod.DB_PATH = _TEST_DB
-        if Path(_TEST_DB).exists():
-            Path(_TEST_DB).unlink()
+        if os.path.exists(_TEST_DB):
+            os.remove(_TEST_DB)
         await init_db()
         import aiosqlite
         from db.migrations import run_migrations
         async with aiosqlite.connect(_TEST_DB) as db:
             await run_migrations(db)
-        
-        # Seed parents
-        async with aiosqlite.connect(_TEST_DB) as db:
+            # Seed parents
             await db.execute("INSERT INTO groups (id, name) VALUES (1, 'g')")
-            await db.execute("INSERT INTO members (id, group_id, name, type) VALUES (1, 1, 'WorkerBot', 'bot')")
+            await db.execute("INSERT INTO members (id, group_id, name, type, role) VALUES (1, 1, 'WorkerBot', 'bot', 'dev')")
             await db.commit()
 
     async def asyncTearDown(self):
         _db_mod.DB_PATH = self._orig
-        if Path(_TEST_DB).exists():
-            Path(_TEST_DB).unlink()
+        if os.path.exists(_TEST_DB):
+            os.remove(_TEST_DB)
 
     async def test_tool_loop_refreshes_context_each_iter(self):
         from executors.plugins.tool_loop_v1 import ToolLoopV1
@@ -50,6 +59,7 @@ class TestDynamicContext(unittest.IsolatedAsyncioTestCase):
             sender={"id": 2, "name": "Human", "type": "human"},
             history=[], all_bots=[bot], all_members=[bot],
             broadcaster=AsyncMock(),
+            interaction=MockInteraction(),
         )
 
         # Mock load_context_files to return different content on each call
@@ -62,8 +72,6 @@ class TestDynamicContext(unittest.IsolatedAsyncioTestCase):
             [{"source": "group", "name": "BOARD.md", "content": "ver 6"}],
             [{"source": "group", "name": "BOARD.md", "content": "ver 7"}],
             [{"source": "group", "name": "BOARD.md", "content": "ver 8"}],
-            [{"source": "group", "name": "BOARD.md", "content": "ver 9"}],
-            [{"source": "group", "name": "BOARD.md", "content": "ver 10"}],
         ]
         mock_load = AsyncMock(side_effect=side_effects)
 
@@ -82,20 +90,14 @@ class TestDynamicContext(unittest.IsolatedAsyncioTestCase):
 
         m = "executors.plugins.tool_loop_v1."
         with patch(m + "load_context_files", new=mock_load), \
-             patch(m + "call_ai_once", new=mock_call_ai), \
+             patch("core.orchestration.ai_service.call_ai_once", new=AsyncMock(side_effect=mock_call_ai)), \
              patch(m + "get_memory_context", new=AsyncMock(return_value="")), \
-             patch(m + "list_skills_all", return_value=[]), \
-             patch(m + "sessions.create_session", new=AsyncMock()), \
-             patch(m + "sessions.append_event", new=AsyncMock()), \
-             patch(m + "sessions.save_snapshot", new=AsyncMock()), \
-             patch(m + "sessions.add_tokens", new=AsyncMock()), \
-             patch(m + "sessions.update_session_status", new=AsyncMock()), \
-             patch(m + "save_message", new=AsyncMock(return_value=1)), \
-             patch(m + "get_messages", new=AsyncMock(return_value=[])), \
+             patch(m + "list_skills_all", new=AsyncMock(return_value=[])), \
+             patch(m + "load_always_skills", new=AsyncMock(return_value=[])), \
              patch(m + "append_log", new=AsyncMock()), \
-             patch("executors.plugins.tool_loop_v1.tool_executor.execute", new=AsyncMock(return_value="tool result")), \
-             patch("executors.plugins.tool_loop_v1.tool_executor.get_schemas", return_value=[{"function": {"name": "read_file"}}]), \
-             patch("permissions.load_rules", new=AsyncMock(return_value=[])):
+             patch(m + "archive_run", new=AsyncMock()), \
+             patch("executors.plugins.tool_loop_v1.tool_executor.execute", new=AsyncMock(return_value=("tool result", False))), \
+             patch("executors.plugins.tool_loop_v1.tool_executor.get_schemas", return_value=[{"function": {"name": "read_file"}}]):
             
             executor = ToolLoopV1()
             await executor.run(ctx)
@@ -103,15 +105,8 @@ class TestDynamicContext(unittest.IsolatedAsyncioTestCase):
         # Verify load_context_files was called multiple times
         # 1 (start) + 3 (loop starts) + 2 (auto_compact calls in first 2 tool rounds) = 6
         self.assertEqual(mock_load.call_count, 6)
-
         
         # Verify that each AI call received a different version of the context
-        # Initial: ver 1
-        # Iter 1: refreshes to ver 2 -> prompt has ver 2
-        # After Iter 1: auto_compact calls _build_reinject -> ver 3
-        # Iter 2: refreshes to ver 4 -> prompt has ver 4
-        # After Iter 2: auto_compact calls _build_reinject -> ver 5
-        # Iter 3: refreshes to ver 6 -> prompt has ver 6
         self.assertIn("ver 2", captured_prompts[0])
         self.assertIn("ver 4", captured_prompts[1])
         self.assertIn("ver 6", captured_prompts[2])

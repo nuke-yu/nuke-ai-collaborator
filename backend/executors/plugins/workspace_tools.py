@@ -326,11 +326,17 @@ def _is_sensitive_path(path: str) -> bool:
     if filename.lower() in _SENSITIVE_FILENAME_ALLOWLIST:
         return False
 
-    # Directory prefix check
+    # Directory prefix check (primarily for home-dir expanded paths)
     for prefix in _SENSITIVE_PATH_PREFIXES:
         expanded = str(Path(prefix).expanduser())
         if p_str == expanded or p_str.startswith(expanded + os.sep):
             return True
+
+    # Point 6: Defensive Depth (DFT-023)
+    # Block sensitive directories regardless of where they appear in the path
+    sensitive_dirs = {".ssh", ".aws", ".docker", ".gnupg", ".kube", ".password-store"}
+    if any(d in p.parts for d in sensitive_dirs):
+        return True
 
     # Filename pattern check (case-insensitive for macOS APFS)
     filename_lower = filename.lower()

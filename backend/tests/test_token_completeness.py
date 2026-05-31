@@ -16,20 +16,24 @@ def _text_result(content, input_tokens=0, output_tokens=0):
         }
     }
 
-class TestBeforeFinalizeHookTokens(unittest.IsolatedAsyncioTestCase):
+def _make_ai_service():
+    mock_ctx = MagicMock()
+    mock_ctx.group_id = 1
+    mock_inter = MagicMock()
+    mock_inter.broadcast = AsyncMock()
+    mock_inter.update_session_tokens = AsyncMock()
+    mock_inter.append_session_event = AsyncMock()
+    mock_inter.save_session_snapshot = AsyncMock()
+    mock_ctx.interaction = mock_inter
+    
+    from core.orchestration.ai_service import AIService
+    return AIService(mock_ctx, "session-1", "temp-1")
 
-    def _make_ai_service(self):
-        mock_ctx = MagicMock()
-        mock_ctx.group_id = 1
-        mock_inter = MagicMock()
-        mock_ctx.interaction = mock_inter
-        
-        from core.orchestration.ai_service import AIService
-        return AIService(mock_ctx, "session-1", "temp-1")
+class TestBeforeFinalizeHookTokens(unittest.IsolatedAsyncioTestCase):
 
     async def test_review_tokens_collected(self):
         from executors.plugins.tool_loop_v1 import _before_finalize_hook
-        ai_service = self._make_ai_service()
+        ai_service = _make_ai_service()
         
         # Mock the AI call inside ai_service.call
         with patch("core.orchestration.ai_service.call_ai_once", 
@@ -51,7 +55,7 @@ class TestBeforeFinalizeHookTokens(unittest.IsolatedAsyncioTestCase):
 
     async def test_review_and_regen_tokens_both_collected(self):
         from executors.plugins.tool_loop_v1 import _before_finalize_hook
-        ai_service = self._make_ai_service()
+        ai_service = _make_ai_service()
 
         call_count = 0
         async def mock_call(sp, msgs, *args, **kwargs):
@@ -75,25 +79,15 @@ class TestBeforeFinalizeHookTokens(unittest.IsolatedAsyncioTestCase):
                 user_message="user question"
             )
 
-        # 1st review (rejected) + 1st regen + 2nd review (rejected) + 2nd regen + 3rd review (rejected)
-        # Note: hook loops max_retries+1 times. Each loop does a review, then maybe a regen.
-        # If max_retries=1, it loop i=0 and i=1.
-        # i=0: review (reject), regen
-        # i=1: review (reject), break
         self.assertEqual(call_count, 3)
         self.assertEqual(ai_service.usage.input_tokens, 6 + 12 + 6) 
         self.assertEqual(ai_service.usage.output_tokens, 2 + 7 + 2)
 
 class TestRunForkSkillTokens(unittest.IsolatedAsyncioTestCase):
 
-    def _make_ai_service(self):
-        mock_ctx = MagicMock()
-        from core.orchestration.ai_service import AIService
-        return AIService(mock_ctx, "session-1", "temp-1")
-
     async def test_fork_skill_tokens_collected(self):
         from executors.plugins.tool_loop_v1 import _run_fork_skill
-        ai_service = self._make_ai_service()
+        ai_service = _make_ai_service()
 
         with patch("core.orchestration.ai_service.call_ai_once", 
                    new=AsyncMock(return_value=_text_result("fork result", input_tokens=14, output_tokens=5))):

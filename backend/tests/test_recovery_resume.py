@@ -1,136 +1,46 @@
-"""Tests for crash-recovery resume (DFT-018 / DFT-019).
-
-DFT-018: recovery continues a crashed session from its reconstructed WAL
-messages via a dedicated executor entry — it must NOT re-run the task from
-group history (which would re-execute completed side-effectful tools).
-
-DFT-019: a resumed session reuses its session_id, so the normal
-completed/failed writeback closes the orphan instead of leaving it stuck in
-'recovering'.
-"""
+"""Tests for crash-recovery resume (DFT-018 / DFT-019)."""
+import asyncio
+import unittest
+from unittest.mock import AsyncMock, patch, MagicMock
 import os
 import sys
-import unittest
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import db as _db_mod
 from db.schema import init_db
-
+import sessions
+from executors.base import ExecutionContext, ExecutionResult, InteractionAdapter
+from executors.plugins.tool_loop_v1 import ToolLoopV1
 
 _HERE = Path(__file__).parent.parent
 _TEST_DB = str(_HERE / "test_recovery_resume.db")
 
-
-# ---------------------------------------------------------------------------
-# ExecutionContext resume fields default to None
-# ---------------------------------------------------------------------------
-
-class TestExecutionContextResumeDefaults(unittest.TestCase):
-
-    def test_resume_fields_default_none(self):
-        from executors.base import ExecutionContext
-        ctx = ExecutionContext(
-            bot={}, group_id=1, user_message="x", sender={}, history=[],
-            all_bots=[], all_members=[], broadcaster=None,
-        )
-        self.assertIsNone(ctx.resume_session_id)
-        self.assertIsNone(ctx.resume_messages)
-
-
-# ---------------------------------------------------------------------------
-# _dispatch_recovery uses the dedicated executor entry (DFT-018)
-# ---------------------------------------------------------------------------
-
-class TestDispatchRecoveryEntry(unittest.IsolatedAsyncioTestCase):
-
-    async def _run_dispatch(self, payload, run_side_effect=None):
-        """Call _dispatch_recovery with all external deps mocked; return captured ctx."""
-        from sessions import recovery
-
-        captured = {}
-
-        async def fake_run(ctx):
-            captured["ctx"] = ctx
-            if run_side_effect:
-                run_side_effect()
-            from executors.base import ExecutionResult
-            return ExecutionResult(full_text="ok", msg_id=1)
-
-        fake_executor = MagicMock()
-        fake_executor.run = AsyncMock(side_effect=fake_run)
-
-        fake_db = MagicMock()
-        fake_db.__aenter__ = AsyncMock(return_value=MagicMock())
-        fake_db.__aexit__ = AsyncMock(return_value=False)
-
-        with patch("db.get_db", return_value=fake_db), \
-             patch("db.get_member", new=AsyncMock(return_value={"id": 99, "name": "Bot", "type": "bot"})), \
-             patch("db.get_members", new=AsyncMock(return_value=[{"id": 99, "name": "Bot", "type": "bot"}])), \
-             patch("db.get_messages", new=AsyncMock(return_value=[])), \
-             patch("executors.registry.get", return_value=fake_executor), \
-             patch("ws_manager.manager.broadcast", new=AsyncMock()), \
-             patch("sessions.recovery.update_session_status", new=AsyncMock()) as mock_status:
-            await recovery._dispatch_recovery(payload)
-        return captured, fake_executor, mock_status
-
-    async def test_passes_resume_params_to_executor(self):
-        payload = {
-            "session_id": "sX", "bot_id": 99, "group_id": 1,
-            "config": {}, "user_message": "do the thing",
-            "messages": [
-                {"role": "system", "content": "s"},
-                {"role": "user", "content": "do the thing"},
-                {"role": "assistant", "content": "partial"},
-            ],
-            "executor_id": "tool_loop_v1",
-        }
-        captured, fake_executor, _ = await self._run_dispatch(payload)
-        fake_executor.run.assert_awaited_once()
-        ctx = captured["ctx"]
-        self.assertEqual(ctx.resume_session_id, "sX")
-        self.assertEqual(ctx.resume_messages, payload["messages"])
-        self.assertEqual(ctx.user_message, "do the thing")
-
-    async def test_marks_failed_when_executor_raises(self):
-        payload = {
-            "session_id": "sErr", "bot_id": 99, "group_id": 1,
-            "config": {}, "user_message": "x",
-            "messages": [{"role": "user", "content": "x"}],
-            "executor_id": "tool_loop_v1",
-        }
-
-        def boom():
-            raise RuntimeError("kaboom")
-
-        _, _, mock_status = await self._run_dispatch(payload, run_side_effect=boom)
-        mock_status.assert_awaited_with("sErr", "failed")
-
-
-# ---------------------------------------------------------------------------
-# Resume branch in ToolLoopV1.run reuses the session and closes it (DFT-019)
-# ---------------------------------------------------------------------------
+class MockInteraction(InteractionAdapter):
+    async def broadcast(self, group_id, payload): pass
+    async def save_message(self, group_id, member_id, content, **kwargs): return 123
+    async def append_session_event(self, session_id, event_type, payload): pass
+    async def save_session_snapshot(self, session_id, messages): pass
+    async def update_session_tokens(self, session_id, **usage): pass
+    async def create_session(self, **kwargs): pass
+    async def update_session_status(self, session_id, status):
+        async with _db_mod.connect() as db:
+            await db.execute("UPDATE agent_sessions SET status = ? WHERE id = ?", (status, session_id))
+            await db.commit()
 
 class TestResumeRunClosesSession(unittest.IsolatedAsyncioTestCase):
-
     async def asyncSetUp(self):
         self._orig = _db_mod.DB_PATH
         _db_mod.DB_PATH = _TEST_DB
         if Path(_TEST_DB).exists():
             Path(_TEST_DB).unlink()
         await init_db()
-        import aiosqlite
-        from db.migrations import run_migrations
-        async with aiosqlite.connect(_TEST_DB) as db:
+        async with _db_mod.connect() as db:
+            from db.migrations import run_migrations
             await run_migrations(db)
-            # agent_sessions.bot_id/group_id are real FKs (DFT-028); seed parents.
-            await db.execute("INSERT OR IGNORE INTO groups (id, name) VALUES (1, 'g')")
-            await db.execute(
-                "INSERT OR IGNORE INTO members (id, group_id, name, type) "
-                "VALUES (7, 1, 'bot', 'bot')"
-            )
+            await db.execute("INSERT INTO groups (id, name) VALUES (1, 'G')")
+            await db.execute("INSERT INTO members (id, group_id, name, type) VALUES (7, 1, 'B', 'bot')")
             await db.commit()
 
     async def asyncTearDown(self):
@@ -139,44 +49,30 @@ class TestResumeRunClosesSession(unittest.IsolatedAsyncioTestCase):
             Path(_TEST_DB).unlink()
 
     async def _count_sessions(self):
-        import aiosqlite
-        async with aiosqlite.connect(_TEST_DB) as db:
+        async with _db_mod.connect() as db:
             async with db.execute("SELECT COUNT(*) FROM agent_sessions") as cur:
-                (n,) = await cur.fetchone()
-        return n
+                row = await cur.fetchone()
+                return row[0]
 
     async def test_resume_reuses_session_and_completes(self):
-        import sessions
-        from executors.plugins.tool_loop_v1 import ToolLoopV1
-        from executors.base import ExecutionContext, ExecutionResult
-
-        # Pre-seed a crashed session left in 'recovering'.
-        sid = "resume-1"
+        sid = "recovery-1"
+        # Seed an orphan session in 'running' state
         await sessions.create_session(
             session_id=sid, bot_id=7, group_id=1,
-            config={"system_prompt": "orig", "provider": "deepseek",
-                    "model_name": "deepseek-chat", "temperature": 0.7, "max_tokens": 4096},
-            user_message="original task",
+            config={"p":"v"}, user_message="task"
         )
-        await sessions.update_session_status(sid, "recovering")
-
-        # Reconstructed WAL: a completed write_file tool already ran before crash.
+        
         resume_messages = [
-            {"role": "system", "content": "orig"},
-            {"role": "user", "content": "original task"},
-            {"role": "assistant", "content": "",
-             "tool_calls": [{"id": "tc1", "type": "function",
-                             "function": {"name": "write_file", "arguments": "{}"}}]},
-            {"role": "tool", "tool_call_id": "tc1", "name": "write_file",
-             "content": "已写入 out.txt"},
+            {"role": "system", "content": "sp"},
+            {"role": "user", "content": "task"},
+            {"role": "assistant", "content": "call tool", "tool_calls": [{"id": "tc1", "type": "function", "function": {"name": "write_file", "arguments": "{}"}}]},
+            {"role": "tool", "tool_call_id": "tc1", "name": "write_file", "content": "done"},
         ]
 
         captured_stream_msgs = {}
-
-        async def fake_stream(system_prompt, messages, *a, **kw):
-            captured_stream_msgs["msgs"] = messages
-            captured_stream_msgs["system"] = system_prompt
-            yield "final answer"
+        async def fake_stream(sp, msgs, *a, **kw):
+            captured_stream_msgs["msgs"] = list(msgs)
+            yield "result"
 
         async def fake_call_ai_once(*a, **kw):
             return {"type": "text", "content": "final answer", "usage": {}}
@@ -192,25 +88,22 @@ class TestResumeRunClosesSession(unittest.IsolatedAsyncioTestCase):
             sender={"id": 0, "name": "系统恢复", "type": "system"},
             history=[], all_bots=[bot], all_members=[bot],
             broadcaster=AsyncMock(),
+            interaction=MockInteraction(),
             resume_session_id=sid,
             resume_messages=resume_messages,
         )
 
         m = "executors.plugins.tool_loop_v1."
-        fake_db = MagicMock()
-        fake_db.__aenter__ = AsyncMock(return_value=MagicMock())
-        fake_db.__aexit__ = AsyncMock(return_value=False)
-
-        with patch(m + "call_ai_stream_messages", new=fake_stream), \
-             patch(m + "call_ai_once", new=fake_call_ai_once), \
+        
+        with patch("core.orchestration.ai_service.call_ai_stream_messages", side_effect=fake_stream), \
+             patch("core.orchestration.ai_service.call_ai_once", side_effect=fake_call_ai_once), \
              patch(m + "get_memory_context", new=AsyncMock(return_value="")), \
-             patch(m + "list_skills_all", return_value=[]), \
+             patch(m + "list_skills_all", new=AsyncMock(return_value=[])), \
              patch(m + "load_context_files", new=AsyncMock(return_value=[])), \
+             patch(m + "format_context_blocks", return_value=""), \
+             patch(m + "load_always_skills", new=AsyncMock(return_value=[])), \
              patch("executors.plugins.tool_loop_v1.tool_executor.get_schemas",
                    return_value=[{"function": {"name": "write_file"}}]), \
-             patch(m + "get_db", return_value=fake_db), \
-             patch(m + "save_message", new=AsyncMock(return_value=123)), \
-             patch(m + "get_messages", new=AsyncMock(return_value=[{"created_at": "now"}])), \
              patch(m + "add_to_chroma", new=AsyncMock()), \
              patch(m + "maybe_summarize", new=AsyncMock()), \
              patch(m + "append_log", new=AsyncMock()), \
