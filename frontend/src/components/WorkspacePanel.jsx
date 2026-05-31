@@ -3,10 +3,6 @@ import SkillPanel from './SkillPanel'
 
 export default function WorkspacePanel({ bot, groupId, onClose }) {
   const [showSkills, setShowSkills] = useState(false)
-  if (showSkills) {
-    return <SkillPanel bot={bot} groupId={groupId} onClose={() => setShowSkills(false)} />
-  }
-
   const [tree, setTree] = useState([])
   const [selected, setSelected] = useState(null)
   const [content, setContent] = useState('')
@@ -24,6 +20,13 @@ export default function WorkspacePanel({ bot, groupId, onClose }) {
   }, [bot.id])
 
   useEffect(() => { loadTree() }, [loadTree])
+
+  // DFT-062: this early return must come AFTER every hook above. It used to sit
+  // before the other ~13 hooks, so toggling the skills panel changed how many
+  // hooks ran between renders and crashed React (Rules of Hooks violation).
+  if (showSkills) {
+    return <SkillPanel bot={bot} groupId={groupId} onClose={() => setShowSkills(false)} />
+  }
 
   const openFile = async (path) => {
     if (dirty && !confirm('有未保存的修改，确认切换？')) return
