@@ -15,7 +15,7 @@
 | Part B · 架构级问题 | DFT-071 ~ 086 | 16 | 2 | 8 | 6 |
 | **合计** | — | **29** | **7** | **13** | **9** |
 
-> **更新 2026-05-31 · 已修 8 项**（DFT-058 / 059 / 060 / 061 / 062 / 063 / 064 + 066），均带回归测试，全量 **524 passed in 10s**。剩 21 项未修（运行时 5 · 架构 16）。
+> **更新 2026-05-31 · 已修 12 项**（Part A 运行时缺陷仅剩 DFT-069 未修；Part B 架构 16 项待排期），均带回归测试，全量 **527 passed in 10s**。剩 17 项未修（运行时 1 · 架构 16）。
 >
 > ✅ **测试前阻断项已全部清除**：DFT-058~062（曾让主流程直接崩、没有任何 bot 能跑完一轮）+ DFT-066（测试套件卡死跑不出绿色基线）已修复并推送到 main，主流程跑通，可正常测试。
 
@@ -31,6 +31,10 @@
 | DFT-062 | `d9e1719` | eslint rules-of-hooks 12→0 + `npm run build` |
 | DFT-063 | `f0f331d` | `tests/test_bg_spawn_finalize.py`（spy `core.bg.spawn`） |
 | DFT-064 | `8ad5a32` | `tests/test_compact_overflow_pairing.py`（配对边界） |
+| DFT-065 | `fdeca39` + `297e046`(test) | `tests/test_port_allocator.py` 词边界用例（子串不误匹配 / 8080 不双替换 / 标准端口仍拦截） |
+| DFT-067 | `fdeca39` | registry/base 清除 `simple_v1`/`react_v1` 引用 |
+| DFT-068 | `fdeca39` | 删除死赋值 `messages`（recovery）/`sections`（rd_manager） |
+| DFT-070 | `fdeca39` | CORS `allow_origins` 限定 localhost 白名单 |
 
 ### 状态索引
 
@@ -313,7 +317,9 @@ cd backend && python3 -m pytest --timeout=20 -q
 ## 建议修复顺序
 
 1. ✅ **测试前阻断**（已完成）：DFT-058 → 059 → 060 → 061 → 062 全修，主流程跑通。
-2. **稳健性**（部分完成）：~~DFT-066~~ ✅（测试网已修 + 冒烟测试已补）；~~DFT-063~~ ✅（fire-and-forget 收口）；~~DFT-064~~ ✅（死代码清理，保护已复核）；剩 DFT-065。
-3. **架构 P0**：DFT-072（状态抽象划界）→ DFT-071（编排收敛）。
-4. **架构 P1**：DFT-073/076/077/078 + DFT-067。
-5. **其余 P2** 渐进清理。
+2. ✅ **稳健性**（已完成）：~~DFT-063~~（fire-and-forget 收口）· ~~DFT-064~~（死代码清理，保护已复核）· ~~DFT-065~~（端口词边界匹配）· ~~DFT-066~~（测试网 + 冒烟测试）全修。
+3. ✅ **杂项清理**（已完成）：~~DFT-067~~（legacy executor 引用清理）· ~~DFT-068~~（死赋值）· ~~DFT-070~~（CORS 收紧）。
+4. **剩余运行时**：DFT-069（前端 eslint：set-state-in-effect / Date.now / 闭包陈旧）。
+5. **架构 P0**：DFT-072（状态抽象划界）→ DFT-071（编排收敛）。
+6. **架构 P1**：DFT-073 / 076 / 077 / 078。
+7. **其余 P2/架构** 渐进清理。
