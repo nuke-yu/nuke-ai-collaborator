@@ -15,7 +15,7 @@
 | Part B · 架构级问题 | DFT-071 ~ 086 | 16 | 2 | 8 | 6 |
 | **合计** | — | **29** | **7** | **13** | **9** |
 
-> **更新 2026-05-31 · 已修 6 项**（DFT-058 / 059 / 060 / 061 / 062 + 066），均带回归测试，全量 **521 passed in 10s**。剩 23 项未修（运行时 7 · 架构 16）。
+> **更新 2026-05-31 · 已修 7 项**（DFT-058 / 059 / 060 / 061 / 062 / 063 + 066），均带回归测试，全量 **522 passed in 10s**。剩 22 项未修（运行时 6 · 架构 16）。
 >
 > ✅ **测试前阻断项已全部清除**：DFT-058~062（曾让主流程直接崩、没有任何 bot 能跑完一轮）+ DFT-066（测试套件卡死跑不出绿色基线）已修复并推送到 main，主流程跑通，可正常测试。
 
@@ -29,6 +29,7 @@
 | DFT-060 | `a5e1ee2` | `tests/test_fork_skill_usage.py` + token 套件 |
 | DFT-061 | `035ed0e` | eslint no-undef 清零 + `npm run build` |
 | DFT-062 | `d9e1719` | eslint rules-of-hooks 12→0 + `npm run build` |
+| DFT-063 | `f0f331d` | `tests/test_bg_spawn_finalize.py`（spy `core.bg.spawn`） |
 
 ### 状态索引
 
@@ -39,7 +40,7 @@
 | DFT-060 ✅已修 | 🔴 | 执行引擎 | `_total_*_tokens` 未初始化即 `+=` | `a5e1ee2` |
 | DFT-061 ✅已修 | 🔴 | 前端 | `resumeSession`/`cancelSessionRecovery` 未 import | `035ed0e` |
 | DFT-062 ✅已修 | 🔴 | 前端 | `WorkspacePanel` hooks 条件调用 | `d9e1719` |
-| DFT-063 | 🟠 | 后台任务 | DFT-025 未完成：多处裸 `create_task` | ⛔ 待修 |
+| DFT-063 ✅已修 | 🟠 | 后台任务 | DFT-025 未完成：多处裸 `create_task` | `f0f331d` |
 | DFT-064 | 🟠 | 上下文压缩 | 溢出恢复守卫死代码，DFT-035 在此路径可能失效 | ⛔ 待修 |
 | DFT-065 | 🟠 | 沙箱 | run_shell 端口拦截子串误匹配改坏命令 | ⛔ 待修 |
 | DFT-066 ✅已修 | 🟠 | 测试 | 全量 `pytest` 跑不完（hang），无绿色基线 | `fc8c598` |
@@ -123,7 +124,7 @@
 - **问题**：DFT-025 声称"所有 fire-and-forget 改走 `bg.spawn`"，但上述仍是裸 `asyncio.create_task`——无引用持有（可被 GC 中途杀）、异常被吞。
 - **影响**：finalize 副作用（记忆/摘要/压缩/审计/归档）可能静默丢失或半执行；恢复派发任务可能被 GC。
 - **修复**：全部改走 `bg.spawn` / `bg.spawn_group`。
-- **状态**：⛔ 未修复
+- **状态**：✅ 已修复（`f0f331d`）—— 7 处转 `bg.spawn`（tool_loop finalize 5 个 + recovery `_dispatch_recovery` + workspace_tools `save_rule`，后者用 `bg_spawn` 别名避开局部 `bg` 变量）。`workspace_tools:205` 的局部 `bg`（子 agent，已入 `_bg_tasks` 字典）保留。单测 `tests/test_bg_spawn_finalize.py`。
 
 ## DFT-064 🟠 溢出恢复守卫死代码，DFT-035 在此路径可能失效
 
@@ -311,7 +312,7 @@ cd backend && python3 -m pytest --timeout=20 -q
 ## 建议修复顺序
 
 1. ✅ **测试前阻断**（已完成）：DFT-058 → 059 → 060 → 061 → 062 全修，主流程跑通。
-2. **稳健性**（部分完成）：~~DFT-066~~ ✅（测试网已修 + 冒烟测试已补）；剩 DFT-063 → 064 → 065。
+2. **稳健性**（部分完成）：~~DFT-066~~ ✅（测试网已修 + 冒烟测试已补）；~~DFT-063~~ ✅（fire-and-forget 收口）；剩 DFT-064 → 065。
 3. **架构 P0**：DFT-072（状态抽象划界）→ DFT-071（编排收敛）。
 4. **架构 P1**：DFT-073/076/077/078 + DFT-067。
 5. **其余 P2** 渐进清理。
