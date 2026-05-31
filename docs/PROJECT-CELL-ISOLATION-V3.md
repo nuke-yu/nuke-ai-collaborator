@@ -191,3 +191,78 @@ runtime/ipc/
 1. **UDS / 广播链路（Phase 0 spike）**：worker bus 事件→UDS→Supervisor→模拟前端，**单次往返 < 100ms**。已写 `backend/spike_uds_bridge.py`（真·跨进程 + 真 EventBus + 自带断言/超时），待运行取数。
 2. **工作负载并行画像**：run_shell 已 fork、LLM 是 I/O——多进程买的究竟是"故障隔离"还是"吞吐并行"？加 **event-loop lag 监控**，量单进程多群并发被纯 Python CPU 阻塞多久，据此定 **K**。
 3. **Supervisor 作为 WS 单点**的扇出能力与队头阻塞——几百群高并发流下是否扛得住（复用 DFT-030 发送超时思路，但现在在 Supervisor 层）。
+
+---
+
+## 12. 执行 Backlog（CELL-xx · 单一可跟踪真相源）
+
+> 每完成一个 CELL 就更新此表（状态 + commit）。strangler-fig：每项落地后现有单进程 app 仍可跑，直到 CELL-22 才翻入口。
+> **进度（2026-05-31）**：已完成 11 · 未做 12。**cell 已能端到端跑一个 bot**（同进程），但**真多进程 + 浏览器 WS 终止 + 调度尚未接**（CELL-13/16/22）。
+
+### Epic 0 · 去风险（门禁）
+
+| CELL | 内容 / 交付物 | 依赖 | 验收 | 状态 |
+|---|---|---|---|---|
+| 🚦 01 | UDS / 广播链路 spike：worker bus 事件→IPC→Supervisor→模拟前端闭环；**两套传输各测**（UDS + Windows 命名管道） | — | 闭环 PASS 且**单次往返 < 100ms**（实测记录） | ⛔ 待办（`spike_uds_bridge.py` 在工作树，未正式测延迟/未提交；CELL-08 单测已覆盖 UDS 功能正确性） |
+| 🚦 02 | event-loop lag 度量 + 负载场景 → 定 **K** | — | 拿到单进程多群并发的 p99 loop lag；据此判"隔离 vs 并行"并定 K | ⛔ 待办 |
+
+### Epic 1 · 数据层（Phase 1-2）
+
+| CELL | 内容 / 交付物 | 依赖 | 验收 | 状态 |
+|---|---|---|---|---|
+| 03 | `db.writer` 按 `(loop_id, db_path)` 参数化：`write_connect(path)` / `aclose_writer(path)` | — | 不同库独立锁/连接；同库串行；向后兼容 | ✅ `675c006` |
+| 04 | contextvar 路由：`db/context.py`（`bind_db`/`current_db_path`）+ `connect`/`write_connect` 解析 + `global_db()` 绕过绑定 | 03 | 绑定后读写落群库、`global_db` 走中心、子任务继承、退出重置 | ✅ `a1a0f46` |
+| 05 | schema 分域：`db/schema_split.py`（`CENTRAL_TABLES`/`GROUP_TABLES` + `init_central_db`/`init_group_db`，群表去跨域 FK） | 04 | 分区正确、跨域 FK 丢弃、域内 FK 保留、群库独立 | ✅ `2fc25ab` |
+| 06 | 一次性数据 splitter `db/split_tool.py`：legacy → central + 各 group_{id} | 05 | 分区/隔离/id 保留/行数守恒 | ✅ `4666f66` |
+| 14b | 查询层分域：sender 字段反规范化进 messages（migration_014 回填 + save_message 快照 + `_MSG_SQL` 去 members JOIN） | 05 | get_messages 在群库无 members 表下可用；bot 端到端跑通 | ✅ `1e5adcb` |
+
+### Epic 2 · IPC 传输
+
+| CELL | 内容 / 交付物 | 依赖 | 验收 | 状态 |
+|---|---|---|---|---|
+| 08 | `runtime/ipc/`：framing（长度前缀 JSON，依赖纯净）+ transport_unix（UDS）+ transport_win（命名管道）+ `__init__` 按平台选 | 01 | 分帧往返 / 超大帧拒绝 / 原生传输端到端 | ✅ `01d7953`（`transport_win` 待 Windows runner 验收 ⚠️） |
+| 09 | 隧道协议 schema：上/下行消息类型 + `envelope`（group_id/trace_id 头）；HELLO 控制帧 | 08 | 通道划分 / envelope；*待补：从 `bus/events.py` 自动生成 + 28 事件契约测试* | 🟡 基本完成 `01d7953`/`d13c216`（自动生成未做） |
+
+### Epic 3 · Supervisor / Worker 切分
+
+| CELL | 内容 / 交付物 | 依赖 | 验收 | 状态 |
+|---|---|---|---|---|
+| 10 | `runtime/worker.py`：下行循环（user_message→bind 群库→dispatch；abort）+ 上行 pump（bus→IPC broadcast）；`runtime/dbpaths.py` | 04,09 | user_message→上行 broadcast；abort 路由 | ✅ `acb89a8` |
+| 11 | Worker 端 bus adapter（上行发 IPC 而非 WSManager） | 09,10 | — | ✅ 并入 CELL-10 上行 pump |
+| 12 | `runtime/supervisor.py`：IPC server（HELLO 注册）+ 下行 `send_to_worker`（route）+ 上行扇出到浏览器客户端 + unread 钩子 | 09,11 | 浏览器→Worker→浏览器端到端、群隔离、无 worker 报错 | ✅ `d13c216` |
+| 13 | APScheduler 上移 Supervisor，到点下发 `wake_trigger` | 12 | cron → worker 唤醒 → 跑一轮 | ⛔ 待办 |
+| 14 | 瘦启动器 `runtime/entry.py --role`（build/run factory）+ worker 真实 dispatch `runtime/dispatch.py`（中心读 members + 群库写） | 04,09,12 | 两 role 可构造；dispatch 跑通 bot（见 14b） | ✅ `986c4d1`（+14b 解锁 e2e）。**WS 终止壳 + 调度仍是 TODO（run_supervisor）** |
+
+### Epic 4 · 分片池 / 路由 / 生命周期
+
+| CELL | 内容 / 交付物 | 依赖 | 验收 | 状态 |
+|---|---|---|---|---|
+| 15 | `runtime/router.py`：`groups.assigned_worker_id` 显式分配 + 查询 | 12 | 新群分配；查询稳定 | ⛔ 待办 |
+| 16 | 多进程派生：Supervisor 起 K 个 worker 进程，按分配表路由 | 14,15 | 2 worker/2 群跨进程消息正确落位 | ⛔ 待办（**目前仍同进程**） |
+| 17 | `runtime/lifecycle.py`：群懒水合 + 空闲驱逐（snapshot+清内存+关私有库）+ **私有库连接 LRU 上界** | 16 | 沉睡群唤醒；空闲驱逐；LRU 封顶 | ⛔ 待办 |
+| 18 | 租约 + 干净交接（drain→snapshot→关→ack→改派→open） | 15,17 | **不变量：任何时刻一群私有库仅一个 worker 持写连接** | ⛔ 待办 |
+
+### Epic 5 · 横切 / 运维
+
+| CELL | 内容 / 交付物 | 依赖 | 验收 | 状态 |
+|---|---|---|---|---|
+| 19 | trace_id 贯穿下行→worker→上行 + 结构化日志（JSON，**独立日志通道**，不挤业务隧道） | 09 | `grep trace_id` 跨进程串一个请求 | ⛔ 待办 |
+| 20 | `/api/system/status`（DFT-057）跨 worker 聚合 bg/ws/权限指标 | 16 | status 返回每 worker + 汇总 | ⛔ 待办 |
+| 21 | Supervisor 扇出复用 DFT-030 发送超时，慢客户端不拖垮其他 | 12 | 慢客户端不阻塞他人 | ⛔ 待办 |
+
+### Epic 6 · 切换收口
+
+| CELL | 内容 / 交付物 | 依赖 | 验收 | 状态 |
+|---|---|---|---|---|
+| 22 | Cutover：FastAPI WS 终止壳接 Supervisor + 默认入口切 runtime + 删旧单进程路径/spike | 全部 | 全系统跑在 cell 架构上，旧路径移除 | ⛔ 待办（**"真正能对外起服务"在这一步**） |
+| 23 | Windows 沙箱策略（run_shell 内存限额：Job Objects 或部署走 WSL/容器）— 可选，独立于 cell 主线 | — | — | ⛔ 待办（低优先） |
+
+### 关键路径
+
+```
+01,02（门禁）→ 数据层(03→04→05→06→14b) ∥ IPC(08→09)
+   汇合 → S/W 切分(10→12→14 ✅ · 13) → 分片池(15→16→17→18)
+        → 横切(19,20,21 可并行) → Cutover(22)
+```
+
+> **当前位置**：数据层 + IPC + S/W 切分（同进程）已通，**bot 能跑**。下一关键跃迁是 **CELL-16（真多进程）** 与 **CELL-22（WS 终止壳，可对外起服务）**；CELL-13（调度）相对独立可穿插。
