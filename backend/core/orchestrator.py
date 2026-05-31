@@ -35,10 +35,32 @@ async def init_event_handlers():
             logger.warning("TicketCreated: no Dev bots found in group %d", group_id)
             return
 
-        # Simple strategy: select the first one for now
-        target_bot = dev_bots[0]
+        # --- Point 3 & 4: Expertise Match Algorithm (DFT-041/042) ---
+        # Scoring based on keywords in role and traits vs ticket title
+        scored_bots = []
+        search_text = title.lower()
         
-        content = f"[系统通知] 发现新任务：{title} ({ticket_id})。请认领并开始执行。"
+        for bot in dev_bots:
+            score = 0
+            # Keywords to check: role name and traits
+            keywords = [bot.get("role", "").lower()] + [t.lower() for t in bot.get("traits", [])]
+            for kw in keywords:
+                if kw and kw in search_text:
+                    score += 10 # Strong match
+            
+            # Tie-breaker: random jitter to avoid always picking the same bot when scores are equal
+            import random
+            score += random.random()
+            scored_bots.append((score, bot))
+        
+        # Sort by score descending
+        scored_bots.sort(key=lambda x: x[0], reverse=True)
+        target_bot = scored_bots[0][1]
+        
+        logger.info("TicketCreated: auto-dispatching bot %s (score %.2f) for ticket %s", 
+                    target_bot["name"], scored_bots[0][0], ticket_id)
+        
+        content = f"[系统通知] 发现新任务：{title} ({ticket_id})。根据你的专业领域（经验匹配），该任务已分配给你。请认领并开始执行。"
         sender = {"id": 0, "name": "系统调度", "type": "system"}
         
         async with get_db() as db_m:
