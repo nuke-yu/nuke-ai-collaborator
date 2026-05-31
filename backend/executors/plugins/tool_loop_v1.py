@@ -634,29 +634,33 @@ class ToolLoopV1(BotExecutor):
                                             if fork_allowed else None
                                         )
                                         fork_model = fork_info.get("model") or model_name
-                                        _fork_usage: list = []
                                         child_sid = str(uuid.uuid4())
                                         await ctx.interaction.append_session_event(_session_id, "child_fork", {
                                             "child_session_id": child_sid,
                                             "skill_name": fork_name,
                                         })
+                                        # DFT-060: pass the parent AIService so the fork's
+                                        # child AI call accumulates its tokens into
+                                        # ai_service.usage (what the final message + session
+                                        # accounting read). The previous call passed a
+                                        # non-existent usage_out= kwarg (TypeError), omitted
+                                        # the required ai_service arg, and fed undefined
+                                        # _total_* accumulators (NameError) — the whole fork
+                                        # path crashed on first use.
                                         tool_result = await _run_fork_skill(
                                             fork_info.get("content", ""),
                                             fork_task,
                                             provider, fork_model, temperature,
+                                            ai_service,
                                             tool_schemas=fork_schemas,
-                                            usage_out=_fork_usage,
                                         )
                                         await ctx.interaction.append_session_event(_session_id, "child_join", {
                                             "child_session_id": child_sid,
                                             "skill_name": fork_name,
                                             "result": tool_result,
                                         })
-                                        for _u in _fork_usage:
-                                            _total_input_tokens += _u.get("input_tokens", 0)
-                                            _total_output_tokens += _u.get("output_tokens", 0)
-                                            _total_cache_read_tokens += _u.get("cache_read_tokens", 0)
-                                            _total_cache_creation_tokens += _u.get("cache_creation_tokens", 0)
+                                        # fork tokens already rolled into ai_service.usage
+                                        # via _run_fork_skill's ai_service.call (DFT-060).
                                         await ctx.interaction.broadcast(ctx.group_id, {
                                             "type": "skill_fork_end", "temp_id": temp_id,
                                             "member_id": bot["id"], "skill_name": fork_name,
