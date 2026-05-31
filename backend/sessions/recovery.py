@@ -170,7 +170,11 @@ async def resume_session(session_id: str) -> bool:
     }
     
     await update_session_status(session_id, "recovering")
-    asyncio.create_task(_dispatch_recovery(payload))
+    # DFT-063: hold a reference + log exceptions instead of a bare create_task,
+    # so this fire-and-forget recovery dispatch can't be GC'd mid-flight or
+    # silently swallow its exception.
+    from core import bg
+    bg.spawn(_dispatch_recovery(payload))
     return True
 
 

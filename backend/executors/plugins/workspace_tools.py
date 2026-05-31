@@ -17,6 +17,7 @@ import workspace as _ws
 from skills import run_skill
 import executors.compact as compact
 import permissions
+from core.bg import spawn as bg_spawn  # aliased: a local var named `bg` is used below
 
 # ---------------------------------------------------------------------------
 # Platform detection
@@ -478,7 +479,8 @@ async def _permission_check_hook(name: str, arguments: dict, context: dict) -> d
 
     if result.get("persist_rule"):
         rule = result["persist_rule"]
-        asyncio.create_task(permissions.save_rule(
+        # DFT-063: held + exception-logged instead of a bare create_task.
+        bg_spawn(permissions.save_rule(
             context.get("bot_id"), rule.tool_pattern, rule.args_pattern, rule.action
         ))
 

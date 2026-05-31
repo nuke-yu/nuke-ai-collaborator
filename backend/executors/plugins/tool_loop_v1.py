@@ -23,6 +23,7 @@ from skills import list_skills_all, load_always_skills, filter_skills_by_context
 from skills.traits import load_traits
 from skills.constants import bot_ws as _bot_ws
 import executors.compact as compact
+from core import bg
 from core.orchestration.ai_service import AIService
 
 _DOOM_LOOP_THRESHOLD = 5  # breaks on the Nth consecutive tool-only iteration (inclusive)
@@ -784,12 +785,12 @@ class ToolLoopV1(BotExecutor):
             m["name"] for m in messages
             if m.get("role") == "tool" and m.get("name")
         ]
-        asyncio.create_task(add_to_chroma(msg_id, full_text, bot.get("role") or "", bot["id"]))
-        asyncio.create_task(maybe_summarize(ctx.group_id, bot["id"], bot.get("role") or bot["name"], [bot["id"]]))
-        asyncio.create_task(compact.maybe_compact_db_history(
+        bg.spawn(add_to_chroma(msg_id, full_text, bot.get("role") or "", bot["id"]))
+        bg.spawn(maybe_summarize(ctx.group_id, bot["id"], bot.get("role") or bot["name"], [bot["id"]]))
+        bg.spawn(compact.maybe_compact_db_history(
             ctx.group_id, bot["id"], provider, model_name, temperature, ctx.interaction
         ))
-        asyncio.create_task(append_log(
+        bg.spawn(append_log(
             bot["id"], full_text,
             user_message=ctx.user_message,
             sender_name=ctx.sender.get("name", ""),
@@ -798,7 +799,7 @@ class ToolLoopV1(BotExecutor):
             executor=self.executor_id,
         ))
         if ctx.group_id and tool_records:
-            asyncio.create_task(archive_run(
+            bg.spawn(archive_run(
                 ctx.group_id, temp_id, bot,
                 user_message=ctx.user_message,
                 sender_name=ctx.sender.get("name", ""),
