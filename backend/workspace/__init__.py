@@ -71,6 +71,7 @@ def _get_effective_ws(bot_id: int, path_str: str) -> Path:
     return ws
 
 
+
 async def read_file(bot_id: int, path: str) -> str:
     ws = _get_effective_ws(bot_id, path)
     p = _safe_path(ws, path)
