@@ -8,6 +8,7 @@ intermingle with the AI loop logic (frequently changed).
 import asyncio
 import fnmatch
 import os
+import re
 import sys
 from pathlib import Path
 

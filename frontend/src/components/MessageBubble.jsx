@@ -93,9 +93,33 @@ function MentionText({ children }) {
 const mdComponents = {
   code({ node, inline, className, children, ...props }) {
     const match = /language-(\w+)/.exec(className || '')
+    const language = match?.[1] || ''
     const code = String(children).replace(/\n$/, '')
+    
+    // Point 5: Terminal Aesthetic for Shell Commands
+    if (!inline && (language === 'bash' || language === 'shell' || code.startsWith('exit_code:'))) {
+      return (
+        <div className="my-2 rounded-lg overflow-hidden border border-gray-700 shadow-xl">
+          <div className="bg-gray-800 px-3 py-1.5 flex items-center gap-1.5 border-b border-gray-700">
+            <div className="flex gap-1">
+              <div className="w-2.5 h-2.5 rounded-full bg-red-500/50" />
+              <div className="w-2.5 h-2.5 rounded-full bg-yellow-500/50" />
+              <div className="w-2.5 h-2.5 rounded-full bg-green-500/50" />
+            </div>
+            <span className="text-[10px] text-gray-500 font-mono uppercase tracking-wider ml-1">Terminal — {language || 'output'}</span>
+          </div>
+          <div className="bg-black p-4 font-mono text-[13px] leading-relaxed overflow-x-auto selection:bg-indigo-500/30">
+            <div className="text-green-400/90 mb-1 flex gap-2">
+              <span className="shrink-0 text-indigo-500/70 select-none">🤖 $</span>
+              <span className="whitespace-pre-wrap text-indigo-100/90">{code}</span>
+            </div>
+          </div>
+        </div>
+      )
+    }
+
     if (!inline && (match || code.includes('\n'))) {
-      return <CollapsibleCode language={match?.[1] || ''} code={code} />
+      return <CollapsibleCode language={language} code={code} />
     }
     return (
       <code className="bg-gray-700 text-pink-300 rounded px-1 py-0.5 text-xs font-mono" {...props}>
@@ -198,11 +222,22 @@ export default function MessageBubble({ msg, isTyping, currentMemberId, members 
     await fetch(`/api/messages/${msg.id}?member_id=${currentMemberId}`, { method: 'DELETE' })
   }
   const avatar = (
-    <div
-      className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold text-white flex-shrink-0"
-      style={{ backgroundColor: msg.avatar_color }}
-    >
-      {msg.sender_name[0]}
+    <div className="relative flex-shrink-0 group/avatar">
+      <div
+        className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold text-white shadow-inner transition-all duration-500 ${
+          msg.sender_type === 'bot' 
+            ? 'ring-2 ring-indigo-500/30 group-hover/avatar:ring-indigo-400 group-hover/avatar:shadow-[0_0_12px_rgba(99,102,241,0.4)]' 
+            : 'ring-1 ring-gray-700/50'
+        }`}
+        style={{ backgroundColor: msg.avatar_color }}
+      >
+        {msg.sender_name[0]}
+      </div>
+      {msg.sender_type === 'bot' && (
+        <div className="absolute -bottom-1 -right-1 bg-gray-900 rounded-full w-4 h-4 flex items-center justify-center text-[10px] border border-gray-700 shadow-sm">
+          🤖
+        </div>
+      )}
     </div>
   )
 
@@ -228,7 +263,6 @@ export default function MessageBubble({ msg, isTyping, currentMemberId, members 
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 mb-0.5">
           <span className="text-sm font-medium text-gray-200">{msg.sender_name}</span>
-          {msg.sender_type === 'bot' && <span className="text-xs text-gray-500">🤖</span>}
           {msg.is_auto_reply && <span className="text-xs text-indigo-400 bg-indigo-950/50 rounded px-1 py-0.5">↩ 自动回复</span>}
           <span className="text-xs text-gray-500">
             {msg.created_at ? new Date(msg.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : ''}
