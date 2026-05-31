@@ -67,7 +67,7 @@ def _get_effective_ws(bot_id: int, path_str: str) -> Path:
         with connect_sync() as conn:
             row = conn.execute("SELECT group_id FROM members WHERE id = ?", (bot_id,)).fetchone()
             if row:
-                return group_ws(row[0])
+                return group_workspace(row[0])
     return ws
 
 
