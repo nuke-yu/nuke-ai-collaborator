@@ -121,7 +121,12 @@ _GROUP_DDL = [
         input_tokens INTEGER DEFAULT NULL,
         output_tokens INTEGER DEFAULT NULL,
         cache_read_tokens INTEGER DEFAULT NULL,
-        cache_creation_tokens INTEGER DEFAULT NULL
+        cache_creation_tokens INTEGER DEFAULT NULL,
+        sender_name TEXT DEFAULT NULL,
+        sender_type TEXT DEFAULT NULL,
+        sender_avatar TEXT DEFAULT NULL,
+        sender_provider TEXT DEFAULT NULL,
+        sender_model TEXT DEFAULT NULL
     )""",
     """CREATE TABLE IF NOT EXISTS role_summaries (
         id                 INTEGER PRIMARY KEY AUTOINCREMENT,

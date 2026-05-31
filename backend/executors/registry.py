@@ -36,9 +36,20 @@ def _load_file(path: Path):
 
 
 def discover():
-    """Scan plugins/ and load all non-private .py files."""
+    """Scan plugins/ and load all non-private .py files.
+
+    Idempotent: re-discovery (startup AND /api/plugins/reload) re-execs plugin
+    modules, whose fresh hook function objects would bypass tool_executor's
+    identity-based dedup and ACCUMULATE duplicate before/after hooks (e.g. the
+    permission check running twice). Clear the hooks first so register_tools()
+    rebuilds exactly one set; tool defs/handlers are keyed by name and overwrite,
+    so they need no reset.
+    """
     _registry.clear()
     _failures.clear()
+    from executors import tool_executor
+    tool_executor.clear_before_hooks()
+    tool_executor.clear_after_hooks()
     for f in sorted(PLUGIN_DIR.glob("*.py")):
         if not f.name.startswith("_"):
             _load_file(f)

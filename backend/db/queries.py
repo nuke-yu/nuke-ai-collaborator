@@ -68,20 +68,44 @@ async def get_member_stats(db, group_id: int):
     return [{"name": r[0], "type": r[1], "count": r[2]} for r in rows]
 
 
+async def _sender_snapshot(write_db, member_id: int):
+    """CELL-14b: resolve the sender's display fields to denormalize onto the
+    message row. Tries the write connection first (legacy single DB: members are
+    co-located); falls back to the central DB (cell: a group's private DB has no
+    members table)."""
+    for use_central in (False, True):
+        try:
+            if use_central:
+                import db as _db
+                async with _db.global_db() as cdb:
+                    m = await get_member(cdb, member_id)
+            else:
+                m = await get_member(write_db, member_id)
+            if m:
+                return (m["name"], m["type"], m["avatar_color"],
+                        m.get("model_provider"), m.get("model_name"))
+        except Exception:
+            continue
+    return (None, None, None, None, None)
+
+
 async def save_message(db, group_id: int, member_id: int, content: str,
                        reply_to_id: int = None, file_url: str = None,
                        file_name: str = None, file_size: int = None,
                        file_type: str = None, is_auto_reply: bool = False,
                        input_tokens: int = None, output_tokens: int = None,
                        cache_read_tokens: int = None, cache_creation_tokens: int = None):
+    s_name, s_type, s_avatar, s_prov, s_model = await _sender_snapshot(db, member_id)
     async with db.execute(
         "INSERT INTO messages (group_id, member_id, content, reply_to_id, "
         "file_url, file_name, file_size, file_type, is_auto_reply, "
-        "input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, "
+        "sender_name, sender_type, sender_avatar, sender_provider, sender_model) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (group_id, member_id, content, reply_to_id,
          file_url, file_name, file_size, file_type, int(is_auto_reply),
-         input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens)
+         input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
+         s_name, s_type, s_avatar, s_prov, s_model)
     ) as cur:
         await db.commit()
         return cur.lastrowid

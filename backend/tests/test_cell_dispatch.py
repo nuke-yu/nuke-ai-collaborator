@@ -45,6 +45,24 @@ class TestCellDispatch(unittest.IsolatedAsyncioTestCase):
         registry.discover()
 
     async def asyncTearDown(self):
+        # This is a heavyweight integration test that runs a real fire-and-forget
+        # bot pipeline; drain/clear the process-global task registries so leaked
+        # tasks from this loop don't bleed into later tests.
+        from core import bg
+        from executors import tool_executor
+        import core.orchestrator as _orch
+        bg.abort_group(GID)
+        bg._bg_tasks.clear()
+        bg._group_tasks.clear()
+        _orch._steer_queues.clear()
+        # setUp's registry.discover() registers the workspace tools into the global
+        # tool_executor; reset it so a later test that assumes an empty executor
+        # (e.g. test_decoupled_executor, which then takes tool_loop's no-tools
+        # streaming branch) isn't perturbed by this heavyweight integration test.
+        tool_executor._defs.clear()
+        tool_executor._handlers.clear()
+        tool_executor.clear_before_hooks()
+        tool_executor.clear_after_hooks()
         await db.aclose_writer()
         db.DB_PATH, _writer.DB_PATH = self._orig_db, self._orig_w
         shutil.rmtree(self.tmp, ignore_errors=True)
@@ -55,13 +73,6 @@ class TestCellDispatch(unittest.IsolatedAsyncioTestCase):
                 "SELECT content FROM messages WHERE member_id=?", (BOT_ID,))
             return [r[0] for r in await cur.fetchall()]
 
-    @unittest.skip(
-        "BLOCKED on split-aware queries: db.get_messages() LEFT JOINs the central "
-        "`members` table, which doesn't exist in a group's private DB. Cross-domain "
-        "JOINs must be removed (denormalize sender name/type/avatar into messages, "
-        "or enrich in Python from central) before a bot can run end-to-end through "
-        "the cell. Tracked as CELL-14b (split-aware query layer)."
-    )
     async def test_dispatch_runs_bot_and_persists_to_group_db(self):
         async def mock_stream(*a, **k):
             yield "cell reply"

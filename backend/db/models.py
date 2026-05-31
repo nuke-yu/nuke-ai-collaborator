@@ -36,19 +36,21 @@ def _row_to_member(r):
     }
 
 
+# CELL-14b: sender fields are denormalized onto each message row (snapshot at
+# save time), so this query has NO cross-domain JOIN to the central `members`
+# table — a group's private DB is self-contained. The rm self-JOIN (messages →
+# messages, same group) stays; the replied-to sender reads rm.sender_name.
 _MSG_SQL = """
     SELECT m.id, m.group_id, m.member_id, m.content, m.created_at,
-           mb.name, mb.type, mb.avatar_color,
-           m.reply_to_id, rm.content, rmb.name,
+           m.sender_name, m.sender_type, m.sender_avatar,
+           m.reply_to_id, rm.content, rm.sender_name,
            m.edited_at, m.is_deleted,
            m.file_url, m.file_name, m.file_size, m.file_type,
            m.is_auto_reply, m.input_tokens, m.output_tokens,
            m.cache_read_tokens, m.cache_creation_tokens,
-           mb.model_provider, mb.model_name
+           m.sender_provider, m.sender_model
     FROM messages m
-    JOIN members mb ON m.member_id = mb.id
     LEFT JOIN messages rm ON m.reply_to_id = rm.id
-    LEFT JOIN members rmb ON rm.member_id = rmb.id
 """
 
 

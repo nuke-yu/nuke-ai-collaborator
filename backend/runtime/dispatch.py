@@ -8,6 +8,7 @@ this. The actual bot run is fire-and-forget via bg.spawn_group so the worker's
 downstream loop stays responsive (abort can still interrupt it); its bus events
 flow out through the Worker's upstream pump.
 """
+import dataclasses
 import logging
 
 import db
@@ -15,6 +16,10 @@ from bus import bus
 from bus.events import Message
 
 log = logging.getLogger(__name__)
+
+# get_messages() rows carry extra display keys (avatar_color, reply_to, cost_usd,
+# …) that the Message event doesn't declare; spread only the fields it accepts.
+_MESSAGE_FIELDS = {f.name for f in dataclasses.fields(Message)}
 
 
 async def dispatch_user_message(msg: dict) -> None:
@@ -47,7 +52,9 @@ async def dispatch_user_message(msg: dict) -> None:
         saved = next((m for m in recent if m["id"] == msg_id), {})
 
     # echo the user's own message back out (Supervisor fans it to the group)
-    await bus.publish(Message(group_id=gid, **{k: v for k, v in saved.items() if k != "group_id"}))
+    await bus.publish(Message(group_id=gid, **{
+        k: v for k, v in saved.items() if k in _MESSAGE_FIELDS and k != "group_id"
+    }))
 
     from core.orchestrator import select_triggered_bots, dispatch_bots
     from core import bg

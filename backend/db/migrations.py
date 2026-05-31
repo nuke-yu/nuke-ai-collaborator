@@ -243,6 +243,25 @@ async def migration_013(db):
     await db.commit()
 
 
+async def migration_014(db):
+    """CELL-14b: denormalize the sender's display fields onto each message so the
+    messages query needs no cross-domain JOIN to the central `members` table
+    (group private DBs are self-contained). Backfill existing rows from members."""
+    for col in ("sender_name TEXT", "sender_type TEXT", "sender_avatar TEXT",
+                "sender_provider TEXT", "sender_model TEXT"):
+        await _safe_add_column(db, f"ALTER TABLE messages ADD COLUMN {col}")
+    await db.execute("""
+        UPDATE messages SET
+            sender_name     = (SELECT name           FROM members WHERE id = messages.member_id),
+            sender_type     = (SELECT type           FROM members WHERE id = messages.member_id),
+            sender_avatar   = (SELECT avatar_color    FROM members WHERE id = messages.member_id),
+            sender_provider = (SELECT model_provider  FROM members WHERE id = messages.member_id),
+            sender_model    = (SELECT model_name      FROM members WHERE id = messages.member_id)
+        WHERE sender_name IS NULL
+    """)
+    await db.commit()
+
+
 MIGRATIONS: list = [
     migration_001,
     migration_002,
@@ -257,6 +276,7 @@ MIGRATIONS: list = [
     migration_011,
     migration_012,
     migration_013,
+    migration_014,
 ]
 
 
