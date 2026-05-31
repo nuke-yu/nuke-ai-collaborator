@@ -2,6 +2,8 @@ import aiosqlite
 import os
 from contextlib import asynccontextmanager, contextmanager
 
+from db.context import resolve as _route, bind_db, current_db_path
+
 DB_PATH = os.path.join(os.path.dirname(__file__), "chat.db")
 
 
@@ -15,7 +17,7 @@ async def connect(path: str | None = None):
     # teardown), the finally below never runs and a NON-daemon thread lingers,
     # blocking process exit and hanging the test/run. Mark the thread daemon
     # before it starts so an orphaned read connection can never block exit.
-    conn = aiosqlite.connect(path if path is not None else DB_PATH)
+    conn = aiosqlite.connect(_route(path, DB_PATH))
     conn.daemon = True
     conn = await conn
     try:
@@ -31,7 +33,7 @@ async def connect(path: str | None = None):
 def connect_sync(path: str | None = None):
     """Synchronous connection for low-frequency lookups (e.g. workspace redirection)."""
     import sqlite3
-    conn = sqlite3.connect(path if path is not None else DB_PATH)
+    conn = sqlite3.connect(_route(path, DB_PATH))
     try:
         yield conn
     finally:
@@ -39,7 +41,15 @@ def connect_sync(path: str | None = None):
 
 
 def get_db():
+    """Read connection for the CURRENTLY BOUND group DB (CELL-04), else DB_PATH."""
     return connect()
+
+
+def global_db():
+    """Read connection to the CENTRAL DB, bypassing any bound group context
+    (CELL-04). Use for global-domain tables: groups / members / app_config /
+    templates / unread_counts."""
+    return connect(DB_PATH)
 
 
 from db.writer import write_connect, aclose_writer  # noqa: E402
@@ -57,7 +67,8 @@ from db.queries import (       # noqa: E402
 )
 
 __all__ = [
-    "DB_PATH", "get_db", "connect", "connect_sync", "write_connect", "aclose_writer", "init_db",
+    "DB_PATH", "get_db", "global_db", "connect", "connect_sync", "write_connect", "aclose_writer",
+    "bind_db", "current_db_path", "init_db",
     "get_group", "get_members", "get_member",
     "get_messages", "get_all_messages", "get_member_stats",
     "save_message", "update_member_setting", "clear_bot_context",

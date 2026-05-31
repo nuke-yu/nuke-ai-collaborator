@@ -23,6 +23,8 @@ from contextlib import asynccontextmanager
 
 import aiosqlite
 
+from db.context import resolve as _route
+
 DB_PATH = os.path.join(os.path.dirname(__file__), "chat.db")
 
 # (loop_id, db_path) -> {"conn": aiosqlite.Connection | None, "lock": asyncio.Lock}
@@ -30,8 +32,9 @@ _state: dict[tuple[int, str], dict] = {}
 
 
 def _resolve(path: str | None) -> str:
-    # Read DB_PATH at call time so tests that monkeypatch it still route correctly.
-    return path if path is not None else DB_PATH
+    # CELL-04: explicit path wins; else the bound current group DB (contextvar);
+    # else DB_PATH (read at call time so tests that monkeypatch it still route).
+    return _route(path, DB_PATH)
 
 
 def _conn_state(db_path: str) -> dict:
