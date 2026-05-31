@@ -42,6 +42,8 @@ class Worker:
 
     async def connect(self) -> None:
         self._reader, self._writer = await ipc.connect(self.addr)
+        # Identify ourselves so the Supervisor can route group→worker (CELL-12).
+        await ipc.send_msg(self._writer, {"type": ipc.protocol.HELLO, "worker_id": self.worker_id})
         # Register the wildcard subscription synchronously BEFORE we start
         # processing downstream messages, so no early bus event is missed.
         self._sub = self.bus.subscribe_all()

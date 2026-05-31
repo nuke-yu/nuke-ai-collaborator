@@ -19,6 +19,9 @@ STATS_REPORT = "stats_report"            # 可观测性聚合（DFT-057 跨 work
 
 UPSTREAM = frozenset({BROADCAST, UNREAD_DELTA, STATS_REPORT})
 
+# ── 控制帧（连接握手，不属于业务上/下行集） ────────────────────────────────
+HELLO = "hello"   # Worker → Supervisor 首帧，自报 worker_id 完成注册
+
 # 注：LOG_RECORD 走独立日志通道，**绝不**与业务隧道共用（§10.2 队头阻塞）。
 
 
