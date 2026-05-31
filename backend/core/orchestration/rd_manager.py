@@ -148,7 +148,6 @@ class RDManager:
 
     def _parse_board(self, content: str) -> dict[str, dict]:
         """Parse all sections of the board to find tickets and their status."""
-        sections = {"backlog": [], "in_progress": [], "done": []}
         current_section = None
         
         tickets = {}

@@ -56,8 +56,8 @@ def reload() -> list[str]:
 
 
 def get(executor_id: str) -> BotExecutor:
-    """Return the executor for the given id, falling back to simple_v1."""
-    executor = _registry.get(executor_id) or _registry.get("simple_v1")
+    """Return the executor for the given id, falling back to tool_loop_v1."""
+    executor = _registry.get(executor_id) or _registry.get("tool_loop_v1")
     if executor is not None:
         return executor
     if _registry:

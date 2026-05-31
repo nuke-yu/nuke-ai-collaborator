@@ -118,8 +118,6 @@ async def _recover_one(session: dict, dispatcher) -> None:
             cutoff_id = dangling[0]["id"]
             events = [e for e in events if e["id"] < cutoff_id]
 
-        messages = reconstruct_messages(config, events)
-
     # Point 3: Notify group instead of auto-dispatching
     # We update status to 'awaiting_recovery' to mark it as found but not yet resumed
     await update_session_status(sid, "awaiting_recovery")

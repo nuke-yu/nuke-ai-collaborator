@@ -75,7 +75,7 @@ async def run_unit(group_id: int, unit, orch) -> None:
 async def resume_workflows() -> None:
     """启动时恢复崩溃前在跑的工作流：还原编排器状态、广播快照、重新派发在飞单元。
 
-    只重新派发 simple_v1 单元 —— tool_loop_v1 这类有副作用的执行器靠各自的 WAL
+    只重新派发无副作用的旧单元 —— tool_loop_v1 这类有副作用的执行器靠各自的 WAL
     （sessions.recover_all）单独恢复，这里不重复触发以免重复落库/调用工具。
     """
     from core.orchestration import registry as orch_registry
@@ -95,8 +95,8 @@ async def resume_workflows() -> None:
         wf.bind(group_id, orchestrator_id)
         await bus.publish(WorkflowUpdate(group_id=group_id, **orch.snapshot(group_id)))
         for unit in orch.resume_units(group_id):
-            if unit.executor_id != "simple_v1":
-                log.info("workflow group %s: skip resume of %s unit (handled by recover_all)",
-                         group_id, unit.executor_id)
+            if unit.executor_id == "tool_loop_v1":
+                log.info("workflow group %s: skip resume of tool_loop_v1 unit (handled by recover_all)",
+                         group_id)
                 continue
             bg.spawn_group(group_id, run_unit(group_id, unit, orch))

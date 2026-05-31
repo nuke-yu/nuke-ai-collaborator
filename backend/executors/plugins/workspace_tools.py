@@ -549,16 +549,17 @@ async def _handle_run_shell(
     # If the bot tries to use a common port, we switch it to a dynamic one
     allocated_port = None
     intercepted_port = None
-    # Sort by length descending to match 8080 before 80
+    # Sort by length descending to match 8080 before 80, using word boundaries (DFT-065)
     for p in sorted(_INTERCEPT_PORTS, key=len, reverse=True):
-        if p in cmd:
+        pattern = r"\b" + re.escape(p) + r"\b"
+        if re.search(pattern, cmd):
             intercepted_port = p
             allocated_port = _allocate_free_port()
             # Intercept by environment variable injection
             sandbox_env["APP_PORT"] = str(allocated_port)
             sandbox_env["PORT"] = str(allocated_port)
             # Physical replacement in the command string as a backstop
-            cmd = cmd.replace(p, str(allocated_port))
+            cmd = re.sub(pattern, str(allocated_port), cmd)
             break
     
     # Wrap command in a subshell with ulimit (virtual memory limit) to prevent OOM

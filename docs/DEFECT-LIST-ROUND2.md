@@ -43,12 +43,12 @@
 | DFT-062 ✅已修 | 🔴 | 前端 | `WorkspacePanel` hooks 条件调用 | `d9e1719` |
 | DFT-063 ✅已修 | 🟠 | 后台任务 | DFT-025 未完成：多处裸 `create_task` | `f0f331d` |
 | DFT-064 ✅已修 | 🟠 | 上下文压缩 | 溢出恢复守卫死代码（DFT-035 保护仍生效） | `8ad5a32` |
-| DFT-065 | 🟠 | 沙箱 | run_shell 端口拦截子串误匹配改坏命令 | ⛔ 待修 |
+| DFT-065 ✅已修 | 🟠 | 沙箱 | run_shell 端口拦截子串误匹配改坏命令 | 正则边界匹配 |
 | DFT-066 ✅已修 | 🟠 | 测试 | 全量 `pytest` 跑不完（hang），无绿色基线 | `fc8c598` |
-| DFT-067 | 🟠 | 执行注册 | `simple_v1`/`react_v1` 漂移 + 静默降级 | ✅ 精读 |
-| DFT-068 | 🟡 | 多处 | 死赋值 `messages`/`sections` | ✅ pyflakes |
+| DFT-067 ✅已修 | 🟠 | 执行注册 | `simple_v1`/`react_v1` 漂移 + 静默降级 | 已清理引用 |
+| DFT-068 ✅已修 | 🟡 | 多处 | 死赋值 `messages`/`sections` | 已删除 |
 | DFT-069 | 🟡 | 前端 | set-state-in-effect ×8 / render 内 Date.now / 闭包陈旧 | ✅ eslint |
-| DFT-070 | 🟡 | 入口 | CORS `allow_origins=["*"]` | ✅ 精读 |
+| DFT-070 ✅已修 | 🟡 | 入口 | CORS `allow_origins=["*"]` | 限 localhost |
 | DFT-071 | 🟠 | 编排 | 两套并行编排系统并存、角色 taxonomy 中英不一致 | 架构分析 |
 | DFT-072 | 🔴 | 全局 | 进程级内存状态锁死单 worker（无横向扩展） | 架构分析 |
 | DFT-073 | 🟠 | 协议 | 前后端 WS 事件无共享契约 | 架构分析 |
