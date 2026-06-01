@@ -1,102 +1,57 @@
+
+import asyncio
 import os
 import sys
 import unittest
-import asyncio
-from pathlib import Path
 from unittest.mock import AsyncMock, patch, MagicMock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import db as _db_mod
-from db.schema import init_db
 from core.orchestration.rd_manager import rd_manager
-from bus.events import TicketCreated
+import db
 
-_HERE = Path(__file__).parent.parent
-_TEST_DB = str(_HERE / "test_rd_manager_v2.db")
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_TEST_DB = str(os.path.join(_HERE, "test_rd_manager_v3.db"))
 
-class TestRDManagerV2(unittest.IsolatedAsyncioTestCase):
+class TestRDManagerV3(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        self._orig = _db_mod.DB_PATH
-        _db_mod.DB_PATH = _TEST_DB
-        if Path(_TEST_DB).exists():
-            Path(_TEST_DB).unlink()
-        await init_db()
-        import aiosqlite
-        from db.migrations import run_migrations
-        async with aiosqlite.connect(_TEST_DB) as db:
-            await run_migrations(db)
-        
-        # Seed parents
-        async with aiosqlite.connect(_TEST_DB) as db:
-            await db.execute("INSERT INTO groups (id, name) VALUES (1, 'g')")
-            await db.commit()
+        if os.path.exists(_TEST_DB):
+            os.remove(_TEST_DB)
+        os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{_TEST_DB}"
+        await db.init_db()
 
     async def asyncTearDown(self):
-        _db_mod.DB_PATH = self._orig
-        if Path(_TEST_DB).exists():
-            Path(_TEST_DB).unlink()
+        if os.path.exists(_TEST_DB):
+            os.remove(_TEST_DB)
 
-    async def test_archiving_logic(self):
+    async def test_render_board_from_db(self):
         group_id = 1
-        content = """
-# Board
-## Backlog
-| JIRA-1 | Task 1 | Medium |
-## Done
-| JIRA-2 | Completed Task | High | Done |
-"""
-        # Mock board file
-        mock_path = MagicMock()
-        mock_path.exists.return_value = True
-        mock_path.read_text.return_value = content
         
-        # Capture the archived board content
+        # 1. Insert dummy tickets into DB
+        async with db.connect() as conn:
+            await conn.execute(
+                "INSERT INTO tickets (group_id, ticket_id, title, status, updated_at) VALUES (?, ?, ?, ?, datetime('now'))",
+                (group_id, "JIRA-100", "Task 1", "backlog")
+            )
+            await conn.execute(
+                "INSERT INTO tickets (group_id, ticket_id, title, status, updated_at) VALUES (?, ?, ?, ?, datetime('now'))",
+                (group_id, "JIRA-101", "Task 2", "in_progress")
+            )
+            await conn.commit()
+
         written_content = ""
-        async def mock_write(bot_id, path, text):
+        async def mock_write(bot_id, path, text, group_id=None):
             nonlocal written_content
             written_content = text
             return "ok"
 
-        with patch("core.orchestration.rd_manager.group_workspace", return_value=MagicMock(__truediv__=lambda s, x: mock_path)), \
-             patch("core.orchestration.rd_manager.write_file", side_effect=mock_write), \
-             patch("bus.bus.publish", new=AsyncMock()):
-            
-            await rd_manager.check_board(group_id)
-            
-            # 1. JIRA-2 should be removed from board
-            self.assertIn("JIRA-1", written_content)
-            self.assertNotIn("JIRA-2", written_content)
-            
-            # 2. JIRA-2 should be in DB
-            from db import connect
-            async with connect() as db:
-                async with db.execute("SELECT ticket_id, status FROM tickets WHERE ticket_id='JIRA-2'") as cur:
-                    row = await cur.fetchone()
-            self.assertIsNotNone(row)
-            self.assertEqual(row[1], "done")
+        with patch("core.orchestration.rd_manager.write_file", side_effect=mock_write):
+            await rd_manager.render_board(group_id)
 
-    async def test_status_sync_to_db(self):
-        group_id = 1
-        content = """
-## In Progress
-| JIRA-100 | Working | Med |
-"""
-        mock_path = MagicMock()
-        mock_path.exists.return_value = True
-        mock_path.read_text.return_value = content
-
-        with patch("core.orchestration.rd_manager.group_workspace", return_value=MagicMock(__truediv__=lambda s, x: mock_path)), \
-             patch("bus.bus.publish", new=AsyncMock()):
-            
-            await rd_manager.check_board(group_id)
-            
-            from db import connect
-            async with connect() as db:
-                async with db.execute("SELECT status FROM tickets WHERE ticket_id='JIRA-100'") as cur:
-                    row = await cur.fetchone()
-            self.assertIsNotNone(row)
-            self.assertEqual(row[0], "in_progress")
+            self.assertIn("JIRA-100", written_content)
+            self.assertIn("JIRA-101", written_content)
+            self.assertIn("Backlog", written_content)
+            self.assertIn("In Progress", written_content)
 
 if __name__ == "__main__":
     unittest.main()

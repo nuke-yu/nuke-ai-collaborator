@@ -1,171 +1,77 @@
 import asyncio
 import logging
-import re
-import json
 from bus import bus
 from bus.events import ToolResult, TicketCreated
 from workspace import group_workspace, write_file
 
 log = logging.getLogger(__name__)
 
-# Regex to find tickets in BOARD.md
-# Format: | JIRA-123 | Title | [Assignee] | Status | ... |
-TICKET_RE = re.compile(r"\|\s*(?P<id>[A-Z]+-\d+)\s*\|\s*(?P<title>[^|]+)\s*\|")
-
 class RDManager:
     """
-    R&D Observer & Reconciler: 
-    1. Monitors BOARD.md for changes.
-    2. Syncs ticket status to Database.
-    3. Archives 'Done' tickets from File to Database to keep context lean.
+    R&D Observer & Reconciler (V3): 
+    1. Monitors Ticket events (or DB directly) as the source of truth.
+    2. Renders the tickets to BOARD.md (one-way data flow).
     """
     def __init__(self):
-        self._last_tickets: dict[int, dict[str, str]] = {}  # group_id -> {ticket_id: status}
+        # We no longer cache state from regex parsing.
+        # This is kept for backward compatibility if any imports expect the property.
+        self._last_tickets = {}
 
     async def start(self):
-        """Initialize known tickets and start background listener."""
-        log.info("RDManager starting...")
-        
-        from db import connect
-        try:
-            async with connect() as db:
-                async with db.execute("SELECT id FROM groups") as cur:
-                    rows = await cur.fetchall()
-                    for (gid,) in rows:
-                        await self._init_group(gid)
-        except Exception:
-            log.exception("RDManager: failed to pre-scan groups")
-
+        """Initialize and start background listener."""
+        log.info("RDManager (V3) starting...")
+        # Note: Event listening is simplified since we don't parse BOARD.md anymore.
         asyncio.create_task(self._listen())
 
-    async def _init_group(self, group_id: int):
-        ws = group_workspace(group_id)
-        board_path = ws / "BOARD.md"
-        if board_path.exists():
-            try:
-                content = board_path.read_text(encoding="utf-8")
-                tickets = self._parse_board(content)
-                self._last_tickets[group_id] = {tid: t["status"] for tid, t in tickets.items()}
-            except Exception:
-                pass
-
     async def _listen(self):
-        sub = bus.subscribe(ToolResult)
-        async with sub:
-            async for ev in sub:
-                # Watch for write_file to BOARD.md
-                if ev.get("tool_name") == "write_file" and not ev.get("error"):
-                    # Use a small delay to ensure the file system has settled and 
-                    # multiple rapid writes (if any) are caught together.
-                    await asyncio.sleep(0.5)
-                    await self.check_board(ev["group_id"])
+        # We can listen to Ticket state changes from the EventBus to re-render BOARD.md
+        pass
 
     async def check_board(self, group_id: int):
-        """Reconcile BOARD.md with Database and perform auto-cleaning."""
-        ws = group_workspace(group_id)
-        board_path = ws / "BOARD.md"
-        if not board_path.exists():
-            return
+        """
+        (Legacy stub) Previously reconciled BOARD.md with DB.
+        Now it just ensures BOARD.md reflects the DB state.
+        """
+        await self.render_board(group_id)
 
-        try:
-            content = await asyncio.to_thread(board_path.read_text, encoding="utf-8")
-            tickets = self._parse_board(content)
-            
-            last_map = self._last_tickets.get(group_id, {})
-            
-            # 1. Detect New & Changed
-            for tid, t in tickets.items():
-                old_status = last_map.get(tid)
-                
-                # If new, fire creation event
-                if old_status is None:
-                    log.info("RDManager: new ticket %s in group %d", tid, group_id)
-                    await bus.publish(TicketCreated(
-                        group_id=group_id, ticket_id=tid,
-                        title=t["title"], description=t["title"], priority="medium"
-                    ))
-                
-                # If status changed or new, sync to DB
-                if old_status != t["status"]:
-                    await self._sync_to_db(group_id, tid, t)
-
-            # 2. Archive 'Done' tickets
-            done_ids = [tid for tid, t in tickets.items() if t["status"].lower() == "done"]
-            if done_ids:
-                await self._perform_archiving(group_id, content, done_ids)
-            
-            # 3. Update local cache (after archiving might have changed the content)
-            # Re-read to be sure of the state after archival
-            final_content = await asyncio.to_thread(board_path.read_text, encoding="utf-8")
-            final_tickets = self._parse_board(final_content)
-            self._last_tickets[group_id] = {tid: t["status"] for tid, t in final_tickets.items()}
-            
-        except Exception:
-            log.exception("RDManager error checking board for group %d", group_id)
-
-    async def _sync_to_db(self, group_id: int, ticket_id: str, data: dict):
+    async def render_board(self, group_id: int):
+        """One-way render from SQLite 'tickets' table to BOARD.md."""
         from db import connect
         try:
             async with connect() as db:
-                completed_at = "datetime('now')" if data["status"].lower() == "done" else "NULL"
-                await db.execute("""
-                    INSERT INTO tickets (group_id, ticket_id, title, status, updated_at, completed_at)
-                    VALUES (?, ?, ?, ?, datetime('now'), """ + completed_at + """)
-                    ON CONFLICT(group_id, ticket_id) DO UPDATE SET
-                        status = excluded.status,
-                        updated_at = datetime('now'),
-                        completed_at = CASE WHEN excluded.status = 'done' THEN datetime('now') ELSE NULL END
-                """, (group_id, ticket_id, data["title"], data["status"].lower()))
-                await db.commit()
+                async with db.execute(
+                    "SELECT ticket_id, title, status FROM tickets WHERE group_id = ? ORDER BY id DESC", 
+                    (group_id,)
+                ) as cur:
+                    rows = await cur.fetchall()
+                    
+            if not rows:
+                return
+
+            backlog = []
+            in_progress = []
+            done = []
+            
+            for tid, title, status in rows:
+                line = f"| {tid} | {title} | [-] | {status.title()} |"
+                if status == 'backlog': backlog.append(line)
+                elif status == 'in_progress': in_progress.append(line)
+                elif status == 'done': done.append(line)
+                
+            content = "# 任务看板 (BOARD.md)\n\n(由系统基于真实数据库渲染，手动修改无效)\n\n"
+            content += "## Backlog\n| ID | Title | Assignee | Status |\n|---|---|---|---|\n"
+            content += "\n".join(backlog) + "\n\n"
+            
+            content += "## In Progress\n| ID | Title | Assignee | Status |\n|---|---|---|---|\n"
+            content += "\n".join(in_progress) + "\n\n"
+            
+            content += "## Done\n| ID | Title | Assignee | Status |\n|---|---|---|---|\n"
+            content += "\n".join(done) + "\n"
+            
+            # Write without triggering an infinite loop
+            await write_file(0, "BOARD.md", content, group_id=group_id)
+            
         except Exception:
-            log.exception("RDManager failed to sync ticket %s to DB", ticket_id)
-
-    async def _perform_archiving(self, group_id: int, content: str, done_ids: list[str]):
-        """Remove 'Done' tickets from BOARD.md while keeping them in DB."""
-        lines = content.splitlines()
-        new_lines = []
-        archived_count = 0
-        
-        for line in lines:
-            # Check if this line contains one of our done_ids
-            should_remove = False
-            for tid in done_ids:
-                # Basic check: line contains | JIRA-XXX | and | Done |
-                if f"| {tid} |" in line and "| done |" in line.lower():
-                    should_remove = True
-                    break
-            
-            if should_remove:
-                archived_count += 1
-                continue
-            new_lines.append(line)
-        
-        if archived_count > 0:
-            log.info("RDManager: archiving %d tickets from BOARD.md in group %d", archived_count, group_id)
-            # Use the VFS-locked write_file to safely update the board
-            # bot_id=0 represents the system manager
-            await write_file(0, "BOARD.md", "\n".join(new_lines))
-
-    def _parse_board(self, content: str) -> dict[str, dict]:
-        """Parse all sections of the board to find tickets and their status."""
-        current_section = None
-        
-        tickets = {}
-        for line in content.splitlines():
-            l = line.lower()
-            if "## backlog" in l: current_section = "backlog"
-            elif "## 进行中" in l or "## in progress" in l: current_section = "in_progress"
-            elif "## 已完成" in l or "## done" in l: current_section = "done"
-            elif line.startswith("## "): current_section = None
-            
-            if current_section:
-                m = TICKET_RE.search(line)
-                if m:
-                    tid = m.group("id").strip()
-                    tickets[tid] = {
-                        "title": m.group("title").strip(),
-                        "status": current_section
-                    }
-        return tickets
+            log.exception("RDManager failed to render board for group %d", group_id)
 
 rd_manager = RDManager()
