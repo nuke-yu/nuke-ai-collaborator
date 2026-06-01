@@ -9,6 +9,13 @@ import os
 import sys
 import unittest
 
+async def _async_route_w0(gid):
+    return "w0"
+    
+async def _async_route_missing(gid):
+    return "missing"
+
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from runtime import ipc
@@ -31,7 +38,7 @@ class _FakeBrowser:
 class TestSupervisorLoop(unittest.IsolatedAsyncioTestCase):
     async def test_browser_to_worker_to_browser(self):
         addr = ipc.make_addr(f"sup_loop_{os.getpid()}")
-        sup = Supervisor(addr, route=lambda gid: "w0")
+        sup = Supervisor(addr, route=_async_route_w0)
         await sup.start()
 
         worker_bus = EventBus()
@@ -69,7 +76,7 @@ class TestSupervisorLoop(unittest.IsolatedAsyncioTestCase):
 
     async def test_fanout_only_to_registered_group(self):
         addr = ipc.make_addr(f"sup_fan_{os.getpid()}")
-        sup = Supervisor(addr, route=lambda gid: "w0")
+        sup = Supervisor(addr, route=_async_route_w0)
         await sup.start()
         worker_bus = EventBus()
 
@@ -102,7 +109,7 @@ class TestSupervisorLoop(unittest.IsolatedAsyncioTestCase):
 
     async def test_send_without_worker_raises(self):
         addr = ipc.make_addr(f"sup_noworker_{os.getpid()}")
-        sup = Supervisor(addr, route=lambda gid: "missing")
+        sup = Supervisor(addr, route=_async_route_missing)
         await sup.start()
         try:
             with self.assertRaises(RuntimeError):

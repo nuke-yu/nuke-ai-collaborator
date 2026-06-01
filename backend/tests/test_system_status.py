@@ -81,7 +81,7 @@ class TestSystemStatusRoute(unittest.IsolatedAsyncioTestCase):
             resp = await client.get("/api/system/status")
         self.assertEqual(resp.status_code, 200)
         body = resp.json()
-        self.assertIn("tasks", body)
+        self.assertIn("supervisor", body)
         self.assertIn("websockets", body)
         self.assertIn("permissions", body)
         self.assertIn("active_tasks", body["tasks"])
