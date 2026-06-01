@@ -21,6 +21,8 @@ import asyncio
 import logging
 
 from runtime import ipc
+import db
+from db import queries
 
 log = logging.getLogger(__name__)
 
@@ -31,6 +33,7 @@ class Supervisor:
         self._workers: dict = {}                 # worker_id -> StreamWriter
         self._browsers: dict[int, set] = {}      # group_id -> {client}
         self._route = route or self._default_route
+        self._routing_cache: dict[int, str] = {}  # group_id -> worker_id
         self._on_unread = on_unread              # async (group_id, payload) -> None
         self._server = None
 
@@ -103,13 +106,21 @@ class Supervisor:
 
     # ── downstream ───────────────────────────────────────────────────────
     async def send_to_worker(self, group_id: int, msg: dict) -> None:
-        wid = self._route(group_id)
+        wid = await self._route(group_id)
         writer = self._workers.get(wid)
         if writer is None:
             raise RuntimeError(f"no connected worker for group {group_id} (route -> {wid!r})")
         await ipc.send_msg(writer, msg)
 
-    def _default_route(self, group_id: int):
-        # Placeholder until CELL-15 (persistent assigned_worker_id): pin to the
-        # single connected worker in dev; multi-worker needs an explicit route.
-        return next(iter(self._workers), None)
+
+    async def _default_route(self, group_id: int) -> str:
+        if group_id in self._routing_cache:
+            return self._routing_cache[group_id]
+        
+        async with db.global_db() as cdb:
+            wid = await queries.get_group_assigned_worker(cdb, group_id)
+        
+        self._routing_cache[group_id] = wid
+        return wid
+
+

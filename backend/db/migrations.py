@@ -262,6 +262,14 @@ async def migration_014(db):
     await db.commit()
 
 
+
+async def migration_015(db):
+    """CELL-15: Add assigned_worker_id to groups table for persistent routing."""
+    await _safe_add_column(db, "ALTER TABLE groups ADD COLUMN assigned_worker_id TEXT DEFAULT 'w0'")
+    await db.commit()
+
+
+
 MIGRATIONS: list = [
     migration_001,
     migration_002,
@@ -277,6 +285,7 @@ MIGRATIONS: list = [
     migration_012,
     migration_013,
     migration_014,
+    migration_015,
 ]
 
 

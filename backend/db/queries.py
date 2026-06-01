@@ -7,7 +7,7 @@ async def get_group(db, group_id: int):
         row = await cur.fetchone()
         if row:
             return {"id": row[0], "name": row[1], "created_at": row[2],
-                    "announcement": row[3] if len(row) > 3 else None}
+                    "announcement": row[3] if len(row) > 3 else None, "assigned_worker_id": row[4] if len(row) > 4 else "w0"}
         return None
 
 
@@ -272,3 +272,9 @@ async def get_pinned_messages(db, group_id: int):
     ) as cur:
         rows = await cur.fetchall()
     return [_row_to_msg(r) for r in rows]
+
+
+async def get_group_assigned_worker(db, group_id: int) -> str:
+    async with db.execute("SELECT assigned_worker_id FROM groups WHERE id = ?", (group_id,)) as cur:
+        row = await cur.fetchone()
+        return row[0] if row else 'w0'

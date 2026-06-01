@@ -38,7 +38,8 @@ _CENTRAL_DDL = [
         id           INTEGER PRIMARY KEY AUTOINCREMENT,
         name         TEXT NOT NULL,
         announcement TEXT DEFAULT NULL,
-        created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        assigned_worker_id TEXT DEFAULT 'w0'
     )""",
     """CREATE TABLE IF NOT EXISTS members (
         id               INTEGER PRIMARY KEY AUTOINCREMENT,
