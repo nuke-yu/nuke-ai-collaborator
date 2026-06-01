@@ -56,7 +56,7 @@
 | DFT-068 ✅已修 | 🟡 | 多处 | 死赋值 `messages`/`sections` | 已删除 |
 | DFT-069 | 🟡 | 前端 | set-state-in-effect ×8 / render 内 Date.now / 闭包陈旧 | ✅ eslint |
 | DFT-070 ✅已修 | 🟡 | 入口 | CORS `allow_origins=["*"]` | 限 localhost |
-| DFT-071 | 🟠 | 编排 | 两套并行编排系统并存、角色 taxonomy 中英不一致 | 架构分析 |
+| DFT-071 ✅已修 | 🟠 | 编排 | 两套并行编排系统并存、角色 taxonomy 中英不一致 | 7216 |
 | DFT-072 ✅已修 | 🔴 | 全局 | 进程级内存状态锁死单 worker（无横向扩展） | b679774 |
 | DFT-073 ✅已修 | 🟠 | 协议 | 前后端 WS 事件无共享契约 | b679774 |
 | DFT-074 ✅已修 | 🟠 | 前端 | `ChatWindow` god component（~40 useState / 25 分支） | f1af309 |

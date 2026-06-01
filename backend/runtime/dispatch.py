@@ -61,29 +61,28 @@ async def dispatch_user_message(msg: dict) -> None:
         k: v for k, v in saved.items() if k in _MESSAGE_FIELDS and k != "group_id"
     }))
 
-    from core.orchestrator import select_triggered_bots, dispatch_bots, send_auto_reply, mark_read
+    import core.workflow as wf
+    from core.orchestration.interaction import StandardInteraction
     from core import bg
-
-    # Update unread/mark_read for the sender (Supervisor handles others)
-    await mark_read(gid, sender_id, msg_id)
+    
+    # ── Orchestration (V3 Unified) ──
+    interaction = StandardInteraction()
+    await interaction.mark_read(gid, sender_id, msg_id)
 
     # ── Auto-reply logic ──
     mentioned_names = set(re.findall(r'@(\S+)', content or ""))
     if mentioned_names:
         for m in all_members:
             if m["name"] in mentioned_names and m["id"] not in online_ids and m.get("auto_reply"):
-                bg.spawn(send_auto_reply(gid, m, msg_id))
+                bg.spawn(interaction.send_auto_reply(gid, m, msg_id))
 
-    triggered = await select_triggered_bots(content, all_bots, gid)
-    if not triggered:
-        return
-    # fire-and-forget + abortable; the bound group context is copied into the task.
-    bg.spawn_group(gid, dispatch_bots(
-        gid, triggered, content, sender, recent, all_bots, all_members,
-        group_name=group_info.get("name", ""),
-        group_announcement=group_info.get("announcement", ""),
-        file_url=file_url, file_type=file_type,
-    ))
+    # Unified Orchestration Call
+    orch = wf._orch_for(gid)
+    step = await orch.dispatch(gid, saved, all_members, recent)
+    
+    if step.next_units:
+        # Side-effects (broadcast typing, AI run, etc.) are handled by the runner
+        bg.spawn_group(gid, wf.apply(gid, step))
 
 
 async def dispatch_wake_trigger(msg: dict) -> None:
@@ -106,11 +105,14 @@ async def dispatch_wake_trigger(msg: dict) -> None:
     async with db.connect() as gdb:
         recent = await db.get_messages(gdb, gid)
 
-    from core.orchestrator import dispatch_bots
+    import core.workflow as wf
     from core import bg
     
-    bg.spawn_group(gid, dispatch_bots(
-        gid, [bot], content, _SYSTEM_SENDER, recent, all_bots, all_members,
-        group_name=group_info.get("name", ""),
-        group_announcement=group_info.get("announcement", ""),
-    ))
+    # Unified Orchestration Call
+    orch = wf._orch_for(gid)
+    # Wrap system message in a dict for dispatch compatibility
+    msg_dict = {"group_id": gid, "content": content, "member_id": 0, "sender_type": "system"}
+    step = await orch.dispatch(gid, msg_dict, all_members, recent)
+    
+    if step.next_units:
+        bg.spawn_group(gid, wf.apply(gid, step))

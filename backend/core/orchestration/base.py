@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 class WorkUnit:
     """一个待执行的工作单元：让某个 bot 用某个 executor 跑一轮。"""
     bot: dict
-    executor_id: str = "simple_v1"      # 轴2：每个单元自己选执行插件
+    executor_id: str = "tool_loop_v1"      # 轴2：每个单元自己选执行插件
     trigger_msg: str = ""               # 触发语 → ExecutionContext.user_message
     prompt_suffix: str = ""             # 阶段指令 → ExecutionContext.workflow_suffix
     tag: dict = field(default_factory=dict)  # 编排私有记账（ticket 等），不进执行层

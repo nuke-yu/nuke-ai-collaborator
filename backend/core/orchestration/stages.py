@@ -96,7 +96,7 @@ class SingleStage(StageType):
             broadcast_state=True,
             next_units=[WorkUnit(
                 bot=stage,
-                executor_id=stage.get("executor_id", "simple_v1"),
+                executor_id=stage.get("executor_id", "tool_loop_v1"),
                 trigger_msg=f"请开始你（{stage['name']} · {stage.get('role', '')}）的工作。",
                 prompt_suffix=ctx.orch.system_suffix(ctx.group_id),
             )],
@@ -280,7 +280,7 @@ class PoolStage(StageType):
         )
         return WorkUnit(
             bot=bot,
-            executor_id=bot.get("executor_id", "simple_v1"),
+            executor_id=bot.get("executor_id", "tool_loop_v1"),
             trigger_msg=f"开始开发任务：{ticket}",
             prompt_suffix=suffix,
             tag={"ticket": ticket},
@@ -368,7 +368,7 @@ class DiscussionStage(StageType):
         )
         return WorkUnit(
             bot=bot,
-            executor_id=bot.get("executor_id", "simple_v1"),
+            executor_id=bot.get("executor_id", "tool_loop_v1"),
             trigger_msg=f"第 {rnd} 轮发言（{bot['name']}）。",
             prompt_suffix=suffix,
         )
@@ -518,7 +518,7 @@ class VerificationStage(StageType):
         )
         return WorkUnit(
             bot=bot,
-            executor_id=bot.get("executor_id", "simple_v1"),
+            executor_id=bot.get("executor_id", "tool_loop_v1"),
             trigger_msg=f"请给出你的方案（{bot['name']}）。",
             prompt_suffix=suffix,
         )
@@ -531,7 +531,7 @@ class VerificationStage(StageType):
         )
         return WorkUnit(
             bot=bot,
-            executor_id=bot.get("executor_id", "simple_v1"),
+            executor_id=bot.get("executor_id", "tool_loop_v1"),
             trigger_msg=f"请投票（{bot['name']}）。",
             prompt_suffix=suffix,
         )

@@ -49,3 +49,29 @@ class StandardInteraction(InteractionAdapter):
                     await db.commit()
             except Exception:
                 log.exception("Failed to update ticket cost")
+    async def mark_read(self, group_id: int, member_id: int, msg_id: int):
+        from db import write_connect
+        from bus import bus
+        from bus.events import Read
+        async with write_connect() as db:
+            await db.execute(
+                "INSERT INTO member_read (member_id, group_id, last_read_id) VALUES (?,?,?) "
+                "ON CONFLICT(member_id, group_id) DO UPDATE SET last_read_id=excluded.last_read_id",
+                (member_id, group_id, msg_id)
+            )
+            await db.commit()
+        await bus.publish(Read(group_id=group_id, member_id=member_id, last_read_id=msg_id))
+
+    async def send_auto_reply(self, group_id: int, member: dict, reply_to_id: int):
+        import asyncio
+        from bus import bus
+        from bus.events import Message
+        await asyncio.sleep(1.5)
+        from db import write_connect
+        async with write_connect() as db:
+            msg_id = await self.save_message(group_id, member["id"], member["auto_reply"],
+                                        reply_to_id=reply_to_id, is_auto_reply=True)
+            from db import get_messages
+            recent = await get_messages(db, group_id)
+            saved = next((m for m in recent if m["id"] == msg_id), {})
+        await bus.publish(Message(group_id=group_id, **{k: v for k, v in saved.items() if k != "group_id"}))

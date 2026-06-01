@@ -9,7 +9,9 @@ core.orchestration.stages 里按名注册的 StageType handler 决定。
 所有方法都是纯决策：只读写内部 _state，返回 OrchestratorStep，绝不发事件 / 调 AI。
 加一个新阶段类型不需要改本文件，只需注册一个 StageType。
 """
-from core.orchestration.base import Orchestrator, OrchestratorStep
+import logging
+from core.orchestration.base import Orchestrator, OrchestratorStep, WorkUnit
+from core.orchestration import locks
 from core.orchestration.stages import StageCtx, stage_handler
 
 
@@ -120,3 +122,56 @@ class DeclarativeOrchestrator(Orchestrator):
             return OrchestratorStep(done=True)
         ctx = self._ctx(group_id)
         return stage_handler(ctx.stage).enter(ctx, prev_output)
+
+    async def dispatch(self, group_id: int, message: dict, members: list, recent: list) -> OrchestratorStep:
+        """DFT-071: Unified dispatch entry point for both workflow and free-form chat."""
+        all_bots = [m for m in members if m["type"] == "bot"]
+        content = (message.get("content") or "").strip()
+        
+        # 1. Check if there's an active workflow stage
+        ctx = self._ctx(group_id)
+        if ctx:
+            # Workflow participant takes priority
+            participant_bots = []
+            from core.orchestration.stages import stage_handler
+            wb = stage_handler(ctx.stage).current_bot(ctx.stage)
+            if wb: participant_bots.append(wb)
+            wp = stage_handler(ctx.stage).current_pool_bots(ctx.stage)
+            if wp: participant_bots.extend([b for b in all_bots if b["id"] in wp])
+            
+            if participant_bots:
+                return OrchestratorStep(next_units=[
+                    WorkUnit(bot=b, group_id=group_id, message=message, history=recent, all_bots=all_bots, all_members=members)
+                    for b in participant_bots
+                ])
+
+        # 2. Free-form chat routing
+        explicit = [b for b in all_bots if f"@{b['name']}" in content]
+        if "@all" in content.lower():
+            explicit = all_bots
+        
+        target_bots = []
+        if explicit:
+            if len(explicit) == 1:
+                await locks.set_active_bot(group_id, explicit[0]["id"])
+            else:
+                await locks.release_lock(group_id)
+            target_bots = explicit
+        else:
+            locked_bot_id = await locks.get_active_bot(group_id)
+            if locked_bot_id:
+                locked = next((b for b in all_bots if b["id"] == locked_bot_id), None)
+                if locked: target_bots = [locked]
+            
+            if not target_bots:
+                from core.role_router import should_bot_respond
+                target_bots = [b for b in all_bots if should_bot_respond(content, b["name"], b["role"] or "")]
+
+        if not target_bots:
+            return OrchestratorStep()
+
+        return OrchestratorStep(next_units=[
+            WorkUnit(bot=b, group_id=group_id, message=message, history=recent, all_bots=all_bots, all_members=members)
+            for b in target_bots
+        ])
+

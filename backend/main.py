@@ -108,15 +108,15 @@ async def reload_plugins():
 @app.get("/api/system/status")
 async def system_status():
     """DFT-057: Aggregated metrics from Supervisor and all Workers."""
+    from core import bg
+    import permissions
     sup_stats = sup_mod.supervisor.get_stats() if sup_mod.supervisor else {}
     return {
-        "supervisor": {
-            "websockets": manager.stats(),
-            **sup_stats
-        }
+        "tasks": bg.stats(),
+        "websockets": manager.stats(),
+        "permissions": permissions.pending_stats(),
+        "supervisor": sup_stats,
     }
-
-
 # ── WebSocket Shell (The Gateway) ────────────────────────────────────────
 
 class WSClientProxy:
@@ -159,8 +159,8 @@ async def websocket_endpoint(websocket: WebSocket, group_id: int, member_id: int
 
                 if t == "read":
                     if msg_id := payload.get("msg_id"):
-                        from core.orchestrator import mark_read
-                        await mark_read(group_id, member_id, msg_id)
+                        from core.orchestration.interaction import StandardInteraction
+                        await StandardInteraction().mark_read(group_id, member_id, msg_id)
                     continue
 
                 if t == "abort":

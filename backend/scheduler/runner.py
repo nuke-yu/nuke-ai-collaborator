@@ -13,7 +13,7 @@ _SYSTEM_SENDER = {"id": 0, "name": "系统调度器", "type": "system", "avatar_
 async def fire_job(bot_id: int, group_id: int, message: str, job_id: int | None = None) -> None:
     # Lazy import keeps the scheduler importable even if orchestrator fails to load
     from db import get_db, get_members, get_messages
-    from core.orchestrator import dispatch_bots
+    import core.workflow as wf
     from scheduler.store import update_last_run
 
     if job_id:
@@ -37,7 +37,7 @@ async def fire_job(bot_id: int, group_id: int, message: str, job_id: int | None 
         return
 
     try:
-        await dispatch_bots(
+        await wf.advance(
             group_id, [bot], message, _SYSTEM_SENDER,
             recent, all_bots, all_members,
         )
