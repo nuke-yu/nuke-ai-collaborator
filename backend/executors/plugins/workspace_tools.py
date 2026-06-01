@@ -19,6 +19,7 @@ from skills import run_skill
 import executors.compact as compact
 import permissions
 from core.bg import spawn as bg_spawn  # aliased: a local var named `bg` is used below
+from executors.plugins import win_sandbox
 
 # ---------------------------------------------------------------------------
 # Platform detection
@@ -562,8 +563,14 @@ async def _handle_run_shell(
             cmd = re.sub(pattern, str(allocated_port), cmd)
             break
     
-    # Wrap command in a subshell with ulimit (virtual memory limit) to prevent OOM
-    safe_cmd = f"ulimit -v 524288 2>/dev/null; {cmd}"
+    # Memory limit enforcement
+    _MEMORY_LIMIT_BYTES = 512 * 1024 * 1024  # 512 MB
+    if not _IS_WINDOWS:
+        # Wrap command in a subshell with ulimit (virtual memory limit) to prevent OOM
+        safe_cmd = f"ulimit -v { _MEMORY_LIMIT_BYTES // 1024 } 2>/dev/null; {cmd}"
+    else:
+        # Windows: We run the raw command and rely on Job Objects (applied to PID below)
+        safe_cmd = cmd
     
     try:
         if background:
@@ -576,6 +583,9 @@ async def _handle_run_shell(
                 # Start new session so background task doesn't die when parent shell exits
                 start_new_session=True if not _IS_WINDOWS else False
             )
+            if _IS_WINDOWS:
+                win_sandbox.apply_memory_limit(proc.pid, _MEMORY_LIMIT_BYTES)
+            
             msg = f"已在后台启动（PID: {proc.pid}），命令：{cmd}"
             if allocated_port:
                 msg += f"\n[端口分配] 系统已自动分配可用端口: {allocated_port} (注入为环境变量 PORT / APP_PORT)"
@@ -588,6 +598,8 @@ async def _handle_run_shell(
             cwd=str(work_dir),
             env=sandbox_env,
         )
+        if _IS_WINDOWS:
+            win_sandbox.apply_memory_limit(proc.pid, _MEMORY_LIMIT_BYTES)
         
         # Enforce strict timeout
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=_max_timeout)
