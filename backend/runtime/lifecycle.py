@@ -103,4 +103,12 @@ class LifecycleManager:
             self._active_groups.clear()
 
 # Global manager instance
+
+    def stats(self) -> dict:
+        return {
+            "active_groups_count": len(self._active_groups),
+            "active_groups": list(self._active_groups.keys()),
+        }
+
+
 manager = LifecycleManager()

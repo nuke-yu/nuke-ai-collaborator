@@ -42,6 +42,7 @@ class Worker:
         self._writer = None
         self._sub = None
         self._upstream_task = None
+        self._report_task = None
 
     async def connect(self) -> None:
         self._reader, self._writer = await ipc.connect(self.addr)
@@ -51,6 +52,7 @@ class Worker:
         # processing downstream messages, so no early bus event is missed.
         self._sub = self.bus.subscribe_all()
         self._upstream_task = asyncio.create_task(self._pump_upstream())
+        self._report_task = asyncio.create_task(self._report_stats_loop())
 
     async def run(self) -> None:
         tracing.setup_structured_logging(log_file=f"logs/worker-{self.worker_id}.log")
@@ -65,10 +67,36 @@ class Worker:
         finally:
             await self.close()
 
+    
+    async def _report_stats_loop(self) -> None:
+        """CELL-20: Periodically push local metrics to Supervisor."""
+        from core import bg
+        import permissions
+        from runtime.lifecycle import manager as lifecycle
+        
+        while True:
+            try:
+                stats = {
+                    "bg": bg.stats(),
+                    "permissions": permissions.pending_stats(),
+                    "lifecycle": lifecycle.stats(),
+                    "worker_id": self.worker_id,
+                }
+                await ipc.send_msg(self._writer, ipc.protocol.envelope(
+                    ipc.protocol.STATS_REPORT, group_id=0, payload=stats
+                ))
+            except Exception:
+                log.exception("worker %s: failed to report stats", self.worker_id)
+            await asyncio.sleep(30)
+
     async def close(self) -> None:
+
+        if self._report_task:
+            self._report_task.cancel()
         if self._upstream_task:
             self._upstream_task.cancel()
             self._upstream_task = None
+        self._report_task = None
         if self._writer:
             self._writer.close()
             self._writer = None

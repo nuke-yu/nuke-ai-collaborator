@@ -104,14 +104,18 @@ async def reload_plugins():
     loaded = registry.reload()
     return {"loaded": loaded, "failures": registry.failures()}
 
+
 @app.get("/api/system/status")
 async def system_status():
-    """DFT-057: Aggregated metrics (TODO: CELL-20 will aggregate from Workers)."""
+    """DFT-057: Aggregated metrics from Supervisor and all Workers."""
+    sup_stats = sup_mod.supervisor.get_stats() if sup_mod.supervisor else {}
     return {
         "supervisor": {
             "websockets": manager.stats(),
+            **sup_stats
         }
     }
+
 
 # ── WebSocket Shell (The Gateway) ────────────────────────────────────────
 

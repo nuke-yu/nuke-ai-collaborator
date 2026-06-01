@@ -36,6 +36,7 @@ class Supervisor:
         self._browsers: dict[int, set] = {}      # group_id -> {client}
         self._route = route or self._default_route
         self._routing_cache: dict[int, str] = {}  # group_id -> worker_id
+        self._worker_stats: dict[str, dict] = {} # worker_id -> latest stats
         self._on_unread = on_unread              # async (group_id, payload) -> None
         self._server = None
         self._num_workers = kwargs.get("num_workers", 0)
@@ -116,13 +117,20 @@ class Supervisor:
         gid = frame.get("group_id")
         tid = frame.get("trace_id")
         
+        
         with tracing.trace_context(trace_id=tid, group_id=gid):
             if t == ipc.protocol.BROADCAST:
                 await self._fanout(gid, frame.get("payload", {}))
             elif t == ipc.protocol.UNREAD_DELTA:
                 if self._on_unread:
                     await self._on_unread(gid, frame)
+            elif t == ipc.protocol.STATS_REPORT:
+                payload = frame.get("payload", {})
+                wid = payload.get("worker_id")
+                if wid:
+                    self._worker_stats[wid] = payload
             else:
+
                 log.debug("supervisor: unhandled upstream type=%s", t)
 
 
@@ -165,6 +173,15 @@ class Supervisor:
         self._routing_cache[group_id] = wid
         return wid
 
+
+
+
+    def get_stats(self) -> dict:
+        return {
+            "workers": self._worker_stats,
+            "active_workers": list(self._workers.keys()),
+            "process_count": len(self._processes),
+        }
 
 
 # Global instance used by the WS shell and Scheduler
