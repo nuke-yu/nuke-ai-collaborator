@@ -11,6 +11,7 @@ bus/engine.py — EventBus 核心
 """
 import asyncio
 import dataclasses
+from runtime import tracing
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -56,13 +57,13 @@ class EventBus:
 
     async def publish(self, event) -> None:
         """发布 typed event dataclass（必须有 .type 和 .group_id 属性）。"""
-        payload = {"type": event.type, **dataclasses.asdict(event)}
+        payload = {"type": event.type, "trace_id": tracing.get_trace_id(), **dataclasses.asdict(event)}
         log.debug("bus.publish type=%s group=%s", event.type, payload.get("group_id"))
         await self._dispatch(event.type, payload)
 
     async def broadcast(self, group_id: int, payload: dict) -> None:
         """兼容接口：和 WSManager.broadcast() 签名相同，executors 无需改动。"""
-        p = {"group_id": group_id, **payload}
+        p = {"group_id": group_id, "trace_id": tracing.get_trace_id(), **payload}
         log.debug("bus.broadcast type=%s group=%s", p.get("type"), group_id)
         await self._dispatch(p.get("type", ""), p)
 

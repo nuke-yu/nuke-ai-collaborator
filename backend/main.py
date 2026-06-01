@@ -12,6 +12,7 @@ import scheduler
 from ws_manager import manager
 
 from bus.events import Presence
+from runtime import tracing
 from runtime import supervisor as sup_mod
 from runtime import ipc
 from ai import client as ai_client
@@ -30,6 +31,7 @@ from executors import registry
 async def lifespan(app: FastAPI):
     """CELL-22: Supervisor lifespan. Manages central DB and Worker fleet."""
     # 1. Initialize central DB (routing/members/templates)
+    tracing.setup_structured_logging()
     await db.init_central_db()
     
     # 2. Discover plugins (needed for metadata APIs like /api/plugins)
@@ -141,23 +143,44 @@ async def websocket_endpoint(websocket: WebSocket, group_id: int, member_id: int
     ev_dict["type"] = presence_ev.type
     await manager.broadcast(group_id, ev_dict)
 
+    
     try:
         while True:
             data = await websocket.receive_text()
-            payload = json.loads(data)
-            t = payload.get("type")
+            # Generate a new trace_id for every incoming message frame
+            with tracing.trace_context(group_id=group_id):
+                tid = tracing.get_trace_id()
+                payload = json.loads(data)
+                t = payload.get("type")
 
-            if t == "read":
-                # unread_counts is central (Supervisor owns it)
-                if msg_id := payload.get("msg_id"):
-                    from core.orchestrator import mark_read
-                    await mark_read(group_id, member_id, msg_id)
-                continue
+                if t == "read":
+                    if msg_id := payload.get("msg_id"):
+                        from core.orchestrator import mark_read
+                        await mark_read(group_id, member_id, msg_id)
+                    continue
 
-            if t == "abort":
+                if t == "abort":
+                    await sup_mod.supervisor.send_to_worker(group_id, ipc.protocol.envelope(
+                        ipc.protocol.ABORT, group_id=group_id, trace_id=tid
+                    ))
+                    continue
+
+                if t == "permission_response":
+                    await sup_mod.supervisor.send_to_worker(group_id, ipc.protocol.envelope(
+                        ipc.protocol.PERMISSION_RESPONSE, group_id=group_id, trace_id=tid, **payload
+                    ))
+                    continue
+
+                # Default: User message
                 await sup_mod.supervisor.send_to_worker(group_id, ipc.protocol.envelope(
-                    ipc.protocol.ABORT, group_id=group_id
+                    ipc.protocol.USER_MESSAGE, 
+                    group_id=group_id, 
+                    member_id=member_id,
+                    online_ids=manager.get_online_member_ids(group_id),
+                    trace_id=tid,
+                    **payload
                 ))
+
                 continue
 
             if t == "permission_response":

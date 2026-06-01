@@ -21,6 +21,7 @@ import asyncio
 import sys
 import logging
 
+from runtime import tracing
 from runtime import ipc
 import db
 from db import queries
@@ -109,15 +110,21 @@ class Supervisor:
                 del self._workers[wid]
                 log.info("supervisor: worker %s disconnected", wid)
 
+    
     async def _on_upstream(self, frame: dict) -> None:
         t = frame.get("type")
-        if t == ipc.protocol.BROADCAST:
-            await self._fanout(frame.get("group_id"), frame.get("payload", {}))
-        elif t == ipc.protocol.UNREAD_DELTA:
-            if self._on_unread:
-                await self._on_unread(frame.get("group_id"), frame)
-        else:
-            log.debug("supervisor: unhandled upstream type=%s", t)
+        gid = frame.get("group_id")
+        tid = frame.get("trace_id")
+        
+        with tracing.trace_context(trace_id=tid, group_id=gid):
+            if t == ipc.protocol.BROADCAST:
+                await self._fanout(gid, frame.get("payload", {}))
+            elif t == ipc.protocol.UNREAD_DELTA:
+                if self._on_unread:
+                    await self._on_unread(gid, frame)
+            else:
+                log.debug("supervisor: unhandled upstream type=%s", t)
+
 
     # ── browser side ─────────────────────────────────────────────────────
     def register_browser(self, group_id: int, client) -> None:

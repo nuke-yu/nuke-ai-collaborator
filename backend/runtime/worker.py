@@ -19,6 +19,7 @@ import asyncio
 import logging
 
 import db
+from runtime import tracing
 from runtime import ipc
 from runtime.dbpaths import group_db_path
 import permissions
@@ -52,6 +53,7 @@ class Worker:
         self._upstream_task = asyncio.create_task(self._pump_upstream())
 
     async def run(self) -> None:
+        tracing.setup_structured_logging(log_file=f"logs/worker-{self.worker_id}.log")
         if self._writer is None:
             await self.connect()
         try:
@@ -82,38 +84,42 @@ class Worker:
                 ))
 
     
+    
     async def _handle(self, msg: dict) -> None:
         t = msg.get("type")
         gid = msg.get("group_id")
-        if t == ipc.protocol.USER_MESSAGE:
-            from runtime.lifecycle import manager as lifecycle
-            db_path = await lifecycle.hydrate(gid)
-            with db.bind_db(db_path):
-                await self._dispatch(msg)
-        elif t == ipc.protocol.ABORT:
-            if self._on_abort:
-                self._on_abort(gid)
-            else:
-                bg.abort_group(gid)
-        elif t == ipc.protocol.PERMISSION_RESPONSE:
-            request_id = msg.get("request_id", "")
-            approved = bool(msg.get("approved", False))
-            persistence = msg.get("persistence", "once")
-            req = permissions.resolve(request_id, approved, persistence, group_id=gid)
-            if req and approved and persistence == "always":
-                # Re-bind the group DB to save the rule in the group's private DB
+        tid = msg.get("trace_id")
+        
+        with tracing.trace_context(trace_id=tid, group_id=gid):
+            if t == ipc.protocol.USER_MESSAGE:
                 from runtime.lifecycle import manager as lifecycle
                 db_path = await lifecycle.hydrate(gid)
                 with db.bind_db(db_path):
-                    bg.spawn(permissions.save_rule(req.bot_id, req.tool_name, "", "allow"))
-        elif t == ipc.protocol.WAKE_TRIGGER:
-            from runtime.lifecycle import manager as lifecycle
-            db_path = await lifecycle.hydrate(gid)
-            with db.bind_db(db_path):
-                from runtime.dispatch import dispatch_wake_trigger
-                await dispatch_wake_trigger(msg)
-        else:
-            log.debug("worker %s: unhandled downstream type=%s", self.worker_id, t)
+                    await self._dispatch(msg)
+            elif t == ipc.protocol.ABORT:
+                if self._on_abort:
+                    self._on_abort(gid)
+                else:
+                    bg.abort_group(gid)
+            elif t == ipc.protocol.PERMISSION_RESPONSE:
+                request_id = msg.get("request_id", "")
+                approved = bool(msg.get("approved", False))
+                persistence = msg.get("persistence", "once")
+                req = permissions.resolve(request_id, approved, persistence, group_id=gid)
+                if req and approved and persistence == "always":
+                    from runtime.lifecycle import manager as lifecycle
+                    db_path = await lifecycle.hydrate(gid)
+                    with db.bind_db(db_path):
+                        bg.spawn(permissions.save_rule(req.bot_id, req.tool_name, "", "allow"))
+            elif t == ipc.protocol.WAKE_TRIGGER:
+                from runtime.lifecycle import manager as lifecycle
+                db_path = await lifecycle.hydrate(gid)
+                with db.bind_db(db_path):
+                    from runtime.dispatch import dispatch_wake_trigger
+                    await dispatch_wake_trigger(msg)
+            else:
+                log.debug("worker %s: unhandled downstream type=%s", self.worker_id, t)
+
 
 
     async def _default_dispatch(self, msg: dict) -> None:
