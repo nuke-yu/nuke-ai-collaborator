@@ -61,7 +61,7 @@
 | DFT-073 ✅已修 | 🟠 | 协议 | 前后端 WS 事件无共享契约 | b679774 |
 | DFT-074 ✅已修 | 🟠 | 前端 | `ChatWindow` god component（~40 useState / 25 分支） | f1af309 |
 | DFT-075 | 🟠 | 执行引擎 | `tool_loop_v1.run` 802 行 god method（DFT-036 名义已修） | 架构分析 |
-| DFT-076 | 🟠 | 编排 | RDManager 用 BOARD.md 当真相源（三方对账/正则/非原子 RMW） | 架构分析 |
+| DFT-076 ✅已修 | 🟠 | 编排 | RDManager 用 BOARD.md 当真相源（三方对账/正则/非原子 RMW） | 7b8ee63 |
 | DFT-077 | 🟠 | 执行引擎 | DI 半迁移（broadcaster+interaction 并存）；AIService 泄漏 Jira 领域 | 架构分析 |
 | DFT-078 | 🟠 | 前端 | WS 断线重连无事件补偿 → 抖动即永久丢事件 | 架构分析 |
 | DFT-079 | 🟡 | 前端 | `handleWsMessage` 闭包陈旧（靠函数式 setState 侥幸） | eslint+分析 |
