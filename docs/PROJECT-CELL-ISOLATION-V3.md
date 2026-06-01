@@ -197,7 +197,7 @@ runtime/ipc/
 ## 12. 执行 Backlog（CELL-xx · 单一可跟踪真相源）
 
 > 每完成一个 CELL 就更新此表（状态 + commit）。strangler-fig：每项落地后现有单进程 app 仍可跑，直到 CELL-22 才翻入口。
-> **进度（2026-05-31）**：已完成 20 · 未做 3。**cell 已能端到端跑一个 bot**（同进程），但**真多进程 + 浏览器 WS 终止 + 调度尚未接**（CELL-13/16/22）。
+> **进度（2026-05-31）**：已完成 21 · 未做 2。**cell 已能端到端跑一个 bot**（同进程），但**真多进程 + 浏览器 WS 终止 + 调度尚未接**（CELL-13/16/22）。
 
 ### Epic 0 · 去风险（门禁）
 
@@ -255,7 +255,7 @@ runtime/ipc/
 | CELL | 内容 / 交付物 | 依赖 | 验收 | 状态 |
 |---|---|---|---|---|
 | 22 | Cutover：FastAPI WS 终止壳接 Supervisor + 默认入口切 runtime + 删旧单进程路径/spike | 全部 | 全系统跑在 cell 架构上，旧路径移除 | ✅ `b679774` |
-| 23 | Windows 沙箱策略（run_shell 内存限额：Job Objects 或部署走 WSL/容器）— 可选，独立于 cell 主线 | — | — | ⛔ 待办（低优先） |
+| 23 | Windows 沙箱策略（run_shell 内存限额：Job Objects 或部署走 WSL/容器）— 可选，独立于 cell 主线 | — | — | ✅ `3e1eed6` |
 
 ### 关键路径
 
