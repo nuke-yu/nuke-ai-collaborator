@@ -551,7 +551,7 @@ async def _handle_run_shell(
     intercepted_port = None
     # Sort by length descending to match 8080 before 80, using word boundaries (DFT-065)
     for p in sorted(_INTERCEPT_PORTS, key=len, reverse=True):
-        pattern = r"\b" + re.escape(p) + r"\b"
+        pattern = r"(?<![\d\-])" + re.escape(p) + r"(?![\d])"
         if re.search(pattern, cmd):
             intercepted_port = p
             allocated_port = _allocate_free_port()

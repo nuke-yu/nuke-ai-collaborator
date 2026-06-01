@@ -100,3 +100,7 @@
 {"timestamp": "2026-06-01 22:57:25,478", "level": "INFO", "logger": "skills.watcher", "message": "SkillWatcher stopped", "trace_id": "-", "group_id": "-"}
 {"timestamp": "2026-06-01 23:15:03,629", "level": "INFO", "logger": "runtime.worker", "message": "worker w0: downstream closed", "trace_id": "-", "group_id": "-"}
 {"timestamp": "2026-06-01 23:15:03,658", "level": "INFO", "logger": "skills.watcher", "message": "SkillWatcher stopped", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 00:23:12,645", "level": "INFO", "logger": "runtime.worker", "message": "worker w0: downstream closed", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 00:23:12,651", "level": "INFO", "logger": "skills.watcher", "message": "SkillWatcher stopped", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 00:23:42,542", "level": "INFO", "logger": "runtime.worker", "message": "worker w0: downstream closed", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 00:23:42,544", "level": "INFO", "logger": "skills.watcher", "message": "SkillWatcher stopped", "trace_id": "-", "group_id": "-"}
