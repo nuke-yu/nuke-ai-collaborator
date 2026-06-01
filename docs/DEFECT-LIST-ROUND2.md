@@ -65,7 +65,7 @@
 | DFT-077 ✅已修 | 🟠 | 执行引擎 | DI 半迁移（broadcaster+interaction 并存）；AIService 泄漏 Jira 领域 | 32198 |
 | DFT-078 | 🟠 | 前端 | WS 断线重连无事件补偿 → 抖动即永久丢事件 | 架构分析 |
 | DFT-079 | 🟡 | 前端 | `handleWsMessage` 闭包陈旧（靠函数式 setState 侥幸） | eslint+分析 |
-| DFT-080 | 🟡 | 事件总线 | EventBus 队列无 maxsize / 无背压 | 架构分析 |
+| DFT-080 ✅已修 | 🟡 | 事件总线 | EventBus 队列无 maxsize / 无背压 | 35800 |
 | DFT-081 | 🟡 | 前端 | 硬编码 `ws://localhost:8000` / group 1 | 精读 |
 | DFT-082 | 🟡 | 全局 | 端到端无鉴权 / 多租户 | 架构分析 |
 | DFT-083 | 🟡 | 分层 | 函数内 import 泛滥 = 循环依赖 | 精读 |

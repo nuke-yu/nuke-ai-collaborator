@@ -68,17 +68,24 @@ class EventBus:
         await self._dispatch(p.get("type", ""), p)
 
     async def _dispatch(self, event_type: str, payload: dict) -> None:
-        # 先推 typed，再推 wildcard（snapshot 避免迭代中增删）
+        # DFT-080: Non-blocking dispatch to prevent slow subscribers from stalling the bus.
+        # Uses put_nowait to implement "Drop Newest" strategy when a subscriber's queue is full.
         for q in list(self._typed.get(event_type, [])):
-            await q.put(payload)
+            try:
+                q.put_nowait(payload)
+            except asyncio.QueueFull:
+                log.warning("bus: typed queue for %s is full, dropping message", event_type)
         for q in list(self._wildcard):
-            await q.put(payload)
+            try:
+                q.put_nowait(payload)
+            except asyncio.QueueFull:
+                log.warning("bus: wildcard queue is full, dropping message")
 
     # ── 订阅 ──────────────────────────────────────────────────────────────────
 
-    def subscribe(self, event_cls) -> Subscription:
+    def subscribe(self, event_cls, maxsize: int = 1000) -> Subscription:
         """typed 订阅：只收指定 event type 的事件。"""
-        q: asyncio.Queue = asyncio.Queue()
+        q: asyncio.Queue = asyncio.Queue(maxsize=maxsize)
         self._typed.setdefault(event_cls.type, []).append(q)
 
         def cleanup():
@@ -90,9 +97,9 @@ class EventBus:
         log.debug("bus.subscribe type=%s", event_cls.type)
         return Subscription(q, cleanup)
 
-    def subscribe_all(self) -> Subscription:
+    def subscribe_all(self, maxsize: int = 1000) -> Subscription:
         """wildcard 订阅：收全部事件（WS adapter 使用）。"""
-        q: asyncio.Queue = asyncio.Queue()
+        q: asyncio.Queue = asyncio.Queue(maxsize=maxsize)
         self._wildcard.append(q)
 
         def cleanup():
