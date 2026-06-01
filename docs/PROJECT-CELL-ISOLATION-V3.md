@@ -197,7 +197,7 @@ runtime/ipc/
 ## 12. 执行 Backlog（CELL-xx · 单一可跟踪真相源）
 
 > 每完成一个 CELL 就更新此表（状态 + commit）。strangler-fig：每项落地后现有单进程 app 仍可跑，直到 CELL-22 才翻入口。
-> **进度（2026-05-31）**：已完成 14 · 未做 9。**cell 已能端到端跑一个 bot**（同进程），但**真多进程 + 浏览器 WS 终止 + 调度尚未接**（CELL-13/16/22）。
+> **进度（2026-05-31）**：已完成 16 · 未做 7。**cell 已能端到端跑一个 bot**（同进程），但**真多进程 + 浏览器 WS 终止 + 调度尚未接**（CELL-13/16/22）。
 
 ### Epic 0 · 去风险（门禁）
 
@@ -230,7 +230,7 @@ runtime/ipc/
 | 10 | `runtime/worker.py`：下行循环（user_message→bind 群库→dispatch；abort）+ 上行 pump（bus→IPC broadcast）；`runtime/dbpaths.py` | 04,09 | user_message→上行 broadcast；abort 路由 | ✅ `acb89a8` |
 | 11 | Worker 端 bus adapter（上行发 IPC 而非 WSManager） | 09,10 | — | ✅ 并入 CELL-10 上行 pump |
 | 12 | `runtime/supervisor.py`：IPC server（HELLO 注册）+ 下行 `send_to_worker`（route）+ 上行扇出到浏览器客户端 + unread 钩子 | 09,11 | 浏览器→Worker→浏览器端到端、群隔离、无 worker 报错 | ✅ `d13c216` |
-| 13 | APScheduler 上移 Supervisor，到点下发 `wake_trigger` | 12 | cron → worker 唤醒 → 跑一轮 | ⛔ 待办 |
+| 13 | APScheduler 上移 Supervisor，到点下发 `wake_trigger` | 12 | cron → worker 唤醒 → 跑一轮 | ✅ `b679774` |
 | 14 | 瘦启动器 `runtime/entry.py --role`（build/run factory）+ worker 真实 dispatch `runtime/dispatch.py`（中心读 members + 群库写） | 04,09,12 | 两 role 可构造；dispatch 跑通 bot（见 14b） | ✅ `986c4d1`（+14b 解锁 e2e）。**WS 终止壳 + 调度仍是 TODO（run_supervisor）** |
 
 ### Epic 4 · 分片池 / 路由 / 生命周期
