@@ -23,7 +23,14 @@ async def get_member(db, member_id: int):
         return _row_to_member(row) if row else None
 
 
-async def get_messages(db, group_id: int, limit: int = 50, before_id: int = None, after_time: str = None):
+async def get_messages(db, group_id: int, limit: int = 50, before_id: int = None, after_time: str = None, after_id: int = None):
+    if after_id:
+        async with db.execute(
+            _MSG_SQL + "WHERE m.group_id = ? AND m.id > ? ORDER BY m.id ASC LIMIT ?",
+            (group_id, after_id, limit)
+        ) as cur:
+            rows = await cur.fetchall()
+            return [_row_to_msg(r) for r in rows]
     if before_id:
         async with db.execute(
             _MSG_SQL + "WHERE m.group_id = ? AND m.id < ? ORDER BY m.id DESC LIMIT ?",

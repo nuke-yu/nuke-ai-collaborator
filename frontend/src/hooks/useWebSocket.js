@@ -1,22 +1,29 @@
 import { useEffect, useRef, useCallback, useState } from 'react'
 
-export function useWebSocket(groupId, memberId, onMessage) {
+export function useWebSocket(groupId, memberId, onMessage, onReconnect) {
   const ws = useRef(null)
   const retryTimer = useRef(null)
   const [connected, setConnected] = useState(false)
   const [reconnecting, setReconnecting] = useState(false)
 
   const onMessageRef = useRef(onMessage)
+  const onReconnectRef = useRef(onReconnect)
   useEffect(() => {
     onMessageRef.current = onMessage
-  }, [onMessage])
+    onReconnectRef.current = onReconnect
+  }, [onMessage, onReconnect])
 
   const connect = useCallback(() => {
     if (!groupId || !memberId) return
-    const url = `ws://localhost:8000/ws/${groupId}/${memberId}`
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const host = window.location.host || 'localhost:8000'
+    const url = protocol + '//' + host + '/ws/' + groupId + '/' + memberId
     const socket = new WebSocket(url)
 
     socket.onopen = () => {
+      if (reconnecting) {
+        onReconnectRef.current?.()
+      }
       setConnected(true)
       setReconnecting(false)
     }

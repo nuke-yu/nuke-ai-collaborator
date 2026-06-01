@@ -145,7 +145,7 @@ async def search_group_messages(group_id: int, q: str, limit: int = 30):
 
 
 @router.get("/api/groups/{group_id}/messages")
-async def get_group_messages(group_id: int, before_id: int = None, limit: int = 50):
+async def get_group_messages(group_id: int, before_id: int = None, after_id: int = None, limit: int = 50):
     async with get_db() as db:
-        msgs = await get_messages(db, group_id, limit=limit, before_id=before_id)
+        msgs = await get_messages(db, group_id, limit=limit, before_id=before_id, after_id=after_id)
     return {"messages": msgs, "has_more": len(msgs) == limit}

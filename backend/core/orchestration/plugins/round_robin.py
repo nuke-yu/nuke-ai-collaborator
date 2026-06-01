@@ -22,7 +22,7 @@ class RoundRobinOrchestrator(Orchestrator):
 
     def _unit(self, group_id: int, bot: dict) -> WorkUnit:
         return WorkUnit(
-            bot=bot, executor_id="simple_v1",
+            bot=bot, executor_id="tool_loop_v1",
             prompt_suffix=self.system_suffix(group_id),
         )
 

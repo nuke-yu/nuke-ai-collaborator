@@ -22,7 +22,7 @@ async def _on_ticket_created(ev: dict):
             all_members = [dict(zip(columns, row)) for row in await cur.fetchall()]
             
     all_bots = [m for m in all_members if m["type"] == "bot"]
-    dev_bots = [b for b in all_bots if (b.get("role") or "").lower() == "dev"]
+    dev_bots = [b for b in all_bots if "dev" in (b.get("role") or "").lower() or "developer" in (b.get("role") or "").lower()]
     
     if not dev_bots:
         return
@@ -32,10 +32,11 @@ async def _on_ticket_created(ev: dict):
     search_text = title.lower()
     for bot in dev_bots:
         score = 0
+        role = bot.get("role") or ""
         traits = bot.get("traits") or "[]"
         import json
         traits_list = json.loads(traits) if isinstance(traits, str) else traits
-        keywords = [bot.get("role", "").lower()] + [t.lower() for t in traits_list]
+        keywords = [role.lower()] + [t.lower() for t in traits_list if isinstance(t, str)]
         for kw in keywords:
             if kw and kw in search_text:
                 score += 10
@@ -72,7 +73,7 @@ async def _on_code_committed(ev: dict):
             all_members = [dict(zip(columns, row)) for row in await cur.fetchall()]
 
     all_bots = [m for m in all_members if m["type"] == "bot"]
-    qa_bots = [b for b in all_bots if (b.get("role") or "").lower() == "qa"]
+    qa_bots = [b for b in all_bots if "qa" in (b.get("role") or "").lower()]
     if not qa_bots: return
 
     target_bot = qa_bots[0]

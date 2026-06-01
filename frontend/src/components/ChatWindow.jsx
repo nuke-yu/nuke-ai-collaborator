@@ -262,7 +262,33 @@ export default function ChatWindow({ memberId, isDark, onToggleTheme }) {
     }
   }
 
-  const { send, sendRaw, connected, reconnecting } = useWebSocket(activeGroupId, memberId, handleWsMessage)
+
+  const handleReconnect = useCallback(async () => {
+    if (!activeGroupId || messages.length === 0) return
+    const lastId = messages[messages.length - 1]?.id
+    if (!lastId || typeof lastId !== 'number') return
+
+    try {
+      const { messages: newer } = await fetchMessages(activeGroupId, { afterId: lastId })
+      if (newer && newer.length > 0) {
+        setMessages(prev => {
+          // Filter out any duplicates just in case
+          const existingIds = new Set(prev.map(m => m.id))
+          const uniqueNewer = newer.filter(m => !existingIds.has(m.id))
+          return [...prev, ...uniqueNewer]
+        })
+        syncCache(msgs => {
+          const existingIds = new Set(msgs.map(m => m.id))
+          const uniqueNewer = newer.filter(m => !existingIds.has(m.id))
+          return [...msgs, ...uniqueNewer]
+        })
+      }
+    } catch (e) {
+      console.error('Failed to catch up messages after reconnect:', e)
+    }
+  }, [activeGroupId, messages])
+
+  const { send, sendRaw, connected, reconnecting } = useWebSocket(activeGroupId, memberId, handleWsMessage, handleReconnect)
   const isStreaming = messages.some(m => m.streaming)
   const handleAbort = () => sendRaw({ type: 'abort', group_id: activeGroupId })
   const handlePermResponse = (requestId, approved, persistence) => {
