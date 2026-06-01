@@ -21,6 +21,8 @@ import logging
 import db
 from runtime import ipc
 from runtime.dbpaths import group_db_path
+import permissions
+from core import bg
 
 log = logging.getLogger(__name__)
 
@@ -79,12 +81,11 @@ class Worker:
                     ipc.protocol.BROADCAST, group_id=gid, payload=payload,
                 ))
 
+    
     async def _handle(self, msg: dict) -> None:
         t = msg.get("type")
         gid = msg.get("group_id")
         if t == ipc.protocol.USER_MESSAGE:
-            # Bind this group's private DB for the whole dispatch call tree
-            # (and bg.spawn'd children inherit the contextvar).
             from runtime.lifecycle import manager as lifecycle
             db_path = await lifecycle.hydrate(gid)
             with db.bind_db(db_path):
@@ -93,11 +94,27 @@ class Worker:
             if self._on_abort:
                 self._on_abort(gid)
             else:
-                from core import bg
                 bg.abort_group(gid)
+        elif t == ipc.protocol.PERMISSION_RESPONSE:
+            request_id = msg.get("request_id", "")
+            approved = bool(msg.get("approved", False))
+            persistence = msg.get("persistence", "once")
+            req = permissions.resolve(request_id, approved, persistence, group_id=gid)
+            if req and approved and persistence == "always":
+                # Re-bind the group DB to save the rule in the group's private DB
+                from runtime.lifecycle import manager as lifecycle
+                db_path = await lifecycle.hydrate(gid)
+                with db.bind_db(db_path):
+                    bg.spawn(permissions.save_rule(req.bot_id, req.tool_name, "", "allow"))
+        elif t == ipc.protocol.WAKE_TRIGGER:
+            from runtime.lifecycle import manager as lifecycle
+            db_path = await lifecycle.hydrate(gid)
+            with db.bind_db(db_path):
+                from runtime.dispatch import dispatch_wake_trigger
+                await dispatch_wake_trigger(msg)
         else:
-            # permission_response / wake_trigger wired in later CELLs
             log.debug("worker %s: unhandled downstream type=%s", self.worker_id, t)
+
 
     async def _default_dispatch(self, msg: dict) -> None:
         raise NotImplementedError(

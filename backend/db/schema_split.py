@@ -18,6 +18,7 @@ all central-internal).
 The legacy single-DB db.schema.init_db() is unchanged; these split inits are
 additive, used by the future Supervisor (central) and Worker (per group).
 """
+from db import DB_PATH
 from db.migrations import MIGRATIONS
 from db.schema import _seed_templates
 
@@ -235,10 +236,10 @@ async def _stamp_version(conn) -> None:
         await conn.execute("INSERT INTO _schema_version (version) VALUES (?)", (len(MIGRATIONS),))
 
 
-async def init_central_db(path: str) -> None:
+async def init_central_db(path: str | None = None) -> None:
     """Create the central (Supervisor-owned) DB at the final schema + seed templates."""
     import db as _db
-    async with _db.connect(path) as conn:
+    async with _db.connect(path or DB_PATH) as conn:
         for ddl in _CENTRAL_DDL:
             await conn.execute(ddl)
         await conn.commit()
@@ -247,10 +248,10 @@ async def init_central_db(path: str) -> None:
         await conn.commit()
 
 
-async def init_group_db(path: str) -> None:
+async def init_group_db(path: str | None = None) -> None:
     """Create a per-group private DB at the final schema (cross-domain FKs dropped)."""
     import db as _db
-    async with _db.connect(path) as conn:
+    async with _db.connect(path or DB_PATH) as conn:
         for ddl in _GROUP_DDL:
             await conn.execute(ddl)
         await conn.commit()

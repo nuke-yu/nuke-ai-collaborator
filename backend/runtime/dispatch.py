@@ -10,12 +10,16 @@ flow out through the Worker's upstream pump.
 """
 import dataclasses
 import logging
+import re
 
 import db
 from bus import bus
 from bus.events import Message
 
 log = logging.getLogger(__name__)
+
+_SYSTEM_SENDER = {"id": 0, "name": "系统调度器", "type": "system", "avatar_color": "#6b7280"}
+
 
 # get_messages() rows carry extra display keys (avatar_color, reply_to, cost_usd,
 # …) that the Message event doesn't declare; spread only the fields it accepts.
@@ -30,6 +34,7 @@ async def dispatch_user_message(msg: dict) -> None:
     file_name = msg.get("file_name")
     file_size = msg.get("file_size")
     file_type = msg.get("file_type")
+    online_ids = set(msg.get("online_ids", []))
     if not content and not file_url:
         return
 
@@ -56,8 +61,18 @@ async def dispatch_user_message(msg: dict) -> None:
         k: v for k, v in saved.items() if k in _MESSAGE_FIELDS and k != "group_id"
     }))
 
-    from core.orchestrator import select_triggered_bots, dispatch_bots
+    from core.orchestrator import select_triggered_bots, dispatch_bots, send_auto_reply, mark_read
     from core import bg
+
+    # Update unread/mark_read for the sender (Supervisor handles others)
+    await mark_read(gid, sender_id, msg_id)
+
+    # ── Auto-reply logic ──
+    mentioned_names = set(re.findall(r'@(\S+)', content or ""))
+    if mentioned_names:
+        for m in all_members:
+            if m["name"] in mentioned_names and m["id"] not in online_ids and m.get("auto_reply"):
+                bg.spawn(send_auto_reply(gid, m, msg_id))
 
     triggered = await select_triggered_bots(content, all_bots, gid)
     if not triggered:
@@ -68,4 +83,34 @@ async def dispatch_user_message(msg: dict) -> None:
         group_name=group_info.get("name", ""),
         group_announcement=group_info.get("announcement", ""),
         file_url=file_url, file_type=file_type,
+    ))
+
+
+async def dispatch_wake_trigger(msg: dict) -> None:
+    gid = msg["group_id"]
+    bot_id = msg.get("bot_id")
+    content = msg.get("content", "")
+    if not bot_id:
+        return
+
+    # ── central domain (members / group) ──
+    async with db.global_db() as cdb:
+        all_members = await db.get_members(cdb, gid)
+        group_info = await db.get_group(cdb, gid) or {}
+    all_bots = [m for m in all_members if m["type"] == "bot"]
+    bot = next((b for b in all_bots if b["id"] == bot_id), None)
+    if not bot:
+        return
+
+    # ── group domain (load recent) ──
+    async with db.connect() as gdb:
+        recent = await db.get_messages(gdb, gid)
+
+    from core.orchestrator import dispatch_bots
+    from core import bg
+    
+    bg.spawn_group(gid, dispatch_bots(
+        gid, [bot], content, _SYSTEM_SENDER, recent, all_bots, all_members,
+        group_name=group_info.get("name", ""),
+        group_announcement=group_info.get("announcement", ""),
     ))

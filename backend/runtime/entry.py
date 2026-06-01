@@ -33,7 +33,12 @@ def build_supervisor(addr: str, **kwargs):
 async def run_worker(worker_id: str, addr: str) -> None:
     from executors import registry
     registry.discover()                       # load bot executor plugins (once, at startup)
-    await build_worker(worker_id, addr).run()
+    from skills.watcher import watcher
+    watcher.start(asyncio.get_event_loop())
+    try:
+        await build_worker(worker_id, addr).run()
+    finally:
+        watcher.stop()
 
 
 async def run_supervisor(addr: str, num_workers: int = 0) -> None:

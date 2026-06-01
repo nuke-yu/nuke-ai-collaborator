@@ -36,14 +36,14 @@ async def clear_state(group_id: int) -> None:
         await conn.commit()
 
 
-async def load_all_active() -> list[dict]:
+async def load_all_active(group_id: int | None = None) -> list[dict]:
     """重启时拉取所有 active 工作流，state_json 解析进 'state' 键。"""
     import aiosqlite
 
     async with _db.connect() as conn:
         conn.row_factory = aiosqlite.Row
         async with conn.execute(
-            "SELECT * FROM workflow_state WHERE status = 'active' ORDER BY group_id ASC"
+            "SELECT * FROM workflow_state WHERE status = 'active'" + (f" AND group_id = {group_id}" if group_id else "") + " ORDER BY group_id ASC"
         ) as cur:
             rows = await cur.fetchall()
     result = []

@@ -72,7 +72,7 @@ async def run_unit(group_id: int, unit, orch) -> None:
     await apply_step(group_id, orch, step)
 
 
-async def resume_workflows() -> None:
+async def resume_workflows(group_id: int | None = None) -> None:
     """启动时恢复崩溃前在跑的工作流：还原编排器状态、广播快照、重新派发在飞单元。
 
     只重新派发无副作用的旧单元 —— tool_loop_v1 这类有副作用的执行器靠各自的 WAL
@@ -81,7 +81,7 @@ async def resume_workflows() -> None:
     from core.orchestration import registry as orch_registry
     import core.workflow as wf
 
-    rows = await workflow_store.load_all_active()
+    rows = await workflow_store.load_all_active(group_id=group_id)
     for row in rows:
         group_id = row["group_id"]
         orchestrator_id = row.get("orchestrator_id") or "workflow_v1"

@@ -278,3 +278,20 @@ async def get_group_assigned_worker(db, group_id: int) -> str:
     async with db.execute("SELECT assigned_worker_id FROM groups WHERE id = ?", (group_id,)) as cur:
         row = await cur.fetchone()
         return row[0] if row else 'w0'
+
+
+async def increment_unread(db, group_id: int, member_id: int, delta: int = 1):
+    await db.execute(
+        """INSERT INTO unread_counts (group_id, member_id, unread, updated_at)
+           VALUES (?, ?, ?, datetime('now'))
+           ON CONFLICT(group_id, member_id) DO UPDATE SET
+               unread = unread + excluded.unread,
+               updated_at = datetime('now')""",
+        (group_id, member_id, delta)
+    )
+    await db.commit()
+
+async def get_unread_counts(db, member_id: int) -> dict[int, int]:
+    async with db.execute("SELECT group_id, unread FROM unread_counts WHERE member_id = ?", (member_id,)) as cur:
+        rows = await cur.fetchall()
+        return {row[0]: row[1] for row in rows}

@@ -94,12 +94,12 @@ async def update_session_status(session_id: str, status: str) -> None:
         await conn.commit()
 
 
-async def get_orphaned_sessions() -> list[dict]:
+async def get_orphaned_sessions(group_id: int | None = None) -> list[dict]:
     """Return all sessions with status='running' — on startup these are orphans."""
     async with _db.connect() as conn:
         conn.row_factory = aiosqlite.Row
         async with conn.execute(
-            "SELECT * FROM agent_sessions WHERE status = 'running' ORDER BY created_at ASC"
+            "SELECT * FROM agent_sessions WHERE status = 'running'" + (f" AND group_id = {group_id}" if group_id else "") + " ORDER BY created_at ASC"
         ) as cur:
             rows = await cur.fetchall()
     result = []

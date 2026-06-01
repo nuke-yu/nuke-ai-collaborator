@@ -159,3 +159,6 @@ class Supervisor:
         return wid
 
 
+
+# Global instance used by the WS shell and Scheduler
+supervisor: 'Supervisor | None' = None

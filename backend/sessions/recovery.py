@@ -60,7 +60,7 @@ def reconstruct_messages(config: dict, events: list[dict]) -> list[dict]:
     return messages
 
 
-async def recover_all(dispatcher=None) -> None:
+async def recover_all(dispatcher=None, group_id: int | None = None) -> None:
     """Find all orphaned sessions and attempt to resume them.
 
     dispatcher: sync callable used ONLY in tests (e.g. list.append).
@@ -69,7 +69,7 @@ async def recover_all(dispatcher=None) -> None:
     Recovery order: children (parent_id IS NOT NULL) before parents,
     sorted by created_at ASC so oldest are retried first.
     """
-    orphans = await get_orphaned_sessions()
+    orphans = await get_orphaned_sessions(group_id=group_id)
     if not orphans:
         return
 

@@ -1,74 +1,74 @@
 import json
+import dataclasses
 import asyncio
-import re
+import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from db import init_db, get_db, get_member, get_members, get_group, save_message, get_messages, aclose_writer
-import permissions
+import db
+import scheduler
 from ws_manager import manager
-from bus import bus, ws_adapter
-from bus.events import Presence, Message
-from models import AddMemberRequest  # noqa: keep models importable via main
-from core.orchestrator import select_triggered_bots, dispatch_bots, mark_read, send_auto_reply, init_event_handlers
-from core import bg
-from core import runner
+
+from bus.events import Presence
+from runtime import supervisor as sup_mod
+from runtime import ipc
+from ai import client as ai_client
+
+# Shared API Routers
 from api.messages import router as message_router, UPLOAD_DIR
 from api.groups import router as group_router
 from api.templates import router as template_router
 from api.workflow import router as workflow_router
 from api.workspace import router as workspace_router
 from api.sessions import router as sessions_router
-from config import read_config, write_config, _preview, FIELDS
-from executors import registry
-from workspace import init_all_bots, init_group_workspace
 from permissions.routes import router as permissions_router
-from skills.watcher import watcher
-from core.orchestration.rd_manager import rd_manager
-from ai import client as ai_client
-import scheduler
-import sessions
-import os
-
+from executors import registry
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await init_db()
+    """CELL-22: Supervisor lifespan. Manages central DB and Worker fleet."""
+    # 1. Initialize central DB (routing/members/templates)
+    await db.init_central_db()
+    
+    # 2. Discover plugins (needed for metadata APIs like /api/plugins)
     registry.discover()
-    async with get_db() as db:
-        async with db.execute("SELECT DISTINCT group_id FROM members WHERE type='bot'") as cur:
-            group_rows = await cur.fetchall()
-        all_bots = []
-        for (gid,) in group_rows:
-            all_bots.extend(await get_members(db, gid))
-    await init_all_bots(all_bots)
-    async with get_db() as db2:
-        async with db2.execute("SELECT id, name FROM groups") as cur:
-            groups = await cur.fetchall()
-    for gid, gname in groups:
-        await init_group_workspace(gid, gname)
-    watcher.start(asyncio.get_event_loop())
-    adapter_task = asyncio.create_task(ws_adapter(bus))
+    
+    # 3. Start AI client pool
+    # (Worker processes will have their own AI clients)
+    
+    # 4. Start Supervisor Engine + Workers
+    addr = ipc.make_addr("supervisor")
+    num_workers = int(os.getenv("NUKE_WORKERS", "4"))
+    sup = sup_mod.Supervisor(addr, num_workers=num_workers, on_unread=on_unread_delta)
+    await sup.start()
+    sup_mod.supervisor = sup
+    
+    # 5. Start Global Scheduler
     await scheduler.start()
-    await rd_manager.start()
-    await init_event_handlers()
-    # Restore orchestrator state BEFORE recovering sessions: a recovered tool_loop_v1
-    # session that was a workflow stage unit must find its workflow already loaded so
-    # its completion can advance the stage (sessions/recovery.py coordination).
-    await runner.resume_workflows()
-    await sessions.recover_all()
+    
     yield
-    scheduler.stop()
-    adapter_task.cancel()
-    watcher.stop()
+    
+    # Teardown
+    await scheduler.stop()
+    await sup.stop()
     await ai_client.aclose_client()
-    await aclose_writer()
+    await db.aclose_writer()
+
+
+async def on_unread_delta(group_id: int, frame: dict):
+    from db import global_db, increment_unread, get_members
+    delta = frame.get("delta", 1)
+    async with global_db() as db:
+        # Increment for all humans in the group
+        members = await get_members(db, group_id)
+        for m in members:
+            if m["type"] == "human":
+                await increment_unread(db, group_id, m["id"], delta)
 
 
 app = FastAPI(lifespan=lifespan)
-
 
 app.add_middleware(
     CORSMiddleware,
@@ -87,143 +87,109 @@ app.include_router(sessions_router)
 app.include_router(permissions_router)
 app.include_router(scheduler.router)
 
+# ── Metadata APIs ─────────────────────────────────────────────────────────
 
 @app.get("/api/plugins")
 async def list_plugins():
     return registry.all_plugins()
 
-
 @app.get("/api/plugins/health")
 async def plugins_health():
     return {"loaded": list(registry._registry.keys()), "failures": registry.failures()}
-
 
 @app.post("/api/plugins/reload")
 async def reload_plugins():
     loaded = registry.reload()
     return {"loaded": loaded, "failures": registry.failures()}
 
-
 @app.get("/api/system/status")
 async def system_status():
-    """DFT-057：单机运行指标，便于运维监控活跃任务数与内存队列堆积。"""
+    """DFT-057: Aggregated metrics (TODO: CELL-20 will aggregate from Workers)."""
     return {
-        "tasks": bg.stats(),
-        "websockets": manager.stats(),
-        "permissions": permissions.pending_stats(),
+        "supervisor": {
+            "websockets": manager.stats(),
+        }
     }
 
+# ── WebSocket Shell (The Gateway) ────────────────────────────────────────
 
-@app.get("/api/config")
-async def get_config():
-    cfg = read_config()
-    result = {}
-    for field, env_var in FIELDS.items():
-        val = cfg.get(field, "").strip() or os.getenv(env_var, "")
-        result[field] = {"configured": bool(val), "preview": _preview(val)}
-    return result
-
-
-@app.put("/api/config")
-async def save_config(data: dict):
-    cfg = read_config()
-    allowed = {"deepseek_api_key", "openai_api_key", "anthropic_api_key", "ollama_base_url"}
-    for key, val in data.items():
-        if key in allowed:
-            cfg[key] = val.strip()
-    write_config(cfg)
-    return {"ok": True}
-
+class WSClientProxy:
+    """Adapts WSManager broadcast to Supervisor fan-out interface."""
+    def __init__(self, group_id: int):
+        self.group_id = group_id
+    async def send(self, payload: dict):
+        # Supervisor calls this when it receives an upstream BROADCAST frame
+        # from a worker. We fan it out to all browsers in this group.
+        await manager.broadcast(self.group_id, payload)
 
 @app.websocket("/ws/{group_id}/{member_id}")
 async def websocket_endpoint(websocket: WebSocket, group_id: int, member_id: int):
     await manager.connect(websocket, group_id, member_id)
-    # online_members 只发给当前连接者，不走 bus
-    await websocket.send_json({"type": "online_members", "member_ids": manager.get_online_member_ids(group_id)})
-    await bus.publish(Presence(group_id=group_id, member_id=member_id, online=True))
-
-    async with get_db() as db:
-        async with db.execute("SELECT MAX(id) FROM messages WHERE group_id=?", (group_id,)) as cur:
-            row = await cur.fetchone()
-        if row and row[0]:
-            await mark_read(group_id, member_id, row[0])
+    
+    # 1. Register group proxy to supervisor for upstream fan-out
+    proxy = WSClientProxy(group_id)
+    sup_mod.supervisor.register_browser(group_id, proxy)
+    
+    # 2. Synchronize initial UI state
+    await websocket.send_json({
+        "type": "online_members", 
+        "member_ids": manager.get_online_member_ids(group_id)
+    })
+    # Presence is a global concern (broadcast to all)
+    presence_ev = Presence(group_id=group_id, member_id=member_id, online=True)
+    ev_dict = dataclasses.asdict(presence_ev)
+    ev_dict["type"] = presence_ev.type
+    await manager.broadcast(group_id, ev_dict)
 
     try:
         while True:
             data = await websocket.receive_text()
             payload = json.loads(data)
+            t = payload.get("type")
 
-            if payload.get("type") == "read":
+            if t == "read":
+                # unread_counts is central (Supervisor owns it)
                 if msg_id := payload.get("msg_id"):
+                    from core.orchestrator import mark_read
                     await mark_read(group_id, member_id, msg_id)
                 continue
 
-            if payload.get("type") == "abort":
-                # DFT-027: cancel the whole group's task set (dispatch + any
-                # workflow-advancement tasks spawned downstream), not just one.
-                bg.abort_group(group_id)
-                continue
-
-            if payload.get("type") == "permission_response":
-                request_id = payload.get("request_id", "")
-                approved = bool(payload.get("approved", False))
-                persistence = payload.get("persistence", "once")  # "once" | "always"
-                req = permissions.resolve(request_id, approved, persistence, group_id=group_id)
-                if req and approved and persistence == "always":
-                    bg.spawn(permissions.save_rule(
-                        req.bot_id, req.tool_name, "", "allow"
-                    ))
-                continue
-
-            content = payload.get("content", "").strip()
-            file_url = payload.get("file_url")
-            file_name = payload.get("file_name")
-            file_size = payload.get("file_size")
-            file_type = payload.get("file_type")
-            if not content and not file_url:
-                continue
-            reply_to_id = payload.get("reply_to_id")
-
-            async with get_db() as db:
-                sender = await get_member(db, member_id)
-                if not sender:
-                    continue
-
-                msg_id = await save_message(db, group_id, member_id, content, reply_to_id,
-                                            file_url, file_name, file_size, file_type)
-                recent = await get_messages(db, group_id)
-                saved = next((m for m in recent if m["id"] == msg_id), {})
-                await bus.publish(Message(group_id=group_id, **{k: v for k, v in saved.items() if k != "group_id"}))
-                await mark_read(group_id, member_id, msg_id)
-
-                mentioned_names = set(re.findall(r'@(\S+)', content or ""))
-                if mentioned_names:
-                    online_ids = set(manager.get_online_member_ids(group_id))
-                    for m in await get_members(db, group_id):
-                        if m["name"] in mentioned_names and m["id"] not in online_ids and m.get("auto_reply"):
-                            bg.spawn(send_auto_reply(group_id, m, msg_id))
-
-                all_members = await get_members(db, group_id)
-                all_bots = [m for m in all_members if m["type"] == "bot"]
-                triggered = await select_triggered_bots(content or "", all_bots, group_id)
-                group_info = await get_group(db, group_id) or {}
-
-            if triggered:
-                bg.spawn_group(group_id, dispatch_bots(
-                    group_id, triggered, content or "", sender, recent,
-                    all_bots, all_members,
-                    group_name=group_info.get("name", ""),
-                    group_announcement=group_info.get("announcement", ""),
-                    file_url=file_url,
-                    file_type=file_type,
+            if t == "abort":
+                await sup_mod.supervisor.send_to_worker(group_id, ipc.protocol.envelope(
+                    ipc.protocol.ABORT, group_id=group_id
                 ))
+                continue
+
+            if t == "permission_response":
+                await sup_mod.supervisor.send_to_worker(group_id, ipc.protocol.envelope(
+                    ipc.protocol.PERMISSION_RESPONSE, group_id=group_id, **payload
+                ))
+                continue
+
+            # Forward User message + current online status to Worker
+            await sup_mod.supervisor.send_to_worker(group_id, ipc.protocol.envelope(
+                ipc.protocol.USER_MESSAGE, 
+                group_id=group_id, 
+                member_id=member_id,
+                online_ids=manager.get_online_member_ids(group_id),
+                **payload
+            ))
 
     except WebSocketDisconnect:
         gone_id = manager.disconnect(websocket, group_id)
         if gone_id:
-            await bus.publish(Presence(group_id=group_id, member_id=gone_id, online=False))
-        # DFT-031: if the group has no clients left, nobody can answer an
-        # outstanding permission prompt — deny them so the suspended tool loops
-        # don't hang forever holding _pending entries.
+            presence_offline = Presence(group_id=group_id, member_id=gone_id, online=False)
+            ev_dict = dataclasses.asdict(presence_offline)
+            ev_dict["type"] = presence_offline.type
+            await manager.broadcast(group_id, ev_dict)
+        
+        # If last client gone, cleanup registration and notify worker
         if not manager.get_online_member_ids(group_id):
-            permissions.cancel_pending_for_group(group_id)
+            sup_mod.supervisor.unregister_browser(group_id, proxy)
+            # Forward 'abort' to worker to cancel any group-wide pending asks/tasks
+            try:
+                await sup_mod.supervisor.send_to_worker(group_id, ipc.protocol.envelope(
+                    ipc.protocol.ABORT, group_id=group_id
+                ))
+            except Exception:
+                pass
