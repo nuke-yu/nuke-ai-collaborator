@@ -145,14 +145,27 @@ class Supervisor:
             if not bucket:
                 self._browsers.pop(group_id, None)
 
+    
     async def _fanout(self, group_id, payload: dict) -> None:
-        for client in list(self._browsers.get(group_id, ())):
+        # CELL-21 (DFT-030 logic): Defend against head-of-line blocking.
+        # If a single WebSocket connection is half-open or TCP window is full,
+        # client.send() could hang indefinitely and stall the Supervisor's
+        # upstream IPC receiver, delaying broadcasts for ALL healthy clients
+        # in ALL groups.
+        _SEND_TIMEOUT = 5.0
+        dead = []
+        clients = list(self._browsers.get(group_id, ()))
+        
+        for client in clients:
             try:
-                await client.send(payload)
+                await asyncio.wait_for(client.send(payload), _SEND_TIMEOUT)
             except Exception:
-                # A dead/slow browser is dropped; real WS impl reuses the DFT-030
-                # send-timeout so one bad client can't stall the fan-out.
-                self.unregister_browser(group_id, client)
+                log.warning("supervisor: client send timed out or failed, evicting")
+                dead.append(client)
+                
+        for client in dead:
+            self.unregister_browser(group_id, client)
+
 
     # ── downstream ───────────────────────────────────────────────────────
     async def send_to_worker(self, group_id: int, msg: dict) -> None:
