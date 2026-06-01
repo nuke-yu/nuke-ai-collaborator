@@ -59,7 +59,7 @@
 | DFT-071 | 🟠 | 编排 | 两套并行编排系统并存、角色 taxonomy 中英不一致 | 架构分析 |
 | DFT-072 ✅已修 | 🔴 | 全局 | 进程级内存状态锁死单 worker（无横向扩展） | b679774 |
 | DFT-073 ✅已修 | 🟠 | 协议 | 前后端 WS 事件无共享契约 | b679774 |
-| DFT-074 | 🟠 | 前端 | `ChatWindow` god component（~40 useState / 25 分支） | 架构分析 |
+| DFT-074 ✅已修 | 🟠 | 前端 | `ChatWindow` god component（~40 useState / 25 分支） | f1af309 |
 | DFT-075 | 🟠 | 执行引擎 | `tool_loop_v1.run` 802 行 god method（DFT-036 名义已修） | 架构分析 |
 | DFT-076 | 🟠 | 编排 | RDManager 用 BOARD.md 当真相源（三方对账/正则/非原子 RMW） | 架构分析 |
 | DFT-077 | 🟠 | 执行引擎 | DI 半迁移（broadcaster+interaction 并存）；AIService 泄漏 Jira 领域 | 架构分析 |
