@@ -85,7 +85,9 @@ class Worker:
         if t == ipc.protocol.USER_MESSAGE:
             # Bind this group's private DB for the whole dispatch call tree
             # (and bg.spawn'd children inherit the contextvar).
-            with db.bind_db(group_db_path(gid)):
+            from runtime.lifecycle import manager as lifecycle
+            db_path = await lifecycle.hydrate(gid)
+            with db.bind_db(db_path):
                 await self._dispatch(msg)
         elif t == ipc.protocol.ABORT:
             if self._on_abort:
