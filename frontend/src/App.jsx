@@ -1,3 +1,4 @@
+import ErrorBoundary from './components/ErrorBoundary'
 import { useState, useEffect } from 'react'
 import { addMember } from './api'
 import ChatWindow from './components/ChatWindow'
@@ -17,7 +18,9 @@ export default function App() {
 
   const handleJoin = async () => {
     if (!name.trim()) return
-    const data = await addMember(1, name.trim())
+    const params = new URLSearchParams(window.location.search)
+    const groupId = parseInt(params.get('groupId')) || 1
+    const data = await addMember(groupId, name.trim())
     localStorage.setItem('memberId', data.id)
     setMemberId(data.id)
   }
@@ -47,5 +50,9 @@ export default function App() {
     )
   }
 
-  return <ChatWindow memberId={memberId} isDark={isDark} onToggleTheme={() => setIsDark(d => !d)} />
+  return (
+    <ErrorBoundary>
+      <ChatWindow memberId={memberId} isDark={isDark} onToggleTheme={() => setIsDark(d => !d)} />
+    </ErrorBoundary>
+  )
 }
