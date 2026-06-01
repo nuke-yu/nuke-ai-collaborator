@@ -238,8 +238,8 @@ runtime/ipc/
 | CELL | 内容 / 交付物 | 依赖 | 验收 | 状态 |
 |---|---|---|---|---|
 | 15 | `runtime/router.py`：`groups.assigned_worker_id` 显式分配 + 查询 | 12 | 新群分配；查询稳定 | ✅ `3804e51` |
-| 16 | 多进程派生：Supervisor 起 K 个 worker 进程，按分配表路由 | 14,15 | 2 worker/2 群跨进程消息正确落位 | ✅ \`8c9de02\` |
-| 17 | `runtime/lifecycle.py`：群懒水合 + 空闲驱逐（snapshot+清内存+关私有库）+ **私有库连接 LRU 上界** | 16 | 沉睡群唤醒；空闲驱逐；LRU 封顶 | ⛔ 待办 |
+| 16 | 多进程派生：Supervisor 起 K 个 worker 进程，按分配表路由 | 14,15 | 2 worker/2 群跨进程消息正确落位 | ✅ `8c9de02` |
+| 17 | `runtime/lifecycle.py`：群懒水合 + 空闲驱逐（snapshot+清内存+关私有库）+ **私有库连接 LRU 上界** | 16 | 沉睡群唤醒；空闲驱逐；LRU 封顶 | ✅ `a4bb5df` |
 | 18 | 租约 + 干净交接（drain→snapshot→关→ack→改派→open） | 15,17 | **不变量：任何时刻一群私有库仅一个 worker 持写连接** | ⛔ 待办 |
 
 ### Epic 5 · 横切 / 运维
@@ -254,7 +254,7 @@ runtime/ipc/
 
 | CELL | 内容 / 交付物 | 依赖 | 验收 | 状态 |
 |---|---|---|---|---|
-| 22 | Cutover：FastAPI WS 终止壳接 Supervisor + 默认入口切 runtime + 删旧单进程路径/spike | 全部 | 全系统跑在 cell 架构上，旧路径移除 | ⛔ 待办（**"真正能对外起服务"在这一步**） |
+| 22 | Cutover：FastAPI WS 终止壳接 Supervisor + 默认入口切 runtime + 删旧单进程路径/spike | 全部 | 全系统跑在 cell 架构上，旧路径移除 | ✅ `b679774` |
 | 23 | Windows 沙箱策略（run_shell 内存限额：Job Objects 或部署走 WSL/容器）— 可选，独立于 cell 主线 | — | — | ⛔ 待办（低优先） |
 
 ### 关键路径
@@ -265,4 +265,4 @@ runtime/ipc/
         → 横切(19,20,21 可并行) → Cutover(22)
 ```
 
-> **当前位置**：数据层 + IPC + S/W 切分（同进程）已通，**bot 能跑**。下一关键跃迁是 **CELL-22（WS 终止壳，可对外起服务）**；CELL-13（调度）相对独立可穿插。
+> **当前位置**：数据层 + IPC + S/W 切分 + 多进程 + WS 终止壳已全部通车。下一阶段重点是 **横向切面 (Epic 5)** 与 **生产加固 (CELL-18)**。
