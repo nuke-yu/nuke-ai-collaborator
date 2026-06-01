@@ -5,12 +5,12 @@
 
 ---
 
-## 一、消息触发链
+## 一、消息触发链（分片宇宙版）
 
 ```
 用户发消息
-  → main.py WebSocket 收到
-  → 取 group_info（名称、公告）
+  → main.py (Supervisor) WebSocket 终止
+  → 路由匹配 (CELL-15) -> 确定 Worker_N
   → select_triggered_bots()   判断哪些 Bot 需要响应（@mention / @all / 工作流）
   → dispatch_bots()            构建 ExecutionContext，传入群组信息
   → registry.get(executor_id).run(ctx)   由 executor_id 决定走哪个插件

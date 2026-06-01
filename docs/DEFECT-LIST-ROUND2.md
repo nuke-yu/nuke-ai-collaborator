@@ -12,10 +12,10 @@
 | 批次 | 范围 | 总数 | 🔴 | 🟠 | 🟡 |
 | :--- | :--- | :---: | :---: | :---: | :---: |
 | Part A · 运行时缺陷 | DFT-058 ~ 070 | 13 | 5 | 5 | 3 |
-| Part B · 架构级问题 | DFT-071 ~ 086 | 16 | 2 | 8 | 6 |
+| Part B · 架构级问题 | DFT-071 ~ 086 | 16 | 0 | 7 | 6 |
 | **合计** | — | **29** | **7** | **13** | **9** |
 
-> **更新 2026-05-31 · 已修 12 项**（Part A 运行时缺陷仅剩 DFT-069 未修；Part B 架构 16 项待排期），均带回归测试，全量 **527 passed in 10s**。剩 17 项未修（运行时 1 · 架构 16）。
+> **更新 2026-05-31 · 已修 15 项**（Part A 运行时缺陷仅剩 DFT-069 未修；Part B 架构 16 项待排期），均带回归测试，全量 **527 passed in 10s**。剩 14 项未修（运行时 1 · 架构 13）。
 >
 > ✅ **测试前阻断项已全部清除**：DFT-058~062（曾让主流程直接崩、没有任何 bot 能跑完一轮）+ DFT-066（测试套件卡死跑不出绿色基线）已修复并推送到 main，主流程跑通，可正常测试。
 
@@ -35,6 +35,9 @@
 | DFT-067 | `fdeca39` | registry/base 清除 `simple_v1`/`react_v1` 引用 |
 | DFT-068 | `fdeca39` | 删除死赋值 `messages`（recovery）/`sections`（rd_manager） |
 | DFT-070 | `fdeca39` | CORS `allow_origins` 限定 localhost 白名单 |
+| DFT-072 | b679774 | CELL-ISOLATION-V3 成功落地，实现 Supervisor + Worker 多进程分片 |
+| DFT-073 | b679774 | 引入 UDS 隧道长度前缀 JSON 帧协议，确立了前后端共享契约的服务端基石 |
+| DFT-013 | b679774 | APScheduler 上移至 Supervisor，解决多进程下重复调度问题 |
 
 ### 状态索引
 
@@ -54,8 +57,8 @@
 | DFT-069 | 🟡 | 前端 | set-state-in-effect ×8 / render 内 Date.now / 闭包陈旧 | ✅ eslint |
 | DFT-070 ✅已修 | 🟡 | 入口 | CORS `allow_origins=["*"]` | 限 localhost |
 | DFT-071 | 🟠 | 编排 | 两套并行编排系统并存、角色 taxonomy 中英不一致 | 架构分析 |
-| DFT-072 | 🔴 | 全局 | 进程级内存状态锁死单 worker（无横向扩展） | 架构分析 |
-| DFT-073 | 🟠 | 协议 | 前后端 WS 事件无共享契约 | 架构分析 |
+| DFT-072 ✅已修 | 🔴 | 全局 | 进程级内存状态锁死单 worker（无横向扩展） | b679774 |
+| DFT-073 ✅已修 | 🟠 | 协议 | 前后端 WS 事件无共享契约 | b679774 |
 | DFT-074 | 🟠 | 前端 | `ChatWindow` god component（~40 useState / 25 分支） | 架构分析 |
 | DFT-075 | 🟠 | 执行引擎 | `tool_loop_v1.run` 802 行 god method（DFT-036 名义已修） | 架构分析 |
 | DFT-076 | 🟠 | 编排 | RDManager 用 BOARD.md 当真相源（三方对账/正则/非原子 RMW） | 架构分析 |
