@@ -37,6 +37,7 @@ class Supervisor:
         self._route = route or self._default_route
         self._routing_cache: dict[int, str] = {}  # group_id -> worker_id
         self._worker_stats: dict[str, dict] = {} # worker_id -> latest stats
+        self._pending_handoffs: dict[int, asyncio.Future] = {} # group_id -> future
         self._on_unread = on_unread              # async (group_id, payload) -> None
         self._server = None
         self._num_workers = kwargs.get("num_workers", 0)
@@ -124,12 +125,18 @@ class Supervisor:
             elif t == ipc.protocol.UNREAD_DELTA:
                 if self._on_unread:
                     await self._on_unread(gid, frame)
+            
             elif t == ipc.protocol.STATS_REPORT:
                 payload = frame.get("payload", {})
                 wid = payload.get("worker_id")
                 if wid:
                     self._worker_stats[wid] = payload
+            elif t == ipc.protocol.LEASE_RELEASED:
+                fut = self._pending_handoffs.get(gid)
+                if fut and not fut.done():
+                    fut.set_result(True)
             else:
+
 
                 log.debug("supervisor: unhandled upstream type=%s", t)
 
@@ -185,10 +192,6 @@ class Supervisor:
         
         self._routing_cache[group_id] = wid
         return wid
-
-
-
-
     def get_stats(self) -> dict:
         return {
             "workers": self._worker_stats,
@@ -196,6 +199,44 @@ class Supervisor:
             "process_count": len(self._processes),
         }
 
+    async def reassign_group(self, group_id: int, new_worker_id: str) -> None:
+        """CELL-18: Safely transfer a group to a new worker with clean lease handoff."""
+        # 1. Update persistent DB
+        async with db.global_db() as cdb:
+            await cdb.execute("UPDATE groups SET assigned_worker_id = ? WHERE id = ?", (new_worker_id, group_id))
+            await cdb.commit()
+            
+        # 2. Check who currently owns it in memory
+        old_wid = self._routing_cache.get(group_id)
+        if not old_wid or old_wid == new_worker_id:
+            self._routing_cache[group_id] = new_worker_id
+            return
+            
+        old_writer = self._workers.get(old_wid)
+        if not old_writer:
+            # Old worker is dead, safe to just update cache
+            self._routing_cache[group_id] = new_worker_id
+            return
+
+        # 3. Handoff Protocol
+        log.info("supervisor: initiating handoff of group %d from %s to %s", group_id, old_wid, new_worker_id)
+        fut = asyncio.get_event_loop().create_future()
+        self._pending_handoffs[group_id] = fut
+        
+        try:
+            # Tell old worker to release
+            await ipc.send_msg(old_writer, ipc.protocol.envelope(
+                ipc.protocol.RELEASE_LEASE, group_id=group_id
+            ))
+            # Wait for ACK
+            await asyncio.wait_for(fut, timeout=10.0)
+            log.info("supervisor: handoff of group %d complete", group_id)
+        except asyncio.TimeoutError:
+            log.error("supervisor: timeout waiting for %s to release group %d, forcing routing update anyway", old_wid, group_id)
+        finally:
+            self._pending_handoffs.pop(group_id, None)
+            # 4. Point traffic to new worker
+            self._routing_cache[group_id] = new_worker_id
 
 # Global instance used by the WS shell and Scheduler
 supervisor: 'Supervisor | None' = None

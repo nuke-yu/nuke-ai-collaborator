@@ -67,11 +67,16 @@ class LifecycleManager:
             self._active_groups[group_id] = time.time()
             return path
 
-    async def _evict_lru(self) -> None:
-        if not self._active_groups:
-            return
-        gid, _ = self._active_groups.popitem(last=False)
-        log.info("lifecycle: evicting group %d (LRU)", gid)
+
+    async def evict(self, group_id: int) -> None:
+        """Explicitly evict a group (used for CELL-18 lease release)."""
+        async with self._lock:
+            if group_id in self._active_groups:
+                del self._active_groups[group_id]
+                await self._do_evict(group_id)
+
+    async def _do_evict(self, gid: int) -> None:
+        log.info("lifecycle: evicting group %d", gid)
         
         # 1. Abort any running tasks
         from core import bg
@@ -94,6 +99,13 @@ class LifecycleManager:
             
         # 3. Close DB writer
         await db.aclose_writer(group_db_path(gid))
+
+    async def _evict_lru(self) -> None:
+        if not self._active_groups:
+            return
+        gid, _ = self._active_groups.popitem(last=False)
+        await self._do_evict(gid)
+
 
     async def shutdown(self) -> None:
         """Close all active groups."""

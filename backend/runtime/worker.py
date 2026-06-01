@@ -139,13 +139,22 @@ class Worker:
                     db_path = await lifecycle.hydrate(gid)
                     with db.bind_db(db_path):
                         bg.spawn(permissions.save_rule(req.bot_id, req.tool_name, "", "allow"))
+
             elif t == ipc.protocol.WAKE_TRIGGER:
                 from runtime.lifecycle import manager as lifecycle
                 db_path = await lifecycle.hydrate(gid)
                 with db.bind_db(db_path):
                     from runtime.dispatch import dispatch_wake_trigger
                     await dispatch_wake_trigger(msg)
+            elif t == ipc.protocol.RELEASE_LEASE:
+                # CELL-18: Gracefully close the group and ACK the Supervisor
+                from runtime.lifecycle import manager as lifecycle
+                await lifecycle.evict(gid)
+                await ipc.send_msg(self._writer, ipc.protocol.envelope(
+                    ipc.protocol.LEASE_RELEASED, group_id=gid, trace_id=tid
+                ))
             else:
+
                 log.debug("worker %s: unhandled downstream type=%s", self.worker_id, t)
 
 

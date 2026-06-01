@@ -9,15 +9,17 @@ USER_MESSAGE = "user_message"            # 用户消息
 ABORT = "abort"                          # 中止该群在跑任务
 PERMISSION_RESPONSE = "permission_response"  # 权限审批回复
 WAKE_TRIGGER = "wake_trigger"            # cron/告警唤醒沉睡群
+RELEASE_LEASE = "release_lease"          # CELL-18: Request worker to release group
 
-DOWNSTREAM = frozenset({USER_MESSAGE, ABORT, PERMISSION_RESPONSE, WAKE_TRIGGER})
+DOWNSTREAM = frozenset({USER_MESSAGE, ABORT, PERMISSION_RESPONSE, WAKE_TRIGGER, RELEASE_LEASE})
 
 # ── 上行 (Worker → Supervisor) ────────────────────────────────────────────
 BROADCAST = "broadcast"                  # 包裹任一 bus 事件，供 Supervisor 扇出给浏览器
 UNREAD_DELTA = "unread_delta"            # 未读增量（Supervisor 落中心库，§10.1/3）
 STATS_REPORT = "stats_report"            # 可观测性聚合（DFT-057 跨 worker）
+LEASE_RELEASED = "lease_released"        # CELL-18: Worker ACK that group is closed
 
-UPSTREAM = frozenset({BROADCAST, UNREAD_DELTA, STATS_REPORT})
+UPSTREAM = frozenset({BROADCAST, UNREAD_DELTA, STATS_REPORT, LEASE_RELEASED})
 
 # ── 控制帧（连接握手，不属于业务上/下行集） ────────────────────────────────
 HELLO = "hello"   # Worker → Supervisor 首帧，自报 worker_id 完成注册
