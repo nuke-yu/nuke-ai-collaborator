@@ -1,11 +1,12 @@
-import { useEffect, useState, useRef, useCallback, Fragment } from 'react'
-import { fetchAllGroups, fetchGroupInfo, fetchMessages, fetchUnreadCounts, fetchReactions, toggleReaction, createGroup, addMember, fetchPins, pinMessage, unpinMessage, fetchGroupStats, exportGroupUrl, resumeSession, cancelSessionRecovery } from '../api'
+import { useEffect, useState, useRef, useCallback } from 'react'
+import { fetchAllGroups, fetchGroupInfo, fetchMessages, fetchUnreadCounts, fetchReactions, toggleReaction, createGroup, addMember, fetchPins, pinMessage, unpinMessage, resumeSession, cancelSessionRecovery } from '../api'
 import { useWebSocket } from '../hooks/useWebSocket'
 import { useNotifications } from '../hooks/useNotifications'
 import GroupList from './GroupList'
+import ChatHeader from './ChatHeader'
+import MessageList from './MessageList'
 import TemplateManager from './TemplateManager'
 import MemberList from './MemberList'
-import MessageBubble from './MessageBubble'
 import MessageInput from './MessageInput'
 import SearchPanel from './SearchPanel'
 import ApiKeyManager from './ApiKeyManager'
@@ -43,8 +44,6 @@ export default function ChatWindow({ memberId, isDark, onToggleTheme }) {
   const [showSearch, setShowSearch] = useState(false)
   const [replyingTo, setReplyingTo] = useState(null)
   const [reactionMap, setReactionMap] = useState({})
-  const [editingGroupName, setEditingGroupName] = useState(false)
-  const [groupNameDraft, setGroupNameDraft] = useState('')
   const [mobileTab, setMobileTab] = useState('chat')
   const [drafts, setDrafts] = useState({})
   const [pins, setPins] = useState([])
@@ -53,7 +52,6 @@ export default function ChatWindow({ memberId, isDark, onToggleTheme }) {
   const [onlineSet, setOnlineSet] = useState(new Set())
   const [showStats, setShowStats] = useState(false)
   const [stats, setStats] = useState([])
-  const [showExportMenu, setShowExportMenu] = useState(false)
   const [permRequest, setPermRequest] = useState(null)
   const [recoveryPrompts, setRecoveryPrompts] = useState([]) // Array of {session_id, bot_name, message, ...}
   const { notify } = useNotifications()
@@ -272,16 +270,6 @@ export default function ChatWindow({ memberId, isDark, onToggleTheme }) {
     setPermRequest(null)
   }
 
-  const saveGroupName = async () => {
-    const name = groupNameDraft.trim()
-    if (!name || name === group?.name) { setEditingGroupName(false); return }
-    await fetch(`/api/groups/${activeGroupId}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name }),
-    })
-    setEditingGroupName(false)
-  }
 
   const saveAnnouncement = (text) => {
     fetch(`/api/groups/${activeGroupId}`, {
@@ -464,107 +452,52 @@ export default function ChatWindow({ memberId, isDark, onToggleTheme }) {
         onDragOver={(e) => e.preventDefault()}
         onDrop={(e) => { e.preventDefault(); dragCounter.current = 0; setDragging(false); const f = e.dataTransfer.files[0]; if (f) messageInputRef.current?.uploadFile(f) }}
       >
-        <div className="h-14 bg-gray-900 border-b border-gray-700 flex items-center px-4 gap-2 flex-shrink-0">
-          {editingGroupName ? (
-            <input
-              autoFocus
-              value={groupNameDraft}
-              onChange={e => setGroupNameDraft(e.target.value)}
-              onKeyDown={e => {
-                if (e.key === 'Enter' && !e.nativeEvent.isComposing) saveGroupName()
-                if (e.key === 'Escape') setEditingGroupName(false)
-              }}
-              onBlur={saveGroupName}
-              className="bg-gray-800 text-gray-100 font-semibold text-sm rounded px-2 py-0.5 outline-none focus:ring-1 focus:ring-indigo-500 w-40"
-            />
-          ) : (
-            <button
-              onClick={() => { setGroupNameDraft(group?.name || ''); setEditingGroupName(true) }}
-              className="text-gray-300 font-semibold hover:text-white transition-colors"
-              title="点击重命名"
-            >
-              # {group?.name || '选择群组'}
-            </button>
-          )}
-          <span className="text-xs text-gray-500 ml-2">· {members.length} 名成员</span>
-          {reconnecting && (
-            <span className="text-xs text-yellow-400 animate-pulse">⚠ 连接断开，正在重连...</span>
-          )}
-          <div className="ml-auto flex items-center gap-1">
-            {members.some(m => m.type === 'bot') && !workflow?.active && (
-              <button
-                onClick={() => {
-                  const defaultKeyword = (m) => {
-                    if (m.done_keyword) return m.done_keyword
-                    const role = m.role || m.name
-                    if (role.includes('需求')) return '需求确认完毕'
-                    if (role.includes('架构')) return '架构设计完毕'
-                    if (role.includes('前端')) return '前端开发完毕'
-                    if (role.includes('后端') || role.includes('开发') || role.includes('工程师')) return '开发完毕'
-                    if (role.includes('测试')) return '测试完成'
-                    if (role.includes('运维')) return '运维完毕'
-                    return `${m.name}完毕`
+        <ChatHeader
+          activeGroupId={activeGroupId}
+          group={group}
+          members={members}
+          reconnecting={reconnecting}
+          workflow={workflow}
+          onShowSearch={() => setShowSearch(s => !s)}
+          onShowStats={(s) => { setStats(s); setShowStats(true); }}
+          onShowWorkflowStart={() => {
+            const defaultKeyword = (m) => {
+              if (m.done_keyword) return m.done_keyword
+              const role = m.role || m.name
+              if (role.includes('需求')) return '需求确认完毕'
+              if (role.includes('架构')) return '架构设计完毕'
+              if (role.includes('前端')) return '前端开发完毕'
+              if (role.includes('后端') || role.includes('开发') || role.includes('工程师')) return '开发完毕'
+              if (role.includes('测试')) return '测试完成'
+              if (role.includes('运维')) return '运维完毕'
+              return `${m.name}完毕`
+            }
+            const isDevBot = (m) => {
+              const t = (m.role || m.name || '').toLowerCase()
+              return t.includes('开发') || t.includes('工程师') || t.includes('developer') || t.includes('engineer')
+            }
+            const bots = members.filter(m => m.type === 'bot')
+            const devBots = bots.filter(isDevBot)
+            const stages = []
+            let poolAdded = false
+            for (const m of bots) {
+              if (isDevBot(m)) {
+                if (!poolAdded) {
+                  if (devBots.length > 1) {
+                    stages.push({ stage_type: 'pool', bots: devBots.map(b => ({...b})), done_keyword: '开发完毕' })
+                  } else {
+                    stages.push({ stage_type: 'single', ...m, done_keyword: defaultKeyword(m) })
                   }
-                  const isDevBot = (m) => {
-                    const t = (m.role || m.name || '').toLowerCase()
-                    return t.includes('开发') || t.includes('工程师') || t.includes('developer') || t.includes('engineer')
-                  }
-                  const bots = members.filter(m => m.type === 'bot')
-                  const devBots = bots.filter(isDevBot)
-                  const stages = []
-                  let poolAdded = false
-                  for (const m of bots) {
-                    if (isDevBot(m)) {
-                      if (!poolAdded) {
-                        if (devBots.length > 1) {
-                          stages.push({ stage_type: 'pool', bots: devBots.map(b => ({...b})), done_keyword: '开发完毕' })
-                        } else {
-                          stages.push({ stage_type: 'single', ...m, done_keyword: defaultKeyword(m) })
-                        }
-                        poolAdded = true
-                      }
-                    } else {
-                      stages.push({ stage_type: 'single', ...m, done_keyword: defaultKeyword(m) })
-                    }
-                  }
-                  setWfBotOrder(stages)
-                  setShowWorkflowStart(true)
-                }}
-                className="text-sm px-2 py-1 rounded text-gray-500 hover:text-indigo-400 transition-colors"
-                title="启动工作流"
-              >⚡</button>
-            )}
-            <button
-              onClick={async () => { const s = await fetchGroupStats(activeGroupId); setStats(s); setShowStats(true) }}
-              className="text-sm px-2 py-1 rounded text-gray-500 hover:text-gray-300 transition-colors"
-              title="使用统计"
-            >📊</button>
-            <div className="relative">
-              <button
-                onClick={() => setShowExportMenu(m => !m)}
-                className={`text-sm px-2 py-1 rounded transition-colors ${showExportMenu ? 'text-indigo-400 bg-indigo-950/50' : 'text-gray-500 hover:text-gray-300'}`}
-                title="导出聊天记录"
-              >⬇️</button>
-              {showExportMenu && (
-                <div className="absolute right-0 top-full mt-1 bg-gray-800 border border-gray-700 rounded-lg shadow-xl overflow-hidden z-50 w-36">
-                  <a href={exportGroupUrl(activeGroupId, 'markdown')} download onClick={() => setShowExportMenu(false)}
-                    className="flex items-center gap-2 px-3 py-2 text-xs text-gray-300 hover:bg-gray-700 transition-colors no-underline">
-                    <span>📝</span> 导出 Markdown
-                  </a>
-                  <a href={exportGroupUrl(activeGroupId, 'json')} download onClick={() => setShowExportMenu(false)}
-                    className="flex items-center gap-2 px-3 py-2 text-xs text-gray-300 hover:bg-gray-700 transition-colors no-underline">
-                    <span>📋</span> 导出 JSON
-                  </a>
-                </div>
-              )}
-            </div>
-            <button
-              onClick={() => setShowSearch(s => !s)}
-              className={`text-sm px-2 py-1 rounded transition-colors ${showSearch ? 'text-indigo-400 bg-indigo-950/50' : 'text-gray-500 hover:text-gray-300'}`}
-              title="搜索消息 (⌘K)"
-            >🔍</button>
-          </div>
-        </div>
+                  poolAdded = true
+                }
+              } else {
+                stages.push({ stage_type: 'single', ...m, done_keyword: defaultKeyword(m) })
+              }
+            }
+            setWfBotOrder(stages)
+            setShowWorkflowStart(true)
+          }}
+        />
 
         {dragging && (
           <div className="absolute inset-0 z-40 bg-indigo-500/10 border-2 border-dashed border-indigo-400 rounded-lg flex items-center justify-center pointer-events-none">
@@ -644,98 +577,26 @@ export default function ChatWindow({ memberId, isDark, onToggleTheme }) {
           </div>
         ))}
 
-        <div
-          ref={scrollRef}
-          className="flex-1 overflow-y-auto px-4 py-4 space-y-1 pb-14 md:pb-4"
+        <MessageList
+          messages={messages}
+          typing={typing}
+          memberId={memberId}
+          members={members}
+          readMap={readMap}
+          reactionMap={reactionMap}
+          pins={pins}
+          highlightedId={highlightedId}
+          group={group}
+          onlineSet={onlineSet}
+          loadingMore={loadingMore}
+          scrollRef={scrollRef}
+          bottomRef={bottomRef}
           onScroll={handleScroll}
-        >
-          {loadingMore && (
-            <div className="text-center py-3">
-              <span className="inline-block w-4 h-4 border-2 border-gray-600 border-t-gray-400 rounded-full animate-spin" />
-            </div>
-          )}
-          {messages.length === 0 && !loadingMore && group && (
-            <div className="flex-1 flex flex-col items-center justify-center gap-5 py-16 text-center select-none">
-              <div className="text-5xl">💬</div>
-              <div>
-                <h3 className="text-gray-200 font-semibold text-base mb-1"># {group.name}</h3>
-                <p className="text-gray-500 text-sm">这是 <span className="text-indigo-400 font-medium">{group.name}</span> 的开始</p>
-              </div>
-              {members.length > 0 && (
-                <div>
-                  <p className="text-xs text-gray-600 mb-3">群组成员</p>
-                  <div className="flex gap-3 justify-center flex-wrap">
-                    {members.map(m => (
-                      <div key={m.id} className="flex flex-col items-center gap-1.5">
-                        <div className="relative">
-                          <div className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold text-white" style={{ backgroundColor: m.avatar_color }}>
-                            {m.name[0]}
-                          </div>
-                          {onlineSet.has(m.id) && <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-400 rounded-full border-2 border-gray-900" />}
-                        </div>
-                        <span className="text-xs text-gray-500">{m.name}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-              <p className="text-xs text-gray-600 mt-2">发送消息开始对话 👇</p>
-            </div>
-          )}
-          {messages.map((msg, i) => {
-            const msgDay = msg.created_at ? new Date(msg.created_at).toDateString() : null
-            const prevDay = i > 0 && messages[i - 1].created_at ? new Date(messages[i - 1].created_at).toDateString() : null
-            const showDate = msgDay && msgDay !== prevDay
-            let dateLabel = ''
-            if (showDate) {
-              const today = new Date().toDateString()
-              const yesterday = new Date(Date.now() - 86400000).toDateString()
-              if (msgDay === today) dateLabel = '今天'
-              else if (msgDay === yesterday) dateLabel = '昨天'
-              else dateLabel = new Date(msg.created_at).toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' })
-            }
-            if (msg._compact_marker) {
-              return (
-                <div key={msg.id} className="flex items-center gap-3 py-2 my-2 px-4">
-                  <div className="flex-1 h-px bg-indigo-900/50" />
-                  <span className="text-[11px] text-indigo-400/70 flex-shrink-0 flex items-center gap-1.5">
-                    <span>⚡</span>
-                    <span>{msg.message || '上下文已压缩'}</span>
-                  </span>
-                  <div className="flex-1 h-px bg-indigo-900/50" />
-                </div>
-              )
-            }
-            return (
-              <Fragment key={msg.id ?? msg.temp_id}>
-                {showDate && (
-                  <div className="flex items-center gap-3 py-2 my-1">
-                    <div className="flex-1 h-px bg-gray-800" />
-                    <span className="text-xs text-gray-500 flex-shrink-0">{dateLabel}</span>
-                    <div className="flex-1 h-px bg-gray-800" />
-                  </div>
-                )}
-                <div data-msg-id={msg.id}>
-                  <MessageBubble
-                    msg={msg}
-                    currentMemberId={memberId}
-                    members={members}
-                    readMap={readMap}
-                    onReply={setReplyingTo}
-                    reactions={reactionMap[String(msg.id)] || {}}
-                    onReact={(emoji) => toggleReaction(msg.id, memberId, emoji)}
-                    isPinned={pins.some(p => p.id === msg.id)}
-                    onPin={(id) => pinMessage(activeGroupId, id)}
-                    onUnpin={(id) => unpinMessage(activeGroupId, id)}
-                    highlighted={msg.id === highlightedId}
-                  />
-                </div>
-              </Fragment>
-            )
-          })}
-          {typing && <MessageBubble msg={typing} isTyping />}
-          <div ref={bottomRef} />
-        </div>
+          onReply={setReplyingTo}
+          onReact={(id, emoji) => toggleReaction(id, memberId, emoji)}
+          onPin={(id) => pinMessage(activeGroupId, id)}
+          onUnpin={(id) => unpinMessage(activeGroupId, id)}
+        />
         {isStreaming && (
           <div className="px-4 py-1 flex justify-center">
             <button
