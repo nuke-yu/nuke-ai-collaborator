@@ -165,11 +165,8 @@ class AIService:
         )
         usage_data["cost_usd"] = cost
         
-        # Determine current ticket from execution context if available
-        # The RDManager could potentially inject this, or we can look it up based on the group's active workflow
-        ticket_id = getattr(self.ctx, "active_ticket_id", None)
-        if ticket_id:
-            usage_data["ticket_id"] = ticket_id
+        # Point 4: Domain-neutral usage sync. 
+        # Specific attribution (Jira/Tickets) is handled by the interaction implementation.
             
         await self.ctx.interaction.update_session_tokens(
             self.session_id, **usage_data

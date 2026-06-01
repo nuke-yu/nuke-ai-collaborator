@@ -101,9 +101,9 @@ export default function WorkspacePanel({ bot, groupId, onClose }) {
   })
 
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/45 backdrop-blur-sm flex items-center justify-center z-50 animate-fade-in" onClick={onClose}>
       <div
-        className="bg-gray-800 rounded-2xl shadow-xl flex overflow-hidden"
+        className="bg-gray-900/80 backdrop-blur-md border border-gray-700/50 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.55)] flex overflow-hidden animate-scale-up"
         style={{ width: '860px', maxWidth: '95vw', height: '560px', maxHeight: '90vh' }}
         onClick={e => e.stopPropagation()}
       >

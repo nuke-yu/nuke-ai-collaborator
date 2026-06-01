@@ -86,8 +86,7 @@ class TestResumeRunClosesSession(unittest.IsolatedAsyncioTestCase):
         ctx = ExecutionContext(
             bot=bot, group_id=1, user_message="original task",
             sender={"id": 0, "name": "系统恢复", "type": "system"},
-            history=[], all_bots=[bot], all_members=[bot],
-            broadcaster=AsyncMock(),
+            history=[], all_bots=[bot], all_members=[bot]),
             interaction=MockInteraction(),
             resume_session_id=sid,
             resume_messages=resume_messages,

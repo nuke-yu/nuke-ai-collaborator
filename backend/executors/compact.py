@@ -581,7 +581,7 @@ async def auto_compact_if_needed(
 
     if result is not None:
         _record_success(group_id)
-        await broadcaster.broadcast(group_id, {
+        await interaction.broadcast(group_id, {
             "type": "compaction", "temp_id": temp_id,
             "strategy": "session_memory",
             "message": "上下文已通过增量摘要压缩",
@@ -599,7 +599,7 @@ async def auto_compact_if_needed(
 
     if result is not None:
         _record_success(group_id)
-        await broadcaster.broadcast(group_id, {
+        await interaction.broadcast(group_id, {
             "type": "compaction", "temp_id": temp_id,
             "strategy": "ai_full",
             "message": "上下文已通过 AI 全量摘要压缩（9 段结构化）",
@@ -723,7 +723,7 @@ async def maybe_compact_db_history(
                 db, group_id, bot_id, summary_text, keep_ids
             )
 
-        await broadcaster.broadcast(group_id, {
+        await interaction.broadcast(group_id, {
             "type": "db_compaction",
             "summary_id": summary_id,
             "deleted_count": len(to_summarize),

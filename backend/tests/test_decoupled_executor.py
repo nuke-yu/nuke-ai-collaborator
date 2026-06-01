@@ -48,8 +48,7 @@ class TestDecoupledExecutor(unittest.IsolatedAsyncioTestCase):
         ctx = ExecutionContext(
             bot=bot, group_id=1, user_message="task",
             sender={"id": 2, "name": "Human", "type": "human"},
-            history=[], all_bots=[bot], all_members=[bot],
-            broadcaster=None, # Should not be used anymore
+            history=[], all_bots=[bot], all_members=[bot], # Should not be used anymore
             interaction=mock_inter,
         )
 

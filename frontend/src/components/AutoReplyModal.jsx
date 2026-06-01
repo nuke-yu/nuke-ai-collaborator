@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { updateMember } from '../api'
 
 export default function AutoReplyModal({ member, onClose, onSaved }) {

@@ -61,7 +61,6 @@ class TestInteractionFallback(unittest.IsolatedAsyncioTestCase):
             bot=bot, group_id=1, user_message="task",
             sender={"id": 2, "name": "Human", "type": "human"},
             history=[], all_bots=[bot], all_members=[bot],
-            broadcaster=None,
             interaction=None,   # <-- the production condition that used to crash
         )
 

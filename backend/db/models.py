@@ -29,7 +29,7 @@ def _row_to_member(r):
         "temperature": r[11] if len(r) > 11 else 0.7,
         "max_tokens": r[12] if len(r) > 12 else 4096,
         "personality_prompt": r[13] if len(r) > 13 else None,
-        "executor_id": r[14] if len(r) > 14 else "simple_v1",
+        "executor_id": r[14] if len(r) > 14 else "tool_loop_v1",
         "executor_config": _parse_json(r[15]) if len(r) > 15 else {},
         "done_keyword": r[16] if len(r) > 16 else None,
         "traits": _parse_json_list(r[17]) if len(r) > 17 else [],

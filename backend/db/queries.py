@@ -139,7 +139,7 @@ async def update_member_full(db, member_id: int, data: dict):
          data.get('avatar_color'), data.get('model_provider'), data.get('model_name'),
          data.get('temperature', 0.7), data.get('max_tokens', 4096),
          data.get('personality_prompt') or None,
-         data.get('executor_id', 'simple_v1'), executor_config,
+         data.get('executor_id', 'tool_loop_v1'), executor_config,
          data.get('done_keyword') or None, traits_json, member_id)
     )
     await db.commit()

@@ -186,7 +186,6 @@ async def _spawn_agent_handler(bot_name: str, task: str, background: bool = Fals
         available = "、".join(b["name"] for b in all_bots) or "（无）"
         return f"[spawn_agent] 未找到 Bot「{bot_name}」。可用：{available}"
 
-    broadcaster = ctx.get("broadcaster") if background else _NullBroadcaster()
     sub_ctx = ExecutionContext(
         bot=target,
         group_id=group_id,
@@ -195,7 +194,7 @@ async def _spawn_agent_handler(bot_name: str, task: str, background: bool = Fals
         history=[],
         all_bots=all_bots,
         all_members=all_members,
-        broadcaster=broadcaster,
+        interaction=ctx.get("interaction"),
         spawn_depth=spawn_depth + 1,
         ruleset=ctx.get("ruleset"),
     )

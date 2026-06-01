@@ -1,8 +1,8 @@
 export default function WorkflowStartModal({ stages, onChangeStages, onStart, onClose }) {
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/45 backdrop-blur-sm flex items-center justify-center z-50 animate-fade-in" onClick={onClose}>
       <div
-        className="bg-gray-800 border border-gray-700 rounded-2xl p-6 w-96 shadow-2xl max-h-[80vh] overflow-y-auto"
+        className="bg-gray-900/80 backdrop-blur-md border border-gray-700/50 rounded-2xl p-6 w-96 shadow-[0_20px_50px_rgba(0,0,0,0.55)] max-h-[80vh] overflow-y-auto animate-scale-up"
         onClick={e => e.stopPropagation()}
       >
         <h3 className="text-white font-semibold mb-1">启动工作流</h3>

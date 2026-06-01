@@ -101,7 +101,7 @@ async def init_db():
                 temperature      REAL    DEFAULT 0.7,
                 max_tokens       INTEGER DEFAULT 4096,
                 personality_prompt TEXT  DEFAULT NULL,
-                executor_id      TEXT    DEFAULT 'simple_v1',
+                executor_id      TEXT    DEFAULT 'tool_loop_v1',
                 executor_config  TEXT    DEFAULT '{}',
                 done_keyword     TEXT    DEFAULT NULL,
                 FOREIGN KEY (group_id) REFERENCES groups(id)

@@ -16,7 +16,7 @@ class AddMemberRequest(BaseModel):
     model_name: Optional[str] = "deepseek-chat"
     temperature: Optional[float] = 0.7
     max_tokens: Optional[int] = 4096
-    executor_id: Optional[str] = "simple_v1"
+    executor_id: Optional[str] = "tool_loop_v1"
     executor_config: Optional[dict] = None
     done_keyword: Optional[str] = None
     traits: Optional[list[str]] = None

@@ -44,7 +44,8 @@ def _acc_usage(target: list, result: dict) -> None:
 
 async def _execute_tool_call(name: str, arguments: dict, context: dict) -> str:
     """Thin wrapper around tool_executor.execute — extracted so tests can mock it."""
-    return await tool_executor.execute(name, arguments, context=context)
+    res, _ = await tool_executor.execute(name, arguments, context=context)
+    return res
 
 
 async def _tool_loop_core(
@@ -588,7 +589,7 @@ class ToolLoopRunner:
                     "all_bots": self.ctx.all_bots,
                     "all_members": self.ctx.all_members,
                     "spawn_depth": self.ctx.spawn_depth,
-                    "broadcaster": self.ctx.broadcaster,
+                    
                     "ruleset": self.ruleset,
                     "steer_channel": self.ctx.steer_channel,
                     "rewake_queue": self.rewake_queue,
@@ -650,7 +651,7 @@ class ToolLoopRunner:
                         self.messages, _ = await compact.auto_compact_if_needed(
                             self.messages, self.model_name, self.ctx.group_id,
                             self.system_prompt, self.provider, self.temperature,
-                            self.ctx.broadcaster, self.temp_id, self.bot["id"],
+                            self.ctx.interaction, self.temp_id, self.bot["id"],
                             context_text=await self._build_reinject(),
                         )
                         
@@ -776,7 +777,7 @@ class ToolLoopV1(BotExecutor):
     async def run(self, ctx: ExecutionContext) -> ExecutionResult:
         if ctx.interaction is None:
             from core.orchestration.interaction import StandardInteraction
-            ctx.interaction = StandardInteraction()
+            ctx.interaction = StandardInteraction(ctx)
             
         runner = ToolLoopRunner(self, ctx)
         return await runner.execute()

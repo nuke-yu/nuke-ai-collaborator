@@ -56,8 +56,7 @@ class TestAbortSignal(unittest.IsolatedAsyncioTestCase):
             sender={"name": "user"},
             history=[],
             all_bots=[bot],
-            all_members=[bot],
-            broadcaster=MagicMock(),
+            all_members=[bot]),
             interaction=mock_inter,
         )
 

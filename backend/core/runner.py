@@ -16,6 +16,7 @@ from bus import bus
 from bus.events import WorkflowUpdate
 from core import bg, workflow_store
 from executors.base import ExecutionContext
+from core.orchestration.interaction import StandardInteraction
 from executors import registry as exec_registry
 
 log = logging.getLogger(__name__)
@@ -62,7 +63,7 @@ async def run_unit(group_id: int, unit, orch) -> None:
     ctx = ExecutionContext(
         bot=unit.bot, group_id=group_id, user_message=unit.trigger_msg,
         sender={"name": "系统"}, history=recent,
-        all_bots=all_bots, all_members=members, broadcaster=bus,
+        all_bots=all_bots, all_members=members, 
         workflow_suffix=unit.prompt_suffix,
     )
     result = await exec_registry.get(unit.executor_id).run(ctx)

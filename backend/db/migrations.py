@@ -58,7 +58,7 @@ async def migration_001(db):
         "ALTER TABLE members ADD COLUMN temperature REAL DEFAULT 0.7",
         "ALTER TABLE members ADD COLUMN max_tokens INTEGER DEFAULT 4096",
         "ALTER TABLE members ADD COLUMN personality_prompt TEXT DEFAULT NULL",
-        "ALTER TABLE members ADD COLUMN executor_id TEXT DEFAULT 'simple_v1'",
+        "ALTER TABLE members ADD COLUMN executor_id TEXT DEFAULT 'tool_loop_v1'",
         "ALTER TABLE members ADD COLUMN executor_config TEXT DEFAULT '{}'",
         "ALTER TABLE members ADD COLUMN done_keyword TEXT DEFAULT NULL",
         "ALTER TABLE groups ADD COLUMN announcement TEXT DEFAULT NULL",

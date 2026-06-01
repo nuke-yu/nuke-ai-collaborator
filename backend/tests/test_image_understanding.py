@@ -163,7 +163,6 @@ class TestExecutionContextImageFields(unittest.TestCase):
         return ExecutionContext(
             bot={}, group_id=1, user_message="hi",
             sender={}, history=[], all_bots=[], all_members=[],
-            broadcaster=None,
             **kwargs,
         )
 

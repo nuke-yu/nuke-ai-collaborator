@@ -6,6 +6,11 @@ export function useWebSocket(groupId, memberId, onMessage) {
   const [connected, setConnected] = useState(false)
   const [reconnecting, setReconnecting] = useState(false)
 
+  const onMessageRef = useRef(onMessage)
+  useEffect(() => {
+    onMessageRef.current = onMessage
+  }, [onMessage])
+
   const connect = useCallback(() => {
     if (!groupId || !memberId) return
     const url = `ws://localhost:8000/ws/${groupId}/${memberId}`
@@ -18,7 +23,7 @@ export function useWebSocket(groupId, memberId, onMessage) {
 
     socket.onmessage = (e) => {
       const data = JSON.parse(e.data)
-      onMessage(data)
+      onMessageRef.current(data)
       // 收到他人消息时，立即发回已读确认
       if (data.type === 'message' && data.id) {
         if (socket.readyState === WebSocket.OPEN) {

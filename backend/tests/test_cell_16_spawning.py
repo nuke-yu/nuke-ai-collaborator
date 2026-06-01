@@ -4,7 +4,7 @@ import os
 import sys
 import unittest
 import tempfile
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 # Ensure the backend directory is in the path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -72,5 +72,4 @@ class TestCell16Spawning(unittest.IsolatedAsyncioTestCase):
             self.assertIsNotNone(proc.returncode)
 
 if __name__ == "__main__":
-    from unittest.mock import patch
     unittest.main()

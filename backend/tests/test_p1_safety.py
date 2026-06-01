@@ -104,8 +104,7 @@ class TestDoomLoopGuard(unittest.IsolatedAsyncioTestCase):
             bot=bot, group_id=1, user_message="task",
             sender={"id": 2, "name": "Human", "type": "human"},
             history=[], all_bots=[bot], all_members=[bot],
-            broadcaster=AsyncMock(),
-            interaction=AsyncMock(),
+        interaction=AsyncMock(),
         )
 
         # AI returns tool_calls ONLY, for more than _DOOM_LOOP_THRESHOLD times

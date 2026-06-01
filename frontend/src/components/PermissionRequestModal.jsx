@@ -11,8 +11,8 @@ export default function PermissionRequestModal({ request, onRespond }) {
   const argEntries = Object.entries(args).filter(([, v]) => v !== null && v !== undefined)
 
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-end sm:items-center justify-center z-50 p-4">
-      <div className="bg-gray-800 rounded-2xl p-5 w-full max-w-md shadow-2xl border border-gray-700">
+    <div className="fixed inset-0 bg-black/45 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-4 animate-fade-in">
+      <div className="bg-gray-900/80 backdrop-blur-md rounded-2xl p-5 w-full max-w-md shadow-[0_20px_50px_rgba(0,0,0,0.55)] border border-gray-700/50 animate-scale-up">
         <div className="flex items-start gap-3 mb-4">
           <div className="w-9 h-9 rounded-full bg-amber-500/20 flex items-center justify-center flex-shrink-0 mt-0.5">
             <svg className="w-4 h-4 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">

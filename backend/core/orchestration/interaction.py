@@ -8,6 +8,8 @@ log = logging.getLogger(__name__)
 
 class StandardInteraction(InteractionAdapter):
     """Production implementation of side-effects using the real DB and Bus."""
+    def __init__(self, ctx=None):
+        self.ctx = ctx
 
     async def create_session(self, **kwargs):
         await sessions.create_session(**kwargs)
@@ -39,16 +41,20 @@ class StandardInteraction(InteractionAdapter):
         )
         
         # Point 4: Hang the cost on the current Jira Ticket if applicable
-        if "ticket_id" in usage and usage["cost_usd"]:
+        ticket_id = usage.get("ticket_id") or (getattr(self.ctx, "active_ticket_id", None) if self.ctx else None)
+        cost_usd = usage.get("cost_usd")
+        
+        if ticket_id and cost_usd:
             try:
                 async with write_connect() as db:
                     await db.execute(
                         "UPDATE tickets SET total_usd_cost = total_usd_cost + ? WHERE ticket_id = ?",
-                        (usage["cost_usd"], usage["ticket_id"])
+                        (cost_usd, ticket_id)
                     )
                     await db.commit()
             except Exception:
                 log.exception("Failed to update ticket cost")
+
     async def mark_read(self, group_id: int, member_id: int, msg_id: int):
         from db import write_connect
         from bus import bus
