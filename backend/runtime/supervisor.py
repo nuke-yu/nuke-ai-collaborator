@@ -18,6 +18,7 @@ engine is testable without a real WebSocket. Group→worker assignment is a
 pluggable `route`; the persistent assigned_worker_id table is CELL-15.
 """
 import asyncio
+import sys
 import logging
 
 from runtime import ipc
@@ -28,7 +29,7 @@ log = logging.getLogger(__name__)
 
 
 class Supervisor:
-    def __init__(self, addr, *, route=None, on_unread=None):
+    def __init__(self, addr, *, route=None, on_unread=None, **kwargs):
         self.addr = addr
         self._workers: dict = {}                 # worker_id -> StreamWriter
         self._browsers: dict[int, set] = {}      # group_id -> {client}
@@ -36,12 +37,46 @@ class Supervisor:
         self._routing_cache: dict[int, str] = {}  # group_id -> worker_id
         self._on_unread = on_unread              # async (group_id, payload) -> None
         self._server = None
+        self._num_workers = kwargs.get("num_workers", 0)
+        self._processes: list[asyncio.subprocess.Process] = []
 
     # ── lifecycle ─────────────────────────────────────────────────────────
+
     async def start(self) -> None:
         self._server = await ipc.serve(self.addr, self._on_worker_conn)
+        if self._num_workers > 0:
+            await self._spawn_workers(self._num_workers)
+
+    async def _spawn_workers(self, k: int) -> None:
+        log.info("supervisor: spawning %d worker processes", k)
+        for i in range(k):
+            wid = f"w{i}"
+            # Use sys.executable to ensure we use the same python interpreter
+            # Use -m runtime.entry to start the worker
+            cmd = [sys.executable, "-m", "runtime.entry", "--role", "worker", "--id", wid, "--addr", self.addr]
+            try:
+                proc = await asyncio.create_subprocess_exec(*cmd)
+                self._processes.append(proc)
+                log.info("supervisor: started worker %s (pid=%d)", wid, proc.pid)
+            except Exception:
+                log.exception("supervisor: failed to spawn worker %s", wid)
+
+
 
     async def stop(self) -> None:
+        # 1. Kill worker processes
+        for proc in self._processes:
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+        
+        if self._processes:
+            await asyncio.gather(*(proc.wait() for proc in self._processes), return_exceptions=True)
+        self._processes.clear()
+
+        # 2. Close IPC connections
+
         for w in list(self._workers.values()):
             w.close()
         self._workers.clear()

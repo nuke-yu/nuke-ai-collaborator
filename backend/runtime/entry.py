@@ -36,8 +36,8 @@ async def run_worker(worker_id: str, addr: str) -> None:
     await build_worker(worker_id, addr).run()
 
 
-async def run_supervisor(addr: str) -> None:
-    sup = build_supervisor(addr)
+async def run_supervisor(addr: str, num_workers: int = 0) -> None:
+    sup = build_supervisor(addr, num_workers=num_workers)
     await sup.start()
     # TODO(CELL-13/WS shell): start APScheduler + FastAPI WS termination here.
     await asyncio.Event().wait()   # run until cancelled
@@ -49,13 +49,14 @@ def main(argv=None) -> None:
     p.add_argument("--role", required=True, choices=["supervisor", "worker"])
     p.add_argument("--id", default="w0", help="worker id (worker role)")
     p.add_argument("--addr", default=None, help="IPC address (default per platform)")
+    p.add_argument("--workers", type=int, default=0, help="number of worker processes to spawn (supervisor role)")
     args = p.parse_args(argv)
 
     default_name = "supervisor" if args.role == "supervisor" else args.id
     addr = args.addr or ipc.make_addr(default_name)
 
     if args.role == "supervisor":
-        asyncio.run(run_supervisor(addr))
+        asyncio.run(run_supervisor(addr, num_workers=args.workers))
     else:
         asyncio.run(run_worker(args.id, addr))
 
