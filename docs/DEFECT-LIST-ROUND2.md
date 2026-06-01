@@ -244,14 +244,14 @@
 - **文件**：`useWebSocket.js:33`（3s 重连，无 catch-up）；后端 bus fire-and-forget 不持久化。
 - **影响**：一次 WS 抖动 = 该客户端永久丢失这段时间的消息/状态，直到手动切群 refetch。
 - **修复**：消息引入单调 seq，重连带 `last_seq` 回放；或重连后强制增量 refetch。
-- **状态**：⛔ 未修复
+- **状态**：✅ 已修复（后端支持 `after_id` 抓取，前端重连后自动追回缺失消息）
 
 ## DFT-079 🟡 `handleWsMessage` 闭包陈旧
 
 - **文件**：`useWebSocket.js:19-21,41`（`socket.onmessage` 闭包捕获上次 connect 的 `onMessage`，eslint exhaustive-deps 实锤）
 - **问题**：当前靠"几乎全用函数式 `setState`"侥幸不出错；谁直接读 state 变量就会读到切群那刻的陈旧值。
 - **修复**：`useRef` 持有最新 handler，`onmessage` 调 `ref.current(data)`。
-- **状态**：⛔ 未修复
+- **状态**：✅ 已修复（使用 `useRef` 始终调用最新的 `onMessage` 处理函数）
 
 ## DFT-080 🟡 EventBus 无背压 / 无 maxsize
 
