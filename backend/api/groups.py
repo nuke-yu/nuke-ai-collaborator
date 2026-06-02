@@ -1,4 +1,7 @@
 import json
+import os
+import shutil
+import logging
 from datetime import datetime
 from urllib.parse import quote
 from fastapi import APIRouter, HTTPException
@@ -9,7 +12,33 @@ from ws_manager import manager
 from models import AddMemberRequest, CreateGroupRequest, UpdateGroupRequest
 from workspace import init_bot_workspace, init_group_workspace
 
+log = logging.getLogger(__name__)
 router = APIRouter()
+
+
+async def _try_exec(conn, sql, params):
+    """Best-effort DELETE that tolerates a missing table/column across DB variants."""
+    try:
+        await conn.execute(sql, params)
+    except Exception:
+        pass
+
+
+# Rows owned by / referencing a member. Split so we can run the right set against
+# the central DB (member row + central FK refs) vs the per-group private DB
+# (messages / sessions / reactions / read state).
+_CENTRAL_REFS = (
+    "DELETE FROM permission_rules WHERE bot_id=?",
+    "DELETE FROM cron_jobs WHERE bot_id=?",
+    "DELETE FROM role_summaries WHERE bot_id=?",
+)
+_MEMBER_DATA = (
+    "DELETE FROM session_events WHERE session_id IN (SELECT id FROM agent_sessions WHERE bot_id=?)",
+    "DELETE FROM agent_sessions WHERE bot_id=?",
+    "DELETE FROM messages WHERE member_id=?",
+    "DELETE FROM message_reactions WHERE member_id=?",
+    "DELETE FROM member_read WHERE member_id=?",
+)
 
 
 @router.get("/api/groups")
@@ -103,18 +132,38 @@ async def add_member(group_id: int, req: AddMemberRequest):
 
 @router.delete("/api/groups/{group_id}/members/{member_id}")
 async def remove_member(group_id: int, member_id: int):
+    """Fully purge a member: its row + all DB data + its on-disk workspace.
+
+    Data is split across the central DB (member row, permission_rules, cron_jobs,
+    role_summaries) and the group's private DB (messages, agent_sessions, reactions,
+    read state); the workspace lives on disk under workspaces/bot_<id>/.
+    """
+    # 1. Central DB: FK-referencing rows + member-owned data + the member row.
     async with write_connect() as db:
-        # Cascade-clean central rows that FK-reference members (the schema has no
-        # ON DELETE CASCADE), so deleting a bot that has permission rules / cron
-        # jobs doesn't fail with a foreign-key error. cron_jobs only exists in the
-        # split central schema, so guard it.
-        await db.execute("DELETE FROM permission_rules WHERE bot_id=?", (member_id,))
-        try:
-            await db.execute("DELETE FROM cron_jobs WHERE bot_id=?", (member_id,))
-        except Exception:
-            pass
+        for sql in (*_CENTRAL_REFS, *_MEMBER_DATA):
+            await _try_exec(db, sql, (member_id,))
         await db.execute("DELETE FROM members WHERE id=? AND group_id=?", (member_id, group_id))
         await db.commit()
+
+    # 2. Group's private DB: messages / sessions / reactions / read state.
+    try:
+        from runtime.dbpaths import group_db_path
+        gpath = group_db_path(group_id)
+        if os.path.exists(gpath):
+            async with write_connect(gpath) as gdb:
+                for sql in _MEMBER_DATA:
+                    await _try_exec(gdb, sql, (member_id,))
+                await gdb.commit()
+    except Exception:
+        log.exception("remove_member: group-db cleanup failed for member %s", member_id)
+
+    # 3. Filesystem: the bot's private workspace directory.
+    try:
+        from skills.constants import WORKSPACE_ROOT
+        shutil.rmtree(os.path.join(str(WORKSPACE_ROOT), f"bot_{member_id}"), ignore_errors=True)
+    except Exception:
+        log.exception("remove_member: workspace cleanup failed for member %s", member_id)
+
     # Keep other connected clients' member lists in sync.
     await manager.broadcast(group_id, {"type": "member_removed", "member_id": member_id})
     return {"ok": True}
