@@ -172,8 +172,10 @@ export default function ChatWindow({ memberId, isDark, onToggleTheme, onLogout }
       setTyping({ sender_name: data.sender_name, avatar_color: data.avatar_color })
     } else if (data.type === 'message') {
       setTyping(null)
-      setMessages((prev) => [...prev, data])
-      syncCache(msgs => [...msgs, data])
+      // Dedup by id: a reconnect / duplicate broadcast can deliver the same
+      // message twice, which would otherwise render it twice.
+      setMessages((prev) => prev.some(m => m.id === data.id) ? prev : [...prev, data])
+      syncCache(msgs => msgs.some(m => m.id === data.id) ? msgs : [...msgs, data])
       if (data.member_id !== memberId) notify(data.sender_name, data.content)
     } else if (data.type === 'stream_start') {
       setTyping(null)

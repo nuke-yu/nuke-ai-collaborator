@@ -137,7 +137,7 @@ class WSClientProxy:
     async def close(self):
         """Called by Supervisor when this client is evicted (H-4)."""
         # 1. Disconnect from manager
-        gone_id = manager.disconnect(self.websocket, self.group_id)
+        gone_id = await manager.disconnect(self.websocket, self.group_id)
         if gone_id:
             # 2. Broadcast offline presence
             from bus.events import Presence
@@ -229,7 +229,7 @@ async def websocket_endpoint(websocket: WebSocket, group_id: int, member_id: int
                 continue
 
     except WebSocketDisconnect:
-        gone_id = manager.disconnect(websocket, group_id)
+        gone_id = await manager.disconnect(websocket, group_id)
         if gone_id:
             presence_offline = Presence(group_id=group_id, member_id=gone_id, online=False)
             ev_dict = dataclasses.asdict(presence_offline)
