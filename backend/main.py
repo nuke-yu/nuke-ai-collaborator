@@ -26,6 +26,7 @@ from api.workflow import router as workflow_router
 from api.workspace import router as workspace_router
 from api.sessions import router as sessions_router
 from api.auth import router as auth_router
+from api.config import router as config_router
 from permissions.routes import router as permissions_router
 from executors import registry
 
@@ -89,6 +90,7 @@ app.include_router(workflow_router, dependencies=[Depends(auth.get_current_user)
 app.include_router(workspace_router, dependencies=[Depends(auth.get_current_user)])
 app.include_router(sessions_router, dependencies=[Depends(auth.get_current_user)])
 app.include_router(permissions_router, dependencies=[Depends(auth.get_current_user)])
+app.include_router(config_router, dependencies=[Depends(auth.get_current_user)])
 app.include_router(scheduler.router)
 app.include_router(auth_router)
 
