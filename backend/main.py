@@ -36,7 +36,12 @@ async def lifespan(app: FastAPI):
     # 1. Initialize central DB (routing/members/templates)
     tracing.setup_structured_logging()
     await db.init_central_db()
-    
+
+    # 1b. Migrate any env-provided API keys into app_config.json so the file is the
+    #     single source of truth the frontend manages (config consolidation).
+    from config import bootstrap_from_env
+    bootstrap_from_env()
+
     # 2. Discover plugins (needed for metadata APIs like /api/plugins)
     registry.discover()
     

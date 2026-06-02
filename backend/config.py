@@ -23,13 +23,29 @@ def write_config(data: dict):
     CONFIG_PATH.write_text(json.dumps(data, indent=2, ensure_ascii=False))
 
 def get_key(field: str) -> str:
-    """Return config value, falling back to the corresponding env var."""
+    """Single source of truth: app_config.json.
+
+    Env vars are migrated into the file once at startup (bootstrap_from_env), so the
+    file is authoritative and the frontend fully controls every key — no hidden
+    env/file dual source to drift out of sync.
+    """
+    return (read_config().get(field) or "").strip()
+
+
+def bootstrap_from_env() -> None:
+    """One-time migration: copy any env-provided keys into app_config.json for fields
+    the file doesn't already define, so the file becomes the single editable source.
+    Called once on app startup."""
     cfg = read_config()
-    val = cfg.get(field, "").strip()
-    if val:
-        return val
-    env_var = FIELDS.get(field, "")
-    return os.getenv(env_var, "")
+    changed = False
+    for field, env_var in FIELDS.items():
+        if not (cfg.get(field) or "").strip():
+            env_val = (os.getenv(env_var) or "").strip()
+            if env_val:
+                cfg[field] = env_val
+                changed = True
+    if changed:
+        write_config(cfg)
 
 def _preview(val: str) -> str:
     if not val:
