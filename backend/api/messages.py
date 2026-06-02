@@ -46,7 +46,7 @@ async def get_pins(group_id: int):
 
 @router.post("/api/groups/{group_id}/messages/{msg_id}/pin")
 async def pin_msg(group_id: int, msg_id: int):
-    async with get_db() as db:
+    async with write_connect() as db:
         await pin_message(db, group_id, msg_id)
         pins = await get_pinned_messages(db, group_id)
     await manager.broadcast(group_id, {"type": "pins_updated", "pins": pins})
@@ -55,7 +55,7 @@ async def pin_msg(group_id: int, msg_id: int):
 
 @router.delete("/api/groups/{group_id}/messages/{msg_id}/pin")
 async def unpin_msg(group_id: int, msg_id: int):
-    async with get_db() as db:
+    async with write_connect() as db:
         await unpin_message(db, group_id, msg_id)
         pins = await get_pinned_messages(db, group_id)
     await manager.broadcast(group_id, {"type": "pins_updated", "pins": pins})
@@ -92,7 +92,7 @@ async def get_group_reactions(group_id: int):
 
 @router.post("/api/messages/{msg_id}/reactions")
 async def toggle_reaction_endpoint(msg_id: int, req: ReactionRequest):
-    async with get_db() as db:
+    async with write_connect() as db:
         meta = await get_message_meta(db, msg_id)
         if not meta:
             raise HTTPException(404, "Message not found")

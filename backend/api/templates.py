@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from db import get_db
+from db import get_db, write_connect
 from models import RoleTemplateRequest
 
 router = APIRouter()
@@ -15,7 +15,7 @@ async def get_templates():
 
 @router.post("/api/templates")
 async def create_template(req: RoleTemplateRequest):
-    async with get_db() as db:
+    async with write_connect() as db:
         async with db.execute(
             "INSERT INTO role_templates (name, role, system_prompt, avatar_color) VALUES (?,?,?,?)",
             (req.name, req.role, req.system_prompt, req.avatar_color)
@@ -27,7 +27,7 @@ async def create_template(req: RoleTemplateRequest):
 
 @router.put("/api/templates/{template_id}")
 async def update_template(template_id: int, req: RoleTemplateRequest):
-    async with get_db() as db:
+    async with write_connect() as db:
         await db.execute(
             "UPDATE role_templates SET name=?, role=?, system_prompt=?, avatar_color=? WHERE id=?",
             (req.name, req.role, req.system_prompt, req.avatar_color, template_id)
@@ -39,7 +39,7 @@ async def update_template(template_id: int, req: RoleTemplateRequest):
 
 @router.delete("/api/templates/{template_id}")
 async def delete_template(template_id: int):
-    async with get_db() as db:
+    async with write_connect() as db:
         await db.execute("DELETE FROM role_templates WHERE id=?", (template_id,))
         await db.commit()
     return {"ok": True}

@@ -3,7 +3,7 @@ from datetime import datetime
 from urllib.parse import quote
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
-from db import (get_db, get_group, get_members, get_all_messages, get_member_stats,
+from db import (get_db, write_connect, get_group, get_members, get_all_messages, get_member_stats,
                       update_member_setting, update_member_full, clear_bot_context)
 from ws_manager import manager
 from models import AddMemberRequest, CreateGroupRequest, UpdateGroupRequest
@@ -27,7 +27,7 @@ async def get_all_groups():
 
 @router.post("/api/groups")
 async def create_group(req: CreateGroupRequest):
-    async with get_db() as db:
+    async with write_connect() as db:
         async with db.execute("INSERT INTO groups (name) VALUES (?)", (req.name,)) as cur:
             group_id = cur.lastrowid
         await db.commit()
@@ -47,7 +47,7 @@ async def get_group_info(group_id: int):
 
 @router.put("/api/groups/{group_id}")
 async def update_group(group_id: int, req: UpdateGroupRequest):
-    async with get_db() as db:
+    async with write_connect() as db:
         if req.name is not None:
             name = req.name.strip()
             if not name:
@@ -67,7 +67,7 @@ async def update_group(group_id: int, req: UpdateGroupRequest):
 
 @router.post("/api/groups/{group_id}/members")
 async def add_member(group_id: int, req: AddMemberRequest):
-    async with get_db() as db:
+    async with write_connect() as db:
         async with db.execute(
             "SELECT id FROM members WHERE group_id = ? AND name = ? AND type = ?",
             (group_id, req.name, req.type)
@@ -103,7 +103,7 @@ async def add_member(group_id: int, req: AddMemberRequest):
 
 @router.delete("/api/groups/{group_id}/members/{member_id}")
 async def remove_member(group_id: int, member_id: int):
-    async with get_db() as db:
+    async with write_connect() as db:
         await db.execute("DELETE FROM members WHERE id=? AND group_id=?", (member_id, group_id))
         await db.commit()
     return {"ok": True}
@@ -111,7 +111,7 @@ async def remove_member(group_id: int, member_id: int):
 
 @router.put("/api/members/{member_id}")
 async def update_member(member_id: int, body: dict):
-    async with get_db() as db:
+    async with write_connect() as db:
         if 'auto_reply' in body and len(body) == 1:
             await update_member_setting(db, member_id, body.get("auto_reply"))
         else:
@@ -121,7 +121,7 @@ async def update_member(member_id: int, body: dict):
 
 @router.delete("/api/members/{member_id}/context")
 async def clear_context(member_id: int, group_id: int):
-    async with get_db() as db:
+    async with write_connect() as db:
         await clear_bot_context(db, member_id, group_id)
     return {"ok": True}
 

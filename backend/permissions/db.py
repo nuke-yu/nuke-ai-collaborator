@@ -21,7 +21,7 @@ async def load_rules(bot_id: int) -> list[Rule]:
 
 
 async def save_rule(bot_id: int, tool_pattern: str, args_pattern: str = "", action: str = "allow") -> int:
-    async with _db.connect(_DB_PATH) as db:
+    async with _db.write_connect(_DB_PATH) as db:
         cur = await db.execute(
             "INSERT INTO permission_rules (bot_id, tool_pattern, args_pattern, action) VALUES (?,?,?,?)",
             (bot_id, tool_pattern, args_pattern, action),
@@ -31,6 +31,6 @@ async def save_rule(bot_id: int, tool_pattern: str, args_pattern: str = "", acti
 
 
 async def delete_rule(rule_id: int) -> None:
-    async with _db.connect(_DB_PATH) as db:
+    async with _db.write_connect(_DB_PATH) as db:
         await db.execute("DELETE FROM permission_rules WHERE id=?", (rule_id,))
         await db.commit()
