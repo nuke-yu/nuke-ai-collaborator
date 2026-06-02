@@ -15,7 +15,8 @@ import db as _db
 
 async def save_state(group_id: int, orchestrator_id: str, state: dict) -> None:
     """整行覆写某个 group 的编排快照（status 置 active）。"""
-    async with _db.connect() as conn:
+    # 写操作必须走串行化 writer（DFT-053），避免绕过单锁导致 database is locked。
+    async with _db.write_connect() as conn:
         await conn.execute(
             """INSERT INTO workflow_state (group_id, orchestrator_id, state_json, status, updated_at)
                VALUES (?, ?, ?, 'active', datetime('now'))
@@ -31,7 +32,7 @@ async def save_state(group_id: int, orchestrator_id: str, state: dict) -> None:
 
 async def clear_state(group_id: int) -> None:
     """工作流结束/被结束时删除快照。"""
-    async with _db.connect() as conn:
+    async with _db.write_connect() as conn:
         await conn.execute("DELETE FROM workflow_state WHERE group_id = ?", (group_id,))
         await conn.commit()
 

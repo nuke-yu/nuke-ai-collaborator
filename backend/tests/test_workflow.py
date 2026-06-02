@@ -7,10 +7,14 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import db as database
+import db.writer as _writer_mod
 
 # Use a test database to isolate tests
 TEST_DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "test_chat.db")
 database.DB_PATH = TEST_DB_PATH
+# workflow_store writes through the serialized writer (db.write_connect), which
+# resolves its default from db.writer.DB_PATH — a separate module global. Patch it too.
+_writer_mod.DB_PATH = TEST_DB_PATH
 
 
 def _bot_entry(bot_id=2, name="WorkflowBot"):
