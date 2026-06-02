@@ -14,6 +14,7 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import db as _db_mod
+import db.writer as _writer_mod
 from db.schema import init_db
 import db.migrations as _migrations_mod
 
@@ -22,11 +23,17 @@ _TEST_DB = str(_HERE / "test_sessions.db")
 
 
 def _use_test_db():
+    # sessions.store writes through the serialized writer (db.write_connect),
+    # which resolves its default path from db.writer.DB_PATH — a *different*
+    # module global than db.DB_PATH. Patch both or writes land in the real DB.
     _db_mod.DB_PATH = _TEST_DB
+    _writer_mod.DB_PATH = _TEST_DB
 
 
 def _restore_db(orig):
+    # Both modules default to the same db/chat.db, so `orig` restores both.
     _db_mod.DB_PATH = orig
+    _writer_mod.DB_PATH = orig
 
 
 async def _seed_parents(group_id: int = 1, bot_ids=(1, 99)):

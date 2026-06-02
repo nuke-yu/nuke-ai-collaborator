@@ -11,7 +11,7 @@ import asyncio
 
 import logging
 
-from db import get_db, get_members, get_messages, save_message
+from db import get_db, write_connect, get_members, get_messages, save_message
 from bus import bus
 from bus.events import WorkflowUpdate
 from core import bg, workflow_store
@@ -23,7 +23,10 @@ log = logging.getLogger(__name__)
 
 
 async def _post_system_msg(group_id: int, sender_bot_id: int, text: str) -> None:
-    async with get_db() as db:
+    # save_message is a WRITE — it must go through the serialized writer
+    # (db.write_connect), not the plain read connection, or it bypasses the
+    # per-DB write lock and re-introduces "database is locked" contention.
+    async with write_connect() as db:
         ann_id = await save_message(db, group_id, sender_bot_id, text)
         recent = await get_messages(db, group_id, limit=3)
     saved = next((m for m in recent if m["id"] == ann_id), {})

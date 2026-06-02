@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, patch, MagicMock
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import db as _db_mod
+import db.writer as _writer_mod
 from db.schema import init_db
 
 _HERE = Path(__file__).parent.parent
@@ -15,7 +16,12 @@ _TEST_DB = str(_HERE / "test_recovery_prompt.db")
 class TestRecoveryPrompt(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self._orig = _db_mod.DB_PATH
+        # sessions.store writes via the serialized writer (db.write_connect),
+        # which resolves from db.writer.DB_PATH — patch it too or recover_all's
+        # status/snapshot writes hit the real DB. (See test_smoke_dispatch.)
+        self._orig_writer = _writer_mod.DB_PATH
         _db_mod.DB_PATH = _TEST_DB
+        _writer_mod.DB_PATH = _TEST_DB
         if Path(_TEST_DB).exists():
             Path(_TEST_DB).unlink()
         await init_db()
@@ -32,6 +38,7 @@ class TestRecoveryPrompt(unittest.IsolatedAsyncioTestCase):
 
     async def asyncTearDown(self):
         _db_mod.DB_PATH = self._orig
+        _writer_mod.DB_PATH = self._orig_writer
         if Path(_TEST_DB).exists():
             Path(_TEST_DB).unlink()
 

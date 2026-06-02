@@ -14,7 +14,7 @@ async def create_session(
     parent_id: str | None = None,
     executor_id: str = "tool_loop_v1",
 ) -> str:
-    async with _db.connect() as conn:
+    async with _db.write_connect() as conn:
         await conn.execute(
             """INSERT INTO agent_sessions
                (id, parent_id, bot_id, group_id, executor_id, config_json, user_message)
@@ -27,7 +27,7 @@ async def create_session(
 
 
 async def append_event(session_id: str, event_type: str, payload: dict) -> None:
-    async with _db.connect() as conn:
+    async with _db.write_connect() as conn:
         await conn.execute(
             "INSERT INTO session_events (session_id, event_type, payload) VALUES (?, ?, ?)",
             (session_id, event_type, json.dumps(payload, ensure_ascii=False)),
@@ -86,7 +86,7 @@ async def get_events(session_id: str) -> list[dict]:
 
 
 async def update_session_status(session_id: str, status: str) -> None:
-    async with _db.connect() as conn:
+    async with _db.write_connect() as conn:
         await conn.execute(
             "UPDATE agent_sessions SET status = ?, updated_at = datetime('now') WHERE id = ?",
             (status, session_id),
@@ -111,7 +111,7 @@ async def get_orphaned_sessions(group_id: int | None = None) -> list[dict]:
 
 
 async def save_snapshot(session_id: str, messages: list) -> None:
-    async with _db.connect() as conn:
+    async with _db.write_connect() as conn:
         await conn.execute(
             "UPDATE agent_sessions SET last_snapshot_json = ?, updated_at = datetime('now') WHERE id = ?",
             (json.dumps(messages, ensure_ascii=False), session_id),
@@ -126,7 +126,7 @@ async def add_tokens(
     cache_read_tokens: int = 0,
     cache_creation_tokens: int = 0,
 ) -> None:
-    async with _db.connect() as conn:
+    async with _db.write_connect() as conn:
         await conn.execute(
             """UPDATE agent_sessions
                SET input_tokens          = input_tokens          + ?,
