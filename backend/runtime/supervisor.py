@@ -211,6 +211,7 @@ class Supervisor:
             "workers": self._worker_stats,
             "active_workers": list(self._workers.keys()),
             "process_count": len(self._processes),
+            "browsers_by_group": {g: len(s) for g, s in self._browsers.items()},
         }
 
     async def reassign_group(self, group_id: int, new_worker_id: str) -> None:

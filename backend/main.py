@@ -154,6 +154,11 @@ class WSClientProxy:
             ev_dict["type"] = presence_offline.type
             await manager.broadcast(self.group_id, ev_dict)
 
+# Exactly ONE fan-out proxy per group (the supervisor layer needs one sink per
+# group; manager.broadcast already delivers to every connection in it).
+_group_proxies: dict[int, WSClientProxy] = {}
+
+
 @app.websocket("/ws/{group_id}/{member_id}")
 async def websocket_endpoint(websocket: WebSocket, group_id: int, member_id: int, token: str = None):
 
@@ -180,9 +185,14 @@ async def websocket_endpoint(websocket: WebSocket, group_id: int, member_id: int
 
     await manager.connect(websocket, group_id, member_id)
     
-    # 1. Register group proxy to supervisor for upstream fan-out
-    proxy = WSClientProxy(group_id, member_id, websocket)
-    sup_mod.supervisor.register_browser(group_id, proxy)
+    # 1. Reuse the group's single fan-out proxy (register it only for the first
+    #    connection). One proxy per *connection* would fan every worker event out
+    #    once per connection -> the bot's reply rendered N times.
+    proxy = _group_proxies.get(group_id)
+    if proxy is None:
+        proxy = WSClientProxy(group_id, member_id, websocket)
+        _group_proxies[group_id] = proxy
+        sup_mod.supervisor.register_browser(group_id, proxy)
     
     # 2. Synchronize initial UI state
     await websocket.send_json({
@@ -242,11 +252,14 @@ async def websocket_endpoint(websocket: WebSocket, group_id: int, member_id: int
             ev_dict = dataclasses.asdict(presence_offline)
             ev_dict["type"] = presence_offline.type
             await manager.broadcast(group_id, ev_dict)
-        
-        # If last client gone, cleanup registration and notify worker
+
+        # Last connection left → drop the group's single fan-out proxy and abort
+        # any group-wide pending tasks. (While other connections remain, the one
+        # proxy keeps serving them, so we don't touch it per-disconnect.)
         if not manager.get_online_member_ids(group_id):
-            sup_mod.supervisor.unregister_browser(group_id, proxy)
-            # Forward 'abort' to worker to cancel any group-wide pending asks/tasks
+            p = _group_proxies.pop(group_id, None)
+            if p:
+                sup_mod.supervisor.unregister_browser(group_id, p)
             try:
                 await sup_mod.supervisor.send_to_worker(group_id, ipc.protocol.envelope(
                     ipc.protocol.ABORT, group_id=group_id
