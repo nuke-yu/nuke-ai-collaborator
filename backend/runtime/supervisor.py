@@ -36,7 +36,7 @@ class Supervisor:
         self._workers: dict = {}                 # worker_id -> StreamWriter
         self._browsers: dict[int, set] = {}      # group_id -> {client}
         self._route = route or self._default_route
-        self._routing_cache: dict[int, str] = {}  # group_id -> worker_id
+        self._routing_cache: dict[int, tuple[str, float]] = {}  # group_id -> (worker_id, expire_at)
         self._worker_stats: dict[str, dict] = {} # worker_id -> latest stats
         self._pending_handoffs: dict[int, asyncio.Future] = {} # group_id -> future
         self._on_unread = on_unread              # async (group_id, payload) -> None
@@ -189,13 +189,18 @@ class Supervisor:
 
 
     async def _default_route(self, group_id: int) -> str:
-        if group_id in self._routing_cache:
-            return self._routing_cache[group_id]
+        import time
+        cached = self._routing_cache.get(group_id)
+        if cached:
+            wid, expire_at = cached
+            if time.time() < expire_at:
+                return wid
         
         async with db.global_db() as cdb:
             wid = await queries.get_group_assigned_worker(cdb, group_id)
         
-        self._routing_cache[group_id] = wid
+        # M-6: Cache for 60 seconds to allow for external DB updates
+        self._routing_cache[group_id] = (wid, time.time() + 60.0)
         return wid
     def get_stats(self) -> dict:
         return {
@@ -212,15 +217,18 @@ class Supervisor:
             await cdb.commit()
             
         # 2. Check who currently owns it in memory
-        old_wid = self._routing_cache.get(group_id)
+        cached_old = self._routing_cache.get(group_id)
+        old_wid = cached_old[0] if cached_old else None
         if not old_wid or old_wid == new_worker_id:
-            self._routing_cache[group_id] = new_worker_id
+            import time
+            self._routing_cache[group_id] = (new_worker_id, time.time() + 3600.0)
             return
             
         old_writer = self._workers.get(old_wid)
         if not old_writer:
             # Old worker is dead, safe to just update cache
-            self._routing_cache[group_id] = new_worker_id
+            import time
+            self._routing_cache[group_id] = (new_worker_id, time.time() + 3600.0)
             return
 
         # 3. Handoff Protocol
@@ -241,7 +249,8 @@ class Supervisor:
         finally:
             self._pending_handoffs.pop(group_id, None)
             # 4. Point traffic to new worker
-            self._routing_cache[group_id] = new_worker_id
+            import time
+            self._routing_cache[group_id] = (new_worker_id, time.time() + 3600.0)
 
 # Global instance used by the WS shell and Scheduler
 supervisor: 'Supervisor | None' = None

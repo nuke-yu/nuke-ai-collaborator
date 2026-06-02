@@ -49,7 +49,7 @@ class TestCell15Routing(unittest.IsolatedAsyncioTestCase):
         # 1. Initial route (cold cache)
         wid = await sup._default_route(7)
         self.assertEqual(wid, "w_seven")
-        self.assertEqual(sup._routing_cache[7], "w_seven")
+        self.assertEqual(sup._routing_cache[7][0], "w_seven")
 
         # 2. Change DB but check cache (warm cache)
         async with db.write_connect() as c:

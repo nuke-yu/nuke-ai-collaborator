@@ -28,7 +28,7 @@ class TestCell18Handoff(unittest.IsolatedAsyncioTestCase):
         
         sup._workers["w1"] = w1_writer
         sup._workers["w2"] = w2_writer
-        sup._routing_cache[77] = "w1"
+        sup._routing_cache[77] = ("w1", 9999999999.0)
         
         with patch("db.global_db", return_value=MockDB()):
             with patch("runtime.ipc.send_msg", new_callable=AsyncMock) as mock_send:
@@ -52,7 +52,7 @@ class TestCell18Handoff(unittest.IsolatedAsyncioTestCase):
                 ))
                 
                 # Verify routing cache was updated AFTER ack
-                self.assertEqual(sup._routing_cache[77], "w2")
+                self.assertEqual(sup._routing_cache[77][0], "w2")
 
     async def test_handoff_timeout(self):
         sup = Supervisor("dummy_addr")
@@ -65,7 +65,7 @@ class TestCell18Handoff(unittest.IsolatedAsyncioTestCase):
             
         w1_writer = AsyncMock()
         sup._workers["w1"] = w1_writer
-        sup._routing_cache[77] = "w1"
+        sup._routing_cache[77] = ("w1", 9999999999.0)
         
         with patch("db.global_db", return_value=MockDB()):
             with patch("runtime.ipc.send_msg", new_callable=AsyncMock):
@@ -74,7 +74,7 @@ class TestCell18Handoff(unittest.IsolatedAsyncioTestCase):
                     await sup.reassign_group(77, "w2")
                     
                     # Routing should STILL be updated to avoid being stuck forever
-                    self.assertEqual(sup._routing_cache[77], "w2")
+                    self.assertEqual(sup._routing_cache[77][0], "w2")
 
 if __name__ == "__main__":
     unittest.main()
