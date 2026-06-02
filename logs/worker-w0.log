@@ -1,7 +1,0 @@
-{"timestamp": "2026-06-01 18:43:57,444", "level": "INFO", "logger": "runtime.supervisor", "message": "supervisor: worker w0 connected", "trace_id": "-", "group_id": "-"}
-{"timestamp": "2026-06-01 18:43:57,472", "level": "INFO", "logger": "runtime.supervisor", "message": "supervisor: worker w0 connected", "trace_id": "-", "group_id": "-"}
-{"timestamp": "2026-06-01 18:43:57,507", "level": "INFO", "logger": "httpx", "message": "HTTP Request: GET http://test/api/system/status \"HTTP/1.1 200 OK\"", "trace_id": "-", "group_id": "-"}
-{"timestamp": "2026-06-01 18:43:57,541", "level": "WARNING", "logger": "skills.traits", "message": "Trait file not found: /Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/workspaces/system/traits/non_existent.md", "trace_id": "-", "group_id": "-"}
-{"timestamp": "2026-06-01 18:43:59,602", "level": "INFO", "logger": "runtime.lifecycle", "message": "lifecycle: hydrating group 7", "trace_id": "tr-1", "group_id": 7}
-{"timestamp": "2026-06-01 18:44:02,772", "level": "INFO", "logger": "core.orchestration.registry", "message": "Registered orchestrator: workflow_v1", "trace_id": "-", "group_id": "-"}
-{"timestamp": "2026-06-01 18:44:02,776", "level": "INFO", "logger": "core.orchestration.registry", "message": "Registered orchestrator: round_robin_v1", "trace_id": "-", "group_id": "-"}
