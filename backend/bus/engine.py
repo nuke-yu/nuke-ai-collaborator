@@ -10,6 +10,8 @@ bus/engine.py — EventBus 核心
   broadcast(group_id, dict)  — 兼容旧接口（executors 的 ctx.broadcaster 用）
 """
 import asyncio
+import threading
+import threading
 import dataclasses
 from runtime import tracing
 import logging
@@ -52,6 +54,8 @@ class EventBus:
         self._typed: dict[str, list[asyncio.Queue]] = {}
         # wildcard：所有事件都推送
         self._wildcard: list[asyncio.Queue] = []
+        self._lock = threading.Lock()
+        self._lock = threading.Lock()
 
     # ── 发布 ──────────────────────────────────────────────────────────────────
 
@@ -86,13 +90,15 @@ class EventBus:
     def subscribe(self, event_cls, maxsize: int = 1000) -> Subscription:
         """typed 订阅：只收指定 event type 的事件。"""
         q: asyncio.Queue = asyncio.Queue(maxsize=maxsize)
-        self._typed.setdefault(event_cls.type, []).append(q)
+        with self._lock:
+            self._typed.setdefault(event_cls.type, []).append(q)
 
         def cleanup():
-            try:
-                self._typed[event_cls.type].remove(q)
-            except (KeyError, ValueError):
-                pass
+            with self._lock:
+                try:
+                    self._typed[event_cls.type].remove(q)
+                except (KeyError, ValueError):
+                    pass
 
         log.debug("bus.subscribe type=%s", event_cls.type)
         return Subscription(q, cleanup)
@@ -100,13 +106,15 @@ class EventBus:
     def subscribe_all(self, maxsize: int = 1000) -> Subscription:
         """wildcard 订阅：收全部事件（WS adapter 使用）。"""
         q: asyncio.Queue = asyncio.Queue(maxsize=maxsize)
-        self._wildcard.append(q)
+        with self._lock:
+            self._wildcard.append(q)
 
         def cleanup():
-            try:
-                self._wildcard.remove(q)
-            except ValueError:
-                pass
+            with self._lock:
+                try:
+                    self._wildcard.remove(q)
+                except ValueError:
+                    pass
 
         log.debug("bus.subscribe_all")
         return Subscription(q, cleanup)
