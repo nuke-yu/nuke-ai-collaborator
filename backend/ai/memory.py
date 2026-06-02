@@ -1,3 +1,4 @@
+from core import config
 import asyncio
 import logging
 from functools import partial
@@ -7,7 +8,7 @@ from db import get_db
 
 log = logging.getLogger(__name__)
 
-SUMMARY_THRESHOLD = 15
+SUMMARY_THRESHOLD = config.SUMMARY_THRESHOLD
 
 # ── Chroma 初始化（懒加载，首次使用时自动下载 ~80MB embedding 模型）──
 _chroma_client = None

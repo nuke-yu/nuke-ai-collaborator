@@ -111,3 +111,13 @@
 {"timestamp": "2026-06-02 08:04:47,995", "level": "INFO", "logger": "skills.watcher", "message": "SkillWatcher stopped", "trace_id": "-", "group_id": "-"}
 {"timestamp": "2026-06-02 08:05:01,118", "level": "INFO", "logger": "runtime.worker", "message": "worker w2: downstream closed", "trace_id": "-", "group_id": "-"}
 {"timestamp": "2026-06-02 08:05:01,127", "level": "INFO", "logger": "skills.watcher", "message": "SkillWatcher stopped", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:14:24,060", "level": "INFO", "logger": "runtime.worker", "message": "worker w2: downstream closed", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:14:24,065", "level": "INFO", "logger": "skills.watcher", "message": "SkillWatcher stopped", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:14:32,618", "level": "INFO", "logger": "runtime.worker", "message": "worker w2: downstream closed", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:14:32,620", "level": "INFO", "logger": "skills.watcher", "message": "SkillWatcher stopped", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:14:38,483", "level": "INFO", "logger": "runtime.worker", "message": "worker w2: downstream closed", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:14:38,484", "level": "INFO", "logger": "skills.watcher", "message": "SkillWatcher stopped", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:14:43,471", "level": "INFO", "logger": "runtime.worker", "message": "worker w2: downstream closed", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:14:43,472", "level": "INFO", "logger": "skills.watcher", "message": "SkillWatcher stopped", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:14:52,304", "level": "INFO", "logger": "runtime.worker", "message": "worker w2: downstream closed", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:14:52,308", "level": "INFO", "logger": "skills.watcher", "message": "SkillWatcher stopped", "trace_id": "-", "group_id": "-"}

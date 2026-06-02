@@ -1,4 +1,5 @@
 import asyncio
+from core import config
 from fastapi import WebSocket
 from typing import Dict, List
 
@@ -6,7 +7,7 @@ from typing import Dict, List
 # broadcast loop. A half-open TCP socket makes send_json await indefinitely,
 # stalling event delivery for the whole app (the bus adapter fans out through
 # here serially). On timeout we treat the client as dead and disconnect it.
-_SEND_TIMEOUT = 10.0
+_SEND_TIMEOUT = config.WS_SEND_TIMEOUT
 
 
 class WSManager:

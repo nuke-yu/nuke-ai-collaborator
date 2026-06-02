@@ -7,6 +7,7 @@ from executors.base import (
     BotExecutor, ExecutionContext, ExecutionResult,
     PluginManifest, WorkspaceConfig, CollabConfig, build_group_section,
 )
+from core import config
 from executors import tool_executor
 from executors.plugins.workspace_tools import (
     _IS_WINDOWS, _WORKSPACE_TOOLS,
@@ -26,7 +27,7 @@ import executors.compact as compact
 from core import bg
 from core.orchestration.ai_service import AIService
 
-_DOOM_LOOP_THRESHOLD = 5  # breaks on the Nth consecutive tool-only iteration (inclusive)
+_DOOM_LOOP_THRESHOLD = config.DOOM_LOOP_THRESHOLD  # breaks on the Nth consecutive tool-only iteration (inclusive)
 
 
 def _acc_usage(target: list, result: dict) -> None:

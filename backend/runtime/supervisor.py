@@ -21,6 +21,7 @@ import asyncio
 import sys
 import logging
 
+from core import config
 from runtime import tracing
 from runtime import ipc
 import db
@@ -159,7 +160,7 @@ class Supervisor:
         # client.send() could hang indefinitely and stall the Supervisor's
         # upstream IPC receiver, delaying broadcasts for ALL healthy clients
         # in ALL groups.
-        _SEND_TIMEOUT = 5.0
+        _SEND_TIMEOUT = config.SUPERVISOR_SEND_TIMEOUT
         dead = []
         clients = list(self._browsers.get(group_id, ()))
         

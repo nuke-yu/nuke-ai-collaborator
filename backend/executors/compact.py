@@ -18,6 +18,7 @@ import logging
 from pathlib import Path
 from typing import Optional
 
+from core import config
 from ai.client import call_ai_once
 
 logger = logging.getLogger(__name__)
@@ -26,7 +27,7 @@ logger = logging.getLogger(__name__)
 # Constants — aligned with Claude Code's autoCompact.ts
 # ---------------------------------------------------------------------------
 MAX_OUTPUT_TOKENS_FOR_SUMMARY = 20_000   # reserve for summary output (p99.99 = 17,387)
-AUTOCOMPACT_BUFFER_TOKENS     = 13_000   # headroom buffer before threshold
+AUTOCOMPACT_BUFFER_TOKENS     = config.AUTOCOMPACT_BUFFER_TOKENS   # headroom buffer before threshold
 MAX_CONSECUTIVE_FAILURES      = 3        # circuit-breaker trip count
 
 MC_KEEP_RECENT_TOOL_RESULTS   = 5        # keep last N tool results intact (Strategy 1)
@@ -34,8 +35,8 @@ MC_CLEARED_MARKER             = "[旧工具结果已清除]"
 
 SNIP_KEEP_PAIRS               = 4        # min user/assistant pairs to keep (Strategy 2)
 
-_PRE_RUN_TOKEN_THRESHOLD      = 20_000   # pre-run compaction trigger
-_DB_COMPACTION_TOKEN_THRESHOLD = 30_000  # post-run DB compaction trigger
+_PRE_RUN_TOKEN_THRESHOLD      = config.PRE_RUN_TOKEN_THRESHOLD   # pre-run compaction trigger
+_DB_COMPACTION_TOKEN_THRESHOLD = config.DB_COMPACTION_TOKEN_THRESHOLD  # post-run DB compaction trigger
 _DB_COMPACTION_KEEP_RECENT    = 10       # DB messages protected from soft-delete
 
 REINJECT_CONTEXT_BUDGET       = 25_000   # max chars re-injected after compaction

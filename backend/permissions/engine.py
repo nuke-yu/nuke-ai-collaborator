@@ -1,3 +1,4 @@
+from core import config
 """
 Decision pipeline and ask-suspension mechanism.
 
@@ -23,7 +24,7 @@ from .models import Rule, Ruleset, _PendingRequest
 # Default-deny an unanswered ask after this many seconds. Backstops the case
 # where the connection stays open but nobody responds (DFT-031): without it the
 # tool-loop coroutine awaits forever and _pending grows unbounded.
-_ASK_TIMEOUT_SECONDS = 300
+_ASK_TIMEOUT_SECONDS = config.ASK_TIMEOUT_SECONDS
 
 # "once" grants scoped to (bot_id, group_id) → list of (tool_name, args_hash).
 # Each grant auto-allows exactly ONE future identical call, then is consumed

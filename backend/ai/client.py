@@ -1,3 +1,4 @@
+from core import config
 import asyncio
 import json
 import logging
@@ -65,7 +66,7 @@ class AIRateLimitError(AIError):
         super().__init__(f"API 限流，建议等待 {wait_seconds:.1f}s 后重试")
 
 
-_AI_RETRY_MAX = 3
+_AI_RETRY_MAX = config.AI_RETRY_MAX
 
 
 def _parse_retry_after(headers: dict) -> float:

@@ -13,6 +13,7 @@ import sys
 from pathlib import Path
 
 from executors.base import ExecutionContext, ExecutionResult, ToolDef
+from core import config
 from executors import tool_executor, registry as _executor_registry
 import workspace as _ws
 from skills import run_skill
@@ -130,7 +131,7 @@ _WORKSPACE_TOOLS = [
 # Spawn-agent support
 # ---------------------------------------------------------------------------
 
-_SPAWN_MAX_DEPTH = 3
+_SPAWN_MAX_DEPTH = config.SPAWN_MAX_DEPTH
 
 # Running background sub-agent tasks: task_id → asyncio.Task
 _bg_tasks: dict[str, asyncio.Task] = {}
@@ -411,7 +412,7 @@ def _resolve_shell_cwd(cwd: str, bot_id) -> tuple[Path | None, str]:
     return None, f"工作目录越界，必须位于工作区内：{cwd}"
 
 
-_TOOL_RESULT_MAX_CHARS = 20_000
+_TOOL_RESULT_MAX_CHARS = config.TOOL_RESULT_MAX_CHARS
 _TOOL_RESULT_HEAD_TAIL = _TOOL_RESULT_MAX_CHARS // 2
 
 
@@ -563,7 +564,7 @@ async def _handle_run_shell(
             break
     
     # Memory limit enforcement
-    _MEMORY_LIMIT_BYTES = 512 * 1024 * 1024  # 512 MB
+    _MEMORY_LIMIT_BYTES = config.SHELL_MEMORY_LIMIT_BYTES
     if not _IS_WINDOWS:
         # Wrap command in a subshell with ulimit (virtual memory limit) to prevent OOM
         safe_cmd = f"ulimit -v { _MEMORY_LIMIT_BYTES // 1024 } 2>/dev/null; {cmd}"
