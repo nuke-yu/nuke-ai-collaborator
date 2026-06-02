@@ -158,13 +158,16 @@ async def websocket_endpoint(websocket: WebSocket, group_id: int, member_id: int
         await websocket.close()
         return
     
-    # H-5: Verify that the member_id belongs to the authenticated user
+    # DFT-082: a valid token (a logged-in company user) is the access boundary —
+    # this is a trusted, internal shared workspace, not a public multi-tenant
+    # service, so we don't bind member_id to a specific user (members.user_id is
+    # not populated; the old check rejected EVERY connection). We still verify the
+    # member exists in this group so a client can't attach to a bogus member_id.
     async with db.global_db() as cdb:
-        async with cdb.execute("SELECT user_id FROM members WHERE id = ? AND group_id = ?", (member_id, group_id)) as cur:
-            row = await cur.fetchone()
-            if not row or row[0] != user_payload["uid"]:
+        async with cdb.execute("SELECT 1 FROM members WHERE id = ? AND group_id = ?", (member_id, group_id)) as cur:
+            if not await cur.fetchone():
                 await websocket.accept()
-                await websocket.send_json({"type": "auth_error", "message": "Unauthorized member access"})
+                await websocket.send_json({"type": "auth_error", "message": "Unknown member for this group"})
                 await websocket.close()
                 return
 

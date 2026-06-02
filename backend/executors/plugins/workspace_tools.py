@@ -152,7 +152,7 @@ async def _run_bg_agent(
     """Run a sub-agent in the background and inject result into parent's steer channel."""
     try:
         result = await _executor_registry.get(
-            sub_ctx.bot.get("executor_id", "simple_v1")
+            sub_ctx.bot.get("executor_id", "tool_loop_v1")
         ).run(sub_ctx)
         reply = result.full_text or "[子 Agent 未返回内容]"
     except asyncio.CancelledError:
@@ -210,7 +210,7 @@ async def _spawn_agent_handler(bot_name: str, task: str, background: bool = Fals
 
     try:
         result = await _executor_registry.get(
-            target.get("executor_id", "simple_v1")
+            target.get("executor_id", "tool_loop_v1")
         ).run(sub_ctx)
         return result.full_text or "[子 Agent 未返回内容]"
     except Exception as e:

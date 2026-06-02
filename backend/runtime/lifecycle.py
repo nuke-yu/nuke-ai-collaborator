@@ -97,7 +97,16 @@ class LifecycleManager:
         except Exception:
             pass
             
-        # 3. Clear VFS locks (M-5)\n        from workspace import clear_group_locks\n        clear_group_locks(gid)\n\n        # 4. Close DB writer
+        # 3. Clear this group's VFS path locks so they don't accumulate in a
+        # long-lived worker (M-5). Group tasks were aborted in step 1, so no
+        # in-flight file op should still hold one.
+        try:
+            from workspace import clear_group_locks
+            clear_group_locks(gid)
+        except Exception:
+            pass
+
+        # 4. Close DB writer
         await db.aclose_writer(group_db_path(gid))
 
     async def _evict_lru(self) -> None:
