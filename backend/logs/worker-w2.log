@@ -121,3 +121,100 @@
 {"timestamp": "2026-06-02 08:14:43,472", "level": "INFO", "logger": "skills.watcher", "message": "SkillWatcher stopped", "trace_id": "-", "group_id": "-"}
 {"timestamp": "2026-06-02 08:14:52,304", "level": "INFO", "logger": "runtime.worker", "message": "worker w2: downstream closed", "trace_id": "-", "group_id": "-"}
 {"timestamp": "2026-06-02 08:14:52,308", "level": "INFO", "logger": "skills.watcher", "message": "SkillWatcher stopped", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:22:52,726", "level": "INFO", "logger": "runtime.worker", "message": "worker w2: downstream closed", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:22:52,749", "level": "INFO", "logger": "skills.watcher", "message": "SkillWatcher stopped", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:23:04,030", "level": "INFO", "logger": "runtime.worker", "message": "worker w2: downstream closed", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:23:04,036", "level": "INFO", "logger": "skills.watcher", "message": "SkillWatcher stopped", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:25:16,138", "level": "INFO", "logger": "runtime.worker", "message": "worker w2: downstream closed", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:25:16,144", "level": "INFO", "logger": "skills.watcher", "message": "SkillWatcher stopped", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:25:19,186", "level": "INFO", "logger": "runtime.worker", "message": "worker w2: downstream closed", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:25:19,187", "level": "INFO", "logger": "skills.watcher", "message": "SkillWatcher stopped", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:25:24,965", "level": "INFO", "logger": "runtime.worker", "message": "worker w2: downstream closed", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:25:24,967", "level": "INFO", "logger": "skills.watcher", "message": "SkillWatcher stopped", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:25:27,276", "level": "INFO", "logger": "runtime.worker", "message": "worker w2: downstream closed", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:25:27,278", "level": "INFO", "logger": "skills.watcher", "message": "SkillWatcher stopped", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:25:29,825", "level": "INFO", "logger": "runtime.worker", "message": "worker w2: downstream closed", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:25:29,826", "level": "INFO", "logger": "skills.watcher", "message": "SkillWatcher stopped", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:25:31,681", "level": "INFO", "logger": "skills.watcher", "message": "SkillWatcher stopped", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:25:33,786", "level": "INFO", "logger": "runtime.worker", "message": "worker w2: downstream closed", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:25:33,788", "level": "INFO", "logger": "skills.watcher", "message": "SkillWatcher stopped", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:27:48,057", "level": "INFO", "logger": "runtime.worker", "message": "worker w2: downstream closed", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:27:48,062", "level": "INFO", "logger": "skills.watcher", "message": "SkillWatcher stopped", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:27:53,383", "level": "INFO", "logger": "runtime.worker", "message": "worker w2: downstream closed", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:27:53,384", "level": "INFO", "logger": "skills.watcher", "message": "SkillWatcher stopped", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:28:26,678", "level": "INFO", "logger": "runtime.worker", "message": "worker w2: downstream closed", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:28:26,682", "level": "INFO", "logger": "skills.watcher", "message": "SkillWatcher stopped", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:28:45,133", "level": "INFO", "logger": "runtime.worker", "message": "worker w2: downstream closed", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:28:45,136", "level": "INFO", "logger": "skills.watcher", "message": "SkillWatcher stopped", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:29:32,920", "level": "INFO", "logger": "runtime.worker", "message": "worker w2: downstream closed", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:29:32,929", "level": "INFO", "logger": "skills.watcher", "message": "SkillWatcher stopped", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:29:37,007", "level": "INFO", "logger": "runtime.worker", "message": "worker w2: downstream closed", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:29:37,009", "level": "INFO", "logger": "skills.watcher", "message": "SkillWatcher stopped", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:31:20,583", "level": "INFO", "logger": "runtime.worker", "message": "worker w2: downstream closed", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:31:20,589", "level": "INFO", "logger": "skills.watcher", "message": "SkillWatcher stopped", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:32:01,115", "level": "INFO", "logger": "runtime.worker", "message": "worker w2: downstream closed", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:32:01,120", "level": "INFO", "logger": "skills.watcher", "message": "SkillWatcher stopped", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:33:10,544", "level": "INFO", "logger": "runtime.worker", "message": "worker w2: downstream closed", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:33:10,550", "level": "INFO", "logger": "skills.watcher", "message": "SkillWatcher stopped", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:33:15,158", "level": "INFO", "logger": "runtime.worker", "message": "worker w2: downstream closed", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:33:15,160", "level": "INFO", "logger": "skills.watcher", "message": "SkillWatcher stopped", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:36:13,651", "level": "INFO", "logger": "runtime.worker", "message": "worker w2: downstream closed", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:36:13,657", "level": "INFO", "logger": "skills.watcher", "message": "SkillWatcher stopped", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:36:17,816", "level": "INFO", "logger": "runtime.worker", "message": "worker w2: downstream closed", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:36:17,823", "level": "INFO", "logger": "skills.watcher", "message": "SkillWatcher stopped", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:36:40,918", "level": "INFO", "logger": "runtime.worker", "message": "worker w2: downstream closed", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:36:40,943", "level": "INFO", "logger": "skills.watcher", "message": "SkillWatcher stopped", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:39:27,743", "level": "INFO", "logger": "runtime.worker", "message": "worker w2: downstream closed", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:39:27,748", "level": "INFO", "logger": "skills.watcher", "message": "SkillWatcher stopped", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:39:32,348", "level": "INFO", "logger": "runtime.worker", "message": "worker w2: downstream closed", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:39:32,353", "level": "INFO", "logger": "skills.watcher", "message": "SkillWatcher stopped", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:39:38,615", "level": "INFO", "logger": "runtime.worker", "message": "worker w2: downstream closed", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:39:38,619", "level": "INFO", "logger": "skills.watcher", "message": "SkillWatcher stopped", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:39:42,883", "level": "INFO", "logger": "runtime.worker", "message": "worker w2: downstream closed", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:39:42,884", "level": "INFO", "logger": "skills.watcher", "message": "SkillWatcher stopped", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:39:47,749", "level": "INFO", "logger": "runtime.worker", "message": "worker w2: downstream closed", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:39:47,751", "level": "INFO", "logger": "skills.watcher", "message": "SkillWatcher stopped", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:39:53,157", "level": "INFO", "logger": "runtime.worker", "message": "worker w2: downstream closed", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:39:53,158", "level": "INFO", "logger": "skills.watcher", "message": "SkillWatcher stopped", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:40:01,769", "level": "INFO", "logger": "runtime.worker", "message": "worker w2: downstream closed", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:40:01,771", "level": "INFO", "logger": "skills.watcher", "message": "SkillWatcher stopped", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:40:07,181", "level": "INFO", "logger": "runtime.worker", "message": "worker w2: downstream closed", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:40:07,184", "level": "INFO", "logger": "skills.watcher", "message": "SkillWatcher stopped", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:40:11,847", "level": "INFO", "logger": "runtime.worker", "message": "worker w2: downstream closed", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:40:11,848", "level": "INFO", "logger": "skills.watcher", "message": "SkillWatcher stopped", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:40:16,924", "level": "INFO", "logger": "runtime.worker", "message": "worker w2: downstream closed", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:40:16,925", "level": "INFO", "logger": "skills.watcher", "message": "SkillWatcher stopped", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:40:21,114", "level": "INFO", "logger": "runtime.worker", "message": "worker w2: downstream closed", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:40:21,115", "level": "INFO", "logger": "skills.watcher", "message": "SkillWatcher stopped", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:40:27,267", "level": "INFO", "logger": "runtime.worker", "message": "worker w2: downstream closed", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:40:27,269", "level": "INFO", "logger": "skills.watcher", "message": "SkillWatcher stopped", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:40:32,952", "level": "INFO", "logger": "runtime.worker", "message": "worker w2: downstream closed", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:40:32,970", "level": "INFO", "logger": "skills.watcher", "message": "SkillWatcher stopped", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:40:39,892", "level": "INFO", "logger": "runtime.worker", "message": "worker w2: downstream closed", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:40:39,895", "level": "INFO", "logger": "skills.watcher", "message": "SkillWatcher stopped", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:40:43,970", "level": "INFO", "logger": "runtime.worker", "message": "worker w2: downstream closed", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:40:43,971", "level": "INFO", "logger": "skills.watcher", "message": "SkillWatcher stopped", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:40:49,336", "level": "INFO", "logger": "runtime.worker", "message": "worker w2: downstream closed", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:40:49,340", "level": "INFO", "logger": "skills.watcher", "message": "SkillWatcher stopped", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:41:39,361", "level": "INFO", "logger": "runtime.worker", "message": "worker w2: downstream closed", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:41:39,367", "level": "INFO", "logger": "skills.watcher", "message": "SkillWatcher stopped", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:42:37,278", "level": "INFO", "logger": "runtime.worker", "message": "worker w2: downstream closed", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:42:37,284", "level": "INFO", "logger": "skills.watcher", "message": "SkillWatcher stopped", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:43:28,885", "level": "INFO", "logger": "runtime.worker", "message": "worker w2: downstream closed", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:43:28,889", "level": "INFO", "logger": "skills.watcher", "message": "SkillWatcher stopped", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:43:52,193", "level": "INFO", "logger": "runtime.worker", "message": "worker w2: downstream closed", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:43:52,196", "level": "INFO", "logger": "skills.watcher", "message": "SkillWatcher stopped", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:45:41,704", "level": "INFO", "logger": "runtime.worker", "message": "worker w2: downstream closed", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:45:41,710", "level": "INFO", "logger": "skills.watcher", "message": "SkillWatcher stopped", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:45:43,683", "level": "INFO", "logger": "skills.watcher", "message": "SkillWatcher stopped", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:45:45,268", "level": "INFO", "logger": "skills.watcher", "message": "SkillWatcher stopped", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:45:50,394", "level": "INFO", "logger": "runtime.worker", "message": "worker w2: downstream closed", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:45:50,395", "level": "INFO", "logger": "skills.watcher", "message": "SkillWatcher stopped", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:45:54,672", "level": "INFO", "logger": "runtime.worker", "message": "worker w2: downstream closed", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:45:54,678", "level": "INFO", "logger": "skills.watcher", "message": "SkillWatcher stopped", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:46:07,533", "level": "INFO", "logger": "runtime.worker", "message": "worker w2: downstream closed", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:46:07,535", "level": "INFO", "logger": "skills.watcher", "message": "SkillWatcher stopped", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:46:36,460", "level": "INFO", "logger": "runtime.worker", "message": "worker w2: downstream closed", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:46:36,463", "level": "INFO", "logger": "skills.watcher", "message": "SkillWatcher stopped", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:46:52,356", "level": "INFO", "logger": "runtime.worker", "message": "worker w2: downstream closed", "trace_id": "-", "group_id": "-"}
+{"timestamp": "2026-06-02 08:46:52,357", "level": "INFO", "logger": "skills.watcher", "message": "SkillWatcher stopped", "trace_id": "-", "group_id": "-"}

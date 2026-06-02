@@ -173,6 +173,10 @@ class Supervisor:
                 
         for client in dead:
             self.unregister_browser(group_id, client)
+            # H-4: If the client has a close method (WSClientProxy), call it to 
+            # trigger presence updates and manager cleanup.
+            if hasattr(client, "close"):
+                asyncio.create_task(client.close())
 
 
     # ── downstream ───────────────────────────────────────────────────────

@@ -57,7 +57,7 @@ class TestDynamicContext(unittest.IsolatedAsyncioTestCase):
         ctx = ExecutionContext(
             bot=bot, group_id=1, user_message="task",
             sender={"id": 2, "name": "Human", "type": "human"},
-            history=[], all_bots=[bot], all_members=[bot]),
+            history=[], all_bots=[bot], all_members=[bot],
             interaction=MockInteraction(),
         )
 

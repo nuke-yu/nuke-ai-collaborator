@@ -11,7 +11,7 @@ import db
 from main import app
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-_TEST_DB = str(os.path.join(_HERE, "test_after_id.db"))
+_TEST_DB = str(os.path.join(_HERE, "test_after_id_unique.db"))
 
 class TestAfterId(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
@@ -22,13 +22,13 @@ class TestAfterId(unittest.IsolatedAsyncioTestCase):
         
         # Create group and members
         async with db.connect() as conn:
-            await conn.execute("INSERT INTO groups (id, name) VALUES (1, 'Test Group')")
-            await conn.execute("INSERT INTO members (id, group_id, name, type) VALUES (1, 1, 'User', 'human')")
+            await conn.execute("INSERT OR IGNORE INTO groups (id, name) VALUES (1, 'Test Group')")
+            await conn.execute("INSERT OR IGNORE INTO members (id, group_id, name, type) VALUES (1, 1, 'User', 'human')")
             
             # Insert 5 messages
             for i in range(1, 6):
                 await conn.execute(
-                    "INSERT INTO messages (id, group_id, member_id, content, created_at) VALUES (?, 1, 1, ?, ?)",
+                    "INSERT OR IGNORE INTO messages (id, group_id, member_id, content, created_at) VALUES (?, 1, 1, ?, ?)",
                     (i, f"msg {i}", datetime.now().isoformat())
                 )
             await conn.commit()
@@ -37,11 +37,17 @@ class TestAfterId(unittest.IsolatedAsyncioTestCase):
         if os.path.exists(_TEST_DB):
             os.remove(_TEST_DB)
 
+    async def _get_token(self, client):
+        await client.post("/api/auth/register", json={"username": "user1", "password": "pw"})
+        resp = await client.post("/api/auth/login", json={"username": "user1", "password": "pw"})
+        return resp.json()["token"]
+
     async def test_get_messages_after_id(self):
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
             # Fetch messages after ID 3
-            resp = await client.get("/api/groups/1/messages?after_id=3")
+            token = await self._get_token(client)
+            resp = await client.get("/api/groups/1/messages?after_id=3", headers={"Authorization": f"Bearer {token}"})
             self.assertEqual(resp.status_code, 200)
             data = resp.json()
             msgs = data["messages"]

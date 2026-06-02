@@ -124,12 +124,28 @@ async def system_status():
 
 class WSClientProxy:
     """Adapts WSManager broadcast to Supervisor fan-out interface."""
-    def __init__(self, group_id: int):
+    def __init__(self, group_id: int, member_id: int, websocket: WebSocket):
         self.group_id = group_id
+        self.member_id = member_id
+        self.websocket = websocket
+
     async def send(self, payload: dict):
         # Supervisor calls this when it receives an upstream BROADCAST frame
         # from a worker. We fan it out to all browsers in this group.
         await manager.broadcast(self.group_id, payload)
+
+    async def close(self):
+        """Called by Supervisor when this client is evicted (H-4)."""
+        # 1. Disconnect from manager
+        gone_id = manager.disconnect(self.websocket, self.group_id)
+        if gone_id:
+            # 2. Broadcast offline presence
+            from bus.events import Presence
+            import dataclasses
+            presence_offline = Presence(group_id=self.group_id, member_id=gone_id, online=False)
+            ev_dict = dataclasses.asdict(presence_offline)
+            ev_dict["type"] = presence_offline.type
+            await manager.broadcast(self.group_id, ev_dict)
 
 @app.websocket("/ws/{group_id}/{member_id}")
 async def websocket_endpoint(websocket: WebSocket, group_id: int, member_id: int, token: str = None):
@@ -144,7 +160,7 @@ async def websocket_endpoint(websocket: WebSocket, group_id: int, member_id: int
     await manager.connect(websocket, group_id, member_id)
     
     # 1. Register group proxy to supervisor for upstream fan-out
-    proxy = WSClientProxy(group_id)
+    proxy = WSClientProxy(group_id, member_id, websocket)
     sup_mod.supervisor.register_browser(group_id, proxy)
     
     # 2. Synchronize initial UI state
@@ -197,11 +213,6 @@ async def websocket_endpoint(websocket: WebSocket, group_id: int, member_id: int
                 ))
 
                 continue
-
-            if t == "permission_response":
-                await sup_mod.supervisor.send_to_worker(group_id, ipc.protocol.envelope(
-                    ipc.protocol.PERMISSION_RESPONSE, group_id=group_id, **payload
-                ))
                 continue
 
             # Forward User message + current online status to Worker

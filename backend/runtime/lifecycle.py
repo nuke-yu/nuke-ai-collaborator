@@ -97,7 +97,7 @@ class LifecycleManager:
         except Exception:
             pass
             
-        # 3. Close DB writer
+        # 3. Clear VFS locks (M-5)\n        from workspace import clear_group_locks\n        clear_group_locks(gid)\n\n        # 4. Close DB writer
         await db.aclose_writer(group_db_path(gid))
 
     async def _evict_lru(self) -> None:

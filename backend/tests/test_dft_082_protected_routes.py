@@ -11,7 +11,7 @@ from main import app
 from core import auth
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-_TEST_DB = str(os.path.join(_HERE, "test_auth_routes.db"))
+_TEST_DB = str(os.path.join(_HERE, "test_auth_routes_unique.db"))
 
 class TestProtectedRoutes(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
@@ -33,14 +33,14 @@ class TestProtectedRoutes(unittest.IsolatedAsyncioTestCase):
             
             # 2. Register a user
             resp = await client.post("/api/auth/register", json={
-                "username": "tester",
+                "username": "tester_9f8234d4",
                 "password": "password123"
             })
             self.assertEqual(resp.status_code, 200)
             
             # 3. Login
             resp = await client.post("/api/auth/login", json={
-                "username": "tester",
+                "username": "tester_9f8234d4",
                 "password": "password123"
             })
             self.assertEqual(resp.status_code, 200)

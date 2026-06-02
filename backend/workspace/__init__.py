@@ -28,6 +28,24 @@ def _get_path_lock(path: Path) -> asyncio.Lock:
             registry[resolved] = asyncio.Lock()
         return registry[resolved]
 
+def clear_group_locks(group_id: int):
+    """M-5: Clear all VFS path locks for a specific group to prevent memory leaks."""
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    loop_id = id(loop)
+    group_prefix = str(group_workspace(group_id).parent.resolve())
+    
+    with _REGISTRY_LOCK:
+        if loop_id not in _LOOP_REGISTRIES:
+            return
+        registry = _LOOP_REGISTRIES[loop_id]
+        to_delete = [p for p in registry if str(p).startswith(group_prefix)]
+        for p in to_delete:
+            del registry[p]
+
+
 
 def bot_workspace(bot_id: int) -> Path:
     path = WORKSPACE_ROOT / f"bot_{bot_id}"

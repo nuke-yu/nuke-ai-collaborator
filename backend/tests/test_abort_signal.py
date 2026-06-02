@@ -56,7 +56,7 @@ class TestAbortSignal(unittest.IsolatedAsyncioTestCase):
             sender={"name": "user"},
             history=[],
             all_bots=[bot],
-            all_members=[bot]),
+            all_members=[bot],
             interaction=mock_inter,
         )
 
