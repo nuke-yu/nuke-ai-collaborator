@@ -4,6 +4,14 @@
 
 ---
 
+
+## 📊 Codebase Metrics
+
+Current Project Scale: **~38,500 LOC**
+Backend Test Coverage: **1.5:1 (Test-to-Code ratio)**
+
+For a detailed breakdown by layer and engineering health analysis, see [ENGINEERING-METRICS.md](docs/ENGINEERING-METRICS.md).
+
 ## Tech Stack
 
 | 层 | 技术 |
