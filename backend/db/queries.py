@@ -1,6 +1,17 @@
 import json
 from db.models import _row_to_member, _row_to_msg, _MSG_SQL
 
+# Explicit column list in _row_to_member's positional order. The central
+# (schema_split) members table has an extra `user_id` column that the legacy
+# (schema.py) table lacks, so `SELECT *` shifts every field for central rows
+# (name->user_id, type->name, ...). Selecting these columns by name keeps the
+# positional mapping correct regardless of which schema the DB uses.
+_MEMBER_COLS = (
+    "id, group_id, name, type, role, system_prompt, avatar_color, "
+    "model_provider, model_name, auto_reply, context_cleared_at, temperature, "
+    "max_tokens, personality_prompt, executor_id, executor_config, done_keyword"
+)
+
 
 async def get_group(db, group_id: int):
     async with db.execute("SELECT * FROM groups WHERE id = ?", (group_id,)) as cur:
@@ -12,13 +23,13 @@ async def get_group(db, group_id: int):
 
 
 async def get_members(db, group_id: int):
-    async with db.execute("SELECT * FROM members WHERE group_id = ?", (group_id,)) as cur:
+    async with db.execute(f"SELECT {_MEMBER_COLS} FROM members WHERE group_id = ?", (group_id,)) as cur:
         rows = await cur.fetchall()
         return [_row_to_member(r) for r in rows]
 
 
 async def get_member(db, member_id: int):
-    async with db.execute("SELECT * FROM members WHERE id = ?", (member_id,)) as cur:
+    async with db.execute(f"SELECT {_MEMBER_COLS} FROM members WHERE id = ?", (member_id,)) as cur:
         row = await cur.fetchone()
         return _row_to_member(row) if row else None
 

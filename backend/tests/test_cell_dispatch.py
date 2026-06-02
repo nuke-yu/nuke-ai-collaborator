@@ -50,11 +50,10 @@ class TestCellDispatch(unittest.IsolatedAsyncioTestCase):
         # tasks from this loop don't bleed into later tests.
         from core import bg
         from executors import tool_executor
-        import core.orchestrator as _orch
         bg.abort_group(GID)
         bg._bg_tasks.clear()
         bg._group_tasks.clear()
-        _orch._steer_queues.clear()
+        # Steering is per-ctx (ctx.steer_channel) now — no global queue registry to clear.
         # setUp's registry.discover() registers the workspace tools into the global
         # tool_executor; reset it so a later test that assumes an empty executor
         # (e.g. test_decoupled_executor, which then takes tool_loop's no-tools

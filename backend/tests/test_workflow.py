@@ -432,6 +432,7 @@ class TestRunnerBroadcast(unittest.IsolatedAsyncioTestCase):
         with patch.object(runner, "get_members", new=AsyncMock(return_value=[bot])), \
              patch.object(runner, "get_messages", new=AsyncMock(return_value=[])), \
              patch.object(runner, "get_db", return_value=fake_db_cm), \
+             patch.object(runner, "global_db", return_value=fake_db_cm), \
              patch.object(runner.exec_registry, "get", return_value=FakeExec()), \
              patch.object(runner.bus, "broadcast", new=cap):
             await runner.run_unit(1, unit, StubOrch())
@@ -476,6 +477,7 @@ class TestRunnerBroadcast(unittest.IsolatedAsyncioTestCase):
         with patch.object(runner, "get_members", new=AsyncMock(return_value=[bot])), \
              patch.object(runner, "get_messages", new=AsyncMock(return_value=[])), \
              patch.object(runner, "get_db", return_value=fake_db_cm), \
+             patch.object(runner, "global_db", return_value=fake_db_cm), \
              patch.object(runner.exec_registry, "get", return_value=FakeExec()):
             await runner.run_unit(1, unit, StubOrch())
 

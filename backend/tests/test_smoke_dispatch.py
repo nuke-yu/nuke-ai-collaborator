@@ -110,14 +110,15 @@ class TestSmokeDispatch(unittest.IsolatedAsyncioTestCase):
              patch(m + "append_log", new=AsyncMock()), \
              patch(m + "archive_run", new=AsyncMock()), \
              patch("executors.compact.maybe_compact_db_history", new=AsyncMock()):
-            from core.orchestrator import dispatch_bots
-            # No interaction is passed anywhere — the real StandardInteraction
-            # fallback (DFT-058) must engage. If it regresses, this raises
-            # NameError/AttributeError right here.
-            await dispatch_bots(
-                GROUP_ID, [bot], "hello", human,
-                recent=[], all_bots=[bot], all_members=[human, bot],
-            )
+            # Drive the current chain directly: a WorkUnit run through
+            # runner.run_unit (bot selection is covered separately). No interaction
+            # is passed — run_unit wires the real StandardInteraction, which must
+            # persist the reply (DFT-058). If that chain regresses this raises.
+            from core.orchestration.base import WorkUnit
+            from core.orchestration import registry as orch_registry
+            from core import runner
+            orch = orch_registry.get("workflow_v1")
+            await runner.run_unit(GROUP_ID, WorkUnit(bot=bot, trigger_msg="hello"), orch)
 
         import aiosqlite
         async with aiosqlite.connect(_TEST_DB) as db:

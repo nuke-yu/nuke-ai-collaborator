@@ -11,7 +11,7 @@ import asyncio
 
 import logging
 
-from db import get_db, write_connect, get_members, get_messages, save_message
+from db import get_db, global_db, write_connect, get_members, get_messages, save_message
 from bus import bus
 from bus.events import WorkflowUpdate
 from core import bg, workflow_store
@@ -58,8 +58,10 @@ async def apply_step(group_id: int, orch, step) -> None:
 async def run_unit(group_id: int, unit, orch) -> None:
     """跑一个工作单元：通过 executor 执行，再把产出交回编排层。"""
     await asyncio.sleep(0.5)
+    # CELL-04: members live in the CENTRAL db; messages live in the bound GROUP db.
+    async with global_db() as cdb:
+        members = await get_members(cdb, group_id)
     async with get_db() as db:
-        members = await get_members(db, group_id)
         recent = await get_messages(db, group_id, limit=20)
     all_bots = [m for m in members if m.get("type") == "bot"]
 

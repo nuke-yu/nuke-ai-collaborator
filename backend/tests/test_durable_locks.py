@@ -55,28 +55,33 @@ class TestDurableLocks(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(await get_active_bot(1))
 
     async def test_orchestrator_integration(self):
-        from core.orchestrator import select_triggered_bots
-        
-        all_bots = [
-            {"id": 10, "name": "bot10", "role": "dev"},
-            {"id": 20, "name": "bot20", "role": "qa"}
+        # The mention->lock routing that used to live in
+        # core.orchestrator.select_triggered_bots is now inside
+        # DeclarativeOrchestrator.dispatch (free-form chat branch).
+        from core.orchestration.declarative import DeclarativeOrchestrator
+        orch = DeclarativeOrchestrator()
+
+        members = [
+            {"id": 10, "name": "bot10", "role": "dev", "type": "bot"},
+            {"id": 20, "name": "bot20", "role": "qa", "type": "bot"},
         ]
-        
-        # Test explicit mention sets lock
-        triggered = await select_triggered_bots("@bot10 hello", all_bots, 1)
-        self.assertEqual(len(triggered), 1)
-        self.assertEqual(triggered[0]["id"], 10)
+
+        async def triggered(content):
+            step = await orch.dispatch(1, {"content": content}, members, [])
+            return [u.bot for u in step.next_units]
+
+        # Explicit mention selects that bot and sets the lock.
+        t = await triggered("@bot10 hello")
+        self.assertEqual([b["id"] for b in t], [10])
         self.assertEqual(await get_active_bot(1), 10)
-        
-        # Test subsequent message without mention follows lock
-        triggered = await select_triggered_bots("how are you?", all_bots, 1)
-        self.assertEqual(len(triggered), 1)
-        self.assertEqual(triggered[0]["id"], 10)
-        
-        # Test mention other bot switches lock
-        triggered = await select_triggered_bots("@bot20 your turn", all_bots, 1)
-        self.assertEqual(len(triggered), 1)
-        self.assertEqual(triggered[0]["id"], 20)
+
+        # Subsequent message without a mention follows the lock.
+        t = await triggered("how are you?")
+        self.assertEqual([b["id"] for b in t], [10])
+
+        # Mentioning another bot switches the lock.
+        t = await triggered("@bot20 your turn")
+        self.assertEqual([b["id"] for b in t], [20])
         self.assertEqual(await get_active_bot(1), 20)
 
 if __name__ == "__main__":

@@ -140,7 +140,7 @@ class DeclarativeOrchestrator(Orchestrator):
             
             if participant_bots:
                 return OrchestratorStep(next_units=[
-                    WorkUnit(bot=b, group_id=group_id, message=message, history=recent, all_bots=all_bots, all_members=members)
+                    WorkUnit(bot=b, trigger_msg=content)
                     for b in participant_bots
                 ])
 
@@ -170,7 +170,7 @@ class DeclarativeOrchestrator(Orchestrator):
             return OrchestratorStep()
 
         return OrchestratorStep(next_units=[
-            WorkUnit(bot=b, group_id=group_id, message=message, history=recent, all_bots=all_bots, all_members=members)
+            WorkUnit(bot=b, trigger_msg=content)
             for b in target_bots
         ])
 
