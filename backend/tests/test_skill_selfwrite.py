@@ -19,6 +19,7 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import db as database
+import db.writer as _writer_mod
 import workspace as _workspace_mod
 import skills.constants as _skill_const
 
@@ -72,8 +73,12 @@ class TestSkillSelfWrite(unittest.IsolatedAsyncioTestCase):
     """端对端测试，每个 test 方法前后保存/恢复全局路径，避免与其他测试文件交叉污染。"""
 
     async def asyncSetUp(self):
+        # Bypass DFT-082 auth so these tests exercise route logic (cleared in tearDown).
+        from core import auth as _auth
+        app.dependency_overrides[_auth.get_current_user] = lambda: {"uid": 1, "sub": "test"}
         # 保存各模块当前的全局路径（其他测试文件可能已经修改过它们）
         self._orig_db      = database.DB_PATH
+        self._orig_writer  = _writer_mod.DB_PATH
         self._orig_ws      = _workspace_mod.WORKSPACE_ROOT
         self._orig_sc_root = _skill_const.WORKSPACE_ROOT
         self._orig_sc_sys  = _skill_const.SYSTEM_SKILLS_ROOT
@@ -81,6 +86,7 @@ class TestSkillSelfWrite(unittest.IsolatedAsyncioTestCase):
 
         # 切换到本文件专用的隔离路径
         database.DB_PATH             = _TEST_DB_PATH
+        _writer_mod.DB_PATH          = _TEST_DB_PATH  # add_member writes via write_connect
         _workspace_mod.WORKSPACE_ROOT = _TEST_WS_ROOT
         _skill_const.WORKSPACE_ROOT   = _TEST_WS_ROOT
         _skill_const.SYSTEM_SKILLS_ROOT = _TEST_WS_ROOT / "system" / "skills"
@@ -98,8 +104,11 @@ class TestSkillSelfWrite(unittest.IsolatedAsyncioTestCase):
             await db.commit()
 
     async def asyncTearDown(self):
+        from core import auth as _auth
+        app.dependency_overrides.pop(_auth.get_current_user, None)
         # 还原全局路径，不干扰后续测试
         database.DB_PATH              = self._orig_db
+        _writer_mod.DB_PATH           = self._orig_writer
         _workspace_mod.WORKSPACE_ROOT  = self._orig_ws
         _skill_const.WORKSPACE_ROOT    = self._orig_sc_root
         _skill_const.SYSTEM_SKILLS_ROOT = self._orig_sc_sys

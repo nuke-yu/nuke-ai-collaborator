@@ -8,6 +8,7 @@ from datetime import datetime
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import db
+import db.writer as _writer
 from main import app
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -15,11 +16,18 @@ _TEST_DB = str(os.path.join(_HERE, "test_after_id_unique.db"))
 
 class TestAfterId(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
+        # The app routes through db.DB_PATH, not DATABASE_URL. Isolate to a temp DB
+        # so register/login don't pollute the real chat.db and this test is immune
+        # to other tests' DB-path patching.
+        self._orig = db.DB_PATH
+        self._orig_writer = _writer.DB_PATH
+        db.DB_PATH = _TEST_DB
+        _writer.DB_PATH = _TEST_DB
         if os.path.exists(_TEST_DB):
             os.remove(_TEST_DB)
-        os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{_TEST_DB}"
         await db.init_db()
-        
+        await db.init_central_db(_TEST_DB)  # users table (register/login)
+
         # Create group and members
         async with db.connect() as conn:
             await conn.execute("INSERT OR IGNORE INTO groups (id, name) VALUES (1, 'Test Group')")
@@ -34,6 +42,8 @@ class TestAfterId(unittest.IsolatedAsyncioTestCase):
             await conn.commit()
 
     async def asyncTearDown(self):
+        db.DB_PATH = self._orig
+        _writer.DB_PATH = self._orig_writer
         if os.path.exists(_TEST_DB):
             os.remove(_TEST_DB)
 

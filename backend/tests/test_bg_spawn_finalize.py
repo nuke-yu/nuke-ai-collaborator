@@ -40,7 +40,7 @@ class TestBgSpawnFinalize(unittest.IsolatedAsyncioTestCase):
             bot=_bot(), group_id=1, user_message="task",
             sender={"id": 2, "name": "Human", "type": "human"},
             history=[], all_bots=[_bot()], all_members=[_bot()],
-            broadcaster=None, interaction=_MockInteraction(),
+            interaction=_MockInteraction(),
         )
 
         spawned = []
