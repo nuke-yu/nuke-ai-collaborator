@@ -35,7 +35,13 @@ _CENTRAL_REFS = (
 _MEMBER_DATA = (
     "DELETE FROM session_events WHERE session_id IN (SELECT id FROM agent_sessions WHERE bot_id=?)",
     "DELETE FROM agent_sessions WHERE bot_id=?",
+    # Rows that FK-reference the member's MESSAGES must go before the messages
+    # themselves (a reaction/pin on the member's message would otherwise block it).
+    "DELETE FROM message_reactions WHERE message_id IN (SELECT id FROM messages WHERE member_id=?)",
+    "DELETE FROM pinned_messages WHERE message_id IN (SELECT id FROM messages WHERE member_id=?)",
+    "DELETE FROM message_embeddings WHERE message_id IN (SELECT id FROM messages WHERE member_id=?)",
     "DELETE FROM messages WHERE member_id=?",
+    # The member's own reactions / read state (independent of the above).
     "DELETE FROM message_reactions WHERE member_id=?",
     "DELETE FROM member_read WHERE member_id=?",
 )
