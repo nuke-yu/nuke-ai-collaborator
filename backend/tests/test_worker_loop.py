@@ -111,6 +111,47 @@ class TestWorkerLoop(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(aborted, [42])
 
+    async def test_upstream_send_failure_does_not_kill_pump(self):
+        """C-1: one failing ipc.send_msg must drop only that event, not stop the
+        pump — subsequent bus events must still be forwarded upstream."""
+        worker_bus = EventBus()
+        sent = []
+
+        class FlakyWriter:
+            """Stand-in StreamWriter: raises once, then succeeds."""
+            def __init__(self):
+                self.calls = 0
+
+        worker = Worker("w0", "ignored", bus=worker_bus, dispatch=None)
+        worker._writer = FlakyWriter()
+        worker._sub = worker_bus.subscribe_all()
+
+        original = ipc.send_msg
+        state = {"n": 0}
+
+        async def flaky_send(writer, msg):
+            state["n"] += 1
+            if state["n"] == 1:
+                raise BrokenPipeError("boom")
+            sent.append(msg)
+
+        ipc.send_msg = flaky_send
+        pump = asyncio.create_task(worker._pump_upstream())
+        try:
+            await worker_bus.broadcast(1, {"type": "first"})   # this send raises
+            await worker_bus.broadcast(1, {"type": "second"})  # must still go out
+            for _ in range(100):
+                if sent:
+                    break
+                await asyncio.sleep(0.02)
+        finally:
+            ipc.send_msg = original
+            pump.cancel()
+
+        # First event dropped (raised), pump survived, second forwarded.
+        self.assertEqual(len(sent), 1)
+        self.assertEqual(sent[0]["payload"]["type"], "second")
+
 
 if __name__ == "__main__":
     unittest.main()

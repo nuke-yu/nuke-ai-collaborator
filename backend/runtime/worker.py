@@ -107,9 +107,19 @@ class Worker:
                 gid = payload.get("group_id")
                 if gid is None:
                     continue  # un-routable events aren't forwarded to the supervisor
-                await ipc.send_msg(self._writer, ipc.protocol.envelope(
-                    ipc.protocol.BROADCAST, group_id=gid, payload=payload,
-                ))
+                # A single failed IPC send (e.g. transient backpressure / half-open
+                # write) must NOT kill the whole pump — otherwise the worker stays
+                # alive but silently stops forwarding ALL future bus events and the
+                # frontend goes dark. Drop the one event, log it, keep pumping.
+                try:
+                    await ipc.send_msg(self._writer, ipc.protocol.envelope(
+                        ipc.protocol.BROADCAST, group_id=gid, payload=payload,
+                    ))
+                except Exception:
+                    log.exception(
+                        "worker %s: upstream send failed, dropping event type=%s group=%s",
+                        self.worker_id, payload.get("type"), gid,
+                    )
 
     
     
