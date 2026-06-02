@@ -144,11 +144,15 @@ class DeclarativeOrchestrator(Orchestrator):
                     for b in participant_bots
                 ])
 
-        # 2. Free-form chat routing
+        # 2. Free-form chat routing. Priority: @mention → keyword match → active-bot
+        #    lock. A single @mention or keyword match (re)sets the active bot, so a
+        #    natural follow-up with no @ and no keyword still continues the
+        #    conversation with the bot that last spoke (instead of going unanswered).
+        from core.role_router import should_bot_respond
         explicit = [b for b in all_bots if f"@{b['name']}" in content]
         if "@all" in content.lower():
             explicit = all_bots
-        
+
         target_bots = []
         if explicit:
             if len(explicit) == 1:
@@ -157,14 +161,15 @@ class DeclarativeOrchestrator(Orchestrator):
                 await locks.release_lock(group_id)
             target_bots = explicit
         else:
-            locked_bot_id = await locks.get_active_bot(group_id)
-            if locked_bot_id:
-                locked = next((b for b in all_bots if b["id"] == locked_bot_id), None)
-                if locked: target_bots = [locked]
-            
-            if not target_bots:
-                from core.role_router import should_bot_respond
-                target_bots = [b for b in all_bots if should_bot_respond(content, b["name"], b["role"] or "")]
+            matched = [b for b in all_bots if should_bot_respond(content, b["name"], b["role"] or "")]
+            if matched:
+                if len(matched) == 1:
+                    await locks.set_active_bot(group_id, matched[0]["id"])
+                target_bots = matched
+            else:
+                locked_bot_id = await locks.get_active_bot(group_id)
+                locked = next((b for b in all_bots if b["id"] == locked_bot_id), None) if locked_bot_id else None
+                target_bots = [locked] if locked else []
 
         if not target_bots:
             return OrchestratorStep()
