@@ -17,7 +17,7 @@ import WorkflowStartModal from './WorkflowStartModal'
 import WorkspacePanel from './WorkspacePanel'
 import PermissionRequestModal from './PermissionRequestModal'
 
-export default function ChatWindow({ memberId, isDark, onToggleTheme }) {
+export default function ChatWindow({ memberId, isDark, onToggleTheme, onLogout }) {
   const [groups, setGroups] = useState([])
   const [activeGroupId, setActiveGroupId] = useState(null)
   const [group, setGroup] = useState(null)
@@ -122,7 +122,9 @@ export default function ChatWindow({ memberId, isDark, onToggleTheme }) {
         setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'instant' }), 0)
       }
     })
-    fetch(`/api/groups/${activeGroupId}/workflow`).then(r => r.json()).then(data => {
+    fetch(`/api/groups/${activeGroupId}/workflow`, {
+      headers: { Authorization: 'Bearer ' + localStorage.getItem('token') },
+    }).then(r => r.json()).then(data => {
       if (active) setWorkflow(data)
     })
 
@@ -287,6 +289,13 @@ export default function ChatWindow({ memberId, isDark, onToggleTheme }) {
       console.error('Failed to catch up messages after reconnect:', e)
     }
   }, [activeGroupId, messages])
+
+  // Stable ref so MessageInput's [groupId, onDraftSave] effect doesn't re-run (and
+  // re-fire its draft-save cleanup → setDrafts → re-render) on every render — that
+  // was an infinite "Maximum update depth exceeded" loop.
+  const handleDraftSave = useCallback((gid, text) => {
+    setDrafts(prev => ({ ...prev, [gid]: text }))
+  }, [])
 
   const { send, sendRaw, connected, reconnecting } = useWebSocket(activeGroupId, memberId, handleWsMessage, handleReconnect, localStorage.getItem('token'), onLogout)
   const isStreaming = messages.some(m => m.streaming)
@@ -641,7 +650,7 @@ export default function ChatWindow({ memberId, isDark, onToggleTheme }) {
           key={activeGroupId}
           groupId={activeGroupId}
           defaultValue={drafts[activeGroupId] || ''}
-          onDraftSave={(gid, text) => setDrafts(prev => ({ ...prev, [gid]: text }))}
+          onDraftSave={handleDraftSave}
           onSend={(content, fileData) => { send(content, replyingTo?.id ?? null, fileData); setReplyingTo(null) }}
           members={members}
           disabled={!connected}

@@ -23,6 +23,7 @@ export default function App() {
   useEffect(() => {
     document.documentElement.classList.toggle('light', !isDark)
     localStorage.setItem('theme', isDark ? 'dark' : 'light')
+  }, [isDark])
 
   const handleLogout = () => {
     localStorage.removeItem('token')
@@ -31,8 +32,6 @@ export default function App() {
     setToken(null)
     setMemberId(null)
   }
-
-  }, [isDark])
 
   const handleJoin = async () => {
     if (!name.trim()) return

@@ -231,7 +231,7 @@ export default function MessageBubble({ msg, isTyping, currentMemberId, members 
         }`}
         style={{ backgroundColor: msg.avatar_color }}
       >
-        {msg.sender_name[0]}
+        {(msg.sender_name || '?')[0]}
       </div>
       {msg.sender_type === 'bot' && (
         <div className="absolute -bottom-1 -right-1 bg-gray-900 rounded-full w-4 h-4 flex items-center justify-center text-[10px] border border-gray-700 shadow-sm">
