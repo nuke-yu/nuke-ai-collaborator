@@ -162,8 +162,11 @@ def read_file_history_version(bot_id: int, path: str, ts: str) -> str:
         return f"[读取错误] {e}"
 
 
-async def write_file(bot_id: int, path: str, content: str) -> str:
-    ws = _get_effective_ws(bot_id, path)
+async def write_file(bot_id: int, path: str, content: str, group_id: int | None = None) -> str:
+    # group_id given (e.g. the system rendering BOARD.md) → write straight to the
+    # group's shared workspace, bypassing the bot-centric redirection (which can't
+    # resolve a group for bot_id=0).
+    ws = group_workspace(group_id) if group_id is not None else _get_effective_ws(bot_id, path)
     p = _safe_path(ws, path)
     if p is None:
         return f"[错误] 非法路径: {path}"

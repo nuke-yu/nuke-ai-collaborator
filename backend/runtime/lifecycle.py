@@ -43,21 +43,25 @@ class LifecycleManager:
                 await run_migrations(conn)
             
             
-            # 3. RDManager pre-scan
-            try:
-                from core.orchestration.rd_manager import rd_manager
-                await rd_manager.check_board(group_id)
-            except Exception:
-                pass
+            # Steps 3 & 4 read/write GROUP-private tables (tickets / workflow_state /
+            # agent_sessions). Bind the group DB so their connect()/get_db() resolve
+            # to it — otherwise they hit the central DB, which has no such tables.
+            with db.bind_db(path):
+                # 3. RDManager pre-scan
+                try:
+                    from core.orchestration.rd_manager import rd_manager
+                    await rd_manager.check_board(group_id)
+                except Exception:
+                    pass
 
-            # 4. Resume workflows and recover sessions (CELL-22)
-            try:
-                from core import runner
-                import sessions
-                await runner.resume_workflows(group_id=group_id)
-                await sessions.recover_all(group_id=group_id)
-            except Exception:
-                log.exception("lifecycle: failed to recover group %d", group_id)
+                # 4. Resume workflows and recover sessions (CELL-22)
+                try:
+                    from core import runner
+                    import sessions
+                    await runner.resume_workflows(group_id=group_id)
+                    await sessions.recover_all(group_id=group_id)
+                except Exception:
+                    log.exception("lifecycle: failed to recover group %d", group_id)
 
 
             # Evict if over limit
