@@ -53,6 +53,10 @@ _CENTRAL_DDL = [
     """CREATE TABLE IF NOT EXISTS members (
         id               INTEGER PRIMARY KEY AUTOINCREMENT,
         group_id         INTEGER NOT NULL,
+        -- RESERVED for future multi-tenant isolation; NOT populated today.
+        -- This is a trusted internal/single-machine tool, so WS auth is token-only
+        -- (see main.py). Do NOT add a `members.user_id == token uid` check while this
+        -- stays NULL — it rejects every connection and bricks the WebSocket (DFT-082).
         user_id          INTEGER DEFAULT NULL,
         name             TEXT NOT NULL,
         type             TEXT NOT NULL CHECK(type IN ('human', 'bot')),
