@@ -42,31 +42,25 @@ class TestRecoveryPrompt(unittest.IsolatedAsyncioTestCase):
         if Path(_TEST_DB).exists():
             Path(_TEST_DB).unlink()
 
-    async def test_recover_all_sends_prompt(self):
-        from sessions.store import create_session, save_snapshot
+    async def test_recover_all_abandons_orphan(self):
+        # Chat semantics: an interrupted ('running') session is DROPPED, not resumed.
+        # recover_all marks it 'failed' and does NOT prompt the user / re-dispatch.
+        from sessions.store import create_session, save_snapshot, get_session
         from sessions.recovery import recover_all
-        
+
         sid = "rec-1"
         await create_session(
             session_id=sid, bot_id=1, group_id=1,
             config={"p": "v"}, user_message="do work"
         )
         await save_snapshot(sid, [{"role": "user", "content": "do work"}])
-        
+
         with patch("ws_manager.manager.broadcast", new=AsyncMock()) as mock_broadcast:
             await recover_all()
-            
-            # Check if broadcast was called with recovery_prompt
-            mock_broadcast.assert_awaited_once()
-            args = mock_broadcast.call_args[0][1]
-            self.assertEqual(args["type"], "recovery_prompt")
-            self.assertEqual(args["session_id"], sid)
-            self.assertEqual(args["bot_name"], "WorkerBot")
+            mock_broadcast.assert_not_awaited()   # no recovery_prompt
 
-        # Check status
-        from sessions.store import get_session
         session = await get_session(sid)
-        self.assertEqual(session["status"], "awaiting_recovery")
+        self.assertEqual(session["status"], "failed")
 
     async def test_resume_session_dispatches_task(self):
         from sessions.store import create_session, save_snapshot, update_session_status

@@ -61,23 +61,19 @@ def reconstruct_messages(config: dict, events: list[dict]) -> list[dict]:
 
 
 async def recover_all(dispatcher=None, group_id: int | None = None) -> None:
-    """Find all orphaned sessions and attempt to resume them.
+    """Chat semantics: a bot run interrupted by a crash / network drop is ABANDONED,
+    not resumed.
 
-    dispatcher: sync callable used ONLY in tests (e.g. list.append).
-    In production, call with no arguments — tasks created via _dispatch_recovery.
-
-    Recovery order: children (parent_id IS NOT NULL) before parents,
-    sorted by created_at ASC so oldest are retried first.
+    This is a live chat, not a resumable transfer — re-running a stale request after
+    the network recovers would post a reply to a conversation that has already moved
+    on. So every orphaned ('running') session is simply marked 'failed' and dropped;
+    we do not re-dispatch it or prompt the user to resume. (`dispatcher` is kept only
+    for signature/test compatibility. _recover_one/resume_session remain for an
+    explicit, user-initiated resume but are no longer triggered automatically.)
     """
     orphans = await get_orphaned_sessions(group_id=group_id)
-    if not orphans:
-        return
-
-    children = [s for s in orphans if s.get("parent_id")]
-    parents  = [s for s in orphans if not s.get("parent_id")]
-
-    for session in children + parents:
-        await _recover_one(session, dispatcher)
+    for session in orphans:
+        await update_session_status(session["id"], "failed")
 
 
 async def _recover_one(session: dict, dispatcher) -> None:
