@@ -63,8 +63,9 @@ class AIService:
                 temperature, max_tokens, tools,
                 use_cached_microcompact=use_cached_microcompact
             )
-            self.usage.add(res.get("usage", {}))
-            await self._sync_tokens()
+            call_usage = res.get("usage", {})
+            self.usage.add(call_usage)
+            await self._sync_tokens(call_usage)
             return res
             
         except AIContextOverflowError:
@@ -97,8 +98,9 @@ class AIService:
                 temperature, max_tokens, tools,
                 use_cached_microcompact=use_cached_microcompact
             )
-            self.usage.add(res.get("usage", {}))
-            await self._sync_tokens()
+            call_usage = res.get("usage", {})
+            self.usage.add(call_usage)
+            await self._sync_tokens(call_usage)
             return res
 
     async def stream(self,
@@ -120,8 +122,9 @@ class AIService:
                 yield chunk
             
             if usage_out:
-                self.usage.add(usage_out[0])
-                await self._sync_tokens()
+                call_usage = usage_out[0]
+                self.usage.add(call_usage)
+                await self._sync_tokens(call_usage)
 
         except AIContextOverflowError:
             if not auto_compact:
@@ -150,25 +153,20 @@ class AIService:
                 yield chunk
                 
             if usage_out:
-                self.usage.add(usage_out[0])
-                await self._sync_tokens()
+                call_usage = usage_out[0]
+                self.usage.add(call_usage)
+                await self._sync_tokens(call_usage)
 
-    async def _sync_tokens(self):
-        """Persist current usage to database via interaction adapter."""
-        usage_data = self.usage.to_dict()
-        
-        # Calculate USD cost
-
+    async def _sync_tokens(self, incremental_usage: dict):
+        """H-3: Persist incremental call usage to database via interaction adapter."""
+        # Calculate USD cost for this specific call
         cost = calculate_cost(
             self.ctx.bot.get("model_provider", "deepseek"),
             self.ctx.bot.get("model_name", "deepseek-chat"),
-            usage_data
+            incremental_usage
         )
-        usage_data["cost_usd"] = cost
         
-        # Point 4: Domain-neutral usage sync. 
-        # Specific attribution (Jira/Tickets) is handled by the interaction implementation.
-            
+        usage_to_sync = {**incremental_usage, "cost_usd": cost}
         await self.ctx.interaction.update_session_tokens(
-            self.session_id, **usage_data
+            self.session_id, **usage_to_sync
         )
