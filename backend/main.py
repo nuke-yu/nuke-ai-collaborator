@@ -3,7 +3,7 @@ import dataclasses
 import asyncio
 import os
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
@@ -16,6 +16,7 @@ from runtime import tracing
 from runtime import supervisor as sup_mod
 from runtime import ipc
 from ai import client as ai_client
+from core import auth
 
 # Shared API Routers
 from api.messages import router as message_router, UPLOAD_DIR
@@ -24,6 +25,7 @@ from api.templates import router as template_router
 from api.workflow import router as workflow_router
 from api.workspace import router as workspace_router
 from api.sessions import router as sessions_router
+from api.auth import router as auth_router
 from permissions.routes import router as permissions_router
 from executors import registry
 
@@ -80,14 +82,15 @@ app.add_middleware(
 )
 
 app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
-app.include_router(message_router)
-app.include_router(group_router)
-app.include_router(template_router)
-app.include_router(workflow_router)
-app.include_router(workspace_router)
-app.include_router(sessions_router)
-app.include_router(permissions_router)
+app.include_router(message_router, dependencies=[Depends(auth.get_current_user)])
+app.include_router(group_router, dependencies=[Depends(auth.get_current_user)])
+app.include_router(template_router, dependencies=[Depends(auth.get_current_user)])
+app.include_router(workflow_router, dependencies=[Depends(auth.get_current_user)])
+app.include_router(workspace_router, dependencies=[Depends(auth.get_current_user)])
+app.include_router(sessions_router, dependencies=[Depends(auth.get_current_user)])
+app.include_router(permissions_router, dependencies=[Depends(auth.get_current_user)])
 app.include_router(scheduler.router)
+app.include_router(auth_router)
 
 # ── Metadata APIs ─────────────────────────────────────────────────────────
 
@@ -129,7 +132,15 @@ class WSClientProxy:
         await manager.broadcast(self.group_id, payload)
 
 @app.websocket("/ws/{group_id}/{member_id}")
-async def websocket_endpoint(websocket: WebSocket, group_id: int, member_id: int):
+async def websocket_endpoint(websocket: WebSocket, group_id: int, member_id: int, token: str = None):
+    # CELL-Auth: Verify token during handshake
+    user_payload = auth.verify_token(token) if token else None
+    if not user_payload:
+        await websocket.accept()
+        await websocket.send_json({"type": "auth_error", "message": "Authentication required"})
+        await websocket.close()
+        return
+
     await manager.connect(websocket, group_id, member_id)
     
     # 1. Register group proxy to supervisor for upstream fan-out

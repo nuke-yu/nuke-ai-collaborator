@@ -30,11 +30,11 @@ class TestRDManagerV3(unittest.IsolatedAsyncioTestCase):
         # 1. Insert dummy tickets into DB
         async with db.connect() as conn:
             await conn.execute(
-                "INSERT INTO tickets (group_id, ticket_id, title, status, updated_at) VALUES (?, ?, ?, ?, datetime('now'))",
+                "INSERT OR REPLACE INTO tickets (group_id, ticket_id, title, status, updated_at) VALUES (?, ?, ?, ?, datetime('now'))",
                 (group_id, "JIRA-100", "Task 1", "backlog")
             )
             await conn.execute(
-                "INSERT INTO tickets (group_id, ticket_id, title, status, updated_at) VALUES (?, ?, ?, ?, datetime('now'))",
+                "INSERT OR REPLACE INTO tickets (group_id, ticket_id, title, status, updated_at) VALUES (?, ?, ?, ?, datetime('now'))",
                 (group_id, "JIRA-101", "Task 2", "in_progress")
             )
             await conn.commit()

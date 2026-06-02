@@ -288,7 +288,7 @@ export default function ChatWindow({ memberId, isDark, onToggleTheme }) {
     }
   }, [activeGroupId, messages])
 
-  const { send, sendRaw, connected, reconnecting } = useWebSocket(activeGroupId, memberId, handleWsMessage, handleReconnect)
+  const { send, sendRaw, connected, reconnecting } = useWebSocket(activeGroupId, memberId, handleWsMessage, handleReconnect, localStorage.getItem('token'))
   const isStreaming = messages.some(m => m.streaming)
   const handleAbort = () => sendRaw({ type: 'abort', group_id: activeGroupId })
   const handlePermResponse = (requestId, approved, persistence) => {
@@ -478,7 +478,7 @@ export default function ChatWindow({ memberId, isDark, onToggleTheme }) {
         onDragOver={(e) => e.preventDefault()}
         onDrop={(e) => { e.preventDefault(); dragCounter.current = 0; setDragging(false); const f = e.dataTransfer.files[0]; if (f) messageInputRef.current?.uploadFile(f) }}
       >
-        <ChatHeader
+        <ChatHeader onLogout={onLogout}
           activeGroupId={activeGroupId}
           group={group}
           members={members}

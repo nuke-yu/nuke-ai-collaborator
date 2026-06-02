@@ -1,6 +1,8 @@
 """CELL-19: Trace ID propagation and structured context."""
 import contextvars
 import uuid
+import json
+import os
 import logging
 from contextlib import contextmanager
 from typing import Optional
@@ -36,7 +38,7 @@ class TraceLogFilter(logging.Filter):
 
 def setup_structured_logging(level=logging.INFO, log_file: Optional[str] = None):
     """Configure logging to include trace metadata and JSON formatting."""
-    import json
+
     
     class JsonFormatter(logging.Formatter):
         def format(self, record):
@@ -65,7 +67,7 @@ def setup_structured_logging(level=logging.INFO, log_file: Optional[str] = None)
 
     # 2. File handler (if provided)
     if log_file:
-        import os
+
         os.makedirs(os.path.dirname(log_file), exist_ok=True)
         file_handler = logging.FileHandler(log_file)
         file_handler.addFilter(TraceLogFilter())

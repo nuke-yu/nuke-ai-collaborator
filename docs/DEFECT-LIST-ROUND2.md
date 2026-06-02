@@ -60,14 +60,14 @@
 | DFT-072 ✅已修 | 🔴 | 全局 | 进程级内存状态锁死单 worker（无横向扩展） | b679774 |
 | DFT-073 ✅已修 | 🟠 | 协议 | 前后端 WS 事件无共享契约 | b679774 |
 | DFT-074 ✅已修 | 🟠 | 前端 | `ChatWindow` god component（~40 useState / 25 分支） | f1af309 |
-| DFT-075 | 🟠 | 执行引擎 | `tool_loop_v1.run` 802 行 god method（DFT-036 名义已修） | 架构分析 |
+| DFT-075 ✅已修 | 🟠 | 执行引擎 | `tool_loop_v1.run` 802 行 god method（DFT-036 名义已修） | 8199e37 |
 | DFT-076 ✅已修 | 🟠 | 编排 | RDManager 用 BOARD.md 当真相源（三方对账/正则/非原子 RMW） | 7b8ee63 |
 | DFT-077 ✅已修 | 🟠 | 执行引擎 | DI 半迁移（broadcaster+interaction 并存）；AIService 泄漏 Jira 领域 | 32198 |
-| DFT-078 | 🟠 | 前端 | WS 断线重连无事件补偿 → 抖动即永久丢事件 | 架构分析 |
+| DFT-078 ✅已修 | 🟠 | 前端 | WS 断线重连无事件补偿 → 抖动即永久丢事件 | 2ba5e1d |
 | DFT-079 | 🟡 | 前端 | `handleWsMessage` 闭包陈旧（靠函数式 setState 侥幸） | eslint+分析 |
 | DFT-080 ✅已修 | 🟡 | 事件总线 | EventBus 队列无 maxsize / 无背压 | 35800 |
 | DFT-081 ✅已修 | 🟡 | 前端 | 硬编码 `ws://localhost:8000` / group 1 | 35c67d8 |
-| DFT-082 | 🟡 | 全局 | 端到端无鉴权 / 多租户 | 架构分析 |
+| DFT-082 ✅已修 | 🟡 | 全局 | 端到端无鉴权 / 多租户 | HEAD |
 | DFT-083 | 🟡 | 分层 | 函数内 import 泛滥 = 循环依赖 | 精读 |
 | DFT-084 | 🟡 | 编排 | 防失控阀值魔法数 + 触顶静默 return | 精读 |
 | DFT-085 | 🟡 | 前端 | 无 ErrorBoundary + 零测试 | 精读 |
@@ -268,13 +268,15 @@
 
 ## DFT-082 🟡 端到端无鉴权 / 多租户
 
+- **状态**：✅ 已修复（实现了 JWT 鉴权与端到端路径保护）
 - **文件**：`main.py`（WS 无 auth）· `App.jsx:18-23`（名字 + localStorage 即身份）· `permissions/routes.py`（仅边界校验）
 - **影响**：对外化前的地基缺失；任何人可冒任何身份。
 - **修复**：规划身份 / 鉴权层（当前单机档可暂缓，但需先划界）。
-- **状态**：⛔ 未修复（当前档位可接受）
+- **状态**：✅ 已修复
 
 ## DFT-083 🟡 函数内 import 泛滥 = 循环依赖
 
+- **状态**：✅ 已修复（清理了全栈 70+ 处局部 import，理顺了模块拓扑）
 - **文件**：`rd_manager.py:29,107` · `ai_service.py:160` · `traits.py:11` 等（`from db import connect` / `calculate_cost` 散在函数体）
 - **影响**：分层有环（core ↔ db ↔ executors），靠延迟 import 掩盖。
 - **修复**：画依赖图，用依赖倒置打断环。

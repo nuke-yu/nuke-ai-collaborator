@@ -133,7 +133,6 @@ class DeclarativeOrchestrator(Orchestrator):
         if ctx:
             # Workflow participant takes priority
             participant_bots = []
-            from core.orchestration.stages import stage_handler
             wb = stage_handler(ctx.stage).current_bot(ctx.stage)
             if wb: participant_bots.append(wb)
             wp = stage_handler(ctx.stage).current_pool_bots(ctx.stage)

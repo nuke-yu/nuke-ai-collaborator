@@ -1,5 +1,8 @@
 import asyncio
+import json
 import logging
+from core.orchestration.base import OrchestratorStep, WorkUnit
+from core import bg
 import random
 import core.workflow as wf
 from bus import bus
@@ -34,7 +37,7 @@ async def _on_ticket_created(ev: dict):
         score = 0
         role = bot.get("role") or ""
         traits = bot.get("traits") or "[]"
-        import json
+
         traits_list = json.loads(traits) if isinstance(traits, str) else traits
         keywords = [role.lower()] + [t.lower() for t in traits_list if isinstance(t, str)]
         for kw in keywords:
@@ -54,12 +57,12 @@ async def _on_ticket_created(ev: dict):
         
     orch = wf._orch_for(group_id)
     # Force trigger this specific bot
-    from core.orchestration.base import OrchestratorStep, WorkUnit
+
     step = OrchestratorStep(next_units=[
         WorkUnit(bot=target_bot, group_id=group_id, message=msg_dict, history=recent, all_bots=all_bots, all_members=all_members)
     ])
     
-    from core import bg
+
     bg.spawn_group(group_id, wf.apply(group_id, step))
 
 async def _on_code_committed(ev: dict):
@@ -85,12 +88,12 @@ async def _on_code_committed(ev: dict):
         recent = await get_messages(db_m, group_id)
         
     orch = wf._orch_for(group_id)
-    from core.orchestration.base import OrchestratorStep, WorkUnit
+
     step = OrchestratorStep(next_units=[
         WorkUnit(bot=target_bot, group_id=group_id, message=msg_dict, history=recent, all_bots=all_bots, all_members=all_members)
     ])
     
-    from core import bg
+
     bg.spawn_group(group_id, wf.apply(group_id, step))
 
 async def start():

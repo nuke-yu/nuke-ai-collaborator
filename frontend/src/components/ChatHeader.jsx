@@ -9,7 +9,7 @@ export default function ChatHeader({
   workflow,
   onShowSearch,
   onShowWorkflowStart,
-  onShowStats,
+  onShowStats, onLogout,
 }) {
   const [editingGroupName, setEditingGroupName] = useState(false)
   const [groupNameDraft, setGroupNameDraft] = useState('')
@@ -85,6 +85,11 @@ export default function ChatHeader({
             </div>
           )}
         </div>
+        <button
+          onClick={onLogout}
+          className="text-sm px-2 py-1 rounded text-gray-500 hover:text-red-400 transition-colors"
+          title="退出登录"
+        >🚪</button>
         <button
           onClick={() => onShowSearch()}
           className="text-sm px-2 py-1 rounded text-gray-500 hover:text-gray-300 transition-colors"

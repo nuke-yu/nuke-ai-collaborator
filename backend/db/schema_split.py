@@ -24,7 +24,7 @@ from db.schema import _seed_templates
 
 # ── table → domain ────────────────────────────────────────────────────────
 CENTRAL_TABLES = frozenset({
-    "groups", "members", "role_templates", "permission_rules", "cron_jobs",
+    "users", "groups", "members", "role_templates", "permission_rules", "cron_jobs",
     "unread_counts",
 })
 GROUP_TABLES = frozenset({
@@ -35,6 +35,14 @@ GROUP_TABLES = frozenset({
 
 # ── CENTRAL DDL (final shape; central-internal FKs kept) ──────────────────
 _CENTRAL_DDL = [
+    """CREATE TABLE IF NOT EXISTS users (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        username     TEXT NOT NULL UNIQUE,
+        password_hash TEXT NOT NULL,
+        email        TEXT,
+        created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )""",
+
     """CREATE TABLE IF NOT EXISTS groups (
         id           INTEGER PRIMARY KEY AUTOINCREMENT,
         name         TEXT NOT NULL,
@@ -45,6 +53,7 @@ _CENTRAL_DDL = [
     """CREATE TABLE IF NOT EXISTS members (
         id               INTEGER PRIMARY KEY AUTOINCREMENT,
         group_id         INTEGER NOT NULL,
+        user_id          INTEGER DEFAULT NULL,
         name             TEXT NOT NULL,
         type             TEXT NOT NULL CHECK(type IN ('human', 'bot')),
         role             TEXT,

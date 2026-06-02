@@ -1,19 +1,37 @@
+import Login from './components/Login'
 import ErrorBoundary from './components/ErrorBoundary'
 import { useState, useEffect } from 'react'
 import { addMember } from './api'
 import ChatWindow from './components/ChatWindow'
 
 export default function App() {
+  const [token, setToken] = useState(() => localStorage.getItem('token'))
   const [memberId, setMemberId] = useState(() => {
     const saved = localStorage.getItem('memberId')
     return saved ? parseInt(saved) : null
   })
   const [name, setName] = useState('')
+
+  const handleLogin = (data) => {
+    localStorage.setItem('token', data.token)
+    localStorage.setItem('user', JSON.stringify(data.user))
+    setToken(data.token)
+  }
+
   const [isDark, setIsDark] = useState(() => localStorage.getItem('theme') !== 'light')
 
   useEffect(() => {
     document.documentElement.classList.toggle('light', !isDark)
     localStorage.setItem('theme', isDark ? 'dark' : 'light')
+
+  const handleLogout = () => {
+    localStorage.removeItem('token')
+    localStorage.removeItem('user')
+    localStorage.removeItem('memberId')
+    setToken(null)
+    setMemberId(null)
+  }
+
   }, [isDark])
 
   const handleJoin = async () => {
@@ -24,6 +42,8 @@ export default function App() {
     localStorage.setItem('memberId', data.id)
     setMemberId(data.id)
   }
+
+  if (!token) return <Login onLogin={handleLogin} />
 
   if (!memberId) {
     return (
@@ -52,7 +72,7 @@ export default function App() {
 
   return (
     <ErrorBoundary>
-      <ChatWindow memberId={memberId} isDark={isDark} onToggleTheme={() => setIsDark(d => !d)} />
+      <ChatWindow memberId={memberId} isDark={isDark} onToggleTheme={() => setIsDark(d => !d)} onLogout={handleLogout} />
     </ErrorBoundary>
   )
 }

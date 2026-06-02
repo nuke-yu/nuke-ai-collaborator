@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from db import connect
 from bus import bus
 from bus.events import ToolResult, TicketCreated
 from workspace import group_workspace, write_file
@@ -36,7 +37,7 @@ class RDManager:
 
     async def render_board(self, group_id: int):
         """One-way render from SQLite 'tickets' table to BOARD.md."""
-        from db import connect
+
         try:
             async with connect() as db:
                 async with db.execute(

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback, useState } from 'react'
 
-export function useWebSocket(groupId, memberId, onMessage, onReconnect) {
+export function useWebSocket(groupId, memberId, onMessage, onReconnect, token) {
   const ws = useRef(null)
   const retryTimer = useRef(null)
   const [connected, setConnected] = useState(false)
@@ -17,7 +17,7 @@ export function useWebSocket(groupId, memberId, onMessage, onReconnect) {
     if (!groupId || !memberId) return
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const host = window.location.host || 'localhost:8000'
-    const url = protocol + '//' + host + '/ws/' + groupId + '/' + memberId
+    const url = protocol + '//' + host + '/ws/' + groupId + '/' + memberId + '?token=' + token
     const socket = new WebSocket(url)
 
     socket.onopen = () => {

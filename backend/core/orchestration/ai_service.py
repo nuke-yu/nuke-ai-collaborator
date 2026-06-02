@@ -4,6 +4,7 @@ from typing import Optional, AsyncGenerator
 from ai.client import call_ai_once, call_ai_stream_messages, AIContextOverflowError, AIError
 from executors import compact
 from executors.base import ExecutionContext
+from ai.pricing import calculate_cost
 
 log = logging.getLogger(__name__)
 
@@ -157,7 +158,7 @@ class AIService:
         usage_data = self.usage.to_dict()
         
         # Calculate USD cost
-        from ai.pricing import calculate_cost
+
         cost = calculate_cost(
             self.ctx.bot.get("model_provider", "deepseek"),
             self.ctx.bot.get("model_name", "deepseek-chat"),
