@@ -9,6 +9,7 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import db as _db_mod
+import db.writer as _writer_mod
 from db.schema import init_db
 import sessions
 from executors.base import ExecutionContext, ExecutionResult, InteractionAdapter
@@ -32,7 +33,11 @@ class MockInteraction(InteractionAdapter):
 class TestResumeRunClosesSession(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self._orig = _db_mod.DB_PATH
+        # sessions.store writes via the serialized writer (db.write_connect),
+        # which resolves from db.writer.DB_PATH — patch it too.
+        self._orig_writer = _writer_mod.DB_PATH
         _db_mod.DB_PATH = _TEST_DB
+        _writer_mod.DB_PATH = _TEST_DB
         if Path(_TEST_DB).exists():
             Path(_TEST_DB).unlink()
         await init_db()
@@ -45,6 +50,7 @@ class TestResumeRunClosesSession(unittest.IsolatedAsyncioTestCase):
 
     async def asyncTearDown(self):
         _db_mod.DB_PATH = self._orig
+        _writer_mod.DB_PATH = self._orig_writer
         if Path(_TEST_DB).exists():
             Path(_TEST_DB).unlink()
 

@@ -7,7 +7,7 @@ import random
 import core.workflow as wf
 from bus import bus
 from bus.events import TicketCreated, CodeCommitted
-from db import global_db, connect, get_messages
+from db import global_db
 
 log = logging.getLogger(__name__)
 
@@ -50,18 +50,11 @@ async def _on_ticket_created(ev: dict):
     target_bot = scored_bots[0][1]
     
     content = f"[系统通知] 发现新任务：{title} ({ticket_id})。该任务已分配给你。请认领并开始执行。"
-    msg_dict = {"group_id": group_id, "content": content, "member_id": 0, "sender_type": "system"}
-    
-    async with connect() as db_m:
-        recent = await get_messages(db_m, group_id)
-        
-    orch = wf._orch_for(group_id)
-    # Force trigger this specific bot
-
+    # run_unit (core/runner) loads members/history from the DB itself; a WorkUnit
+    # only carries the target bot + trigger message (+ orchestrator-private tag).
     step = OrchestratorStep(next_units=[
-        WorkUnit(bot=target_bot, group_id=group_id, message=msg_dict, history=recent, all_bots=all_bots, all_members=all_members)
+        WorkUnit(bot=target_bot, trigger_msg=content, tag={"ticket_id": ticket_id})
     ])
-    
 
     bg.spawn_group(group_id, wf.apply(group_id, step))
 
@@ -82,17 +75,9 @@ async def _on_code_committed(ev: dict):
     target_bot = qa_bots[0]
     file_list = ", ".join(files)
     content = f"[系统通知] 发现代码提交：{file_list}。请针对 Ticket {ticket_id} 执行本地测试流水线并反馈结果。"
-    msg_dict = {"group_id": group_id, "content": content, "member_id": 0, "sender_type": "system"}
-    
-    async with connect() as db_m:
-        recent = await get_messages(db_m, group_id)
-        
-    orch = wf._orch_for(group_id)
-
     step = OrchestratorStep(next_units=[
-        WorkUnit(bot=target_bot, group_id=group_id, message=msg_dict, history=recent, all_bots=all_bots, all_members=all_members)
+        WorkUnit(bot=target_bot, trigger_msg=content, tag={"ticket_id": ticket_id})
     ])
-    
 
     bg.spawn_group(group_id, wf.apply(group_id, step))
 
