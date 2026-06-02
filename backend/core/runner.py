@@ -66,8 +66,12 @@ async def run_unit(group_id: int, unit, orch) -> None:
     ctx = ExecutionContext(
         bot=unit.bot, group_id=group_id, user_message=unit.trigger_msg,
         sender={"name": "系统"}, history=recent,
-        all_bots=all_bots, all_members=members, 
+        all_bots=all_bots, all_members=members,
         workflow_suffix=unit.prompt_suffix,
+        # Side-effect dispatcher: broadcasts via the bus + persists via the writer.
+        # (Executors default this themselves when None, but wiring it here makes the
+        # workflow path explicit and testable.)
+        interaction=StandardInteraction(),
     )
     result = await exec_registry.get(unit.executor_id).run(ctx)
     if not result.full_text:

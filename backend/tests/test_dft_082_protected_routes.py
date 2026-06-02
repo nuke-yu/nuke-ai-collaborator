@@ -15,12 +15,19 @@ _TEST_DB = str(os.path.join(_HERE, "test_auth_routes_unique.db"))
 
 class TestProtectedRoutes(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
+        # The app routes DB access through db.DB_PATH, not DATABASE_URL. Patch it
+        # to an isolated temp DB so register/login don't pollute the real chat.db
+        # (which made this test fail with 400 'username exists' on reruns).
+        self._orig = db.DB_PATH
+        db.DB_PATH = _TEST_DB
         if os.path.exists(_TEST_DB):
             os.remove(_TEST_DB)
-        os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{_TEST_DB}"
         await db.init_db()
+        # users/groups live in the central schema (db.global_db reads db.DB_PATH).
+        await db.init_central_db(_TEST_DB)
 
     async def asyncTearDown(self):
+        db.DB_PATH = self._orig
         if os.path.exists(_TEST_DB):
             os.remove(_TEST_DB)
 

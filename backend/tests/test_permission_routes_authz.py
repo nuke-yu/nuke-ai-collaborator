@@ -24,6 +24,11 @@ from httpx import AsyncClient
 class TestPermissionRouteAuthz(unittest.IsolatedAsyncioTestCase):
 
     async def asyncSetUp(self):
+        # Routes are auth-protected (DFT-082); bypass auth so these tests exercise
+        # the route logic, not the token check. Cleared in tearDown so it can't
+        # leak into the auth-specific test files.
+        from core import auth as _auth
+        app.dependency_overrides[_auth.get_current_user] = lambda: {"uid": 1, "sub": "test"}
         # Ensure clean state
         if os.path.exists(TEST_DB_PATH):
             try: os.remove(TEST_DB_PATH)
@@ -42,8 +47,9 @@ class TestPermissionRouteAuthz(unittest.IsolatedAsyncioTestCase):
             await db.commit()
 
     async def asyncTearDown(self):
+        from core import auth as _auth
+        app.dependency_overrides.pop(_auth.get_current_user, None)
         # We don't remove here to avoid locking issues between tests
-        pass
 
     async def test_add_rule_rejects_nonexistent_member(self):
         async with AsyncClient(app=app, base_url="http://test") as ac:

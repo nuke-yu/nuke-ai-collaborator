@@ -405,7 +405,7 @@ class TestRunnerBroadcast(unittest.IsolatedAsyncioTestCase):
             executor_id = "fake"
 
             async def run(self, ctx):
-                await ctx.broadcaster.broadcast(ctx.group_id, {
+                await ctx.interaction.broadcast(ctx.group_id, {
                     "type": "stream_chunk", "temp_id": "x", "delta": "Part 1",
                 })
                 return ExecutionResult(full_text="Part 1", msg_id=99)
@@ -482,7 +482,8 @@ class TestRunnerBroadcast(unittest.IsolatedAsyncioTestCase):
         ctx = captured["ctx"]
         self.assertEqual(ctx.user_message, "请开始你的工作。")
         self.assertEqual(ctx.workflow_suffix, "[阶段指令]")
-        self.assertIs(ctx.broadcaster, runner.bus)
+        from core.orchestration.interaction import StandardInteraction
+        self.assertIsInstance(ctx.interaction, StandardInteraction)
 
 
 class TestWorkflowParseTickets(unittest.TestCase):

@@ -190,7 +190,7 @@ async def _dispatch_recovery(payload: dict) -> None:
     from db import get_db, get_member, get_members, get_messages
     from executors import registry
     from executors.base import ExecutionContext
-    from bus import bus
+    from core.orchestration.interaction import StandardInteraction
     from ws_manager import manager as ws_manager
 
     sid = payload["session_id"]
@@ -226,7 +226,7 @@ async def _dispatch_recovery(payload: dict) -> None:
         history=history,
         all_bots=all_bots,
         all_members=members,
-        broadcaster=bus,
+        interaction=StandardInteraction(),
         resume_session_id=sid,
         resume_messages=payload["messages"],
     )

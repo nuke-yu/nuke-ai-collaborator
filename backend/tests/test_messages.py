@@ -17,6 +17,9 @@ from httpx import AsyncClient
 class TestMessageTimestamps(unittest.IsolatedAsyncioTestCase):
 
     async def asyncSetUp(self):
+        # Bypass DFT-082 auth so these tests exercise route logic (cleared in tearDown).
+        from core import auth as _auth
+        app.dependency_overrides[_auth.get_current_user] = lambda: {"uid": 1, "sub": "test"}
         if os.path.exists(TEST_DB_PATH):
             os.remove(TEST_DB_PATH)
         await database.init_db()
@@ -33,6 +36,8 @@ class TestMessageTimestamps(unittest.IsolatedAsyncioTestCase):
             await db.commit()
 
     async def asyncTearDown(self):
+        from core import auth as _auth
+        app.dependency_overrides.pop(_auth.get_current_user, None)
         if os.path.exists(TEST_DB_PATH):
             try:
                 os.remove(TEST_DB_PATH)

@@ -332,7 +332,7 @@ class TestSchedulerRunner(unittest.IsolatedAsyncioTestCase):
         with patch("db.get_db", return_value=self._make_async_cm()), \
              patch("db.get_members", new_callable=AsyncMock, return_value=fake_members), \
              patch("db.get_messages", new_callable=AsyncMock, return_value=[]), \
-             patch("core.orchestrator.dispatch_bots", new_callable=AsyncMock) as mock_dispatch:
+             patch("core.workflow.advance", new_callable=AsyncMock) as mock_dispatch:
             await fire_job(_BOT_ID, _GROUP_ID, "hello scheduler")
 
         mock_dispatch.assert_awaited_once()
@@ -345,7 +345,7 @@ class TestSchedulerRunner(unittest.IsolatedAsyncioTestCase):
         with patch("db.get_db", return_value=self._make_async_cm()), \
              patch("db.get_members", new_callable=AsyncMock, return_value=[]), \
              patch("db.get_messages", new_callable=AsyncMock, return_value=[]), \
-             patch("core.orchestrator.dispatch_bots", new_callable=AsyncMock) as mock_dispatch:
+             patch("core.workflow.advance", new_callable=AsyncMock) as mock_dispatch:
             await fire_job(999, _GROUP_ID, "ping")
 
         mock_dispatch.assert_not_awaited()
@@ -353,7 +353,7 @@ class TestSchedulerRunner(unittest.IsolatedAsyncioTestCase):
     async def test_fire_job_handles_db_error_gracefully(self):
         from scheduler.runner import fire_job
         with patch("db.get_db", side_effect=Exception("DB down")), \
-             patch("core.orchestrator.dispatch_bots", new_callable=AsyncMock) as mock_dispatch:
+             patch("core.workflow.advance", new_callable=AsyncMock) as mock_dispatch:
             await fire_job(_BOT_ID, _GROUP_ID, "fail gracefully")  # must not raise
         mock_dispatch.assert_not_awaited()
 
