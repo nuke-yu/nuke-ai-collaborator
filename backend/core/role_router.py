@@ -1,21 +1,39 @@
-def should_bot_respond(message: str, bot_name: str, bot_role: str) -> bool:
-    msg_lower = message.lower()
-    name_lower = bot_name.lower()
+# Trigger keywords per role "family" (EN + ZH). A bot auto-responds (no @mention /
+# active-bot lock needed) when the message mentions any keyword of its family.
+_FAMILY_KEYWORDS = {
+    "qa":  ("test", "qa", "bug", "regression", "测试", "质量", "用例", "验证", "缺陷"),
+    "ba":  ("requirement", "req", "spec", "feature", "story", "scope", "acceptance",
+            "需求", "规格", "要求", "产品", "功能", "验收", "用户故事", "范围"),
+    "dev": ("code", "implement", "api", "refactor", "deploy", "feature", "develop",
+            "开发", "代码", "实现", "接口", "架构", "前端", "后端", "部署", "重构"),
+}
 
+
+def _role_family(role: str):
+    """Map a free-form role string (EN or ZH, any case) to a known family, or None."""
+    r = (role or "").strip().lower()
+    if any(s in r for s in ("qa", "test", "quality", "测试", "质量")):
+        return "qa"          # check QA first so "QA Engineer" isn't caught by "engineer"
+    if r == "ba" or any(s in r for s in ("business", "analyst", "product", "pm",
+                                          "需求", "产品", "业务", "需求分析")):
+        return "ba"
+    if any(s in r for s in ("dev", "engineer", "developer", "code", "fullstack",
+                            "full-stack", "frontend", "backend", "开发", "工程",
+                            "前端", "后端")):
+        return "dev"
+    return None
+
+
+def should_bot_respond(message: str, bot_name: str, bot_role: str) -> bool:
+    msg_lower = (message or "").lower()
     if "@all" in msg_lower:
         return True
-
-    if f"@{name_lower}" in msg_lower:
+    if f"@{(bot_name or '').lower()}" in msg_lower:
         return True
-
-    role_keywords = {
-        "需求分析师": ["需求", "分析", "要求", "规格", "产品"],
-        "开发工程师": ["开发", "代码", "实现", "编程", "接口", "架构"],
-        "测试工程师": ["测试", "质量", "用例", "验证", "缺陷"],
-    }
-
-    keywords = role_keywords.get(bot_role, [])
-    return any(kw in msg_lower for kw in keywords)
+    family = _role_family(bot_role)
+    if not family:
+        return False
+    return any(kw in msg_lower for kw in _FAMILY_KEYWORDS[family])
 
 def build_image_content(text: str, file_url: str | None, file_type: str | None,
                         provider: str) -> "str | list":
