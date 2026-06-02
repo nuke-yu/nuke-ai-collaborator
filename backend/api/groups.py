@@ -104,8 +104,19 @@ async def add_member(group_id: int, req: AddMemberRequest):
 @router.delete("/api/groups/{group_id}/members/{member_id}")
 async def remove_member(group_id: int, member_id: int):
     async with write_connect() as db:
+        # Cascade-clean central rows that FK-reference members (the schema has no
+        # ON DELETE CASCADE), so deleting a bot that has permission rules / cron
+        # jobs doesn't fail with a foreign-key error. cron_jobs only exists in the
+        # split central schema, so guard it.
+        await db.execute("DELETE FROM permission_rules WHERE bot_id=?", (member_id,))
+        try:
+            await db.execute("DELETE FROM cron_jobs WHERE bot_id=?", (member_id,))
+        except Exception:
+            pass
         await db.execute("DELETE FROM members WHERE id=? AND group_id=?", (member_id, group_id))
         await db.commit()
+    # Keep other connected clients' member lists in sync.
+    await manager.broadcast(group_id, {"type": "member_removed", "member_id": member_id})
     return {"ok": True}
 
 

@@ -248,6 +248,15 @@ export default function ChatWindow({ memberId, isDark, onToggleTheme, onLogout }
         data.online ? next.add(data.member_id) : next.delete(data.member_id)
         return next
       })
+    } else if (data.type === 'member_removed') {
+      setMembers(prev => prev.filter(m => m.id !== data.member_id))
+      setMembersCache(prev => ({
+        ...prev,
+        [activeGroupId]: (prev[activeGroupId] || []).filter(m => m.id !== data.member_id)
+      }))
+      setGroups(prev => prev.map(g =>
+        g.id === activeGroupId ? { ...g, member_count: Math.max(0, (g.member_count ?? 1) - 1) } : g
+      ))
     } else if (data.type === 'workflow_update') {
       setWorkflow(data.active ? data : null)
     } else if (data.type === 'skills_loaded') {
@@ -428,7 +437,12 @@ export default function ChatWindow({ memberId, isDark, onToggleTheme, onLogout }
           }))
         }}
         onRemoveMember={async (id) => {
-          await fetch(`/api/groups/${activeGroupId}/members/${id}`, { method: 'DELETE' })
+          const res = await fetch(`/api/groups/${activeGroupId}/members/${id}`, { method: 'DELETE' })
+          if (!res.ok) {
+            setError('删除成员失败：' + res.status)
+            setTimeout(() => setError(null), 5000)
+            return
+          }
           setMembers(prev => prev.filter(m => m.id !== id))
           setMembersCache(prev => ({
             ...prev,
