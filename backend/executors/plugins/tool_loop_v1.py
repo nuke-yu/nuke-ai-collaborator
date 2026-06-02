@@ -656,8 +656,12 @@ class ToolLoopRunner:
                             context_text=await self._build_reinject(),
                         )
                         
+                        
+                        
                         if self.ctx.steer_channel and not self.ctx.steer_channel.empty():
                             steers = []
+                            # Note (M-7): In single-threaded asyncio, these empty() -> get_nowait() 
+                            # sequences are atomic as there are no yield points (awaits) between them.
                             while not self.ctx.steer_channel.empty():
                                 steers.append(self.ctx.steer_channel.get_nowait())
                             steer_text = "\n".join(steers)
@@ -669,6 +673,24 @@ class ToolLoopRunner:
                             
                         if not self.rewake_queue.empty():
                             rewakes = []
+                            # Note (M-7): In single-threaded asyncio, these empty() -> get_nowait() 
+                            # sequences are atomic as there are no yield points (awaits) between them.
+                            while not self.rewake_queue.empty():
+                                rewakes.append(self.rewake_queue.get_nowait())
+                            rewake_text = chr(10).join(rewakes)
+                            self.messages.append({"role": "user", "content": f"[系统唤醒] {rewake_text}"})
+                            await self.ctx.interaction.broadcast(self.ctx.group_id, {
+                                "type": "rewake_injected", "temp_id": self.temp_id,
+                                "member_id": self.bot["id"], "message": rewake_text[:300],
+                            })
+
+
+                            
+                        if not self.rewake_queue.empty():
+                            rewakes = []
+                            
+                        # Note (M-7): In single-threaded asyncio, these empty() -> get_nowait() 
+                        # sequences are atomic as there are no yield points (awaits) between them.
                             while not self.rewake_queue.empty():
                                 rewakes.append(self.rewake_queue.get_nowait())
                             rewake_text = "\n".join(rewakes)

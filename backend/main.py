@@ -149,6 +149,7 @@ class WSClientProxy:
 
 @app.websocket("/ws/{group_id}/{member_id}")
 async def websocket_endpoint(websocket: WebSocket, group_id: int, member_id: int, token: str = None):
+
     # CELL-Auth: Verify token during handshake
     user_payload = auth.verify_token(token) if token else None
     if not user_payload:
@@ -156,6 +157,16 @@ async def websocket_endpoint(websocket: WebSocket, group_id: int, member_id: int
         await websocket.send_json({"type": "auth_error", "message": "Authentication required"})
         await websocket.close()
         return
+    
+    # H-5: Verify that the member_id belongs to the authenticated user
+    async with db.global_db() as cdb:
+        async with cdb.execute("SELECT user_id FROM members WHERE id = ? AND group_id = ?", (member_id, group_id)) as cur:
+            row = await cur.fetchone()
+            if not row or row[0] != user_payload["uid"]:
+                await websocket.accept()
+                await websocket.send_json({"type": "auth_error", "message": "Unauthorized member access"})
+                await websocket.close()
+                return
 
     await manager.connect(websocket, group_id, member_id)
     
@@ -213,16 +224,6 @@ async def websocket_endpoint(websocket: WebSocket, group_id: int, member_id: int
                 ))
 
                 continue
-                continue
-
-            # Forward User message + current online status to Worker
-            await sup_mod.supervisor.send_to_worker(group_id, ipc.protocol.envelope(
-                ipc.protocol.USER_MESSAGE, 
-                group_id=group_id, 
-                member_id=member_id,
-                online_ids=manager.get_online_member_ids(group_id),
-                **payload
-            ))
 
     except WebSocketDisconnect:
         gone_id = manager.disconnect(websocket, group_id)

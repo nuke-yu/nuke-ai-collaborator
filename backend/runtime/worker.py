@@ -61,6 +61,7 @@ class Worker:
         try:
             while True:
                 msg = await ipc.recv_msg(self._reader)
+                if msg is None: break
                 await self._handle(msg)
         except (asyncio.IncompleteReadError, ConnectionResetError, BrokenPipeError):
             log.info("worker %s: downstream closed", self.worker_id)

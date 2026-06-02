@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback, useState } from 'react'
 
-export function useWebSocket(groupId, memberId, onMessage, onReconnect, token) {
+export function useWebSocket(groupId, memberId, onMessage, onReconnect, token, onAuthError) {
   const ws = useRef(null)
   const retryTimer = useRef(null)
   const [connected, setConnected] = useState(false)
@@ -8,9 +8,11 @@ export function useWebSocket(groupId, memberId, onMessage, onReconnect, token) {
 
   const onMessageRef = useRef(onMessage)
   const onReconnectRef = useRef(onReconnect)
+  const onAuthErrorRef = useRef(onAuthError)
   useEffect(() => {
     onMessageRef.current = onMessage
     onReconnectRef.current = onReconnect
+    onAuthErrorRef.current = onAuthError
   }, [onMessage, onReconnect])
 
   const connect = useCallback(() => {
@@ -30,6 +32,11 @@ export function useWebSocket(groupId, memberId, onMessage, onReconnect, token) {
 
     socket.onmessage = (e) => {
       const data = JSON.parse(e.data)
+      if (data.type === 'auth_error') {
+        onAuthErrorRef.current?.(data.message)
+        if (ws.current) ws.current.onclose = null // prevent retry
+        return
+      }
       onMessageRef.current(data)
       // 收到他人消息时，立即发回已读确认
       if (data.type === 'message' && data.id) {

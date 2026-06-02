@@ -101,6 +101,11 @@ class Supervisor:
                 writer.close()
                 return
             wid = hello["worker_id"]
+            # H-6: Close old connection if this worker_id is reconnecting
+            old_w = self._workers.get(wid)
+            if old_w:
+                try: old_w.close()
+                except Exception: pass
             self._workers[wid] = writer
             log.info("supervisor: worker %s connected", wid)
             while True:
@@ -119,27 +124,26 @@ class Supervisor:
         gid = frame.get("group_id")
         tid = frame.get("trace_id")
         
-        
-        with tracing.trace_context(trace_id=tid, group_id=gid):
-            if t == ipc.protocol.BROADCAST:
-                await self._fanout(gid, frame.get("payload", {}))
-            elif t == ipc.protocol.UNREAD_DELTA:
-                if self._on_unread:
-                    await self._on_unread(gid, frame)
-            
-            elif t == ipc.protocol.STATS_REPORT:
-                payload = frame.get("payload", {})
-                wid = payload.get("worker_id")
-                if wid:
-                    self._worker_stats[wid] = payload
-            elif t == ipc.protocol.LEASE_RELEASED:
-                fut = self._pending_handoffs.get(gid)
-                if fut and not fut.done():
-                    fut.set_result(True)
-            else:
-
-
-                log.debug("supervisor: unhandled upstream type=%s", t)
+        try:
+            with tracing.trace_context(trace_id=tid, group_id=gid):
+                if t == ipc.protocol.BROADCAST:
+                    await self._fanout(gid, frame.get("payload", {}))
+                elif t == ipc.protocol.UNREAD_DELTA:
+                    if self._on_unread:
+                        await self._on_unread(gid, frame)
+                elif t == ipc.protocol.STATS_REPORT:
+                    payload = frame.get("payload", {})
+                    wid = payload.get("worker_id")
+                    if wid:
+                        self._worker_stats[wid] = payload
+                elif t == ipc.protocol.LEASE_RELEASED:
+                    fut = self._pending_handoffs.get(gid)
+                    if fut and not fut.done():
+                        fut.set_result(True)
+                else:
+                    log.debug("supervisor: unhandled upstream type=%s", t)
+        except Exception:
+            log.exception("supervisor: error processing upstream frame type=%s", t)
 
 
     # ── browser side ─────────────────────────────────────────────────────

@@ -1,3 +1,4 @@
+import logging
 import asyncio
 import threading
 from pathlib import Path
@@ -67,7 +68,7 @@ def _safe_path(workspace: Path, relative: str) -> Path | None:
         if resolved.is_relative_to(workspace.resolve()):
             return resolved
     except Exception:
-        pass
+        log.exception("vfs: failed to save history for %s", p)
     return None
 
 
@@ -129,7 +130,7 @@ def _save_to_history(ws: Path, p: Path) -> None:
         while len(versions) > _HISTORY_LIMIT:
             versions.pop(0).unlink(missing_ok=True)
     except Exception:
-        pass
+        log.exception("vfs: failed to save history for %s", p)
 
 
 def list_file_history(bot_id: int, path: str) -> list[dict]:
@@ -573,3 +574,5 @@ async def archive_run(
         run_file.write_text(text, encoding="utf-8")
 
     await asyncio.to_thread(_write)
+
+log = logging.getLogger(__name__)

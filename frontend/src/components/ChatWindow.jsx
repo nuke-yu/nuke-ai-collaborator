@@ -288,7 +288,7 @@ export default function ChatWindow({ memberId, isDark, onToggleTheme }) {
     }
   }, [activeGroupId, messages])
 
-  const { send, sendRaw, connected, reconnecting } = useWebSocket(activeGroupId, memberId, handleWsMessage, handleReconnect, localStorage.getItem('token'))
+  const { send, sendRaw, connected, reconnecting } = useWebSocket(activeGroupId, memberId, handleWsMessage, handleReconnect, localStorage.getItem('token'), onLogout)
   const isStreaming = messages.some(m => m.streaming)
   const handleAbort = () => sendRaw({ type: 'abort', group_id: activeGroupId })
   const handlePermResponse = (requestId, approved, persistence) => {

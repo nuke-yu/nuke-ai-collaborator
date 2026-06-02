@@ -47,6 +47,8 @@ class RDManager:
                     rows = await cur.fetchall()
                     
             if not rows:
+                content = "# 任务看板 (BOARD.md)\n\n(暂无任务)"
+                await write_file(0, "BOARD.md", content, group_id=group_id)
                 return
 
             backlog = []
