@@ -184,7 +184,7 @@ WSManager（连接注册表，纯传输层）
 
 ```
 backend/bus/
-├── events.py   # 28 种 typed event 定义（@event 装饰器 + 中心注册表）
+├── events.py   # 29 种 typed event 定义（@event 装饰器 + 中心注册表）
 ├── engine.py   # EventBus 核心：typed / wildcard 双通道，Subscription 上下文管理器
 ├── adapter.py  # wildcard 订阅 → manager.broadcast，服务启动时以后台 Task 运行
 └── __init__.py # 导出 bus 单例、publish、ws_adapter
@@ -233,13 +233,13 @@ async with bus.subscribe_all() as sub:
     → WSManager 遍历连接 → ws.send_json(out) × N 个浏览器
 ```
 
-### 已定义事件类型（28 种）
+### 已定义事件类型（29 种）
 
 | 分类 | 事件 |
 |------|------|
 | 流式输出 | `stream_start` · `stream_chunk` · `stream_error` · `stream_end` · `stream_aborted` |
 | 消息 | `message` · `read` |
-| 在线状态 | `presence` |
+| 在线状态 | `presence` · `workflow_update` |
 | Bot 状态 | `typing` · `error` · `steer_queued` · `followup_start` · `steer_injected` · `rewake_injected` |
 | 工具执行 | `tool_call` · `tool_result` |
 | ReAct | `react_thought` · `react_action` · `react_observation` |
@@ -259,7 +259,7 @@ nuke-ai-collaborator/
 │   ├── models.py            # Pydantic 请求模型
 │   ├── config.py            # API Key 配置管理
 │   ├── bus/                 # 消息总线（见上方架构说明）
-│   │   ├── events.py        # 28 种 typed event
+│   │   ├── events.py        # 29 种 typed event
 │   │   ├── engine.py        # EventBus 核心
 │   │   ├── adapter.py       # WS 推送适配层
 │   │   └── __init__.py
