@@ -55,6 +55,19 @@ class TestMessageTimestamps(unittest.IsolatedAsyncioTestCase):
             # The original timestamp '2026-05-26 12:34:56' should be formatted to '2026-05-26T12:34:56Z'
             self.assertEqual(messages[0]["created_at"], "2026-05-26T12:34:56Z")
 
+    async def test_message_meta_roundtrips(self):
+        """save_message(meta=...) persists JSON and get_messages returns it parsed
+        (carries the workflow confirm-gate card). Plain messages keep meta=None."""
+        from db.queries import save_message, get_messages
+        async with database.get_db() as db:
+            gate_meta = {"kind": "confirm_gate", "gate_id": "1-0", "status": "pending"}
+            await save_message(db, 1, 2, "确认需求", meta=gate_meta)
+            msgs = await get_messages(db, 1, limit=10)
+        gate_msg = next(m for m in msgs if m["content"] == "确认需求")
+        self.assertEqual(gate_msg["meta"], gate_meta)
+        plain = next(m for m in msgs if m["content"] == "Test message")
+        self.assertIsNone(plain["meta"])
+
     async def test_search_messages_timestamp_formatting(self):
         """Verify that search_group_messages returns ISO 8601 UTC formatted timestamps (DFT-010)."""
         async with AsyncClient(app=app, base_url="http://test") as ac:

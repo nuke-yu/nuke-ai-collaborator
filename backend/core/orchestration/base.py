@@ -36,6 +36,9 @@ class OrchestratorStep:
     announcements: list = field(default_factory=list)   # list[SystemMessage] —— runner 广播
     broadcast_state: bool = False                       # runner 发 WorkflowUpdate(snapshot)
     done: bool = False                                  # 工作流结束
+    confirm_gate: dict | None = None                    # 人确认门：runner 广播一张内联确认卡片并挂起，
+                                                        # 等用户 confirm() 才推进。形如
+                                                        # {gate_id, label, bot_id, stage_name}
 
 
 class Orchestrator(ABC):
@@ -49,6 +52,11 @@ class Orchestrator(ABC):
     @abstractmethod
     def observe(self, group_id: int, bot_id: int, response: str) -> OrchestratorStep:
         """某个 bot 跑完一轮，更新内部状态并返回下一步。"""
+
+    def confirm(self, group_id: int, gate_id: str | None = None) -> OrchestratorStep:
+        """人在确认门点了「确认」。若当前正挂在该门上则推进到下一步，否则空步。
+        默认无门语义，返回空步。"""
+        return OrchestratorStep()
 
     def end(self, group_id: int) -> None:
         """结束编排，丢弃该 group 的内部状态。有状态的实现必须覆盖。"""

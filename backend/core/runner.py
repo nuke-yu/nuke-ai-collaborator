@@ -36,10 +36,26 @@ async def _post_system_msg(group_id: int, sender_bot_id: int, text: str) -> None
     })
 
 
+async def _post_confirm_gate(group_id: int, gate: dict) -> None:
+    """落库 + 广播一张人确认卡片（内联在消息流里，前端按 meta.kind 渲染按钮）。
+    挂在触发该门的 bot 名下；meta 带 gate_id 供前端点「确认」时回传。"""
+    bot_id = gate.get("bot_id") or 0
+    label = gate.get("label", "请确认")
+    meta = {"kind": "confirm_gate", "gate_id": gate.get("gate_id"),
+            "stage_name": gate.get("stage_name", ""), "status": "pending"}
+    async with write_connect() as db:
+        mid = await save_message(db, group_id, bot_id, label, meta=meta)
+        recent = await get_messages(db, group_id, limit=3)
+    saved = next((m for m in recent if m["id"] == mid), {})
+    await bus.broadcast(group_id, {"type": "message", **saved})
+
+
 async def apply_step(group_id: int, orch, step) -> None:
     """把 OrchestratorStep 翻译成副作用。编排层决定，runner 执行。"""
     for ann in step.announcements:
         await _post_system_msg(group_id, ann.sender_bot_id, ann.text)
+    if step.confirm_gate:
+        await _post_confirm_gate(group_id, step.confirm_gate)
     if step.broadcast_state:
         await bus.publish(WorkflowUpdate(group_id=group_id, **orch.snapshot(group_id)))
         blob = orch.serialize(group_id)

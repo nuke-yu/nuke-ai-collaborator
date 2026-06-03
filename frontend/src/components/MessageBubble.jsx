@@ -196,11 +196,12 @@ function SkillsStrip({ skills }) {
 
 const QUICK_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🎉', '🤔', '👏']
 
-export default function MessageBubble({ msg, isTyping, currentMemberId, members = [], readMap = {}, onReply, reactions = {}, onReact, isPinned, onPin, onUnpin, highlighted = false }) {
+export default function MessageBubble({ msg, isTyping, currentMemberId, members = [], readMap = {}, onReply, reactions = {}, onReact, isPinned, onPin, onUnpin, highlighted = false, onConfirmGate }) {
   const [editing, setEditing] = useState(false)
   const [editText, setEditText] = useState(msg.content)
   const [lightboxSrc, setLightboxSrc] = useState(null)
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
+  const [gateState, setGateState] = useState(null)  // null | 'confirmed' | 'revising'
   const editRef = useRef(null)
   const isOwn = msg.member_id === currentMemberId
   const closeEmojiPicker = useCallback(() => setShowEmojiPicker(false), [])
@@ -251,6 +252,44 @@ export default function MessageBubble({ msg, isTyping, currentMemberId, members 
             {[0, 150, 300].map((delay) => (
               <span key={delay} className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: `${delay}ms` }} />
             ))}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // 工作流人确认门：内联卡片（不是弹窗），人点确认才推进；想改就直接发消息。
+  if (msg.meta?.kind === 'confirm_gate') {
+    const status = gateState || (msg.meta.status === 'confirmed' ? 'confirmed' : 'pending')
+    return (
+      <div className="flex items-start gap-2 py-1">
+        {avatar}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-0.5">
+            <span className="text-sm font-medium text-gray-200">{msg.sender_name}</span>
+            <span className="text-xs text-indigo-400 bg-indigo-950/50 rounded px-1 py-0.5">需确认</span>
+            <span className="text-xs text-gray-500">
+              {msg.created_at ? new Date(msg.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : ''}
+            </span>
+          </div>
+          <div className="border border-indigo-500/40 bg-indigo-950/20 rounded-xl px-4 py-3 inline-block max-w-lg">
+            <div className="text-sm text-gray-200 mb-2">{msg.content}</div>
+            {status === 'confirmed' ? (
+              <div className="text-sm text-green-400">✅ 已确认</div>
+            ) : status === 'revising' ? (
+              <div className="text-sm text-gray-400">✏️ 已选择修改 —— 直接发消息调整即可</div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => { onConfirmGate?.(msg.meta.gate_id); setGateState('confirmed') }}
+                  className="px-3 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium transition-colors"
+                >✅ 确认</button>
+                <button
+                  onClick={() => setGateState('revising')}
+                  className="px-3 py-1 rounded-lg border border-gray-600 text-gray-300 hover:bg-gray-700 text-sm transition-colors"
+                >✏️ 修改</button>
+              </div>
+            )}
           </div>
         </div>
       </div>

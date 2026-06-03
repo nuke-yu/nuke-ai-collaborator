@@ -141,7 +141,8 @@ _GROUP_DDL = [
         sender_type TEXT DEFAULT NULL,
         sender_avatar TEXT DEFAULT NULL,
         sender_provider TEXT DEFAULT NULL,
-        sender_model TEXT DEFAULT NULL
+        sender_model TEXT DEFAULT NULL,
+        meta TEXT DEFAULT NULL
     )""",
     """CREATE TABLE IF NOT EXISTS role_summaries (
         id                 INTEGER PRIMARY KEY AUTOINCREMENT,

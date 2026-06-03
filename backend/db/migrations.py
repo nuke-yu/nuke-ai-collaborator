@@ -269,6 +269,12 @@ async def migration_015(db):
     await db.commit()
 
 
+async def migration_016(db):
+    """Add meta (JSON) to messages — carries structured payloads like the
+    workflow human-confirmation gate card (meta.kind = 'confirm_gate')."""
+    await _safe_add_column(db, "ALTER TABLE messages ADD COLUMN meta TEXT DEFAULT NULL")
+    await db.commit()
+
 
 MIGRATIONS: list = [
     migration_001,
@@ -286,6 +292,7 @@ MIGRATIONS: list = [
     migration_013,
     migration_014,
     migration_015,
+    migration_016,
 ]
 
 

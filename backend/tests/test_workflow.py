@@ -64,6 +64,67 @@ class TestOrchestratorFlow(unittest.TestCase):
         step = self.orch.observe(1, 1, "完毕")
         self.assertEqual(step.next_units[0].executor_id, "tool_loop_v1")
 
+    # ── 人确认门（gate）─────────────────────────────────────────────────────────
+    def _gated(self, bid, name, keyword="完毕"):
+        s = self._single(bid, name, keyword=keyword)
+        s["gate"] = True
+        s["gate_label"] = f"确认{name}"
+        return s
+
+    def test_gated_stage_raises_gate_instead_of_advancing(self):
+        self.orch.begin(1, [self._gated(1, "BA"), self._single(2, "Dev")])
+        step = self.orch.observe(1, 1, "需求整理好了 完毕")
+        # 挂起：发卡片、不推进、不派发下一个 bot
+        self.assertIsNotNone(step.confirm_gate)
+        self.assertEqual(step.confirm_gate["gate_id"], "1-0")
+        self.assertEqual(step.confirm_gate["bot_id"], 1)
+        self.assertEqual(step.confirm_gate["label"], "确认BA")
+        self.assertEqual(step.next_units, [])
+        self.assertFalse(step.done)
+        # 仍停在第 0 阶段，快照标记挂起
+        self.assertEqual(self.orch.get(1)["current"], 0)
+        self.assertEqual(self.orch.snapshot(1)["awaiting_confirm"], "1-0")
+
+    def test_confirm_advances_past_gate(self):
+        self.orch.begin(1, [self._gated(1, "BA"), self._single(2, "Dev")])
+        self.orch.observe(1, 1, "完毕")
+        step = self.orch.confirm(1)
+        self.assertEqual(len(step.next_units), 1)
+        self.assertEqual(step.next_units[0].bot["id"], 2)   # 交棒给 Dev
+        self.assertEqual(self.orch.get(1)["current"], 1)
+        self.assertIsNone(self.orch.snapshot(1)["awaiting_confirm"])
+
+    def test_confirm_rejects_stale_gate_id(self):
+        self.orch.begin(1, [self._gated(1, "BA"), self._single(2, "Dev")])
+        self.orch.observe(1, 1, "完毕")
+        stale = self.orch.confirm(1, gate_id="1-999")
+        self.assertEqual(stale.next_units, [])
+        self.assertEqual(self.orch.get(1)["current"], 0)            # 没被推进
+        ok = self.orch.confirm(1, gate_id="1-0")                    # 对的 gate_id 才生效
+        self.assertEqual(ok.next_units[0].bot["id"], 2)
+
+    def test_confirm_without_pending_gate_is_noop(self):
+        self.orch.begin(1, [self._gated(1, "BA"), self._single(2, "Dev")])
+        step = self.orch.confirm(1)   # 还没挂门
+        self.assertEqual(step.next_units, [])
+        self.assertEqual(self.orch.get(1)["current"], 0)
+
+    def test_gated_final_stage_done_only_after_confirm(self):
+        self.orch.begin(1, [self._gated(1, "QA")])
+        step = self.orch.observe(1, 1, "测试通过 完毕")
+        self.assertFalse(step.done)                 # 挂门，先不结束
+        self.assertIsNotNone(step.confirm_gate)
+        done_step = self.orch.confirm(1)
+        self.assertTrue(done_step.done)             # 确认后才结束
+        self.assertIsNone(self.orch.get(1))
+
+    def test_ungated_stage_still_auto_advances(self):
+        # 回归：没有 gate 标志的阶段保持原行为（命中关键词即推进）
+        self.orch.begin(1, [self._single(1, "A"), self._single(2, "B")])
+        step = self.orch.observe(1, 1, "完毕")
+        self.assertIsNone(step.confirm_gate)
+        self.assertEqual(step.next_units[0].bot["id"], 2)
+
     def test_pool_entry_assigns_tickets(self):
         pool = {"stage_type": "pool", "done_keyword": "完毕",
                 "bots": [_bot_entry(10, "D1"), _bot_entry(11, "D2")]}
@@ -638,6 +699,52 @@ class TestOrchestratorPluggability(unittest.IsolatedAsyncioTestCase):
             wf.end(g_rr)
             wf._orch.end(g_wf)
             wf._group_orch.pop(g_wf, None)
+
+
+class TestConfirmGateGlue(unittest.IsolatedAsyncioTestCase):
+    """runner.apply_step 把 step.confirm_gate 落成一条带 meta 的内联确认卡片并广播。"""
+
+    async def test_apply_step_posts_confirm_gate_card(self):
+        from core import runner
+        from core.orchestration.base import OrchestratorStep
+
+        saved = {}
+        async def fake_save(db, gid, mid, content, **kw):
+            saved.update(gid=gid, mid=mid, content=content, meta=kw.get("meta"))
+            return 77
+        bcast = []
+        async def cap(gid, payload):
+            bcast.append(payload)
+
+        fake_db_cm = MagicMock()
+        fake_db_cm.__aenter__ = AsyncMock(return_value=MagicMock())
+        fake_db_cm.__aexit__ = AsyncMock(return_value=False)
+
+        class StubOrch:
+            def snapshot(self, gid): return {"active": True}
+            def serialize(self, gid): return None
+
+        step = OrchestratorStep(confirm_gate={
+            "gate_id": "1-0", "label": "确认「需求」这一步已完成", "bot_id": 3, "stage_name": "需求",
+        })
+        with patch.object(runner, "save_message", new=fake_save), \
+             patch.object(runner, "get_messages",
+                          new=AsyncMock(return_value=[{"id": 77, "content": "确认「需求」这一步已完成",
+                                                       "meta": {"kind": "confirm_gate", "gate_id": "1-0"}}])), \
+             patch.object(runner, "write_connect", return_value=fake_db_cm), \
+             patch.object(runner.bus, "broadcast", new=cap):
+            await runner.apply_step(1, StubOrch(), step)
+
+        # 落库的卡片：挂在 bot 名下，content=label，meta.kind=confirm_gate 带 gate_id
+        self.assertEqual(saved["mid"], 3)
+        self.assertEqual(saved["content"], "确认「需求」这一步已完成")
+        self.assertEqual(saved["meta"]["kind"], "confirm_gate")
+        self.assertEqual(saved["meta"]["gate_id"], "1-0")
+        self.assertEqual(saved["meta"]["status"], "pending")
+        # 广播了一条 message（带 meta）
+        msgs = [b for b in bcast if b.get("type") == "message"]
+        self.assertEqual(len(msgs), 1)
+        self.assertEqual(msgs[0]["meta"]["kind"], "confirm_gate")
 
 
 if __name__ == "__main__":

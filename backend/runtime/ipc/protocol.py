@@ -8,10 +8,11 @@
 USER_MESSAGE = "user_message"            # 用户消息
 ABORT = "abort"                          # 中止该群在跑任务
 PERMISSION_RESPONSE = "permission_response"  # 权限审批回复
+CONFIRM = "confirm"                      # 人在工作流确认门点了「确认」
 WAKE_TRIGGER = "wake_trigger"            # cron/告警唤醒沉睡群
 RELEASE_LEASE = "release_lease"          # CELL-18: Request worker to release group
 
-DOWNSTREAM = frozenset({USER_MESSAGE, ABORT, PERMISSION_RESPONSE, WAKE_TRIGGER, RELEASE_LEASE})
+DOWNSTREAM = frozenset({USER_MESSAGE, ABORT, PERMISSION_RESPONSE, CONFIRM, WAKE_TRIGGER, RELEASE_LEASE})
 
 # ── 上行 (Worker → Supervisor) ────────────────────────────────────────────
 BROADCAST = "broadcast"                  # 包裹任一 bus 事件，供 Supervisor 扇出给浏览器

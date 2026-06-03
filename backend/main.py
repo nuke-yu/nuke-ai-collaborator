@@ -227,6 +227,13 @@ async def websocket_endpoint(websocket: WebSocket, group_id: int, member_id: int
                     ))
                     continue
 
+                if t == "confirm":
+                    await sup_mod.supervisor.send_to_worker(group_id, ipc.protocol.envelope(
+                        ipc.protocol.CONFIRM, group_id=group_id, trace_id=tid,
+                        gate_id=payload.get("gate_id")
+                    ))
+                    continue
+
                 if t == "permission_response":
                     await sup_mod.supervisor.send_to_worker(group_id, ipc.protocol.envelope(
                         ipc.protocol.PERMISSION_RESPONSE, group_id=group_id, trace_id=tid, **payload

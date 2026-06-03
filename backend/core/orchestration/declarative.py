@@ -69,10 +69,12 @@ class DeclarativeOrchestrator(Orchestrator):
         s = self._state.get(group_id)
         if not s:
             return {"active": False}
+        pending = s.get("awaiting_confirm")
         return {
             "active": True,
             "stages": [stage_handler(st).snapshot(st) for st in s["stages"]],
             "current": s["current"],
+            "awaiting_confirm": pending["gate_id"] if pending else None,
         }
 
     # ── 持久化 / 崩溃恢复 ───────────────────────────────────────────────────────
@@ -116,12 +118,44 @@ class DeclarativeOrchestrator(Orchestrator):
         s = self._state.get(group_id)
         if not s:
             return OrchestratorStep()
+        s.pop("awaiting_confirm", None)  # 推进即离开当前门
         s["current"] += 1
         if s["current"] >= len(s["stages"]):
             self.end(group_id)
             return OrchestratorStep(done=True)
         ctx = self._ctx(group_id)
         return stage_handler(ctx.stage).enter(ctx, prev_output)
+
+    def _raise_gate(self, ctx: StageCtx, response: str) -> OrchestratorStep:
+        """bot 在带 gate 的阶段说出了完成关键词：挂起本阶段、广播一张确认卡片，
+        等用户 confirm() 才真正 _advance。response 暂存为下一阶段的 prev_output。"""
+        s = self._state.get(ctx.group_id)
+        if not s:
+            return OrchestratorStep()
+        gate_id = f"{ctx.group_id}-{s['current']}"
+        s["awaiting_confirm"] = {"gate_id": gate_id, "prev_output": response}
+        stage = ctx.stage
+        return OrchestratorStep(
+            broadcast_state=True,
+            confirm_gate={
+                "gate_id": gate_id,
+                "label": stage.get("gate_label") or f"确认「{stage.get('name', '')}」这一步已完成",
+                "bot_id": stage.get("id"),
+                "stage_name": stage.get("name", ""),
+            },
+        )
+
+    def confirm(self, group_id: int, gate_id: str | None = None) -> OrchestratorStep:
+        s = self._state.get(group_id)
+        if not s:
+            return OrchestratorStep()
+        pending = s.get("awaiting_confirm")
+        if not pending:
+            return OrchestratorStep()
+        # 防重复 / 防过期：带了 gate_id 就必须对得上当前挂起的门。
+        if gate_id is not None and gate_id != pending["gate_id"]:
+            return OrchestratorStep()
+        return self._advance(group_id, prev_output=pending.get("prev_output", ""))
 
     async def dispatch(self, group_id: int, message: dict, members: list, recent: list) -> OrchestratorStep:
         """DFT-071: Unified dispatch entry point for both workflow and free-form chat."""

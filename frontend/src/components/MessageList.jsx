@@ -19,7 +19,8 @@ export default function MessageList({
   onReply,
   onReact,
   onPin,
-  onUnpin
+  onUnpin,
+  onConfirmGate
 }) {
   return (
     <div
@@ -106,6 +107,7 @@ export default function MessageList({
                 onPin={(id) => onPin(id)}
                 onUnpin={(id) => onUnpin(id)}
                 highlighted={msg.id === highlightedId}
+                onConfirmGate={onConfirmGate}
               />
             </div>
           </Fragment>

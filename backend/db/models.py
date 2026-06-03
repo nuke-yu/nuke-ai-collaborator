@@ -48,7 +48,7 @@ _MSG_SQL = """
            m.file_url, m.file_name, m.file_size, m.file_type,
            m.is_auto_reply, m.input_tokens, m.output_tokens,
            m.cache_read_tokens, m.cache_creation_tokens,
-           m.sender_provider, m.sender_model
+           m.sender_provider, m.sender_model, m.meta
     FROM messages m
     LEFT JOIN messages rm ON m.reply_to_id = rm.id
 """
@@ -65,6 +65,7 @@ def _row_to_msg(r):
     cache_creation_tokens = r[21] if len(r) > 21 else None
     provider = r[22] if len(r) > 22 else None
     model = r[23] if len(r) > 23 else None
+    meta = _parse_json(r[24]) or None if len(r) > 24 else None
     cost_usd = None
     if provider and (input_tokens or output_tokens or cache_read_tokens or cache_creation_tokens):
         cost_usd = calculate_cost(provider, model, {
@@ -85,4 +86,5 @@ def _row_to_msg(r):
         "cache_read_tokens": cache_read_tokens,
         "cache_creation_tokens": cache_creation_tokens,
         "cost_usd": cost_usd,
+        "meta": meta,
     }

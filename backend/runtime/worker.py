@@ -140,6 +140,12 @@ class Worker:
                     self._on_abort(gid)
                 else:
                     bg.abort_group(gid)
+            elif t == ipc.protocol.CONFIRM:
+                from runtime.lifecycle import manager as lifecycle
+                db_path = await lifecycle.hydrate(gid)
+                with db.bind_db(db_path):
+                    import core.workflow as wf
+                    await wf.confirm(gid, msg.get("gate_id"))
             elif t == ipc.protocol.PERMISSION_RESPONSE:
                 request_id = msg.get("request_id", "")
                 approved = bool(msg.get("approved", False))

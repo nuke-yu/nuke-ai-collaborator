@@ -105,6 +105,9 @@ class SingleStage(StageType):
     def observe(self, ctx: StageCtx, bot_id: int, response: str) -> OrchestratorStep:
         keyword = ctx.stage.get("done_keyword", "")
         if keyword and keyword in response:
+            # 带 gate 的阶段：bot 说完成不直接推进，而是挂起等人点「确认」。
+            if ctx.stage.get("gate"):
+                return ctx.orch._raise_gate(ctx, response)
             return ctx.orch._advance(ctx.group_id, prev_output=response)
         return OrchestratorStep()
 
@@ -114,6 +117,7 @@ class SingleStage(StageType):
             "id": stage["id"], "name": stage["name"],
             "avatar_color": stage["avatar_color"], "role": stage.get("role") or "",
             "done_keyword": stage.get("done_keyword", ""),
+            "gate": bool(stage.get("gate")),
         }
 
 

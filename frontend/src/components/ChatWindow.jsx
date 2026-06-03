@@ -311,6 +311,7 @@ export default function ChatWindow({ memberId, isDark, onToggleTheme, onLogout }
   const { send, sendRaw, connected, reconnecting } = useWebSocket(activeGroupId, memberId, handleWsMessage, handleReconnect, localStorage.getItem('token'), onLogout)
   const isStreaming = messages.some(m => m.streaming)
   const handleAbort = () => sendRaw({ type: 'abort', group_id: activeGroupId })
+  const handleConfirmGate = (gateId) => sendRaw({ type: 'confirm', group_id: activeGroupId, gate_id: gateId })
   const handlePermResponse = (requestId, approved, persistence) => {
     sendRaw({ type: 'permission_response', request_id: requestId, approved, persistence })
     setPermRequest(null)
@@ -647,6 +648,7 @@ export default function ChatWindow({ memberId, isDark, onToggleTheme, onLogout }
           onReact={(id, emoji) => toggleReaction(id, memberId, emoji)}
           onPin={(id) => pinMessage(activeGroupId, id)}
           onUnpin={(id) => unpinMessage(activeGroupId, id)}
+          onConfirmGate={handleConfirmGate}
         />
         {isStreaming && (
           <div className="px-4 py-1 flex justify-center">
