@@ -92,12 +92,16 @@ class SingleStage(StageType):
 
     def enter(self, ctx: StageCtx, prev_output: str) -> OrchestratorStep:
         stage = ctx.stage
+        # 带 instruction 的阶段（如 RD 流水线的建Jira/Dev/QA 棒）用本阶段任务指令开场，
+        # 交棒时下一个 bot 一进场就知道该干什么；否则回退到通用开场白。
+        trigger = stage.get("instruction") or \
+            f"请开始你（{stage['name']} · {stage.get('role', '')}）的工作。"
         return OrchestratorStep(
             broadcast_state=True,
             next_units=[WorkUnit(
                 bot=stage,
                 executor_id=stage.get("executor_id", "tool_loop_v1"),
-                trigger_msg=f"请开始你（{stage['name']} · {stage.get('role', '')}）的工作。",
+                trigger_msg=trigger,
                 prompt_suffix=ctx.orch.system_suffix(ctx.group_id),
             )],
         )

@@ -125,6 +125,48 @@ class TestOrchestratorFlow(unittest.TestCase):
         self.assertIsNone(step.confirm_gate)
         self.assertEqual(step.next_units[0].bot["id"], 2)
 
+    # ── RD 流水线：4 道门 + 交棒（BA澄清→BA建Jira→Dev→QA）────────────────────────
+    def test_rd_pipeline_four_gates_with_handoff(self):
+        from core.orchestration.pipeline import build_rd_pipeline
+        ba = {"id": 1, "name": "BA", "avatar_color": "#1", "role": "BA"}
+        dev = {"id": 2, "name": "Dev", "avatar_color": "#2", "role": "Dev"}
+        qa = {"id": 3, "name": "QA", "avatar_color": "#3", "role": "QA"}
+        self.orch.begin(1, build_rd_pipeline(ba, dev, qa))
+
+        # 阶段0 BA澄清：说完成关键词 → 门1（不推进）
+        s = self.orch.observe(1, 1, "需求总结…… 需求确认完成")
+        self.assertEqual(s.confirm_gate["gate_id"], "1-0")
+        self.assertEqual(s.confirm_gate["label"], "确认需求已整理清楚")
+        self.assertEqual(self.orch.get(1)["current"], 0)
+
+        # 确认门1 → 阶段1 BA建Jira：交棒回 BA，trigger 带「建Jira」指令
+        s = self.orch.confirm(1)
+        self.assertEqual(s.next_units[0].bot["id"], 1)
+        self.assertIn("Jira", s.next_units[0].trigger_msg)
+        self.assertEqual(self.orch.get(1)["current"], 1)
+
+        # 阶段1 → 门2 → 阶段2 Dev
+        s = self.orch.observe(1, 1, "工单清单…… JIRA创建完成")
+        self.assertEqual(s.confirm_gate["gate_id"], "1-1")
+        s = self.orch.confirm(1)
+        self.assertEqual(s.next_units[0].bot["id"], 2)          # 交棒给 Dev
+        self.assertIn("开发", s.next_units[0].trigger_msg)
+
+        # 阶段2 → 门3 → 阶段3 QA
+        s = self.orch.observe(1, 2, "实现方案…… 开发完成")
+        self.assertIsNotNone(s.confirm_gate)
+        s = self.orch.confirm(1)
+        self.assertEqual(s.next_units[0].bot["id"], 3)          # 交棒给 QA
+
+        # 阶段3 QA（末棒）→ 门4：确认前不结束
+        s = self.orch.observe(1, 3, "逐条AC…… 测试完成")
+        self.assertIsNotNone(s.confirm_gate)
+        self.assertFalse(s.done)
+        # 确认门4 → 整条流水线结束、状态清空
+        s = self.orch.confirm(1)
+        self.assertTrue(s.done)
+        self.assertIsNone(self.orch.get(1))
+
     def test_pool_entry_assigns_tickets(self):
         pool = {"stage_type": "pool", "done_keyword": "完毕",
                 "bots": [_bot_entry(10, "D1"), _bot_entry(11, "D2")]}
