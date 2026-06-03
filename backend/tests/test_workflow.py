@@ -118,6 +118,16 @@ class TestOrchestratorFlow(unittest.TestCase):
         self.assertTrue(done_step.done)             # 确认后才结束
         self.assertIsNone(self.orch.get(1))
 
+    def test_gated_snapshot_is_workflow_update_compatible(self):
+        # 回归：snapshot 多出的 awaiting_confirm 必须能塞进 WorkflowUpdate 事件
+        # （runner/workflow.apply 做的就是 WorkflowUpdate(group_id, **snapshot)）。
+        from bus.events import WorkflowUpdate
+        self.orch.begin(1, [self._gated(1, "BA")])
+        self.orch.observe(1, 1, "完毕")            # 挂门 → snapshot 带 awaiting_confirm
+        snap = self.orch.snapshot(1)
+        ev = WorkflowUpdate(group_id=1, **snap)    # 不应抛 TypeError
+        self.assertEqual(ev.awaiting_confirm, "1-0")
+
     def test_ungated_stage_still_auto_advances(self):
         # 回归：没有 gate 标志的阶段保持原行为（命中关键词即推进）
         self.orch.begin(1, [self._single(1, "A"), self._single(2, "B")])

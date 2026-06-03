@@ -199,6 +199,7 @@ class WorkflowUpdate:
     stages:   list | None = None
     current:  int | None  = None
     done:     bool        = False
+    awaiting_confirm: str | None = None   # gate_id 时表示该群正挂在人确认门上
 
 
 # ─── Compaction ──────────────────────────────────────────────────────────────

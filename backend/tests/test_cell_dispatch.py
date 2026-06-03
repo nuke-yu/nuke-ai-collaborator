@@ -43,6 +43,16 @@ class TestCellDispatch(unittest.IsolatedAsyncioTestCase):
             c.commit()
         from executors import registry
         registry.discover()
+        # Defensive isolation: a prior test that hydrated a group (e.g.
+        # test_cell_17_lifecycle hydrates group 1) leaves the process-global workflow
+        # orchestrator singleton keyed on that group_id. For GID=1 that makes
+        # dispatch take the (stale) workflow path instead of free-form @mention
+        # routing, so the bot never replies. Reset it to a clean slate.
+        import core.workflow as _wf
+        _wf._orch._state.clear()
+        _wf._group_orch.clear()
+        from runtime.lifecycle import manager as _lm
+        _lm._active_groups.clear()
 
     async def asyncTearDown(self):
         # This is a heavyweight integration test that runs a real fire-and-forget

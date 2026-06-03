@@ -335,10 +335,12 @@ class TestSaveMessageCacheColumns(unittest.IsolatedAsyncioTestCase):
 
         mock_db = self._make_save_db()
         await save_message(mock_db, group_id=1, member_id=2, content="hi")
-        _, params = mock_db.execute.call_args[0]
-        # cache_read_tokens and cache_creation_tokens are the last two positional params
-        self.assertIsNone(params[-2])
-        self.assertIsNone(params[-1])
+        sql, params = mock_db.execute.call_args[0]
+        # Locate the cache columns by name in the INSERT and assert their params are
+        # None — robust to other trailing columns (sender_*, meta) being appended.
+        cols = [c.strip() for c in sql.split("(", 1)[1].split(")", 1)[0].split(",")]
+        self.assertIsNone(params[cols.index("cache_read_tokens")])
+        self.assertIsNone(params[cols.index("cache_creation_tokens")])
 
 
 # =============================================================================
