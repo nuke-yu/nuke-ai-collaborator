@@ -456,9 +456,17 @@ _APPROVAL_REQUIRED_TOOLS = frozenset({
     "run_shell", "write_file", "read_local_file", "write_local_file", "spawn_agent",
 })
 
+# RD 流水线的内部记账工具（Jira/PR 替身）：人把关在工作流的 4 道门，不在每次工具调用，
+# 故这些工具不走权限询问，直接放行。
+_AUTO_ALLOW_TOOLS = frozenset({
+    "create_jira_ticket", "list_jira_tickets", "create_pr",
+})
+
 
 async def _permission_check_hook(name: str, arguments: dict, context: dict) -> dict | None:
     """Run the permission decision pipeline before every tool call."""
+    if name in _AUTO_ALLOW_TOOLS:
+        return None  # internal RD bookkeeping tools — gated at the workflow doors, not here
     ruleset = context.get("ruleset")
     if ruleset is None:
         if name in _APPROVAL_REQUIRED_TOOLS:
