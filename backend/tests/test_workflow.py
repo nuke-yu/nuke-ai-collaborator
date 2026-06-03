@@ -789,5 +789,54 @@ class TestConfirmGateGlue(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(msgs[0]["meta"]["kind"], "confirm_gate")
 
 
+class TestStartRdPipeline(unittest.IsolatedAsyncioTestCase):
+    """worker 侧启动 RD 流水线：角色匹配 BA/Dev/QA，缺角色则提示不启动。"""
+
+    def _cm(self):
+        cm = MagicMock()
+        cm.__aenter__ = AsyncMock(return_value=MagicMock())
+        cm.__aexit__ = AsyncMock(return_value=False)
+        return cm
+
+    async def test_missing_role_aborts_with_message(self):
+        from runtime import dispatch
+        members = [{"id": 1, "name": "BA", "type": "bot", "role": "BA", "avatar_color": "#1"}]
+        bcast = []
+        async def cap(gid, p): bcast.append(p)
+        with patch.object(dispatch.db, "global_db", return_value=self._cm()), \
+             patch.object(dispatch.db, "get_members", new=AsyncMock(return_value=members)), \
+             patch.object(dispatch.bus, "broadcast", new=cap), \
+             patch("core.workflow.apply", new=AsyncMock()) as mock_apply:
+            await dispatch.dispatch_start_workflow({"group_id": 9001})
+        self.assertTrue(any("缺少角色" in (p.get("content", "")) for p in bcast))
+        mock_apply.assert_not_awaited()   # 没启动工作流
+
+    async def test_all_roles_start_pipeline(self):
+        from runtime import dispatch
+        import core.workflow as wf
+        gid = 9002
+        wf.end(gid)
+        members = [
+            {"id": 1, "name": "小需", "type": "bot", "role": "需求分析", "avatar_color": "#1"},
+            {"id": 2, "name": "小开", "type": "bot", "role": "后端开发", "avatar_color": "#2"},
+            {"id": 3, "name": "小测", "type": "bot", "role": "测试", "avatar_color": "#3"},
+        ]
+        bcast = []
+        async def cap(g, p): bcast.append(p)
+        try:
+            with patch.object(dispatch.db, "global_db", return_value=self._cm()), \
+                 patch.object(dispatch.db, "get_members", new=AsyncMock(return_value=members)), \
+                 patch.object(dispatch.bus, "broadcast", new=cap), \
+                 patch("core.workflow.apply", new=AsyncMock()):
+                await dispatch.dispatch_start_workflow({"group_id": gid})
+            # 工作流已登记：4 个阶段，首阶段当前 bot 是 BA(小需)
+            snap = wf._snapshot(gid)
+            self.assertEqual(len(snap["stages"]), 4)
+            self.assertEqual(wf.current_bot(gid)["id"], 1)
+            self.assertTrue(any("需求流程已开始" in p.get("content", "") for p in bcast))
+        finally:
+            wf.end(gid)
+
+
 if __name__ == "__main__":
     unittest.main()

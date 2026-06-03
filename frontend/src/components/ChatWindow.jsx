@@ -510,6 +510,7 @@ export default function ChatWindow({ memberId, isDark, onToggleTheme, onLogout }
           members={members}
           reconnecting={reconnecting}
           workflow={workflow}
+          onStartRequirement={() => sendRaw({ type: 'start_workflow', group_id: activeGroupId })}
           onShowSearch={() => setShowSearch(s => !s)}
           onShowStats={(s) => { setStats(s); setShowStats(true); }}
           onShowWorkflowStart={() => {

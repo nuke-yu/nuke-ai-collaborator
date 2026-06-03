@@ -234,6 +234,12 @@ async def websocket_endpoint(websocket: WebSocket, group_id: int, member_id: int
                     ))
                     continue
 
+                if t == "start_workflow":
+                    await sup_mod.supervisor.send_to_worker(group_id, ipc.protocol.envelope(
+                        ipc.protocol.START_WORKFLOW, group_id=group_id, trace_id=tid
+                    ))
+                    continue
+
                 if t == "permission_response":
                     await sup_mod.supervisor.send_to_worker(group_id, ipc.protocol.envelope(
                         ipc.protocol.PERMISSION_RESPONSE, group_id=group_id, trace_id=tid, **payload

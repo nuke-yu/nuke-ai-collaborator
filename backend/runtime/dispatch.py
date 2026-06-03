@@ -85,6 +85,48 @@ async def dispatch_user_message(msg: dict) -> None:
         bg.spawn_group(gid, wf.apply(gid, step))
 
 
+async def dispatch_start_workflow(msg: dict) -> None:
+    """起 RD 人确认流水线（BA→Dev→QA 四道门）。在 worker 进程里 start，编排状态就落在
+    处理本群消息的同一个 worker 上（并经 workflow_store 持久化），首阶段(BA澄清)由用户
+    驱动，故不立即派发 bot。角色按 role_router 家族匹配；缺角色则广播提示、不启动。"""
+    gid = msg["group_id"]
+    from core.role_router import _role_family
+    from core.orchestration.pipeline import build_rd_pipeline
+    import core.workflow as wf
+
+    async with db.global_db() as cdb:
+        all_members = await db.get_members(cdb, gid)
+    all_bots = [m for m in all_members if m["type"] == "bot"]
+
+    picked: dict = {}
+    for b in all_bots:
+        fam = _role_family(b.get("role") or "")
+        if fam in ("ba", "dev", "qa") and fam not in picked:
+            picked[fam] = b
+
+    label = {"ba": "BA(需求)", "dev": "Dev(开发)", "qa": "QA(测试)"}
+    missing = [r for r in ("ba", "dev", "qa") if r not in picked]
+    if missing:
+        await bus.broadcast(gid, {
+            "type": "message", "member_id": 0, "sender_name": "工作流系统",
+            "avatar_color": "#6366f1",
+            "content": "无法开始需求流程：群里缺少角色 —— "
+                       + "、".join(label[m] for m in missing)
+                       + "。请确保群内 BA / Dev / QA 各有一个 bot（按 role 识别）。",
+        })
+        return
+
+    stages = build_rd_pipeline(picked["ba"], picked["dev"], picked["qa"])
+    await wf.apply(gid, wf.start(gid, stages, "workflow_v1"))
+    await bus.broadcast(gid, {
+        "type": "message", "member_id": 0, "sender_name": "工作流系统",
+        "avatar_color": "#6366f1",
+        "content": (f"🚀 需求流程已开始（{picked['ba']['name']} → {picked['dev']['name']} "
+                    f"→ {picked['qa']['name']}）。请向 {picked['ba']['name']} 描述你的需求，"
+                    f"TA 会和你逐步澄清；每完成一步会有一张确认卡片等你点确认。"),
+    })
+
+
 async def dispatch_wake_trigger(msg: dict) -> None:
     gid = msg["group_id"]
     bot_id = msg.get("bot_id")

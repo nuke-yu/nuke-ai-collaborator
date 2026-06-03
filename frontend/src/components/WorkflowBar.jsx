@@ -19,6 +19,11 @@ export default function WorkflowBar({ workflow, onNext, onEnd }) {
         ))}
       </div>
       <div className="flex items-center gap-2 flex-shrink-0">
+        {workflow.awaiting_confirm && (
+          <span className="text-xs text-amber-300 bg-amber-950/40 rounded px-1.5 py-0.5 animate-pulse flex-shrink-0">
+            ⏳ 待你确认
+          </span>
+        )}
         <button
           onClick={onNext}
           className="text-xs text-indigo-500 hover:text-indigo-300 transition-colors"

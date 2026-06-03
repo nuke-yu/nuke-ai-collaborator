@@ -9,6 +9,7 @@ export default function ChatHeader({
   workflow,
   onShowSearch,
   onShowWorkflowStart,
+  onStartRequirement,
   onShowStats, onLogout,
 }) {
   const [editingGroupName, setEditingGroupName] = useState(false)
@@ -55,11 +56,18 @@ export default function ChatHeader({
       )}
       <div className="ml-auto flex items-center gap-1">
         {members.some(m => m.type === 'bot') && !workflow?.active && (
-          <button
-            onClick={() => onShowWorkflowStart()}
-            className="text-sm px-2 py-1 rounded text-gray-500 hover:text-indigo-400 transition-colors"
-            title="启动工作流"
-          >⚡</button>
+          <>
+            <button
+              onClick={() => onStartRequirement?.()}
+              className="text-xs px-2 py-1 rounded text-indigo-300 hover:text-white hover:bg-indigo-600/40 transition-colors"
+              title="开始需求流程（BA→Dev→QA，每步人确认）"
+            >📋 开始需求</button>
+            <button
+              onClick={() => onShowWorkflowStart()}
+              className="text-sm px-2 py-1 rounded text-gray-500 hover:text-indigo-400 transition-colors"
+              title="启动自定义工作流"
+            >⚡</button>
+          </>
         )}
         <button
           onClick={async () => { const s = await fetchGroupStats(activeGroupId); onShowStats(s); }}
