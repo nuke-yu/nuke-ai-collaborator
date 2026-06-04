@@ -1,4 +1,5 @@
 import { useEffect, useRef, useCallback, useState } from 'react'
+import * as wsrpc from '../wsrpc'
 
 export function useWebSocket(groupId, memberId, onMessage, onReconnect, token, onAuthError) {
   const ws = useRef(null)
@@ -23,6 +24,7 @@ export function useWebSocket(groupId, memberId, onMessage, onReconnect, token, o
     const socket = new WebSocket(url)
 
     socket.onopen = () => {
+      wsrpc.setSocket(socket)
       if (reconnecting) {
         onReconnectRef.current?.()
       }
@@ -37,6 +39,7 @@ export function useWebSocket(groupId, memberId, onMessage, onReconnect, token, o
         if (ws.current) ws.current.onclose = null // prevent retry
         return
       }
+      if (wsrpc.handleFrame(data)) return
       onMessageRef.current(data)
       // 收到他人消息时，立即发回已读确认
       if (data.type === 'message' && data.id) {
