@@ -93,6 +93,18 @@ class TestDispatchQueryOther(QueryDispatchBase):
         s2 = await self._run({"type": "query", "group_id": 1, "req_id": "c1-6", "query": "pins"})
         self.assertEqual(s2[0][1]["data"], [])
 
+    async def test_search_normalizes_created_at_to_iso_z(self):
+        import db
+        async with db.write_connect(self.path) as conn:
+            await conn.execute(
+                "INSERT INTO messages (id, group_id, member_id, content, created_at, "
+                "sender_name, sender_type, sender_avatar) "
+                "VALUES (99, 1, 5, 'tsfmt', '2026-05-26 12:34:56', 'Nuke', 'human', '#fff')")
+            await conn.commit()
+        sent = await self._run({"type": "query", "group_id": 1, "req_id": "c1-7",
+                                "query": "search", "q": "tsfmt"})
+        self.assertEqual(sent[0][1]["data"][0]["created_at"], "2026-05-26T12:34:56Z")
+
 
 class TestDispatchMutate(QueryDispatchBase):
     async def _run_mutate(self, msg):

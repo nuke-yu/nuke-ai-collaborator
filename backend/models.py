@@ -28,14 +28,6 @@ class UpdateGroupRequest(BaseModel):
     name: Optional[str] = None
     announcement: Optional[str] = None
 
-class EditMessageRequest(BaseModel):
-    content: str
-    member_id: int
-
-class ReactionRequest(BaseModel):
-    member_id: int
-    emoji: str
-
 class RoleTemplateRequest(BaseModel):
     name: str
     role: str
