@@ -127,6 +127,24 @@ async def dispatch_start_workflow(msg: dict) -> None:
     })
 
 
+async def dispatch_workflow_next(msg: dict) -> None:
+    """手动推进工作流到下一阶段。必须在 worker 进程执行：编排器活内存状态在这里，
+    主进程的 REST 端点只负责把本控制帧转发过来（同 confirm 路径）。"""
+    import core.workflow as wf
+    await wf.advance(msg["group_id"])
+
+
+async def dispatch_workflow_end(msg: dict) -> None:
+    """结束工作流：丢弃 worker 内存编排状态、清持久化快照、广播 workflow_update。
+    REST 的 DELETE /workflow 仅转发本帧（旧实现在主进程操作空内存 + 写错库）。"""
+    gid = msg["group_id"]
+    import core.workflow as wf
+    from core import workflow_store
+    wf.end(gid)
+    await workflow_store.clear_state(gid)
+    await bus.broadcast(gid, {"type": "workflow_update", "active": False})
+
+
 async def dispatch_wake_trigger(msg: dict) -> None:
     gid = msg["group_id"]
     bot_id = msg.get("bot_id")

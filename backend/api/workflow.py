@@ -6,6 +6,8 @@ import core.workflow as wf
 from core import workflow_store
 from core.orchestration import registry as orch_registry
 from runtime.dbpaths import group_db_path
+from runtime import supervisor as sup_mod
+from runtime import ipc
 
 router = APIRouter()
 
@@ -65,13 +67,17 @@ async def start_workflow(group_id: int, body: dict):
 
 @router.post("/api/groups/{group_id}/workflow/next")
 async def next_workflow(group_id: int):
-    await wf.advance(group_id)
+    # 编排器活内存状态在 worker 进程；主进程直接 wf.advance 是操作空内存的 no-op。
+    # 转发控制帧给 worker 执行（同 confirm 路径）。
+    await sup_mod.supervisor.send_to_worker(
+        group_id, ipc.protocol.envelope(ipc.protocol.WORKFLOW_NEXT, group_id=group_id))
     return {"ok": True}
 
 
 @router.delete("/api/groups/{group_id}/workflow")
 async def end_workflow(group_id: int):
-    wf.end(group_id)
-    await workflow_store.clear_state(group_id)
-    await manager.broadcast(group_id, {"type": "workflow_update", "active": False})
+    # 主进程 wf.end 是空内存 no-op、clear_state 还会写错库（未 bind 群库）。
+    # 转发给 worker：由它丢内存编排状态、清持久化、广播 workflow_update。
+    await sup_mod.supervisor.send_to_worker(
+        group_id, ipc.protocol.envelope(ipc.protocol.WORKFLOW_END, group_id=group_id))
     return {"ok": True}

@@ -925,5 +925,58 @@ class TestSnapshotFromPersistedState(unittest.TestCase):
         self.assertEqual(live.snapshot(7), live.snapshot_state(live.serialize(7)))
 
 
+class TestWorkflowMutationRouting(unittest.IsolatedAsyncioTestCase):
+    """工作流的 next/end 是状态变更，必须在 worker 进程对活内存编排器执行；REST 端点
+    （主进程）只能转发控制帧，绝不能在本进程直接 advance/end（空内存 no-op + 写错库）。"""
+
+    async def test_next_endpoint_forwards_frame_to_worker(self):
+        from runtime.ipc import protocol
+        self.assertIn(protocol.WORKFLOW_NEXT, protocol.DOWNSTREAM)
+        import api.workflow as apiwf
+        sup = MagicMock()
+        sup.send_to_worker = AsyncMock()
+        with patch.object(apiwf.sup_mod, "supervisor", sup):
+            await apiwf.next_workflow(42)
+        sup.send_to_worker.assert_awaited_once()
+        gid, frame = sup.send_to_worker.await_args.args
+        self.assertEqual(gid, 42)
+        self.assertEqual(frame["type"], protocol.WORKFLOW_NEXT)
+        self.assertEqual(frame["group_id"], 42)
+
+    async def test_end_endpoint_forwards_frame_to_worker(self):
+        from runtime.ipc import protocol
+        self.assertIn(protocol.WORKFLOW_END, protocol.DOWNSTREAM)
+        import api.workflow as apiwf
+        sup = MagicMock()
+        sup.send_to_worker = AsyncMock()
+        with patch.object(apiwf.sup_mod, "supervisor", sup):
+            await apiwf.end_workflow(42)
+        gid, frame = sup.send_to_worker.await_args.args
+        self.assertEqual(gid, 42)
+        self.assertEqual(frame["type"], protocol.WORKFLOW_END)
+
+    async def test_dispatch_next_advances_in_worker(self):
+        import core.workflow as wf
+        from runtime.dispatch import dispatch_workflow_next
+        with patch.object(wf, "advance", new=AsyncMock()) as adv:
+            await dispatch_workflow_next({"group_id": 7})
+        adv.assert_awaited_once_with(7)
+
+    async def test_dispatch_end_clears_state_and_broadcasts(self):
+        import core.workflow as wf
+        from core import workflow_store
+        import runtime.dispatch as dsp
+        with patch.object(wf, "end") as end, \
+             patch.object(workflow_store, "clear_state", new=AsyncMock()) as clear, \
+             patch.object(dsp.bus, "broadcast", new=AsyncMock()) as bcast:
+            await dsp.dispatch_workflow_end({"group_id": 7})
+        end.assert_called_once_with(7)
+        clear.assert_awaited_once_with(7)
+        bcast.assert_awaited_once()
+        gid, payload = bcast.await_args.args
+        self.assertEqual(gid, 7)
+        self.assertEqual(payload, {"type": "workflow_update", "active": False})
+
+
 if __name__ == "__main__":
     unittest.main()

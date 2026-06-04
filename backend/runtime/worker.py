@@ -152,6 +152,18 @@ class Worker:
                 with db.bind_db(db_path):
                     from runtime.dispatch import dispatch_start_workflow
                     await dispatch_start_workflow(msg)
+            elif t == ipc.protocol.WORKFLOW_NEXT:
+                from runtime.lifecycle import manager as lifecycle
+                db_path = await lifecycle.hydrate(gid)
+                with db.bind_db(db_path):
+                    from runtime.dispatch import dispatch_workflow_next
+                    await dispatch_workflow_next(msg)
+            elif t == ipc.protocol.WORKFLOW_END:
+                from runtime.lifecycle import manager as lifecycle
+                db_path = await lifecycle.hydrate(gid)
+                with db.bind_db(db_path):
+                    from runtime.dispatch import dispatch_workflow_end
+                    await dispatch_workflow_end(msg)
             elif t == ipc.protocol.QUERY:
                 from runtime.lifecycle import manager as lifecycle
                 db_path = await lifecycle.hydrate(gid)

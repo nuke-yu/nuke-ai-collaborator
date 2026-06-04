@@ -255,14 +255,19 @@ async def websocket_endpoint(websocket: WebSocket, group_id: int, member_id: int
                     ))
                     continue
 
-                # Default: User message
+                # Default: User message. Strip reserved envelope keys from the
+                # client payload (same as the query/mutate branch above) — else a
+                # client-sent group_id/type/trace_id/member_id collides with the
+                # envelope's own kwargs and raises "multiple values for ...".
+                fields = {k: v for k, v in payload.items()
+                          if k not in ("type", "group_id", "trace_id", "member_id")}
                 await sup_mod.supervisor.send_to_worker(group_id, ipc.protocol.envelope(
-                    ipc.protocol.USER_MESSAGE, 
-                    group_id=group_id, 
+                    ipc.protocol.USER_MESSAGE,
+                    group_id=group_id,
                     member_id=member_id,
                     online_ids=manager.get_online_member_ids(group_id),
                     trace_id=tid,
-                    **payload
+                    **fields
                 ))
 
                 continue
