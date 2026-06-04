@@ -315,3 +315,30 @@ async def get_unread_counts(db, member_id: int) -> dict[int, int]:
     async with db.execute("SELECT group_id, unread FROM unread_counts WHERE member_id = ?", (member_id,)) as cur:
         rows = await cur.fetchall()
         return {row[0]: row[1] for row in rows}
+
+
+async def reset_unread(db, group_id: int, member_id: int):
+    """Clear a member's unread for one group (they've read it)."""
+    await db.execute(
+        """INSERT INTO unread_counts (group_id, member_id, unread, updated_at)
+           VALUES (?, ?, 0, datetime('now'))
+           ON CONFLICT(group_id, member_id) DO UPDATE SET
+               unread = 0, updated_at = datetime('now')""",
+        (group_id, member_id),
+    )
+    await db.commit()
+
+
+async def bump_unread_for_group(db, group_id: int, member_rows: list,
+                                sender_id, online_ids) -> list[int]:
+    """+1 unread for every HUMAN member of the group except the sender and anyone
+    currently viewing this group (online_ids). Returns the member_ids bumped.
+    Online members get a 'read' and reset to 0 anyway; skipping them avoids badge
+    flicker. Bots never accrue unread."""
+    bumped = []
+    for m in member_rows:
+        mid = m["id"]
+        if m["type"] == "human" and mid != sender_id and mid not in online_ids:
+            await increment_unread(db, group_id, mid, 1)
+            bumped.append(mid)
+    return bumped

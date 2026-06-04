@@ -67,15 +67,20 @@ async def lifespan(app: FastAPI):
     await db.aclose_writer()
 
 
-async def on_unread_delta(group_id: int, frame: dict):
-    from db import global_db, increment_unread, get_members
-    delta = frame.get("delta", 1)
-    async with global_db() as db:
-        # Increment for all humans in the group
-        members = await get_members(db, group_id)
-        for m in members:
-            if m["type"] == "human":
-                await increment_unread(db, group_id, m["id"], delta)
+async def on_unread_delta(group_id: int, payload: dict):
+    """A new message was broadcast for `group_id`: +1 unread for every human who
+    isn't the sender and isn't currently viewing this group. The supervisor is the
+    sole writer of the central unread_counts projection (V3 §10.1)."""
+    from db import global_db, write_connect, get_members, bump_unread_for_group
+    sender_id = payload.get("member_id")
+    online = set(manager.get_online_member_ids(group_id))
+    async with global_db() as gdb:
+        members = await get_members(gdb, group_id)
+    if not any(m["type"] == "human" and m["id"] != sender_id and m["id"] not in online
+               for m in members):
+        return
+    async with write_connect() as wdb:   # supervisor unbound -> central DB
+        await bump_unread_for_group(wdb, group_id, members, sender_id, online)
 
 
 app = FastAPI(lifespan=lifespan)
@@ -208,6 +213,10 @@ async def websocket_endpoint(websocket: WebSocket, group_id: int, member_id: int
                     if msg_id := payload.get("msg_id"):
                         from core.orchestration.interaction import StandardInteraction
                         await StandardInteraction().mark_read(group_id, member_id, msg_id)
+                    # reading the group clears its unread badge (central projection)
+                    from db import write_connect, reset_unread
+                    async with write_connect() as udb:
+                        await reset_unread(udb, group_id, member_id)
                     continue
 
                 if t == "abort":

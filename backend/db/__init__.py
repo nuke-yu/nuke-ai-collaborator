@@ -70,6 +70,7 @@ from db.queries import (       # noqa: E402
     save_compaction_summary, get_message_meta,
     toggle_reaction, get_reactions_for_message, get_reactions_for_group,
     pin_message, unpin_message, get_pinned_messages,
+    increment_unread, get_unread_counts, reset_unread, bump_unread_for_group,
 )
 
 __all__ = [
@@ -83,4 +84,5 @@ __all__ = [
     "save_compaction_summary", "get_message_meta",
     "toggle_reaction", "get_reactions_for_message", "get_reactions_for_group",
     "pin_message", "unpin_message", "get_pinned_messages",
+    "increment_unread", "get_unread_counts", "reset_unread", "bump_unread_for_group",
 ]

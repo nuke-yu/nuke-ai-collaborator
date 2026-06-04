@@ -127,7 +127,14 @@ class Supervisor:
         try:
             with tracing.trace_context(trace_id=tid, group_id=gid):
                 if t == ipc.protocol.BROADCAST:
-                    await self._fanout(gid, frame.get("payload", {}))
+                    payload = frame.get("payload", {})
+                    await self._fanout(gid, payload)
+                    # Maintain the central unread projection: a newly-posted chat
+                    # message bumps unread for offline members (their 'read' resets it).
+                    if (self._on_unread and gid is not None
+                            and payload.get("type") in ("message", "stream_end")
+                            and isinstance(payload.get("id"), int)):
+                        await self._on_unread(gid, payload)
                 elif t == ipc.protocol.UNREAD_DELTA:
                     if self._on_unread:
                         await self._on_unread(gid, frame)

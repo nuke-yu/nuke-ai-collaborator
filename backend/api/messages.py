@@ -1,7 +1,7 @@
 import uuid
 import pathlib
 from fastapi import APIRouter, HTTPException, UploadFile, File
-from db import get_db
+from db import global_db, get_unread_counts as _get_unread_counts
 
 UPLOAD_DIR = pathlib.Path(__file__).parent / "uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
@@ -35,15 +35,10 @@ async def upload_file(file: UploadFile = File(...)):
 
 @router.get("/api/members/{member_id}/unread")
 async def get_unread_counts(member_id: int):
-    async with get_db() as db:
-        async with db.execute("""
-            SELECT m.group_id, COUNT(m.id) as unread
-            FROM messages m
-            LEFT JOIN member_read mr ON mr.member_id = ? AND mr.group_id = m.group_id
-            WHERE m.id > COALESCE(mr.last_read_id, 0)
-            GROUP BY m.group_id
-        """, (member_id,)) as cur:
-            rows = await cur.fetchall()
-    return {r[0]: r[1] for r in rows}
+    # unread_counts is the supervisor-owned CENTRAL projection (incremented on new
+    # messages for offline members, reset on read). Messages live in per-group DBs
+    # the supervisor can't see, so we read the central projection, not messages.
+    async with global_db() as db:
+        return await _get_unread_counts(db, member_id)
 
 
