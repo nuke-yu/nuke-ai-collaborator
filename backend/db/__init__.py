@@ -35,6 +35,9 @@ def connect_sync(path: str | None = None):
     import sqlite3
     conn = sqlite3.connect(_route(path, DB_PATH))
     try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=5000")
+        conn.execute("PRAGMA foreign_keys=ON")
         yield conn
     finally:
         conn.close()

@@ -152,10 +152,12 @@ async def execute(name: str, arguments: dict, context: dict | None = None) -> tu
             tool_result = await handler(**arguments)
         tool_result = str(tool_result) if tool_result is not None else "完成"
         
-        # Heuristic: if the output starts with [错误] or [执行错误], consider it an error
-        # In a more robust system, the handler would raise a specific exception.
-        if tool_result.startswith("[错误]") or tool_result.startswith("[执行错误]"):
-            is_error = True
+        # Point 1: Accurate Error Tracking (DFT-034).
+        # Check if the output has a bracketed prefix containing error/block keywords.
+        if tool_result.startswith("[") and "]" in tool_result:
+            prefix = tool_result.split("]", 1)[0] + "]"
+            if any(k in prefix for k in ("错误", "拒绝", "不存在", "受保护", "拦截", "异常", "fail", "error", "denied", "blocked")):
+                is_error = True
             
     except Exception as e:
         tool_result = f"[执行错误] {e}"

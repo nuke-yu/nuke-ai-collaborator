@@ -131,10 +131,8 @@ async def system_status():
 
 class WSClientProxy:
     """Adapts WSManager broadcast to Supervisor fan-out interface."""
-    def __init__(self, group_id: int, member_id: int, websocket: WebSocket):
+    def __init__(self, group_id: int):
         self.group_id = group_id
-        self.member_id = member_id
-        self.websocket = websocket
 
     async def send(self, payload: dict):
         # Supervisor calls this when it receives an upstream BROADCAST frame
@@ -143,16 +141,7 @@ class WSClientProxy:
 
     async def close(self):
         """Called by Supervisor when this client is evicted (H-4)."""
-        # 1. Disconnect from manager
-        gone_id = await manager.disconnect(self.websocket, self.group_id)
-        if gone_id:
-            # 2. Broadcast offline presence
-            from bus.events import Presence
-            import dataclasses
-            presence_offline = Presence(group_id=self.group_id, member_id=gone_id, online=False)
-            ev_dict = dataclasses.asdict(presence_offline)
-            ev_dict["type"] = presence_offline.type
-            await manager.broadcast(self.group_id, ev_dict)
+        await manager.close_group(self.group_id)
 
 # Exactly ONE fan-out proxy per group (the supervisor layer needs one sink per
 # group; manager.broadcast already delivers to every connection in it).
@@ -190,7 +179,7 @@ async def websocket_endpoint(websocket: WebSocket, group_id: int, member_id: int
     #    once per connection -> the bot's reply rendered N times.
     proxy = _group_proxies.get(group_id)
     if proxy is None:
-        proxy = WSClientProxy(group_id, member_id, websocket)
+        proxy = WSClientProxy(group_id)
         _group_proxies[group_id] = proxy
         sup_mod.supervisor.register_browser(group_id, proxy)
     

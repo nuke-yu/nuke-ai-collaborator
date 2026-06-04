@@ -439,7 +439,7 @@ export default function ChatWindow({ memberId, isDark, onToggleTheme, onLogout }
         unreadCounts={unreadCounts}
         members={members}
         className={tabClass('groups')}
-        onSelect={(id) => { setActiveGroupId(id); setMobileTab('chat') }}
+        onSelect={(id) => { setActiveGroupId(id); setActiveMemberId(null); setMobileTab('chat') }}
         onOpenTemplates={() => setShowTemplates(true)}
         onOpenApiKeys={() => setShowApiKeys(true)}
         isDark={isDark}
@@ -483,6 +483,7 @@ export default function ChatWindow({ memberId, isDark, onToggleTheme, onLogout }
           const g = await createGroup(name)
           setGroups((prev) => [...prev, g])
           setActiveGroupId(g.id)
+          setActiveMemberId(null)
           setMobileTab('chat')
         }}
       />

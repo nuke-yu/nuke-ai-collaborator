@@ -41,6 +41,32 @@ class WSManager:
         async with self._lock:
             return self._disconnect_sync(websocket, group_id)
 
+    async def close_group(self, group_id: int):
+        """Close and disconnect all websockets for a group."""
+        async with self._lock:
+            if group_id not in self.connections:
+                return
+            conns = list(self.connections[group_id])
+        
+        # Close all websockets
+        for ws, _ in conns:
+            try:
+                await ws.close()
+            except Exception:
+                pass
+        
+        # Disconnect them all and broadcast offline presence
+        gone_ids = []
+        async with self._lock:
+            if group_id in self.connections:
+                for ws, mid in list(self.connections[group_id]):
+                    gone_id = self._disconnect_sync(ws, group_id)
+                    if gone_id:
+                        gone_ids.append(gone_id)
+                        
+        for gone_id in gone_ids:
+            await self.broadcast(group_id, {"type": "presence", "member_id": gone_id, "online": False})
+
     def _disconnect_sync(self, websocket: WebSocket, group_id: int) -> int | None:
         """Internal synchronous disconnect logic to be called under lock."""
         if group_id not in self.connections:

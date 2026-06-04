@@ -10,12 +10,65 @@ from runtime.dbpaths import group_db_path
 
 log = logging.getLogger(__name__)
 
+import sys
+
+class GroupLock:
+    def __init__(self, group_id: int):
+        self.fd = None
+        from skills.constants import WORKSPACE_ROOT
+        from pathlib import Path
+        self.lock_file = Path(WORKSPACE_ROOT) / f"group_{group_id}" / "group.lock"
+
+    def acquire(self) -> bool:
+        self.lock_file.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            self.fd = open(self.lock_file, "w")
+            if sys.platform == "win32":
+                import msvcrt
+                msvcrt.locking(self.fd.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(self.fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            self.fd.write(str(os.getpid()))
+            self.fd.flush()
+            return True
+        except Exception as e:
+            log.warning("Failed to acquire group lock for %s: %s", self.lock_file, e)
+            if self.fd:
+                try: self.fd.close()
+                except Exception: pass
+                self.fd = None
+            return False
+
+    def release(self):
+        if self.fd:
+            try:
+                if sys.platform != "win32":
+                    import fcntl
+                    fcntl.flock(self.fd, fcntl.LOCK_UN)
+            except Exception:
+                pass
+            try:
+                self.fd.close()
+            except Exception:
+                pass
+            self.fd = None
+            try:
+                self.lock_file.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+    def __del__(self):
+        self.release()
+
+
 class LifecycleManager:
     def __init__(self, max_groups: int = 100):
         self.max_groups = max_groups
         # group_id -> last_active_timestamp
         self._active_groups: OrderedDict[int, float] = OrderedDict()
         self._lock = asyncio.Lock()
+        self._locks: dict[int, GroupLock] = {}
 
     async def hydrate(self, group_id: int) -> str:
         """Ensure a group is ready for work. Returns the DB path."""
@@ -29,6 +82,12 @@ class LifecycleManager:
 
             # New hydration
             log.info("lifecycle: hydrating group %d", group_id)
+            
+            # Acquire group file lock to prevent split-brain double worker executions
+            glock = GroupLock(group_id)
+            if not glock.acquire():
+                raise RuntimeError(f"Failed to acquire lease lock for group {group_id}. Another worker process is likely holding it.")
+            self._locks[group_id] = glock
             
             # Ensure workspace directory exists
             os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -113,6 +172,11 @@ class LifecycleManager:
         # 4. Close DB writer
         await db.aclose_writer(group_db_path(gid))
 
+        # 5. Release file lock
+        glock = self._locks.pop(gid, None)
+        if glock:
+            glock.release()
+
     async def _evict_lru(self) -> None:
         if not self._active_groups:
             return
@@ -125,6 +189,9 @@ class LifecycleManager:
         async with self._lock:
             for gid in list(self._active_groups):
                 await db.aclose_writer(group_db_path(gid))
+                glock = self._locks.pop(gid, None)
+                if glock:
+                    glock.release()
             self._active_groups.clear()
 
     def stats(self) -> dict:

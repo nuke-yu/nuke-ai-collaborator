@@ -27,6 +27,8 @@ from db.context import resolve as _route
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "chat.db")
 
+import weakref
+
 # (loop_id, db_path) -> {"conn": aiosqlite.Connection | None, "lock": asyncio.Lock}
 _state: dict[tuple[int, str], dict] = {}
 
@@ -38,11 +40,20 @@ def _resolve(path: str | None) -> str:
 
 
 def _conn_state(db_path: str) -> dict:
-    key = (id(asyncio.get_running_loop()), db_path)
+    loop = asyncio.get_running_loop()
+    lid = id(loop)
+    key = (lid, db_path)
     st = _state.get(key)
     if st is None:
         st = {"conn": None, "lock": asyncio.Lock()}
         _state[key] = st
+        
+        # Cleanup callback to remove stale keys when the event loop is garbage collected
+        def _cleanup(loop_id):
+            for k in [k for k in list(_state) if k[0] == loop_id]:
+                _state.pop(k, None)
+        
+        weakref.finalize(loop, _cleanup, lid)
     return st
 
 

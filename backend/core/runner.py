@@ -91,7 +91,16 @@ async def run_unit(group_id: int, unit, orch) -> None:
         # workflow path explicit and testable.)
         interaction=StandardInteraction(),
     )
-    result = await exec_registry.get(unit.executor_id).run(ctx)
+    try:
+        result = await exec_registry.get(unit.executor_id).run(ctx)
+    except Exception as e:
+        log.exception("Workflow execution failed for group %d", group_id)
+        error_msg = f"[工作流系统错误] Bot「{unit.bot.get('name', 'Unknown')}」执行异常: {e}"
+        await _post_system_msg(group_id, unit.bot.get("id", 0), error_msg)
+        await bus.publish(WorkflowUpdate(group_id=group_id, active=False, done=False))
+        await workflow_store.clear_state(group_id)
+        return
+
     if not result.full_text:
         return
     step = orch.observe(group_id, unit.bot["id"], result.full_text)
