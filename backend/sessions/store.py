@@ -52,7 +52,7 @@ async def get_session(session_id: str) -> dict | None:
     d["config"] = json.loads(d.pop("config_json", "{}"))
     if d.get("last_snapshot_json"):
         try:
-            d["last_snapshot"] = json.loads(d.pop("last_snapshot_json"))
+            d["last_snapshot"] = json.loads(d["last_snapshot_json"])
         except Exception:
             d["last_snapshot"] = []
     else:
@@ -172,7 +172,7 @@ async def get_group_sessions(group_id: int, limit: int = 50) -> list[dict]:
         d["config"] = json.loads(d.pop("config_json", "{}"))
         if d.get("last_snapshot_json"):
             try:
-                d["last_snapshot"] = json.loads(d.pop("last_snapshot_json"))
+                d["last_snapshot"] = json.loads(d["last_snapshot_json"])
             except Exception:
                 d["last_snapshot"] = []
         else:
