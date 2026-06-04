@@ -98,6 +98,33 @@ class TestSchemaSplit(unittest.IsolatedAsyncioTestCase):
             cur = await conn.execute("SELECT MAX(version) FROM _schema_version")
             self.assertEqual((await cur.fetchone())[0], len(MIGRATIONS))
 
+    async def test_init_central_db_catches_up_legacy_db(self):
+        """回归：分库前的老单库被改用作中央库时，带着一张缺新列的 messages 表、
+        _schema_version 停在旧版本。init_central_db 必须像 group/legacy 路径一样跑
+        run_migrations 把它补齐——否则 HTTP 读消息端点查中央库会 no such column: m.meta。"""
+        legacy = tempfile.mktemp(suffix="_legacy_central.db")
+        try:
+            async with db.connect(legacy) as conn:
+                await conn.execute("CREATE TABLE messages (id INTEGER PRIMARY KEY, content TEXT)")
+                await conn.execute("CREATE TABLE _schema_version (version INTEGER NOT NULL, "
+                                   "applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+                # 停在 meta(最后一个迁移)之前一版，模拟 db/chat.db 的 v15 状态
+                await conn.execute("INSERT INTO _schema_version (version) VALUES (?)",
+                                   (len(MIGRATIONS) - 1,))
+                await conn.commit()
+            await db.init_central_db(legacy)
+            async with db.connect(legacy) as conn:
+                cur = await conn.execute("PRAGMA table_info(messages)")
+                cols = {r[1] for r in await cur.fetchall()}
+            self.assertIn("meta", cols)
+        finally:
+            await db.aclose_writer()
+            for s in ("", "-wal", "-shm"):
+                try:
+                    os.unlink(legacy + s)
+                except FileNotFoundError:
+                    pass
+
     async def test_templates_seeded_in_central(self):
         async with db.connect(self.central) as conn:
             cur = await conn.execute("SELECT COUNT(*) FROM role_templates")

@@ -251,13 +251,22 @@ async def _stamp_version(conn) -> None:
 
 
 async def init_central_db(path: str | None = None) -> None:
-    """Create the central (Supervisor-owned) DB at the final schema + seed templates."""
+    """Create the central (Supervisor-owned) DB at the final schema + seed templates.
+
+    Also runs run_migrations so a *legacy* central DB (the pre-split single DB
+    repurposed as central) catches up on migrations added after it was stamped —
+    e.g. messages.meta (migration 016), without which HTTP read endpoints that
+    fall back to the central DB raise `no such column: m.meta`. On a fresh central
+    DB _stamp_version marks it at len(MIGRATIONS), so run_migrations is a no-op and
+    won't touch group-only tables that the central schema intentionally omits."""
+    from db.migrations import run_migrations
     import db as _db
     async with _db.connect(path or DB_PATH) as conn:
         for ddl in _CENTRAL_DDL:
             await conn.execute(ddl)
         await conn.commit()
         await _stamp_version(conn)
+        await run_migrations(conn)
         await _seed_templates(conn)
         await conn.commit()
 
