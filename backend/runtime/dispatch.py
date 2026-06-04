@@ -86,8 +86,8 @@ async def dispatch_user_message(msg: dict) -> None:
 
 
 async def dispatch_start_workflow(msg: dict) -> None:
-    """起 RD 人确认流水线（BA→Dev→QA 四道门）。在 worker 进程里 start，编排状态就落在
-    处理本群消息的同一个 worker 上（并经 workflow_store 持久化），首阶段(BA澄清)由用户
+    """起 RD 人确认流水线（BA→Dev→QA 三道门）。在 worker 进程里 start，编排状态就落在
+    处理本群消息的同一个 worker 上（并经 workflow_store 持久化），首阶段(BA)由用户
     驱动，故不立即派发 bot。角色按 role_router 家族匹配；缺角色则广播提示、不启动。"""
     gid = msg["group_id"]
     from core.role_router import _role_family

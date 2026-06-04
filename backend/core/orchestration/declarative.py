@@ -55,15 +55,22 @@ class DeclarativeOrchestrator(Orchestrator):
         idx, total = ctx.idx, ctx.total
         keyword = ctx.stage.get("done_keyword", "完毕")
 
+        # 首阶段(idx==0)由用户驱动、begin 不派发 enter，本阶段任务指令(instruction)
+        # 不会经 trigger 送达，只能随 system_suffix 一起带给 bot；后续阶段的 instruction
+        # 已由 enter 的 trigger 送达，这里不再重复。
+        brief = ""
+        if idx == 0 and ctx.stage.get("instruction"):
+            brief = f"\n\n你这一阶段的任务：{ctx.stage['instruction']}"
+
         if idx + 1 < total:
             nxt = self._ctx(group_id, idx + 1)
             handler = stage_handler(nxt.stage)
             base = (f"\n\n[工作流 {idx+1}/{total}] 与用户多轮对话，充分澄清所有关键点后，"
                     f"当你认为本阶段工作真正完成时，在回复中说出「{keyword}」，"
                     f"系统会自动通知 {handler.display_name(nxt.stage)} 接棒。完成之前请不要说这句话。")
-            return base + handler.incoming_requirement(nxt.stage, keyword)
-        return (f"\n\n[工作流 {idx+1}/{total}] 这是最后一个阶段。"
-                f"完成后说「{keyword}」作为收尾，给出完整的最终结论。")
+            return brief + base + handler.incoming_requirement(nxt.stage, keyword)
+        return brief + (f"\n\n[工作流 {idx+1}/{total}] 这是最后一个阶段。"
+                        f"完成后说「{keyword}」作为收尾，给出完整的最终结论。")
 
     def snapshot(self, group_id: int) -> dict:
         s = self._state.get(group_id)

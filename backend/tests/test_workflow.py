@@ -135,44 +135,45 @@ class TestOrchestratorFlow(unittest.TestCase):
         self.assertIsNone(step.confirm_gate)
         self.assertEqual(step.next_units[0].bot["id"], 2)
 
-    # ── RD 流水线：4 道门 + 交棒（BA澄清→BA建Jira→Dev→QA）────────────────────────
-    def test_rd_pipeline_four_gates_with_handoff(self):
+    # ── RD 流水线：3 道门 + 交棒（BA→Dev→QA）──────────────────────────────────────
+    # 澄清 / 确认 / 建 Jira 工单都是 BA 一个人的活，合并成单一 BA 阶段（不再拆两段）。
+    def test_rd_pipeline_three_gates_with_handoff(self):
         from core.orchestration.pipeline import build_rd_pipeline
         ba = {"id": 1, "name": "BA", "avatar_color": "#1", "role": "BA"}
         dev = {"id": 2, "name": "Dev", "avatar_color": "#2", "role": "Dev"}
         qa = {"id": 3, "name": "QA", "avatar_color": "#3", "role": "QA"}
-        self.orch.begin(1, build_rd_pipeline(ba, dev, qa))
+        stages = build_rd_pipeline(ba, dev, qa)
+        self.assertEqual(len(stages), 3)                        # BA 只出现一次
+        self.assertEqual([st["id"] for st in stages], [1, 2, 3])
+        self.orch.begin(1, stages)
 
-        # 阶段0 BA澄清：说完成关键词 → 门1（不推进）
-        s = self.orch.observe(1, 1, "需求总结…… 需求确认完成")
+        # 首阶段(BA)由用户驱动、begin 不派发 enter，建 Jira 工单的指令必须随
+        # system_suffix 一起带给 BA（否则 BA 不知道要建工单）。
+        suffix = self.orch.system_suffix(1)
+        self.assertIn("Jira", suffix)
+
+        # 阶段0 BA（澄清+建工单一气呵成）：说完成关键词 → 门1（不推进）
+        s = self.orch.observe(1, 1, "需求总结 + 工单清单…… 需求与工单已就绪")
         self.assertEqual(s.confirm_gate["gate_id"], "1-0")
-        self.assertEqual(s.confirm_gate["label"], "确认需求已整理清楚")
         self.assertEqual(self.orch.get(1)["current"], 0)
 
-        # 确认门1 → 阶段1 BA建Jira：交棒回 BA，trigger 带「建Jira」指令
-        s = self.orch.confirm(1)
-        self.assertEqual(s.next_units[0].bot["id"], 1)
-        self.assertIn("Jira", s.next_units[0].trigger_msg)
-        self.assertEqual(self.orch.get(1)["current"], 1)
-
-        # 阶段1 → 门2 → 阶段2 Dev
-        s = self.orch.observe(1, 1, "工单清单…… JIRA创建完成")
-        self.assertEqual(s.confirm_gate["gate_id"], "1-1")
+        # 确认门1 → 阶段1 Dev：交棒给 Dev，trigger 带「开发」指令
         s = self.orch.confirm(1)
         self.assertEqual(s.next_units[0].bot["id"], 2)          # 交棒给 Dev
         self.assertIn("开发", s.next_units[0].trigger_msg)
+        self.assertEqual(self.orch.get(1)["current"], 1)
 
-        # 阶段2 → 门3 → 阶段3 QA
+        # 阶段1 → 门2 → 阶段2 QA
         s = self.orch.observe(1, 2, "实现方案…… 开发完成")
-        self.assertIsNotNone(s.confirm_gate)
+        self.assertEqual(s.confirm_gate["gate_id"], "1-1")
         s = self.orch.confirm(1)
         self.assertEqual(s.next_units[0].bot["id"], 3)          # 交棒给 QA
 
-        # 阶段3 QA（末棒）→ 门4：确认前不结束
+        # 阶段2 QA（末棒）→ 门3：确认前不结束
         s = self.orch.observe(1, 3, "逐条AC…… 测试完成")
         self.assertIsNotNone(s.confirm_gate)
         self.assertFalse(s.done)
-        # 确认门4 → 整条流水线结束、状态清空
+        # 确认门3 → 整条流水线结束、状态清空
         s = self.orch.confirm(1)
         self.assertTrue(s.done)
         self.assertIsNone(self.orch.get(1))
@@ -839,9 +840,9 @@ class TestStartRdPipeline(unittest.IsolatedAsyncioTestCase):
                  patch.object(dispatch.bus, "broadcast", new=cap), \
                  patch("core.workflow.apply", new=AsyncMock()):
                 await dispatch.dispatch_start_workflow({"group_id": gid})
-            # 工作流已登记：4 个阶段，首阶段当前 bot 是 BA(小需)
+            # 工作流已登记：3 个阶段（BA→Dev→QA），首阶段当前 bot 是 BA(小需)
             snap = wf._snapshot(gid)
-            self.assertEqual(len(snap["stages"]), 4)
+            self.assertEqual(len(snap["stages"]), 3)
             self.assertEqual(wf.current_bot(gid)["id"], 1)
             self.assertTrue(any("需求流程已开始" in p.get("content", "") for p in bcast))
         finally:
