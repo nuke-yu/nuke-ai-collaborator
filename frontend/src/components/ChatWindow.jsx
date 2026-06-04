@@ -17,7 +17,7 @@ import WorkflowStartModal from './WorkflowStartModal'
 import WorkspacePanel from './WorkspacePanel'
 import PermissionRequestModal from './PermissionRequestModal'
 
-export default function ChatWindow({ memberId, isDark, onToggleTheme, onLogout }) {
+export default function ChatWindow({ memberId, theme, onThemeChange, onLogout }) {
   const [groups, setGroups] = useState([])
   const [activeGroupId, setActiveGroupId] = useState(null)
   const [activeMemberId, setActiveMemberId] = useState(null)
@@ -442,8 +442,8 @@ export default function ChatWindow({ memberId, isDark, onToggleTheme, onLogout }
         onSelect={(id) => { setActiveGroupId(id); setActiveMemberId(null); setMobileTab('chat') }}
         onOpenTemplates={() => setShowTemplates(true)}
         onOpenApiKeys={() => setShowApiKeys(true)}
-        isDark={isDark}
-        onToggleTheme={onToggleTheme}
+        theme={theme}
+        onThemeChange={onThemeChange}
         onlineSet={onlineSet}
         currentMemberId={activeMemberId}
         membersCache={membersCache}

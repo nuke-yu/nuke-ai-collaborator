@@ -18,12 +18,19 @@ export default function App() {
     setToken(data.token)
   }
 
-  const [isDark, setIsDark] = useState(() => localStorage.getItem('theme') !== 'light')
+  const [theme, setTheme] = useState(() => localStorage.getItem('app-theme') || 'default-dark')
 
   useEffect(() => {
-    document.documentElement.classList.toggle('light', !isDark)
-    localStorage.setItem('theme', isDark ? 'dark' : 'light')
-  }, [isDark])
+    const themeClasses = ['theme-default-dark', 'theme-elegant-light', 'theme-elevenlabs', 'theme-hsbc', 'theme-cyberpunk', 'theme-glass']
+    themeClasses.forEach(cls => document.documentElement.classList.remove(cls))
+    document.documentElement.classList.add(`theme-${theme}`)
+    
+    // For general compatibility with light/dark utilities in plugins
+    const isLight = theme === 'elegant-light' || theme === 'hsbc'
+    document.documentElement.classList.toggle('light', isLight)
+    
+    localStorage.setItem('app-theme', theme)
+  }, [theme])
 
   const handleLogout = () => {
     localStorage.removeItem('token')
@@ -71,7 +78,7 @@ export default function App() {
 
   return (
     <ErrorBoundary>
-      <ChatWindow memberId={memberId} isDark={isDark} onToggleTheme={() => setIsDark(d => !d)} onLogout={handleLogout} />
+      <ChatWindow memberId={memberId} theme={theme} onThemeChange={setTheme} onLogout={handleLogout} />
     </ErrorBoundary>
   )
 }

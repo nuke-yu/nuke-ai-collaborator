@@ -1,11 +1,20 @@
 import { useState, useEffect } from 'react'
 import AutoReplyModal from './AutoReplyModal'
 
+const THEMES = [
+  { id: 'default-dark', name: '默认暗黑', icon: '🌙' },
+  { id: 'elegant-light', name: '极简明亮', icon: '☀️' },
+  { id: 'elevenlabs', name: 'ElevenLabs', icon: '🎙️' },
+  { id: 'hsbc', name: 'HSBC 商务', icon: '🏦' },
+  { id: 'cyberpunk', name: '赛博霓虹', icon: '👾' },
+  { id: 'glass', name: '毛玻璃幻彩', icon: '🔮' }
+]
+
 export default function GroupList({
   groups, activeGroupId, unreadCounts = {},
   onSelect, onCreateGroup, onOpenTemplates, onOpenApiKeys,
   membersCache = {}, onOpenAddMember, onRemoveMember, onEditMember, onOpenWorkspace,
-  isDark = true, onToggleTheme,
+  theme = 'default-dark', onThemeChange,
   onlineSet = new Set(),
   currentMemberId,
   onAutoReplySaved,
@@ -16,10 +25,18 @@ export default function GroupList({
   const [newName, setNewName] = useState('')
   const [expandedGroups, setExpandedGroups] = useState(new Set())
   const [autoReplyTarget, setAutoReplyTarget] = useState(null)
+  const [showThemeMenu, setShowThemeMenu] = useState(false)
 
   useEffect(() => {
     if (activeGroupId) setExpandedGroups(prev => new Set([...prev, activeGroupId]))
   }, [activeGroupId])
+
+  useEffect(() => {
+    if (!showThemeMenu) return
+    const handleClose = () => setShowThemeMenu(false)
+    window.addEventListener('click', handleClose)
+    return () => window.removeEventListener('click', handleClose)
+  }, [showThemeMenu])
 
   const handleCreate = async () => {
     if (!newName.trim()) return
@@ -33,8 +50,38 @@ export default function GroupList({
     <div className={`w-full md:w-56 bg-gray-900 text-white flex flex-col flex-shrink-0 ${className}`}>
       <div className="p-4 border-b border-gray-800 flex-shrink-0">
         <h1 className="text-white font-bold text-sm mb-2">Nuke AI Collaborator</h1>
-        <div className="flex items-center gap-1">
-          <button onClick={onToggleTheme} className="text-gray-500 hover:text-white text-xs transition-colors" title={isDark ? '切换亮色模式' : '切换暗色模式'}>{isDark ? '☀️' : '🌙'}</button>
+        <div className="flex items-center gap-2">
+          <div className="relative">
+            <button
+              onClick={(e) => { e.stopPropagation(); setShowThemeMenu(prev => !prev) }}
+              className="text-gray-500 hover:text-white text-xs transition-colors flex items-center gap-0.5"
+              title="选择主题皮肤"
+            >
+              🎨 {THEMES.find(t => t.id === theme)?.name || '主题'}
+            </button>
+            {showThemeMenu && (
+              <div className="absolute left-0 top-full mt-1.5 bg-gray-800 border border-gray-700 rounded-lg shadow-xl overflow-hidden z-50 w-36 py-1 animate-scale-up">
+                {THEMES.map((t) => (
+                  <button
+                    key={t.id}
+                    onClick={() => {
+                      onThemeChange(t.id)
+                      setShowThemeMenu(false)
+                    }}
+                    className={`w-full text-left px-3 py-1.5 text-xs flex items-center gap-1.5 transition-colors ${
+                      theme === t.id
+                        ? 'bg-indigo-600/30 text-indigo-400 font-semibold'
+                        : 'text-gray-300 hover:bg-gray-700 hover:text-white'
+                    }`}
+                  >
+                    <span>{t.icon}</span>
+                    <span>{t.name}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <span className="text-gray-700 select-none">|</span>
           <button onClick={onOpenApiKeys} className="text-gray-500 hover:text-white text-xs transition-colors" title="API Key 管理">🔑</button>
           <button onClick={onOpenTemplates} className="text-gray-500 hover:text-white text-xs transition-colors" title="角色模板">⚙️</button>
         </div>
