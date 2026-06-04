@@ -87,6 +87,25 @@ export default function BotLogPanel({ groupId, onClose }) {
     }
   }, [sessions, sessionDetail, selectedSessionId])
 
+  // Listen to WebSocket events in real-time for instant update
+  useEffect(() => {
+    const handleWsEvent = (e) => {
+      const data = e.detail
+      const relevantTypes = ['stream_start', 'stream_end', 'tool_call', 'tool_result', 'compaction', 'skills_loaded', 'recovery_prompt']
+      if (relevantTypes.includes(data.type)) {
+        fetchSessionsList(false)
+        if (selectedSessionId) {
+          fetchSessionData(selectedSessionId, false)
+        }
+      }
+    }
+
+    window.addEventListener('ws_bot_event', handleWsEvent)
+    return () => {
+      window.removeEventListener('ws_bot_event', handleWsEvent)
+    }
+  }, [selectedSessionId, groupId])
+
   const toggleExpand = (id) => {
     setExpandedItems(prev => {
       const next = new Set(prev)

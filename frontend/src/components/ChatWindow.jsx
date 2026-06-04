@@ -194,6 +194,7 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
   }
 
   const handleWsMessage = (data) => {
+    window.dispatchEvent(new CustomEvent('ws_bot_event', { detail: data }))
     if (data.type === 'typing') {
       setTyping({ sender_name: data.sender_name, avatar_color: data.avatar_color })
     } else if (data.type === 'message') {
