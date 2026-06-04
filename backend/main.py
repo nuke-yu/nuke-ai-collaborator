@@ -240,6 +240,17 @@ async def websocket_endpoint(websocket: WebSocket, group_id: int, member_id: int
                     ))
                     continue
 
+                if t in ("query", "mutate"):
+                    # supervisor only routes; member_id comes from the authed URL,
+                    # not the client payload. Strip reserved envelope keys.
+                    fields = {k: v for k, v in payload.items()
+                              if k not in ("type", "group_id", "trace_id", "member_id")}
+                    mtype = ipc.protocol.QUERY if t == "query" else ipc.protocol.MUTATE
+                    await sup_mod.supervisor.send_to_worker(group_id, ipc.protocol.envelope(
+                        mtype, group_id=group_id, trace_id=tid, member_id=member_id, **fields
+                    ))
+                    continue
+
                 if t == "permission_response":
                     await sup_mod.supervisor.send_to_worker(group_id, ipc.protocol.envelope(
                         ipc.protocol.PERMISSION_RESPONSE, group_id=group_id, trace_id=tid, **payload
