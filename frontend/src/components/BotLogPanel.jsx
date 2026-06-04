@@ -19,6 +19,14 @@ export default function BotLogPanel({ groupId, onClose }) {
       if (res.ok) {
         const data = await res.json()
         setSessions(data)
+        // Auto-select the first running session if none is selected yet
+        if (!selectedSessionId) {
+          const running = data.find(s => s.status === 'running')
+          if (running) {
+            setSelectedSessionId(running.id)
+            fetchSessionData(running.id, showLoading)
+          }
+        }
       }
     } catch (e) {
       console.error('Failed to fetch sessions:', e)
@@ -32,8 +40,8 @@ export default function BotLogPanel({ groupId, onClose }) {
     if (showLoading) setLoadingDetail(true)
     try {
       const [resDetail, resEvents] = await Promise.all([
-        fetch(`/api/sessions/${sid}`),
-        fetch(`/api/sessions/${sid}/events`)
+        fetch(`/api/sessions/${sid}?group_id=${groupId}`),
+        fetch(`/api/sessions/${sid}/events?group_id=${groupId}`)
       ])
       if (resDetail.ok) {
         const detail = await resDetail.json()

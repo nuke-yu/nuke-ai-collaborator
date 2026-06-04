@@ -355,7 +355,7 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
 
   const handleResume = async (sessionId) => {
     try {
-      await resumeSession(sessionId)
+      await resumeSession(sessionId, activeGroupId)
       setRecoveryPrompts(prev => prev.filter(p => p.session_id !== sessionId))
     } catch (e) {
       setError('无法恢复会话：' + e.message)
@@ -364,7 +364,7 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
 
   const handleCancelRecovery = async (sessionId) => {
     try {
-      await cancelSessionRecovery(sessionId)
+      await cancelSessionRecovery(sessionId, activeGroupId)
       setRecoveryPrompts(prev => prev.filter(p => p.session_id !== sessionId))
     } catch (e) {
       setError('无法取消恢复：' + e.message)

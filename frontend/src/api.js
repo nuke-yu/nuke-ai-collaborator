@@ -137,13 +137,15 @@ export async function addMember(groupId, payload, type = 'human', role = null, s
   return res.json()
 }
 
-export async function resumeSession(sessionId) {
-  const res = await authFetch(`/api/sessions/${sessionId}/resume`, { method: 'POST' })
+export async function resumeSession(sessionId, groupId) {
+  const query = groupId ? `?group_id=${groupId}` : ''
+  const res = await authFetch(`/api/sessions/${sessionId}/resume${query}`, { method: 'POST' })
   return res.json()
 }
 
-export async function cancelSessionRecovery(sessionId) {
-  const res = await authFetch(`/api/sessions/${sessionId}/cancel-recovery`, { method: 'POST' })
+export async function cancelSessionRecovery(sessionId, groupId) {
+  const query = groupId ? `?group_id=${groupId}` : ''
+  const res = await authFetch(`/api/sessions/${sessionId}/cancel-recovery${query}`, { method: 'POST' })
   return res.json()
 }
 
