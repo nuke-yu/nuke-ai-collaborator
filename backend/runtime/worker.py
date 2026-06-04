@@ -152,6 +152,18 @@ class Worker:
                 with db.bind_db(db_path):
                     from runtime.dispatch import dispatch_start_workflow
                     await dispatch_start_workflow(msg)
+            elif t == ipc.protocol.QUERY:
+                from runtime.lifecycle import manager as lifecycle
+                db_path = await lifecycle.hydrate(gid)
+                with db.bind_db(db_path):
+                    from runtime.query_dispatch import dispatch_query
+                    await dispatch_query(msg)
+            elif t == ipc.protocol.MUTATE:
+                from runtime.lifecycle import manager as lifecycle
+                db_path = await lifecycle.hydrate(gid)
+                with db.bind_db(db_path):
+                    from runtime.query_dispatch import dispatch_mutate
+                    await dispatch_mutate(msg)
             elif t == ipc.protocol.PERMISSION_RESPONSE:
                 request_id = msg.get("request_id", "")
                 approved = bool(msg.get("approved", False))
