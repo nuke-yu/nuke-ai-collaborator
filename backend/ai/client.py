@@ -2,6 +2,8 @@ from core import config
 import asyncio
 import json
 import logging
+import re
+import uuid
 import httpx
 from contextlib import asynccontextmanager
 from config import get_key
@@ -331,6 +333,48 @@ def _to_claude_messages(messages: list[dict]) -> list[dict]:
     return merged_result
 
 
+# DSML（DeepSeek 内联函数调用标记）兜底解析。标记用全角竖线 ｜(U+FF5C) 包裹，形如
+#   <｜｜DSML｜｜invoke name="write_file">
+#     <｜｜DSML｜｜parameter name="path" string="true">index.html</｜｜DSML｜｜parameter>
+#   </｜｜DSML｜｜invoke>
+# 这里只认 invoke/parameter 标签名（忽略具体前缀/竖线），尽量宽容。
+_DSML_INVOKE_RE = re.compile(r'invoke\s+name="([^"]+)"\s*>(.*?)</[^>]*?invoke\s*>', re.DOTALL)
+_DSML_PARAM_RE = re.compile(r'parameter\s+name="([^"]+)"([^>]*)>(.*?)</[^>]*?parameter\s*>', re.DOTALL)
+
+
+def _recover_dsml_tool_calls(content: str | None, usage: dict) -> dict | None:
+    """把泄漏成文本的 DSML 工具调用救回成结构化 tool_calls 结果；非工具文本返回 None。
+
+    产出的 assistant_message 是干净的 OpenAI 风格 tool_calls（content=None、arguments
+    为 JSON 字符串），不含任何 DSML 文本——避免把乱码写回历史造成后续轮次模仿。"""
+    if not content or "invoke" not in content:
+        return None
+    calls = []
+    tc_msgs = []
+    for name, body in _DSML_INVOKE_RE.findall(content):
+        args: dict = {}
+        for pname, attrs, raw in _DSML_PARAM_RE.findall(body):
+            val = raw.strip()
+            if 'string="true"' in attrs:
+                args[pname] = val
+            else:
+                try:
+                    args[pname] = json.loads(val)
+                except Exception:
+                    args[pname] = val
+        cid = f"dsml_{uuid.uuid4().hex[:24]}"
+        calls.append({"id": cid, "name": name, "arguments": args})
+        tc_msgs.append({"id": cid, "type": "function",
+                        "function": {"name": name, "arguments": json.dumps(args, ensure_ascii=False)}})
+    if not calls:
+        return None
+    logger.warning("recovered %d DSML-leaked tool call(s) from content: %s",
+                   len(calls), [c["name"] for c in calls])
+    assistant_message = {"role": "assistant", "content": None, "tool_calls": tc_msgs}
+    return {"type": "tool_calls", "calls": calls,
+            "assistant_message": assistant_message, "usage": usage}
+
+
 async def _once_openai_compat(url: str, api_key: str, model: str, system_prompt: str,
                                messages: list, temperature: float, max_tokens: int,
                                tools: list | None) -> dict:
@@ -373,7 +417,14 @@ async def _once_openai_compat(url: str, api_key: str, model: str, system_prompt:
             for tc in msg["tool_calls"]
         ]
         return {"type": "tool_calls", "calls": calls, "assistant_message": msg, "usage": usage}
-    return {"type": "text", "content": msg.get("content", ""), "usage": usage}
+    content = msg.get("content", "") or ""
+    # deepseek-chat 偶尔把工具调用以 DSML 文本塞进 content 而非结构化 tool_calls
+    # 字段（finish_reason 也不是 tool_calls）。若不救回，调用就不会执行、DSML 乱码
+    # 会被当成最终答复存库并污染后续上下文。
+    recovered = _recover_dsml_tool_calls(content, usage)
+    if recovered is not None:
+        return recovered
+    return {"type": "text", "content": content, "usage": usage}
 
 
 async def _once_claude(api_key: str, model: str, system_prompt: str,

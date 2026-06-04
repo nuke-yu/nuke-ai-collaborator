@@ -179,6 +179,21 @@ class TestOrchestratorFlow(unittest.TestCase):
         self.assertTrue(s.done)
         self.assertIsNone(self.orch.get(1))
 
+    def test_dev_stage_instruction_requires_write_file(self):
+        """Dev 阶段指令必须强制用 write_file 落盘、禁止把完整源码贴进聊天——否则
+        deepseek 倾向把代码灌进消息、工作区里永远没有文件。"""
+        from core.orchestration.pipeline import build_rd_pipeline
+        ba = {"id": 1, "name": "BA", "avatar_color": "#1", "role": "BA"}
+        dev = {"id": 2, "name": "Dev", "avatar_color": "#2", "role": "Dev"}
+        qa = {"id": 3, "name": "QA", "avatar_color": "#3", "role": "QA"}
+        stages = build_rd_pipeline(ba, dev, qa)
+        dev_instr = stages[1]["instruction"]
+        self.assertIn("write_file", dev_instr)
+        self.assertIn("[[DEV_DONE]]", dev_instr)
+        # 明确禁止贴源码进聊天
+        self.assertIn("聊天", dev_instr)
+        self.assertTrue("严禁" in dev_instr or "不要" in dev_instr)
+
     def test_sentinel_match_is_tolerant(self):
         """哨兵标记容错：大小写/空格/全角括号变体仍能命中；普通中文关键词不误伤。"""
         from core.orchestration.pipeline import build_rd_pipeline

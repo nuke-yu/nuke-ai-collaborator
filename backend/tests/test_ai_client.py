@@ -740,5 +740,78 @@ class TestStreamingUsageCapture(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(usage_out[0]["output_tokens"], 5)
 
 
+class TestDsmlToolCallRecovery(unittest.TestCase):
+    """deepseek-chat 间歇性把工具调用以 DSML 文本塞进 content（而非结构化 tool_calls
+    字段），导致调用不执行、乱码存进消息。_recover_dsml_tool_calls 把这种泄漏救回成
+    真正的 tool_calls，并产出干净的 assistant_message（无 DSML 文本）以防上下文污染。"""
+
+    # 真实泄漏样本：全角竖线 ｜(U+FF5C) 包裹的 DSML 标记
+    P = "｜｜DSML｜｜"
+
+    def _wrap(self, body):
+        return f"<{self.P}tool_calls>\n{body}\n</{self.P}tool_calls>"
+
+    def test_recovers_leaked_write_file_call(self):
+        from ai.client import _recover_dsml_tool_calls
+        content = (
+            "好的，直接开干！\n\n"
+            + self._wrap(
+                f'<{self.P}invoke name="write_file">\n'
+                f'<{self.P}parameter name="path" string="true">index.html</{self.P}parameter>\n'
+                f'<{self.P}parameter name="content" string="true"><h1>hi</h1></{self.P}parameter>\n'
+                f'</{self.P}invoke>'
+            )
+        )
+        usage = {"input_tokens": 1, "output_tokens": 2,
+                 "cache_read_tokens": 0, "cache_creation_tokens": 0}
+        res = _recover_dsml_tool_calls(content, usage)
+        self.assertIsNotNone(res)
+        self.assertEqual(res["type"], "tool_calls")
+        self.assertEqual(len(res["calls"]), 1)
+        call = res["calls"][0]
+        self.assertEqual(call["name"], "write_file")
+        self.assertEqual(call["arguments"]["path"], "index.html")
+        self.assertEqual(call["arguments"]["content"], "<h1>hi</h1>")
+        self.assertEqual(res["usage"], usage)
+        # assistant_message 必须是干净的 OpenAI tool_calls（无 DSML 文本）防污染
+        am = res["assistant_message"]
+        self.assertIsNone(am.get("content"))
+        self.assertEqual(am["tool_calls"][0]["function"]["name"], "write_file")
+        self.assertNotIn("DSML", json.dumps(am, ensure_ascii=False))
+        # arguments 在 assistant_message 里是 JSON 字符串（OpenAI 格式）
+        self.assertEqual(
+            json.loads(am["tool_calls"][0]["function"]["arguments"])["path"], "index.html")
+
+    def test_multiple_invokes_in_order(self):
+        from ai.client import _recover_dsml_tool_calls
+        content = (
+            f'<{self.P}invoke name="list_workspace">\n'
+            f'<{self.P}parameter name="path" string="true">.</{self.P}parameter>\n'
+            f'</{self.P}invoke>\n'
+            f'<{self.P}invoke name="read_file">\n'
+            f'<{self.P}parameter name="path" string="true">a.txt</{self.P}parameter>\n'
+            f'</{self.P}invoke>'
+        )
+        res = _recover_dsml_tool_calls(content, {})
+        self.assertIsNotNone(res)
+        self.assertEqual([c["name"] for c in res["calls"]], ["list_workspace", "read_file"])
+        ids = [c["id"] for c in res["calls"]]
+        self.assertEqual(len(set(ids)), 2)  # 每个调用 id 唯一
+
+    def test_plain_text_returns_none(self):
+        from ai.client import _recover_dsml_tool_calls
+        self.assertIsNone(_recover_dsml_tool_calls("就是一段普通回答，没有工具调用", {}))
+        self.assertIsNone(_recover_dsml_tool_calls("", {}))
+        self.assertIsNone(_recover_dsml_tool_calls(None, {}))
+
+    def test_invoke_without_params(self):
+        from ai.client import _recover_dsml_tool_calls
+        content = f'<{self.P}invoke name="list_workspace"></{self.P}invoke>'
+        res = _recover_dsml_tool_calls(content, {})
+        self.assertIsNotNone(res)
+        self.assertEqual(res["calls"][0]["name"], "list_workspace")
+        self.assertEqual(res["calls"][0]["arguments"], {})
+
+
 if __name__ == "__main__":
     unittest.main()
