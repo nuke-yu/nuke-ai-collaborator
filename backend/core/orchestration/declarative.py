@@ -74,14 +74,25 @@ class DeclarativeOrchestrator(Orchestrator):
                         f"单独、原样输出标记 {keyword}（一字不差）作为收尾，并给出完整的最终结论。")
 
     def snapshot(self, group_id: int) -> dict:
-        s = self._state.get(group_id)
-        if not s:
+        return self.snapshot_state(self._state.get(group_id))
+
+    def snapshot_state(self, state: dict | None) -> dict:
+        """从一个 state blob 渲染前端快照（纯函数，不读写 self._state）。
+
+        编排实际跑在 worker 进程，其内存 _state 才是活的；但 REST 应用跑在主进程、
+        内存恒空，只能从 group 私有库读出的持久化 blob 来渲染。snapshot() 即为本函数
+        在 live 内存态上的特例。blob 经 JSON round-trip 后 stage 内 int key 会变 str，
+        故先 rehydrate（各 stage_type 的 rehydrate 均幂等，对 live 态调用无副作用）。"""
+        if not state:
             return {"active": False}
-        pending = s.get("awaiting_confirm")
+        stages = state.get("stages", [])
+        for st in stages:
+            stage_handler(st).rehydrate(st)
+        pending = state.get("awaiting_confirm")
         return {
             "active": True,
-            "stages": [stage_handler(st).snapshot(st) for st in s["stages"]],
-            "current": s["current"],
+            "stages": [stage_handler(st).snapshot(st) for st in stages],
+            "current": state.get("current", 0),
             "awaiting_confirm": pending["gate_id"] if pending else None,
         }
 

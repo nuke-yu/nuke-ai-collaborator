@@ -69,6 +69,12 @@ class Orchestrator(ABC):
         """给 WorkflowUpdate 用的状态快照。"""
         return {"active": False}
 
+    def snapshot_state(self, state: dict | None) -> dict:
+        """从持久化 blob 渲染前端快照（纯函数，不依赖内存 _state）——供主进程 REST 用：
+        编排跑在 worker 进程，主进程内存恒空，只能从 group 私有库的 blob 渲染。
+        默认仅报告活跃与否；有阶段视图的实现（如 declarative）应覆盖以给出完整快照。"""
+        return {"active": bool(state)}
+
     # ── 当前在岗参与者（消费方 core.workflow / core.orchestrator 依赖） ──
     def current_bot(self, group_id: int) -> dict | None:
         """当前应当发言的单个 bot（无则 None，如池/并行阶段）。"""

@@ -1,15 +1,27 @@
 from fastapi import APIRouter, HTTPException
+import db
 from db import get_db, get_members
 from ws_manager import manager
 import core.workflow as wf
 from core import workflow_store
+from core.orchestration import registry as orch_registry
+from runtime.dbpaths import group_db_path
 
 router = APIRouter()
 
 
 @router.get("/api/groups/{group_id}/workflow")
 async def get_workflow(group_id: int):
-    return wf._snapshot(group_id)
+    # 编排实际跑在 worker 进程；REST 应用在主进程、其内存编排器恒空，wf._snapshot()
+    # 在这里永远报 inactive。改为从 group 私有库读持久化快照（每次阶段/门变化都会
+    # broadcast_state 落库），前端加载后再靠 live workflow_update 事件保持实时。
+    with db.bind_db(group_db_path(group_id)):
+        rows = await workflow_store.load_all_active(group_id=group_id)
+    if not rows:
+        return {"active": False}
+    row = rows[0]
+    orch = orch_registry.get(row.get("orchestrator_id") or "workflow_v1")
+    return orch.snapshot_state(row["state"])
 
 
 @router.post("/api/groups/{group_id}/workflow/start")

@@ -881,5 +881,49 @@ class TestStartRdPipeline(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Jira", unit.prompt_suffix)               # 建工单指令也在
 
 
+class TestSnapshotFromPersistedState(unittest.TestCase):
+    """跨进程修复：REST 应用跑在主进程，其编排器内存恒为空。它必须能仅凭持久化的
+    state blob（从 group 私有库读出）渲染工作流快照，且不污染任何共享内存状态。"""
+
+    def _orch(self):
+        from core.orchestration.declarative import DeclarativeOrchestrator
+        return DeclarativeOrchestrator()
+
+    def _gated(self, bid, name, keyword="[[DONE]]"):
+        return {"id": bid, "name": name, "avatar_color": "#111",
+                "stage_type": "single", "done_keyword": keyword, "role": "Dev",
+                "gate": True}
+
+    def test_snapshot_state_renders_active_blob_without_mutation(self):
+        live = self._orch()
+        live.begin(7, [self._gated(1, "BA"), self._gated(2, "Dev")])
+        live.observe(7, 1, "all done [[DONE]]")     # BA 吐哨兵 → 挂起确认门
+        blob = live.serialize(7)
+        self.assertIn("awaiting_confirm", blob)
+
+        fresh = self._orch()                         # = 主进程：内存空
+        self.assertEqual(fresh.snapshot(7), {"active": False})
+
+        snap = fresh.snapshot_state(blob)
+        self.assertTrue(snap["active"])
+        self.assertEqual(snap["current"], 0)
+        self.assertEqual(len(snap["stages"]), 2)
+        self.assertEqual(snap["awaiting_confirm"], "7-0")
+        # 纯函数：绝不能把状态塞进单例 _state
+        self.assertIsNone(fresh.get(7))
+        self.assertEqual(fresh.snapshot(7), {"active": False})
+
+    def test_snapshot_state_empty_blob_inactive(self):
+        fresh = self._orch()
+        self.assertEqual(fresh.snapshot_state(None), {"active": False})
+        self.assertEqual(fresh.snapshot_state({}), {"active": False})
+
+    def test_live_snapshot_matches_snapshot_state(self):
+        live = self._orch()
+        live.begin(7, [self._gated(1, "BA"), self._gated(2, "Dev")])
+        live.observe(7, 1, "done [[DONE]]")
+        self.assertEqual(live.snapshot(7), live.snapshot_state(live.serialize(7)))
+
+
 if __name__ == "__main__":
     unittest.main()
