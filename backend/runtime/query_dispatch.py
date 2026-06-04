@@ -72,3 +72,58 @@ async def _run_query(gid: int, kind: str, msg: dict):
             return await db.get_pinned_messages(conn, gid)
 
     raise ValueError(f"unknown query kind: {kind!r}")
+
+
+async def dispatch_mutate(msg: dict) -> None:
+    gid = msg["group_id"]
+    action = msg.get("action")
+    member_id = msg.get("member_id")
+    msg_id = msg.get("msg_id")
+    try:
+        event = await _run_mutate(gid, action, member_id, msg_id, msg)
+    except Exception:
+        log.exception("query_dispatch: mutate=%s group=%s failed", action, gid)
+        return
+    if event is not None:
+        await bus.broadcast(gid, event)
+
+
+async def _run_mutate(gid: int, action: str, member_id, msg_id, msg: dict):
+    if action == "toggle_reaction":
+        async with db.write_connect() as conn:
+            meta = await db.get_message_meta(conn, msg_id)
+            if not meta:
+                return None
+            await db.toggle_reaction(conn, msg_id, member_id, msg.get("emoji"))
+            reactions = await db.get_reactions_for_message(conn, msg_id)
+        return {"type": "reaction_updated", "message_id": msg_id, "reactions": reactions}
+
+    if action == "pin":
+        async with db.write_connect() as conn:
+            await db.pin_message(conn, gid, msg_id)
+            pins = await db.get_pinned_messages(conn, gid)
+        return {"type": "pins_updated", "pins": pins}
+
+    if action == "unpin":
+        async with db.write_connect() as conn:
+            await db.unpin_message(conn, gid, msg_id)
+            pins = await db.get_pinned_messages(conn, gid)
+        return {"type": "pins_updated", "pins": pins}
+
+    if action == "edit":
+        async with db.write_connect() as conn:
+            meta = await db.get_message_meta(conn, msg_id)
+            if not meta or meta["member_id"] != member_id:
+                return None  # only the author may edit
+            await db.update_message(conn, msg_id, msg.get("content"))
+        return {"type": "message_edited", "id": msg_id, "content": msg.get("content")}
+
+    if action == "withdraw":
+        async with db.write_connect() as conn:
+            meta = await db.get_message_meta(conn, msg_id)
+            if not meta or meta["member_id"] != member_id:
+                return None  # only the author may withdraw
+            await db.soft_delete_message(conn, msg_id)
+        return {"type": "message_deleted", "id": msg_id}
+
+    raise ValueError(f"unknown mutate action: {action!r}")

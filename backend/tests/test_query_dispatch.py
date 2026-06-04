@@ -94,5 +94,50 @@ class TestDispatchQueryOther(QueryDispatchBase):
         self.assertEqual(s2[0][1]["data"], [])
 
 
+class TestDispatchMutate(QueryDispatchBase):
+    async def _run_mutate(self, msg):
+        import db
+        from runtime import query_dispatch
+        sent = []
+        with db.bind_db(self.path):
+            with patch.object(query_dispatch.bus, "broadcast",
+                              new=AsyncMock(side_effect=lambda gid, p: sent.append((gid, p)))):
+                await query_dispatch.dispatch_mutate(msg)
+        return sent
+
+    async def test_toggle_reaction_persists_and_broadcasts(self):
+        sent = await self._run_mutate({"type": "mutate", "group_id": 1, "action": "toggle_reaction",
+                                       "msg_id": 1, "member_id": 5, "emoji": "👍"})
+        self.assertEqual(sent[0][1]["type"], "reaction_updated")
+        self.assertEqual(sent[0][1]["message_id"], 1)
+        self.assertIn("👍", sent[0][1]["reactions"])
+
+    async def test_edit_rejects_non_author(self):
+        sent = await self._run_mutate({"type": "mutate", "group_id": 1, "action": "edit",
+                                       "msg_id": 1, "member_id": 999, "content": "hacked"})
+        # not the author (5) → no broadcast, content unchanged
+        self.assertEqual(sent, [])
+        import db
+        async with db.connect(self.path) as conn:
+            cur = await conn.execute("SELECT content FROM messages WHERE id=1")
+            self.assertEqual((await cur.fetchone())[0], "msg1")
+
+    async def test_edit_by_author_broadcasts(self):
+        sent = await self._run_mutate({"type": "mutate", "group_id": 1, "action": "edit",
+                                       "msg_id": 1, "member_id": 5, "content": "fixed"})
+        self.assertEqual(sent[0][1], {"type": "message_edited", "id": 1, "content": "fixed"})
+
+    async def test_withdraw_by_author_broadcasts(self):
+        sent = await self._run_mutate({"type": "mutate", "group_id": 1, "action": "withdraw",
+                                       "msg_id": 2, "member_id": 5})
+        self.assertEqual(sent[0][1], {"type": "message_deleted", "id": 2})
+
+    async def test_pin_and_unpin_broadcast_pins_updated(self):
+        s1 = await self._run_mutate({"type": "mutate", "group_id": 1, "action": "pin", "msg_id": 1})
+        self.assertEqual(s1[0][1]["type"], "pins_updated")
+        s2 = await self._run_mutate({"type": "mutate", "group_id": 1, "action": "unpin", "msg_id": 1})
+        self.assertEqual(s2[0][1]["type"], "pins_updated")
+
+
 if __name__ == "__main__":
     unittest.main()
