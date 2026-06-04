@@ -1,3 +1,4 @@
+import * as wsrpc from './wsrpc'
 
 async function authFetch(url, options = {}) {
   const token = localStorage.getItem('token')
@@ -23,21 +24,17 @@ export async function fetchGroupInfo(groupId) {
 }
 
 export async function fetchReactions(groupId) {
-  const res = await authFetch(`/api/groups/${groupId}/reactions`)
-  return res.json()
+  return wsrpc.request({ query: 'reactions', group_id: groupId })
 }
 
 export async function toggleReaction(msgId, memberId, emoji) {
-  await authFetch(`/api/messages/${msgId}/reactions`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ member_id: memberId, emoji }),
-  })
+  // memberId kept in the signature for caller compatibility but ignored:
+  // the server uses the authenticated connection's member_id.
+  wsrpc.send({ type: 'mutate', action: 'toggle_reaction', msg_id: msgId, emoji })
 }
 
 export async function searchMessages(groupId, q) {
-  const res = await authFetch(`/api/groups/${groupId}/messages/search?q=${encodeURIComponent(q)}`)
-  return res.json()
+  return wsrpc.request({ query: 'search', group_id: groupId, q })
 }
 
 export async function fetchUnreadCounts(memberId) {
@@ -45,11 +42,12 @@ export async function fetchUnreadCounts(memberId) {
   return res.json()
 }
 
-export async function fetchMessages(groupId, { beforeId } = {}) {
-  const params = new URLSearchParams({ limit: 50 })
-  if (beforeId) params.set('before_id', beforeId)
-  const res = await authFetch(`/api/groups/${groupId}/messages?${params}`)
-  return res.json()
+export async function fetchMessages(groupId, { beforeId, afterId } = {}) {
+  return wsrpc.request({
+    query: 'messages', group_id: groupId, limit: 50,
+    ...(beforeId ? { before_id: beforeId } : {}),
+    ...(afterId ? { after_id: afterId } : {}),
+  }) // resolves to { messages, has_more }
 }
 
 export async function createGroup(name) {
@@ -62,16 +60,15 @@ export async function createGroup(name) {
 }
 
 export async function fetchPins(groupId) {
-  const res = await authFetch(`/api/groups/${groupId}/pins`)
-  return res.json()
+  return wsrpc.request({ query: 'pins', group_id: groupId })
 }
 
 export async function pinMessage(groupId, msgId) {
-  await authFetch(`/api/groups/${groupId}/messages/${msgId}/pin`, { method: 'POST' })
+  wsrpc.send({ type: 'mutate', action: 'pin', group_id: groupId, msg_id: msgId })
 }
 
 export async function unpinMessage(groupId, msgId) {
-  await authFetch(`/api/groups/${groupId}/messages/${msgId}/pin`, { method: 'DELETE' })
+  wsrpc.send({ type: 'mutate', action: 'unpin', group_id: groupId, msg_id: msgId })
 }
 
 export async function fetchConfig() {
