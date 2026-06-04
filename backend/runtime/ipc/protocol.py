@@ -12,9 +12,11 @@ CONFIRM = "confirm"                      # 人在工作流确认门点了「确�
 START_WORKFLOW = "start_workflow"        # 启动 RD 人确认流水线
 WAKE_TRIGGER = "wake_trigger"            # cron/告警唤醒沉睡群
 RELEASE_LEASE = "release_lease"          # CELL-18: Request worker to release group
+QUERY = "query"                          # 读 group 域数据，worker 查群库后经 bus 回 query_result
+MUTATE = "mutate"                        # 写 group 域数据（反应/置顶/编辑/撤回），worker 写群库并广播更新
 
 DOWNSTREAM = frozenset({USER_MESSAGE, ABORT, PERMISSION_RESPONSE, CONFIRM,
-                        START_WORKFLOW, WAKE_TRIGGER, RELEASE_LEASE})
+                        START_WORKFLOW, WAKE_TRIGGER, RELEASE_LEASE, QUERY, MUTATE})
 
 # ── 上行 (Worker → Supervisor) ────────────────────────────────────────────
 BROADCAST = "broadcast"                  # 包裹任一 bus 事件，供 Supervisor 扇出给浏览器
