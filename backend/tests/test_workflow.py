@@ -861,6 +861,25 @@ class TestStartRdPipeline(unittest.IsolatedAsyncioTestCase):
         finally:
             wf.end(gid)
 
+    async def test_user_driven_first_stage_carries_workflow_suffix(self):
+        """首阶段(BA)由用户驱动、走 orch.dispatch —— 必须把 system_suffix（含哨兵指令）
+        挂到 WorkUnit.prompt_suffix 上，否则 BA 收不到“输出 [[BA_DONE]]”的指令，
+        确认门永远挂不起来（这正是 Dev 不开工的根因）。"""
+        from core.orchestration.declarative import DeclarativeOrchestrator
+        from core.orchestration.pipeline import build_rd_pipeline
+        orch = DeclarativeOrchestrator()
+        ba = {"id": 1, "name": "BA", "avatar_color": "#1", "role": "BA"}
+        dev = {"id": 2, "name": "Dev", "avatar_color": "#2", "role": "Dev"}
+        qa = {"id": 3, "name": "QA", "avatar_color": "#3", "role": "QA"}
+        orch.begin(7, build_rd_pipeline(ba, dev, qa))
+        members = [{**ba, "type": "bot"}, {**dev, "type": "bot"}, {**qa, "type": "bot"}]
+        step = await orch.dispatch(7, {"content": "做个计算器"}, members, [])
+        self.assertTrue(step.next_units)
+        unit = step.next_units[0]
+        self.assertEqual(unit.bot["id"], 1)                     # BA 应答
+        self.assertIn("[[BA_DONE]]", unit.prompt_suffix)        # 哨兵指令必须随单元下发
+        self.assertIn("Jira", unit.prompt_suffix)               # 建工单指令也在
+
 
 if __name__ == "__main__":
     unittest.main()

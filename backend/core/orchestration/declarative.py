@@ -181,8 +181,13 @@ class DeclarativeOrchestrator(Orchestrator):
             if wp: participant_bots.extend([b for b in all_bots if b["id"] in wp])
             
             if participant_bots:
+                # 首阶段由用户驱动、走这条路（而非 enter()），必须同样把工作流 system_suffix
+                # 挂到 prompt_suffix 上，否则在岗 bot 收不到阶段指令（如“最后一行输出哨兵
+                # [[BA_DONE]]”），确认门永远挂不起来、下一阶段永不交棒。
+                suffix = self.system_suffix(group_id)
                 return OrchestratorStep(next_units=[
-                    WorkUnit(bot=b, trigger_msg=content)
+                    WorkUnit(bot=b, executor_id=(b.get("executor_id") or "tool_loop_v1"),
+                             trigger_msg=content, prompt_suffix=suffix)
                     for b in participant_bots
                 ])
 
