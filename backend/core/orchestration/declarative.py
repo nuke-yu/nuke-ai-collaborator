@@ -66,11 +66,12 @@ class DeclarativeOrchestrator(Orchestrator):
             nxt = self._ctx(group_id, idx + 1)
             handler = stage_handler(nxt.stage)
             base = (f"\n\n[工作流 {idx+1}/{total}] 与用户多轮对话，充分澄清所有关键点后，"
-                    f"当你认为本阶段工作真正完成时，在回复中说出「{keyword}」，"
-                    f"系统会自动通知 {handler.display_name(nxt.stage)} 接棒。完成之前请不要说这句话。")
+                    f"当你认为本阶段工作真正完成时，在回复的最后一行单独、原样输出标记 {keyword}"
+                    f"（一字不差，不要翻译/改写/加别的字）——系统识别到这个标记才会弹出确认卡片，"
+                    f"人点确认后才会通知 {handler.display_name(nxt.stage)} 接棒。完成之前绝对不要输出它。")
             return brief + base + handler.incoming_requirement(nxt.stage, keyword)
-        return brief + (f"\n\n[工作流 {idx+1}/{total}] 这是最后一个阶段。"
-                        f"完成后说「{keyword}」作为收尾，给出完整的最终结论。")
+        return brief + (f"\n\n[工作流 {idx+1}/{total}] 这是最后一个阶段。完成后在回复的最后一行"
+                        f"单独、原样输出标记 {keyword}（一字不差）作为收尾，并给出完整的最终结论。")
 
     def snapshot(self, group_id: int) -> dict:
         s = self._state.get(group_id)

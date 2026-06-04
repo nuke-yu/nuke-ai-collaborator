@@ -4,11 +4,14 @@
 
     BA(澄清+建Jira) ─门1─► Dev开发 ─门2─► QA测试 ─门3─► 完成
 
-每个阶段都是数据：本阶段任务指令(instruction)、完成关键词(done_keyword)、
-人确认门标签(gate_label)。bot 说出关键词后不自动推进，而是挂起等人点「确认」
+每个阶段都是数据：本阶段任务指令(instruction)、完成信号(done_keyword)、
+人确认门标签(gate_label)。bot 吐出完成信号后不自动推进，而是挂起等人点「确认」
 （门机制见 stages.SingleStage / declarative._raise_gate）。
 
 注意：
+- 完成信号用「哨兵标记」（[[BA_DONE]] / [[DEV_DONE]] / [[QA_DONE]]）而不是中文短语：
+  人格化 bot 几乎必然把长中文句子改写掉，匹配就失败、确认卡片永远弹不出来；带方括号
+  的怪 token 模型倾向一字不差照抄，且 stages._signal_in 做了大小写/空格/全角括号容错。
 - 澄清需求、确认、拆 Jira 工单都是 BA 一个人的活，合并成单一 BA 阶段（不再拆两段）。
 - 首阶段(BA)由用户驱动：begin 不自动派发，用户开口聊需求即进入；本阶段任务指令
   (instruction) 不经 enter 的 trigger 送达，而是随 system_suffix 一起带给 BA
@@ -40,28 +43,32 @@ def build_rd_pipeline(ba: dict, dev: dict, qa: dict) -> list[dict]:
                 "和用户多轮对话，把需求问清楚：目标、范围、边界、验收标准。"
                 "充分澄清并与用户对齐后，把需求拆成 Jira 工单，每个工单包含："
                 "标题、描述、验收标准(AC)。（当前 Jira 为替身，先用清晰的文字列出工单清单。）"
-                "需求总结和工单清单都给完后，在回复末尾单独说「需求与工单已就绪」。"
-                "没完全澄清、工单没列完之前不要说这句话。"
+                "需求总结和工单清单都给完后，向用户说明『都就绪了，是否让开发开始？』，"
+                "并在回复的最后一行单独、原样输出标记 [[BA_DONE]]（一字不差，"
+                "不要翻译/改写/加别的字）——系统识别到它才会给用户弹出确认卡片。"
+                "没完全澄清、工单没列完之前，绝对不要输出这个标记。"
             ),
-            done_keyword="需求与工单已就绪",
+            done_keyword="[[BA_DONE]]",
             gate_label="确认需求已整理清楚、Jira 工单已建好",
         ),
         _gated_stage(
             dev,
             instruction=(
                 "按上面的 Jira 工单开发：说明实现方案与关键代码思路，做代码自测，"
-                "并给出 PR 描述（当前 Git 为替身，用文字描述 PR）。完成后说「开发完成」。"
+                "并给出 PR 描述（当前 Git 为替身，用文字描述 PR）。完成后在回复的最后一行"
+                "单独、原样输出标记 [[DEV_DONE]]（一字不差，不要改写）。完成之前不要输出它。"
             ),
-            done_keyword="开发完成",
+            done_keyword="[[DEV_DONE]]",
             gate_label="确认开发完成、PR 已提",
         ),
         _gated_stage(
             qa,
             instruction=(
                 "按 Jira 工单的验收标准(AC)做冒烟测试：逐条给出通过/不通过及理由，"
-                "最后给出测试结论。完成后说「测试完成」。"
+                "最后给出测试结论。完成后在回复的最后一行单独、原样输出标记 [[QA_DONE]]"
+                "（一字不差，不要改写）。完成之前不要输出它。"
             ),
-            done_keyword="测试完成",
+            done_keyword="[[QA_DONE]]",
             gate_label="确认测试通过",
         ),
     ]

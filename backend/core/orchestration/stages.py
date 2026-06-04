@@ -27,6 +27,21 @@ def parse_tickets(message: str) -> list[str]:
     return ["本次迭代任务"]
 
 
+_SIGNAL_STRIP = re.compile(r"[\s\[\]【】（）()<>「」]")
+
+
+def _signal_in(response: str, keyword: str) -> bool:
+    """容错匹配阶段完成信号。
+
+    哨兵标记（如 [[BA_DONE]]）模型偶尔会写成 [[ ba_done ]]、全角【【BA_DONE】】等变体；
+    归一化（去掉空白和各种括号、统一大小写）后再做子串匹配，仍能命中。对普通中文关键词
+    （如「完毕」「测试完成」）归一化是恒等，行为与原来的 `keyword in response` 一致。"""
+    if not keyword:
+        return False
+    norm = lambda s: _SIGNAL_STRIP.sub("", s).upper()
+    return norm(keyword) in norm(response)
+
+
 @dataclass
 class StageCtx:
     """一次阶段操作的上下文。orch 用鸭子类型（DeclarativeOrchestrator），不在此 import 以免环。"""
@@ -107,8 +122,7 @@ class SingleStage(StageType):
         )
 
     def observe(self, ctx: StageCtx, bot_id: int, response: str) -> OrchestratorStep:
-        keyword = ctx.stage.get("done_keyword", "")
-        if keyword and keyword in response:
+        if _signal_in(response, ctx.stage.get("done_keyword", "")):
             # 带 gate 的阶段：bot 说完成不直接推进，而是挂起等人点「确认」。
             if ctx.stage.get("gate"):
                 return ctx.orch._raise_gate(ctx, response)
@@ -213,8 +227,7 @@ class PoolStage(StageType):
 
     def observe(self, ctx: StageCtx, bot_id: int, response: str) -> OrchestratorStep:
         stage = ctx.stage
-        keyword = stage.get("done_keyword", "")
-        if not (keyword and keyword in response):
+        if not _signal_in(response, stage.get("done_keyword", "")):
             return OrchestratorStep()
         in_progress = stage.get("in_progress", {})
         if bot_id is None or bot_id not in in_progress:

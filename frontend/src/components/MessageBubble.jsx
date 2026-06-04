@@ -196,6 +196,13 @@ function SkillsStrip({ skills }) {
 
 const QUICK_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🎉', '🤔', '👏']
 
+// 工作流哨兵标记（如 [[BA_DONE]] / [[DEV_DONE]] / [[QA_DONE]]）是给编排器看的控制信号，
+// 不展示给人——后端靠它挂起确认门，前端渲染时把它（含全角括号变体）抹掉。
+const stripSentinels = (text) =>
+  typeof text === 'string'
+    ? text.replace(/[\[【]{1,2}\s*[A-Za-z_]*_DONE\s*[\]】]{1,2}/g, '').replace(/\n{3,}/g, '\n\n').trim()
+    : text
+
 export default function MessageBubble({ msg, isTyping, currentMemberId, members = [], readMap = {}, onReply, reactions = {}, onReact, isPinned, onPin, onUnpin, highlighted = false, onConfirmGate }) {
   const [editing, setEditing] = useState(false)
   const [editText, setEditText] = useState(msg.content)
@@ -378,7 +385,7 @@ export default function MessageBubble({ msg, isTyping, currentMemberId, members 
           </div>
         ) : msg.streaming ? (
           <div className="text-sm text-gray-100 whitespace-pre-wrap break-words leading-relaxed">
-            {msg.content}
+            {stripSentinels(msg.content)}
             <span className="inline-block w-0.5 h-4 bg-gray-300 animate-pulse ml-px align-text-bottom rounded-sm" />
           </div>
         ) : (
@@ -386,7 +393,7 @@ export default function MessageBubble({ msg, isTyping, currentMemberId, members 
             {msg.content && (
               <div className="text-sm text-gray-100 leading-relaxed prose prose-invert prose-sm max-w-none">
                 <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
-                  {msg.content}
+                  {stripSentinels(msg.content)}
                 </ReactMarkdown>
               </div>
             )}

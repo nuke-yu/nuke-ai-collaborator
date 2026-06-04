@@ -148,12 +148,13 @@ class TestOrchestratorFlow(unittest.TestCase):
         self.orch.begin(1, stages)
 
         # 首阶段(BA)由用户驱动、begin 不派发 enter，建 Jira 工单的指令必须随
-        # system_suffix 一起带给 BA（否则 BA 不知道要建工单）。
+        # system_suffix 一起带给 BA（否则 BA 不知道要建工单）；推进信号是哨兵标记。
         suffix = self.orch.system_suffix(1)
         self.assertIn("Jira", suffix)
+        self.assertIn("[[BA_DONE]]", suffix)
 
-        # 阶段0 BA（澄清+建工单一气呵成）：说完成关键词 → 门1（不推进）
-        s = self.orch.observe(1, 1, "需求总结 + 工单清单…… 需求与工单已就绪")
+        # 阶段0 BA（澄清+建工单一气呵成）：吐出哨兵标记 → 门1（不推进）
+        s = self.orch.observe(1, 1, "需求总结 + 工单清单…… 是否让开发开始？\n[[BA_DONE]]")
         self.assertEqual(s.confirm_gate["gate_id"], "1-0")
         self.assertEqual(self.orch.get(1)["current"], 0)
 
@@ -164,19 +165,31 @@ class TestOrchestratorFlow(unittest.TestCase):
         self.assertEqual(self.orch.get(1)["current"], 1)
 
         # 阶段1 → 门2 → 阶段2 QA
-        s = self.orch.observe(1, 2, "实现方案…… 开发完成")
+        s = self.orch.observe(1, 2, "实现方案…… [[DEV_DONE]]")
         self.assertEqual(s.confirm_gate["gate_id"], "1-1")
         s = self.orch.confirm(1)
         self.assertEqual(s.next_units[0].bot["id"], 3)          # 交棒给 QA
 
         # 阶段2 QA（末棒）→ 门3：确认前不结束
-        s = self.orch.observe(1, 3, "逐条AC…… 测试完成")
+        s = self.orch.observe(1, 3, "逐条AC…… [[QA_DONE]]")
         self.assertIsNotNone(s.confirm_gate)
         self.assertFalse(s.done)
         # 确认门3 → 整条流水线结束、状态清空
         s = self.orch.confirm(1)
         self.assertTrue(s.done)
         self.assertIsNone(self.orch.get(1))
+
+    def test_sentinel_match_is_tolerant(self):
+        """哨兵标记容错：大小写/空格/全角括号变体仍能命中；普通中文关键词不误伤。"""
+        from core.orchestration.pipeline import build_rd_pipeline
+        ba = {"id": 1, "name": "BA", "avatar_color": "#1", "role": "BA"}
+        dev = {"id": 2, "name": "Dev", "avatar_color": "#2", "role": "Dev"}
+        qa = {"id": 3, "name": "QA", "avatar_color": "#3", "role": "QA"}
+        self.orch.begin(1, build_rd_pipeline(ba, dev, qa))
+        # 模型把 [[BA_DONE]] 写成带空格小写的 [[ ba_done ]] —— 仍应挂门
+        s = self.orch.observe(1, 1, "都就绪了，是否开始开发？\n[[ ba_done ]]")
+        self.assertIsNotNone(s.confirm_gate)
+        self.assertEqual(s.confirm_gate["gate_id"], "1-0")
 
     def test_pool_entry_assigns_tickets(self):
         pool = {"stage_type": "pool", "done_keyword": "完毕",
