@@ -57,6 +57,22 @@ async def get_session(session_id: str) -> dict | None:
             d["last_snapshot"] = []
     else:
         d["last_snapshot"] = []
+
+    # Fetch bot details from central DB
+    async with _db.global_db() as gconn:
+        gconn.row_factory = aiosqlite.Row
+        async with gconn.execute(
+            "SELECT name, avatar_color FROM members WHERE id = ?",
+            (d["bot_id"],)
+        ) as gcur:
+            bot_row = await gcur.fetchone()
+    if bot_row:
+        d["bot_name"] = bot_row["name"]
+        d["bot_avatar_color"] = bot_row["avatar_color"]
+    else:
+        d["bot_name"] = "Unknown Bot"
+        d["bot_avatar_color"] = "#6b7280"
+
     d["cost_usd"] = _session_cost(d)
     return d
 
@@ -154,18 +170,28 @@ async def add_tokens(
 
 
 async def get_group_sessions(group_id: int, limit: int = 50) -> list[dict]:
+    # 1. Fetch bot members from central DB
+    async with _db.global_db() as gconn:
+        gconn.row_factory = aiosqlite.Row
+        async with gconn.execute(
+            "SELECT id, name, avatar_color FROM members WHERE group_id = ?",
+            (group_id,)
+        ) as gcur:
+            members_rows = await gcur.fetchall()
+    members_map = {row["id"]: dict(row) for row in members_rows}
+
+    # 2. Fetch sessions from group DB
     async with _db.connect() as conn:
         conn.row_factory = aiosqlite.Row
         async with conn.execute(
-            """SELECT s.*, m.name as bot_name, m.avatar_color as bot_avatar_color
-               FROM agent_sessions s
-               JOIN members m ON s.bot_id = m.id
-               WHERE s.group_id = ?
-               ORDER BY s.updated_at DESC, s.created_at DESC
+            """SELECT * FROM agent_sessions
+               WHERE group_id = ?
+               ORDER BY updated_at DESC, created_at DESC
                LIMIT ?""",
             (group_id, limit)
         ) as cur:
             rows = await cur.fetchall()
+
     result = []
     for r in rows:
         d = dict(r)
@@ -177,6 +203,11 @@ async def get_group_sessions(group_id: int, limit: int = 50) -> list[dict]:
                 d["last_snapshot"] = []
         else:
             d["last_snapshot"] = []
+
+        bot_info = members_map.get(d["bot_id"], {})
+        d["bot_name"] = bot_info.get("name", "Unknown Bot")
+        d["bot_avatar_color"] = bot_info.get("avatar_color", "#6b7280")
+
         d["cost_usd"] = _session_cost(d)
         result.append(d)
     return result
