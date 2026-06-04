@@ -73,5 +73,26 @@ class TestDispatchQueryMessages(QueryDispatchBase):
         self.assertFalse(sent[0][1]["data"]["has_more"])
 
 
+class TestDispatchQueryOther(QueryDispatchBase):
+    async def test_search_matches_content_without_members_join(self):
+        sent = await self._run({"type": "query", "group_id": 1, "req_id": "c1-3",
+                                "query": "search", "q": "msg2", "limit": 30})
+        rows = sent[0][1]["data"]
+        self.assertEqual([r["id"] for r in rows], [2])
+        self.assertEqual(rows[0]["sender_name"], "Nuke")
+        self.assertEqual(rows[0]["avatar_color"], "#fff")
+
+    async def test_search_blank_returns_empty(self):
+        sent = await self._run({"type": "query", "group_id": 1, "req_id": "c1-4",
+                                "query": "search", "q": "   "})
+        self.assertEqual(sent[0][1]["data"], [])
+
+    async def test_reactions_and_pins_empty_by_default(self):
+        s1 = await self._run({"type": "query", "group_id": 1, "req_id": "c1-5", "query": "reactions"})
+        self.assertEqual(s1[0][1]["data"], {})
+        s2 = await self._run({"type": "query", "group_id": 1, "req_id": "c1-6", "query": "pins"})
+        self.assertEqual(s2[0][1]["data"], [])
+
+
 if __name__ == "__main__":
     unittest.main()

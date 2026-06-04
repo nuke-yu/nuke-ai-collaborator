@@ -37,4 +37,38 @@ async def _run_query(gid: int, kind: str, msg: dict):
                 before_id=msg.get("before_id"), after_id=msg.get("after_id"),
             )
         return {"messages": msgs, "has_more": len(msgs) == limit}
+
+    if kind == "search":
+        q = (msg.get("q") or "").strip()
+        if not q:
+            return []
+        limit = int(msg.get("limit") or 30)
+        async with db.get_db() as conn:
+            # group DB is self-contained: read denormalized sender_* (no members JOIN)
+            cur = await conn.execute(
+                "SELECT id, group_id, member_id, content, created_at, "
+                "       sender_name, sender_type, sender_avatar "
+                "FROM messages WHERE group_id = ? AND content LIKE ? "
+                "ORDER BY id DESC LIMIT ?",
+                (gid, f"%{q}%", limit),
+            )
+            rows = await cur.fetchall()
+        out = []
+        for r in rows:
+            created = r[4]
+            if created and "Z" not in created and "+" not in created:
+                created = created.replace(" ", "T") + "Z"
+            out.append({"id": r[0], "group_id": r[1], "member_id": r[2], "content": r[3],
+                        "created_at": created, "sender_name": r[5], "sender_type": r[6],
+                        "avatar_color": r[7]})
+        return out
+
+    if kind == "reactions":
+        async with db.get_db() as conn:
+            return await db.get_reactions_for_group(conn, gid)
+
+    if kind == "pins":
+        async with db.get_db() as conn:
+            return await db.get_pinned_messages(conn, gid)
+
     raise ValueError(f"unknown query kind: {kind!r}")
