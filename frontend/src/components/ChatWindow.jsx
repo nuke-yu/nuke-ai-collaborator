@@ -20,6 +20,7 @@ import PermissionRequestModal from './PermissionRequestModal'
 export default function ChatWindow({ memberId, isDark, onToggleTheme, onLogout }) {
   const [groups, setGroups] = useState([])
   const [activeGroupId, setActiveGroupId] = useState(null)
+  const [activeMemberId, setActiveMemberId] = useState(null)
   const [group, setGroup] = useState(null)
   const [members, setMembers] = useState([])
   const [membersCache, setMembersCache] = useState({})
@@ -84,6 +85,7 @@ export default function ChatWindow({ memberId, isDark, onToggleTheme, onLogout }
     if (!activeGroupId) return
     let active = true
     setTyping(null)
+    setActiveMemberId(null) // Reset activeMemberId to prevent connection with old member ID
     setUnreadCounts(prev => ({ ...prev, [activeGroupId]: 0 }))
 
     // 有缓存时立即显示，无缓存时清空等待
@@ -101,11 +103,33 @@ export default function ChatWindow({ memberId, isDark, onToggleTheme, onLogout }
     fetchPins(activeGroupId).then(data => {
       if (active) setPins(data)
     })
-    fetchGroupInfo(activeGroupId).then(({ group, members }) => {
+    fetchGroupInfo(activeGroupId).then(async ({ group, members }) => {
+      if (!active) return
+      const currentUser = JSON.parse(localStorage.getItem('user'))
+      const currentUsername = currentUser?.username || 'Guest'
+      let userMember = members.find(m => m.type === 'human' && m.name === currentUsername)
+      let finalMembers = members
+
+      if (!userMember) {
+        // Automatically join the group if the user is not a member yet
+        try {
+          const newMember = await addMember(activeGroupId, currentUsername)
+          userMember = newMember
+          finalMembers = [...members, { ...newMember, avatar_color: '#f59e0b' }]
+        } catch (e) {
+          console.error('Failed to auto-join group:', e)
+        }
+      }
+
       if (active) {
         setGroup(group)
-        setMembers(members)
-        setMembersCache(prev => ({ ...prev, [activeGroupId]: members }))
+        setMembers(finalMembers)
+        setMembersCache(prev => ({ ...prev, [activeGroupId]: finalMembers }))
+        if (userMember) {
+          setActiveMemberId(userMember.id)
+        } else {
+          setActiveMemberId(memberId) // Fallback
+        }
       }
     })
     fetchReactions(activeGroupId).then(data => {
@@ -176,7 +200,7 @@ export default function ChatWindow({ memberId, isDark, onToggleTheme, onLogout }
       // message twice, which would otherwise render it twice.
       setMessages((prev) => prev.some(m => m.id === data.id) ? prev : [...prev, data])
       syncCache(msgs => msgs.some(m => m.id === data.id) ? msgs : [...msgs, data])
-      if (data.member_id !== memberId) notify(data.sender_name, data.content)
+      if (data.member_id !== activeMemberId) notify(data.sender_name, data.content)
     } else if (data.type === 'stream_start') {
       setTyping(null)
       setMessages(prev => [...prev, {
@@ -200,7 +224,7 @@ export default function ChatWindow({ memberId, isDark, onToggleTheme, onLogout }
       )
       setMessages(finalize)
       syncCache(finalize)
-      if (data.member_id !== memberId) notify(data.sender_name, data.preview)
+      if (data.member_id !== activeMemberId) notify(data.sender_name, data.preview)
     } else if (data.type === 'compaction') {
       const marker = {
         _compact_marker: true,
@@ -308,7 +332,7 @@ export default function ChatWindow({ memberId, isDark, onToggleTheme, onLogout }
     setDrafts(prev => ({ ...prev, [gid]: text }))
   }, [])
 
-  const { send, sendRaw, connected, reconnecting } = useWebSocket(activeGroupId, memberId, handleWsMessage, handleReconnect, localStorage.getItem('token'), onLogout)
+  const { send, sendRaw, connected, reconnecting } = useWebSocket(activeGroupId, activeMemberId, handleWsMessage, handleReconnect, localStorage.getItem('token'), onLogout)
   const isStreaming = messages.some(m => m.streaming)
   const handleAbort = () => sendRaw({ type: 'abort', group_id: activeGroupId })
   const handleConfirmGate = (gateId) => sendRaw({ type: 'confirm', group_id: activeGroupId, gate_id: gateId })
@@ -421,7 +445,7 @@ export default function ChatWindow({ memberId, isDark, onToggleTheme, onLogout }
         isDark={isDark}
         onToggleTheme={onToggleTheme}
         onlineSet={onlineSet}
-        currentMemberId={memberId}
+        currentMemberId={activeMemberId}
         membersCache={membersCache}
         onOpenAddMember={() => setShowAddMember(true)}
         onEditMember={(m) => setEditingMember(m)}
@@ -633,7 +657,7 @@ export default function ChatWindow({ memberId, isDark, onToggleTheme, onLogout }
         <MessageList
           messages={messages}
           typing={typing}
-          memberId={memberId}
+          memberId={activeMemberId}
           members={members}
           readMap={readMap}
           reactionMap={reactionMap}
@@ -646,7 +670,7 @@ export default function ChatWindow({ memberId, isDark, onToggleTheme, onLogout }
           bottomRef={bottomRef}
           onScroll={handleScroll}
           onReply={setReplyingTo}
-          onReact={(id, emoji) => toggleReaction(id, memberId, emoji)}
+          onReact={(id, emoji) => toggleReaction(id, activeMemberId, emoji)}
           onPin={(id) => pinMessage(activeGroupId, id)}
           onUnpin={(id) => unpinMessage(activeGroupId, id)}
           onConfirmGate={handleConfirmGate}

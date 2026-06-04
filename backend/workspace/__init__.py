@@ -177,27 +177,6 @@ async def write_file(bot_id: int, path: str, content: str, group_id: int | None 
     lock = _get_path_lock(p)
     async with lock:
         def _do_write() -> str:
-            # Point 1: Emit CodeCommitted event if a code file is written
-            # (Heuristic: file in shared/ and has code suffix)
-            is_shared = ws.parent.name.startswith("group_")
-            if is_shared and p.suffix in {".py", ".js", ".ts", ".go", ".java"}:
-                from bus import publish
-                from bus.events import CodeCommitted
-                # We need group_id and ticket_id. 
-                # For this simple implementation, we'll try to find ticket_id in DB 
-                # or just use a generic 'auto' id.
-                from db import connect_sync
-                with connect_sync() as conn:
-                    row = conn.execute("SELECT group_id FROM members WHERE id = ?", (bot_id,)).fetchone()
-                    if row:
-                         asyncio.create_task(publish(CodeCommitted(
-                             group_id=row[0], 
-                             ticket_id="auto", # Ideally passed via context
-                             files=[path], 
-                             commit_msg=f"Auto-commit by Bot {bot_id}",
-                             author_id=bot_id
-                         )))
-
             # Redirect learned/active writes → learned/draft (requires user approval)
             if rel.startswith(_LEARNED_ACTIVE):
                 draft_path = ws / _LEARNED_DRAFT / p.name
@@ -220,7 +199,31 @@ async def write_file(bot_id: int, path: str, content: str, group_id: int | None 
             p.write_text(content, encoding="utf-8")
             return f"已写入 {path}（{len(content)} 字符）"
 
-        return await asyncio.to_thread(_do_write)
+        result = await asyncio.to_thread(_do_write)
+
+        # Point 1: Emit CodeCommitted event if a code file is written (main thread async)
+        is_shared = ws.parent.name.startswith("group_")
+        if (
+            is_shared 
+            and p.suffix in {".py", ".js", ".ts", ".go", ".java"}
+            and not result.startswith("__DRAFT_WRITTEN__")
+        ):
+            from bus import publish
+            from bus.events import CodeCommitted
+            from db import connect
+            async with connect() as conn:
+                async with conn.execute("SELECT group_id FROM members WHERE id = ?", (bot_id,)) as cur:
+                    row = await cur.fetchone()
+                if row:
+                    await publish(CodeCommitted(
+                        group_id=row[0],
+                        ticket_id="auto", # Ideally passed via context
+                        files=[path],
+                        commit_msg=f"Auto-commit by Bot {bot_id}",
+                        author_id=bot_id
+                    ))
+
+        return result
 
 
 

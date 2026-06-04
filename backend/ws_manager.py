@@ -64,13 +64,15 @@ class WSManager:
             # Take a snapshot under lock to iterate safely
             current_group_conns = list(self.connections[group_id])
 
-        for ws, _ in current_group_conns:
+        async def _send_one(ws):
             try:
-                # wait_for caps a slow/half-open client; on timeout the send is
-                # cancelled and the client dropped, so it can't stall the loop.
                 await asyncio.wait_for(ws.send_json(message), _SEND_TIMEOUT)
+                return None
             except Exception:
-                dead.append(ws)
+                return ws
+
+        results = await asyncio.gather(*[_send_one(ws) for ws, _ in current_group_conns], return_exceptions=True)
+        dead = [r for r in results if r is not None and not isinstance(r, Exception)]
         
         if not dead:
             return
