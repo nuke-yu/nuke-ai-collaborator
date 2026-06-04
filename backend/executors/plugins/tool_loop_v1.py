@@ -63,11 +63,11 @@ async def _tool_loop_core(
     """Minimal tool-calling loop used by tests (no broadcaster, no compaction, no DB).
 
     Returns the final text response, or a doom-loop protection message if
-    ``_DOOM_LOOP_THRESHOLD`` consecutive tool-only iterations occur.
+    ``_DOOM_LOOP_THRESHOLD`` consecutive identical tool-only iterations occur.
     """
     messages = list(messages)
     iter_count = 0
-    _consecutive_tool_only = 0
+    tool_calls_history = []
     while iter_count < max_iter:
         iter_count += 1
         result = await call_ai_once(
@@ -75,9 +75,23 @@ async def _tool_loop_core(
             temperature, max_tokens, tool_schemas,
         )
         if result["type"] == "tool_calls":
-            _consecutive_tool_only += 1
-            if _consecutive_tool_only >= _DOOM_LOOP_THRESHOLD:
-                return f"[循环保护] 连续 {_consecutive_tool_only} 次工具调用，已终止循环"
+            def _serialize_calls(calls):
+                serialized = []
+                for c in calls:
+                    serialized.append({
+                        "name": c["name"],
+                        "arguments": c.get("arguments", {})
+                    })
+                return json.dumps(serialized, sort_keys=True)
+
+            current_serialized = _serialize_calls(result["calls"])
+            tool_calls_history.append(current_serialized)
+
+            if len(tool_calls_history) >= _DOOM_LOOP_THRESHOLD:
+                recent_history = tool_calls_history[-_DOOM_LOOP_THRESHOLD:]
+                if all(h == current_serialized for h in recent_history):
+                    return f"[循环保护] 连续 {_DOOM_LOOP_THRESHOLD} 次完全相同的工具调用，已终止循环"
+
             messages.append(result["assistant_message"])
             for call in result["calls"]:
                 tool_result = await _execute_tool_call(
@@ -90,7 +104,7 @@ async def _tool_loop_core(
                     "content": tool_result,
                 })
         else:
-            _consecutive_tool_only = 0
+            tool_calls_history.clear()
             return result.get("content", "")
     return "[达到最大工具调用次数，任务未完成]"
 
@@ -216,6 +230,7 @@ class ToolLoopRunner:
         self.full_text = ""
         self.iter_count = 0
         self.consecutive_tool_only = 0
+        self.tool_calls_history = []
         self.tool_records = []
         self.file_tracker = {}
         self.temp_id = str(uuid.uuid4())
@@ -626,15 +641,29 @@ class ToolLoopRunner:
 
                     if result["type"] == "text":
                         self.consecutive_tool_only = 0
+                        self.tool_calls_history.clear()
                         self.full_text = result["content"]
                         await self._finalize_reply()
                         break
                     
                     if result["type"] == "tool_calls":
-                        self.consecutive_tool_only += 1
-                        if self.consecutive_tool_only >= _DOOM_LOOP_THRESHOLD:
-                            self.full_text = f"[循环保护] 连续 {self.consecutive_tool_only} 次工具调用，已终止循环"
-                            break
+                        def _serialize_calls(calls):
+                            serialized = []
+                            for c in calls:
+                                serialized.append({
+                                    "name": c["name"],
+                                    "arguments": c.get("arguments", {})
+                                })
+                            return json.dumps(serialized, sort_keys=True)
+
+                        current_serialized = _serialize_calls(result["calls"])
+                        self.tool_calls_history.append(current_serialized)
+
+                        if len(self.tool_calls_history) >= _DOOM_LOOP_THRESHOLD:
+                            recent_history = self.tool_calls_history[-_DOOM_LOOP_THRESHOLD:]
+                            if all(h == current_serialized for h in recent_history):
+                                self.full_text = f"[循环保护] 连续 {_DOOM_LOOP_THRESHOLD} 次完全相同的工具调用，已终止循环"
+                                break
                         self.messages.append(result["assistant_message"])
                         await self.ctx.interaction.save_session_snapshot(self.session_id, self.messages)
 

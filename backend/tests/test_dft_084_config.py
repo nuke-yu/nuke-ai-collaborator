@@ -13,7 +13,7 @@ class TestConfig(unittest.TestCase):
         self.assertEqual(config.IPC_MAX_FRAME_SIZE, 64 * 1024 * 1024)
         self.assertEqual(config.ASK_TIMEOUT_SECONDS, 300)
         self.assertEqual(config.SPAWN_MAX_DEPTH, 3)
-        self.assertEqual(config.DOOM_LOOP_THRESHOLD, 5)
+        self.assertEqual(config.DOOM_LOOP_THRESHOLD, 3)
         self.assertEqual(config.SUMMARY_THRESHOLD, 15)
         self.assertEqual(config.AI_RETRY_MAX, 3)
 

@@ -112,8 +112,11 @@ Maximum file size: **10 MB**. Images are displayed inline; other files show as d
 ```bash
 cd backend
 pip install -r requirements.txt
-python main.py
+python -m uvicorn main:app --host 0.0.0.0 --port 8000
 ```
+
+> The frontend dev server proxies `/api`, `/uploads` and `/ws` to `http://localhost:8000`, so the backend must listen on port **8000**.
+> Add `--reload` during development for auto-restart on code changes.
 
 ### Frontend Setup
 

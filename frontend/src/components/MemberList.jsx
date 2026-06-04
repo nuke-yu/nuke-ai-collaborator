@@ -91,7 +91,7 @@ const INIT_FORM = {
   model_provider: 'deepseek', model_name: 'deepseek-chat',
   temperature: 0.7, max_tokens: 4096,
   personality_prompt: '',
-  executor_id: 'simple_v1', executor_config: {},
+  executor_id: 'simple_v1', executor_config: { max_iterations: 100 },
   done_keyword: '',
   traits: [],
 }
@@ -462,6 +462,21 @@ export default function MemberList({ onAddMember, onEditMember, onClose, initial
                   className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
                   value={form.max_tokens}
                   onChange={(e) => setField({ max_tokens: parseInt(e.target.value) || 4096 })}
+                />
+              </div>
+
+              <div>
+                <label className="text-xs text-gray-400 mb-1 block">Max Iterations（最大迭代步数限制）</label>
+                <input
+                  type="number" min="1" max="1000" step="1"
+                  className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                  value={form.executor_config?.max_iterations ?? 100}
+                  onChange={(e) => setField({
+                    executor_config: {
+                      ...form.executor_config,
+                      max_iterations: parseInt(e.target.value) || 100
+                    }
+                  })}
                 />
               </div>
 
