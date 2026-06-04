@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import ReactMarkdown from 'react-markdown'
+import * as wsrpc from '../wsrpc'
 import EmojiPicker from './EmojiPicker'
 import remarkGfm from 'remark-gfm'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
@@ -218,16 +219,13 @@ export default function MessageBubble({ msg, isTyping, currentMemberId, members 
   const handleEditSave = async () => {
     const trimmed = editText.trim()
     if (!trimmed || trimmed === msg.content) { setEditing(false); return }
-    await fetch(`/api/messages/${msg.id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content: trimmed, member_id: currentMemberId }),
-    })
+    // author check is enforced server-side from the authenticated WS connection
+    wsrpc.send({ type: 'mutate', action: 'edit', msg_id: msg.id, content: trimmed })
     setEditing(false)
   }
 
   const handleWithdraw = async () => {
-    await fetch(`/api/messages/${msg.id}?member_id=${currentMemberId}`, { method: 'DELETE' })
+    wsrpc.send({ type: 'mutate', action: 'withdraw', msg_id: msg.id })
   }
   const avatar = (
     <div className="relative flex-shrink-0 group/avatar">
