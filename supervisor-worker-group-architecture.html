@@ -9,7 +9,7 @@
 
   body {
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    background: #090d16;
+    background: #080c14;
     color: #cbd5e1;
     min-height: 100vh;
     padding: 40px 24px;
@@ -190,66 +190,147 @@
     font-size: 1.25rem;
     font-weight: 700;
     color: #f1f5f9;
-    margin-bottom: 24px;
+    margin-bottom: 20px;
     display: flex;
     align-items: center;
-    gap: 10px;
+    justify-content: space-between;
   }
+  .flow-card h2 span {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .flow-badge {
+    font-size: 0.65rem;
+    padding: 3px 10px;
+    border-radius: 99px;
+    font-weight: 700;
+    background: rgba(59, 130, 246, 0.15);
+    color: #60a5fa;
+    border: 1px solid rgba(59, 130, 246, 0.3);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+  .flow-badge.green-badge {
+    background: rgba(16, 185, 129, 0.15);
+    color: #34d399;
+    border: 1px solid rgba(16, 185, 129, 0.3);
+  }
+
   .flow-steps {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 0;
   }
   .flow-step {
-    background: rgba(255, 255, 255, 0.02);
-    border: 1px solid rgba(255, 255, 255, 0.04);
-    border-radius: 12px;
-    padding: 14px 18px;
+    background: rgba(255, 255, 255, 0.01);
+    border: 1px solid rgba(255, 255, 255, 0.03);
+    border-radius: 14px;
+    padding: 16px 20px;
     display: flex;
     align-items: flex-start;
-    gap: 14px;
-    transition: background 0.2s, transform 0.2s;
+    gap: 16px;
+    transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+    position: relative;
+    overflow: hidden;
   }
-  .flow-step:hover {
-    background: rgba(255, 255, 255, 0.05);
-    transform: translateX(4px);
+  
+  /* Animated connector arrows */
+  .flow-arrow {
+    text-align: center;
+    color: rgba(255, 255, 255, 0.06);
+    font-size: 1rem;
+    margin: 4px 0;
+    transition: color 0.4s, transform 0.4s;
+    display: flex;
+    justify-content: center;
+    align-items: center;
   }
+  
+  /* Active Step Styling */
+  .flow-step.active-step {
+    transform: scale(1.02) translateX(8px);
+    background: rgba(59, 130, 246, 0.06);
+    border-color: rgba(96, 165, 250, 0.4);
+    box-shadow: 0 8px 24px rgba(59, 130, 246, 0.15);
+    z-index: 10;
+  }
+  .flow-step.green-step.active-step {
+    background: rgba(16, 185, 129, 0.06);
+    border-color: rgba(52, 211, 153, 0.4);
+    box-shadow: 0 8px 24px rgba(16, 185, 129, 0.15);
+  }
+
   .step-num {
-    background: rgba(96, 165, 250, 0.15);
-    color: #60a5fa;
-    width: 24px;
-    height: 24px;
+    background: rgba(255, 255, 255, 0.05);
+    color: #94a3b8;
+    width: 26px;
+    height: 26px;
     border-radius: 50%;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 0.78rem;
+    font-size: 0.8rem;
     font-weight: 700;
     flex-shrink: 0;
     margin-top: 1px;
+    transition: all 0.4s;
   }
-  .flow-step.green-step .step-num {
-    background: rgba(52, 211, 153, 0.15);
-    color: #34d399;
+  .active-step .step-num {
+    background: #3b82f6;
+    color: #ffffff;
+    box-shadow: 0 0 12px rgba(59, 130, 246, 0.6);
   }
-  .flow-step.purple-step .step-num {
-    background: rgba(167, 139, 250, 0.15);
-    color: #a78bfa;
+  .green-step.active-step .step-num {
+    background: #10b981;
+    color: #ffffff;
+    box-shadow: 0 0 12px rgba(16, 185, 129, 0.6);
   }
+
   .step-content {
     display: flex;
     flex-direction: column;
     gap: 4px;
   }
   .step-title {
-    font-size: 0.88rem;
+    font-size: 0.9rem;
     font-weight: 700;
-    color: #f1f5f9;
+    color: #cbd5e1;
+    transition: color 0.4s;
   }
+  .active-step .step-title {
+    color: #60a5fa;
+  }
+  .green-step.active-step .step-title {
+    color: #34d399;
+  }
+
   .step-desc {
     font-size: 0.78rem;
+    color: #64748b;
+    line-height: 1.55;
+    transition: color 0.4s;
+  }
+  .active-step .step-desc {
     color: #94a3b8;
-    line-height: 1.5;
+  }
+
+  /* Moving laser light animation */
+  .flow-step::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 50%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.04), transparent);
+  }
+  .flow-step.active-step::after {
+    animation: flow-laser 1.5s infinite linear;
+  }
+  @keyframes flow-laser {
+    0% { left: -100%; }
+    100% { left: 200%; }
   }
 
   /* ── Deep Dive Grid ── */
@@ -406,34 +487,40 @@
 
     <!-- Downstream & Upstream Path -->
     <div class="flow-card">
-      <h2>双向消息管道路径 &nbsp;Data Flow Pipeline</h2>
-      <div class="flow-steps">
-        <div class="flow-step">
+      <h2>
+        <span>双向消息管道路径 &nbsp;Data Flow Pipeline</span>
+        <span class="flow-badge">Active Loop</span>
+      </h2>
+      <div class="flow-steps" id="pipeline-container">
+        <div class="flow-step" id="pipeline-step-1">
           <div class="step-num">1</div>
           <div class="step-content">
             <span class="step-title">下行路由 (FastAPI WebSocket)</span>
-            <span class="step-desc">浏览器消息发至 Supervisor，Supervisor 查路由缓存 `_routing_cache` 确定拥有该 Group 的 Worker ID。</span>
+            <span class="step-desc">Web 端用户发送消息，网关将消息送至 Supervisor。Supervisor 查路由缓存 `_routing_cache` 确定拥有该 Group 的 Worker ID。</span>
           </div>
         </div>
-        <div class="flow-step">
+        <div class="flow-arrow" id="pipeline-arrow-1">↓</div>
+        <div class="flow-step" id="pipeline-step-2">
           <div class="step-num">2</div>
           <div class="step-content">
-            <span class="step-title">IPC 送达与进程隔离激活</span>
-            <span class="step-desc">Supervisor 通过 IPC 发送 `USER_MESSAGE` 到目标 Worker。Worker 唤醒 `LifecycleManager.hydrate()` 获取专属物理排他锁 `group.lock` 并绑定 DB。</span>
+            <span class="step-title">IPC 送达与租约挂载 (Hydrate)</span>
+            <span class="step-desc">Supervisor 通过 IPC 管道发送 `USER_MESSAGE` 到目标 Worker。Worker 唤醒 `LifecycleManager.hydrate()` 获取物理排他锁 `group.lock` 并绑定 DB。</span>
           </div>
         </div>
-        <div class="flow-step">
+        <div class="flow-arrow" id="pipeline-arrow-2">↓</div>
+        <div class="flow-step" id="pipeline-step-3">
           <div class="step-num">3</div>
           <div class="step-content">
-            <span class="step-title">本地总线收集 (Wildcard Subscription)</span>
-            <span class="step-desc">AI Agent 运行触发本地 `Event Bus`，Worker 通过 `subscribe_all()` 持续捕获本地所有状态变更事件。</span>
+            <span class="step-title">总线监听 (Bus Wildcard Subscription)</span>
+            <span class="step-desc">AI Agent 在 Worker 进程中运行并产生状态事件，写入本地 `Event Bus`。Worker 通过 `subscribe_all()` 实时捕获。</span>
           </div>
         </div>
-        <div class="flow-step">
+        <div class="flow-arrow" id="pipeline-arrow-3">↓</div>
+        <div class="flow-step" id="pipeline-step-4">
           <div class="step-num">4</div>
           <div class="step-content">
             <span class="step-title">上行广播与多端分发</span>
-            <span class="step-desc">Worker 将事件封装为 `BROADCAST` 帧送回 Supervisor。Supervisor 广播分发给所有在此 Group 挂载的浏览器客户端。</span>
+            <span class="step-desc">Worker 将事件封装为 `BROADCAST` 帧送回 Supervisor。Supervisor 分发广播给当前连接在该组的所有客户端网页。</span>
           </div>
         </div>
       </div>
@@ -441,33 +528,39 @@
 
     <!-- Handoff Protocol -->
     <div class="flow-card">
-      <h2>租约转移与安全接管协议 &nbsp;Group Lease Handoff Protocol</h2>
-      <div class="flow-steps">
-        <div class="flow-step green-step">
+      <h2>
+        <span>租约转移安全接管协议 &nbsp;Lease Handoff</span>
+        <span class="flow-badge green-badge">Active Loop</span>
+      </h2>
+      <div class="flow-steps" id="handoff-container">
+        <div class="flow-step green-step" id="handoff-step-1">
           <div class="step-num">1</div>
           <div class="step-content">
-            <span class="step-title">修改数据库与下发释放指令</span>
-            <span class="step-desc">Supervisor 更新全局 `groups` 的映射。向正在运行该组的**旧 Worker 1** 写入 `RELEASE_LEASE`。</span>
+            <span class="step-title">更新映射与下发释放指令</span>
+            <span class="step-desc">Supervisor 在中央数据库修改指派的 Worker。通过 IPC 管道向**旧 Worker 1** 写入 `RELEASE_LEASE`。</span>
           </div>
         </div>
-        <div class="flow-step green-step">
+        <div class="flow-arrow" id="handoff-arrow-1">↓</div>
+        <div class="flow-step green-step" id="handoff-step-2">
           <div class="step-num">2</div>
           <div class="step-content">
-            <span class="step-title">旧工作器本地析构 (Evict)</span>
+            <span class="step-title">旧工作器本地释放析构 (Evict)</span>
             <span class="step-desc">Worker 1 拦截到指令，中止所有在该组的异步 AI 任务，清理内存缓存，释放 `group.lock` 并关闭数据库连接。</span>
           </div>
         </div>
-        <div class="flow-step green-step">
+        <div class="flow-arrow" id="handoff-arrow-2">↓</div>
+        <div class="flow-step green-step" id="handoff-step-3">
           <div class="step-num">3</div>
           <div class="step-content">
-            <span class="step-title">安全确认与路由转向</span>
-            <span class="step-desc">Worker 1 返回 `LEASE_RELEASED` 确认。Supervisor 收到 ACK，将内存路由更新并指向**新 Worker 2**。</span>
+            <span class="step-title">释放 ACK 与内存路由变更</span>
+            <span class="step-desc">Worker 1 返回 `LEASE_RELEASED` 帧给 Supervisor。Supervisor 确认释放后，将内存路由更新并指向**新 Worker 2**。</span>
           </div>
         </div>
-        <div class="flow-step green-step">
+        <div class="flow-arrow" id="handoff-arrow-3">↓</div>
+        <div class="flow-step green-step" id="handoff-step-4">
           <div class="step-num">4</div>
           <div class="step-content">
-            <span class="step-title">新工作器无缝初始化 (Hydrate)</span>
+            <span class="step-title">新工作器安全接管初始化</span>
             <span class="step-desc">后续流量到达 Worker 2，Worker 2 加锁并开启数据库，恢复之前中断的工作流和会话，继续执行。</span>
           </div>
         </div>
@@ -543,6 +636,95 @@
   </footer>
 
 </div>
+
+<!-- Animation Controller Script -->
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+  // ── Pipeline Auto Animation ──
+  const pipelineSteps = [
+    document.getElementById("pipeline-step-1"),
+    document.getElementById("pipeline-step-2"),
+    document.getElementById("pipeline-step-3"),
+    document.getElementById("pipeline-step-4")
+  ];
+  const pipelineArrows = [
+    document.getElementById("pipeline-arrow-1"),
+    document.getElementById("pipeline-arrow-2"),
+    document.getElementById("pipeline-arrow-3")
+  ];
+  
+  let pipelineIndex = 0;
+  
+  function stepPipeline() {
+    // Clean all classes
+    pipelineSteps.forEach(s => s.classList.remove("active-step"));
+    pipelineArrows.forEach(a => {
+      a.style.color = "rgba(255, 255, 255, 0.06)";
+      a.style.transform = "scale(1)";
+    });
+    
+    // Highlight current step
+    pipelineSteps[pipelineIndex].classList.add("active-step");
+    
+    // Highlight downstream arrow if active
+    if (pipelineIndex < pipelineArrows.length) {
+      setTimeout(() => {
+        pipelineArrows[pipelineIndex - 1 < 0 ? 0 : pipelineIndex - 1].style.color = "#60a5fa";
+        pipelineArrows[pipelineIndex - 1 < 0 ? 0 : pipelineIndex - 1].style.transform = "scale(1.2)";
+      }, 300);
+    }
+    
+    pipelineIndex = (pipelineIndex + 1) % pipelineSteps.length;
+  }
+  
+  // Start pipeline cycle (every 2.5 seconds)
+  stepPipeline();
+  setInterval(stepPipeline, 2500);
+
+  // ── Handoff Auto Animation ──
+  const handoffSteps = [
+    document.getElementById("handoff-step-1"),
+    document.getElementById("handoff-step-2"),
+    document.getElementById("handoff-step-3"),
+    document.getElementById("handoff-step-4")
+  ];
+  const handoffArrows = [
+    document.getElementById("handoff-arrow-1"),
+    document.getElementById("handoff-arrow-2"),
+    document.getElementById("handoff-arrow-3")
+  ];
+  
+  let handoffIndex = 0;
+  
+  function stepHandoff() {
+    // Clean all classes
+    handoffSteps.forEach(s => s.classList.remove("active-step"));
+    handoffArrows.forEach(a => {
+      a.style.color = "rgba(255, 255, 255, 0.06)";
+      a.style.transform = "scale(1)";
+    });
+    
+    // Highlight current step
+    handoffSteps[handoffIndex].classList.add("active-step");
+    
+    // Highlight downstream arrow if active
+    if (handoffIndex < handoffArrows.length) {
+      setTimeout(() => {
+        handoffArrows[handoffIndex - 1 < 0 ? 0 : handoffIndex - 1].style.color = "#34d399";
+        handoffArrows[handoffIndex - 1 < 0 ? 0 : handoffIndex - 1].style.transform = "scale(1.2)";
+      }, 300);
+    }
+    
+    handoffIndex = (handoffIndex + 1) % handoffSteps.length;
+  }
+  
+  // Start handoff cycle (every 2.8 seconds, offset slightly to look natural)
+  setTimeout(() => {
+    stepHandoff();
+    setInterval(stepHandoff, 2800);
+  }, 1000);
+});
+</script>
 
 </body>
 </html>
