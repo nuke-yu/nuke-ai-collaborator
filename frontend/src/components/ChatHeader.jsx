@@ -11,6 +11,7 @@ export default function ChatHeader({
   onShowWorkflowStart,
   onStartRequirement,
   onShowStats, onLogout,
+  onShowBotLogs,
 }) {
   const [editingGroupName, setEditingGroupName] = useState(false)
   const [groupNameDraft, setGroupNameDraft] = useState('')
@@ -103,6 +104,11 @@ export default function ChatHeader({
           className="text-sm px-2 py-1 rounded text-gray-500 hover:text-gray-300 transition-colors"
           title="搜索消息 (⌘K)"
         >🔍</button>
+        <button
+          onClick={() => onShowBotLogs()}
+          className="text-sm px-2 py-1 rounded text-gray-500 hover:text-gray-300 transition-colors"
+          title="Bot 运行日志"
+        >📜</button>
       </div>
     </div>
   )

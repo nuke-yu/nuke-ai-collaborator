@@ -9,6 +9,7 @@ import TemplateManager from './TemplateManager'
 import MemberList from './MemberList'
 import MessageInput from './MessageInput'
 import SearchPanel from './SearchPanel'
+import BotLogPanel from './BotLogPanel'
 import ApiKeyManager from './ApiKeyManager'
 import PinnedBar from './PinnedBar'
 import AnnouncementBar from './AnnouncementBar'
@@ -43,6 +44,7 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
   const [loadingMore, setLoadingMore] = useState(false)
   const [unreadCounts, setUnreadCounts] = useState({})
   const [showSearch, setShowSearch] = useState(false)
+  const [showBotLogs, setShowBotLogs] = useState(false)
   const [replyingTo, setReplyingTo] = useState(null)
   const [reactionMap, setReactionMap] = useState({})
   const [mobileTab, setMobileTab] = useState('chat')
@@ -536,7 +538,8 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
           reconnecting={reconnecting}
           workflow={workflow}
           onStartRequirement={() => sendRaw({ type: 'start_workflow', group_id: activeGroupId })}
-          onShowSearch={() => setShowSearch(s => !s)}
+          onShowSearch={() => { setShowSearch(s => !s); setShowBotLogs(false); }}
+          onShowBotLogs={() => { setShowBotLogs(s => !s); setShowSearch(false); }}
           onShowStats={(s) => { setStats(s); setShowStats(true); }}
           onShowWorkflowStart={() => {
             const defaultKeyword = (m) => {
@@ -707,6 +710,9 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
       </div>
       {showSearch && activeGroupId && (
         <SearchPanel groupId={activeGroupId} onClose={() => setShowSearch(false)} onJump={handleJump} />
+      )}
+      {showBotLogs && activeGroupId && (
+        <BotLogPanel groupId={activeGroupId} onClose={() => setShowBotLogs(false)} />
       )}
       </div>
 

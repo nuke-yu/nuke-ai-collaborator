@@ -50,6 +50,13 @@ async def get_session(session_id: str) -> dict | None:
         return None
     d = dict(row)
     d["config"] = json.loads(d.pop("config_json", "{}"))
+    if d.get("last_snapshot_json"):
+        try:
+            d["last_snapshot"] = json.loads(d.pop("last_snapshot_json"))
+        except Exception:
+            d["last_snapshot"] = []
+    else:
+        d["last_snapshot"] = []
     d["cost_usd"] = _session_cost(d)
     return d
 
@@ -144,3 +151,32 @@ async def add_tokens(
              cache_creation_tokens, session_id),
         )
         await conn.commit()
+
+
+async def get_group_sessions(group_id: int, limit: int = 50) -> list[dict]:
+    async with _db.connect() as conn:
+        conn.row_factory = aiosqlite.Row
+        async with conn.execute(
+            """SELECT s.*, m.name as bot_name, m.avatar_color as bot_avatar_color
+               FROM agent_sessions s
+               JOIN members m ON s.bot_id = m.id
+               WHERE s.group_id = ?
+               ORDER BY s.updated_at DESC, s.created_at DESC
+               LIMIT ?""",
+            (group_id, limit)
+        ) as cur:
+            rows = await cur.fetchall()
+    result = []
+    for r in rows:
+        d = dict(r)
+        d["config"] = json.loads(d.pop("config_json", "{}"))
+        if d.get("last_snapshot_json"):
+            try:
+                d["last_snapshot"] = json.loads(d.pop("last_snapshot_json"))
+            except Exception:
+                d["last_snapshot"] = []
+        else:
+            d["last_snapshot"] = []
+        d["cost_usd"] = _session_cost(d)
+        result.append(d)
+    return result
