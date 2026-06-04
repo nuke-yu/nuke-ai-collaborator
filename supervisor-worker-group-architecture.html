@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Supervisor / Worker / Group 进程与分片架构图</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: #090d16;
+    color: #cbd5e1;
+    min-height: 100vh;
+    padding: 40px 24px;
+    line-height: 1.5;
+  }
+
+  .container {
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+
+  /* ── Header ── */
+  .page-header {
+    text-align: center;
+    margin-bottom: 48px;
+  }
+  .page-header h1 {
+    font-size: 2.5rem;
+    font-weight: 800;
+    background: linear-gradient(135deg, #3b82f6, #8b5cf6, #ec4899);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    letter-spacing: -0.8px;
+    margin-bottom: 12px;
+  }
+  .page-header p {
+    color: #64748b;
+    font-size: 1.05rem;
+    max-width: 600px;
+    margin: 0 auto;
+  }
+  .header-icon {
+    font-size: 2.5rem;
+    display: inline-block;
+    margin-bottom: 16px;
+    filter: drop-shadow(0 0 12px rgba(139, 92, 246, 0.4));
+  }
+
+  /* ── Stats Bar ── */
+  .stats-bar {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    justify-content: center;
+    margin-bottom: 48px;
+  }
+  .stat-pill {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 999px;
+    padding: 8px 18px;
+    font-size: 0.82rem;
+    color: #94a3b8;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+  }
+  .stat-pill strong { color: #f1f5f9; }
+
+  /* ── Architecture Layers ── */
+  .arch-container {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 64px;
+    background: rgba(15, 23, 42, 0.3);
+    border: 1px solid rgba(255,255,255,0.03);
+    border-radius: 24px;
+    padding: 24px;
+    box-shadow: inset 0 0 32px rgba(0,0,0,0.8);
+  }
+
+  .layer {
+    border-radius: 16px;
+    border: 1px solid rgba(255,255,255,0.06);
+    padding: 20px 24px;
+    position: relative;
+    transition: transform 0.25s, box-shadow 0.25s, border-color 0.25s;
+    background: rgba(30, 41, 59, 0.2);
+  }
+  .layer:hover {
+    transform: translateY(-2px);
+    border-color: rgba(255,255,255,0.15);
+    box-shadow: 0 12px 40px rgba(0,0,0,0.5);
+  }
+
+  .layer-label {
+    font-size: 0.72rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .layer-label::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: currentColor;
+    opacity: 0.15;
+  }
+
+  .cards {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .card {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    padding: 10px 16px;
+    font-size: 0.82rem;
+    font-weight: 500;
+    color: #e2e8f0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: default;
+    transition: background 0.2s, border-color 0.2s;
+  }
+  .card:hover {
+    background: rgba(255, 255, 255, 0.09);
+    border-color: rgba(255,255,255,0.18);
+  }
+  .card .ico { font-size: 1.1rem; }
+
+  /* Layer Palette */
+  .l-client      { background: linear-gradient(135deg, rgba(59, 130, 246, 0.08), rgba(29, 78, 216, 0.03)); }
+  .l-client .layer-label { color: #60a5fa; }
+  .l-supervisor  { background: linear-gradient(135deg, rgba(139, 92, 246, 0.08), rgba(109, 40, 217, 0.03)); }
+  .l-supervisor .layer-label { color: #a78bfa; }
+  .l-tunnel      { background: linear-gradient(135deg, rgba(236, 72, 153, 0.06), rgba(190, 24, 74, 0.02)); }
+  .l-tunnel .layer-label { color: #f472b6; }
+  .l-worker      { background: linear-gradient(135deg, rgba(16, 185, 129, 0.08), rgba(4, 120, 87, 0.03)); }
+  .l-worker .layer-label { color: #34d399; }
+  .l-group       { background: linear-gradient(135deg, rgba(245, 158, 11, 0.08), rgba(180, 83, 9, 0.03)); }
+  .l-group .layer-label { color: #fbbf24; }
+
+  .connector-row {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 24px;
+    color: rgba(255, 255, 255, 0.1);
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+
+  /* ── Interactive Flowcharts ── */
+  .flowcharts-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 24px;
+    margin-bottom: 64px;
+  }
+  @media (min-width: 900px) {
+    .flowcharts-grid {
+      grid-template-columns: 1fr 1fr;
+    }
+  }
+
+  .flow-card {
+    background: rgba(30, 41, 59, 0.25);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 20px;
+    padding: 28px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+  }
+  .flow-card h2 {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: #f1f5f9;
+    margin-bottom: 24px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .flow-steps {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .flow-step {
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.04);
+    border-radius: 12px;
+    padding: 14px 18px;
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    transition: background 0.2s, transform 0.2s;
+  }
+  .flow-step:hover {
+    background: rgba(255, 255, 255, 0.05);
+    transform: translateX(4px);
+  }
+  .step-num {
+    background: rgba(96, 165, 250, 0.15);
+    color: #60a5fa;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.78rem;
+    font-weight: 700;
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+  .flow-step.green-step .step-num {
+    background: rgba(52, 211, 153, 0.15);
+    color: #34d399;
+  }
+  .flow-step.purple-step .step-num {
+    background: rgba(167, 139, 250, 0.15);
+    color: #a78bfa;
+  }
+  .step-content {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .step-title {
+    font-size: 0.88rem;
+    font-weight: 700;
+    color: #f1f5f9;
+  }
+  .step-desc {
+    font-size: 0.78rem;
+    color: #94a3b8;
+    line-height: 1.5;
+  }
+
+  /* ── Deep Dive Grid ── */
+  .details-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    gap: 20px;
+    margin-bottom: 64px;
+  }
+  .detail-card {
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 16px;
+    padding: 24px;
+    transition: transform 0.25s, background 0.25s;
+  }
+  .detail-card:hover {
+    transform: translateY(-3px);
+    background: rgba(255, 255, 255, 0.04);
+    border-color: rgba(255, 255, 255, 0.1);
+  }
+  .detail-icon {
+    font-size: 1.8rem;
+    margin-bottom: 16px;
+    display: inline-block;
+  }
+  .detail-title {
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: #f8fafc;
+    margin-bottom: 8px;
+  }
+  .detail-desc {
+    font-size: 0.82rem;
+    color: #94a3b8;
+    line-height: 1.6;
+  }
+  .badge {
+    display: inline-block;
+    font-size: 0.68rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 2px 8px;
+    border-radius: 6px;
+    margin-right: 6px;
+    margin-top: 10px;
+  }
+  .badge-blue { background: rgba(59, 130, 246, 0.15); color: #60a5fa; }
+  .badge-purple { background: rgba(139, 92, 246, 0.15); color: #a78bfa; }
+  .badge-emerald { background: rgba(16, 185, 129, 0.15); color: #34d399; }
+  .badge-amber { background: rgba(245, 158, 11, 0.15); color: #fbbf24; }
+
+  footer {
+    text-align: center;
+    color: #475569;
+    font-size: 0.78rem;
+    padding: 32px 0;
+    border-top: 1px solid rgba(255,255,255,0.04);
+  }
+</style>
+</head>
+<body>
+
+<div class="container">
+
+  <!-- Header -->
+  <div class="page-header">
+    <span class="header-icon">🧬</span>
+    <h1>Supervisor / Worker / Group 架构分析图</h1>
+    <p>详解多进程分片架构下的进程生命周期、局部隔离存储与双向消息管道路由机制</p>
+  </div>
+
+  <!-- Stats Bar -->
+  <div class="stats-bar">
+    <div class="stat-pill">🖥️ <strong>主控进程 (Supervisor)</strong> · 单入口管理</div>
+    <div class="stat-pill">⚙️ <strong>工作进程 (Worker)</strong> · 多核多进程 Sharding</div>
+    <div class="stat-pill">🔒 <strong>锁定隔离 (Group Lease)</strong> · file lock 互斥</div>
+    <div class="stat-pill">📬 <strong>IPC 隧道</strong> · async Stream Pumps</div>
+  </div>
+
+  <!-- Architecture Topology -->
+  <div class="arch-container">
+
+    <!-- L1: Client -->
+    <div class="layer l-client">
+      <div class="layer-label">① 浏览器端 &nbsp;Browser Clients Layer</div>
+      <div class="cards">
+        <div class="card"><span class="ico">💬</span>Web Chat (React UI)</div>
+        <div class="card"><span class="ico">📂</span>VFS File System Explorer</div>
+        <div class="card"><span class="ico">📊</span>Metrics Dashboard</div>
+      </div>
+    </div>
+
+    <div class="connector-row">↕ WebSocket Connection (WSRPC)</div>
+
+    <!-- L2: Supervisor -->
+    <div class="layer l-supervisor">
+      <div class="layer-label">② 监督进程 (单入口) &nbsp;Supervisor Process (Coordinator)</div>
+      <div class="cards">
+        <div class="card"><span class="ico">🌐</span>FastAPI WebSocket Router</div>
+        <div class="card"><span class="ico">👥</span>Browser Registry (_browsers[group_id])</div>
+        <div class="card"><span class="ico">🗺️</span>Routing Cache (Memory + DB)</div>
+        <div class="card"><span class="ico">🛠️</span>Subprocess Controller (_spawn_workers)</div>
+        <div class="card"><span class="ico">📊</span>Central Unread Folding (_on_unread)</div>
+      </div>
+    </div>
+
+    <div class="connector-row">↕ Unix Domain Socket (UDS) / TCP IPC Tunnel</div>
+
+    <!-- L3: IPC Message Frames -->
+    <div class="layer l-tunnel">
+      <div class="layer-label">③ IPC 帧通信层 &nbsp;IPC Frame &amp; Protocol Layer</div>
+      <div class="cards">
+        <div class="card"><span class="ico">👋</span>HELLO (wID Handshake)</div>
+        <div class="card"><span class="ico">📩</span>USER_MESSAGE (Downstream control)</div>
+        <div class="card"><span class="ico">📣</span>BROADCAST (Upstream bus event wrap)</div>
+        <div class="card"><span class="ico">🚫</span>RELEASE_LEASE / LEASE_RELEASED (Handoff)</div>
+        <div class="card"><span class="ico">📈</span>STATS_REPORT (Periodical metrics)</div>
+      </div>
+    </div>
+
+    <div class="connector-row">↕ Asynchronous Pump (read/write encapsulation)</div>
+
+    <!-- L4: Worker -->
+    <div class="layer l-worker">
+      <div class="layer-label">④ 工作器进程 (分片) &nbsp;Worker Process (Compute Shards)</div>
+      <div class="cards">
+        <div class="card"><span class="ico">🏃‍♂️</span>Main Event Loop (asyncio run)</div>
+        <div class="card"><span class="ico">🏗️</span>LifecycleManager (hydrate / evict)</div>
+        <div class="card"><span class="ico">🔒</span>GroupLock (flock file lease)</div>
+        <div class="card"><span class="ico">📝</span>Event Bus Wildcard Subscriber (_pump_upstream)</div>
+        <div class="card"><span class="ico">🧠</span>Bot Agent Orchestrator (ToolLoopRunner)</div>
+      </div>
+    </div>
+
+    <div class="connector-row">↕ Dedicated SQLite / OS VFS Bindings</div>
+
+    <!-- L5: Group Sandbox -->
+    <div class="layer l-group">
+      <div class="layer-label">⑤ 会话组隔离层 &nbsp;Group Isolation &amp; Storage Sandbox</div>
+      <div class="cards">
+        <div class="card"><span class="ico">🗄️</span>Group Private Database (group_N.db)</div>
+        <div class="card"><span class="ico">🔑</span>Group Lease Lock File (group.lock)</div>
+        <div class="card"><span class="ico">📁</span>Workspace VFS Directory (group_N/)</div>
+        <div class="card"><span class="ico">📖</span>Local Session Snapshot</div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Interactive Flowcharts -->
+  <div class="flowcharts-grid">
+
+    <!-- Downstream & Upstream Path -->
+    <div class="flow-card">
+      <h2>双向消息管道路径 &nbsp;Data Flow Pipeline</h2>
+      <div class="flow-steps">
+        <div class="flow-step">
+          <div class="step-num">1</div>
+          <div class="step-content">
+            <span class="step-title">下行路由 (FastAPI WebSocket)</span>
+            <span class="step-desc">浏览器消息发至 Supervisor，Supervisor 查路由缓存 `_routing_cache` 确定拥有该 Group 的 Worker ID。</span>
+          </div>
+        </div>
+        <div class="flow-step">
+          <div class="step-num">2</div>
+          <div class="step-content">
+            <span class="step-title">IPC 送达与进程隔离激活</span>
+            <span class="step-desc">Supervisor 通过 IPC 发送 `USER_MESSAGE` 到目标 Worker。Worker 唤醒 `LifecycleManager.hydrate()` 获取专属物理排他锁 `group.lock` 并绑定 DB。</span>
+          </div>
+        </div>
+        <div class="flow-step">
+          <div class="step-num">3</div>
+          <div class="step-content">
+            <span class="step-title">本地总线收集 (Wildcard Subscription)</span>
+            <span class="step-desc">AI Agent 运行触发本地 `Event Bus`，Worker 通过 `subscribe_all()` 持续捕获本地所有状态变更事件。</span>
+          </div>
+        </div>
+        <div class="flow-step">
+          <div class="step-num">4</div>
+          <div class="step-content">
+            <span class="step-title">上行广播与多端分发</span>
+            <span class="step-desc">Worker 将事件封装为 `BROADCAST` 帧送回 Supervisor。Supervisor 广播分发给所有在此 Group 挂载的浏览器客户端。</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Handoff Protocol -->
+    <div class="flow-card">
+      <h2>租约转移与安全接管协议 &nbsp;Group Lease Handoff Protocol</h2>
+      <div class="flow-steps">
+        <div class="flow-step green-step">
+          <div class="step-num">1</div>
+          <div class="step-content">
+            <span class="step-title">修改数据库与下发释放指令</span>
+            <span class="step-desc">Supervisor 更新全局 `groups` 的映射。向正在运行该组的**旧 Worker 1** 写入 `RELEASE_LEASE`。</span>
+          </div>
+        </div>
+        <div class="flow-step green-step">
+          <div class="step-num">2</div>
+          <div class="step-content">
+            <span class="step-title">旧工作器本地析构 (Evict)</span>
+            <span class="step-desc">Worker 1 拦截到指令，中止所有在该组的异步 AI 任务，清理内存缓存，释放 `group.lock` 并关闭数据库连接。</span>
+          </div>
+        </div>
+        <div class="flow-step green-step">
+          <div class="step-num">3</div>
+          <div class="step-content">
+            <span class="step-title">安全确认与路由转向</span>
+            <span class="step-desc">Worker 1 返回 `LEASE_RELEASED` 确认。Supervisor 收到 ACK，将内存路由更新并指向**新 Worker 2**。</span>
+          </div>
+        </div>
+        <div class="flow-step green-step">
+          <div class="step-num">4</div>
+          <div class="step-content">
+            <span class="step-title">新工作器无缝初始化 (Hydrate)</span>
+            <span class="step-desc">后续流量到达 Worker 2，Worker 2 加锁并开启数据库，恢复之前中断的工作流和会话，继续执行。</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Deep Dive Cards Grid -->
+  <div class="details-grid">
+
+    <!-- Card 1 -->
+    <div class="detail-card">
+      <span class="detail-icon">🔒</span>
+      <div class="detail-title">GroupLock 物理锁互斥</div>
+      <div class="detail-desc">
+        使用 OS 原生锁机制（Windows 下使用 `msvcrt.locking`，Posix 下使用 `fcntl.flock`）对 `group.lock` 施加非阻塞排他锁。这是防范多进程架构下“分裂脑（Split-brain）”同时写库导致 SQLite Lock 的最强物理防线。
+      </div>
+      <div>
+        <span class="badge badge-emerald">flock</span>
+        <span class="badge badge-emerald">msvcrt</span>
+        <span class="badge badge-emerald">Anti-SplitBrain</span>
+      </div>
+    </div>
+
+    <!-- Card 2 -->
+    <div class="detail-card">
+      <span class="detail-icon">📡</span>
+      <div class="detail-title">并发广播与队头防阻塞</div>
+      <div class="detail-desc">
+        Supervisor 在向单个群组内的多客户端分发消息时，使用并发并发机制，并设置 `SUPERVISOR_SEND_TIMEOUT`。如果单个连接在 5 秒内因网络波动假死，会被立刻淘汰，防止单个慢连接拖垮 IPC upstream 管道。
+      </div>
+      <div>
+        <span class="badge badge-purple">WSManager</span>
+        <span class="badge badge-purple">Eviction</span>
+        <span class="badge badge-purple">Timeout</span>
+      </div>
+    </div>
+
+    <!-- Card 3 -->
+    <div class="detail-card">
+      <span class="detail-icon">🚀</span>
+      <div class="detail-title">Event Loop 耗时防劣化</div>
+      <div class="detail-desc">
+        将 CPU 密集的 AI 模型决策、长上下文压缩（Auto-Compaction）、以及本地文件沙箱执行分配到不同的子进程（Workers）中。主进程 Supervisor 仅做帧交换，从而彻底隔离了 AI 计算负载导致的主网关 Websocket 延迟毛刺。
+      </div>
+      <div>
+        <span class="badge badge-blue">Process Pool</span>
+        <span class="badge badge-blue">UDS Latency</span>
+        <span class="badge badge-blue">CELL-01</span>
+      </div>
+    </div>
+
+    <!-- Card 4 -->
+    <div class="detail-card">
+      <span class="detail-icon">⚙️</span>
+      <div class="detail-title">GC 敏感型 weakref finalize</div>
+      <div class="detail-desc">
+        数据库连接池使用 `weakref.finalize` 对 asyncio event loop 进行周期性的垃圾回收监听。一旦某个进程/线程的主 Loop 被销毁，无效连接会自动从连接缓存池中原子擦除，彻底防范了 Loop ID 复用造成的连接混乱报错。
+      </div>
+      <div>
+        <span class="badge badge-amber">weakref</span>
+        <span class="badge badge-amber">Loop Cache</span>
+        <span class="badge badge-amber">aiosqlite</span>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Footer -->
+  <footer>
+    Nuke AI Collaborator Architecture Diagrams · Generated 2026-06-05 · MIT License
+  </footer>
+
+</div>
+
+</body>
+</html>
