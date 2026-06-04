@@ -50,7 +50,7 @@ export default function MessageList({
                       <div className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold text-white" style={{ backgroundColor: m.avatar_color }}>
                         {m.name[0]}
                       </div>
-                      {onlineSet.has(m.id) && <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-400 rounded-full border-2 border-gray-900" />}
+                      {(onlineSet.has(m.id) || m.type === 'bot') && <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-400 rounded-full border-2 border-gray-900" />}
                     </div>
                     <span className="text-xs text-gray-500">{m.name}</span>
                   </div>

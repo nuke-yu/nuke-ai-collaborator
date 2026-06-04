@@ -148,9 +148,9 @@ export default function GroupList({
                       <div className="w-3.5 h-3.5 rounded-full flex items-center justify-center text-xs font-bold text-white" style={{ backgroundColor: m.avatar_color }}>
                         {m.name[0]}
                       </div>
-                      {onlineSet.has(m.id) && <span className="absolute -bottom-px -right-px w-1.5 h-1.5 bg-green-400 rounded-full border border-gray-900" />}
+                      {(onlineSet.has(m.id) || m.type === 'bot') && <span className="absolute -bottom-px -right-px w-1.5 h-1.5 bg-green-400 rounded-full border border-gray-900" />}
                     </div>
-                    <span className={`text-xs truncate flex-1 ${onlineSet.has(m.id) ? 'text-gray-300' : 'text-gray-500'}`}>{m.name}</span>
+                    <span className={`text-xs truncate flex-1 ${(onlineSet.has(m.id) || m.type === 'bot') ? 'text-gray-300' : 'text-gray-500'}`}>{m.name}</span>
                     {m.type === 'bot' && (
                       <>
                         {skillDraftBots.has(m.id)
