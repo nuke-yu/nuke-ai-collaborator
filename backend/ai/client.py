@@ -338,8 +338,8 @@ def _to_claude_messages(messages: list[dict]) -> list[dict]:
 #     <｜｜DSML｜｜parameter name="path" string="true">index.html</｜｜DSML｜｜parameter>
 #   </｜｜DSML｜｜invoke>
 # 这里只认 invoke/parameter 标签名（忽略具体前缀/竖线），尽量宽容。
-_DSML_INVOKE_RE = re.compile(r'invoke\s+name="([^"]+)"\s*>(.*?)</[^>]*?invoke\s*>', re.DOTALL)
-_DSML_PARAM_RE = re.compile(r'parameter\s+name="([^"]+)"([^>]*)>(.*?)</[^>]*?parameter\s*>', re.DOTALL)
+_DSML_INVOKE_RE = re.compile(r'invoke\s+name\s*=\s*(?:"|\')?([a-zA-Z0-9_-]+)(?:"|\')?\s*>(.*?)</[^>]*?invoke\s*>', re.DOTALL)
+_DSML_PARAM_RE = re.compile(r'parameter\s+name\s*=\s*(?:"|\')?([a-zA-Z0-9_-]+)(?:"|\')?([^>]*)>(.*?)</[^>]*?parameter\s*>', re.DOTALL)
 
 
 def _recover_dsml_tool_calls(content: str | None, usage: dict) -> dict | None:

@@ -80,7 +80,8 @@ class TestResumeRunClosesSession(unittest.IsolatedAsyncioTestCase):
             captured_stream_msgs["msgs"] = list(msgs)
             yield "result"
 
-        async def fake_call_ai_once(*a, **kw):
+        async def fake_call_ai_once(sp, msgs, *a, **kw):
+            captured_stream_msgs["msgs"] = list(msgs)
             return {"type": "text", "content": "final answer", "usage": {}}
 
         bot = {

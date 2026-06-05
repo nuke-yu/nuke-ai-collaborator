@@ -272,6 +272,16 @@ class ToolLoopRunner:
         return "\n\n".join(parts)
 
     async def _stream_final(self):
+        if self.full_text:
+            chunk_size = 20
+            for i in range(0, len(self.full_text), chunk_size):
+                chunk = self.full_text[i:i+chunk_size]
+                await self.ctx.interaction.broadcast(self.ctx.group_id, {
+                    "type": "stream_chunk", "temp_id": self.temp_id, "delta": chunk,
+                })
+                await asyncio.sleep(0.02)
+            return
+
         try:
             async for chunk in self.ai_service.stream(
                 self.system_prompt, self.messages, self.model_name, self.provider,
