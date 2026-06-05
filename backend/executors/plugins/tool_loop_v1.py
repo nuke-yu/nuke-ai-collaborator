@@ -488,6 +488,7 @@ class ToolLoopRunner:
             await self.ctx.interaction.broadcast(self.ctx.group_id, {
                 "type": "tool_call", "temp_id": self.temp_id,
                 "tool": call["name"], "args": call["arguments"],
+                "session_id": self.session_id,
             })
             await self.ctx.interaction.append_session_event(self.session_id, "tool_call", {
                 "tool_call_id": call["id"],
@@ -527,6 +528,7 @@ class ToolLoopRunner:
             await self.ctx.interaction.broadcast(self.ctx.group_id, {
                 "type": "tool_result", "temp_id": self.temp_id,
                 "tool": call["name"], "result": display_result[:300],
+                "session_id": self.session_id,
             })
 
     async def _execute_serial_tools(self, calls):
@@ -534,6 +536,7 @@ class ToolLoopRunner:
             await self.ctx.interaction.broadcast(self.ctx.group_id, {
                 "type": "tool_call", "temp_id": self.temp_id,
                 "tool": call["name"], "args": call["arguments"],
+                "session_id": self.session_id,
             })
             await self.ctx.interaction.append_session_event(self.session_id, "tool_call", {
                 "tool_call_id": call["id"],
@@ -586,6 +589,7 @@ class ToolLoopRunner:
             await self.ctx.interaction.broadcast(self.ctx.group_id, {
                 "type": "tool_result", "temp_id": self.temp_id,
                 "tool": call["name"], "result": display_result[:300],
+                "session_id": self.session_id,
             })
 
     async def _run_pre_compaction(self):
@@ -833,7 +837,7 @@ class ToolLoopV1(BotExecutor):
             writeback_pattern="logs/{date}.md",
         ),
         collaboration=CollabConfig(can_handoff=True, can_spawn_subagent=True),
-        max_iterations=10,
+        max_iterations=100,
     )
 
     async def run(self, ctx: ExecutionContext) -> ExecutionResult:

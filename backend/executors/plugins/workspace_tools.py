@@ -562,6 +562,33 @@ def _wrap_command_with_limits(cmd: str, limit_bytes: int) -> str:
     return cmd
 
 
+def _check_shell_command_paths(cmd: str, work_dir: Path) -> str | None:
+    home_dir = Path("~").expanduser().resolve()
+    home_dir_str = str(home_dir)
+    
+    # 1. Check path-like patterns under /Users, /home, or ~
+    path_pattern = r'(?:/Users/|/home/|~)(?:/[a-zA-Z0-9_\-\.]+)+'
+    for match in re.findall(path_pattern, cmd):
+        try:
+            resolved = Path(match).expanduser().resolve()
+            if not resolved.is_relative_to(work_dir.resolve()):
+                return f"工作区沙箱限制：禁止读写工作区外的路径「{match}」"
+        except Exception:
+            pass
+
+    # 2. Check direct home directory string references in arguments
+    if home_dir_str in cmd:
+        for word in re.split(r'[\s\'\"<>\|;&]+', cmd):
+            if home_dir_str in word:
+                try:
+                    resolved = Path(word).expanduser().resolve()
+                    if not resolved.is_relative_to(work_dir.resolve()):
+                        return f"工作区沙箱限制：禁止读写工作区外的路径「{word}」"
+                except Exception:
+                    pass
+    return None
+
+
 async def _handle_run_shell(
     cmd: str, cwd: str = "", timeout: int = 30,
     background: bool = False, context: dict = None,
@@ -570,6 +597,10 @@ async def _handle_run_shell(
     work_dir, err = _resolve_shell_cwd(cwd, bot_id)
     if err:
         return f"[安全拒绝] {err}"
+    
+    restricted_err = _check_shell_command_paths(cmd, work_dir)
+    if restricted_err:
+        return f"[安全拒绝] {restricted_err}"
     
     _max_timeout = min(timeout, 300)
     sandbox_env = _sandbox_env()
