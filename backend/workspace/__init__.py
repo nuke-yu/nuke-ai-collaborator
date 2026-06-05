@@ -95,7 +95,7 @@ def _get_effective_ws(bot_id: int, path_str: str) -> Path:
 
 
 
-async def read_file(bot_id: int, path: str) -> str:
+async def read_file(bot_id: int, path: str, offset: int | None = None, limit: int | None = None) -> str:
     ws = _get_effective_ws(bot_id, path)
     p = _safe_path(ws, path)
     if p is None:
@@ -106,7 +106,24 @@ async def read_file(bot_id: int, path: str) -> str:
     lock = _get_path_lock(p)
     async with lock:
         try:
-            return await asyncio.to_thread(p.read_text, encoding="utf-8")
+            text = await asyncio.to_thread(p.read_text, encoding="utf-8")
+            if offset is not None or limit is not None:
+                try:
+                    start = int(offset) if offset is not None else 0
+                    if start < 0:
+                        start = 0
+                except (ValueError, TypeError):
+                    start = 0
+                try:
+                    length = int(limit) if limit is not None else None
+                    if length is not None and length < 0:
+                        length = 0
+                except (ValueError, TypeError):
+                    length = None
+                
+                end = (start + length) if length is not None else len(text)
+                return text[start:end]
+            return text
         except Exception as e:
             return f"[读取错误] {e}"
 

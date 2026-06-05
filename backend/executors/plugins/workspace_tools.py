@@ -41,7 +41,11 @@ _WORKSPACE_TOOLS = [
         description="读取 Bot 工作区内的文件内容",
         parameters={
             "type": "object",
-            "properties": {"path": {"type": "string", "description": "相对于工作区根目录的路径"}},
+            "properties": {
+                "path": {"type": "string", "description": "相对于工作区根目录的路径"},
+                "offset": {"type": "integer", "description": "读取文件的起始字符偏移量"},
+                "limit": {"type": "integer", "description": "最大读取字符长度"}
+            },
             "required": ["path"],
         },
         concurrency_safe=True,
@@ -510,9 +514,9 @@ def _with_personality(base_prompt: str, bot: dict) -> str:
 # Tool handler implementations
 # ---------------------------------------------------------------------------
 
-async def _handle_read_file(path: str, context: dict = None) -> str:
+async def _handle_read_file(path: str, offset: int | None = None, limit: int | None = None, context: dict = None, **kwargs) -> str:
     bot_id = (context or {}).get("bot_id")
-    return await _ws.read_file(bot_id, path) if bot_id else "[错误] 缺少 bot_id"
+    return await _ws.read_file(bot_id, path, offset=offset, limit=limit) if bot_id else "[错误] 缺少 bot_id"
 
 
 async def _handle_write_file(path: str, content: str, context: dict = None) -> str:
