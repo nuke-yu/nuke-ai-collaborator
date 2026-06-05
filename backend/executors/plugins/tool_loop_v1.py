@@ -766,6 +766,8 @@ class ToolLoopRunner:
                 "member_id": self.bot["id"], "sender_name": self.bot["name"],
                 "preview": self.full_text[:100], "created_at": "",
             })
+            self.messages.append({"role": "assistant", "content": self.full_text})
+            await self.ctx.interaction.save_session_snapshot(self.session_id, self.messages)
             await self.ctx.interaction.update_session_status(self.session_id, "completed")
             return ExecutionResult(full_text=self.full_text, msg_id=None)
 
@@ -814,6 +816,8 @@ class ToolLoopRunner:
                 executor=self.executor.executor_id,
             ))
 
+        self.messages.append({"role": "assistant", "content": self.full_text})
+        await self.ctx.interaction.save_session_snapshot(self.session_id, self.messages)
         await self.ctx.interaction.update_session_status(self.session_id, "completed")
         return ExecutionResult(full_text=self.full_text, msg_id=msg_id)
 
