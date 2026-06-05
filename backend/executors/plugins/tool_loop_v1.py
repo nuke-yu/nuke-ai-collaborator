@@ -604,6 +604,7 @@ class ToolLoopRunner:
                 "type": "compaction", "temp_id": self.temp_id,
                 "strategy": "pre_run",
                 "message": f"历史已预压缩（{_pre_tokens:,} tokens > {compact._PRE_RUN_TOKEN_THRESHOLD:,}）",
+                "session_id": self.session_id,
             })
 
     async def _poll_and_inject_signals(self):

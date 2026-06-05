@@ -11,6 +11,8 @@ export default function BotLogPanel({ groupId, onClose }) {
   const [expandedItems, setExpandedItems] = useState(new Set()) // for collapsing tool results
   const pollIntervalRef = useRef(null)
   const debounceTimerRef = useRef(null)
+  const selectedSessionIdRef = useRef(null)
+  selectedSessionIdRef.current = selectedSessionId
 
   // Fetch recent sessions
   const fetchSessionsList = async (showLoading = true) => {
@@ -104,11 +106,8 @@ export default function BotLogPanel({ groupId, onClose }) {
       }
       debounceTimerRef.current = setTimeout(() => {
         fetchSessionsList(false)
-        // Only refresh the detail pane when the updated session is the one
-        // currently open — otherwise a group-wide session_updated for another
-        // bot's session would hijack the view away from what the user is reading.
-        if (selectedSessionId && (!targetSessionId || targetSessionId === selectedSessionId)) {
-          fetchSessionData(selectedSessionId, false)
+        if (selectedSessionIdRef.current && (!targetSessionId || targetSessionId === selectedSessionIdRef.current)) {
+          fetchSessionData(selectedSessionIdRef.current, false)
         }
       }, 250)
     }
@@ -122,38 +121,187 @@ export default function BotLogPanel({ groupId, onClose }) {
         return
       }
 
-      // 2. Handle stream chunks for the active session in real-time
-      if (data.type === 'stream_chunk' && selectedSessionId && data.session_id === selectedSessionId) {
+      // 2. Handle stream start synchronously
+      if (data.type === 'stream_start') {
+        const isNew = data.session_id && data.session_id !== selectedSessionIdRef.current
+        if (isNew) {
+          selectedSessionIdRef.current = data.session_id
+          setSelectedSessionId(data.session_id)
+        }
+        
+        // Immediately set/update session detail placeholder so subsequent stream_chunks are not dropped
         setSessionDetail(prev => {
-          if (!prev) return prev
-          const snapshot = [...(prev.last_snapshot || [])]
-          const lastMsg = snapshot[snapshot.length - 1]
-          if (lastMsg && lastMsg.role === 'assistant' && lastMsg.streaming) {
-            snapshot[snapshot.length - 1] = {
-              ...lastMsg,
-              content: (lastMsg.content || '') + data.delta
+          if (prev && prev.id === data.session_id) {
+            return {
+              ...prev,
+              status: 'running'
             }
-          } else {
-            snapshot.push({
-              role: 'assistant',
-              content: data.delta,
-              streaming: true
-            })
           }
-          return { ...prev, last_snapshot: snapshot }
+          return {
+            id: data.session_id,
+            bot_id: data.member_id,
+            bot_name: data.sender_name,
+            bot_avatar_color: data.avatar_color,
+            status: 'running',
+            last_snapshot: []
+          }
         })
+        
+        setEvents(prev => {
+          // Prevent duplicates
+          if (prev.some(evt => evt.id === `start-${data.session_id}`)) return prev
+          return [
+            {
+              id: `start-${data.session_id}`,
+              event_type: 'session_start',
+              payload: { user_content: '' },
+              created_at: new Date().toISOString()
+            }
+          ]
+        })
+
+        fetchSessionData(data.session_id, false)
+        fetchSessionsList(false)
         return
       }
 
-      // 3. Other events that trigger instant re-fetch
-      const relevantTypes = ['stream_start', 'stream_end', 'tool_call', 'tool_result', 'compaction', 'skills_loaded', 'recovery_prompt']
+      // 3. Handle stream chunks in real-time
+      if (data.type === 'stream_chunk') {
+        const activeSid = selectedSessionIdRef.current
+        if (activeSid && data.session_id === activeSid) {
+          setSessionDetail(prev => {
+            const currentDetail = prev && prev.id === data.session_id ? prev : {
+              id: data.session_id,
+              status: 'running',
+              last_snapshot: []
+            }
+            const snapshot = [...(currentDetail.last_snapshot || [])]
+            const lastMsg = snapshot[snapshot.length - 1]
+            if (lastMsg && lastMsg.role === 'assistant' && lastMsg.streaming) {
+              snapshot[snapshot.length - 1] = {
+                ...lastMsg,
+                content: (lastMsg.content || '') + data.delta
+              }
+            } else {
+              snapshot.push({
+                role: 'assistant',
+                content: data.delta,
+                streaming: true
+              })
+            }
+            return { ...currentDetail, last_snapshot: snapshot }
+          })
+        }
+        return
+      }
+
+      // 4. Handle stream end
+      if (data.type === 'stream_end') {
+        const activeSid = selectedSessionIdRef.current
+        if (activeSid && data.session_id === activeSid) {
+          setSessionDetail(prev => {
+            if (!prev || prev.id !== data.session_id) return prev
+            const snapshot = [...(prev.last_snapshot || [])]
+            const lastMsg = snapshot[snapshot.length - 1]
+            if (lastMsg && lastMsg.role === 'assistant') {
+              snapshot[snapshot.length - 1] = {
+                ...lastMsg,
+                streaming: false
+              }
+            }
+            return { ...prev, status: 'completed', last_snapshot: snapshot }
+          })
+          triggerDebouncedRefresh(data.session_id)
+        }
+        return
+      }
+
+      // 5. Handle tool call in real-time
+      if (data.type === 'tool_call') {
+        const activeSid = selectedSessionIdRef.current
+        if (activeSid && data.session_id === activeSid) {
+          setEvents(prev => {
+            const tempId = `temp-call-${data.temp_id}-${data.tool}`
+            if (prev.some(evt => evt.id === tempId || evt.payload?.tool_call_id === data.tool_call_id)) {
+              return prev
+            }
+            return [
+              ...prev,
+              {
+                id: tempId,
+                event_type: 'tool_call',
+                payload: {
+                  tool_name: data.tool,
+                  arguments: data.args
+                },
+                created_at: new Date().toISOString()
+              }
+            ]
+          })
+        }
+        return
+      }
+
+      // 6. Handle tool result in real-time
+      if (data.type === 'tool_result') {
+        const activeSid = selectedSessionIdRef.current
+        if (activeSid && data.session_id === activeSid) {
+          setEvents(prev => {
+            const tempId = `temp-res-${data.temp_id}-${data.tool}`
+            if (prev.some(evt => evt.id === tempId || evt.payload?.tool_call_id === data.tool_call_id)) {
+              return prev
+            }
+            return [
+              ...prev,
+              {
+                id: tempId,
+                event_type: 'tool_result',
+                payload: {
+                  tool_name: data.tool,
+                  result: data.result,
+                  is_error: data.is_error || false
+                },
+                created_at: new Date().toISOString()
+              }
+            ]
+          })
+        }
+        return
+      }
+
+      // 7. Handle compaction in real-time
+      if (data.type === 'compaction') {
+        const activeSid = selectedSessionIdRef.current
+        if (activeSid && data.session_id === activeSid) {
+          setEvents(prev => {
+            const compId = `compaction-${Date.now()}`
+            return [
+              ...prev,
+              {
+                id: compId,
+                event_type: 'compaction',
+                payload: {
+                  strategy: data.strategy,
+                  message: data.message
+                },
+                created_at: new Date().toISOString()
+              }
+            ]
+          })
+        }
+        return
+      }
+
+      // 8. Other fallback events that trigger debounced/instant refresh
+      const relevantTypes = ['skills_loaded', 'recovery_prompt']
       if (relevantTypes.includes(data.type)) {
-        if (data.session_id && data.session_id !== selectedSessionId) {
+        if (data.session_id && data.session_id !== selectedSessionIdRef.current) {
+          selectedSessionIdRef.current = data.session_id
           setSelectedSessionId(data.session_id)
           fetchSessionData(data.session_id, false)
           fetchSessionsList(false)
         } else {
-          triggerDebouncedRefresh(data.session_id || selectedSessionId)
+          triggerDebouncedRefresh(data.session_id || selectedSessionIdRef.current)
         }
       }
     }
@@ -165,7 +313,7 @@ export default function BotLogPanel({ groupId, onClose }) {
         clearTimeout(debounceTimerRef.current)
       }
     }
-  }, [selectedSessionId, groupId])
+  }, [groupId])
 
   const toggleExpand = (id) => {
     setExpandedItems(prev => {

@@ -90,6 +90,7 @@ class AIService:
                 "type": "compaction", "temp_id": self.temp_id,
                 "strategy": "overflow_recovery",
                 "message": "上下文溢出，已自动压缩并重试",
+                "session_id": self.session_id,
             })
             
             # Retry once after compaction
@@ -142,6 +143,7 @@ class AIService:
                 "type": "compaction", "temp_id": self.temp_id,
                 "strategy": "overflow_recovery",
                 "message": "流式回复溢出，已自动压缩并重试",
+                "session_id": self.session_id,
             })
             
             # Retry streaming
