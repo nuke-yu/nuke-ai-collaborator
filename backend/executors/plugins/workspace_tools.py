@@ -16,6 +16,7 @@ from executors.base import ExecutionContext, ExecutionResult, ToolDef
 from core import config
 from executors import tool_executor, registry as _executor_registry
 import workspace as _ws
+import editing
 from skills import run_skill
 import executors.compact as compact
 import permissions
@@ -52,7 +53,10 @@ _WORKSPACE_TOOLS = [
     ),
     ToolDef(
         name="write_file",
-        description="向工作区文件写入内容（会覆盖）",
+        description=(
+            "向工作区写入整个文件（会覆盖原内容）。仅用于新建文件或整文件重写；"
+            "修改已有文件请优先用 edit_file —— 它只发改动的片段，避免大文件被单次输出长度截断。"
+        ),
         parameters={
             "type": "object",
             "properties": {
@@ -60,6 +64,24 @@ _WORKSPACE_TOOLS = [
                 "content": {"type": "string"},
             },
             "required": ["path", "content"],
+        },
+    ),
+    ToolDef(
+        name="edit_file",
+        description=(
+            "对工作区已有文件做精确字符串替换（只发改动片段，不必重发整文件）。"
+            "把 old_string 替换为 new_string；old_string 必须在文件中唯一"
+            "（否则报错，请加更多上下文或用 replace_all）。修改已有文件首选本工具。"
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "path":        {"type": "string", "description": "相对于工作区根目录的路径"},
+                "old_string":  {"type": "string", "description": "要被替换的原文（需与文件内容一致，可含多行）"},
+                "new_string":  {"type": "string", "description": "替换后的新内容"},
+                "replace_all": {"type": "boolean", "description": "是否替换所有匹配，默认 false", "default": False},
+            },
+            "required": ["path", "old_string", "new_string"],
         },
     ),
     ToolDef(
@@ -524,6 +546,24 @@ async def _handle_write_file(path: str, content: str, context: dict = None) -> s
     return await _ws.write_file(bot_id, path, content) if bot_id else "[错误] 缺少 bot_id"
 
 
+async def _handle_edit_file(path: str, old_string: str, new_string: str,
+                            replace_all: bool = False, context: dict = None) -> str:
+    # 薄 glue：读原文（workspace）→ 纯替换（editing）→ 写回（workspace）。
+    bot_id = (context or {}).get("bot_id")
+    if not bot_id:
+        return "[错误] 缺少 bot_id"
+    current = await _ws.read_file(bot_id, path)
+    if current.startswith(("[错误]", "[文件不存在]", "[读取错误]")):
+        return current
+    try:
+        updated = editing.apply_replacement(current, old_string, new_string, replace_all=replace_all)
+    except editing.EditError as e:
+        return f"[编辑失败] {e}"
+    if updated == current:
+        return "[无改动] 替换前后内容一致"
+    return await _ws.write_file(bot_id, path, updated)
+
+
 async def _handle_list_workspace(context: dict = None) -> str:
     bot_id = (context or {}).get("bot_id")
     return await _ws.list_workspace(bot_id) if bot_id else "[错误] 缺少 bot_id"
@@ -711,6 +751,7 @@ def register_workspace_tools() -> None:
     handlers = {
         "read_file":        _handle_read_file,
         "write_file":       _handle_write_file,
+        "edit_file":        _handle_edit_file,
         "list_workspace":   _handle_list_workspace,
         "run_skill":        _handle_run_skill,
         "run_shell":        _handle_run_shell,

@@ -28,6 +28,7 @@ import executors.compact as compact
 from core import bg
 from core.orchestration.ai_service import AIService
 from core.orchestration.prompt_builder import compile_system_prompt
+from ai.model_limits import resolve_max_tokens
 
 _DOOM_LOOP_THRESHOLD = config.DOOM_LOOP_THRESHOLD  # breaks on the Nth consecutive tool-only iteration (inclusive)
 
@@ -225,7 +226,10 @@ class ToolLoopRunner:
         self.model_name = self.bot.get("model_name", "deepseek-chat")
         self.provider = self.bot.get("model_provider", "deepseek")
         self.temperature = self.bot.get("temperature", 0.7)
-        self.max_tokens = self.bot.get("max_tokens", 4096)
+        # Per-model output budget: default to the model's real ceiling (not a flat
+        # 4096), clamp an explicit config down to that ceiling. Avoids large-file
+        # write_file outputs getting truncated just because the default was tiny.
+        self.max_tokens = resolve_max_tokens(self.provider, self.model_name, self.bot.get("max_tokens"))
         
         self.messages = []
         self.full_text = ""
