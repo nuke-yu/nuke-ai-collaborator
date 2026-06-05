@@ -89,6 +89,47 @@ async def _shell_handler_done(cmd=None, **_):
     return "done"
 
 
+class TestArgAliasNormalization:
+    """LLMs often call write_file with `file_path`/`contents` instead of the
+    declared `path`/`content`. execute() should normalize the alias rather than
+    crash with 'unexpected keyword argument'."""
+
+    def _register_write_file(self, captured):
+        from executors.base import ToolDef
+        async def handler(path, content):
+            captured["path"] = path
+            captured["content"] = content
+            return "ok"
+        te.register(ToolDef(name="write_file", description="", parameters={}), handler)
+
+    def test_file_path_alias_maps_to_path(self):
+        captured = {}
+        self._register_write_file(captured)
+        result, is_error = _run(te.execute("write_file", {"file_path": "a.txt", "content": "x"}))
+        assert not is_error
+        assert result == "ok"
+        assert captured == {"path": "a.txt", "content": "x"}
+
+    def test_contents_alias_maps_to_content(self):
+        captured = {}
+        self._register_write_file(captured)
+        _run(te.execute("write_file", {"path": "a.txt", "contents": "body"}))
+        assert captured == {"path": "a.txt", "content": "body"}
+
+    def test_explicit_path_wins_over_alias(self):
+        captured = {}
+        self._register_write_file(captured)
+        # both present → keep the canonical, drop the alias (no crash)
+        _run(te.execute("write_file", {"path": "real.txt", "file_path": "alias.txt", "content": "x"}))
+        assert captured["path"] == "real.txt"
+
+    def test_no_alias_left_untouched(self):
+        captured = {}
+        self._register_write_file(captured)
+        _run(te.execute("write_file", {"path": "a.txt", "content": "x"}))
+        assert captured == {"path": "a.txt", "content": "x"}
+
+
 class TestBeforeHookCondition:
     def setup_method(self):
         te.clear_before_hooks()

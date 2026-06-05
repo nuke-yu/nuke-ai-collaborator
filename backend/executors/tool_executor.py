@@ -9,6 +9,32 @@ from executors.base import ToolDef
 _handlers: dict[str, Callable] = {}
 _defs: dict[str, ToolDef] = {}
 
+# LLMs frequently call file tools with a near-miss param name (`file_path`
+# instead of the declared `path`, `contents` instead of `content`), which blows
+# up the handler with "unexpected keyword argument". Normalize these well-known
+# aliases onto the canonical param the handler actually accepts.
+_ARG_ALIASES = {
+    "file_path": "path",
+    "filepath": "path",
+    "filePath": "path",
+    "contents": "content",
+}
+
+
+def _normalize_arg_aliases(arguments: dict, sig: inspect.Signature) -> None:
+    """In-place: rename known alias kwargs to the handler's canonical param.
+
+    Only fires when the alias isn't itself a valid param and the canonical one
+    is. The alias is always dropped (so it can't trigger an unexpected-kwarg
+    error); the canonical value is only filled if the caller didn't already
+    provide it explicitly.
+    """
+    params = sig.parameters
+    for alias, canonical in _ARG_ALIASES.items():
+        if alias in arguments and alias not in params and canonical in params:
+            arguments.setdefault(canonical, arguments[alias])
+            arguments.pop(alias)
+
 
 @dataclass
 class _HookEntry:
@@ -148,6 +174,7 @@ async def execute(name: str, arguments: dict, context: dict | None = None) -> tu
         sig = inspect.signature(handler)
         
         is_truncated = arguments.pop("__truncated__", False)
+        _normalize_arg_aliases(arguments, sig)
 
         if is_truncated and name != "write_file":
             # Don't execute a truncated destructive call — but fall through so the
