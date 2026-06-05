@@ -384,6 +384,11 @@ class ToolLoopRunner:
 
         tool_names = [t.name for t in self.executor.manifest.tools]
         self.tool_schemas = tool_executor.get_schemas(tool_names)
+        # Per-stage tool whitelist (e.g. the BA requirements stage gets only
+        # read/skill/ticket tools, so it physically can't write code). Filtering
+        # the base schemas here means every iteration — and any skill-level
+        # narrowing on top — stays within the stage's allowed set.
+        self.tool_schemas = self._restrict_schemas(self.tool_schemas, self.bot.get("allowed_tools"))
 
         if _resuming:
             await self.ctx.interaction.update_session_status(self.session_id, "running")
@@ -418,6 +423,15 @@ class ToolLoopRunner:
                 "type": "skills_loaded", "temp_id": self.temp_id,
                 "member_id": self.bot["id"], "skills": self.skills_snapshot,
             })
+
+    @staticmethod
+    def _restrict_schemas(schemas: list, allowed: list | None) -> list:
+        """Keep only tool schemas whose name is in `allowed`. `None`/empty = no
+        restriction (return as-is)."""
+        if not allowed:
+            return schemas
+        allowed_set = set(allowed)
+        return [s for s in schemas if s["function"]["name"] in allowed_set]
 
     def _track_vfs_modifications(self, call_name: str, arguments: dict):
         _fpath = arguments.get("path", "")

@@ -194,6 +194,40 @@ class TestOrchestratorFlow(unittest.TestCase):
         self.assertIn("聊天", dev_instr)
         self.assertTrue("严禁" in dev_instr or "不要" in dev_instr)
 
+    def test_ba_stage_cannot_write_files(self):
+        """BA 阶段只澄清需求 + 建工单，绝不能动手写代码：必须用 allowed_tools 白名单
+        在工具层物理拿掉 write_file / write_local_file / run_shell / create_pr /
+        spawn_agent，只保留读取 / 技能 / 建工单类工具。否则 BA 会在需求阶段直接把整个
+        网页写出来（门没推进、没确认卡片，纯越权）。"""
+        from core.orchestration.pipeline import build_rd_pipeline
+        ba = {"id": 1, "name": "BA", "avatar_color": "#1", "role": "BA"}
+        dev = {"id": 2, "name": "Dev", "avatar_color": "#2", "role": "Dev"}
+        qa = {"id": 3, "name": "QA", "avatar_color": "#3", "role": "QA"}
+        stages = build_rd_pipeline(ba, dev, qa)
+
+        ba_allowed = stages[0].get("allowed_tools")
+        self.assertIsNotNone(ba_allowed, "BA 阶段必须带 allowed_tools 白名单")
+        for forbidden in ("write_file", "write_local_file", "run_shell", "create_pr", "spawn_agent"):
+            self.assertNotIn(forbidden, ba_allowed)
+        # 仍要能澄清/建工单
+        self.assertIn("read_file", ba_allowed)
+        self.assertIn("create_jira_ticket", ba_allowed)
+
+        # Dev 阶段必须不受限（它的活就是 write_file 落盘）
+        self.assertIsNone(stages[1].get("allowed_tools"))
+
+    def test_runner_restrict_schemas_by_allowed(self):
+        """ToolLoopRunner 的工具白名单过滤：allowed 为空时原样返回，非空时只留白名单内的。"""
+        from executors.plugins.tool_loop_v1 import ToolLoopRunner
+        schemas = [
+            {"function": {"name": "read_file"}},
+            {"function": {"name": "write_file"}},
+            {"function": {"name": "create_jira_ticket"}},
+        ]
+        self.assertEqual(ToolLoopRunner._restrict_schemas(schemas, None), schemas)
+        kept = ToolLoopRunner._restrict_schemas(schemas, ["read_file", "create_jira_ticket"])
+        self.assertEqual([s["function"]["name"] for s in kept], ["read_file", "create_jira_ticket"])
+
     def test_sentinel_match_is_tolerant(self):
         """哨兵标记容错：大小写/空格/全角括号变体仍能命中；普通中文关键词不误伤。"""
         from core.orchestration.pipeline import build_rd_pipeline

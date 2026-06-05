@@ -23,8 +23,18 @@
 PIPELINE_ID = "rd_gate_v1"
 
 
-def _gated_stage(bot: dict, *, instruction: str, done_keyword: str, gate_label: str) -> dict:
-    return {
+# BA 阶段只澄清需求 + 列工单，不写代码。用工具白名单在工具层物理拿掉一切写/执行
+# 类工具（write_file / write_local_file / run_shell / create_pr / spawn_agent），
+# 只留读取、技能、建/查工单——光靠提示约束挡不住模型在需求阶段直接动手写网页。
+_BA_ALLOWED_TOOLS = [
+    "read_file", "read_local_file", "list_workspace",
+    "run_skill", "create_jira_ticket", "list_jira_tickets",
+]
+
+
+def _gated_stage(bot: dict, *, instruction: str, done_keyword: str, gate_label: str,
+                 allowed_tools: list[str] | None = None) -> dict:
+    stage = {
         **bot,
         "stage_type": "single",
         "gate": True,
@@ -32,6 +42,9 @@ def _gated_stage(bot: dict, *, instruction: str, done_keyword: str, gate_label: 
         "done_keyword": done_keyword,
         "gate_label": gate_label,
     }
+    if allowed_tools is not None:
+        stage["allowed_tools"] = allowed_tools
+    return stage
 
 
 def build_rd_pipeline(ba: dict, dev: dict, qa: dict) -> list[dict]:
@@ -43,6 +56,9 @@ def build_rd_pipeline(ba: dict, dev: dict, qa: dict) -> list[dict]:
                 "和用户多轮对话，把需求问清楚：目标、范围、边界、验收标准。"
                 "充分澄清并与用户对齐后，把需求拆成 Jira 工单，每个工单包含："
                 "标题、描述、验收标准(AC)。（当前 Jira 为替身，先用清晰的文字列出工单清单。）"
+                "【本阶段铁律】你是需求分析，不是开发：绝对不要写任何代码或网页文件，"
+                "不要创建项目目录、不要落盘任何实现。开发是确认通过后下一阶段 Dev 的活。"
+                "（系统也已在工具层禁用了你的 write_file / run_shell 等写入能力。）"
                 "需求总结和工单清单都给完后，向用户说明『都就绪了，是否让开发开始？』，"
                 "并在回复的最后一行单独、原样输出标记 [[BA_DONE]]（一字不差，"
                 "不要翻译/改写/加别的字）——系统识别到它才会给用户弹出确认卡片。"
@@ -50,6 +66,7 @@ def build_rd_pipeline(ba: dict, dev: dict, qa: dict) -> list[dict]:
             ),
             done_keyword="[[BA_DONE]]",
             gate_label="确认需求已整理清楚、Jira 工单已建好",
+            allowed_tools=_BA_ALLOWED_TOOLS,
         ),
         _gated_stage(
             dev,
