@@ -6,6 +6,10 @@ from datetime import date, datetime
 from typing import Dict
 
 from skills.constants import WORKSPACE_ROOT, LEARNED_ACTIVE as _LEARNED_ACTIVE, LEARNED_DRAFT as _LEARNED_DRAFT
+from workspace.templates import (
+    IDENTITY_TEMPLATE, SOUL_TEMPLATE, BOOTSTRAP_TEMPLATE,
+    AGENT_TEMPLATE, MEMORY_TEMPLATE, BOARD_TEMPLATE, SPEC_TEMPLATE
+)
 
 _SUBDIRS = ["skills", "logs"]
 _HISTORY_LIMIT = 10
@@ -299,67 +303,31 @@ async def read_startup_files(bot_id: int, file_names: list[str]) -> str:
 # Workspace init
 # ---------------------------------------------------------------------------
 
+from workspace.templates import (
+    IDENTITY_TEMPLATE,
+    SOUL_TEMPLATE,
+    BOOTSTRAP_TEMPLATE,
+    AGENT_TEMPLATE,
+    MEMORY_TEMPLATE,
+    BOARD_TEMPLATE,
+    SPEC_TEMPLATE,
+)
+
 async def init_bot_workspace(bot: dict):
     """Create default workspace files for a newly created bot."""
     bot_id = bot["id"]
     name = bot.get("name", "Bot")
     role = bot.get("role", "")
-    system_prompt = (bot.get("system_prompt") or "").strip()
-    personality_prompt = (bot.get("personality_prompt") or "").strip()
+    system_prompt = (bot.get("system_prompt") or "").strip() or f"你是 {name}，{role}。"
+    personality_prompt = (bot.get("personality_prompt") or "").strip() or "- 诚实、专业、高效。"
 
     ws = bot_workspace(bot_id)
 
-    identity = f"# {name}\n\n**角色：** {role}\n\n{system_prompt or f'你是 {name}，{role}。'}\n"
-    soul = f"# {name} · 行事原则\n\n{personality_prompt or '- 诚实、专业、高效。'}\n"
-    bootstrap = f"# 启动指令\n\n每次对话开始时，回顾工作区状态，确认当前任务优先级。\n"
-    agent = f"""# AGENT.md — {name} 的推理框架
-
-## 角色定位
-{role or name}
-
-## 思考方式
-
-在回应之前，先在脑海中完成以下步骤：
-
-1. **理解意图** — 对方真正想要的是什么？表面需求背后有没有更深的目标？
-2. **盘点已知** — 我现在掌握哪些信息？工作区里有什么可以参考？
-3. **识别缺口** — 还缺什么信息？是否需要先澄清，还是可以合理推断？
-4. **选择行动** — 直接回答 / 调用工具 / 请求补充信息，哪种最有效？
-5. **验证输出** — 我的回答是否真的解决了问题？有没有遗漏边界条件？
-
-## 工作原则
-
-- 优先完成，再求完美
-- 遇到不确定时，明说假设，而不是沉默或胡猜
-- 主动更新工作区文件，保持状态可追溯
-- 每次任务结束写入日志
-
-## 边界
-
-- 不在没有充分理由的情况下修改他人负责的文件
-- 不超出当前任务范围擅自扩展
-"""
-
-    memory = f"""# {name} · 长期记忆
-
-> 这是 {name} 的永久记忆文件，由用户维护，Bot 无法覆盖。
-> 记录能力图谱、项目经历、重要决策和长期偏好。
-
-## 能力图谱
-
-（记录擅长的领域和技术栈）
-
-## 项目经历
-
-（记录参与过的项目和主要贡献）
-
-## 重要决策 & 偏好
-
-（记录用户的重要决定、风格偏好、约定俗成的做法）
-
-## 备注
-
-"""
+    identity = IDENTITY_TEMPLATE.format(name=name, role=role, system_prompt=system_prompt)
+    soul = SOUL_TEMPLATE.format(name=name, personality_prompt=personality_prompt)
+    bootstrap = BOOTSTRAP_TEMPLATE
+    agent = AGENT_TEMPLATE.format(name=name, role=role or name)
+    memory = MEMORY_TEMPLATE.format(name=name)
 
     for filename, content in [
         ("IDENTITY.md", identity),
@@ -396,36 +364,8 @@ async def init_group_workspace(group_id: int, group_name: str = ""):
     display = group_name or f"群组 {group_id}"
     today = date.today().isoformat()
 
-    board = f"""# 工作看板 · {display}
-
-更新时间：{today}
-
-## Backlog
-| # | 需求 | 优先级 |
-|---|------|--------|
-
-## 进行中
-| # | 需求 | 负责人 | 状态 | Todo |
-|---|------|--------|------|------|
-
-## 已完成
-| # | 需求 | 负责人 | 完成时间 | 产出 |
-|---|------|--------|---------|------|
-"""
-
-    spec = f"""# 需求文档 · {display}
-
-> 由 PM Bot 维护，记录项目背景、目标和详细需求。
-
-## 项目背景
-
-
-## 核心需求
-
-
-## 验收标准
-
-"""
+    board = BOARD_TEMPLATE.format(display=display, today=today)
+    spec = SPEC_TEMPLATE.format(display=display)
 
     for filename, content in [
         ("BOARD.md", board),

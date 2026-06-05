@@ -33,6 +33,32 @@ def _scan_dir_sync(path: Path, layer: str) -> List[Dict]:
     return result
 
 
+def _scan_personal_layer_sync(skills_dir: Path) -> Dict[str, Dict]:
+    personal = {}
+    if not skills_dir.exists():
+        return personal
+    for p in sorted(skills_dir.iterdir()):
+        if p.is_dir() and p.name == "learned":
+            continue
+        if p.is_dir():
+            sf = p / "SKILL.md"
+            if sf.exists():
+                meta = parse_skill_meta(sf)
+                meta["layer"] = meta.get("layer") or "personal"
+                personal[p.name] = {"name": p.name, "type": "md", **meta}
+        elif p.suffix == ".md":
+            meta = parse_skill_meta(p)
+            meta["layer"] = meta.get("layer") or "personal"
+            personal[p.stem] = {"name": p.stem, "type": "md", **meta}
+        elif p.suffix == ".py":
+            personal[p.stem] = {
+                "name": p.stem, "type": "py", "layer": "personal",
+                "description": "(代码技能)", "always": False,
+                "status": "active", "when_to_use": "", "learns": False
+            }
+    return personal
+
+
 async def list_skills(bot_id: int) -> List[Dict]:
     """Asynchronous listing of skills in bot's personal skills/ dir."""
     return await asyncio.to_thread(_list_skills_sync, bot_id)
@@ -97,25 +123,8 @@ def _list_skills_all_sync(bot_id: int, group_id: Optional[int] = None,
         merged[s["name"]] = s
 
     # Personal (overrides all earlier layers)
-    skills_dir = ws / "skills"
-    if skills_dir.exists():
-        for p in sorted(skills_dir.iterdir()):
-            if p.is_dir() and p.name == "learned":
-                continue
-            if p.is_dir():
-                sf = p / "SKILL.md"
-                if sf.exists():
-                    meta = parse_skill_meta(sf)
-                    meta["layer"] = meta.get("layer") or "personal"
-                    merged[p.name] = {"name": p.name, "type": "md", **meta}
-            elif p.suffix == ".md":
-                meta = parse_skill_meta(p)
-                meta["layer"] = meta.get("layer") or "personal"
-                merged[p.stem] = {"name": p.stem, "type": "md", **meta}
-            elif p.suffix == ".py":
-                merged[p.stem] = {"name": p.stem, "type": "py", "layer": "personal",
-                                   "description": "(代码技能)", "always": False,
-                                   "status": "active", "when_to_use": "", "learns": False}
+    personal_skills = _scan_personal_layer_sync(ws / "skills")
+    merged.update(personal_skills)
 
     # L4 Draft
     drafts = []
