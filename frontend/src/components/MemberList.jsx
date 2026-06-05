@@ -154,7 +154,16 @@ _Good luck out there. Make it count._
 
 export default function MemberList({ onAddMember, onEditMember, onClose, initialData }) {
   const isEdit = !!initialData
-  const [form, setForm] = useState(isEdit ? { ...INIT_FORM, ...initialData } : INIT_FORM)
+  const [form, setForm] = useState(() => {
+    const base = isEdit ? { ...INIT_FORM, ...initialData } : INIT_FORM
+    if (base.executor_config) {
+      base.executor_config = {
+        max_iterations: 100,
+        ...base.executor_config
+      }
+    }
+    return base
+  })
   const [sliders, setSliders] = useState(DEFAULT_SLIDERS)
   const [plugins, setPlugins] = useState([])
   const [bootstrap, setBootstrap] = useState('')
