@@ -139,6 +139,7 @@ export default function BotLogPanel({ groupId, onClose }) {
       case 'running':
         return <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-green-500/20 text-green-400 border border-green-500/30 animate-pulse">进行中</span>
       case 'finished':
+      case 'completed':
         return <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">已完成</span>
       case 'failed':
         return <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-red-500/20 text-red-400 border border-red-500/30">失败</span>
