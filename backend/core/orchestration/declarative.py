@@ -145,20 +145,47 @@ class DeclarativeOrchestrator(Orchestrator):
         ctx = self._ctx(group_id)
         return stage_handler(ctx.stage).enter(ctx, prev_output)
 
-    def _raise_gate(self, ctx: StageCtx, response: str) -> OrchestratorStep:
-        """bot 在带 gate 的阶段说出了完成关键词：挂起本阶段、广播一张确认卡片，
-        等用户 confirm() 才真正 _advance。response 暂存为下一阶段的 prev_output。"""
+    def _rewind(self, group_id: int, target_idx: int, prev_output: str = "") -> OrchestratorStep:
+        """返工：把当前阶段回退到 target_idx（如 QA → Dev）并重新进入。给被回退到的
+        bot 的 trigger 前面加一句【返工】说明，让它知道是按上游报告修复而非从头开发。"""
+        s = self._state.get(group_id)
+        if not s:
+            return OrchestratorStep()
+        s.pop("awaiting_confirm", None)
+        s["current"] = target_idx
+        ctx = self._ctx(group_id)
+        if ctx is None:
+            return OrchestratorStep()
+        step = stage_handler(ctx.stage).enter(ctx, prev_output)
+        for u in step.next_units:
+            u.trigger_msg = (
+                "【返工】QA 测试未通过。请根据上面 QA 的测试报告逐条修复问题，"
+                "完成后重新自测，并按原要求在最后一行输出完成标记。\n\n" + u.trigger_msg
+            )
+        return step
+
+    def _raise_gate(self, ctx: StageCtx, response: str, rework_to: int | None = None) -> OrchestratorStep:
+        """bot 在带 gate 的阶段说出了完成/返工关键词：挂起本阶段、广播一张确认卡片，
+        等用户 confirm() 才真正推进。response 暂存为下一步的 prev_output。
+
+        rework_to 非空 → 这是一张「返工门」：确认后不是 _advance，而是 _rewind 回到
+        rework_to 指向的阶段（门 id 加 -rework 后缀，与正常完成门区分）。"""
         s = self._state.get(ctx.group_id)
         if not s:
             return OrchestratorStep()
-        gate_id = f"{ctx.group_id}-{s['current']}"
-        s["awaiting_confirm"] = {"gate_id": gate_id, "prev_output": response}
         stage = ctx.stage
+        is_rework = rework_to is not None
+        gate_id = f"{ctx.group_id}-{s['current']}" + ("-rework" if is_rework else "")
+        s["awaiting_confirm"] = {"gate_id": gate_id, "prev_output": response, "rework_to": rework_to}
+        if is_rework:
+            label = stage.get("fail_gate_label") or f"「{stage.get('name', '')}」未通过，是否打回上一步修复？"
+        else:
+            label = stage.get("gate_label") or f"确认「{stage.get('name', '')}」这一步已完成"
         return OrchestratorStep(
             broadcast_state=True,
             confirm_gate={
                 "gate_id": gate_id,
-                "label": stage.get("gate_label") or f"确认「{stage.get('name', '')}」这一步已完成",
+                "label": label,
                 "bot_id": stage.get("id"),
                 "stage_name": stage.get("name", ""),
             },
@@ -174,6 +201,9 @@ class DeclarativeOrchestrator(Orchestrator):
         # 防重复 / 防过期：带了 gate_id 就必须对得上当前挂起的门。
         if gate_id is not None and gate_id != pending["gate_id"]:
             return OrchestratorStep()
+        rework_to = pending.get("rework_to")
+        if rework_to is not None:
+            return self._rewind(group_id, rework_to, prev_output=pending.get("prev_output", ""))
         return self._advance(group_id, prev_output=pending.get("prev_output", ""))
 
     async def dispatch(self, group_id: int, message: dict, members: list, recent: list) -> OrchestratorStep:

@@ -33,7 +33,9 @@ _BA_ALLOWED_TOOLS = [
 
 
 def _gated_stage(bot: dict, *, instruction: str, done_keyword: str, gate_label: str,
-                 allowed_tools: list[str] | None = None) -> dict:
+                 allowed_tools: list[str] | None = None,
+                 fail_keyword: str | None = None, rework_to: int | None = None,
+                 fail_gate_label: str | None = None) -> dict:
     stage = {
         **bot,
         "stage_type": "single",
@@ -44,6 +46,11 @@ def _gated_stage(bot: dict, *, instruction: str, done_keyword: str, gate_label: 
     }
     if allowed_tools is not None:
         stage["allowed_tools"] = allowed_tools
+    # 返工：本阶段没通过时输出 fail_keyword，确认后回退到 rework_to 指向的阶段重做。
+    if fail_keyword is not None:
+        stage["fail_keyword"] = fail_keyword
+        stage["rework_to"] = rework_to
+        stage["fail_gate_label"] = fail_gate_label
     return stage
 
 
@@ -87,10 +94,18 @@ def build_rd_pipeline(ba: dict, dev: dict, qa: dict) -> list[dict]:
             qa,
             instruction=(
                 "按 Jira 工单的验收标准(AC)做冒烟测试：逐条给出通过/不通过及理由，"
-                "最后给出测试结论。完成后在回复的最后一行单独、原样输出标记 [[QA_DONE]]"
-                "（一字不差，不要改写）。完成之前不要输出它。"
+                "最后给出测试结论。"
+                "【收尾规则】只有当所有 AC 全部通过时，才在回复的最后一行单独、原样输出 "
+                "[[QA_DONE]]（一字不差，不要改写）。"
+                "只要有任何一条 AC 不通过，就绝对不要输出 [[QA_DONE]]，"
+                "而是在回复的最后一行单独、原样输出 [[QA_FAIL]]——"
+                "系统会弹确认卡片，人确认后把问题打回 Dev 修复，修好会再回到你这里重测。"
+                "两个标记互斥，一次只输出其中一个；测试还没做完之前两个都不要输出。"
             ),
             done_keyword="[[QA_DONE]]",
             gate_label="确认测试通过",
+            fail_keyword="[[QA_FAIL]]",
+            rework_to=1,  # 打回 Dev（流水线第 2 个阶段，下标 1）
+            fail_gate_label="QA 未通过：是否打回 Dev 修复并重测？",
         ),
     ]

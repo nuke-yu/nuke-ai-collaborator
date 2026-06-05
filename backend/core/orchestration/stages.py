@@ -27,19 +27,37 @@ def parse_tickets(message: str) -> list[str]:
     return ["本次迭代任务"]
 
 
-_SIGNAL_STRIP = re.compile(r"[\s\[\]【】（）()<>「」]")
+_SIGNAL_STRIP = re.compile(r"[\s\[\]【】（）()<>「」.,!?，。！？#*_\-:：]")
 
 
 def _signal_in(response: str, keyword: str) -> bool:
-    """容错匹配阶段完成信号。
+    """容错并精确匹配阶段完成信号。
 
-    哨兵标记（如 [[BA_DONE]]）模型偶尔会写成 [[ ba_done ]]、全角【【BA_DONE】】等变体；
-    归一化（去掉空白和各种括号、统一大小写）后再做子串匹配，仍能命中。对普通中文关键词
-    （如「完毕」「测试完成」）归一化是恒等，行为与原来的 `keyword in response` 一致。"""
+    如果是带括号的哨兵标记（如 [[BA_DONE]] / [[DEV_DONE]]），防止模型在对话中提及它作为提问/讨论，
+    此时应采用更严格的行级精确匹配或尾部匹配逻辑。
+    对普通中文关键词（如「完毕」「测试完成」），保持原有的宽容子串包含逻辑。"""
     if not keyword:
         return False
     norm = lambda s: _SIGNAL_STRIP.sub("", s).upper()
-    return norm(keyword) in norm(response)
+    keyword_norm = norm(keyword)
+    if not keyword_norm:
+        return False
+
+    is_sentinel = (keyword.startswith("[") and keyword.endswith("]")) or \
+                  (keyword.startswith("【") and keyword.endswith("】"))
+
+    if is_sentinel:
+        # 1. 检查是否有某一行（归一化后）精确等于关键词（归一化后）
+        for line in response.splitlines():
+            if norm(line) == keyword_norm:
+                return True
+        # 2. 或者整个回复（归一化后）以关键词（归一化后）结尾
+        response_norm = norm(response)
+        if response_norm.endswith(keyword_norm):
+            return True
+        return False
+    else:
+        return keyword_norm in norm(response)
 
 
 @dataclass
@@ -122,6 +140,11 @@ class SingleStage(StageType):
         )
 
     def observe(self, ctx: StageCtx, bot_id: int, response: str) -> OrchestratorStep:
+        # 返工信号优先：QA 等阶段没全通过时输出 fail_keyword，挂起一张返工确认门，
+        # 人确认后 _rewind 回到 rework_to 指向的阶段（如 Dev）重做。
+        fail_kw = ctx.stage.get("fail_keyword")
+        if fail_kw and _signal_in(response, fail_kw):
+            return ctx.orch._raise_gate(ctx, response, rework_to=ctx.stage.get("rework_to"))
         if _signal_in(response, ctx.stage.get("done_keyword", "")):
             # 带 gate 的阶段：bot 说完成不直接推进，而是挂起等人点「确认」。
             if ctx.stage.get("gate"):

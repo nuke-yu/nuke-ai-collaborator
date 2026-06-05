@@ -194,6 +194,72 @@ class TestOrchestratorFlow(unittest.TestCase):
         self.assertIn("聊天", dev_instr)
         self.assertTrue("严禁" in dev_instr or "不要" in dev_instr)
 
+    def test_pipeline_qa_stage_has_rework_config(self):
+        """QA 阶段必须带返工配置：fail_keyword / rework_to / fail_gate_label，
+        且指令里告诉 QA 不通过时输出 [[QA_FAIL]]。"""
+        from core.orchestration.pipeline import build_rd_pipeline
+        ba = {"id": 1, "name": "BA", "avatar_color": "#1", "role": "BA"}
+        dev = {"id": 2, "name": "Dev", "avatar_color": "#2", "role": "Dev"}
+        qa = {"id": 3, "name": "QA", "avatar_color": "#3", "role": "QA"}
+        stages = build_rd_pipeline(ba, dev, qa)
+        qa_stage = stages[2]
+        self.assertEqual(qa_stage["fail_keyword"], "[[QA_FAIL]]")
+        self.assertEqual(qa_stage["rework_to"], 1)  # Dev 的下标
+        self.assertTrue(qa_stage.get("fail_gate_label"))
+        self.assertIn("[[QA_FAIL]]", qa_stage["instruction"])
+
+    def test_qa_fail_bounces_back_to_dev_then_loops_to_done(self):
+        """QA 出 [[QA_FAIL]] → 返工确认门（不前进）；人确认 → 回到 Dev（带返工 trigger）。
+        Dev 修完 [[DEV_DONE]] → 门 → 确认 → 自然回到 QA；QA 全过 [[QA_DONE]] → 门 → 确认 → done。"""
+        from core.orchestration.pipeline import build_rd_pipeline
+        ba = {"id": 1, "name": "BA", "avatar_color": "#1", "role": "BA"}
+        dev = {"id": 2, "name": "Dev", "avatar_color": "#2", "role": "Dev"}
+        qa = {"id": 3, "name": "QA", "avatar_color": "#3", "role": "QA"}
+        self.orch.begin(1, build_rd_pipeline(ba, dev, qa))
+
+        # 推进到 QA：BA done+confirm，Dev done+confirm
+        self.orch.observe(1, 1, "需求…… [[BA_DONE]]"); self.orch.confirm(1)
+        self.orch.observe(1, 2, "实现…… [[DEV_DONE]]"); self.orch.confirm(1)
+        self.assertEqual(self.orch.get(1)["current"], 2)
+
+        # QA 不通过：返工门，current 不动
+        s = self.orch.observe(1, 3, "AC1 不通过……\n[[QA_FAIL]]")
+        self.assertIsNotNone(s.confirm_gate)
+        self.assertTrue(s.confirm_gate["gate_id"].endswith("-rework"))
+        self.assertEqual(self.orch.get(1)["current"], 2)
+
+        # 确认返工 → 回到 Dev，带【返工】trigger
+        s = self.orch.confirm(1, s.confirm_gate["gate_id"])
+        self.assertEqual(self.orch.get(1)["current"], 1)
+        self.assertEqual(s.next_units[0].bot["id"], 2)
+        self.assertIn("返工", s.next_units[0].trigger_msg)
+
+        # Dev 修完 → 门 → 确认 → 回到 QA
+        self.orch.observe(1, 2, "已修复…… [[DEV_DONE]]")
+        s = self.orch.confirm(1)
+        self.assertEqual(s.next_units[0].bot["id"], 3)
+        self.assertEqual(self.orch.get(1)["current"], 2)
+
+        # QA 全过 → 门 → 确认 → 整条流水线结束
+        s = self.orch.observe(1, 3, "全部通过 [[QA_DONE]]")
+        self.assertIsNotNone(s.confirm_gate)
+        self.assertFalse(s.confirm_gate["gate_id"].endswith("-rework"))
+        s = self.orch.confirm(1)
+        self.assertTrue(s.done)
+        self.assertIsNone(self.orch.get(1))
+
+    def test_qa_fail_gate_uses_fail_label(self):
+        from core.orchestration.pipeline import build_rd_pipeline
+        ba = {"id": 1, "name": "BA", "avatar_color": "#1", "role": "BA"}
+        dev = {"id": 2, "name": "Dev", "avatar_color": "#2", "role": "Dev"}
+        qa = {"id": 3, "name": "QA", "avatar_color": "#3", "role": "QA"}
+        stages = build_rd_pipeline(ba, dev, qa)
+        self.orch.begin(1, stages)
+        self.orch.observe(1, 1, "需求…… [[BA_DONE]]"); self.orch.confirm(1)
+        self.orch.observe(1, 2, "实现…… [[DEV_DONE]]"); self.orch.confirm(1)
+        s = self.orch.observe(1, 3, "有问题\n[[QA_FAIL]]")
+        self.assertEqual(s.confirm_gate["label"], stages[2]["fail_gate_label"])
+
     def test_ba_stage_cannot_write_files(self):
         """BA 阶段只澄清需求 + 建工单，绝不能动手写代码：必须用 allowed_tools 白名单
         在工具层物理拿掉 write_file / write_local_file / run_shell / create_pr /
