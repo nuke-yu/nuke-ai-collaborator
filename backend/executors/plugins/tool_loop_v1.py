@@ -838,7 +838,7 @@ class ToolLoopV1(BotExecutor):
             writeback_pattern="logs/{date}.md",
         ),
         collaboration=CollabConfig(can_handoff=True, can_spawn_subagent=True),
-        max_iterations=40,
+        max_iterations=100,
     )
 
     async def run(self, ctx: ExecutionContext) -> ExecutionResult:
