@@ -8,7 +8,7 @@ core/runner.py — 编排层与执行层之间的胶水
   4. 按返回值施加副作用（广播系统消息 / WorkflowUpdate / 调度下一批单元）
 """
 import asyncio
-
+import json
 import logging
 
 from db import get_db, global_db, write_connect, get_members, get_messages, save_message
@@ -48,6 +48,37 @@ async def _post_confirm_gate(group_id: int, gate: dict) -> None:
         recent = await get_messages(db, group_id, limit=3)
     saved = next((m for m in recent if m["id"] == mid), {})
     await bus.broadcast(group_id, {"type": "message", **saved})
+
+
+async def mark_gate_confirmed(group_id: int, gate_id: str) -> None:
+    """把已确认的确认门卡片 meta.status 翻成 'confirmed'，让"已确认"态能扛过刷新
+    （前端 MessageBubble 读 meta.status 渲染；点按钮只是本地乐观更新，刷新即丢）。
+
+    纯卡片外观，best-effort：任何失败只告警、不影响 confirm 本身的推进。卡片由
+    _post_confirm_gate 落库（建时 status='pending'），故标记 confirmed 收在同一模块。"""
+    if not gate_id:
+        return
+    try:
+        async with write_connect() as db:
+            cur = await db.execute(
+                "SELECT id, meta FROM messages WHERE group_id = ? AND meta LIKE ?",
+                (group_id, f'%"{gate_id}"%'),
+            )
+            rows = await cur.fetchall()
+            for msg_id, meta_str in rows:
+                try:
+                    meta = json.loads(meta_str) if meta_str else {}
+                except (ValueError, TypeError):
+                    continue
+                if meta.get("kind") == "confirm_gate" and meta.get("gate_id") == gate_id:
+                    meta["status"] = "confirmed"
+                    await db.execute(
+                        "UPDATE messages SET meta = ? WHERE id = ?",
+                        (json.dumps(meta, ensure_ascii=False), msg_id),
+                    )
+            await db.commit()
+    except Exception:
+        log.warning("mark_gate_confirmed failed for gate %s (group %s)", gate_id, group_id, exc_info=True)
 
 
 async def apply_step(group_id: int, orch, step) -> None:

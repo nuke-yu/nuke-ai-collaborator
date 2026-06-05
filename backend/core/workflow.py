@@ -14,7 +14,7 @@ orchestrator_id 选出的 Orchestrator（默认 workflow_v1 / DeclarativeOrchest
 from db import get_db, get_messages
 from core.orchestration import parse_tickets
 from core.orchestration import registry as orch_registry
-from core.runner import apply_step
+from core.runner import apply_step, mark_gate_confirmed
 
 # 默认编排器：保留模块级单例供向后兼容（测试/旧代码访问 workflow._orch / _state）。
 _orch = orch_registry.get("workflow_v1")
@@ -109,6 +109,8 @@ async def confirm(group_id: int, gate_id: str = None) -> bool:
     orch = _orch_for(group_id)
     step = orch.confirm(group_id, gate_id)
     await apply_step(group_id, orch, step)
+    # 把确认门卡片标记为 confirmed（best-effort，逻辑收在 runner，紧挨建卡片处）
+    await mark_gate_confirmed(group_id, gate_id)
     return step.done
 
 

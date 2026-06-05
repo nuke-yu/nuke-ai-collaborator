@@ -165,13 +165,13 @@ class TestOrchestratorFlow(unittest.TestCase):
         self.assertEqual(self.orch.get(1)["current"], 1)
 
         # 阶段1 → 门2 → 阶段2 QA
-        s = self.orch.observe(1, 2, "实现方案…… [[DEV_DONE]]")
+        s = self.orch.observe(1, 2, "实现方案……\n[[DEV_DONE]]")
         self.assertEqual(s.confirm_gate["gate_id"], "1-1")
         s = self.orch.confirm(1)
         self.assertEqual(s.next_units[0].bot["id"], 3)          # 交棒给 QA
 
         # 阶段2 QA（末棒）→ 门3：确认前不结束
-        s = self.orch.observe(1, 3, "逐条AC…… [[QA_DONE]]")
+        s = self.orch.observe(1, 3, "逐条AC……\n[[QA_DONE]]")
         self.assertIsNotNone(s.confirm_gate)
         self.assertFalse(s.done)
         # 确认门3 → 整条流水线结束、状态清空
@@ -218,8 +218,8 @@ class TestOrchestratorFlow(unittest.TestCase):
         self.orch.begin(1, build_rd_pipeline(ba, dev, qa))
 
         # 推进到 QA：BA done+confirm，Dev done+confirm
-        self.orch.observe(1, 1, "需求…… [[BA_DONE]]"); self.orch.confirm(1)
-        self.orch.observe(1, 2, "实现…… [[DEV_DONE]]"); self.orch.confirm(1)
+        self.orch.observe(1, 1, "需求……\n[[BA_DONE]]"); self.orch.confirm(1)
+        self.orch.observe(1, 2, "实现……\n[[DEV_DONE]]"); self.orch.confirm(1)
         self.assertEqual(self.orch.get(1)["current"], 2)
 
         # QA 不通过：返工门，current 不动
@@ -235,13 +235,13 @@ class TestOrchestratorFlow(unittest.TestCase):
         self.assertIn("返工", s.next_units[0].trigger_msg)
 
         # Dev 修完 → 门 → 确认 → 回到 QA
-        self.orch.observe(1, 2, "已修复…… [[DEV_DONE]]")
+        self.orch.observe(1, 2, "已修复……\n[[DEV_DONE]]")
         s = self.orch.confirm(1)
         self.assertEqual(s.next_units[0].bot["id"], 3)
         self.assertEqual(self.orch.get(1)["current"], 2)
 
         # QA 全过 → 门 → 确认 → 整条流水线结束
-        s = self.orch.observe(1, 3, "全部通过 [[QA_DONE]]")
+        s = self.orch.observe(1, 3, "全部通过\n[[QA_DONE]]")
         self.assertIsNotNone(s.confirm_gate)
         self.assertFalse(s.confirm_gate["gate_id"].endswith("-rework"))
         s = self.orch.confirm(1)
@@ -255,8 +255,8 @@ class TestOrchestratorFlow(unittest.TestCase):
         qa = {"id": 3, "name": "QA", "avatar_color": "#3", "role": "QA"}
         stages = build_rd_pipeline(ba, dev, qa)
         self.orch.begin(1, stages)
-        self.orch.observe(1, 1, "需求…… [[BA_DONE]]"); self.orch.confirm(1)
-        self.orch.observe(1, 2, "实现…… [[DEV_DONE]]"); self.orch.confirm(1)
+        self.orch.observe(1, 1, "需求……\n[[BA_DONE]]"); self.orch.confirm(1)
+        self.orch.observe(1, 2, "实现……\n[[DEV_DONE]]"); self.orch.confirm(1)
         s = self.orch.observe(1, 3, "有问题\n[[QA_FAIL]]")
         self.assertEqual(s.confirm_gate["label"], stages[2]["fail_gate_label"])
 
@@ -273,7 +273,7 @@ class TestOrchestratorFlow(unittest.TestCase):
 
         ba_allowed = stages[0].get("allowed_tools")
         self.assertIsNotNone(ba_allowed, "BA 阶段必须带 allowed_tools 白名单")
-        for forbidden in ("write_file", "write_local_file", "run_shell", "create_pr", "spawn_agent"):
+        for forbidden in ("write_file", "edit_file", "write_local_file", "run_shell", "create_pr", "spawn_agent"):
             self.assertNotIn(forbidden, ba_allowed)
         # 仍要能澄清/建工单
         self.assertIn("read_file", ba_allowed)
@@ -927,6 +927,20 @@ class TestConfirmGateGlue(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(msgs), 1)
         self.assertEqual(msgs[0]["meta"]["kind"], "confirm_gate")
 
+    async def test_confirm_marks_gate_confirmed(self):
+        # 接线：wf.confirm 推进过门后，调用 runner.mark_gate_confirmed 持久化卡片状态。
+        import core.workflow as wf
+
+        mock_orch = MagicMock()
+        mock_orch.confirm.return_value = MagicMock(done=False, next_units=[], confirm_gate=None, announcements=[])
+
+        with patch("core.workflow._orch_for", return_value=mock_orch), \
+             patch("core.workflow.apply_step", new=AsyncMock()), \
+             patch("core.workflow.mark_gate_confirmed", new=AsyncMock()) as mark:
+            await wf.confirm(group_id=1, gate_id="1-0")
+
+        mark.assert_awaited_once_with(1, "1-0")
+
 
 class TestStartRdPipeline(unittest.IsolatedAsyncioTestCase):
     """worker 侧启动 RD 流水线：角色匹配 BA/Dev/QA，缺角色则提示不启动。"""
@@ -1012,7 +1026,7 @@ class TestSnapshotFromPersistedState(unittest.TestCase):
     def test_snapshot_state_renders_active_blob_without_mutation(self):
         live = self._orch()
         live.begin(7, [self._gated(1, "BA"), self._gated(2, "Dev")])
-        live.observe(7, 1, "all done [[DONE]]")     # BA 吐哨兵 → 挂起确认门
+        live.observe(7, 1, "all done\n[[DONE]]")     # BA 吐哨兵 → 挂起确认门
         blob = live.serialize(7)
         self.assertIn("awaiting_confirm", blob)
 
@@ -1036,7 +1050,7 @@ class TestSnapshotFromPersistedState(unittest.TestCase):
     def test_live_snapshot_matches_snapshot_state(self):
         live = self._orch()
         live.begin(7, [self._gated(1, "BA"), self._gated(2, "Dev")])
-        live.observe(7, 1, "done [[DONE]]")
+        live.observe(7, 1, "done\n[[DONE]]")
         self.assertEqual(live.snapshot(7), live.snapshot_state(live.serialize(7)))
 
 
@@ -1091,6 +1105,87 @@ class TestWorkflowMutationRouting(unittest.IsolatedAsyncioTestCase):
         gid, payload = bcast.await_args.args
         self.assertEqual(gid, 7)
         self.assertEqual(payload, {"type": "workflow_update", "active": False})
+
+
+class TestSentinelContract(unittest.TestCase):
+    """_signal_in 的哨兵匹配契约：标记必须独占一行（行级精确，归一化后）。
+
+    刻意不做"行尾 endswith"匹配——那会把"完成后我会输出[[QA_DONE]]"这类**提及**也
+    误判为完成。独占一行是唯一无歧义的完成信号。"""
+
+    def _s(self, response, keyword="[[QA_DONE]]"):
+        from core.orchestration.stages import _signal_in
+        return _signal_in(response, keyword)
+
+    def test_own_line_matches(self):
+        self.assertTrue(self._s("结论：通过\n[[QA_DONE]]"))
+
+    def test_tolerates_spacing_fullwidth_and_trailing_punct(self):
+        # 归一化容忍空格/大小写/全角括号/行尾标点，只要这一行没有别的正文词
+        self.assertTrue(self._s("done\n[[ qa_done ]]."))
+        self.assertTrue(self._s("done\n【【QA_DONE】】"))
+
+    def test_inline_with_prose_does_not_match(self):
+        # 同一行还有正文词 → 不算完成（契约：标记独占一行）
+        self.assertFalse(self._s("结论：通过 [[QA_DONE]]"))
+
+    def test_mention_does_not_match(self):
+        # 仅"提及"标记（没真正收尾）不应触发——这正是不用 endswith 的原因
+        self.assertFalse(self._s("我会在最后输出[[QA_DONE]]"))
+        self.assertFalse(self._s("完成后我会输出[[QA_DONE]]再继续"))
+
+    def test_plain_keyword_keeps_substring_match(self):
+        # 普通中文关键词仍走宽容子串匹配，不受影响
+        self.assertTrue(self._s("测试全部完毕了", "完毕"))
+
+
+class TestMarkGateConfirmed(unittest.IsolatedAsyncioTestCase):
+    """runner.mark_gate_confirmed：把匹配 gate_id 的确认门卡片 meta.status 翻成 confirmed，
+    其余卡片不动；坏 meta 跳过不炸；DB 失败只告警不抛（best-effort，不影响 confirm 推进）。"""
+
+    def _fake_conn(self, rows):
+        cur = MagicMock()
+        cur.fetchall = AsyncMock(return_value=rows)
+        conn = MagicMock()
+        conn.execute = AsyncMock(return_value=cur)   # `cur = await db.execute(...)`
+        conn.commit = AsyncMock()
+        cm = MagicMock()
+        cm.__aenter__ = AsyncMock(return_value=conn)
+        cm.__aexit__ = AsyncMock(return_value=False)
+        return cm, conn
+
+    async def test_flips_only_matching_gate_and_skips_bad_meta(self):
+        from core import runner
+        import json
+        cm, conn = self._fake_conn([
+            (123, '{"kind": "confirm_gate", "gate_id": "1-0", "status": "pending"}'),
+            (124, '{"kind": "confirm_gate", "gate_id": "9-9", "status": "pending"}'),  # gate 不匹配
+            (125, 'not-json'),                                                          # 坏 meta，跳过
+        ])
+        with patch.object(runner, "write_connect", return_value=cm):
+            await runner.mark_gate_confirmed(1, "1-0")
+        updated = {"kind": "confirm_gate", "gate_id": "1-0", "status": "confirmed"}
+        conn.execute.assert_any_call(
+            "UPDATE messages SET meta = ? WHERE id = ?",
+            (json.dumps(updated, ensure_ascii=False), 123),
+        )
+        # 只更新了匹配的那条：UPDATE 仅出现一次
+        updates = [c for c in conn.execute.call_args_list if c.args[0].startswith("UPDATE")]
+        self.assertEqual(len(updates), 1)
+        conn.commit.assert_awaited_once()
+
+    async def test_no_gate_id_is_noop(self):
+        from core import runner
+        with patch.object(runner, "write_connect") as wc:
+            await runner.mark_gate_confirmed(1, None)
+        wc.assert_not_called()
+
+    async def test_db_failure_is_swallowed(self):
+        from core import runner
+        bad_cm = MagicMock()
+        bad_cm.__aenter__ = AsyncMock(side_effect=RuntimeError("boom"))
+        with patch.object(runner, "write_connect", return_value=bad_cm):
+            await runner.mark_gate_confirmed(1, "1-0")  # 不应抛
 
 
 if __name__ == "__main__":

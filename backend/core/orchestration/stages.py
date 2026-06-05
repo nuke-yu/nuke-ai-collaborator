@@ -34,7 +34,7 @@ def _signal_in(response: str, keyword: str) -> bool:
     """容错并精确匹配阶段完成信号。
 
     如果是带括号的哨兵标记（如 [[BA_DONE]] / [[DEV_DONE]]），防止模型在对话中提及它作为提问/讨论，
-    此时应采用更严格的行级精确匹配或尾部匹配逻辑。
+    此时应采用更严格的行级精确匹配逻辑。
     对普通中文关键词（如「完毕」「测试完成」），保持原有的宽容子串包含逻辑。"""
     if not keyword:
         return False
@@ -51,10 +51,6 @@ def _signal_in(response: str, keyword: str) -> bool:
         for line in response.splitlines():
             if norm(line) == keyword_norm:
                 return True
-        # 2. 或者整个回复（归一化后）以关键词（归一化后）结尾
-        response_norm = norm(response)
-        if response_norm.endswith(keyword_norm):
-            return True
         return False
     else:
         return keyword_norm in norm(response)
