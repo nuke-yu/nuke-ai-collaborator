@@ -386,6 +386,13 @@ class ToolLoopRunner:
         self.system_prompt = self.system_prompt_base
 
         user_content = build_image_content(user_msg, self.ctx.file_url, self.ctx.file_type, self.provider)
+        if isinstance(user_content, str):
+            user_content, _ = compact.truncate_user_message(user_content)
+        elif isinstance(user_content, list):
+            for block in user_content:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    truncated_text, _ = compact.truncate_user_message(block.get("text", ""))
+                    block["text"] = truncated_text
         
         _resuming = bool(self.ctx.resume_session_id)
         if _resuming:
@@ -459,21 +466,25 @@ class ToolLoopRunner:
             _fpath = call["arguments"].get("path", "")
             if _fpath and call["name"] in compact._FILE_READ_TOOLS:
                 self.file_tracker.setdefault(_fpath, "read")
+            
+            # Apply truncation if output is too long
+            display_result, truncated_path = compact.truncate_tool_result(call["name"], tool_result)
+            
             self.tool_records.append({
                 "name": call["name"],
                 "args": call["arguments"],
-                "result": tool_result,
+                "result": display_result,
             })
             self.messages.append({
                 "role": "tool",
                 "tool_call_id": call["id"],
                 "name": call["name"],
-                "content": tool_result,
+                "content": display_result,
             })
             await self.ctx.interaction.save_session_snapshot(self.session_id, self.messages)
             await self.ctx.interaction.broadcast(self.ctx.group_id, {
                 "type": "tool_result", "temp_id": self.temp_id,
-                "tool": call["name"], "result": tool_result[:300],
+                "tool": call["name"], "result": display_result[:300],
             })
 
     async def _execute_serial_tools(self, calls):
@@ -571,6 +582,9 @@ class ToolLoopRunner:
                     "message": f"{self.bot['name']} 写入了新的自学技能「{skill_name}」，请在 Skill 管理面板审批。",
                 })
                 
+            # Apply truncation if output is too long
+            display_result, truncated_path = compact.truncate_tool_result(call["name"], display_result)
+
             self.tool_records.append({
                 "name": call["name"],
                 "args": call["arguments"],

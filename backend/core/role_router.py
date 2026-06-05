@@ -49,6 +49,8 @@ def build_image_content(text: str, file_url: str | None, file_type: str | None,
 
 
 def build_context_message(message: str, sender_name: str, recent_messages: list) -> tuple:
+    from core.config import TOOL_RESULT_MAX_CHARS
+
     history_source = recent_messages
     if history_source and history_source[-1].get("content") == message and history_source[-1].get("sender_name") == sender_name:
         history_source = history_source[:-1]
@@ -56,10 +58,26 @@ def build_context_message(message: str, sender_name: str, recent_messages: list)
     history = []
     for msg in history_source[-8:]:
         role = "assistant" if msg["sender_type"] == "bot" else "user"
+        content = msg["content"]
+        if content and isinstance(content, str) and len(content) > TOOL_RESULT_MAX_CHARS:
+            half = TOOL_RESULT_MAX_CHARS // 2
+            head = content[:half]
+            tail = content[-half:]
+            truncated_chars = len(content) - (len(head) + len(tail))
+            content = f"{head}\n\n[... 历史消息超长已自动截断 {truncated_chars:,} 字符 ...]\n\n{tail}"
+
         history.append({
             "role": role,
-            "content": f"[{msg['sender_name']}]: {msg['content']}"
+            "content": f"[{msg['sender_name']}]: {content}"
         })
+    
+    if message and len(message) > TOOL_RESULT_MAX_CHARS:
+        half = TOOL_RESULT_MAX_CHARS // 2
+        head = message[:half]
+        tail = message[-half:]
+        truncated_chars = len(message) - (len(head) + len(tail))
+        message = f"{head}\n\n[... 消息超长已自动截断 {truncated_chars:,} 字符 ...]\n\n{tail}"
+
     user_message = f"[{sender_name}]: {message}"
     return history, user_message
 

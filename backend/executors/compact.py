@@ -737,3 +737,94 @@ async def maybe_compact_db_history(
         logger.error("DB compaction error for group %s: %s", group_id, exc)
     finally:
         _db_compaction_locks.discard(group_id)
+
+
+def truncate_tool_result(tool_name: str, tool_result: str) -> tuple[str, str | None]:
+    """
+    Checks if tool_result exceeds TOOL_RESULT_MAX_CHARS.
+    If yes, writes the full output to backend/uploads/truncated_outputs/tool_result_{uuid}.log
+    and returns a truncated preview (first half + last half) with instructions,
+    along with the path of the saved file.
+    Otherwise returns the original tool_result, and None.
+    """
+    import os
+    import uuid
+    from core.config import TOOL_RESULT_MAX_CHARS
+
+    if not isinstance(tool_result, str):
+        return tool_result, None
+
+    if len(tool_result) <= TOOL_RESULT_MAX_CHARS:
+        return tool_result, None
+
+    file_id = str(uuid.uuid4())
+    # Save inside backend/uploads/truncated_outputs
+    dir_path = os.path.join("backend", "uploads", "truncated_outputs")
+    os.makedirs(dir_path, exist_ok=True)
+    file_name = f"tool_result_{file_id}.log"
+    file_path = os.path.join(dir_path, file_name)
+
+    with open(file_path, "w", encoding="utf-8") as f:
+        f.write(tool_result)
+
+    half = TOOL_RESULT_MAX_CHARS // 2
+    head = tool_result[:half]
+    tail = tool_result[-half:]
+    truncated_chars = len(tool_result) - (len(head) + len(tail))
+
+    abs_path = os.path.abspath(file_path)
+
+    hint = (
+        f"\n\n[系统提示] 该工具「{tool_name}」输出超长（{len(tool_result):,} 字符），已被自动截断。\n"
+        f"完整输出已保存至本地文件：{abs_path}\n"
+        f"你可以使用 run_shell 结合 grep、head、tail 等命令，或者文件读取工具的 offset/limit 参数局部读取该文件，"
+        f"请勿尝试直接读取整份日志以节省上下文空间。"
+    )
+
+    preview = f"{head}\n\n[... 已自动截断 {truncated_chars:,} 字符 ...]\n\n{tail}{hint}"
+    return preview, abs_path
+
+
+def truncate_user_message(content) -> tuple[str, str | None]:
+    """
+    Checks if user message content exceeds TOOL_RESULT_MAX_CHARS.
+    If yes, writes the full content to backend/uploads/truncated_outputs/user_message_{uuid}.txt
+    and returns a truncated preview with instructions,
+    along with the path of the saved file.
+    Otherwise returns the original content, and None.
+    """
+    import os
+    import uuid
+    from core.config import TOOL_RESULT_MAX_CHARS
+
+    if not isinstance(content, str):
+        return content, None
+
+    if len(content) <= TOOL_RESULT_MAX_CHARS:
+        return content, None
+
+    file_id = str(uuid.uuid4())
+    dir_path = os.path.join("backend", "uploads", "truncated_outputs")
+    os.makedirs(dir_path, exist_ok=True)
+    file_name = f"user_message_{file_id}.txt"
+    file_path = os.path.join(dir_path, file_name)
+
+    with open(file_path, "w", encoding="utf-8") as f:
+        f.write(content)
+
+    half = TOOL_RESULT_MAX_CHARS // 2
+    head = content[:half]
+    tail = content[-half:]
+    truncated_chars = len(content) - (len(head) + len(tail))
+
+    abs_path = os.path.abspath(file_path)
+
+    hint = (
+        f"\n\n[系统提示] 该用户消息内容超长（{len(content):,} 字符），已自动截断以保护上下文。\n"
+        f"完整内容已保存至本地文件：{abs_path}\n"
+        f"你可以使用 run_shell 结合 grep 等命令，或者文件读取工具的 offset/limit 参数局部读取该文件。"
+    )
+
+    preview = f"{head}\n\n[... 已自动截断 {truncated_chars:,} 字符 ...]\n\n{tail}{hint}"
+    return preview, abs_path
+

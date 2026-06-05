@@ -50,5 +50,29 @@ class TestBuildContextMessage(unittest.TestCase):
         self.assertEqual(history[1]["content"], "[BobBot]: Hi there!")
         self.assertEqual(user_message, "[Alice]: New question")
 
+    def test_build_context_truncation(self):
+        """Verify that build_context_message truncates messages exceeding TOOL_RESULT_MAX_CHARS."""
+        from core.config import TOOL_RESULT_MAX_CHARS
+        
+        long_content = "A" * (TOOL_RESULT_MAX_CHARS + 5000)
+        recent_messages = [
+            {"sender_name": "Alice", "sender_type": "human", "content": long_content, "created_at": "2026-05-26 12:00:00"},
+        ]
+        
+        history, user_message = build_context_message(
+            message=long_content,
+            sender_name="BobBot",  # Different sender to avoid deduplication
+            recent_messages=recent_messages
+        )
+        
+        # Historical message should be truncated
+        self.assertEqual(len(history), 1)
+        self.assertTrue("已自动截断" in history[0]["content"])
+        self.assertTrue(len(history[0]["content"]) < len(long_content))
+        
+        # User message should also be truncated
+        self.assertTrue("已自动截断" in user_message)
+        self.assertTrue(len(user_message) < len(long_content))
+
 if __name__ == "__main__":
     unittest.main()
