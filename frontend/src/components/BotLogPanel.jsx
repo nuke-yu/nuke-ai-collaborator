@@ -104,9 +104,11 @@ export default function BotLogPanel({ groupId, onClose }) {
       }
       debounceTimerRef.current = setTimeout(() => {
         fetchSessionsList(false)
-        const sid = targetSessionId || selectedSessionId
-        if (sid) {
-          fetchSessionData(sid, false)
+        // Only refresh the detail pane when the updated session is the one
+        // currently open — otherwise a group-wide session_updated for another
+        // bot's session would hijack the view away from what the user is reading.
+        if (selectedSessionId && (!targetSessionId || targetSessionId === selectedSessionId)) {
+          fetchSessionData(selectedSessionId, false)
         }
       }, 250)
     }
@@ -146,7 +148,13 @@ export default function BotLogPanel({ groupId, onClose }) {
       // 3. Other events that trigger instant re-fetch
       const relevantTypes = ['stream_start', 'stream_end', 'tool_call', 'tool_result', 'compaction', 'skills_loaded', 'recovery_prompt']
       if (relevantTypes.includes(data.type)) {
-        triggerDebouncedRefresh(selectedSessionId)
+        if (data.session_id && data.session_id !== selectedSessionId) {
+          setSelectedSessionId(data.session_id)
+          fetchSessionData(data.session_id, false)
+          fetchSessionsList(false)
+        } else {
+          triggerDebouncedRefresh(data.session_id || selectedSessionId)
+        }
       }
     }
 
