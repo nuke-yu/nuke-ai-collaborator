@@ -739,10 +739,12 @@ async def maybe_compact_db_history(
         _db_compaction_locks.discard(group_id)
 
 
-def truncate_tool_result(tool_name: str, tool_result: str) -> tuple[str, str | None]:
+def truncate_tool_result(
+    tool_name: str, tool_result: str, group_id: int, model_name: str = None
+) -> tuple[str, str | None]:
     """
-    Checks if tool_result exceeds TOOL_RESULT_MAX_CHARS.
-    If yes, writes the full output to backend/uploads/truncated_outputs/tool_result_{uuid}.log
+    Checks if tool_result exceeds a dynamically calculated character limit.
+    If yes, writes the full output to group_workspace(group_id) / "truncated_outputs" / tool_result_{uuid}.log
     and returns a truncated preview (first half + last half) with instructions,
     along with the path of the saved file.
     Otherwise returns the original tool_result, and None.
@@ -750,16 +752,28 @@ def truncate_tool_result(tool_name: str, tool_result: str) -> tuple[str, str | N
     import os
     import uuid
     from core.config import TOOL_RESULT_MAX_CHARS
+    from workspace import group_workspace
 
     if not isinstance(tool_result, str):
         return tool_result, None
 
-    if len(tool_result) <= TOOL_RESULT_MAX_CHARS:
+    # Resolve dynamic character cap based on model context window
+    char_cap = TOOL_RESULT_MAX_CHARS
+    if model_name:
+        context_window = _MODEL_CONTEXT_WINDOWS.get(model_name, _DEFAULT_CONTEXT_WINDOW)
+        # Allocate approx 15% of the context window for a single tool result,
+        # converting tokens to characters (1 token ≈ 4 characters).
+        # Floor it at 20,000 and cap it at 160,000 characters
+        dynamic_cap = int(context_window * 0.15 * 4)
+        char_cap = max(20000, min(160000, dynamic_cap))
+
+    if len(tool_result) <= char_cap:
         return tool_result, None
 
     file_id = str(uuid.uuid4())
-    # Save inside backend/uploads/truncated_outputs
-    dir_path = os.path.join("backend", "uploads", "truncated_outputs")
+    # Save inside group workspace / truncated_outputs
+    ws_path = group_workspace(group_id)
+    dir_path = os.path.join(ws_path, "truncated_outputs")
     os.makedirs(dir_path, exist_ok=True)
     file_name = f"tool_result_{file_id}.log"
     file_path = os.path.join(dir_path, file_name)
@@ -767,28 +781,31 @@ def truncate_tool_result(tool_name: str, tool_result: str) -> tuple[str, str | N
     with open(file_path, "w", encoding="utf-8") as f:
         f.write(tool_result)
 
-    half = TOOL_RESULT_MAX_CHARS // 2
+    half = char_cap // 2
     head = tool_result[:half]
     tail = tool_result[-half:]
     truncated_chars = len(tool_result) - (len(head) + len(tail))
 
-    abs_path = os.path.abspath(file_path)
+    # Path relative to workspace root so LLM/tools can locate it directly
+    rel_path = os.path.join("truncated_outputs", file_name)
 
     hint = (
         f"\n\n[系统提示] 该工具「{tool_name}」输出超长（{len(tool_result):,} 字符），已被自动截断。\n"
-        f"完整输出已保存至本地文件：{abs_path}\n"
-        f"你可以使用 run_shell 结合 grep、head、tail 等命令，或者文件读取工具的 offset/limit 参数局部读取该文件，"
+        f"完整输出已保存至当前工作区路径：{rel_path}\n"
+        f"你可以使用 run_shell 结合 grep、head、tail 等命令，或者 read_file 工具并设置 offset/limit 参数局部读取该文件，"
         f"请勿尝试直接读取整份日志以节省上下文空间。"
     )
 
     preview = f"{head}\n\n[... 已自动截断 {truncated_chars:,} 字符 ...]\n\n{tail}{hint}"
-    return preview, abs_path
+    return preview, rel_path
 
 
-def truncate_user_message(content) -> tuple[str, str | None]:
+def truncate_user_message(
+    content, group_id: int, model_name: str = None
+) -> tuple[str, str | None]:
     """
-    Checks if user message content exceeds TOOL_RESULT_MAX_CHARS.
-    If yes, writes the full content to backend/uploads/truncated_outputs/user_message_{uuid}.txt
+    Checks if user message content exceeds a dynamically calculated character limit.
+    If yes, writes the full content to group_workspace(group_id) / "truncated_outputs" / user_message_{uuid}.txt
     and returns a truncated preview with instructions,
     along with the path of the saved file.
     Otherwise returns the original content, and None.
@@ -796,15 +813,23 @@ def truncate_user_message(content) -> tuple[str, str | None]:
     import os
     import uuid
     from core.config import TOOL_RESULT_MAX_CHARS
+    from workspace import group_workspace
 
     if not isinstance(content, str):
         return content, None
 
-    if len(content) <= TOOL_RESULT_MAX_CHARS:
+    char_cap = TOOL_RESULT_MAX_CHARS
+    if model_name:
+        context_window = _MODEL_CONTEXT_WINDOWS.get(model_name, _DEFAULT_CONTEXT_WINDOW)
+        dynamic_cap = int(context_window * 0.15 * 4)
+        char_cap = max(20000, min(160000, dynamic_cap))
+
+    if len(content) <= char_cap:
         return content, None
 
     file_id = str(uuid.uuid4())
-    dir_path = os.path.join("backend", "uploads", "truncated_outputs")
+    ws_path = group_workspace(group_id)
+    dir_path = os.path.join(ws_path, "truncated_outputs")
     os.makedirs(dir_path, exist_ok=True)
     file_name = f"user_message_{file_id}.txt"
     file_path = os.path.join(dir_path, file_name)
@@ -812,19 +837,19 @@ def truncate_user_message(content) -> tuple[str, str | None]:
     with open(file_path, "w", encoding="utf-8") as f:
         f.write(content)
 
-    half = TOOL_RESULT_MAX_CHARS // 2
+    half = char_cap // 2
     head = content[:half]
     tail = content[-half:]
     truncated_chars = len(content) - (len(head) + len(tail))
 
-    abs_path = os.path.abspath(file_path)
+    rel_path = os.path.join("truncated_outputs", file_name)
 
     hint = (
         f"\n\n[系统提示] 该用户消息内容超长（{len(content):,} 字符），已自动截断以保护上下文。\n"
-        f"完整内容已保存至本地文件：{abs_path}\n"
-        f"你可以使用 run_shell 结合 grep 等命令，或者文件读取工具的 offset/limit 参数局部读取该文件。"
+        f"完整内容已保存至当前工作区路径：{rel_path}\n"
+        f"你可以使用 run_shell 结合 grep 等命令，或者 read_file 工具并设置 offset/limit 参数局部读取该文件。"
     )
 
     preview = f"{head}\n\n[... 已自动截断 {truncated_chars:,} 字符 ...]\n\n{tail}{hint}"
-    return preview, abs_path
+    return preview, rel_path
 

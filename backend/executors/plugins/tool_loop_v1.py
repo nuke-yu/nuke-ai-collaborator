@@ -387,11 +387,11 @@ class ToolLoopRunner:
 
         user_content = build_image_content(user_msg, self.ctx.file_url, self.ctx.file_type, self.provider)
         if isinstance(user_content, str):
-            user_content, _ = compact.truncate_user_message(user_content)
+            user_content, _ = compact.truncate_user_message(user_content, self.ctx.group_id, self.model_name)
         elif isinstance(user_content, list):
             for block in user_content:
                 if isinstance(block, dict) and block.get("type") == "text":
-                    truncated_text, _ = compact.truncate_user_message(block.get("text", ""))
+                    truncated_text, _ = compact.truncate_user_message(block.get("text", ""), self.ctx.group_id, self.model_name)
                     block["text"] = truncated_text
         
         _resuming = bool(self.ctx.resume_session_id)
@@ -468,7 +468,7 @@ class ToolLoopRunner:
                 self.file_tracker.setdefault(_fpath, "read")
             
             # Apply truncation if output is too long
-            display_result, truncated_path = compact.truncate_tool_result(call["name"], tool_result)
+            display_result, truncated_path = compact.truncate_tool_result(call["name"], tool_result, self.ctx.group_id, self.model_name)
             
             self.tool_records.append({
                 "name": call["name"],
@@ -583,7 +583,7 @@ class ToolLoopRunner:
                 })
                 
             # Apply truncation if output is too long
-            display_result, truncated_path = compact.truncate_tool_result(call["name"], display_result)
+            display_result, truncated_path = compact.truncate_tool_result(call["name"], display_result, self.ctx.group_id, self.model_name)
 
             self.tool_records.append({
                 "name": call["name"],
