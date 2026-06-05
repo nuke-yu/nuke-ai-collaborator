@@ -541,6 +541,27 @@ def _allocate_free_port() -> int:
         return s.getsockname()[1]
 
 
+def _intercept_command_ports(cmd: str, env: dict) -> tuple[str, str | None, int | None]:
+    allocated_port = None
+    intercepted_port = None
+    for p in sorted(_INTERCEPT_PORTS, key=len, reverse=True):
+        pattern = r"(?<![\d\-])" + re.escape(p) + r"(?![\d])"
+        if re.search(pattern, cmd):
+            intercepted_port = p
+            allocated_port = _allocate_free_port()
+            env["APP_PORT"] = str(allocated_port)
+            env["PORT"] = str(allocated_port)
+            cmd = re.sub(pattern, str(allocated_port), cmd)
+            break
+    return cmd, intercepted_port, allocated_port
+
+
+def _wrap_command_with_limits(cmd: str, limit_bytes: int) -> str:
+    if not _IS_WINDOWS:
+        return f"ulimit -v { limit_bytes // 1024 } 2>/dev/null; {cmd}"
+    return cmd
+
+
 async def _handle_run_shell(
     cmd: str, cwd: str = "", timeout: int = 30,
     background: bool = False, context: dict = None,
@@ -550,35 +571,11 @@ async def _handle_run_shell(
     if err:
         return f"[安全拒绝] {err}"
     
-    # 强制上限，防止 Bot 瞎传参数导致永远阻塞
-    _max_timeout = min(timeout, 300) # Max 5 minutes even if requested more
+    _max_timeout = min(timeout, 300)
     sandbox_env = _sandbox_env()
     
-    # Point 6: Dynamic Port Interception & Allocation
-    # If the bot tries to use a common port, we switch it to a dynamic one
-    allocated_port = None
-    intercepted_port = None
-    # Sort by length descending to match 8080 before 80, using word boundaries (DFT-065)
-    for p in sorted(_INTERCEPT_PORTS, key=len, reverse=True):
-        pattern = r"(?<![\d\-])" + re.escape(p) + r"(?![\d])"
-        if re.search(pattern, cmd):
-            intercepted_port = p
-            allocated_port = _allocate_free_port()
-            # Intercept by environment variable injection
-            sandbox_env["APP_PORT"] = str(allocated_port)
-            sandbox_env["PORT"] = str(allocated_port)
-            # Physical replacement in the command string as a backstop
-            cmd = re.sub(pattern, str(allocated_port), cmd)
-            break
-    
-    # Memory limit enforcement
-    _MEMORY_LIMIT_BYTES = config.SHELL_MEMORY_LIMIT_BYTES
-    if not _IS_WINDOWS:
-        # Wrap command in a subshell with ulimit (virtual memory limit) to prevent OOM
-        safe_cmd = f"ulimit -v { _MEMORY_LIMIT_BYTES // 1024 } 2>/dev/null; {cmd}"
-    else:
-        # Windows: We run the raw command and rely on Job Objects (applied to PID below)
-        safe_cmd = cmd
+    cmd, intercepted_port, allocated_port = _intercept_command_ports(cmd, sandbox_env)
+    safe_cmd = _wrap_command_with_limits(cmd, config.SHELL_MEMORY_LIMIT_BYTES)
     
     try:
         if background:
@@ -588,11 +585,10 @@ async def _handle_run_shell(
                 stderr=asyncio.subprocess.DEVNULL,
                 cwd=str(work_dir),
                 env=sandbox_env,
-                # Start new session so background task doesn't die when parent shell exits
                 start_new_session=True if not _IS_WINDOWS else False
             )
             if _IS_WINDOWS:
-                win_sandbox.apply_memory_limit(proc.pid, _MEMORY_LIMIT_BYTES)
+                win_sandbox.apply_memory_limit(proc.pid, config.SHELL_MEMORY_LIMIT_BYTES)
             
             msg = f"已在后台启动（PID: {proc.pid}），命令：{cmd}"
             if allocated_port:
@@ -607,9 +603,8 @@ async def _handle_run_shell(
             env=sandbox_env,
         )
         if _IS_WINDOWS:
-            win_sandbox.apply_memory_limit(proc.pid, _MEMORY_LIMIT_BYTES)
+            win_sandbox.apply_memory_limit(proc.pid, config.SHELL_MEMORY_LIMIT_BYTES)
         
-        # Enforce strict timeout
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=_max_timeout)
         
         out = stdout.decode(errors="replace").strip()

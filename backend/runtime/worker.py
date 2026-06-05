@@ -17,6 +17,7 @@ out / exercised in CELL-12. This module is the loop + lifecycle + routing.
 """
 import asyncio
 import logging
+from contextlib import asynccontextmanager
 
 import db
 from runtime import tracing
@@ -124,85 +125,70 @@ class Worker:
 
     
     
+    @asynccontextmanager
+    async def _group_context(self, gid: int):
+        from runtime.lifecycle import manager as lifecycle
+        db_path = await lifecycle.hydrate(gid)
+        with db.bind_db(db_path):
+            yield
+
     async def _handle(self, msg: dict) -> None:
         t = msg.get("type")
         gid = msg.get("group_id")
         tid = msg.get("trace_id")
         
         with tracing.trace_context(trace_id=tid, group_id=gid):
-            if t == ipc.protocol.USER_MESSAGE:
-                from runtime.lifecycle import manager as lifecycle
-                db_path = await lifecycle.hydrate(gid)
-                with db.bind_db(db_path):
-                    await self._dispatch(msg)
-            elif t == ipc.protocol.ABORT:
+            if t == ipc.protocol.ABORT:
                 if self._on_abort:
                     self._on_abort(gid)
                 else:
                     bg.abort_group(gid)
-            elif t == ipc.protocol.CONFIRM:
-                from runtime.lifecycle import manager as lifecycle
-                db_path = await lifecycle.hydrate(gid)
-                with db.bind_db(db_path):
-                    import core.workflow as wf
-                    await wf.confirm(gid, msg.get("gate_id"))
-            elif t == ipc.protocol.START_WORKFLOW:
-                from runtime.lifecycle import manager as lifecycle
-                db_path = await lifecycle.hydrate(gid)
-                with db.bind_db(db_path):
-                    from runtime.dispatch import dispatch_start_workflow
-                    await dispatch_start_workflow(msg)
-            elif t == ipc.protocol.WORKFLOW_NEXT:
-                from runtime.lifecycle import manager as lifecycle
-                db_path = await lifecycle.hydrate(gid)
-                with db.bind_db(db_path):
-                    from runtime.dispatch import dispatch_workflow_next
-                    await dispatch_workflow_next(msg)
-            elif t == ipc.protocol.WORKFLOW_END:
-                from runtime.lifecycle import manager as lifecycle
-                db_path = await lifecycle.hydrate(gid)
-                with db.bind_db(db_path):
-                    from runtime.dispatch import dispatch_workflow_end
-                    await dispatch_workflow_end(msg)
-            elif t == ipc.protocol.QUERY:
-                from runtime.lifecycle import manager as lifecycle
-                db_path = await lifecycle.hydrate(gid)
-                with db.bind_db(db_path):
-                    from runtime.query_dispatch import dispatch_query
-                    await dispatch_query(msg)
-            elif t == ipc.protocol.MUTATE:
-                from runtime.lifecycle import manager as lifecycle
-                db_path = await lifecycle.hydrate(gid)
-                with db.bind_db(db_path):
-                    from runtime.query_dispatch import dispatch_mutate
-                    await dispatch_mutate(msg)
-            elif t == ipc.protocol.PERMISSION_RESPONSE:
-                request_id = msg.get("request_id", "")
-                approved = bool(msg.get("approved", False))
-                persistence = msg.get("persistence", "once")
-                req = permissions.resolve(request_id, approved, persistence, group_id=gid)
-                if req and approved and persistence == "always":
-                    from runtime.lifecycle import manager as lifecycle
-                    db_path = await lifecycle.hydrate(gid)
-                    with db.bind_db(db_path):
-                        bg.spawn(permissions.save_rule(req.bot_id, req.tool_name, "", "allow"))
+                return
 
-            elif t == ipc.protocol.WAKE_TRIGGER:
-                from runtime.lifecycle import manager as lifecycle
-                db_path = await lifecycle.hydrate(gid)
-                with db.bind_db(db_path):
-                    from runtime.dispatch import dispatch_wake_trigger
-                    await dispatch_wake_trigger(msg)
-            elif t == ipc.protocol.RELEASE_LEASE:
-                # CELL-18: Gracefully close the group and ACK the Supervisor
+            if t == ipc.protocol.RELEASE_LEASE:
                 from runtime.lifecycle import manager as lifecycle
                 await lifecycle.evict(gid)
                 await ipc.send_msg(self._writer, ipc.protocol.envelope(
                     ipc.protocol.LEASE_RELEASED, group_id=gid, trace_id=tid
                 ))
-            else:
+                return
 
-                log.debug("worker %s: unhandled downstream type=%s", self.worker_id, t)
+            if t == ipc.protocol.PERMISSION_RESPONSE:
+                request_id = msg.get("request_id", "")
+                approved = bool(msg.get("approved", False))
+                persistence = msg.get("persistence", "once")
+                req = permissions.resolve(request_id, approved, persistence, group_id=gid)
+                if req and approved and persistence == "always":
+                    async with self._group_context(gid):
+                        bg.spawn(permissions.save_rule(req.bot_id, req.tool_name, "", "allow"))
+                return
+
+            async with self._group_context(gid):
+                if t == ipc.protocol.USER_MESSAGE:
+                    await self._dispatch(msg)
+                elif t == ipc.protocol.CONFIRM:
+                    import core.workflow as wf
+                    await wf.confirm(gid, msg.get("gate_id"))
+                elif t == ipc.protocol.START_WORKFLOW:
+                    from runtime.dispatch import dispatch_start_workflow
+                    await dispatch_start_workflow(msg)
+                elif t == ipc.protocol.WORKFLOW_NEXT:
+                    from runtime.dispatch import dispatch_workflow_next
+                    await dispatch_workflow_next(msg)
+                elif t == ipc.protocol.WORKFLOW_END:
+                    from runtime.dispatch import dispatch_workflow_end
+                    await dispatch_workflow_end(msg)
+                elif t == ipc.protocol.QUERY:
+                    from runtime.query_dispatch import dispatch_query
+                    await dispatch_query(msg)
+                elif t == ipc.protocol.MUTATE:
+                    from runtime.query_dispatch import dispatch_mutate
+                    await dispatch_mutate(msg)
+                elif t == ipc.protocol.WAKE_TRIGGER:
+                    from runtime.dispatch import dispatch_wake_trigger
+                    await dispatch_wake_trigger(msg)
+                else:
+                    log.debug("worker %s: unhandled downstream type=%s", self.worker_id, t)
 
 
 

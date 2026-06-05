@@ -99,6 +99,40 @@ export default function BotLogPanel({ groupId, onClose }) {
   useEffect(() => {
     const handleWsEvent = (e) => {
       const data = e.detail
+
+      // 1. Handle session updated event from database writes
+      if (data.type === 'session_updated') {
+        fetchSessionsList(false)
+        if (selectedSessionId && data.session_id === selectedSessionId) {
+          fetchSessionData(selectedSessionId, false)
+        }
+        return
+      }
+
+      // 2. Handle stream chunks for the active session in real-time
+      if (data.type === 'stream_chunk' && selectedSessionId && data.session_id === selectedSessionId) {
+        setSessionDetail(prev => {
+          if (!prev) return prev
+          const snapshot = [...(prev.last_snapshot || [])]
+          const lastMsg = snapshot[snapshot.length - 1]
+          if (lastMsg && lastMsg.role === 'assistant' && lastMsg.streaming) {
+            snapshot[snapshot.length - 1] = {
+              ...lastMsg,
+              content: (lastMsg.content || '') + data.delta
+            }
+          } else {
+            snapshot.push({
+              role: 'assistant',
+              content: data.delta,
+              streaming: true
+            })
+          }
+          return { ...prev, last_snapshot: snapshot }
+        })
+        return
+      }
+
+      // 3. Other events that trigger instant re-fetch
       const relevantTypes = ['stream_start', 'stream_end', 'tool_call', 'tool_result', 'compaction', 'skills_loaded', 'recovery_prompt']
       if (relevantTypes.includes(data.type)) {
         fetchSessionsList(false)
@@ -319,7 +353,7 @@ export default function BotLogPanel({ groupId, onClose }) {
                         roleLabel = 'User Prompt'
                         roleClass = 'bg-indigo-950/40 text-indigo-200 border-indigo-900/50'
                       } else if (isAssistant) {
-                        roleLabel = 'LLM Assistant'
+                        roleLabel = msg.streaming ? 'LLM Assistant (正在生成...)' : 'LLM Assistant'
                         roleClass = 'bg-emerald-950/20 text-emerald-300 border-emerald-900/40'
                       } else if (isTool) {
                         roleLabel = `Tool Result: ${msg.name}`

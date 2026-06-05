@@ -27,6 +27,7 @@ from skills.constants import bot_ws as _bot_ws
 import executors.compact as compact
 from core import bg
 from core.orchestration.ai_service import AIService
+from core.orchestration.prompt_builder import compile_system_prompt
 
 _DOOM_LOOP_THRESHOLD = config.DOOM_LOOP_THRESHOLD  # breaks on the Nth consecutive tool-only iteration (inclusive)
 
@@ -278,6 +279,7 @@ class ToolLoopRunner:
                 chunk = self.full_text[i:i+chunk_size]
                 await self.ctx.interaction.broadcast(self.ctx.group_id, {
                     "type": "stream_chunk", "temp_id": self.temp_id, "delta": chunk,
+                    "session_id": self.session_id,
                 })
                 await asyncio.sleep(0.02)
             return
@@ -290,10 +292,12 @@ class ToolLoopRunner:
                 self.full_text += chunk
                 await self.ctx.interaction.broadcast(self.ctx.group_id, {
                     "type": "stream_chunk", "temp_id": self.temp_id, "delta": chunk,
+                    "session_id": self.session_id,
                 })
         except AIError as e:
             await self.ctx.interaction.broadcast(self.ctx.group_id, {
                 "type": "stream_error", "temp_id": self.temp_id, "message": str(e),
+                "session_id": self.session_id,
             })
 
     async def _finalize_reply(self):
@@ -322,6 +326,7 @@ class ToolLoopRunner:
             await self.ctx.interaction.broadcast(self.ctx.group_id, {
                 "type": "stream_chunk", "temp_id": self.temp_id,
                 "delta": approved_text[i:i+chunk_size],
+                "session_id": self.session_id,
             })
 
     async def _setup_session(self):
@@ -334,55 +339,30 @@ class ToolLoopRunner:
             self.ruleset = permissions.Ruleset(rules=db_rules, mode=perm_mode)
 
         history, user_msg = build_context_message(self.ctx.user_message, self.ctx.sender["name"], self.ctx.history)
-        base = _with_personality(
-            self.bot["system_prompt"] or f"你是{self.bot['name']}，{self.bot.get('role', '')}。", self.bot
-        )
         memory = await get_memory_context(self.bot["id"], self.bot.get("role") or "", self.ctx.user_message)
+        _, _ = await self._get_fresh_context_prefix()
 
         if self.executor.manifest.workspace.skill_discovery:
-            raw_skills = await list_skills_all(self.bot["id"], group_id=self.ctx.group_id, role=self.bot.get("role"))
-            lazy_candidates = [
-                s for s in raw_skills
-                if not s.get("always")
-                and s.get("status", "active") != "disabled"
-                and s.get("user_invocable", True)
-            ]
-            lazy_candidates = filter_skills_by_context(lazy_candidates, self.ctx.user_message)
-            self.skills_xml, injected_names = _build_skills_xml(lazy_candidates, self.model_name)
-            for s in raw_skills:
-                if s.get("status", "active") == "disabled":
-                    self.skills_snapshot.append({**s, "injected": None})
-                elif s.get("always"):
-                    self.skills_snapshot.append({**s, "injected": "full"})
-                elif not s.get("user_invocable", True):
-                    self.skills_snapshot.append({**s, "injected": None})
-                else:
-                    inj = "metadata" if s["name"] in injected_names else None
-                    self.skills_snapshot.append({**s, "injected": inj})
-            if any(s.get("always") for s in raw_skills if s.get("status", "active") != "disabled"):
-                self.always_skills = await load_always_skills(self.bot["id"], self.ctx.group_id, self.bot.get("role"))
-
-        context_prefix, context_text = await self._get_fresh_context_prefix()
-        always_section = ""
-        if self.always_skills:
-            parts = [f"=== {s['name']} ===\n{s['content']}" for s in self.always_skills]
-            always_section = "\n\n【常驻技能 · 始终激活】\n" + "\n\n".join(parts)
-
-        group_section = build_group_section(self.ctx)
-        bot_traits = self.bot.get("traits", [])
-        traits_section = load_traits(bot_traits)
-        
-        os_info = f"Windows (PowerShell)" if _IS_WINDOWS else f"{sys.platform} (shell: /bin/sh)"
-        self.system_prompt_base = (
-            base
-            + (f"\n\n{memory}" if memory else "")
-            + traits_section
-            + (f"\n\n【群组信息】\n{group_section}" if group_section else "")
-            + always_section
-            + f"\n\n【运行环境】\nOS: {os_info}\n路径分隔符: {'\\' if _IS_WINDOWS else '/'}\n使用 run_shell 执行命令时请使用适合当前 OS 的语法。"
-            + "\n\n【自学技能规则】\n当你发现可复用的规律或用户说「记住这个做法」时，用 write_file 将技能写入 `skills/learned/draft/<skill-name>.md`，系统会自动请求用户审批。禁止直接写入 `skills/learned/active/`。"
-            + self.ctx.workflow_suffix
-        )
+            self.system_prompt_base, self.skills_xml, self.skills_snapshot, self.always_skills = await compile_system_prompt(
+                self.bot, self.ctx, self.model_name, memory
+            )
+        else:
+            base = _with_personality(
+                self.bot["system_prompt"] or f"你是{self.bot['name']}，{self.bot.get('role', '')}。", self.bot
+            )
+            group_section = build_group_section(self.ctx)
+            bot_traits = self.bot.get("traits", [])
+            traits_section = load_traits(bot_traits)
+            os_info = f"Windows (PowerShell)" if _IS_WINDOWS else f"{sys.platform} (shell: /bin/sh)"
+            self.system_prompt_base = (
+                base
+                + (f"\n\n{memory}" if memory else "")
+                + traits_section
+                + (f"\n\n【群组信息】\n{group_section}" if group_section else "")
+                + f"\n\n【运行环境】\nOS: {os_info}\n路径分隔符: {'\\' if _IS_WINDOWS else '/'}\n使用 run_shell 执行命令时请使用适合当前 OS 的语法。"
+                + "\n\n【自学技能规则】\n当你发现可复用的规律或用户说「记住这个做法」时，用 write_file 将技能写入 `skills/learned/draft/<skill-name>.md`，系统会自动请求用户审批。禁止直接写入 `skills/learned/active/`。"
+                + self.ctx.workflow_suffix
+            )
         self.system_prompt = self.system_prompt_base
 
         user_content = build_image_content(user_msg, self.ctx.file_url, self.ctx.file_type, self.provider)
@@ -432,12 +412,77 @@ class ToolLoopRunner:
             "type": "stream_start", "temp_id": self.temp_id,
             "member_id": self.bot["id"], "sender_name": self.bot["name"],
             "sender_type": "bot", "avatar_color": self.bot["avatar_color"],
+            "session_id": self.session_id,
         })
         if self.skills_snapshot:
             await self.ctx.interaction.broadcast(self.ctx.group_id, {
                 "type": "skills_loaded", "temp_id": self.temp_id,
                 "member_id": self.bot["id"], "skills": self.skills_snapshot,
             })
+
+    def _track_vfs_modifications(self, call_name: str, arguments: dict):
+        _fpath = arguments.get("path", "")
+        if _fpath:
+            if call_name in compact._FILE_WRITE_TOOLS:
+                self.file_tracker[_fpath] = "modified"
+            elif call_name in compact._FILE_READ_TOOLS:
+                self.file_tracker.setdefault(_fpath, "read")
+
+    async def _handle_run_skill_result(self, call: dict, tool_result: str) -> str:
+        skill_max = self.execution_ctx.pop("skill_max_iterations", None)
+        if skill_max and skill_max > self.max_iter:
+            self.max_iter = skill_max
+            
+        skill_learns = self.execution_ctx.pop("skill_learns", None)
+        if skill_learns:
+            self.messages.append({
+                "role": "user",
+                "content": (
+                    f"[系统] 技能「{skill_learns}」声明了 learns: true。"
+                    f"请将本次执行的关键发现、规律或改进点总结为一个新技能，"
+                    f"用 write_file 写入 `skills/learned/draft/{skill_learns}-learned.md`，"
+                    f"使用 standard frontmatter（name/description/layer: learned/status: draft）。"
+                ),
+            })
+            
+        if tool_result == "__SKILL_FORK__":
+            fork_info = self.execution_ctx.pop("skill_fork", {})
+            fork_name = fork_info.get("name", "unknown")
+            await self.ctx.interaction.broadcast(self.ctx.group_id, {
+                "type": "skill_fork_start", "temp_id": self.temp_id,
+                "member_id": self.bot["id"], "skill_name": fork_name,
+            })
+            fork_task = fork_info.get("args") or self.execution_ctx.get("user_message", "")
+            fork_allowed = fork_info.get("allowed_tools", [])
+            fork_schemas = (
+                [s for s in self.tool_schemas if s["function"]["name"] in fork_allowed]
+                if fork_allowed else None
+            )
+            fork_model = fork_info.get("model") or self.model_name
+            child_sid = str(uuid.uuid4())
+            await self.ctx.interaction.append_session_event(self.session_id, "child_fork", {
+                "child_session_id": child_sid,
+                "skill_name": fork_name,
+            })
+            
+            tool_result = await _run_fork_skill(
+                fork_info.get("content", ""),
+                fork_task,
+                self.provider, fork_model, self.temperature,
+                self.ai_service,
+                tool_schemas=fork_schemas,
+            )
+            await self.ctx.interaction.append_session_event(self.session_id, "child_join", {
+                "child_session_id": child_sid,
+                "skill_name": fork_name,
+                "result": tool_result,
+            })
+            await self.ctx.interaction.broadcast(self.ctx.group_id, {
+                "type": "skill_fork_end", "temp_id": self.temp_id,
+                "member_id": self.bot["id"], "skill_name": fork_name,
+                "result": tool_result[:300],
+            })
+        return tool_result
 
     async def _execute_parallel_tools(self, calls):
         for call in calls:
@@ -463,9 +508,7 @@ class ToolLoopRunner:
                 "result": tool_result,
                 "is_error": is_error,
             })
-            _fpath = call["arguments"].get("path", "")
-            if _fpath and call["name"] in compact._FILE_READ_TOOLS:
-                self.file_tracker.setdefault(_fpath, "read")
+            self._track_vfs_modifications(call["name"], call["arguments"])
             
             # Apply truncation if output is too long
             display_result, truncated_path = compact.truncate_tool_result(call["name"], tool_result, self.ctx.group_id, self.model_name)
@@ -509,67 +552,10 @@ class ToolLoopRunner:
                 "is_error": is_error,
             })
             
-            _fpath = call["arguments"].get("path", "")
-            if _fpath:
-                if call["name"] in compact._FILE_WRITE_TOOLS:
-                    self.file_tracker[_fpath] = "modified"
-                elif call["name"] in compact._FILE_READ_TOOLS:
-                    self.file_tracker.setdefault(_fpath, "read")
+            self._track_vfs_modifications(call["name"], call["arguments"])
                     
             if call["name"] == "run_skill":
-                skill_max = self.execution_ctx.pop("skill_max_iterations", None)
-                if skill_max and skill_max > self.max_iter:
-                    self.max_iter = skill_max
-                    
-                skill_learns = self.execution_ctx.pop("skill_learns", None)
-                if skill_learns:
-                    self.messages.append({
-                        "role": "user",
-                        "content": (
-                            f"[系统] 技能「{skill_learns}」声明了 learns: true。"
-                            f"请将本次执行的关键发现、规律或改进点总结为一个新技能，"
-                            f"用 write_file 写入 `skills/learned/draft/{skill_learns}-learned.md`，"
-                            f"使用 standard frontmatter（name/description/layer: learned/status: draft）。"
-                        ),
-                    })
-                    
-                if tool_result == "__SKILL_FORK__":
-                    fork_info = self.execution_ctx.pop("skill_fork", {})
-                    fork_name = fork_info.get("name", "unknown")
-                    await self.ctx.interaction.broadcast(self.ctx.group_id, {
-                        "type": "skill_fork_start", "temp_id": self.temp_id,
-                        "member_id": self.bot["id"], "skill_name": fork_name,
-                    })
-                    fork_task = fork_info.get("args") or self.execution_ctx.get("user_message", "")
-                    fork_allowed = fork_info.get("allowed_tools", [])
-                    fork_schemas = (
-                        [s for s in self.tool_schemas if s["function"]["name"] in fork_allowed]
-                        if fork_allowed else None
-                    )
-                    fork_model = fork_info.get("model") or self.model_name
-                    child_sid = str(uuid.uuid4())
-                    await self.ctx.interaction.append_session_event(self.session_id, "child_fork", {
-                        "child_session_id": child_sid,
-                        "skill_name": fork_name,
-                    })
-                    
-                    tool_result = await _run_fork_skill(
-                        fork_info.get("content", ""),
-                        fork_task,
-                        self.provider, fork_model, self.temperature,
-                        self.ai_service,
-                        tool_schemas=fork_schemas,
-                    )
-                    await self.ctx.interaction.append_session_event(self.session_id, "child_join", {
-                        "child_session_id": child_sid,
-                        "skill_name": fork_name,
-                        "result": tool_result,
-                    })
-                    await self.ctx.interaction.broadcast(self.ctx.group_id, {
-                        "type": "skill_fork_end", "temp_id": self.temp_id,
-                        "member_id": self.bot["id"], "skill_name": fork_name,
-                        "result": tool_result[:300],
-                    })
+                tool_result = await self._handle_run_skill_result(call, tool_result)
                     
             display_result = tool_result
             if call["name"] == "write_file" and tool_result.startswith("__DRAFT_WRITTEN__:"):
@@ -603,9 +589,7 @@ class ToolLoopRunner:
                 "tool": call["name"], "result": display_result[:300],
             })
 
-    async def execute(self) -> ExecutionResult:
-        await self._setup_session()
-
+    async def _run_pre_compaction(self):
         self.messages = compact.apply_tool_result_microcompact(self.messages)
         _pre_tokens = compact.estimate_tokens(self.messages)
         if _pre_tokens > compact._PRE_RUN_TOKEN_THRESHOLD:
@@ -618,6 +602,102 @@ class ToolLoopRunner:
                 "strategy": "pre_run",
                 "message": f"历史已预压缩（{_pre_tokens:,} tokens > {compact._PRE_RUN_TOKEN_THRESHOLD:,}）",
             })
+
+    async def _poll_and_inject_signals(self):
+        if self.ctx.steer_channel and not self.ctx.steer_channel.empty():
+            steers = []
+            # Note (M-7): In single-threaded asyncio, these empty() -> get_nowait() 
+            # sequences are atomic as there are no yield points (awaits) between them.
+            while not self.ctx.steer_channel.empty():
+                steers.append(self.ctx.steer_channel.get_nowait())
+            steer_text = "\n".join(steers)
+            self.messages.append({"role": "user", "content": f"[用户中途指令] {steer_text}"})
+            await self.ctx.interaction.broadcast(self.ctx.group_id, {
+                "type": "steer_injected", "temp_id": self.temp_id,
+                "member_id": self.bot["id"], "message": steer_text[:300],
+            })
+            
+        if not self.rewake_queue.empty():
+            rewakes = []
+            # Note (M-7): In single-threaded asyncio, these empty() -> get_nowait() 
+            # sequences are atomic as there are no yield points (awaits) between them.
+            while not self.rewake_queue.empty():
+                rewakes.append(self.rewake_queue.get_nowait())
+            rewake_text = "\n".join(rewakes)
+            self.messages.append({"role": "user", "content": f"[系统唤醒] {rewake_text}"})
+            await self.ctx.interaction.broadcast(self.ctx.group_id, {
+                "type": "rewake_injected", "temp_id": self.temp_id,
+                "member_id": self.bot["id"], "message": rewake_text[:300],
+            })
+
+    async def _cleanup_and_finalize(self, msg_id_out: list) -> ExecutionResult:
+        if self.ctx.spawn_depth > 0:
+            await self.ctx.interaction.broadcast(self.ctx.group_id, {
+                "type": "stream_end", "temp_id": self.temp_id, "id": None,
+                "member_id": self.bot["id"], "sender_name": self.bot["name"],
+                "preview": self.full_text[:100], "created_at": "",
+                "session_id": self.session_id,
+            })
+            self.messages.append({"role": "assistant", "content": self.full_text})
+            await self.ctx.interaction.save_session_snapshot(self.session_id, self.messages)
+            await self.ctx.interaction.update_session_status(self.session_id, "completed")
+            return ExecutionResult(full_text=self.full_text, msg_id=None)
+
+        msg_id = await self.ctx.interaction.save_message(
+            self.ctx.group_id, self.bot["id"], self.full_text,
+            input_tokens=self.ai_service.usage.input_tokens or None,
+            output_tokens=self.ai_service.usage.output_tokens or None,
+            cache_read_tokens=self.ai_service.usage.cache_read_tokens or None,
+            cache_creation_tokens=self.ai_service.usage.cache_creation_tokens or None,
+        )
+        msg_id_out.append(msg_id)
+
+        await self.ctx.interaction.broadcast(self.ctx.group_id, {
+            "type": "stream_end", "temp_id": self.temp_id, "id": msg_id,
+            "member_id": self.bot["id"], "sender_name": self.bot["name"],
+            "preview": self.full_text[:100],
+            "created_at": "",
+            "session_id": self.session_id,
+        })
+
+        tool_names_called = [
+            m["name"] for m in self.messages
+            if m.get("role") == "tool" and m.get("name")
+        ]
+        
+        bg.spawn(add_to_chroma(msg_id, self.full_text, self.bot.get("role") or "", self.bot["id"]))
+        bg.spawn(maybe_summarize(self.ctx.group_id, self.bot["id"], self.bot.get("role") or self.bot["name"], [self.bot["id"]]))
+        bg.spawn(compact.maybe_compact_db_history(
+            self.ctx.group_id, self.bot["id"], self.provider, self.model_name, self.temperature, self.ctx.interaction
+        ))
+        bg.spawn(append_log(
+            self.bot["id"], self.full_text,
+            user_message=self.ctx.user_message,
+            sender_name=self.ctx.sender.get("name", ""),
+            tool_calls=tool_names_called,
+            iterations=self.iter_count if tool_names_called else 0,
+            executor=self.executor.executor_id,
+        ))
+        if self.ctx.group_id and self.tool_records:
+            bg.spawn(archive_run(
+                self.ctx.group_id, self.temp_id, self.bot,
+                user_message=self.ctx.user_message,
+                sender_name=self.ctx.sender.get("name", ""),
+                tool_records=self.tool_records,
+                reply=self.full_text,
+                iterations=self.iter_count,
+                model=self.model_name,
+                executor=self.executor.executor_id,
+            ))
+
+        self.messages.append({"role": "assistant", "content": self.full_text})
+        await self.ctx.interaction.save_session_snapshot(self.session_id, self.messages)
+        await self.ctx.interaction.update_session_status(self.session_id, "completed")
+        return ExecutionResult(full_text=self.full_text, msg_id=msg_id)
+
+    async def execute(self) -> ExecutionResult:
+        await self._setup_session()
+        await self._run_pre_compaction()
 
         try:
             if not self.tool_schemas:
@@ -710,49 +790,7 @@ class ToolLoopRunner:
                             context_text=await self._build_reinject(),
                         )
                         
-                        
-                        
-                        if self.ctx.steer_channel and not self.ctx.steer_channel.empty():
-                            steers = []
-                            # Note (M-7): In single-threaded asyncio, these empty() -> get_nowait() 
-                            # sequences are atomic as there are no yield points (awaits) between them.
-                            while not self.ctx.steer_channel.empty():
-                                steers.append(self.ctx.steer_channel.get_nowait())
-                            steer_text = "\n".join(steers)
-                            self.messages.append({"role": "user", "content": f"[用户中途指令] {steer_text}"})
-                            await self.ctx.interaction.broadcast(self.ctx.group_id, {
-                                "type": "steer_injected", "temp_id": self.temp_id,
-                                "member_id": self.bot["id"], "message": steer_text[:300],
-                            })
-                            
-                        if not self.rewake_queue.empty():
-                            rewakes = []
-                            # Note (M-7): In single-threaded asyncio, these empty() -> get_nowait() 
-                            # sequences are atomic as there are no yield points (awaits) between them.
-                            while not self.rewake_queue.empty():
-                                rewakes.append(self.rewake_queue.get_nowait())
-                            rewake_text = chr(10).join(rewakes)
-                            self.messages.append({"role": "user", "content": f"[系统唤醒] {rewake_text}"})
-                            await self.ctx.interaction.broadcast(self.ctx.group_id, {
-                                "type": "rewake_injected", "temp_id": self.temp_id,
-                                "member_id": self.bot["id"], "message": rewake_text[:300],
-                            })
-
-
-                            
-                        if not self.rewake_queue.empty():
-                            rewakes = []
-                            
-                        # Note (M-7): In single-threaded asyncio, these empty() -> get_nowait() 
-                        # sequences are atomic as there are no yield points (awaits) between them.
-                            while not self.rewake_queue.empty():
-                                rewakes.append(self.rewake_queue.get_nowait())
-                            rewake_text = "\n".join(rewakes)
-                            self.messages.append({"role": "user", "content": f"[系统唤醒] {rewake_text}"})
-                            await self.ctx.interaction.broadcast(self.ctx.group_id, {
-                                "type": "rewake_injected", "temp_id": self.temp_id,
-                                "member_id": self.bot["id"], "message": rewake_text[:300],
-                            })
+                        await self._poll_and_inject_signals()
                     else:
                         self.consecutive_tool_only = 0
                         await self._finalize_reply()
@@ -765,75 +803,19 @@ class ToolLoopRunner:
             await self.ctx.interaction.update_session_status(self.session_id, "failed")
             await self.ctx.interaction.broadcast(self.ctx.group_id, {
                 "type": "stream_aborted", "temp_id": self.temp_id, "member_id": self.bot["id"],
+                "session_id": self.session_id,
             })
             raise
         except AIError as e:
             await self.ctx.interaction.update_session_status(self.session_id, "failed")
             await self.ctx.interaction.broadcast(self.ctx.group_id, {
                 "type": "stream_error", "temp_id": self.temp_id, "message": str(e),
+                "session_id": self.session_id,
             })
             return ExecutionResult(full_text="", msg_id=None)
 
-        if self.ctx.spawn_depth > 0:
-            await self.ctx.interaction.broadcast(self.ctx.group_id, {
-                "type": "stream_end", "temp_id": self.temp_id, "id": None,
-                "member_id": self.bot["id"], "sender_name": self.bot["name"],
-                "preview": self.full_text[:100], "created_at": "",
-            })
-            self.messages.append({"role": "assistant", "content": self.full_text})
-            await self.ctx.interaction.save_session_snapshot(self.session_id, self.messages)
-            await self.ctx.interaction.update_session_status(self.session_id, "completed")
-            return ExecutionResult(full_text=self.full_text, msg_id=None)
-
-        msg_id = await self.ctx.interaction.save_message(
-            self.ctx.group_id, self.bot["id"], self.full_text,
-            input_tokens=self.ai_service.usage.input_tokens or None,
-            output_tokens=self.ai_service.usage.output_tokens or None,
-            cache_read_tokens=self.ai_service.usage.cache_read_tokens or None,
-            cache_creation_tokens=self.ai_service.usage.cache_creation_tokens or None,
-        )
-
-        await self.ctx.interaction.broadcast(self.ctx.group_id, {
-            "type": "stream_end", "temp_id": self.temp_id, "id": msg_id,
-            "member_id": self.bot["id"], "sender_name": self.bot["name"],
-            "preview": self.full_text[:100],
-            "created_at": "",
-        })
-
-        tool_names_called = [
-            m["name"] for m in self.messages
-            if m.get("role") == "tool" and m.get("name")
-        ]
-        
-        bg.spawn(add_to_chroma(msg_id, self.full_text, self.bot.get("role") or "", self.bot["id"]))
-        bg.spawn(maybe_summarize(self.ctx.group_id, self.bot["id"], self.bot.get("role") or self.bot["name"], [self.bot["id"]]))
-        bg.spawn(compact.maybe_compact_db_history(
-            self.ctx.group_id, self.bot["id"], self.provider, self.model_name, self.temperature, self.ctx.interaction
-        ))
-        bg.spawn(append_log(
-            self.bot["id"], self.full_text,
-            user_message=self.ctx.user_message,
-            sender_name=self.ctx.sender.get("name", ""),
-            tool_calls=tool_names_called,
-            iterations=self.iter_count if tool_names_called else 0,
-            executor=self.executor.executor_id,
-        ))
-        if self.ctx.group_id and self.tool_records:
-            bg.spawn(archive_run(
-                self.ctx.group_id, self.temp_id, self.bot,
-                user_message=self.ctx.user_message,
-                sender_name=self.ctx.sender.get("name", ""),
-                tool_records=self.tool_records,
-                reply=self.full_text,
-                iterations=self.iter_count,
-                model=self.model_name,
-                executor=self.executor.executor_id,
-            ))
-
-        self.messages.append({"role": "assistant", "content": self.full_text})
-        await self.ctx.interaction.save_session_snapshot(self.session_id, self.messages)
-        await self.ctx.interaction.update_session_status(self.session_id, "completed")
-        return ExecutionResult(full_text=self.full_text, msg_id=msg_id)
+        msg_ids = []
+        return await self._cleanup_and_finalize(msg_ids)
 
 class ToolLoopV1(BotExecutor):
     executor_id = "tool_loop_v1"

@@ -658,6 +658,24 @@ async def compact_conversation(
 # maybe_compact_db_history — post-run DB-level compaction (background task)
 # ---------------------------------------------------------------------------
 
+def _db_messages_to_ai_format(messages: list[dict]) -> list[dict]:
+    return [
+        {
+            "role": "assistant" if m.get("sender_type") == "bot" else "user",
+            "content": f"[{m.get('sender_name', '?')}]: {(m.get('content') or '')[:1000]}",
+        }
+        for m in messages
+    ]
+
+
+def _extract_compaction_summary(content: str) -> str:
+    return (
+        content[len("【历史摘要】\n"):]
+        if content.startswith("【历史摘要】\n")
+        else content
+    )
+
+
 async def maybe_compact_db_history(
     group_id: int,
     bot_id: int,
@@ -693,15 +711,7 @@ async def maybe_compact_db_history(
         keep_ids = {m["id"] for m in to_keep}
 
         # Convert DB messages to AI-format for compact_conversation
-        ai_messages = [
-            {
-                "role": "assistant" if m.get("sender_type") == "bot" else "user",
-                "content": (
-                    f"[{m.get('sender_name', '?')}]: {(m.get('content') or '')[:1000]}"
-                ),
-            }
-            for m in to_summarize
-        ]
+        ai_messages = _db_messages_to_ai_format(to_summarize)
 
         compacted = await compact_conversation(
             ai_messages, "", provider, model, temperature, keep_recent=0
@@ -711,11 +721,7 @@ async def maybe_compact_db_history(
 
         first = compacted[0]
         raw_content = first.get("content", "")
-        summary_text = (
-            raw_content[len("【历史摘要】\n"):]
-            if raw_content.startswith("【历史摘要】\n")
-            else raw_content
-        )
+        summary_text = _extract_compaction_summary(raw_content)
         if not summary_text:
             return
 

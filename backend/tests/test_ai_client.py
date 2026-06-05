@@ -813,5 +813,27 @@ class TestDsmlToolCallRecovery(unittest.TestCase):
         self.assertEqual(res["calls"][0]["arguments"], {})
 
 
+class TestRepairJsonArguments(unittest.TestCase):
+    def test_normal_json(self):
+        from ai.client import repair_json_arguments
+        self.assertEqual(repair_json_arguments('{"path": "app.js", "content": "ok"}'), {"path": "app.js", "content": "ok"})
+
+    def test_truncated_json_simple(self):
+        from ai.client import repair_json_arguments
+        self.assertEqual(repair_json_arguments('{"path": "app.js", "content": "ok'), {"path": "app.js", "content": "ok"})
+
+    def test_truncated_json_escaped(self):
+        from ai.client import repair_json_arguments
+        self.assertEqual(repair_json_arguments('{"path": "app.js", "content": "console.log(\\"hello\\");'), {"path": "app.js", "content": 'console.log("hello");'})
+
+    def test_truncated_json_backslash_end(self):
+        from ai.client import repair_json_arguments
+        self.assertEqual(repair_json_arguments('{"path": "app.js", "content": "console.log(\\"hello\\");\\'), {"path": "app.js", "content": 'console.log("hello");'})
+
+    def test_invalid_json(self):
+        from ai.client import repair_json_arguments
+        self.assertIsNone(repair_json_arguments('invalid'))
+
+
 if __name__ == "__main__":
     unittest.main()

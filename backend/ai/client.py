@@ -375,6 +375,64 @@ def _recover_dsml_tool_calls(content: str | None, usage: dict) -> dict | None:
             "assistant_message": assistant_message, "usage": usage}
 
 
+def repair_json_arguments(s: str) -> dict | None:
+    """
+    Attempts to repair a truncated JSON arguments string.
+    Usually looks like: {"path": "...", "content": "..."
+    We scan the string, track open quotes, escapes, and brackets/braces,
+    then append the necessary closing characters to make it valid JSON.
+    """
+    s = s.strip()
+    if not s.startswith('{'):
+        return None
+        
+    in_string = False
+    escape = False
+    stack = []
+    
+    # We will build a repaired string
+    repaired = []
+    
+    for char in s:
+        repaired.append(char)
+        if escape:
+            escape = False
+            continue
+        if char == '\\':
+            escape = True
+            continue
+        if char == '"':
+            in_string = not in_string
+            continue
+        if not in_string:
+            if char in ('{', '['):
+                stack.append(char)
+            elif char in ('}', ']'):
+                if stack:
+                    stack.pop()
+                    
+    # Now close whatever is open
+    if escape:
+        repaired.pop() # remove the trailing backslash
+    
+    if in_string:
+        repaired.append('"')
+        
+    # Close the open braces/brackets in reverse order
+    while stack:
+        open_char = stack.pop()
+        if open_char == '{':
+            repaired.append('}')
+        elif open_char == '[':
+            repaired.append(']')
+            
+    repaired_str = "".join(repaired)
+    try:
+        return json.loads(repaired_str)
+    except Exception:
+        return None
+
+
 async def _once_openai_compat(url: str, api_key: str, model: str, system_prompt: str,
                                messages: list, temperature: float, max_tokens: int,
                                tools: list | None) -> dict:
@@ -410,12 +468,36 @@ async def _once_openai_compat(url: str, api_key: str, model: str, system_prompt:
         ),
         "cache_creation_tokens": 0,
     }
-    if choice.get("finish_reason") == "tool_calls" and msg.get("tool_calls"):
-        calls = [
-            {"id": tc["id"], "name": tc["function"]["name"],
-             "arguments": json.loads(tc["function"]["arguments"])}
-            for tc in msg["tool_calls"]
-        ]
+    if choice.get("finish_reason") in ("tool_calls", "length") and msg.get("tool_calls"):
+        calls = []
+        cleaned_tool_calls = []
+        for tc in msg["tool_calls"]:
+            func_name = tc["function"]["name"]
+            raw_args = tc["function"]["arguments"]
+            try:
+                args = json.loads(raw_args)
+            except json.JSONDecodeError:
+                repaired = repair_json_arguments(raw_args)
+                if repaired is not None:
+                    args = repaired
+                    args["__truncated__"] = True
+                else:
+                    raise
+            
+            # Reconstruct the tool call with valid JSON for API history compatibility
+            api_args = {k: v for k, v in args.items() if k != "__truncated__"}
+            cleaned_tc = {
+                "id": tc["id"],
+                "type": "function",
+                "function": {
+                    "name": func_name,
+                    "arguments": json.dumps(api_args, ensure_ascii=False)
+                }
+            }
+            cleaned_tool_calls.append(cleaned_tc)
+            calls.append({"id": tc["id"], "name": func_name, "arguments": args})
+            
+        msg["tool_calls"] = cleaned_tool_calls
         return {"type": "tool_calls", "calls": calls, "assistant_message": msg, "usage": usage}
     content = msg.get("content", "") or ""
     # deepseek-chat 偶尔把工具调用以 DSML 文本塞进 content 而非结构化 tool_calls

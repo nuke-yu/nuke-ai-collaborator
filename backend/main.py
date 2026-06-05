@@ -153,16 +153,14 @@ class WSClientProxy:
 _group_proxies: dict[int, WSClientProxy] = {}
 
 
-@app.websocket("/ws/{group_id}/{member_id}")
-async def websocket_endpoint(websocket: WebSocket, group_id: int, member_id: int, token: str = None):
-
+async def _authenticate_websocket(websocket: WebSocket, group_id: int, member_id: int, token: str = None) -> bool:
     # CELL-Auth: Verify token during handshake
     user_payload = auth.verify_token(token) if token else None
     if not user_payload:
         await websocket.accept()
         await websocket.send_json({"type": "auth_error", "message": "Authentication required"})
         await websocket.close()
-        return
+        return False
     
     # DFT-082: a valid token (a logged-in company user) is the access boundary —
     # this is a trusted, internal shared workspace, not a public multi-tenant
@@ -175,8 +173,11 @@ async def websocket_endpoint(websocket: WebSocket, group_id: int, member_id: int
                 await websocket.accept()
                 await websocket.send_json({"type": "auth_error", "message": "Unknown member for this group"})
                 await websocket.close()
-                return
+                return False
+    return True
 
+
+async def _initialize_websocket_session(websocket: WebSocket, group_id: int, member_id: int):
     await manager.connect(websocket, group_id, member_id)
     
     # 1. Reuse the group's single fan-out proxy (register it only for the first
@@ -199,6 +200,101 @@ async def websocket_endpoint(websocket: WebSocket, group_id: int, member_id: int
     ev_dict["type"] = presence_ev.type
     await manager.broadcast(group_id, ev_dict)
 
+
+async def _handle_incoming_message(payload: dict, group_id: int, member_id: int, trace_id: str):
+    t = payload.get("type")
+
+    if t == "read":
+        if msg_id := payload.get("msg_id"):
+            from core.orchestration.interaction import StandardInteraction
+            await StandardInteraction().mark_read(group_id, member_id, msg_id)
+        # reading the group clears its unread badge (central projection)
+        from db import write_connect, reset_unread
+        async with write_connect() as udb:
+            await reset_unread(udb, group_id, member_id)
+        return
+
+    if t == "abort":
+        await sup_mod.supervisor.send_to_worker(group_id, ipc.protocol.envelope(
+            ipc.protocol.ABORT, group_id=group_id, trace_id=trace_id
+        ))
+        return
+
+    if t == "confirm":
+        await sup_mod.supervisor.send_to_worker(group_id, ipc.protocol.envelope(
+            ipc.protocol.CONFIRM, group_id=group_id, trace_id=trace_id,
+            gate_id=payload.get("gate_id")
+        ))
+        return
+
+    if t == "start_workflow":
+        await sup_mod.supervisor.send_to_worker(group_id, ipc.protocol.envelope(
+            ipc.protocol.START_WORKFLOW, group_id=group_id, trace_id=trace_id
+        ))
+        return
+
+    if t in ("query", "mutate"):
+        # supervisor only routes; member_id comes from the authed URL,
+        # not the client payload. Strip reserved envelope keys.
+        fields = {k: v for k, v in payload.items()
+                  if k not in ("type", "group_id", "trace_id", "member_id")}
+        mtype = ipc.protocol.QUERY if t == "query" else ipc.protocol.MUTATE
+        await sup_mod.supervisor.send_to_worker(group_id, ipc.protocol.envelope(
+            mtype, group_id=group_id, trace_id=trace_id, member_id=member_id, **fields
+        ))
+        return
+
+    if t == "permission_response":
+        await sup_mod.supervisor.send_to_worker(group_id, ipc.protocol.envelope(
+            ipc.protocol.PERMISSION_RESPONSE, group_id=group_id, trace_id=trace_id, **payload
+        ))
+        return
+
+    # Default: User message. Strip reserved envelope keys from the
+    # client payload (same as the query/mutate branch above) — else a
+    # client-sent group_id/type/trace_id/member_id collides with the
+    # envelope's own kwargs and raises "multiple values for ...".
+    fields = {k: v for k, v in payload.items()
+              if k not in ("type", "group_id", "trace_id", "member_id")}
+    await sup_mod.supervisor.send_to_worker(group_id, ipc.protocol.envelope(
+        ipc.protocol.USER_MESSAGE,
+        group_id=group_id,
+        member_id=member_id,
+        online_ids=manager.get_online_member_ids(group_id),
+        trace_id=trace_id,
+        **fields
+    ))
+
+
+async def _handle_websocket_disconnect(websocket: WebSocket, group_id: int):
+    gone_id = await manager.disconnect(websocket, group_id)
+    if gone_id:
+        presence_offline = Presence(group_id=group_id, member_id=gone_id, online=False)
+        ev_dict = dataclasses.asdict(presence_offline)
+        ev_dict["type"] = presence_offline.type
+        await manager.broadcast(group_id, ev_dict)
+
+    # Last connection left → drop the group's single fan-out proxy and abort
+    # any group-wide pending tasks. (While other connections remain, the one
+    # proxy keeps serving them, so we don't touch it per-disconnect.)
+    if not manager.get_online_member_ids(group_id):
+        p = _group_proxies.pop(group_id, None)
+        if p:
+            sup_mod.supervisor.unregister_browser(group_id, p)
+        try:
+            await sup_mod.supervisor.send_to_worker(group_id, ipc.protocol.envelope(
+                ipc.protocol.ABORT, group_id=group_id
+            ))
+        except Exception:
+            pass
+
+
+@app.websocket("/ws/{group_id}/{member_id}")
+async def websocket_endpoint(websocket: WebSocket, group_id: int, member_id: int, token: str = None):
+    if not await _authenticate_websocket(websocket, group_id, member_id, token):
+        return
+
+    await _initialize_websocket_session(websocket, group_id, member_id)
     
     try:
         while True:
@@ -207,89 +303,6 @@ async def websocket_endpoint(websocket: WebSocket, group_id: int, member_id: int
             with tracing.trace_context(group_id=group_id):
                 tid = tracing.get_trace_id()
                 payload = json.loads(data)
-                t = payload.get("type")
-
-                if t == "read":
-                    if msg_id := payload.get("msg_id"):
-                        from core.orchestration.interaction import StandardInteraction
-                        await StandardInteraction().mark_read(group_id, member_id, msg_id)
-                    # reading the group clears its unread badge (central projection)
-                    from db import write_connect, reset_unread
-                    async with write_connect() as udb:
-                        await reset_unread(udb, group_id, member_id)
-                    continue
-
-                if t == "abort":
-                    await sup_mod.supervisor.send_to_worker(group_id, ipc.protocol.envelope(
-                        ipc.protocol.ABORT, group_id=group_id, trace_id=tid
-                    ))
-                    continue
-
-                if t == "confirm":
-                    await sup_mod.supervisor.send_to_worker(group_id, ipc.protocol.envelope(
-                        ipc.protocol.CONFIRM, group_id=group_id, trace_id=tid,
-                        gate_id=payload.get("gate_id")
-                    ))
-                    continue
-
-                if t == "start_workflow":
-                    await sup_mod.supervisor.send_to_worker(group_id, ipc.protocol.envelope(
-                        ipc.protocol.START_WORKFLOW, group_id=group_id, trace_id=tid
-                    ))
-                    continue
-
-                if t in ("query", "mutate"):
-                    # supervisor only routes; member_id comes from the authed URL,
-                    # not the client payload. Strip reserved envelope keys.
-                    fields = {k: v for k, v in payload.items()
-                              if k not in ("type", "group_id", "trace_id", "member_id")}
-                    mtype = ipc.protocol.QUERY if t == "query" else ipc.protocol.MUTATE
-                    await sup_mod.supervisor.send_to_worker(group_id, ipc.protocol.envelope(
-                        mtype, group_id=group_id, trace_id=tid, member_id=member_id, **fields
-                    ))
-                    continue
-
-                if t == "permission_response":
-                    await sup_mod.supervisor.send_to_worker(group_id, ipc.protocol.envelope(
-                        ipc.protocol.PERMISSION_RESPONSE, group_id=group_id, trace_id=tid, **payload
-                    ))
-                    continue
-
-                # Default: User message. Strip reserved envelope keys from the
-                # client payload (same as the query/mutate branch above) — else a
-                # client-sent group_id/type/trace_id/member_id collides with the
-                # envelope's own kwargs and raises "multiple values for ...".
-                fields = {k: v for k, v in payload.items()
-                          if k not in ("type", "group_id", "trace_id", "member_id")}
-                await sup_mod.supervisor.send_to_worker(group_id, ipc.protocol.envelope(
-                    ipc.protocol.USER_MESSAGE,
-                    group_id=group_id,
-                    member_id=member_id,
-                    online_ids=manager.get_online_member_ids(group_id),
-                    trace_id=tid,
-                    **fields
-                ))
-
-                continue
-
+                await _handle_incoming_message(payload, group_id, member_id, tid)
     except WebSocketDisconnect:
-        gone_id = await manager.disconnect(websocket, group_id)
-        if gone_id:
-            presence_offline = Presence(group_id=group_id, member_id=gone_id, online=False)
-            ev_dict = dataclasses.asdict(presence_offline)
-            ev_dict["type"] = presence_offline.type
-            await manager.broadcast(group_id, ev_dict)
-
-        # Last connection left → drop the group's single fan-out proxy and abort
-        # any group-wide pending tasks. (While other connections remain, the one
-        # proxy keeps serving them, so we don't touch it per-disconnect.)
-        if not manager.get_online_member_ids(group_id):
-            p = _group_proxies.pop(group_id, None)
-            if p:
-                sup_mod.supervisor.unregister_browser(group_id, p)
-            try:
-                await sup_mod.supervisor.send_to_worker(group_id, ipc.protocol.envelope(
-                    ipc.protocol.ABORT, group_id=group_id
-                ))
-            except Exception:
-                pass
+        await _handle_websocket_disconnect(websocket, group_id)

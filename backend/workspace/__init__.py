@@ -494,33 +494,20 @@ async def append_log(
     await asyncio.to_thread(_write)
 
 
-async def archive_run(
+def _build_archive_markdown(
     group_id: int,
     run_id: str,
     bot: dict,
-    *,
-    user_message: str = "",
-    sender_name: str = "",
-    tool_records: list[dict] | None = None,
-    reply: str = "",
-    iterations: int = 0,
-    model: str = "",
-    executor: str = "",
-):
-    """Write a full execution record to workspaces/group_{id}/runs/.
-
-    One file per run, named YYYY-MM-DD_HHMMSS_{run_id[:8]}.md.
-    tool_records: list of {"name": str, "args": dict, "result": str}.
-    """
-    runs_dir = WORKSPACE_ROOT / f"group_{group_id}" / "runs"
-    runs_dir.mkdir(parents=True, exist_ok=True)
-
-    now = datetime.now()
-    filename = f"{now.strftime('%Y-%m-%d_%H%M%S')}_{run_id[:8]}.md"
-    run_file = runs_dir / filename
-
+    user_message: str,
+    sender_name: str,
+    tool_records: list[dict] | None,
+    reply: str,
+    iterations: int,
+    model: str,
+    executor: str,
+    now: datetime,
+) -> str:
     _RESULT_PREVIEW = 500
-
     lines = [
         f"# Run · {bot.get('name', '')} · {now.strftime('%Y-%m-%d %H:%M:%S')}",
         "",
@@ -573,8 +560,47 @@ async def archive_run(
         reply.strip()[:2000] + ("…" if len(reply.strip()) > 2000 else ""),
         "",
     ]
+    return "\n".join(lines)
 
-    text = "\n".join(lines)
+
+async def archive_run(
+    group_id: int,
+    run_id: str,
+    bot: dict,
+    *,
+    user_message: str = "",
+    sender_name: str = "",
+    tool_records: list[dict] | None = None,
+    reply: str = "",
+    iterations: int = 0,
+    model: str = "",
+    executor: str = "",
+):
+    """Write a full execution record to workspaces/group_{id}/runs/.
+
+    One file per run, named YYYY-MM-DD_HHMMSS_{run_id[:8]}.md.
+    tool_records: list of {"name": str, "args": dict, "result": str}.
+    """
+    runs_dir = WORKSPACE_ROOT / f"group_{group_id}" / "runs"
+    runs_dir.mkdir(parents=True, exist_ok=True)
+
+    now = datetime.now()
+    filename = f"{now.strftime('%Y-%m-%d_%H%M%S')}_{run_id[:8]}.md"
+    run_file = runs_dir / filename
+
+    text = _build_archive_markdown(
+        group_id=group_id,
+        run_id=run_id,
+        bot=bot,
+        user_message=user_message,
+        sender_name=sender_name,
+        tool_records=tool_records,
+        reply=reply,
+        iterations=iterations,
+        model=model,
+        executor=executor,
+        now=now,
+    )
 
     def _write():
         run_file.write_text(text, encoding="utf-8")

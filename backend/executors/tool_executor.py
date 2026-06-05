@@ -146,11 +146,22 @@ async def execute(name: str, arguments: dict, context: dict | None = None) -> tu
     try:
         handler = _handlers[name]
         sig = inspect.signature(handler)
+        
+        is_truncated = arguments.pop("__truncated__", False)
+        
         if "context" in sig.parameters and context is not None:
             tool_result = await handler(**arguments, context=context)
         else:
             tool_result = await handler(**arguments)
         tool_result = str(tool_result) if tool_result is not None else "完成"
+        
+        if is_truncated:
+            hint = (
+                f"\n\n[系统警告] 由于模型的输出长度限制，工具「{name}」的输入参数已被截断。\n"
+                f"目前只执行了已被生成的前半部分（如果您刚才在写入代码/网页，部分内容已成功写入，但必然不完整）。\n"
+                f"请不要尝试重新调用 write_file，请立刻分析当前代码，并使用 replace_file_content 增量追加和修补剩余被截断的内容！"
+            )
+            tool_result += hint
         
         # Point 1: Accurate Error Tracking (DFT-034).
         # Check if the output has a bracketed prefix containing error/block keywords.
