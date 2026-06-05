@@ -55,8 +55,8 @@ def build_rd_pipeline(ba: dict, dev: dict, qa: dict) -> list[dict]:
             dev,
             instruction=(
                 "按上面的 Jira 工单开发。"
-                "【硬性要求】必须用 write_file 工具把完整代码真正写到工作区文件里"
-                "（如 index.html / *.py 等），一个文件一次 write_file 调用；"
+                "【硬性要求】默认先在自己的工作区（Workspace）中新建一个目录（如以项目或工单命名的文件夹，例如 calculator/ ），"
+                "然后必须用 write_file 工具将完整代码真正写到该新建目录下（如 calculator/index.html ），一个文件一次 write_file 调用；"
                 "**严禁把完整源码贴进聊天回复**——聊天里只用简短文字说明：实现方案、"
                 "关键设计决策、以及你写了哪些文件。写完后做代码自测，并用文字给出 PR 描述"
                 "（当前 Git 为替身）。确认代码已落盘且自测通过后，在回复的最后一行"
