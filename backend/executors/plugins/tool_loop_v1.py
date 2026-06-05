@@ -340,7 +340,6 @@ class ToolLoopRunner:
 
         history, user_msg = build_context_message(self.ctx.user_message, self.ctx.sender["name"], self.ctx.history)
         memory = await get_memory_context(self.bot["id"], self.bot.get("role") or "", self.ctx.user_message)
-        _, _ = await self._get_fresh_context_prefix()
 
         if self.executor.manifest.workspace.skill_discovery:
             self.system_prompt_base, self.skills_xml, self.skills_snapshot, self.always_skills = await compile_system_prompt(
@@ -428,7 +427,7 @@ class ToolLoopRunner:
             elif call_name in compact._FILE_READ_TOOLS:
                 self.file_tracker.setdefault(_fpath, "read")
 
-    async def _handle_run_skill_result(self, call: dict, tool_result: str) -> str:
+    async def _handle_run_skill_result(self, tool_result: str) -> str:
         skill_max = self.execution_ctx.pop("skill_max_iterations", None)
         if skill_max and skill_max > self.max_iter:
             self.max_iter = skill_max
@@ -555,7 +554,7 @@ class ToolLoopRunner:
             self._track_vfs_modifications(call["name"], call["arguments"])
                     
             if call["name"] == "run_skill":
-                tool_result = await self._handle_run_skill_result(call, tool_result)
+                tool_result = await self._handle_run_skill_result(tool_result)
                     
             display_result = tool_result
             if call["name"] == "write_file" and tool_result.startswith("__DRAFT_WRITTEN__:"):
@@ -630,7 +629,7 @@ class ToolLoopRunner:
                 "member_id": self.bot["id"], "message": rewake_text[:300],
             })
 
-    async def _cleanup_and_finalize(self, msg_id_out: list) -> ExecutionResult:
+    async def _cleanup_and_finalize(self) -> ExecutionResult:
         if self.ctx.spawn_depth > 0:
             await self.ctx.interaction.broadcast(self.ctx.group_id, {
                 "type": "stream_end", "temp_id": self.temp_id, "id": None,
@@ -650,7 +649,7 @@ class ToolLoopRunner:
             cache_read_tokens=self.ai_service.usage.cache_read_tokens or None,
             cache_creation_tokens=self.ai_service.usage.cache_creation_tokens or None,
         )
-        msg_id_out.append(msg_id)
+
 
         await self.ctx.interaction.broadcast(self.ctx.group_id, {
             "type": "stream_end", "temp_id": self.temp_id, "id": msg_id,
@@ -814,8 +813,7 @@ class ToolLoopRunner:
             })
             return ExecutionResult(full_text="", msg_id=None)
 
-        msg_ids = []
-        return await self._cleanup_and_finalize(msg_ids)
+        return await self._cleanup_and_finalize()
 
 class ToolLoopV1(BotExecutor):
     executor_id = "tool_loop_v1"

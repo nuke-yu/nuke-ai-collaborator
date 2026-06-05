@@ -149,6 +149,13 @@ async def execute(name: str, arguments: dict, context: dict | None = None) -> tu
         
         is_truncated = arguments.pop("__truncated__", False)
         
+        if is_truncated and name != "write_file":
+            return (
+                f"[安全拦截] 由于模型输出长度限制，工具「{name}」的参数被截断。为了防止操作执行不完整或损坏文件/环境，"
+                f"系统已拦截并取消了此次执行。请重新规划，或尝试缩短范围/拆分成更小的操作重新调用。",
+                True
+            )
+        
         if "context" in sig.parameters and context is not None:
             tool_result = await handler(**arguments, context=context)
         else:

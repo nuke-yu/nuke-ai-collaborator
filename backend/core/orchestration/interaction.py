@@ -35,20 +35,9 @@ class StandardInteraction(InteractionAdapter):
 
     async def append_session_event(self, session_id: str, event_type: str, payload: dict):
         await sessions.append_event(session_id, event_type, payload)
-        if self.ctx and getattr(self.ctx, "group_id", None) is not None:
-            await self.broadcast(self.ctx.group_id, {
-                "type": "session_updated",
-                "session_id": session_id,
-                "event_type": event_type,
-            })
 
     async def save_session_snapshot(self, session_id: str, messages: list):
         await sessions.save_snapshot(session_id, messages)
-        if self.ctx and getattr(self.ctx, "group_id", None) is not None:
-            await self.broadcast(self.ctx.group_id, {
-                "type": "session_updated",
-                "session_id": session_id,
-            })
 
     async def update_session_tokens(self, session_id: str, **usage):
         # Translate keys if necessary

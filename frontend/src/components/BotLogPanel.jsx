@@ -10,6 +10,7 @@ export default function BotLogPanel({ groupId, onClose }) {
   const [activeTab, setActiveTab] = useState('messages') // 'messages' | 'events'
   const [expandedItems, setExpandedItems] = useState(new Set()) // for collapsing tool results
   const pollIntervalRef = useRef(null)
+  const debounceTimerRef = useRef(null)
 
   // Fetch recent sessions
   const fetchSessionsList = async (showLoading = true) => {
@@ -97,15 +98,25 @@ export default function BotLogPanel({ groupId, onClose }) {
 
   // Listen to WebSocket events in real-time for instant update
   useEffect(() => {
+    const triggerDebouncedRefresh = (targetSessionId) => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current)
+      }
+      debounceTimerRef.current = setTimeout(() => {
+        fetchSessionsList(false)
+        const sid = targetSessionId || selectedSessionId
+        if (sid) {
+          fetchSessionData(sid, false)
+        }
+      }, 250)
+    }
+
     const handleWsEvent = (e) => {
       const data = e.detail
 
       // 1. Handle session updated event from database writes
       if (data.type === 'session_updated') {
-        fetchSessionsList(false)
-        if (selectedSessionId && data.session_id === selectedSessionId) {
-          fetchSessionData(selectedSessionId, false)
-        }
+        triggerDebouncedRefresh(data.session_id)
         return
       }
 
@@ -135,16 +146,16 @@ export default function BotLogPanel({ groupId, onClose }) {
       // 3. Other events that trigger instant re-fetch
       const relevantTypes = ['stream_start', 'stream_end', 'tool_call', 'tool_result', 'compaction', 'skills_loaded', 'recovery_prompt']
       if (relevantTypes.includes(data.type)) {
-        fetchSessionsList(false)
-        if (selectedSessionId) {
-          fetchSessionData(selectedSessionId, false)
-        }
+        triggerDebouncedRefresh(selectedSessionId)
       }
     }
 
     window.addEventListener('ws_bot_event', handleWsEvent)
     return () => {
       window.removeEventListener('ws_bot_event', handleWsEvent)
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current)
+      }
     }
   }, [selectedSessionId, groupId])
 

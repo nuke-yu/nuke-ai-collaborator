@@ -102,13 +102,13 @@ class TestDynamicContext(unittest.IsolatedAsyncioTestCase):
             await executor.run(ctx)
 
         # Verify load_context_files was called multiple times
-        # 1 (start) + 3 (loop starts) + 2 (auto_compact calls in first 2 tool rounds) = 6
-        self.assertEqual(mock_load.call_count, 6)
+        # 3 (loop starts) + 2 (auto_compact calls in first 2 tool rounds) = 5
+        self.assertEqual(mock_load.call_count, 5)
         
         # Verify that each AI call received a different version of the context
-        self.assertIn("ver 2", captured_prompts[0])
-        self.assertIn("ver 4", captured_prompts[1])
-        self.assertIn("ver 6", captured_prompts[2])
+        self.assertIn("ver 1", captured_prompts[0])
+        self.assertIn("ver 3", captured_prompts[1])
+        self.assertIn("ver 5", captured_prompts[2])
 
 if __name__ == "__main__":
     unittest.main()
