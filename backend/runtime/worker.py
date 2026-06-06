@@ -127,12 +127,28 @@ class Worker:
         except Exception:
             log.exception("worker %s: failed to generate event-driven recap for group %s", self.worker_id, gid)
 
+    async def _retro_on_done(self, gid: int) -> None:
+        """Handle one WorkflowPaused(reason='done') event: generate retrospective for group."""
+        from runtime.lifecycle import manager as lifecycle
+        if not lifecycle.is_active(gid):
+            return
+        try:
+            from runtime.dbpaths import group_db_path
+            with db.bind_db(group_db_path(gid)):
+                from core.recap.retro import generate_ticket_retrospective
+                await generate_ticket_retrospective(gid)
+        except Exception:
+            log.exception("worker %s: failed to generate retrospective for group %s", self.worker_id, gid)
+
     async def _pump_recap(self) -> None:
         from bus.events import WorkflowPaused
         sub = self.bus.subscribe(WorkflowPaused)
         async with sub:
             async for ev in sub:
-                bg.spawn(self._recap_on_paused(ev.group_id))
+                if ev.reason == "done":
+                    bg.spawn(self._retro_on_done(ev.group_id))
+                else:
+                    bg.spawn(self._recap_on_paused(ev.group_id))
 
     async def _pump_compaction(self) -> None:
         from bus.events import CompactionTriggered

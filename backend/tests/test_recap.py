@@ -356,5 +356,147 @@ class TestRecapEventTrigger(unittest.IsolatedAsyncioTestCase):
         gen.assert_awaited_once_with(7)
 
 
+class TestRetrospective(unittest.IsolatedAsyncioTestCase):
+    """Test retrospective memory logic, including event dispatch and file generation."""
+
+    async def test_pump_recap_routes_done_to_retro(self):
+        from runtime.worker import Worker
+        from bus.events import WorkflowPaused
+
+        w = Worker.__new__(Worker)
+        w.bus = MagicMock()
+        w._retro_on_done = MagicMock(return_value="retro_coro")
+        w._recap_on_paused = MagicMock(return_value="recap_coro")
+
+        evs = [
+            WorkflowPaused(group_id=1, reason="done"),
+            WorkflowPaused(group_id=1, reason="gate"),
+        ]
+
+        class MockSub:
+            async def __aenter__(self): return self
+            async def __aexit__(self, exc_type, exc_val, exc_tb): pass
+            def __aiter__(self):
+                self.idx = 0
+                return self
+            async def __anext__(self):
+                if self.idx < len(evs):
+                    ev = evs[self.idx]
+                    self.idx += 1
+                    return ev
+                raise StopAsyncIteration
+
+        w.bus.subscribe.return_value = MockSub()
+
+        from core import bg
+        with patch.object(bg, "spawn") as mock_spawn:
+            await w._pump_recap()
+            self.assertEqual(mock_spawn.call_count, 2)
+            w._retro_on_done.assert_called_once_with(1)
+            w._recap_on_paused.assert_called_once_with(1)
+
+    async def test_retro_on_done_generates_for_active_group(self):
+        import db as _db
+        from runtime.worker import Worker
+        from runtime.lifecycle import manager as lifecycle
+
+        w = Worker.__new__(Worker)
+        w.worker_id = "test_worker"
+
+        cm = MagicMock()
+        cm.__enter__ = MagicMock()
+        cm.__exit__ = MagicMock(return_value=False)
+
+        with patch.object(lifecycle, "is_active", return_value=True), \
+             patch.object(_db, "bind_db", return_value=cm), \
+             patch("core.recap.retro.generate_ticket_retrospective", new=AsyncMock()) as gen:
+            await w._retro_on_done(5)
+        gen.assert_awaited_once_with(5)
+
+    async def test_generate_ticket_retrospective(self):
+        import tempfile
+        import shutil
+        from pathlib import Path
+
+        temp_dir = tempfile.mkdtemp()
+        try:
+            ws_mock = Path(temp_dir) / "group_1" / "shared"
+            ws_mock.mkdir(parents=True)
+
+            # Mock workspace
+            with patch("core.recap.retro.group_workspace", return_value=ws_mock), \
+                 patch("core.recap.retro.get_db") as mock_gdb, \
+                 patch("core.recap.retro.global_db") as mock_cdb, \
+                 patch("core.recap.retro.get_messages") as mock_get_msgs, \
+                 patch("core.recap.retro.get_members") as mock_get_members, \
+                 patch("core.recap.retro.call_ai_once") as mock_call_ai, \
+                 patch("core.recap.retro.write_connect") as mock_write_conn, \
+                 patch("core.recap.retro.bus.broadcast") as mock_broadcast:
+
+                # Setup messages
+                mock_get_msgs.return_value = [
+                    {"id": 10, "content": "Hello", "sender_name": "BA", "is_deleted": False, "is_auto_reply": False},
+                    {"id": 11, "content": "Code written", "sender_name": "Dev", "is_deleted": False, "is_auto_reply": False},
+                ]
+                mock_get_members.return_value = []
+
+                # Setup LLM response
+                mock_call_ai.return_value = {
+                    "content": """
+## 1. 最终成果摘要 (Executive Summary)
+完成本轮开发，生成了测试组件。
+
+## 2. 核心技术决策与动因 (Key Decisions & Rationale)
+无
+
+## 3. 避坑指南与教训 (Lessons & Anti-Patterns)
+无
+
+## 4. 技术债与后续待办 (Tech Debt & Next Steps)
+无
+"""
+                }
+
+                # Mock DB connection
+                conn_mock = AsyncMock()
+                mock_write_conn.return_value.__aenter__.return_value = conn_mock
+
+                from core.recap.retro import generate_ticket_retrospective
+                content = await generate_ticket_retrospective(1)
+
+                # Verify retrospective returned content
+                self.assertIsNotNone(content)
+                self.assertIn("完成本轮开发", content)
+
+                # Verify files created
+                latest_path = ws_mock / "RETRO_LATEST.md"
+                run_path = ws_mock / "retros" / "run_0.md"
+                self.assertTrue(latest_path.exists())
+                self.assertTrue(run_path.exists())
+                self.assertIn("完成本轮开发", latest_path.read_text(encoding="utf-8"))
+
+                # Verify anchor file created outside shared/
+                anchor_path = ws_mock.parent / ".system" / "retro_anchor.json"
+                self.assertTrue(anchor_path.exists())
+
+                # Verify central DB update called
+                conn_mock.execute.assert_called_once()
+                sql = conn_mock.execute.call_args[0][0]
+                args = conn_mock.execute.call_args[0][1]
+                self.assertIn("UPDATE groups SET away_summary", sql)
+                self.assertEqual(args[0], "完成本轮开发，生成了测试组件。")
+                self.assertEqual(args[1], 1)
+
+                # Verify broadcast called
+                mock_broadcast.assert_called_once_with(1, {
+                    "type": "recap_updated",
+                    "group_id": 1,
+                    "away_summary": "完成本轮开发，生成了测试组件。"
+                })
+
+        finally:
+            shutil.rmtree(temp_dir)
+
+
 if __name__ == "__main__":
     unittest.main()
