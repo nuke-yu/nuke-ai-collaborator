@@ -28,6 +28,28 @@ async def _safe_add_column(db, sql: str) -> None:
     schema marked as success (DFT-038).
     """
     try:
+        parts = sql.split()
+        if len(parts) >= 3 and parts[0].upper() == "ALTER" and parts[1].upper() == "TABLE":
+            table_name = parts[2].strip("`\"[]")
+            from db.schema_split import CENTRAL_TABLES, GROUP_TABLES
+            
+            # If the table is central-only, check if this DB is central (has 'groups' table)
+            if table_name in CENTRAL_TABLES:
+                cur = await db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='groups'")
+                if (await cur.fetchone()) is None:
+                    log.debug("Skipping central migration for table %s on group DB: %s", table_name, sql)
+                    return
+            
+            # If the table is group-only, check if this DB is a group DB (has 'messages' table)
+            if table_name in GROUP_TABLES:
+                cur = await db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='messages'")
+                if (await cur.fetchone()) is None:
+                    log.debug("Skipping group migration for table %s on central DB: %s", table_name, sql)
+                    return
+    except Exception as e:
+        log.warning("failed to check table domain for %s: %s", sql, e)
+
+    try:
         await db.execute(sql)
     except sqlite3.OperationalError as e:
         if "duplicate column" in str(e).lower():

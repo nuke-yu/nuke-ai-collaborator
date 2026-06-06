@@ -97,8 +97,8 @@ async def apply_step(group_id: int, orch, step) -> None:
         await bus.publish(WorkflowUpdate(group_id=group_id, active=False, done=True))
         await workflow_store.clear_state(group_id)
     
-    # Trigger recap generation if workflow gets gated, finishes, or pauses (no active bot turns)
-    if step.confirm_gate or step.done or not step.next_units:
+    # Trigger recap generation ONLY when workflow gets gated (confirm_gate is raised) or finishes (done)
+    if step.confirm_gate or step.done:
         from core.recap import generate_and_cache_recap
         bg.spawn(generate_and_cache_recap(group_id))
 

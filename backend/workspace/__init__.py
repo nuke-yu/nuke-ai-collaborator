@@ -183,6 +183,62 @@ def read_file_history_version(bot_id: int, path: str, ts: str) -> str:
         return f"[读取错误] {e}"
 
 
+async def _commit_text(ws: Path, p: Path, rel: str, path: str, new_text: str, bot_id: int, action: str) -> str:
+    """Internal helper to write text to VFS/disk, handle history/drafts, and dispatch CodeCommitted events."""
+    def _do_write() -> str:
+        # Redirect learned/active writes → learned/draft (requires user approval)
+        if rel.startswith(_LEARNED_ACTIVE):
+            draft_path = ws / _LEARNED_DRAFT / p.name
+            draft_path.parent.mkdir(parents=True, exist_ok=True)
+            draft_path.write_text(new_text, encoding="utf-8")
+            return f"__DRAFT_WRITTEN__:{p.name}"   # sentinel for broadcast
+        # Direct writes to learned/draft/ also return sentinel so tool_loop broadcasts
+        if rel.startswith(_LEARNED_DRAFT):
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(new_text, encoding="utf-8")
+            return f"__DRAFT_WRITTEN__:{p.name}"
+        # Save history before overwriting if content differs
+        if p.exists():
+            try:
+                if p.read_text(encoding="utf-8") != new_text:
+                    _save_to_history(ws, p)
+            except Exception:
+                pass
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(new_text, encoding="utf-8")
+        if action == "write":
+            return f"已写入 {path}（{len(new_text)} 字符）"
+        else:
+            return f"已修改 {path}"
+
+    result = await asyncio.to_thread(_do_write)
+
+    # Emit CodeCommitted event if a code file is written (main thread async)
+    is_shared = ws.parent.name.startswith("group_")
+    if (
+        is_shared 
+        and p.suffix in {".py", ".js", ".ts", ".go", ".java"}
+        and not result.startswith("__DRAFT_WRITTEN__")
+    ):
+        from bus import publish
+        from bus.events import CodeCommitted
+        from db import connect
+        async with connect() as conn:
+            async with conn.execute("SELECT group_id FROM members WHERE id = ?", (bot_id,)) as cur:
+                row = await cur.fetchone()
+            if row:
+                commit_msg = f"Auto-commit by Bot {bot_id}" if action == "write" else f"Auto-edit by Bot {bot_id}"
+                await publish(CodeCommitted(
+                    group_id=row[0],
+                    ticket_id="auto", # Ideally passed via context
+                    files=[path],
+                    commit_msg=commit_msg,
+                    author_id=bot_id
+                ))
+
+    return result
+
+
 async def write_file(bot_id: int, path: str, content: str, group_id: int | None = None) -> str:
     # group_id given (e.g. the system rendering BOARD.md) → write straight to the
     # group's shared workspace, bypassing the bot-centric redirection (which can't
@@ -197,54 +253,7 @@ async def write_file(bot_id: int, path: str, content: str, group_id: int | None 
 
     lock = _get_path_lock(p)
     async with lock:
-        def _do_write() -> str:
-            # Redirect learned/active writes → learned/draft (requires user approval)
-            if rel.startswith(_LEARNED_ACTIVE):
-                draft_path = ws / _LEARNED_DRAFT / p.name
-                draft_path.parent.mkdir(parents=True, exist_ok=True)
-                draft_path.write_text(content, encoding="utf-8")
-                return f"__DRAFT_WRITTEN__:{p.name}"   # sentinel for broadcast
-            # Direct writes to learned/draft/ also return sentinel so tool_loop broadcasts
-            if rel.startswith(_LEARNED_DRAFT):
-                p.parent.mkdir(parents=True, exist_ok=True)
-                p.write_text(content, encoding="utf-8")
-                return f"__DRAFT_WRITTEN__:{p.name}"
-            # Save history before overwriting if content differs
-            if p.exists():
-                try:
-                    if p.read_text(encoding="utf-8") != content:
-                        _save_to_history(ws, p)
-                except Exception:
-                    pass
-            p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_text(content, encoding="utf-8")
-            return f"已写入 {path}（{len(content)} 字符）"
-
-        result = await asyncio.to_thread(_do_write)
-
-        # Point 1: Emit CodeCommitted event if a code file is written (main thread async)
-        is_shared = ws.parent.name.startswith("group_")
-        if (
-            is_shared 
-            and p.suffix in {".py", ".js", ".ts", ".go", ".java"}
-            and not result.startswith("__DRAFT_WRITTEN__")
-        ):
-            from bus import publish
-            from bus.events import CodeCommitted
-            from db import connect
-            async with connect() as conn:
-                async with conn.execute("SELECT group_id FROM members WHERE id = ?", (bot_id,)) as cur:
-                    row = await cur.fetchone()
-                if row:
-                    await publish(CodeCommitted(
-                        group_id=row[0],
-                        ticket_id="auto", # Ideally passed via context
-                        files=[path],
-                        commit_msg=f"Auto-commit by Bot {bot_id}",
-                        author_id=bot_id
-                    ))
-
-        return result
+        return await _commit_text(ws, p, rel, path, content, bot_id, "write")
 
 
 async def edit_file(bot_id: int, path: str, old_string: str, new_string: str, replace_all: bool = False) -> str:
@@ -274,48 +283,7 @@ async def edit_file(bot_id: int, path: str, old_string: str, new_string: str, re
         if updated == current:
             return "[无改动] 替换前后内容一致"
 
-        def _do_write() -> str:
-            if rel.startswith(_LEARNED_ACTIVE):
-                draft_path = ws / _LEARNED_DRAFT / p.name
-                draft_path.parent.mkdir(parents=True, exist_ok=True)
-                draft_path.write_text(updated, encoding="utf-8")
-                return f"__DRAFT_WRITTEN__:{p.name}"
-            if rel.startswith(_LEARNED_DRAFT):
-                p.parent.mkdir(parents=True, exist_ok=True)
-                p.write_text(updated, encoding="utf-8")
-                return f"__DRAFT_WRITTEN__:{p.name}"
-            try:
-                _save_to_history(ws, p)
-            except Exception:
-                pass
-            p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_text(updated, encoding="utf-8")
-            return f"已修改 {path}"
-
-        result = await asyncio.to_thread(_do_write)
-
-        is_shared = ws.parent.name.startswith("group_")
-        if (
-            is_shared 
-            and p.suffix in {".py", ".js", ".ts", ".go", ".java"}
-            and not result.startswith("__DRAFT_WRITTEN__")
-        ):
-            from bus import publish
-            from bus.events import CodeCommitted
-            from db import connect
-            async with connect() as conn:
-                async with conn.execute("SELECT group_id FROM members WHERE id = ?", (bot_id,)) as cur:
-                    row = await cur.fetchone()
-                if row:
-                    await publish(CodeCommitted(
-                        group_id=row[0],
-                        ticket_id="auto",
-                        files=[path],
-                        commit_msg=f"Auto-edit by Bot {bot_id}",
-                        author_id=bot_id
-                    ))
-
-        return result
+        return await _commit_text(ws, p, rel, path, updated, bot_id, "edit")
 
 
 async def list_workspace(bot_id: int) -> str:

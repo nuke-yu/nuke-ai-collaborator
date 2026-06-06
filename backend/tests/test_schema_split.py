@@ -110,7 +110,7 @@ class TestSchemaSplit(unittest.IsolatedAsyncioTestCase):
                                    "applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
                 # 停在 meta(最后一个迁移)之前一版，模拟 db/chat.db 的 v15 状态
                 await conn.execute("INSERT INTO _schema_version (version) VALUES (?)",
-                                   (len(MIGRATIONS) - 1,))
+                                   (15,))
                 await conn.commit()
             await db.init_central_db(legacy)
             async with db.connect(legacy) as conn:

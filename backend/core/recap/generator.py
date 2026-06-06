@@ -13,10 +13,12 @@ async def generate_and_cache_recap(group_id: int) -> str | None:
     """
     try:
         log.info("Starting recap generation for group %s", group_id)
-        # 1. Fetch recent messages and members
-        async with get_db() as db_conn:
-            messages = await get_messages(db_conn, group_id, limit=30)
-            members = await get_members(db_conn, group_id)
+        # 1. Fetch members from Central DB and messages from Group Private DB
+        from db import global_db
+        async with global_db() as cdb:
+            members = await get_members(cdb, group_id)
+        async with get_db() as gdb:
+            messages = await get_messages(gdb, group_id, limit=30)
         
         if not messages:
             log.info("No messages found in group %s to summarize", group_id)
@@ -78,7 +80,7 @@ async def generate_and_cache_recap(group_id: int) -> str | None:
             log.warning("Generated empty recap for group %s", group_id)
             return None
             
-        # 6. Save the summary in the database (groups table in the central DB)
+        # 6. Save the summary in the database (groups table in the central DB, hence passing db.DB_PATH explicitly)
         async with write_connect(db.DB_PATH) as db_conn:
             await db_conn.execute(
                 "UPDATE groups SET away_summary = ? WHERE id = ?",
@@ -106,6 +108,7 @@ async def clear_recap(group_id: int) -> None:
     Clears the cached away summary from the groups table in the central DB.
     """
     try:
+        # Pass db.DB_PATH explicitly to write to the central DB
         async with write_connect(db.DB_PATH) as db_conn:
             await db_conn.execute(
                 "UPDATE groups SET away_summary = NULL WHERE id = ?",
