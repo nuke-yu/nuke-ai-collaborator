@@ -33,11 +33,11 @@ sequenceDiagram
     
     alt 人类点击 [确认]
         User->>DB: 4. 触发 /workflow/confirm API
-        DB->>DB: 5. 提交草稿: is_draft = 0
+        DB->>DB: 5. 提交草稿: 从 speculative_messages 拷贝到 messages
         DB->>User: 6. 正式广播测试报告 (零延迟呈现)
     else 人类点击 [打回]
         User->>DB: 4. 触发 /workflow/rework API
-        DB->>DB: 5. 清理草稿: DELETE WHERE is_draft = 1
+        DB->>DB: 5. 清理草稿: TRUNCATE/DELETE speculative_messages
         DB->>User: 6. 流程回退，不留痕迹
     end
 ```
@@ -48,20 +48,32 @@ sequenceDiagram
 
 ### 2.1 数据库结构变更 (Database Schema)
 
-在群聊私有库的 `messages` 表中新增 `is_draft` 字段，以实现对推测产出的逻辑隔离。
+为了防止正式消息表受到频繁“写入-删除” churn 的影响，并物理保证未确认的预执行草稿绝不泄漏，设计采用**物理临时表隔离**，单独创建 `speculative_messages` 表存储推测草稿。
 
 ```sql
--- 针对新消息表的默认字段
-ALTER TABLE messages ADD COLUMN is_draft INTEGER DEFAULT 0;
+CREATE TABLE IF NOT EXISTS speculative_messages (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_id        INTEGER NOT NULL,
+    member_id       INTEGER NOT NULL,
+    content         TEXT    NOT NULL,
+    reply_to_id     INTEGER DEFAULT NULL,
+    meta            TEXT    DEFAULT NULL,
+    sender_name     TEXT,
+    sender_type     TEXT,
+    sender_avatar   TEXT,
+    sender_provider TEXT,
+    sender_model    TEXT,
+    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (group_id) REFERENCES groups(id)
+);
 
--- 创建索引以优化日常历史查询
-CREATE INDEX IF NOT EXISTS idx_messages_draft ON messages(group_id, is_draft, id);
+CREATE INDEX IF NOT EXISTS idx_speculative_group ON speculative_messages(group_id);
 ```
 
 > [!IMPORTANT]
 > **API & WebSocket 隔离规则**：
-> - 所有的消息查询接口（如 `get_messages`、`get_all_messages`）必须在 SQL 过滤中加入 `WHERE is_draft = 0`。
-> - WebSocket 广播在向客户端推送 `stream_start`、`stream_chunk` 和 `message` 事件时，如果该流属于预执行阶段，必须阻止向前端客户端发送，或打上特定 `draft` 标记进行屏蔽。
+> - 所有的日常消息查询接口（如 `get_messages`、`get_all_messages`）物理隔离，**不需要修改 SQL 查询条件**即可确保 100% 不会意外泄露草稿。
+> - WebSocket 广播在向客户端推送预执行的 `stream_start`、`stream_chunk` 等流式事件时，如果该流在 `speculative_messages` 域下运行，必须拦截向前端客户端的推送，或打上特定 `draft` 标记进行屏蔽，防止在确认前界面闪现。
 
 ### 2.2 工作区沙箱隔离 (Workspace Sandbox Isolation)
 
@@ -73,37 +85,49 @@ CREATE INDEX IF NOT EXISTS idx_messages_draft ON messages(group_id, is_draft, id
 
 ### 2.3 状态流转与双向提交 (Commit / Discard)
 
-在 `backend/core/workflow.py` and `backend/core/runner.py` 中引入两阶段提交逻辑：
+在 `backend/core/workflow.py` 和 `backend/core/runner.py` 中引入两阶段提交逻辑：
 
 #### 触发预执行
 当 `apply_step` 检测到工作流处于挂起卡片状态（`step.confirm_gate` 非空）时，调用下一步智能体的 `pre_execute` 方法：
 ```python
 if step.confirm_gate:
-    # 异步默默拉起下一步的预执行，传入 is_draft=True
-    bg.spawn(run_speculative_unit(group_id, next_unit))
+    # 异步默默拉起下一步的预执行，写入临时草稿表
+    bg.spawn(run_speculative_unit(group_id, next_unit, use_speculative_table=True))
 ```
 
 #### 两阶段控制
 ```python
 async def commit_speculative_data(group_id: int) -> None:
-    """确认通过：将草稿消息正式生效并向前端广播"""
+    """确认通过：将草稿消息批量拷贝到正式消息表，并向前端广播"""
     async with write_connect(group_db_path(group_id)) as db:
-        # 1. 选出草稿态消息
-        cur = await db.execute("SELECT * FROM messages WHERE group_id = ? AND is_draft = 1", (group_id,))
+        # 1. 读出所有临时草稿
+        cur = await db.execute(
+            "SELECT member_id, content, reply_to_id, meta, sender_name, sender_type, sender_avatar, sender_provider, sender_model FROM speculative_messages WHERE group_id = ? ORDER BY id ASC", 
+            (group_id,)
+        )
         drafts = await cur.fetchall()
         
-        # 2. 将状态翻转为正式消息
-        await db.execute("UPDATE messages SET is_draft = 0 WHERE group_id = ? AND is_draft = 1", (group_id,))
+        # 2. 依次写入正式消息表，并清空临时表
+        committed_messages = []
+        for row in drafts:
+            # save_message 内部会自动分配正式 ID，此处批量插入
+            mid = await save_message(
+                db, group_id, member_id=row[0], content=row[1],
+                reply_to_id=row[2], file_url=None, file_name=None,
+                file_size=None, file_type=None, meta=json.loads(row[3]) if row[3] else None
+            )
+            committed_messages.append(mid)
+            
+        await db.execute("DELETE FROM speculative_messages WHERE group_id = ?", (group_id,))
         await db.commit()
     
-    # 3. 广播广播消息，前端收到后追加到消息列表，用户体验为秒出
-    for msg in drafts:
-        await bus.broadcast(group_id, {"type": "message", **msg})
+    # 3. 广播给前端客户端
+    # fetch & broadcast committed messages...
 
 async def discard_speculative_data(group_id: int) -> None:
     """打回重做：物理删除草稿，并清理沙箱"""
     async with write_connect(group_db_path(group_id)) as db:
-        await db.execute("DELETE FROM messages WHERE group_id = ? AND is_draft = 1", (group_id,))
+        await db.execute("DELETE FROM speculative_messages WHERE group_id = ?", (group_id,))
         await db.commit()
     # 异步清理临时分支/目录
     bg.spawn(cleanup_speculative_workspace(group_id))
@@ -113,11 +137,11 @@ async def discard_speculative_data(group_id: int) -> None:
 
 ## 3. 前端交互设计
 
-由于草稿消息在确认前被过滤，用户界面在确认前不会有任何变化，完美保证了透明性。
+由于草稿消息物理隔离在 `speculative_messages` 表中，确认前用户界面不会有任何变化，完美保证了透明性。
 
 当用户点击 **[ 确认 ]** 时：
 1. 前端向后端发送 `/api/groups/{group_id}/workflow/confirm` 请求。
-2. 后端瞬间将 `is_draft` 翻转为 `0`，并通过 WebSocket 广播。
+2. 后端瞬间将临时消息表中的数据拷贝至正式表并物理清空临时表，同时通过 WebSocket 广播。
 3. 前端接收到正式的 QA 消息包，聊天面板平滑滚动并依次渲染出测试结论。原本漫长的机器思考时间在用户侧变成了**瞬间滑出结果**。
 
 ---
@@ -125,6 +149,6 @@ async def discard_speculative_data(group_id: int) -> None:
 ## 4. 异常边界处理 (Edge Cases)
 
 * **预执行仍在跑时用户点击了 [确认]**：  
-  如果 QA 跑 pytest 还没结束（预执行仍在进行中），用户便点击了确认。系统将自动“接轨转正”：将该任务的执行模式由 `draft` 切换为 `live`，后续产生的 Stream 字符直接广播给前端呈现。
+  如果 QA 跑 pytest 还没结束（预执行仍在进行中），用户便点击了确认。系统将自动“接轨转正”：将该任务的执行写入位置由 `speculative_messages` 切换为 `messages`，后续产生的 Stream 字符直接广播给前端呈现。
 * **LLM 限流 (Rate Limit) 保护**：  
-  由于预执行是一项提速机制，一旦遇到平台 API 限制（如 429 Error），系统应主动放弃预执行（Graceful Degradation），改为传统的确认后再启动模式，绝不影响主流程的健壮性。
+  由于预执行是一项提速机制，一旦遇到平台 API 限制（如 429 Error），系统应主动放弃预执行 (Graceful Degradation)，改为传统的确认后再启动模式，绝不影响主流程的健壮性。
