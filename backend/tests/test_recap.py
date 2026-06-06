@@ -51,7 +51,7 @@ class TestAwaySummaryRecap(unittest.IsolatedAsyncioTestCase):
             except Exception:
                 pass
 
-    @patch("core.recap.call_ai_once", new_callable=AsyncMock)
+    @patch("core.recap.generator.call_ai_once", new_callable=AsyncMock)
     async def test_generate_and_cache_recap_success(self, mock_call_ai):
         mock_call_ai.return_value = {"content": "This is a recap summary."}
 
@@ -70,7 +70,7 @@ class TestAwaySummaryRecap(unittest.IsolatedAsyncioTestCase):
             group = await database.get_group(db_conn, 1)
             self.assertEqual(group["away_summary"], "This is a recap summary.")
 
-    @patch("core.recap.call_ai_once", new_callable=AsyncMock)
+    @patch("core.recap.generator.call_ai_once", new_callable=AsyncMock)
     async def test_generate_and_cache_recap_empty_messages(self, mock_call_ai):
         # Delete messages first
         async with database.get_db() as db_conn:
