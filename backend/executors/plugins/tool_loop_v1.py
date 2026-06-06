@@ -734,6 +734,7 @@ class ToolLoopRunner:
                 self.execution_ctx = {
                     "bot_id": self.bot["id"],
                     "group_id": self.ctx.group_id,
+                    "role": self.bot.get("role"),
                     "user_message": self.ctx.user_message,
                     "all_bots": self.ctx.all_bots,
                     "all_members": self.ctx.all_members,

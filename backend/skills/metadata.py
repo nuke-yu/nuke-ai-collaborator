@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+import yaml
 
 
 def _is_safe_name(name: str) -> bool:
@@ -53,46 +54,63 @@ def parse_frontmatter(content: str) -> dict:
             break
     if end is None:
         return {}
+    
+    frontmatter_text = "\n".join(lines[1:end])
+    try:
+        raw_fm = yaml.safe_load(frontmatter_text)
+    except Exception:
+        return {}
+        
+    if not isinstance(raw_fm, dict):
+        return {}
+        
     fm: dict = {}
-    for line in lines[1:end]:
-        if ":" not in line:
-            continue
-        key, _, val = line.partition(":")
-        key = key.strip()
-        val = val.strip().strip("\"'")
-        if key == "name":
-            fm["name"] = val
-        elif key == "description":
-            fm["description"] = val
-        elif key == "when_to_use":
-            fm["when_to_use"] = val
-        elif key == "always":
-            fm["always"] = val.lower() in ("true", "yes", "1")
-        elif key == "max_iterations":
-            try:
-                fm["max_iterations"] = int(val)
-            except ValueError:
-                pass
-        elif key == "status":
-            fm["status"] = val
-        elif key == "layer":
-            fm["layer"] = val
-        elif key == "learns":
-            fm["learns"] = val.lower() in ("true", "yes", "1")
-        elif key == "paths":
-            fm["paths"] = val
-        elif key == "context":
-            fm["context"] = val  # "inline" (default) or "fork"
-        elif key == "shell":
-            fm["shell"] = val  # "bash" (default) or "powershell"
-        elif key == "user-invocable":
-            fm["user_invocable"] = val.lower() not in ("false", "no", "0")
-        elif key == "argument-hint":
-            fm["argument_hint"] = val
-        elif key == "allowed-tools":
-            fm["allowed_tools"] = [t.strip() for t in val.split(",") if t.strip()]
-        elif key == "model":
-            fm["model"] = val
+    
+    # Process standard string fields
+    for str_key in ["name", "description", "when_to_use", "status", "layer", "paths", "context", "shell", "model"]:
+        if str_key in raw_fm:
+            fm[str_key] = str(raw_fm[str_key]) if raw_fm[str_key] is not None else ""
+            
+    # For argument-hint (support both '-' and '_' naming variants)
+    arg_hint = raw_fm.get("argument-hint") or raw_fm.get("argument_hint")
+    if arg_hint is not None:
+        fm["argument_hint"] = str(arg_hint)
+        
+    # Process boolean fields
+    for bool_key in ["always", "learns"]:
+        if bool_key in raw_fm:
+            val = raw_fm[bool_key]
+            if isinstance(val, bool):
+                fm[bool_key] = val
+            else:
+                fm[bool_key] = str(val).lower() in ("true", "yes", "1")
+                
+    # Process integer iterations
+    if "max_iterations" in raw_fm:
+        val = raw_fm["max_iterations"]
+        try:
+            fm["max_iterations"] = int(val)
+        except (ValueError, TypeError):
+            pass
+            
+    # Process user-invocable flag
+    user_invocable = raw_fm.get("user-invocable") or raw_fm.get("user_invocable")
+    if user_invocable is not None:
+        if isinstance(user_invocable, bool):
+            fm["user_invocable"] = user_invocable
+        else:
+            fm["user_invocable"] = str(user_invocable).lower() not in ("false", "no", "0")
+            
+    # Process allowed-tools (A2: list list/comma dual state)
+    allowed_tools = raw_fm.get("allowed-tools") or raw_fm.get("allowed_tools")
+    if allowed_tools is not None:
+        if isinstance(allowed_tools, list):
+            fm["allowed_tools"] = [str(t).strip() for t in allowed_tools if t]
+        elif isinstance(allowed_tools, str):
+            fm["allowed_tools"] = [t.strip() for t in allowed_tools.split(",") if t.strip()]
+        else:
+            fm["allowed_tools"] = []
+            
     return fm
 
 
@@ -130,6 +148,10 @@ def parse_skill_meta(path: Path) -> dict:
                 if clean:
                     description = clean
                     break
+                    
+        body = strip_frontmatter(content).strip()
+        is_stub = not body
+
         return {
             "description": description,
             "always": always,
@@ -145,7 +167,9 @@ def parse_skill_meta(path: Path) -> dict:
             "argument_hint": fm.get("argument_hint", ""),
             "allowed_tools": fm.get("allowed_tools", []),
             "model": fm.get("model", ""),
+            "is_stub": is_stub,
+            "fm_keys": list(fm.keys())
         }
     except Exception:
         return {"description": "", "always": False, "status": "active",
-                "layer": "", "learns": False}
+                "layer": "", "learns": False, "is_stub": False, "fm_keys": []}
