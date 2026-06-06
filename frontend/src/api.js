@@ -186,3 +186,13 @@ export async function fetchPersonalRecap(groupId, memberId) {
   return res.json()
 }
 
+export async function fetchAiSuggestions(groupId, awaitingConfirm) {
+  const res = await authFetch(`/api/groups/${groupId}/suggest`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ awaiting_confirm: awaitingConfirm })
+  })
+  return res.json()
+}
+
+

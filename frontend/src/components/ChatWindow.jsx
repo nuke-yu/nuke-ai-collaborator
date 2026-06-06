@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
-import { fetchAllGroups, fetchGroupInfo, fetchMessages, fetchUnreadCounts, fetchReactions, toggleReaction, createGroup, addMember, fetchPins, pinMessage, unpinMessage, resumeSession, cancelSessionRecovery, fetchGroupRecap, dismissGroupRecap, fetchPersonalRecap } from '../api'
+import { fetchAllGroups, fetchGroupInfo, fetchMessages, fetchUnreadCounts, fetchReactions, toggleReaction, createGroup, addMember, fetchPins, pinMessage, unpinMessage, resumeSession, cancelSessionRecovery, fetchGroupRecap, dismissGroupRecap, fetchPersonalRecap, fetchAiSuggestions } from '../api'
 import { useWebSocket } from '../hooks/useWebSocket'
 import { useNotifications } from '../hooks/useNotifications'
 import GroupList from './GroupList'
@@ -62,9 +62,30 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
   const [awaySummary, setAwaySummary] = useState(null)
   const [personalSummary, setPersonalSummary] = useState(null)
   const [loadingRecap, setLoadingRecap] = useState(false)
+  const [aiSuggestions, setAiSuggestions] = useState([])
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false)
   const personalRecapAt = useRef({}) // groupId -> last fetch ts（10s 防抖，避免频繁触发 LLM）
   const { notify } = useNotifications()
   const bottomRef = useRef(null)
+
+  const handleFetchAiSuggestions = async () => {
+    if (!activeGroupId || suggestionsLoading) return
+    setSuggestionsLoading(true)
+    try {
+      const data = await fetchAiSuggestions(activeGroupId, workflow?.awaiting_confirm || null)
+      setAiSuggestions(data.suggestions || [])
+    } catch (err) {
+      console.error('Failed to fetch AI suggestions:', err)
+      notify('获取 AI 建议失败', 'error')
+    } finally {
+      setSuggestionsLoading(false)
+    }
+  }
+
+  // Auto-clear AI suggestions on message addition or workflow transition
+  useEffect(() => {
+    setAiSuggestions([])
+  }, [activeGroupId, messages.length, workflow?.active, workflow?.awaiting_confirm])
 
   const loadRecap = useCallback(async (groupId) => {
     if (!groupId) return
@@ -791,6 +812,9 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
           awaySummary={awaySummary}
           messages={messages}
           members={members}
+          aiSuggestions={aiSuggestions}
+          loading={suggestionsLoading}
+          onFetch={handleFetchAiSuggestions}
           onSelect={(text, action) => {
             if (action === 'confirm') {
               if (workflow?.awaiting_confirm) {

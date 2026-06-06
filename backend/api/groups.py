@@ -280,3 +280,13 @@ async def get_personal_recap(group_id: int, member_id: int):
     from core.recap import generate_personal_recap
     return await generate_personal_recap(group_id, member_id)
 
+
+@router.post("/api/groups/{group_id}/suggest")
+async def get_suggestions(group_id: int, payload: dict = None):
+    from core.suggest import get_ai_suggestions
+    payload = payload or {}
+    awaiting_confirm = payload.get("awaiting_confirm")
+    suggestions = await get_ai_suggestions(group_id, awaiting_confirm)
+    return {"suggestions": suggestions}
+
+
