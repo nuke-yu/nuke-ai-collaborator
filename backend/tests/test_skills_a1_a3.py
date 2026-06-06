@@ -1,13 +1,18 @@
 import os
-import shutil
-import unittest
+import sys
 from pathlib import Path
 
-from backend.skills.metadata import parse_frontmatter, parse_skill_meta
-from backend.skills.discovery import _list_skills_all_sync
-from backend.skills.loader import run_skill, load_always_skills
-import backend.skills.discovery as skill_discovery
-import backend.skills.loader as skill_loader
+# Add backend directory to sys.path to allow relative imports (like importing core/skills directly)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import shutil
+import unittest
+
+from skills.metadata import parse_frontmatter, parse_skill_meta
+from skills.discovery import _list_skills_all_sync
+from skills.loader import run_skill, load_always_skills
+import skills.discovery as skill_discovery
+import skills.loader as skill_loader
 
 _HERE = Path(__file__).parent.parent
 _TEST_WS_ROOT = _HERE / "test_ws_skills_a1_a3"
@@ -157,6 +162,43 @@ status: active
         content = await run_skill(bot_id=1, name="build-helper", ctx=ctx)
         self.assertIn("Group build-helper body", content)
         self.assertEqual(ctx.get("skill_allowed_tools"), ["run_shell"])
+
+    def test_filter_skills_by_context_b1(self):
+        from skills.filter import filter_skills_by_context
+
+        # Mock list of skills with different roles and stages specs
+        skills = [
+            {"name": "dev-skill", "roles": ["dev"], "stages": ["dev"], "when_to_use": "compile or build"},
+            {"name": "qa-skill", "roles": ["qa"], "stages": ["qa"], "when_to_use": "test or verify"},
+            {"name": "confirm-skill", "stages": ["awaiting_confirm"], "when_to_use": "approve or confirm"},
+            {"name": "always-eligible"}
+        ]
+
+        # Case 1: bot is 'dev' and stage is 'dev'
+        res = filter_skills_by_context(skills, "I want to compile the code", bot_role="developer", current_stage="dev")
+        self.assertEqual(len(res), 2)
+        names = [s["name"] for s in res]
+        self.assertIn("dev-skill", names)
+        self.assertIn("always-eligible", names)
+
+        # Case 2: bot is 'qa' and stage is 'qa'
+        res = filter_skills_by_context(skills, "I want to test", bot_role="QA Engineer", current_stage="qa")
+        self.assertEqual(len(res), 2)
+        names = [s["name"] for s in res]
+        self.assertIn("qa-skill", names)
+        self.assertIn("always-eligible", names)
+
+        # Case 3: bot is 'dev' but stage is 'qa' -> dev-skill is filtered out by stage constraint
+        res = filter_skills_by_context(skills, "I want to compile", bot_role="developer", current_stage="qa")
+        self.assertEqual(len(res), 1)
+        self.assertEqual(res[0]["name"], "always-eligible")
+
+        # Case 4: awaiting confirmation stage
+        res = filter_skills_by_context(skills, "I want to approve", bot_role="developer", current_stage="dev", is_awaiting_confirm=True)
+        self.assertEqual(len(res), 2)
+        names = [s["name"] for s in res]
+        self.assertIn("confirm-skill", names)
+        self.assertIn("always-eligible", names)
 
 
 if __name__ == "__main__":

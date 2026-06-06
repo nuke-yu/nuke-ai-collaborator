@@ -110,6 +110,26 @@ def parse_frontmatter(content: str) -> dict:
             fm["allowed_tools"] = [t.strip() for t in allowed_tools.split(",") if t.strip()]
         else:
             fm["allowed_tools"] = []
+
+    # Process roles (support list / comma separated string)
+    roles = raw_fm.get("roles") or raw_fm.get("role")
+    if roles is not None:
+        if isinstance(roles, list):
+            fm["roles"] = [str(r).strip().lower() for r in roles if r]
+        elif isinstance(roles, str):
+            fm["roles"] = [r.strip().lower() for r in roles.split(",") if r.strip()]
+        else:
+            fm["roles"] = []
+
+    # Process stages (support list / comma separated string)
+    stages = raw_fm.get("stages") or raw_fm.get("stage")
+    if stages is not None:
+        if isinstance(stages, list):
+            fm["stages"] = [str(s).strip().lower() for s in stages if s]
+        elif isinstance(stages, str):
+            fm["stages"] = [s.strip().lower() for s in stages.split(",") if s.strip()]
+        else:
+            fm["stages"] = []
             
     return fm
 
@@ -167,9 +187,12 @@ def parse_skill_meta(path: Path) -> dict:
             "argument_hint": fm.get("argument_hint", ""),
             "allowed_tools": fm.get("allowed_tools", []),
             "model": fm.get("model", ""),
+            "roles": fm.get("roles", []),
+            "stages": fm.get("stages", []),
             "is_stub": is_stub,
             "fm_keys": list(fm.keys())
         }
     except Exception:
         return {"description": "", "always": False, "status": "active",
-                "layer": "", "learns": False, "is_stub": False, "fm_keys": []}
+                "layer": "", "learns": False, "is_stub": False, "fm_keys": [],
+                "roles": [], "stages": []}

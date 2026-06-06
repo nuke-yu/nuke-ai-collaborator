@@ -101,23 +101,56 @@ def _extract_keywords(text: str) -> set[str]:
 # Main filter
 # ---------------------------------------------------------------------------
 
-def filter_skills_by_context(skills: list[dict], user_message: str) -> list[dict]:
+def filter_skills_by_context(
+    skills: list[dict],
+    user_message: str,
+    bot_role: str | None = None,
+    current_stage: str | None = None,
+    is_awaiting_confirm: bool = False
+) -> list[dict]:
     """Return the subset of skills relevant to user_message.
 
-    Per-skill inclusion logic:
-      1. `paths:` set AND any extracted path matches  → include (force)
-      2. `when_to_use` not set                        → include (always)
-      3. `when_to_use` set AND keywords match message → include
-      4. otherwise                                    → exclude
+    Inclusion logic:
+      1. Hard Gates: filter out skills where roles or stages don't match (zero-cost).
+      2. Paths Match: paths spec matches extracted path -> force-include
+      3. Intent Match: when_to_use matches keywords or is empty -> include
     """
-    if not user_message or not skills:
-        return skills
+    if not skills:
+        return []
+
+    # 1. Hard Gate (determination filtering by roles/stages)
+    candidates = []
+    from core.role_router import _role_family
+    bot_family = _role_family(bot_role) if bot_role else None
+
+    for s in skills:
+        # Check roles constraint
+        roles_spec = s.get("roles")
+        if roles_spec:
+            if not bot_family or bot_family not in roles_spec:
+                continue
+
+        # Check stages constraint
+        stages_spec = s.get("stages")
+        if stages_spec:
+            matched_stage = False
+            if current_stage and current_stage.lower() in stages_spec:
+                matched_stage = True
+            elif is_awaiting_confirm and "awaiting_confirm" in stages_spec:
+                matched_stage = True
+            if not matched_stage:
+                continue
+
+        candidates.append(s)
+
+    if not user_message or not candidates:
+        return candidates
 
     msg = user_message.lower()
     candidate_paths = _extract_paths(user_message)
 
     result = []
-    for s in skills:
+    for s in candidates:
         paths_spec = (s.get("paths") or "").strip()
         if paths_spec:
             # paths: defined → include ONLY when paths match (when_to_use ignored)

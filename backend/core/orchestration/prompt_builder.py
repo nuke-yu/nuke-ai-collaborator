@@ -35,7 +35,30 @@ async def compile_system_prompt(
         and s.get("status", "active") != "disabled"
         and s.get("user_invocable", True)
     ]
-    lazy_candidates = filter_skills_by_context(lazy_candidates, ctx.user_message)
+    
+    # B1: Retrieve current workflow stage and awaiting_confirm state
+    from core.orchestration import registry as orch_registry
+    orch = orch_registry.get("workflow_v1")
+    s_state = orch.get(ctx.group_id) if (orch and ctx.group_id) else None
+    
+    current_stage = None
+    is_awaiting_confirm = False
+    
+    if s_state:
+        current_idx = s_state.get("current", 0)
+        stages = s_state.get("stages", [])
+        if 0 <= current_idx < len(stages):
+            current_stage = stages[current_idx].get("name")
+        if s_state.get("awaiting_confirm"):
+            is_awaiting_confirm = True
+
+    lazy_candidates = filter_skills_by_context(
+        lazy_candidates,
+        ctx.user_message,
+        bot_role=bot.get("role"),
+        current_stage=current_stage,
+        is_awaiting_confirm=is_awaiting_confirm
+    )
     skills_xml, injected_names = _build_skills_xml(lazy_candidates, model_name)
     
     for s in raw_skills:
