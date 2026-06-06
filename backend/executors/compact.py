@@ -730,15 +730,24 @@ async def maybe_compact_db_history(
                 db, group_id, bot_id, summary_text, keep_ids
             )
 
+        msg_text = f"DB 历史已压缩（{total_tokens:,} tokens），{len(to_summarize)} 条旧消息归档"
         await broadcaster.broadcast(group_id, {
             "type": "db_compaction",
             "summary_id": summary_id,
             "deleted_count": len(to_summarize),
-            "message": (
-                f"DB 历史已压缩（{total_tokens:,} tokens），"
-                f"{len(to_summarize)} 条旧消息归档"
-            ),
+            "message": msg_text,
         })
+        try:
+            from bus import bus
+            from bus.events import CompactionCompleted
+            await bus.publish(CompactionCompleted(
+                group_id=group_id,
+                summary_id=summary_id,
+                deleted_count=len(to_summarize),
+                message=msg_text
+            ))
+        except Exception as e:
+            logger.warning("Failed to publish CompactionCompleted event: %s", e)
     except Exception as exc:
         logger.error("DB compaction error for group %s: %s", group_id, exc)
     finally:

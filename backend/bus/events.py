@@ -218,6 +218,24 @@ class Compaction:
     summary:  str
 
 
+@event("compaction_triggered")
+class CompactionTriggered:
+    group_id:    int
+    bot_id:      int
+    provider:    str
+    model_name:  str
+    temperature: float
+
+
+@event("compaction_completed")
+class CompactionCompleted:
+    group_id:      int
+    summary_id:    int
+    deleted_count: int
+    message:       str
+
+
+
 # ─── Skill ───────────────────────────────────────────────────────────────────
 
 @event("skills_loaded")

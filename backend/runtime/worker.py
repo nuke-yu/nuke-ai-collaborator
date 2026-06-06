@@ -45,6 +45,7 @@ class Worker:
         self._upstream_task = None
         self._report_task = None
         self._recap_task = None
+        self._compaction_task = None
 
     async def connect(self) -> None:
         self._reader, self._writer = await ipc.connect(self.addr)
@@ -56,6 +57,7 @@ class Worker:
         self._upstream_task = asyncio.create_task(self._pump_upstream())
         self._report_task = asyncio.create_task(self._report_stats_loop())
         self._recap_task = asyncio.create_task(self._pump_recap())
+        self._compaction_task = asyncio.create_task(self._pump_compaction())
 
     async def run(self) -> None:
         tracing.setup_structured_logging(log_file=f"logs/worker-{self.worker_id}.log")
@@ -104,27 +106,53 @@ class Worker:
         if self._recap_task:
             self._recap_task.cancel()
             self._recap_task = None
+        if self._compaction_task:
+            self._compaction_task.cancel()
+            self._compaction_task = None
         if self._writer:
             self._writer.close()
             self._writer = None
+
+    async def _recap_on_paused(self, gid: int) -> None:
+        """Handle one WorkflowPaused event: generate a recap only for a group this
+        worker actually owns, with the group DB bound. Best-effort."""
+        from runtime.lifecycle import manager as lifecycle
+        if not lifecycle.is_active(gid):
+            return
+        try:
+            from runtime.dbpaths import group_db_path
+            with db.bind_db(group_db_path(gid)):
+                from core.recap import generate_and_cache_recap
+                await generate_and_cache_recap(gid)
+        except Exception:
+            log.exception("worker %s: failed to generate event-driven recap for group %s", self.worker_id, gid)
 
     async def _pump_recap(self) -> None:
         from bus.events import WorkflowPaused
         sub = self.bus.subscribe(WorkflowPaused)
         async with sub:
             async for ev in sub:
+                bg.spawn(self._recap_on_paused(ev.group_id))
+
+    async def _pump_compaction(self) -> None:
+        from bus.events import CompactionTriggered
+        sub = self.bus.subscribe(CompactionTriggered)
+        async with sub:
+            async for ev in sub:
                 gid = ev.group_id
                 from runtime.lifecycle import manager as lifecycle
-                if gid in lifecycle._active_groups:
+                if lifecycle.is_active(gid):
                     async def _run():
                         try:
                             from runtime.dbpaths import group_db_path
                             db_path = group_db_path(gid)
                             with db.bind_db(db_path):
-                                from core.recap import generate_and_cache_recap
-                                await generate_and_cache_recap(gid)
+                                from executors.compact import maybe_compact_db_history
+                                await maybe_compact_db_history(
+                                    gid, ev.bot_id, ev.provider, ev.model_name, ev.temperature, self.bus
+                                )
                         except Exception:
-                            log.exception("worker %s: failed to generate event-driven recap for group %s", self.worker_id, gid)
+                            log.exception("worker %s: failed to execute event-driven compaction for group %s", self.worker_id, gid)
                     bg.spawn(_run())
 
     async def _pump_upstream(self) -> None:

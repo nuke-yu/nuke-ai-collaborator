@@ -26,6 +26,8 @@ from skills.traits import load_traits
 from skills.constants import bot_ws as _bot_ws
 import executors.compact as compact
 from core import bg
+from bus import bus
+from bus.events import CompactionTriggered
 from core.orchestration.ai_service import AIService
 from core.orchestration.prompt_builder import compile_system_prompt
 from ai.model_limits import resolve_max_tokens
@@ -689,9 +691,13 @@ class ToolLoopRunner:
         
         bg.spawn(add_to_chroma(msg_id, self.full_text, self.bot.get("role") or "", self.bot["id"]))
         bg.spawn(maybe_summarize(self.ctx.group_id, self.bot["id"], self.bot.get("role") or self.bot["name"], [self.bot["id"]]))
-        bg.spawn(compact.maybe_compact_db_history(
-            self.ctx.group_id, self.bot["id"], self.provider, self.model_name, self.temperature, self.ctx.interaction
-        ))
+        bg.spawn(bus.publish(CompactionTriggered(
+            group_id=self.ctx.group_id,
+            bot_id=self.bot["id"],
+            provider=self.provider,
+            model_name=self.model_name,
+            temperature=self.temperature
+        )))
         bg.spawn(append_log(
             self.bot["id"], self.full_text,
             user_message=self.ctx.user_message,

@@ -70,6 +70,11 @@ class LifecycleManager:
         self._lock = asyncio.Lock()
         self._locks: dict[int, GroupLock] = {}
 
+    def is_active(self, group_id: int) -> bool:
+        """Is this group currently hydrated/owned by this worker? Public predicate
+        so callers don't reach into the private _active_groups map."""
+        return group_id in self._active_groups
+
     async def hydrate(self, group_id: int) -> str:
         """Ensure a group is ready for work. Returns the DB path."""
         path = group_db_path(group_id)

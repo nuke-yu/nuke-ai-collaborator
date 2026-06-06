@@ -9,6 +9,16 @@ log = logging.getLogger(__name__)
 _generating_groups = set()
 _last_generated = {}
 
+# debounce 时间戳只用于 5s 去抖；超过这个 TTL 的条目早已失效，定期清掉以免
+# _last_generated 随群数无界增长。
+_DEBOUNCE_TTL = 60
+
+
+def _prune_last_generated(now: float) -> None:
+    cutoff = now - _DEBOUNCE_TTL
+    for gid in [g for g, t in _last_generated.items() if t < cutoff]:
+        del _last_generated[gid]
+
 async def generate_and_cache_recap(group_id: int, force: bool = False) -> str | None:
     """
     Pre-generates a 1-3 sentence recap for the group and caches it in the groups table of the central DB.
@@ -20,6 +30,7 @@ async def generate_and_cache_recap(group_id: int, force: bool = False) -> str | 
     so the banner is never blanked.
     """
     import time
+    _prune_last_generated(time.time())
 
     if group_id in _generating_groups:
         log.info("Recap generation already in progress for group %s, skipping", group_id)

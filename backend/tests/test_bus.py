@@ -47,7 +47,7 @@ class TestEventRegistry(unittest.TestCase):
             "tool_call", "tool_result",
             "react_thought", "react_action", "react_observation",
             "workflow_update", "workflow_paused",
-            "compaction", "skills_loaded",
+            "compaction", "compaction_triggered", "compaction_completed", "skills_loaded",
             "skill_fork_start", "skill_fork_end", "skill_draft_added",
             "before_finalize_review", "before_finalize_approved", "before_finalize_rejected",
             "permission_asked",
