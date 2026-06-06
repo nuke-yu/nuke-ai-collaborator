@@ -19,6 +19,62 @@ def _prune_last_generated(now: float) -> None:
     for gid in [g for g, t in _last_generated.items() if t < cutoff]:
         del _last_generated[gid]
 
+
+_GROUP_SYS = (
+    "你是一个项目协作助手。请根据提供的最近聊天记录，生成一段 1-3 句的简短“缺席重回”摘要（Recap）。\n"
+    "摘要要求：\n"
+    "1. 概括当前任务/Ticket 的核心状态。\n"
+    "2. 概括各个智能体（Bots，如 BA, Dev, QA）刚刚完成了什么工作。\n"
+    "3. 说明下一步计划或当前需要人类用户进行什么操作/确认。\n"
+    "4. 语言简洁生动，具有亲和力与科技感，使用中文，总字数控制在 120 字以内。\n"
+    "5. 必须直接输出摘要文本，不要包含任何前导词（如“这里是摘要：”）、Markdown 格式标记或解释。"
+)
+
+_PERSONAL_SYS = (
+    "你是一个项目协作助手。下面是某位用户离开期间他「错过」的群聊消息。"
+    "请用第二人称「你」生成一段 1-3 句的简短摘要，概括：你离开期间发生的关键进展、"
+    "各 Bot（BA/Dev/QA）做了什么、以及现在需要你做什么/确认什么。\n"
+    "语言简洁生动、使用中文、120 字以内。必须直接输出摘要文本，不要前导词、不要 Markdown 标记。"
+)
+
+
+def _pick_provider_model(members: list) -> tuple[str, str]:
+    """优先 deepseek，否则用第一个 bot 的配置；无 bot 时回退默认。"""
+    provider, model = "deepseek", "deepseek-chat"
+    bots = [m for m in members if m.get("type") == "bot"]
+    if bots:
+        preferred = next((b for b in bots if b.get("model_provider") == "deepseek"), bots[0])
+        provider = preferred.get("model_provider") or "deepseek"
+        model = preferred.get("model_name") or "deepseek-chat"
+    return provider, model
+
+
+async def _summarize(messages: list, members: list, *, personal: bool = False) -> str | None:
+    """把一段消息历史摘成一句话 recap（group/personal 共用）。空历史/空结果返回 None。"""
+    formatted = []
+    for msg in messages:
+        if msg.get("is_deleted"):
+            continue
+        sender = msg.get("sender_name") or "用户"
+        formatted.append(f"{sender}: {msg.get('content') or ''}")
+    if not formatted:
+        return None
+    log_text = "\n".join(formatted)
+    provider, model = _pick_provider_model(members)
+    system_prompt = _PERSONAL_SYS if personal else _GROUP_SYS
+    user_message = (
+        f"以下是你离开期间错过的群聊消息：\n\n{log_text}\n\n请生成你的「缺席重回」摘要。"
+        if personal else
+        f"以下是项目协作中最近的聊天记录：\n\n{log_text}\n\n请为重回项目的用户生成一段 1-3 句的简短“缺席重回”摘要（Recap）。"
+    )
+    res = await call_ai_once(
+        system_prompt=system_prompt,
+        messages=[{"role": "user", "content": user_message}],
+        provider=provider, model=model, temperature=0.5, max_tokens=256,
+    )
+    summary = (res.get("content") if isinstance(res, dict) else str(res)) or ""
+    return summary.strip() or None
+
 async def generate_and_cache_recap(group_id: int, force: bool = False) -> str | None:
     """
     Pre-generates a 1-3 sentence recap for the group and caches it in the groups table of the central DB.
@@ -55,63 +111,13 @@ async def generate_and_cache_recap(group_id: int, force: bool = False) -> str | 
         if not messages:
             log.info("No messages found in group %s to summarize", group_id)
             return None
-        
-        # 2. Determine LLM provider and model based on group's bot configurations
-        provider = "deepseek"
-        model = "deepseek-chat"
-        
-        bots = [m for m in members if m.get("type") == "bot"]
-        if bots:
-            # Prefer deepseek if any bot uses it, otherwise use the first bot's configuration
-            preferred_bot = next((b for b in bots if b.get("model_provider") == "deepseek"), bots[0])
-            provider = preferred_bot.get("model_provider") or "deepseek"
-            model = preferred_bot.get("model_name") or "deepseek-chat"
-            
-        # 3. Format message history for LLM context
-        formatted_history = []
-        for msg in messages:
-            if msg.get("is_deleted"):
-                continue
-            sender = msg.get("sender_name") or "用户"
-            content = msg.get("content") or ""
-            formatted_history.append(f"{sender}: {content}")
-            
-        log_text = "\n".join(formatted_history)
-        
-        # 4. Set up system prompt and user message
-        system_prompt = (
-            "你是一个项目协作助手。请根据提供的最近聊天记录，生成一段 1-3 句的简短“缺席重回”摘要（Recap）。\n"
-            "摘要要求：\n"
-            "1. 概括当前任务/Ticket 的核心状态。\n"
-            "2. 概括各个智能体（Bots，如 BA, Dev, QA）刚刚完成了什么工作。\n"
-            "3. 说明下一步计划或当前需要人类用户进行什么操作/确认。\n"
-            "4. 语言简洁生动，具有亲和力与科技感，使用中文，总字数控制在 120 字以内。\n"
-            "5. 必须直接输出摘要文本，不要包含任何前导词（如“这里是摘要：”）、Markdown 格式标记或解释。"
-        )
-        
-        user_message = f"以下是项目协作中最近的聊天记录：\n\n{log_text}\n\n请为重回项目的用户生成一段 1-3 句的简短“缺席重回”摘要（Recap）。"
-        
-        # 5. Call LLM to generate summary
-        res = await call_ai_once(
-            system_prompt=system_prompt,
-            messages=[{"role": "user", "content": user_message}],
-            provider=provider,
-            model=model,
-            temperature=0.5,
-            max_tokens=256
-        )
-        
-        summary = ""
-        if isinstance(res, dict):
-            summary = res.get("content") or ""
-        else:
-            summary = str(res)
-            
-        summary = summary.strip()
+
+        # 2-5. Summarize the recent group activity (shared helper)
+        summary = await _summarize(messages, members)
         if not summary:
             log.warning("Generated empty recap for group %s", group_id)
             return None
-            
+
         # 6. Save the summary in the database (groups table in the central DB, hence passing db.DB_PATH explicitly)
         async with write_connect(db.DB_PATH) as db_conn:
             await db_conn.execute(
@@ -160,3 +166,35 @@ async def clear_recap(group_id: int) -> None:
         })
     except Exception as e:
         log.error("Failed to clear away summary for group %s: %r", group_id, e, exc_info=True)
+
+
+async def generate_personal_recap(group_id: int, member_id: int) -> dict:
+    """方案 1：按需、不缓存的 per-user recap。概括该成员 last_read_id 之后「错过」的消息。
+
+    返回 {"unread_count": int, "summary": str | None}。无未读 → summary=None、不调用 LLM。
+    成员/消息分属 central/group 库，分别用 global_db()/get_db() 读。
+    """
+    try:
+        from db import global_db
+        async with get_db() as gdb:
+            cur = await gdb.execute(
+                "SELECT last_read_id FROM member_read WHERE member_id = ? AND group_id = ?",
+                (member_id, group_id),
+            )
+            row = await cur.fetchone()
+            last_read = row[0] if row else 0
+            # after_id → 升序取「未读」消息（cap 30，足够 1-3 句摘要的上下文）
+            messages = await get_messages(gdb, group_id, limit=30, after_id=last_read)
+
+        if not messages:
+            return {"unread_count": 0, "summary": None}
+
+        async with global_db() as cdb:
+            members = await get_members(cdb, group_id)
+
+        summary = await _summarize(messages, members, personal=True)
+        return {"unread_count": len(messages), "summary": summary}
+    except Exception as e:
+        log.error("Failed to generate personal recap for group %s member %s: %r",
+                  group_id, member_id, e, exc_info=True)
+        return {"unread_count": 0, "summary": None}

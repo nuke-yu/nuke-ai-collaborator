@@ -272,3 +272,11 @@ async def trigger_group_recap(group_id: int):
         summary = group.get("away_summary") if group else None
     return {"ok": True, "away_summary": summary}
 
+
+@router.get("/api/groups/{group_id}/recap/personal/{member_id}")
+async def get_personal_recap(group_id: int, member_id: int):
+    # 方案 1：按需 per-user recap —— 概括该成员离开期间（last_read 之后）错过的消息。
+    # 不缓存、不广播；成员频繁切标签的防抖交给前端。
+    from core.recap import generate_personal_recap
+    return await generate_personal_recap(group_id, member_id)
+

@@ -180,3 +180,9 @@ export async function dismissGroupRecap(groupId) {
   return res.json()
 }
 
+// 方案 1：按需 per-user recap —— 概括「我」离开期间错过的消息。
+export async function fetchPersonalRecap(groupId, memberId) {
+  const res = await authFetch(`/api/groups/${groupId}/recap/personal/${memberId}`)
+  return res.json()
+}
+

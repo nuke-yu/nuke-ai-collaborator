@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
-import { fetchAllGroups, fetchGroupInfo, fetchMessages, fetchUnreadCounts, fetchReactions, toggleReaction, createGroup, addMember, fetchPins, pinMessage, unpinMessage, resumeSession, cancelSessionRecovery, fetchGroupRecap, dismissGroupRecap } from '../api'
+import { fetchAllGroups, fetchGroupInfo, fetchMessages, fetchUnreadCounts, fetchReactions, toggleReaction, createGroup, addMember, fetchPins, pinMessage, unpinMessage, resumeSession, cancelSessionRecovery, fetchGroupRecap, dismissGroupRecap, fetchPersonalRecap } from '../api'
 import { useWebSocket } from '../hooks/useWebSocket'
 import { useNotifications } from '../hooks/useNotifications'
 import GroupList from './GroupList'
@@ -59,7 +59,9 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
   const [permRequest, setPermRequest] = useState(null)
   const [recoveryPrompts, setRecoveryPrompts] = useState([]) // Array of {session_id, bot_name, message, ...}
   const [awaySummary, setAwaySummary] = useState(null)
+  const [personalSummary, setPersonalSummary] = useState(null)
   const [loadingRecap, setLoadingRecap] = useState(false)
+  const personalRecapAt = useRef({}) // groupId -> last fetch ts（10s 防抖，避免频繁触发 LLM）
   const { notify } = useNotifications()
   const bottomRef = useRef(null)
 
@@ -73,8 +75,23 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
     }
   }, [])
 
+  // 方案 1：按需拉「我」错过的 per-user recap；10s 内不重复触发（每次都现算 LLM）。
+  const loadPersonalRecap = useCallback(async (groupId) => {
+    if (!groupId || !memberId) return
+    const now = Date.now()
+    if (now - (personalRecapAt.current[groupId] || 0) < 10000) return
+    personalRecapAt.current[groupId] = now
+    try {
+      const data = await fetchPersonalRecap(groupId, memberId)
+      setPersonalSummary(data?.unread_count > 0 ? (data.summary || null) : null)
+    } catch (err) {
+      console.error('Failed to fetch personal recap:', err)
+    }
+  }, [memberId])
+
   const handleDismissRecap = async () => {
     if (!activeGroupId) return
+    setPersonalSummary(null)
     try {
       await dismissGroupRecap(activeGroupId)
       setAwaySummary(null)
@@ -109,13 +126,14 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible' && activeGroupId) {
         loadRecap(activeGroupId)
+        loadPersonalRecap(activeGroupId)
       }
     }
     document.addEventListener('visibilitychange', handleVisibilityChange)
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange)
     }
-  }, [activeGroupId, loadRecap])
+  }, [activeGroupId, loadRecap, loadPersonalRecap])
 
   const scrollRef = useRef(null)
   const messageInputRef = useRef(null)
@@ -211,6 +229,7 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
       if (active) setWorkflow(data)
     })
     loadRecap(activeGroupId)
+    loadPersonalRecap(activeGroupId)
 
     return () => {
       active = false
@@ -651,8 +670,9 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
           </div>
         )}
 
+        {/* 个人「你错过的」优先；没有未读时回退到群级动态摘要 */}
         <RecapBanner
-          summary={awaySummary}
+          summary={personalSummary || awaySummary}
           loading={loadingRecap}
           onDismiss={handleDismissRecap}
           onRegenerate={handleRegenerateRecap}

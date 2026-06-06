@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import db as database
-from core.recap import generate_and_cache_recap, clear_recap
+from core.recap import generate_and_cache_recap, clear_recap, generate_personal_recap
 from main import app
 from httpx import AsyncClient
 
@@ -147,6 +147,31 @@ class TestAwaySummaryRecap(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(mock_call_ai.call_count, 2)
 
     @patch("core.recap.generator.call_ai_once", new_callable=AsyncMock)
+    async def test_personal_recap_summarizes_unread(self, mock_call_ai):
+        """方案 1：概括成员 last_read_id 之后错过的消息，返回未读数 + 摘要。"""
+        mock_call_ai.return_value = {"content": "你错过了 Dev 的提交。"}
+        async with database.get_db() as db_conn:
+            # 人类成员 20 已读到消息 100；之后有两条未读
+            await db_conn.execute("INSERT INTO member_read (member_id, group_id, last_read_id) VALUES (20, 1, 100)")
+            await db_conn.execute("INSERT INTO messages (id, group_id, member_id, content, sender_name, sender_type) VALUES (101,1,10,'fix done','DevBot','bot')")
+            await db_conn.execute("INSERT INTO messages (id, group_id, member_id, content, sender_name, sender_type) VALUES (102,1,10,'tests pass','DevBot','bot')")
+            await db_conn.commit()
+        res = await generate_personal_recap(1, 20)
+        self.assertEqual(res["unread_count"], 2)
+        self.assertEqual(res["summary"], "你错过了 Dev 的提交。")
+        mock_call_ai.assert_called_once()
+
+    @patch("core.recap.generator.call_ai_once", new_callable=AsyncMock)
+    async def test_personal_recap_no_unread(self, mock_call_ai):
+        """已读到最新 → 无未读 → 不调用 LLM、summary 为空。"""
+        async with database.get_db() as db_conn:
+            await db_conn.execute("INSERT INTO member_read (member_id, group_id, last_read_id) VALUES (21, 1, 100)")
+            await db_conn.commit()
+        res = await generate_personal_recap(1, 21)
+        self.assertEqual(res, {"unread_count": 0, "summary": None})
+        mock_call_ai.assert_not_called()
+
+    @patch("core.recap.generator.call_ai_once", new_callable=AsyncMock)
     async def test_force_bypasses_debounce(self, mock_call_ai):
         """force=True 用于用户手动触发：跳过 5s 去抖，必定重算（不被静默跳过）。"""
         mock_call_ai.return_value = {"content": "Forced summary."}
@@ -218,6 +243,15 @@ class TestRecapApi(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(resp.status_code, 200)
             self.assertEqual(resp.json(), {"ok": True, "away_summary": "Triggered Summary"})
             mock_generate_recap.assert_called_once_with(1, force=True)
+
+    @patch("core.recap.generate_personal_recap", new_callable=AsyncMock)
+    async def test_personal_recap_endpoint(self, mock_gen):
+        mock_gen.return_value = {"unread_count": 3, "summary": "你错过了 3 条。"}
+        async with AsyncClient(app=app, base_url="http://test") as ac:
+            resp = await ac.get("/api/groups/1/recap/personal/20")
+            self.assertEqual(resp.status_code, 200)
+            self.assertEqual(resp.json(), {"unread_count": 3, "summary": "你错过了 3 条。"})
+            mock_gen.assert_awaited_once_with(1, 20)
 
     @patch("core.recap.generate_and_cache_recap", new_callable=AsyncMock)
     async def test_trigger_recap_falls_back_to_cache_when_skipped(self, mock_generate_recap):
