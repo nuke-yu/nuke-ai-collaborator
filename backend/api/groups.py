@@ -242,3 +242,27 @@ async def export_group(group_id: int, format: str = "markdown"):
         media_type=media_type,
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded}"},
     )
+
+
+@router.get("/api/groups/{group_id}/recap")
+async def get_group_recap(group_id: int):
+    async with get_db() as db:
+        group = await get_group(db, group_id)
+    if not group:
+        raise HTTPException(404, "Group not found")
+    return {"group_id": group_id, "away_summary": group.get("away_summary")}
+
+
+@router.delete("/api/groups/{group_id}/recap")
+async def delete_group_recap(group_id: int):
+    from core.recap import clear_recap
+    await clear_recap(group_id)
+    return {"ok": True}
+
+
+@router.post("/api/groups/{group_id}/recap/trigger")
+async def trigger_group_recap(group_id: int):
+    from core.recap import generate_and_cache_recap
+    summary = await generate_and_cache_recap(group_id)
+    return {"ok": True, "away_summary": summary}
+

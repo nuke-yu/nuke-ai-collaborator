@@ -106,6 +106,9 @@ async def check_and_advance(group_id: int, response: str, bot_id: int = None) ->
 
 async def confirm(group_id: int, gate_id: str = None) -> bool:
     """人在确认门点了「确认」：让编排器推进过门，并施加副作用（交棒给下一个 bot）。"""
+    from core.recap import clear_recap
+    await clear_recap(group_id)
+
     orch = _orch_for(group_id)
     step = orch.confirm(group_id, gate_id)
     await apply_step(group_id, orch, step)

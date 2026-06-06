@@ -17,30 +17,26 @@ def _run(coro):
 
 
 class TestEditFileHandler(unittest.TestCase):
-    def test_edit_file_reads_applies_writes(self):
-        with patch.object(wt._ws, "read_file", new=AsyncMock(return_value="x = 1\ny = 2\n")) as r, \
-             patch.object(wt._ws, "write_file", new=AsyncMock(return_value="完成")) as w:
+    def test_edit_file_delegates_to_workspace_edit(self):
+        with patch.object(wt._ws, "edit_file", new=AsyncMock(return_value="已修改 a.py")) as e:
             out = _run(wt._handle_edit_file("a.py", "x = 1", "x = 99", context={"bot_id": 1}))
-        self.assertEqual(out, "完成")
-        w.assert_awaited_once()
-        # 写回的是替换后的完整内容
-        self.assertEqual(w.await_args.args[2], "x = 99\ny = 2\n")
+        self.assertEqual(out, "已修改 a.py")
+        e.assert_awaited_once_with(1, "a.py", "x = 1", "x = 99", replace_all=False)
 
     def test_edit_file_missing_bot_id(self):
         out = _run(wt._handle_edit_file("a.py", "a", "b", context={}))
         self.assertIn("缺少 bot_id", out)
 
     def test_edit_file_propagates_read_error(self):
-        with patch.object(wt._ws, "read_file", new=AsyncMock(return_value="[文件不存在] a.py")):
+        with patch.object(wt._ws, "edit_file", new=AsyncMock(return_value="[文件不存在] a.py")):
             out = _run(wt._handle_edit_file("a.py", "a", "b", context={"bot_id": 1}))
         self.assertIn("文件不存在", out)
 
     def test_edit_file_not_found_returns_edit_failure(self):
-        with patch.object(wt._ws, "read_file", new=AsyncMock(return_value="hello")), \
-             patch.object(wt._ws, "write_file", new=AsyncMock(return_value="完成")) as w:
+        with patch.object(wt._ws, "edit_file", new=AsyncMock(return_value="[编辑失败] old_string 在文件中未找到")) as e:
             out = _run(wt._handle_edit_file("a.py", "nope", "b", context={"bot_id": 1}))
         self.assertIn("编辑失败", out)
-        w.assert_not_awaited()   # 没找到就不写
+        e.assert_awaited_once()
 
 
 class TestTruncationHintWiring(unittest.TestCase):

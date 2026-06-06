@@ -69,6 +69,11 @@ async def dispatch_user_message(msg: dict) -> None:
     interaction = StandardInteraction()
     await interaction.mark_read(gid, sender_id, msg_id)
 
+    # ── Clear Away Recap if sender is human ──
+    if sender.get("type") == "human":
+        from core.recap import clear_recap
+        bg.spawn(clear_recap(gid))
+
     # ── Auto-reply logic ──
     mentioned_names = set(re.findall(r'@(\S+)', content or ""))
     if mentioned_names:

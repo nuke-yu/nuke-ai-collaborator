@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
-import { fetchAllGroups, fetchGroupInfo, fetchMessages, fetchUnreadCounts, fetchReactions, toggleReaction, createGroup, addMember, fetchPins, pinMessage, unpinMessage, resumeSession, cancelSessionRecovery } from '../api'
+import { fetchAllGroups, fetchGroupInfo, fetchMessages, fetchUnreadCounts, fetchReactions, toggleReaction, createGroup, addMember, fetchPins, pinMessage, unpinMessage, resumeSession, cancelSessionRecovery, fetchGroupRecap, dismissGroupRecap } from '../api'
 import { useWebSocket } from '../hooks/useWebSocket'
 import { useNotifications } from '../hooks/useNotifications'
 import GroupList from './GroupList'
@@ -17,6 +17,7 @@ import WorkflowBar from './WorkflowBar'
 import WorkflowStartModal from './WorkflowStartModal'
 import WorkspacePanel from './WorkspacePanel'
 import PermissionRequestModal from './PermissionRequestModal'
+import RecapBanner from './RecapBanner'
 
 export default function ChatWindow({ memberId, theme, onThemeChange, onLogout }) {
   const [groups, setGroups] = useState([])
@@ -57,8 +58,64 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
   const [stats, setStats] = useState([])
   const [permRequest, setPermRequest] = useState(null)
   const [recoveryPrompts, setRecoveryPrompts] = useState([]) // Array of {session_id, bot_name, message, ...}
+  const [awaySummary, setAwaySummary] = useState(null)
+  const [loadingRecap, setLoadingRecap] = useState(false)
   const { notify } = useNotifications()
   const bottomRef = useRef(null)
+
+  const loadRecap = useCallback(async (groupId) => {
+    if (!groupId) return
+    try {
+      const data = await fetchGroupRecap(groupId)
+      setAwaySummary(data?.away_summary || null)
+    } catch (err) {
+      console.error('Failed to fetch group recap:', err)
+    }
+  }, [])
+
+  const handleDismissRecap = async () => {
+    if (!activeGroupId) return
+    try {
+      await dismissGroupRecap(activeGroupId)
+      setAwaySummary(null)
+    } catch (err) {
+      console.error('Failed to dismiss group recap:', err)
+    }
+  }
+
+  const handleRegenerateRecap = async () => {
+    if (!activeGroupId) return
+    setLoadingRecap(true)
+    try {
+      const res = await fetch(`/api/groups/${activeGroupId}/recap/trigger`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer ' + localStorage.getItem('token')
+        }
+      })
+      const data = await res.json()
+      if (data.ok) {
+        setAwaySummary(data.away_summary)
+      }
+    } catch (err) {
+      console.error('Failed to trigger recap regeneration:', err)
+    } finally {
+      setLoadingRecap(false)
+    }
+  }
+
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && activeGroupId) {
+        loadRecap(activeGroupId)
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
+  }, [activeGroupId, loadRecap])
 
   const scrollRef = useRef(null)
   const messageInputRef = useRef(null)
@@ -153,6 +210,7 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
     }).then(r => r.json()).then(data => {
       if (active) setWorkflow(data)
     })
+    loadRecap(activeGroupId)
 
     return () => {
       active = false
@@ -267,6 +325,10 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
       setTimeout(() => setError(null), 5000)
     } else if (data.type === 'pins_updated') {
       setPins(data.pins)
+    } else if (data.type === 'recap_updated') {
+      if (data.group_id === activeGroupId) {
+        setAwaySummary(data.away_summary)
+      }
     } else if (data.type === 'read') {
       setReadMap((prev) => ({ ...prev, [data.member_id]: data.last_read_id }))
     } else if (data.type === 'online_members') {
@@ -307,6 +369,8 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
     if (!activeGroupId || messages.length === 0) return
     const lastId = messages[messages.length - 1]?.id
     if (!lastId || typeof lastId !== 'number') return
+
+    loadRecap(activeGroupId)
 
     try {
       const { messages: newer } = await fetchMessages(activeGroupId, { afterId: lastId })
@@ -586,6 +650,13 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
             <span className="text-indigo-300 text-base font-medium">释放以上传文件</span>
           </div>
         )}
+
+        <RecapBanner
+          summary={awaySummary}
+          loading={loadingRecap}
+          onDismiss={handleDismissRecap}
+          onRegenerate={handleRegenerateRecap}
+        />
 
         <AnnouncementBar
           announcement={group?.announcement || null}

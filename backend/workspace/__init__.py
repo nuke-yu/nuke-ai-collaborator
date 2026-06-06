@@ -247,6 +247,76 @@ async def write_file(bot_id: int, path: str, content: str, group_id: int | None 
         return result
 
 
+async def edit_file(bot_id: int, path: str, old_string: str, new_string: str, replace_all: bool = False) -> str:
+    ws = _get_effective_ws(bot_id, path)
+    p = _safe_path(ws, path)
+    if p is None:
+        return f"[错误] 非法路径: {path}"
+    if p.name in _WRITE_PROTECTED:
+        return f"[受保护] {p.name} 是永久记忆文件，Bot 无法编辑。如需修改记录，请通过工作区面板手动编辑。"
+    if not p.exists():
+        return f"[文件不存在] {path}"
+
+    rel = str(p.relative_to(ws)).replace("\\", "/")
+    lock = _get_path_lock(p)
+    async with lock:
+        try:
+            current = await asyncio.to_thread(p.read_text, encoding="utf-8")
+        except Exception as e:
+            return f"[读取错误] {e}"
+
+        import editing
+        try:
+            updated = editing.apply_replacement(current, old_string, new_string, replace_all=replace_all)
+        except editing.EditError as e:
+            return f"[编辑失败] {e}"
+
+        if updated == current:
+            return "[无改动] 替换前后内容一致"
+
+        def _do_write() -> str:
+            if rel.startswith(_LEARNED_ACTIVE):
+                draft_path = ws / _LEARNED_DRAFT / p.name
+                draft_path.parent.mkdir(parents=True, exist_ok=True)
+                draft_path.write_text(updated, encoding="utf-8")
+                return f"__DRAFT_WRITTEN__:{p.name}"
+            if rel.startswith(_LEARNED_DRAFT):
+                p.parent.mkdir(parents=True, exist_ok=True)
+                p.write_text(updated, encoding="utf-8")
+                return f"__DRAFT_WRITTEN__:{p.name}"
+            try:
+                _save_to_history(ws, p)
+            except Exception:
+                pass
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(updated, encoding="utf-8")
+            return f"已修改 {path}"
+
+        result = await asyncio.to_thread(_do_write)
+
+        is_shared = ws.parent.name.startswith("group_")
+        if (
+            is_shared 
+            and p.suffix in {".py", ".js", ".ts", ".go", ".java"}
+            and not result.startswith("__DRAFT_WRITTEN__")
+        ):
+            from bus import publish
+            from bus.events import CodeCommitted
+            from db import connect
+            async with connect() as conn:
+                async with conn.execute("SELECT group_id FROM members WHERE id = ?", (bot_id,)) as cur:
+                    row = await cur.fetchone()
+                if row:
+                    await publish(CodeCommitted(
+                        group_id=row[0],
+                        ticket_id="auto",
+                        files=[path],
+                        commit_msg=f"Auto-edit by Bot {bot_id}",
+                        author_id=bot_id
+                    ))
+
+        return result
+
 
 async def list_workspace(bot_id: int) -> str:
     ws = bot_workspace(bot_id)

@@ -14,11 +14,17 @@ _MEMBER_COLS = (
 
 
 async def get_group(db, group_id: int):
-    async with db.execute("SELECT * FROM groups WHERE id = ?", (group_id,)) as cur:
+    async with db.execute("SELECT id, name, created_at, announcement, assigned_worker_id, away_summary FROM groups WHERE id = ?", (group_id,)) as cur:
         row = await cur.fetchone()
         if row:
-            return {"id": row[0], "name": row[1], "created_at": row[2],
-                    "announcement": row[3] if len(row) > 3 else None, "assigned_worker_id": row[4] if len(row) > 4 else "w0"}
+            return {
+                "id": row[0],
+                "name": row[1],
+                "created_at": row[2],
+                "announcement": row[3],
+                "assigned_worker_id": row[4],
+                "away_summary": row[5]
+            }
         return None
 
 
@@ -157,7 +163,7 @@ async def update_member_full(db, member_id: int, data: dict):
         "personality_prompt=?, executor_id=?, executor_config=?, done_keyword=?, traits_json=? WHERE id=?",
         (data.get('name'), data.get('role'), data.get('system_prompt'),
          data.get('avatar_color'), data.get('model_provider'), data.get('model_name'),
-         data.get('temperature', 0.7), data.get('max_tokens', 4096),
+         data.get('temperature', 0.7), data.get('max_tokens', 8192),
          data.get('personality_prompt') or None,
          data.get('executor_id', 'tool_loop_v1'), executor_config,
          data.get('done_keyword') or None, traits_json, member_id)

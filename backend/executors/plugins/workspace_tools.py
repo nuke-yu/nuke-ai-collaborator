@@ -53,10 +53,7 @@ _WORKSPACE_TOOLS = [
     ),
     ToolDef(
         name="write_file",
-        description=(
-            "向工作区写入整个文件（会覆盖原内容）。仅用于新建文件或整文件重写；"
-            "修改已有文件请优先用 edit_file —— 它只发改动的片段，避免大文件被单次输出长度截断。"
-        ),
+        description="仅用于新建文件或整文件重写；改已有文件请用 edit_file（只发 diff，避免大文件被输出长度截断）。",
         parameters={
             "type": "object",
             "properties": {
@@ -548,20 +545,10 @@ async def _handle_write_file(path: str, content: str, context: dict = None) -> s
 
 async def _handle_edit_file(path: str, old_string: str, new_string: str,
                             replace_all: bool = False, context: dict = None) -> str:
-    # 薄 glue：读原文（workspace）→ 纯替换（editing）→ 写回（workspace）。
     bot_id = (context or {}).get("bot_id")
     if not bot_id:
         return "[错误] 缺少 bot_id"
-    current = await _ws.read_file(bot_id, path)
-    if current.startswith(("[错误]", "[文件不存在]", "[读取错误]")):
-        return current
-    try:
-        updated = editing.apply_replacement(current, old_string, new_string, replace_all=replace_all)
-    except editing.EditError as e:
-        return f"[编辑失败] {e}"
-    if updated == current:
-        return "[无改动] 替换前后内容一致"
-    return await _ws.write_file(bot_id, path, updated)
+    return await _ws.edit_file(bot_id, path, old_string, new_string, replace_all=replace_all)
 
 
 async def _handle_list_workspace(context: dict = None) -> str:

@@ -68,7 +68,7 @@ _CENTRAL_DDL = [
         auto_reply       TEXT    DEFAULT NULL,
         context_cleared_at TEXT  DEFAULT NULL,
         temperature      REAL    DEFAULT 0.7,
-        max_tokens       INTEGER DEFAULT 4096,
+        max_tokens       INTEGER DEFAULT 8192,
         personality_prompt TEXT  DEFAULT NULL,
         executor_id      TEXT    DEFAULT 'tool_loop_v1',
         executor_config  TEXT    DEFAULT '{}',

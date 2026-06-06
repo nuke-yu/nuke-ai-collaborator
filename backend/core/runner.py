@@ -96,6 +96,12 @@ async def apply_step(group_id: int, orch, step) -> None:
     if step.done:
         await bus.publish(WorkflowUpdate(group_id=group_id, active=False, done=True))
         await workflow_store.clear_state(group_id)
+    
+    # Trigger recap generation if workflow gets gated, finishes, or pauses (no active bot turns)
+    if step.confirm_gate or step.done or not step.next_units:
+        from core.recap import generate_and_cache_recap
+        bg.spawn(generate_and_cache_recap(group_id))
+
     for unit in step.next_units:
         # DFT-025/027: hold a reference (no GC) + register to the group so a
         # user abort cancels the whole workflow chain, not just the dispatch.

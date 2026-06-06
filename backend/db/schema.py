@@ -82,6 +82,7 @@ async def init_db():
                 id           INTEGER PRIMARY KEY AUTOINCREMENT,
                 name         TEXT NOT NULL,
                 announcement TEXT DEFAULT NULL,
+                away_summary TEXT DEFAULT NULL,
                 created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
@@ -99,7 +100,7 @@ async def init_db():
                 auto_reply       TEXT    DEFAULT NULL,
                 context_cleared_at TEXT  DEFAULT NULL,
                 temperature      REAL    DEFAULT 0.7,
-                max_tokens       INTEGER DEFAULT 4096,
+                max_tokens       INTEGER DEFAULT 8192,
                 personality_prompt TEXT  DEFAULT NULL,
                 executor_id      TEXT    DEFAULT 'tool_loop_v1',
                 executor_config  TEXT    DEFAULT '{}',

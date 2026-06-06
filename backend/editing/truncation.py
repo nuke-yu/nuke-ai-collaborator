@@ -14,10 +14,7 @@ def build_completion_hint(tool_name: str, path: str, written_chars: int) -> str:
     """
     where = f"文件「{path}」" if path else "该文件"
     return (
-        f"\n\n[系统提示]「{tool_name}」的输出被模型单次长度限制截断，"
-        f"{where}只写入了前 {written_chars} 个字符，内容不完整。\n"
-        f"请不要重新发送整个文件（同样会再次被截断）。补全方式：\n"
-        f"1) 用 edit_file 续写：取当前文件末尾一段唯一文本作为 old_string，"
-        f"替换为「该段 + 剩余未写入的内容」，从断点处接着写；\n"
-        f"2) 若文件本身过大，改为拆成多个较小文件，分别用 write_file 写入。"
+        f"\n\n[系统提示] {where}只写入了前 {written_chars} 字符不完整，"
+        f"请用 edit_file 以末尾一段为锚点补全剩余内容，"
+        f"或把超大文件拆成多个较小文件分别写——不要重发整文件"
     )

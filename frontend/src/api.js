@@ -169,3 +169,14 @@ export async function register(username, password, email) {
   if (!res.ok) throw new Error('注册失败')
   return res.json()
 }
+
+export async function fetchGroupRecap(groupId) {
+  const res = await authFetch(`/api/groups/${groupId}/recap`)
+  return res.json()
+}
+
+export async function dismissGroupRecap(groupId) {
+  const res = await authFetch(`/api/groups/${groupId}/recap`, { method: 'DELETE' })
+  return res.json()
+}
+

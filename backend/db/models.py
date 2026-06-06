@@ -27,7 +27,7 @@ def _row_to_member(r):
         "auto_reply": r[9] if len(r) > 9 else None,
         "context_cleared_at": r[10] if len(r) > 10 else None,
         "temperature": r[11] if len(r) > 11 else 0.7,
-        "max_tokens": r[12] if len(r) > 12 else 4096,
+        "max_tokens": r[12] if len(r) > 12 else 8192,
         "personality_prompt": r[13] if len(r) > 13 else None,
         "executor_id": r[14] if len(r) > 14 else "tool_loop_v1",
         "executor_config": _parse_json(r[15]) if len(r) > 15 else {},

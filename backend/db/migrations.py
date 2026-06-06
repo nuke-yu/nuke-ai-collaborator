@@ -56,7 +56,7 @@ async def migration_001(db):
         "ALTER TABLE members ADD COLUMN auto_reply TEXT DEFAULT NULL",
         "ALTER TABLE members ADD COLUMN context_cleared_at TEXT DEFAULT NULL",
         "ALTER TABLE members ADD COLUMN temperature REAL DEFAULT 0.7",
-        "ALTER TABLE members ADD COLUMN max_tokens INTEGER DEFAULT 4096",
+        "ALTER TABLE members ADD COLUMN max_tokens INTEGER DEFAULT 8192",
         "ALTER TABLE members ADD COLUMN personality_prompt TEXT DEFAULT NULL",
         "ALTER TABLE members ADD COLUMN executor_id TEXT DEFAULT 'tool_loop_v1'",
         "ALTER TABLE members ADD COLUMN executor_config TEXT DEFAULT '{}'",
@@ -276,6 +276,12 @@ async def migration_016(db):
     await db.commit()
 
 
+async def migration_017(db):
+    """Add away_summary column to groups table to cache pre-generated recap."""
+    await _safe_add_column(db, "ALTER TABLE groups ADD COLUMN away_summary TEXT DEFAULT NULL")
+    await db.commit()
+
+
 MIGRATIONS: list = [
     migration_001,
     migration_002,
@@ -293,6 +299,7 @@ MIGRATIONS: list = [
     migration_014,
     migration_015,
     migration_016,
+    migration_017,
 ]
 
 
