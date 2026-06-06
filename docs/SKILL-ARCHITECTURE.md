@@ -1,7 +1,7 @@
 # Skill 系统架构 · 全景设计
 
-> 最后更新：2026-05-26
-> 状态：设计阶段（未实现）
+> 最后更新：2026-06-06
+> 状态：已落地实现
 
 ---
 
@@ -254,3 +254,73 @@ Skill 库面板
 | 9 步卸载状态机 | openclaw | L4 draft → reject 流程参考；未来 skill 删除需清理 frontmatter + 文件 + 缓存 |
 | 版本目录 + orphan 7 天清理 | claude-code-haha | skill 编辑历史归档设计参考（M3）；draft 被拒绝后可软删除而非立即清除 |
 | Catalog 按技术栈匹配 | gsd-2 | L3 Role Skill 初始化时按 bot.role 自动匹配预置包（developer / pm / qa 等） |
+
+---
+
+## 十、 智能体框架 Skill 系统横向对比
+
+以下是业界四大主流框架（**Claude Code / Claude-haha**、**opencode**、**gsd-2**、**openclaw**）与我们当前项目（**nuke-ai-collaborator**）的 Skill 系统横向对比：
+
+| 维度 / 机制 | Claude Code (TypeScript) | opencode (TypeScript) | gsd-2 (TypeScript/Rust) | openclaw (TypeScript) | 我们的项目 (Python/SQLite) |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **1. 目录拓扑与扫描范围** | **三级 Scope 扫描**：<br>1. Managed (.claude/skills)<br>2. User (~/.claude/skills)<br>3. Project (.claude/skills，向根目录追溯)<br>支持 `--add-dir` 手动扩展。 | **配置文件与 URL 双轨制**：<br>1. 全局与项目级目录扫描<br>2. `cfg.skills.paths` 配置文件配置<br>3. `cfg.skills.urls` 远程 URL 动态拉取并缓存在本地。 | **行业标准目录**：<br>1. 全局统一使用 `~/.agents/skills/` (Ecosystem)<br>2. 项目级 `.agents/skills/`<br>3. 兼容旧版 `~/.gsd/agent/skills/` 迁移。 | **两级嵌套目录**：<br>1. 扫描直属 `.md` 技能<br>2. 支持一级子文件夹分组（如 `skills/coze/koze-retrieval/SKILL.md`）<br>3. 支持 Symlink 符号链接加载。 | **4 层覆盖架构 (L1 $\rightarrow$ L4)**：<br>1. L1 General（内置通用）<br>2. L2 Group（群组共享）<br>3. L3 Role（角色专属）<br>4. L4 Learned（自学沉淀）与个人手写。 |
+| **2. 物理目录结构** | **技能包文件夹制**：<br>仅支持 `[skill-name]/SKILL.md` 目录格式，不扫描根部平铺的单体 `.md` 文件（legacy commands 除外）。 | **SKILL.md 规范**：<br>外部/远程包必须包含 `SKILL.md` 入口文件，且不支持单体 `.md` 平铺加载。 | **混合扫描**：<br>1. 根目录下支持平铺的单体 `.md` 文件<br>2. 子目录下必须使用 `SKILL.md` 格式。 | **SKILL.md 规范**：<br>子目录中必须有且仅有一个 `SKILL.md` 入口文件。 | **混合扫描**：<br>1. 支持直接平铺的单体 `.md` 文件（如 L1-L3 基础技能）<br>2. 复杂技能支持以目录为包进行入口加载。 |
+| **3. 重名去重与冲突解决** | **先入为主 (First-Wins)**：<br>通过 `realpath` 解析 canonical 真实物理路径，排队去重，忽略后续同名/同物理文件的加载并记录 Log。 | **本地覆写 (Local Overrides)**：<br>内置技能（如 customize-opencode）最先注册，随后扫描的本地磁盘技能若重名直接**覆盖**内置技能。 | **冲突诊断警告 (Collision Warning)**：<br>不允许重名。若发生重名，系统生成 `collision` 诊断报告并发出警告，指定 `winnerPath` 与 `loserPath`。 | **物理路径去重**：<br>基于 `realpathSync` 物理路径过滤 duplicate，若存在重名且有冲突直接警告并跳过。 | **层级覆盖 (Layer-Override)**：<br>按 L1 $\rightarrow$ L2 $\rightarrow$ L3 $\rightarrow$ L4 扫描合并，同名技能**后层直接覆写前层**（例如 L4 Learned 会覆盖 L1 System）。 |
+| **4. 伴随条件激活与懒加载** | **路径匹配激活 (`paths`)**：<br> frontmatter 中配置 `paths` 过滤规则（gitignore 语法），仅在触碰/修改对应特征文件时才激活注入。 | **按需加载 (Get-on-Demand)**：<br>只在模型请求或 UI 渲染时通过 `get()` 和 `available()` 动态获取内容。 | **触发控制 (`disable-model-invocation`)**：<br>若配置为 `true`，模型不能自动感知识别（不进 XML），仅能通过用户 slash 命令手动触发。 | **模型过滤与容量预算**：<br>在 Prompt 中通过 `<available_skills>` 渲染列表。可按 `agentId` 进行条件过滤和可见性控制。 | **双态注入 Base**：<br>`always: true` 的技能全文常驻 system prompt；`always: false` 的技能仅以 XML/JSON 元数据声明，供 LLM 懒加载。 |
+| **5. Prompt 容量控制 (Budget)** | **轻量前置预估**：<br>未激活时仅将 `name`、`description` 等 frontmatter 组成短句参与 Token 估算，不加载 Markdown 实体。 | **元数据渲染**：<br>在系统提示词中仅以 `- name: desc` 简短形式渲染，执行时才加载具体 Body。 | **XML 标准格式**：<br>将可见技能转换为 `<skill><name>...</name><location>...</location></skill>` 注入 Prompt 中。 | **Home 目录压缩 (`~/`) & 熔断**：<br>1. 将技能绝对路径中的 homedir 缩短为 `~/`（单个可节省约 5 字符，防 Token 泄漏与膨胀）<br>2. 限制单文件大小（< 256KB）和总 Prompt 长度（默认 18K 字符）。 | **冷热分流机制**：<br>将元数据 XML 平铺进 System Prompt，减少常驻 Prompt 预算，大模型有需时按名索取。 |
+| **6. 安全沙箱与 HIL 防线** | **Shell 指令阻断**：<br>本地技能允许 `!{bash}` 评估；但**绝对禁止** remote MCP 技能评估任何 shell 指令，防 RCE 溢出。 | **角色权限网关 (Permission Gate)**：<br>对 Skill 进行 Permission 安全组划归，评估 Agent 角色，`deny` 用户可阻断特定技能的拉取。 | **前置合规检验**：<br>严格验证 `name === parentDirName`，限制 lowercase-hyphen-only 命名规范，避免任意字符转义漏洞。 | **Symlink 越界阻断 (Escape Guard)**：<br>严格检验 realpath，禁止通过 symlink 逃逸出工作区或允许的安全目录（`allowSymlinkTargets`）。 | **两段式审批防线 (HITL Gate)**：<br>Bot 产生的自学技能（Learned）限制写入 `draft/`（不可注入），需人类在 Web UI 审批后移至 `active/` 生效。 |
+
+---
+
+## 十一、 我们的项目核心代码实现分析
+
+我们项目的 Skill 加载、生命周期和转换管线完全用 Python 在 `backend/skills/` 中实现。以下是各模块的具体代码逻辑与技术特色：
+
+### 1. 多层级扫描与合并优先权 ([discovery.py](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/skills/discovery.py))
+* **层级扫描器 (`_scan_dir_sync`)**：支持两种 Skill 组织形态。既支持子文件夹打包式的技能包目录（如扫描 `name/SKILL.md`，优先提取），也支持根目录下平铺的单体 `.md` 文件和 `.py` 代码技能。
+* **后层覆写前层 (`_list_skills_all_sync`)**：
+  ```python
+  # L1 System -> L2 Group -> L3 Role -> L4 Learned/active -> Personal
+  merged.update(personal_skills)
+  ```
+  在合并字典时，使用顺序覆盖规则。同时会扫描 `learned/draft/` 并将状态标记为 `"draft"`（不注入，仅用作 UI 展示等待审批）。
+* **注入状态划分**：
+  - `status` 为 `disabled` 或 `deprecated` 的技能被设置 `injected = None`，表示不注入；
+  - `always: true` 的技能被设置 `injected = "full"`，代表全文注入系统提示词；
+  - 其余普通技能被设置 `injected = "metadata"`，元数据注入，供 LLM 懒加载。
+
+### 2. 沙箱边界与目录逃逸防御 ([metadata.py](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/skills/metadata.py))
+为了防止恶意的智能体利用包含路径分隔符的技能名称读取系统敏感文件，我们构建了防御体系：
+* **命名安全阀 (`_is_safe_name`)**：
+  ```python
+  def _is_safe_name(name: str) -> bool:
+      if not name or name != name.strip():
+          return False
+      if os.path.isabs(name):
+          return False
+      return not ("/" in name or "\\" in name or ".." in name or "\x00" in name)
+  ```
+  拒绝一切包含斜杠、双点或零字节的名称。
+* **绝对包含性校验 (`_contained`)**：
+  ```python
+  def _contained(base: Path, target: Path) -> bool:
+      try:
+          return target.resolve().is_relative_to(base.resolve())
+      except (OSError, ValueError):
+          return False
+  ```
+  对目标路径进行 `.resolve()` 展开以处理任何软链接，强制校验其是否严格保留在 `base` 目录中，从而完全阻断了任何**符号链接越界逃逸（Symlink Escape）**漏洞。
+
+### 3. 技能处理管道与 shell 注入阻断 ([processor.py](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/skills/processor.py))
+* **参数替换机制 (`substitute_arguments`)**：全面兼容 Claude 规范，支持对技能内容中的 `$ARGUMENTS`, `$ARGUMENTS[N]`, `$N` 占位符进行入参替换。如果无占位符但传参非空，会在尾部追加 `ARGUMENTS: {args}`。
+* **Shell 动态指令阻断 (安全机制 DFT-022)**：
+  > [!IMPORTANT]
+  > 我们的框架中**有意不支持执行嵌入式 shell**（与 Claude Code 等框架在加载 Prompt 时允许执行 `!{command}` 进行命令行预替换不同）。
+  > 因为如果 Agent 具有 `write_file` 和 `run_skill` 权限，恶意的智能体完全可以自我编写一个带 `!` 执行块的临时技能然后调用它，从而绕过系统的 sandbox 审计阻断。
+  > 因此我们决定，**任何 shell 执行必须走标准的 run_shell 权限网关**，技能内容中的 `!` 标记一律被视作静态字符串直通。
+
+### 4. 技能动态运行与元数据注入 ([loader.py](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/skills/loader.py))
+* **技能解析运行 (`run_skill`)**：
+  在执行技能时，动态调用 `process_skill_content` 替换参数及 `${SKILL_DIR}` 变量。如果是包目录形式（`SKILL.md`），会自动归纳其同级子文件列表并以 `<skill_files>` 标签附加在 Prompt 后面。
+* **执行器副作用注入 (Executor Side-Effects)**：
+  执行时，元数据（YAML frontmatter）里包含的控制变量（例如 `max_iterations`, `learns`, `allowed_tools`, `model`, `context: "fork"` 等）会直接作为 side-effects 写入当前的执行上下文 `ctx` 中，用来动态调整大模型执行本次技能时的循环次数上限、大模型选择或白名单工具范围。
