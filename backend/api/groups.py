@@ -263,6 +263,12 @@ async def delete_group_recap(group_id: int):
 @router.post("/api/groups/{group_id}/recap/trigger")
 async def trigger_group_recap(group_id: int):
     from core.recap import generate_and_cache_recap
-    summary = await generate_and_cache_recap(group_id)
+    # 用户手动触发 → force 跳过去抖；若仍被在途守卫跳过返回 None，回退到现有缓存，
+    # 不要把前端 banner 清空。
+    summary = await generate_and_cache_recap(group_id, force=True)
+    if summary is None:
+        async with get_db() as db:
+            group = await get_group(db, group_id)
+        summary = group.get("away_summary") if group else None
     return {"ok": True, "away_summary": summary}
 

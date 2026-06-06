@@ -144,6 +144,22 @@ class TestAwaySummaryRecap(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(summary3, "Debounced summary.")
         self.assertEqual(mock_call_ai.call_count, 2)
 
+    @patch("core.recap.generator.call_ai_once", new_callable=AsyncMock)
+    async def test_force_bypasses_debounce(self, mock_call_ai):
+        """force=True 用于用户手动触发：跳过 5s 去抖，必定重算（不被静默跳过）。"""
+        mock_call_ai.return_value = {"content": "Forced summary."}
+
+        self.assertEqual(await generate_and_cache_recap(1), "Forced summary.")
+        self.assertEqual(mock_call_ai.call_count, 1)
+
+        # 紧接着的 eager 调用：被去抖跳过
+        self.assertIsNone(await generate_and_cache_recap(1))
+        self.assertEqual(mock_call_ai.call_count, 1)
+
+        # 紧接着的 force 调用：绕过去抖，重新生成
+        self.assertEqual(await generate_and_cache_recap(1, force=True), "Forced summary.")
+        self.assertEqual(mock_call_ai.call_count, 2)
+
 
 class TestRecapApi(unittest.IsolatedAsyncioTestCase):
 
@@ -197,7 +213,16 @@ class TestRecapApi(unittest.IsolatedAsyncioTestCase):
             resp = await ac.post("/api/groups/1/recap/trigger")
             self.assertEqual(resp.status_code, 200)
             self.assertEqual(resp.json(), {"ok": True, "away_summary": "Triggered Summary"})
-            mock_generate_recap.assert_called_once_with(1)
+            mock_generate_recap.assert_called_once_with(1, force=True)
+
+    @patch("core.recap.generate_and_cache_recap", new_callable=AsyncMock)
+    async def test_trigger_recap_falls_back_to_cache_when_skipped(self, mock_generate_recap):
+        # 生成被去抖/在途跳过返回 None 时，端点回退到现有缓存，绝不把 banner 清空。
+        mock_generate_recap.return_value = None
+        async with AsyncClient(app=app, base_url="http://test") as ac:
+            resp = await ac.post("/api/groups/1/recap/trigger")
+            self.assertEqual(resp.status_code, 200)
+            self.assertEqual(resp.json(), {"ok": True, "away_summary": "Cached Recap"})
 
 
 if __name__ == "__main__":

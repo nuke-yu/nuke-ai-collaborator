@@ -9,10 +9,15 @@ log = logging.getLogger(__name__)
 _generating_groups = set()
 _last_generated = {}
 
-async def generate_and_cache_recap(group_id: int) -> str | None:
+async def generate_and_cache_recap(group_id: int, force: bool = False) -> str | None:
     """
     Pre-generates a 1-3 sentence recap for the group and caches it in the groups table of the central DB.
     Does not block workflow execution; failures are caught and logged.
+
+    force=True (用户手动触发) skips the 5s recency debounce so an explicit
+    "regenerate" always recomputes. The in-flight guard still applies — the API
+    layer falls back to the cached summary when a concurrent run returns None,
+    so the banner is never blanked.
     """
     import time
 
@@ -20,10 +25,11 @@ async def generate_and_cache_recap(group_id: int) -> str | None:
         log.info("Recap generation already in progress for group %s, skipping", group_id)
         return None
 
-    now = time.time()
-    if now - _last_generated.get(group_id, 0) < 5:
-        log.info("Recap generated too recently for group %s, skipping eager run", group_id)
-        return None
+    if not force:
+        now = time.time()
+        if now - _last_generated.get(group_id, 0) < 5:
+            log.info("Recap generated too recently for group %s, skipping eager run", group_id)
+            return None
 
     _generating_groups.add(group_id)
     try:
