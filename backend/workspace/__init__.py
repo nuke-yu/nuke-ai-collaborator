@@ -128,7 +128,7 @@ async def read_file(bot_id: int, path: str, offset: int | None = None, limit: in
             return f"[读取错误] {e}"
 
 
-_WRITE_PROTECTED = {"MEMORY.md"}
+_WRITE_PROTECTED = {"MEMORY.md", "RETRO_LATEST.md"}
 
 
 def _history_dir(ws: Path, p: Path) -> Path:
