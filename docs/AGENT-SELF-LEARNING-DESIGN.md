@@ -76,8 +76,8 @@ graph TD
 
 ---
 
-## 4. 后续落地计划
+## 4. 后续落地计划与状态
 
-* [ ] **Milestone 1**：优化 Front-end React 侧边栏，支持展示并审批 `learned/draft/` 目录下的新技能。
+* [x] **Milestone 1**：优化 Front-end React 侧边栏，支持展示并审批 `learned/draft/` 目录下的新技能。**(已在 SkillPanel.jsx 中实现并与后端 API 对接)**
 * [ ] **Milestone 2**：开发 `evidence` 路径解析器。当用户或 AI 点击 Learned Skill 中的 `evidence` 时，系统能自动在日志面板调出并定位到当年被截断的 `truncated_outputs/` 日志文件。
 * [ ] **Milestone 3**：引入后台异步 Reflexion 反思线程。每日夜间扫描 `chat.db` 的报错会话，自动提炼草稿技能到 `draft/`。

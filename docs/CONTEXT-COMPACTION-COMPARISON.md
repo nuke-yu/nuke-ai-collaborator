@@ -14,7 +14,7 @@
 | **摘要结构与格式** | **XML 结构化** `<summary>`：<br>包含压缩统计、使用工具、最近 3 条请求、Pending 任务、文件路径、截断 Timeline。 | **Markdown 结构化看板**：<br>`## Goal` / `## Constraints` / `## Progress` / `## Key Decisions` / `## Next Steps` / `## Critical Context`。 | **Markdown 严格模板**：<br>比 gsd-2 多一个 `## Relevant Files` 字段（相关文件列表）。 | **对齐 Claude Code 模板**：<br>采用 **9 段式严格 Markdown 模板**（带 `<analysis>` 思考草稿区，压缩后由程序过滤剥离），保留 Pending 任务与文件列表。 |
 | **长文本/工具输出防御** | **输入截断 + 工具去重**：<br>首尾截断 stdout，限制 Paste 长度，自动精简重复运行的 Tool 节点。 | **分块总结 + 局部截断**：<br>单条消息 > 2,000 字符强制截断。采用 Markdown 标题边界截断防止格式破碎。 | **文件缓存 + 命令行索引 Hint (`truncate.ts`)**：<br>输出 > 2000 行/50KB 时，自动存入本地临时文件，仅返回 Preview 以及引导 LLM 使用 `grep` 读取的 Hint。 | **双端截断 (Head + Tail 各 10K)**：<br>防止因单侧截断丢失命令行退出码（exit code）或关键 pass/fail 状态。 |
 | **旧数据剪枝 (Pruning)** | 直接按历史消息条数进行 Compaction 压缩。 | 无。 | **逆序扫描擦除 (`compaction.ts`)**：<br>若累积工具返回超过 40,000 tokens，**直接在 DB 中擦除较早工具的 Output**。 | **Strategy 1 工具结果微压缩**：<br>对齐 Claude Code 剪枝思路，对 `run_shell`、`read_file` 等高频工具的旧返回内容直接在内存中替换为 `[旧工具结果已清除]` 占位符。 |
-| **断点恢复与持久化** | **Continuation 提示词**：<br>使用 `COMPACT_DIRECT_RESUME_INSTRUCTION` 告知 LLM 续接历史，不要寒暄复述。 | **Markdown 快照**：<br>压缩前将不超 2KB 的快照写入 `.gsd/last-snapshot.md`，重启通过 `gsd_resume` 重建状态。 | **会话回滚与重放 (`overflow.ts`)**：<br>溢出时撤销引发溢出的 Assistant 输出，执行 Compaction 后自动重新提交。 | **1. DB 归档持久化**：超 30K 时在 SQLite 软删除老消息并归档 9 段快照，激活时自动拉起；<br>**2. Continuation 续接**：对齐 OpenCode 注入续接提示词。 |
+| **断点恢复与持久化** | **Continuation 提示词**：<br>使用 `COMPACT_DIRECT_RESUME_INSTRUCTION` 告知 LLM 续接历史，不要寒暄复述。 | **Markdown 快照**：<br>压缩前将不超 2KB 的快照写入 `.gsd/last-snapshot.md`，重启通过 `gsd_resume` 重建状态。 | **会话回滚与重放 (`overflow.ts`)**：<br>溢出时撤销引发溢出的 Assistant 输出，执行 Compaction 后自动重新提交。 | **1. 异步后台 Worker 归档**：DB 历史压缩完全异步移至后台 Worker（由 `CompactionTriggered` 事件触发），超 30K 时在 SQLite 软删除老消息并归档，激活时自动拉起；<br>**2. Continuation 续接**：对齐 OpenCode 注入续接提示词。 |
 | **防退化/防幻觉保护** | **天然免疫**（由于采用本地 Rust 规则提取，摘要绝对不会幻觉或劣化）。 | **Degenerate Summary Guard**：<br>若生成的摘要 < 100 字符或结构缺失，触发重写；二次失败则拒绝更新。 | **Plugin 钩子拦截**：<br>通过 `experimental.session.compacting` 等 Plugin 钩子拦截干预或注入特定的 Anchored 摘要数据。 | **1. 熔断器机制**：连续 3 次 AI 压缩失败则自动熔断，退化为无 AI 剪枝模式防死锁；<br>**2. VFS 跨压缩跟踪**：记录修改文件在压缩后自动重注入。 |
 
 ---
@@ -32,7 +32,8 @@
 ### 3. Web 常驻服务模式下的「DB 层持久化归档」（Nuke AI 独创）
 * **背景差异**：OpenCode, gsd-2 以及 Claude Code 都是 **CLI 单次运行工具 (Ephemeral)**。会话在本地终端退出后，内存状态随之销毁，不需要考虑历史记录无限增长带来的系统性负担。
 * **工程挑战**：Nuke AI Collaborator 是一款 **常驻式 Web 服务**，用户的聊天记录和机器人的执行历史必须永久存入 SQLite 数据库。如果不做处理，随着时间推移，单组的 DB 加载和 Session 反序列化将会严重阻碍 Event Loop，造成严重的网络延迟和内存泄露。
-* **创新机制**：我们设计了 **SQLite DB Compaction 异步后台归档**：
-  - 在每次 `run` 结束后，异步评估数据库历史，若超过 30,000 tokens，将调用 AI 压缩成 9 段式快照，存入独立的 `compaction_summaries` 归档表。
+* **创新机制**：我们设计了 **基于事件驱动的 SQLite DB Compaction 异步后台归档**：
+  - 将数据库历史评估与压缩计算完全异步移至后台 Worker（通过发布 `CompactionTriggered` 事件触发），彻底消除了同步工具循环中的阻塞，避免了网络请求的延迟和卡顿。
+  - 后台 Worker 接收事件后，若数据库历史超过 30,000 tokens，则异步调用 AI 压缩成 9 段式快照，存入独立的 `compaction_summaries` 归档表。
   - 将所有归档前的冷消息状态标记为 `is_deleted = 1`。
   - 下次 Session 激活或重新加载（Hydration）时，系统默认忽略已标记删除的消息，直接读取最新的 9 段摘要快照并拼接最近的 10 条消息，从根本上消除了数据库读取与内存解析的性能瓶颈。
