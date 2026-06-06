@@ -48,6 +48,14 @@ class DeclarativeOrchestrator(Orchestrator):
         ctx = self._ctx(group_id)
         return None if ctx is None else stage_handler(ctx.stage).current_pool_bots(ctx.stage)
 
+    def current_stage_name(self, group_id: int) -> str | None:
+        ctx = self._ctx(group_id)
+        return ctx.stage.get("name") if ctx and ctx.stage else None
+
+    def is_awaiting_confirm(self, group_id: int) -> bool:
+        s = self._state.get(group_id)
+        return bool(s.get("awaiting_confirm")) if s else False
+
     def system_suffix(self, group_id: int) -> str:
         ctx = self._ctx(group_id)
         if ctx is None:

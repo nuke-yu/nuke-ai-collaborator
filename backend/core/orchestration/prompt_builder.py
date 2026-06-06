@@ -39,18 +39,9 @@ async def compile_system_prompt(
     # B1: Retrieve current workflow stage and awaiting_confirm state
     from core.orchestration import registry as orch_registry
     orch = orch_registry.get("workflow_v1")
-    s_state = orch.get(ctx.group_id) if (orch and ctx.group_id) else None
     
-    current_stage = None
-    is_awaiting_confirm = False
-    
-    if s_state:
-        current_idx = s_state.get("current", 0)
-        stages = s_state.get("stages", [])
-        if 0 <= current_idx < len(stages):
-            current_stage = stages[current_idx].get("name")
-        if s_state.get("awaiting_confirm"):
-            is_awaiting_confirm = True
+    current_stage = orch.current_stage_name(ctx.group_id) if orch else None
+    is_awaiting_confirm = orch.is_awaiting_confirm(ctx.group_id) if orch else False
 
     lazy_candidates = filter_skills_by_context(
         lazy_candidates,

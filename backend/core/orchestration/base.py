@@ -84,6 +84,14 @@ class Orchestrator(ABC):
         """当前在岗的一组 bot id（无池语义则 None）。"""
         return None
 
+    def current_stage_name(self, group_id: int) -> str | None:
+        """当前活跃阶段的名称（无阶段语义则为 None）。"""
+        return None
+
+    def is_awaiting_confirm(self, group_id: int) -> bool:
+        """当前工作流是否正处于等待人类确认的挂起状态。"""
+        return False
+
     def system_suffix(self, group_id: int) -> str:
         """注入给当前阶段 bot 的系统提示后缀（无则空串）。"""
         return ""
