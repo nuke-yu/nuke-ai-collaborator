@@ -23,6 +23,11 @@ class TestAwaySummaryRecap(unittest.IsolatedAsyncioTestCase):
 
         database.DB_PATH = TEST_DB_PATH
 
+        # Reset module-level state for recap generator to prevent test leakage
+        from core.recap.generator import _last_generated, _generating_groups
+        _last_generated.clear()
+        _generating_groups.clear()
+
         # Set up schema and run migrations
         await database.init_db()
 
@@ -99,6 +104,45 @@ class TestAwaySummaryRecap(unittest.IsolatedAsyncioTestCase):
             "group_id": 1,
             "away_summary": None
         })
+
+    def test_schema_consistency_groups_and_messages(self):
+        """Verify that the groups table in CENTRAL_DDL has away_summary column,
+        and messages table in GROUP_DDL has meta and other expected columns."""
+        from db.schema_split import _CENTRAL_DDL, _GROUP_DDL
+        
+        # Check central DDL groups table contains away_summary
+        groups_ddl = next((ddl for ddl in _CENTRAL_DDL if "CREATE TABLE" in ddl and "groups" in ddl), None)
+        self.assertIsNotNone(groups_ddl)
+        self.assertIn("away_summary", groups_ddl)
+        
+        # Check group DDL messages table contains meta
+        messages_ddl = next((ddl for ddl in _GROUP_DDL if "CREATE TABLE" in ddl and "messages" in ddl), None)
+        self.assertIsNotNone(messages_ddl)
+        self.assertIn("meta", messages_ddl)
+
+    @patch("core.recap.generator.call_ai_once", new_callable=AsyncMock)
+    async def test_recap_debounce_and_deduplication(self, mock_call_ai):
+        mock_call_ai.return_value = {"content": "Debounced summary."}
+        
+        # First call: generates recap
+        summary1 = await generate_and_cache_recap(1)
+        self.assertEqual(summary1, "Debounced summary.")
+        self.assertEqual(mock_call_ai.call_count, 1)
+        
+        # Second call immediately after: debounced (returns None)
+        summary2 = await generate_and_cache_recap(1)
+        self.assertIsNone(summary2)
+        self.assertEqual(mock_call_ai.call_count, 1)
+        
+        # Reset debounce state to allow generating again
+        from core.recap.generator import _last_generated, _generating_groups
+        _last_generated.clear()
+        _generating_groups.clear()
+        
+        # Third call: runs again
+        summary3 = await generate_and_cache_recap(1)
+        self.assertEqual(summary3, "Debounced summary.")
+        self.assertEqual(mock_call_ai.call_count, 2)
 
 
 class TestRecapApi(unittest.IsolatedAsyncioTestCase):

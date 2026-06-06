@@ -44,6 +44,7 @@ class Worker:
         self._sub = None
         self._upstream_task = None
         self._report_task = None
+        self._recap_task = None
 
     async def connect(self) -> None:
         self._reader, self._writer = await ipc.connect(self.addr)
@@ -54,6 +55,7 @@ class Worker:
         self._sub = self.bus.subscribe_all()
         self._upstream_task = asyncio.create_task(self._pump_upstream())
         self._report_task = asyncio.create_task(self._report_stats_loop())
+        self._recap_task = asyncio.create_task(self._pump_recap())
 
     async def run(self) -> None:
         tracing.setup_structured_logging(log_file=f"logs/worker-{self.worker_id}.log")
@@ -95,13 +97,35 @@ class Worker:
 
         if self._report_task:
             self._report_task.cancel()
+            self._report_task = None
         if self._upstream_task:
             self._upstream_task.cancel()
             self._upstream_task = None
-        self._report_task = None
+        if self._recap_task:
+            self._recap_task.cancel()
+            self._recap_task = None
         if self._writer:
             self._writer.close()
             self._writer = None
+
+    async def _pump_recap(self) -> None:
+        from bus.events import WorkflowPaused
+        sub = self.bus.subscribe(WorkflowPaused)
+        async with sub:
+            async for ev in sub:
+                gid = ev.group_id
+                from runtime.lifecycle import manager as lifecycle
+                if gid in lifecycle._active_groups:
+                    async def _run():
+                        try:
+                            from runtime.dbpaths import group_db_path
+                            db_path = group_db_path(gid)
+                            with db.bind_db(db_path):
+                                from core.recap import generate_and_cache_recap
+                                await generate_and_cache_recap(gid)
+                        except Exception:
+                            log.exception("worker %s: failed to generate event-driven recap for group %s", self.worker_id, gid)
+                    bg.spawn(_run())
 
     async def _pump_upstream(self) -> None:
         async with self._sub as sub:

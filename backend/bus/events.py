@@ -202,6 +202,13 @@ class WorkflowUpdate:
     awaiting_confirm: str | None = None   # gate_id 时表示该群正挂在人确认门上
 
 
+@event("workflow_paused")
+class WorkflowPaused:
+    group_id: int
+    reason:   str  # e.g., 'gate' or 'done' or 'pause'
+
+
+
 # ─── Compaction ──────────────────────────────────────────────────────────────
 
 @event("compaction")

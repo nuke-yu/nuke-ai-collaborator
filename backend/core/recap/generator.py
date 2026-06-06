@@ -6,11 +6,26 @@ from bus import bus
 
 log = logging.getLogger(__name__)
 
+_generating_groups = set()
+_last_generated = {}
+
 async def generate_and_cache_recap(group_id: int) -> str | None:
     """
     Pre-generates a 1-3 sentence recap for the group and caches it in the groups table of the central DB.
     Does not block workflow execution; failures are caught and logged.
     """
+    import time
+
+    if group_id in _generating_groups:
+        log.info("Recap generation already in progress for group %s, skipping", group_id)
+        return None
+
+    now = time.time()
+    if now - _last_generated.get(group_id, 0) < 5:
+        log.info("Recap generated too recently for group %s, skipping eager run", group_id)
+        return None
+
+    _generating_groups.add(group_id)
     try:
         log.info("Starting recap generation for group %s", group_id)
         # 1. Fetch members from Central DB and messages from Group Private DB
@@ -89,6 +104,7 @@ async def generate_and_cache_recap(group_id: int) -> str | None:
             await db_conn.commit()
             
         log.info("Recap generated and cached successfully for group %s: %s", group_id, summary)
+        _last_generated[group_id] = time.time()
         
         # 7. Broadcast the updated recap to websocket clients
         await bus.broadcast(group_id, {
@@ -102,6 +118,8 @@ async def generate_and_cache_recap(group_id: int) -> str | None:
     except Exception as e:
         log.error("Failed to generate and cache recap for group %s: %r", group_id, e, exc_info=True)
         return None
+    finally:
+        _generating_groups.discard(group_id)
 
 async def clear_recap(group_id: int) -> None:
     """

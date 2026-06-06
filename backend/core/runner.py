@@ -13,7 +13,7 @@ import logging
 
 from db import get_db, global_db, write_connect, get_members, get_messages, save_message
 from bus import bus
-from bus.events import WorkflowUpdate
+from bus.events import WorkflowUpdate, WorkflowPaused
 from core import bg, workflow_store
 from executors.base import ExecutionContext
 from core.orchestration.interaction import StandardInteraction
@@ -97,10 +97,10 @@ async def apply_step(group_id: int, orch, step) -> None:
         await bus.publish(WorkflowUpdate(group_id=group_id, active=False, done=True))
         await workflow_store.clear_state(group_id)
     
-    # Trigger recap generation ONLY when workflow gets gated (confirm_gate is raised) or finishes (done)
+    # Decoupled Event Trigger: Publish WorkflowPaused event when workflow gets gated or finishes
     if step.confirm_gate or step.done:
-        from core.recap import generate_and_cache_recap
-        bg.spawn(generate_and_cache_recap(group_id))
+        reason = "gate" if step.confirm_gate else "done"
+        bg.spawn(bus.publish(WorkflowPaused(group_id=group_id, reason=reason)))
 
     for unit in step.next_units:
         # DFT-025/027: hold a reference (no GC) + register to the group so a
