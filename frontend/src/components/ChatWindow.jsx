@@ -790,18 +790,18 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
           isStreaming={isStreaming}
           awaySummary={awaySummary}
           messages={messages}
+          members={members}
           onSelect={(text, action) => {
             if (action === 'confirm') {
-              const pending = messages.find(m => m.meta?.kind === 'confirm_gate' && m.meta?.status !== 'confirmed');
-              if (pending) {
-                handleConfirmGate(pending.meta.gate_id);
+              if (workflow?.awaiting_confirm) {
+                handleConfirmGate(workflow.awaiting_confirm);
               }
             } else if (action === 'start') {
               sendRaw({ type: 'start_workflow', group_id: activeGroupId });
             } else if (action === 'abort') {
               handleAbort();
             } else if (text) {
-              messageInputRef.current?.insertText(text);
+              messageInputRef.current?.setInputText(text);
             }
           }}
         />

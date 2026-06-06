@@ -1,7 +1,7 @@
 import React from 'react'
 
-export default function SuggestionBar({ workflow, isStreaming, awaySummary, messages, onSelect }) {
-  const suggestions = deriveSuggestions(workflow, isStreaming, awaySummary, messages)
+export default function SuggestionBar({ workflow, isStreaming, awaySummary, messages, members, onSelect }) {
+  const suggestions = deriveSuggestions(workflow, isStreaming, awaySummary, messages, members)
 
   if (suggestions.length === 0) return null
 
@@ -36,14 +36,15 @@ export default function SuggestionBar({ workflow, isStreaming, awaySummary, mess
   )
 }
 
-function deriveSuggestions(workflow, isStreaming, awaySummary, messages) {
+function deriveSuggestions(workflow, isStreaming, awaySummary, messages, members) {
   const suggestions = []
 
-  // 1. Confirm Gate
-  const pendingGate = messages?.find(m => m.meta?.kind === 'confirm_gate' && m.meta?.status !== 'confirmed')
-  if (pendingGate) {
+  // 1. Confirm Gate (driven by workflow.awaiting_confirm)
+  const isAwaitingConfirm = workflow?.awaiting_confirm
+  if (isAwaitingConfirm) {
+    const isRework = String(isAwaitingConfirm).endsWith('rework')
     suggestions.push({
-      label: '👍 确认并继续',
+      label: isRework ? '👍 确认打回 Dev 修复' : '👍 确认并继续',
       action: 'confirm',
       variant: 'indigo'
     })
@@ -73,11 +74,13 @@ function deriveSuggestions(workflow, isStreaming, awaySummary, messages) {
     })
   }
 
-  // 4. Recap banner is active (Tier 2 suggestion)
-  if (awaySummary && !isStreaming && !pendingGate) {
+  // 4. Recap/Retro is active (Tier 2 suggestion)
+  if (awaySummary && !isStreaming && !isAwaitingConfirm) {
+    const firstBot = members?.find(m => m.type === 'bot')
+    const botMention = firstBot ? `@${firstBot.name} ` : ''
     suggestions.push({
-      label: '📄 查看最近开发复盘 (RETRO_LATEST.md)',
-      text: '查看最近的开发复盘。',
+      label: '📄 让 Bot 查看开发复盘 (RETRO_LATEST.md)',
+      text: `${botMention}请读取工作区的 RETRO_LATEST.md，并告诉我有什么需要注意的。`,
       variant: 'purple'
     })
   }

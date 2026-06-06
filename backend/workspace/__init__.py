@@ -76,7 +76,7 @@ def _safe_path(workspace: Path, relative: str) -> Path | None:
     return None
 
 
-_SHARED_FILES = {"BOARD.md", "SPEC.md", "API_CONTRACT.md"}
+_SHARED_FILES = {"BOARD.md", "SPEC.md", "API_CONTRACT.md", "RETRO_LATEST.md"}
 
 
 def _get_effective_ws(bot_id: int, path_str: str) -> Path:
