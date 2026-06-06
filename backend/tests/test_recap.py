@@ -21,6 +21,7 @@ class TestAwaySummaryRecap(unittest.IsolatedAsyncioTestCase):
         if os.path.exists(TEST_DB_PATH):
             os.remove(TEST_DB_PATH)
 
+        self._orig_db_path = database.DB_PATH   # 还原全局，避免污染后续测试文件
         database.DB_PATH = TEST_DB_PATH
 
         # Reset module-level state for recap generator to prevent test leakage
@@ -50,6 +51,7 @@ class TestAwaySummaryRecap(unittest.IsolatedAsyncioTestCase):
 
     async def asyncTearDown(self):
         self.patcher_bus.stop()
+        database.DB_PATH = self._orig_db_path
         if os.path.exists(TEST_DB_PATH):
             try:
                 os.remove(TEST_DB_PATH)
@@ -170,6 +172,7 @@ class TestRecapApi(unittest.IsolatedAsyncioTestCase):
         if os.path.exists(TEST_DB_PATH):
             os.remove(TEST_DB_PATH)
 
+        self._orig_db_path = database.DB_PATH   # 还原全局，避免污染后续测试文件
         database.DB_PATH = TEST_DB_PATH
         await database.init_db()
 
@@ -180,6 +183,7 @@ class TestRecapApi(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self):
         from core import auth as _auth
         app.dependency_overrides.pop(_auth.get_current_user, None)
+        database.DB_PATH = self._orig_db_path
 
         if os.path.exists(TEST_DB_PATH):
             try:
@@ -223,6 +227,99 @@ class TestRecapApi(unittest.IsolatedAsyncioTestCase):
             resp = await ac.post("/api/groups/1/recap/trigger")
             self.assertEqual(resp.status_code, 200)
             self.assertEqual(resp.json(), {"ok": True, "away_summary": "Cached Recap"})
+
+
+class TestDebouncePrune(unittest.TestCase):
+    """_last_generated 不能随群数无界增长：超过 TTL 的去抖时间戳要被清掉。"""
+
+    def test_prune_removes_stale_keeps_recent(self):
+        from core.recap import generator as g
+        g._last_generated.clear()
+        try:
+            g._last_generated[1] = 1000.0        # 远古
+            g._last_generated[2] = 100_000.0     # "现在"
+            g._prune_last_generated(now=100_000.0)
+            self.assertNotIn(1, g._last_generated)
+            self.assertIn(2, g._last_generated)
+        finally:
+            g._last_generated.clear()
+
+
+def _close_spawned(mock_spawn):
+    """关闭被 fire-and-forget 的协程，避免 'coroutine never awaited' 噪音。"""
+    for c in mock_spawn.call_args_list:
+        for a in c.args:
+            if asyncio.iscoroutine(a):
+                a.close()
+
+
+class TestRecapEventTrigger(unittest.IsolatedAsyncioTestCase):
+    """解耦契约：apply_step 在 gate/done 时 publish WorkflowPaused（而非直接调 recap）；
+    worker._recap_on_paused 只为本 worker 持有的活跃 group 生成。"""
+
+    async def _run_apply_step(self, step):
+        from core import runner
+        from bus.events import WorkflowPaused
+        with patch.object(runner, "bus") as bus, \
+             patch.object(runner, "workflow_store") as ws, \
+             patch.object(runner, "bg") as bg_mock, \
+             patch.object(runner, "_post_confirm_gate", new=AsyncMock()):
+            bus.publish = AsyncMock()
+            bus.broadcast = AsyncMock()
+            ws.save_state = AsyncMock()
+            ws.clear_state = AsyncMock()
+            orch = MagicMock()
+            orch.snapshot.return_value = {"active": True}
+            orch.serialize.return_value = None
+            await runner.apply_step(1, orch, step)
+            _close_spawned(bg_mock.spawn)
+            _close_spawned(bg_mock.spawn_group)
+            published = [c.args[0] for c in bus.publish.call_args_list if c.args]
+        return [p for p in published if isinstance(p, WorkflowPaused)]
+
+    async def test_gate_publishes_workflow_paused(self):
+        from core.orchestration.base import OrchestratorStep
+        paused = await self._run_apply_step(OrchestratorStep(
+            confirm_gate={"gate_id": "1-0", "label": "x", "bot_id": 1, "stage_name": "BA"}))
+        self.assertEqual(len(paused), 1)
+        self.assertEqual(paused[0].reason, "gate")
+
+    async def test_done_publishes_workflow_paused(self):
+        from core.orchestration.base import OrchestratorStep
+        paused = await self._run_apply_step(OrchestratorStep(done=True))
+        self.assertEqual(len(paused), 1)
+        self.assertEqual(paused[0].reason, "done")
+
+    async def test_plain_advance_does_not_publish(self):
+        from core.orchestration.base import OrchestratorStep, WorkUnit
+        paused = await self._run_apply_step(OrchestratorStep(
+            next_units=[WorkUnit(bot={"id": 2, "name": "Dev"})]))
+        self.assertEqual(paused, [])
+
+    async def test_recap_on_paused_skips_inactive_group(self):
+        from runtime.worker import Worker
+        from runtime.lifecycle import manager as lifecycle
+        w = Worker.__new__(Worker)
+        w.worker_id = "t"
+        with patch.object(lifecycle, "is_active", return_value=False), \
+             patch("core.recap.generate_and_cache_recap", new=AsyncMock()) as gen:
+            await w._recap_on_paused(1)
+        gen.assert_not_awaited()
+
+    async def test_recap_on_paused_generates_for_active_group(self):
+        import db as _db
+        from runtime.worker import Worker
+        from runtime.lifecycle import manager as lifecycle
+        w = Worker.__new__(Worker)
+        w.worker_id = "t"
+        cm = MagicMock()
+        cm.__enter__ = MagicMock()
+        cm.__exit__ = MagicMock(return_value=False)
+        with patch.object(lifecycle, "is_active", return_value=True), \
+             patch.object(_db, "bind_db", return_value=cm), \
+             patch("core.recap.generate_and_cache_recap", new=AsyncMock()) as gen:
+            await w._recap_on_paused(7)
+        gen.assert_awaited_once_with(7)
 
 
 if __name__ == "__main__":
