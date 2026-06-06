@@ -18,6 +18,7 @@ import WorkflowStartModal from './WorkflowStartModal'
 import WorkspacePanel from './WorkspacePanel'
 import PermissionRequestModal from './PermissionRequestModal'
 import RecapBanner from './RecapBanner'
+import SuggestionBar from './SuggestionBar'
 
 export default function ChatWindow({ memberId, theme, onThemeChange, onLogout }) {
   const [groups, setGroups] = useState([])
@@ -784,6 +785,26 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
             </button>
           </div>
         )}
+        <SuggestionBar
+          workflow={workflow}
+          isStreaming={isStreaming}
+          awaySummary={awaySummary}
+          messages={messages}
+          onSelect={(text, action) => {
+            if (action === 'confirm') {
+              const pending = messages.find(m => m.meta?.kind === 'confirm_gate' && m.meta?.status !== 'confirmed');
+              if (pending) {
+                handleConfirmGate(pending.meta.gate_id);
+              }
+            } else if (action === 'start') {
+              sendRaw({ type: 'start_workflow', group_id: activeGroupId });
+            } else if (action === 'abort') {
+              handleAbort();
+            } else if (text) {
+              messageInputRef.current?.insertText(text);
+            }
+          }}
+        />
         <MessageInput
           ref={messageInputRef}
           key={activeGroupId}

@@ -25,7 +25,10 @@ const MessageInput = forwardRef(function MessageInput({ onSend, members = [], di
 
   useEffect(() => { textRef.current = text }, [text])
 
-  useImperativeHandle(ref, () => ({ uploadFile: handleUpload }))
+  useImperativeHandle(ref, () => ({
+    uploadFile: handleUpload,
+    insertText: (val) => setText(val)
+  }))
 
   // 同步重置输入框内容（切换群组加载新草稿）
   useEffect(() => {
