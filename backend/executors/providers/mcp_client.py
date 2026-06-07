@@ -60,8 +60,9 @@ _MCP_WRITE_TOOLS = frozenset({
     "write", "delete", "remove", "move", "rename",
 })
 
-# Sentinel object to signal _session_task to exit
-_STOP = object()
+# Sentinel objects passed through the request queue to the session task.
+_STOP = object()        # stop the session loop and unwind
+_REFRESH = object()     # re-fetch the tool list (ToolListChanged notification)
 
 # --------------------------------------------------------------------------- #
 # Untrusted-I/O scanning (MCP threat model: tool poisoning + indirect injection)
@@ -168,11 +169,20 @@ class McpClientToolProvider(ToolProvider):
         call_timeout: int = _DEFAULT_CALL_TIMEOUT,
         require_approval_all: bool = False,
         approval_tools: set[str] | None = None,
+        url: str | None = None,
+        transport: str = "stdio",
+        headers: dict[str, str] | None = None,
     ):
         self._server_name = server_name
         self._command = command
         self._args = args
         self._extra_env = env or {}
+        # Transport: stdio (local subprocess) or remote (sse / streamable-http).
+        # url present → remote; transport picks the remote client. headers carry
+        # auth (e.g. {"Authorization": "Bearer …"}).
+        self._url = url
+        self._transport = transport
+        self._headers = headers or {}
         self._allow_list = allow_list          # None = accept all
         self._call_timeout = call_timeout
         # HIL policy: which tools require human approval before execution.
@@ -352,79 +362,104 @@ class McpClientToolProvider(ToolProvider):
                 f"Failed to initialize MCP server '{self._server_name}': {exc}"
             ) from exc
 
+    def _open_transport(self):
+        """Return the transport context manager for this provider's config:
+        remote sse / streamable-http when a url is set, else local stdio."""
+        if self._url:
+            headers = self._headers or None
+            if self._transport == "sse":
+                from mcp.client.sse import sse_client
+                return sse_client(self._url, headers=headers)
+            from mcp.client.streamable_http import streamablehttp_client
+            return streamablehttp_client(self._url, headers=headers)
+        import os
+        merged_env = {**os.environ, **self._extra_env} if self._extra_env else None
+        params = StdioServerParameters(command=self._command, args=self._args, env=merged_env)
+        return stdio_client(params)
+
+    async def _on_message(self, message) -> None:
+        """ClientSession message handler: on a tools/list_changed notification,
+        ask the session loop (via the queue, so it runs in the owning task) to
+        re-fetch the tool list. Never does I/O itself (would deadlock the read
+        loop)."""
+        root = getattr(message, "root", message)
+        if getattr(root, "method", None) == "notifications/tools/list_changed":
+            if self._request_queue is not None:
+                try:
+                    self._request_queue.put_nowait(_REFRESH)
+                except Exception:
+                    pass
+
     async def _session_loop(self) -> None:
         """
-        Long-lived task: owns the stdio_client + ClientSession for its lifetime.
+        Long-lived task: owns the transport + ClientSession for its lifetime.
 
         Enters and exits both context managers in THIS task to avoid anyio
-        cancel-scope cross-task errors.
+        cancel-scope cross-task errors. Transport is stdio or remote (sse/http).
         """
-        import os
-        # Merge extra env onto current env so PATH etc. are preserved
-        merged_env = {**os.environ, **self._extra_env} if self._extra_env else None
-
-        params = StdioServerParameters(
-            command=self._command,
-            args=self._args,
-            env=merged_env,
-        )
-
         try:
-            async with stdio_client(params) as (read, write):
-                async with ClientSession(read, write) as session:
-                    await session.initialize()
-                    await self._cache_tools(session)
-                    self._ready.set()
-
-                    logger.info(
-                        f"MCP '{self._server_name}' ready: "
-                        f"{[t.name for t in self._tools]}"
-                    )
-
-                    # Request loop — process until _STOP sentinel received
-                    while True:
-                        item = await self._request_queue.get()
-                        if item is _STOP:
-                            break
-                        tool_name, arguments, future = item
-                        if future.cancelled():
-                            continue
-                        try:
-                            # Timeout INSIDE the loop too: the caller-side wait_for
-                            # only unblocks the caller; without this a genuinely hung
-                            # call_tool would wedge the single session loop and back up
-                            # every subsequent request on this server.
-                            result = await asyncio.wait_for(
-                                session.call_tool(tool_name, arguments),
-                                timeout=self._call_timeout,
-                            )
-                            texts = []
-                            for block in result.content:
-                                texts.append(block.text if hasattr(block, "text") else str(block))
-                            if not future.done():
-                                future.set_result(("\n".join(texts) or "完成", False))
-                        except asyncio.TimeoutError:
-                            logger.warning(f"MCP call timeout [{self._server_name}/{tool_name}] > {self._call_timeout}s")
-                            if not future.done():
-                                future.set_result((f"[MCP超时] 工具 '{tool_name}' 执行超过 {self._call_timeout} 秒", True))
-                        except Exception as e:
-                            logger.error(f"MCP call error [{self._server_name}/{tool_name}]: {e}")
-                            if not future.done():
-                                future.set_result((f"[MCP执行错误] {e}", True))
+            async with self._open_transport() as streams:
+                # stdio/sse yield (read, write); streamable-http yields a 3-tuple.
+                read, write = streams[0], streams[1]
+                async with ClientSession(read, write, message_handler=self._on_message) as session:
+                    await self._run_session(session)
         except Exception as e:
             logger.error(f"MCP session loop failed [{self._server_name}]: {e}")
-            # Fail any pending requests
             if self._request_queue:
                 while not self._request_queue.empty():
                     try:
                         item = self._request_queue.get_nowait()
-                        if item is not _STOP:
+                        if item not in (_STOP, _REFRESH):
                             _, _, future = item
                             if not future.done():
                                 future.set_result((f"[MCP断开] {e}", True))
                     except asyncio.QueueEmpty:
                         break
             raise
+
+    async def _run_session(self, session: ClientSession) -> None:
+        """Init handshake, cache tools, then serve the request queue until _STOP."""
+        await session.initialize()
+        await self._cache_tools(session)
+        self._ready.set()
+        logger.info(f"MCP '{self._server_name}' ready: {[t.name for t in self._tools]}")
+
+        while True:
+            item = await self._request_queue.get()
+            if item is _STOP:
+                break
+            if item is _REFRESH:
+                try:
+                    await self._cache_tools(session)
+                    logger.info(f"MCP '{self._server_name}' tools refreshed: {[t.name for t in self._tools]}")
+                except Exception as e:
+                    logger.warning(f"MCP '{self._server_name}' tool refresh failed: {e}")
+                continue
+            tool_name, arguments, future = item
+            if future.cancelled():
+                continue
+            try:
+                # Timeout INSIDE the loop too: the caller-side wait_for only
+                # unblocks the caller; without this a genuinely hung call_tool
+                # would wedge the single session loop and back up every
+                # subsequent request on this server.
+                result = await asyncio.wait_for(
+                    session.call_tool(tool_name, arguments),
+                    timeout=self._call_timeout,
+                )
+                texts = []
+                for block in result.content:
+                    texts.append(block.text if hasattr(block, "text") else str(block))
+                if not future.done():
+                    future.set_result(("\n".join(texts) or "完成", False))
+            except asyncio.TimeoutError:
+                logger.warning(f"MCP call timeout [{self._server_name}/{tool_name}] > {self._call_timeout}s")
+                if not future.done():
+                    future.set_result((f"[MCP超时] 工具 '{tool_name}' 执行超过 {self._call_timeout} 秒", True))
+            except Exception as e:
+                logger.error(f"MCP call error [{self._server_name}/{tool_name}]: {e}")
+                if not future.done():
+                    future.set_result((f"[MCP执行错误] {e}", True))
 
     async def _cache_tools(self, session: ClientSession) -> None:
         """Fetch and cache tool list from the server, applying allow_list filter."""
@@ -487,15 +522,21 @@ class McpClientToolProvider(ToolProvider):
         """
         Parse mcp_servers.json and return one provider per enabled server.
 
-        Config format (compatible with Claude Desktop):
+        Config format (compatible with Claude Desktop). Local (stdio) or remote:
         {
           "mcpServers": {
-            "filesystem": {
+            "filesystem": {                      // local stdio
               "command": "npx",
               "args": ["-y", "@modelcontextprotocol/server-filesystem", "./workspace"],
-              "env": {},           // merged onto os.environ; missing = use host env
-              "allow_list": ["read_file", "write_file"],  // optional tool whitelist
-              "call_timeout": 30,  // optional per-call timeout in seconds
+              "env": {},
+              "allow_list": ["read_file", "write_file"],
+              "call_timeout": 30,
+              "enabled": true
+            },
+            "remote-api": {                      // remote
+              "url": "https://mcp.example.com/sse",
+              "transport": "sse",               // "sse" | "http" (default http)
+              "headers": {"Authorization": "Bearer ${TOKEN}"},
               "enabled": true
             }
           }
@@ -516,14 +557,18 @@ class McpClientToolProvider(ToolProvider):
                 continue
             allow_list = spec.get("allow_list")
             approval_tools = spec.get("approval_tools")
+            url = spec.get("url")
             providers.append(cls(
                 server_name=name,
-                command=spec["command"],
+                command=spec.get("command", ""),
                 args=spec.get("args", []),
                 env=spec.get("env") or {},
                 allow_list=set(allow_list) if allow_list else None,
                 call_timeout=spec.get("call_timeout", _DEFAULT_CALL_TIMEOUT),
                 require_approval_all=spec.get("require_approval_all", False),
                 approval_tools=set(approval_tools) if approval_tools else None,
+                url=url,
+                transport=spec.get("transport", "stdio" if not url else "http"),
+                headers=spec.get("headers") or {},
             ))
         return providers

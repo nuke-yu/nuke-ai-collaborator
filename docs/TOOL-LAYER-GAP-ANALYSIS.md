@@ -27,15 +27,15 @@
 | 能力 | nuke | Claude Code | opencode | openclaw | gsd-2 |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | 工具执行 | 自有引擎 | 自有引擎 | Effect 服务 | 自有+容器 | 委托 CLI |
-| 命令安全决策 | ⚠️ 子串匹配 | ✅ 分类器 | 权限规则 | ✅ 容器+CodeQL | ✅ pattern 合成+粒度菜单 |
+| 命令安全决策 | 🔶 正则+tokenized（非 classifier） | ✅ 分类器 | 权限规则 | ✅ 容器+CodeQL | ✅ pattern 合成+粒度菜单 |
 | 权限裁决契约 | ⚠️ block/allow | ✅ 模式+多源分层 | ✅ ask/allow/deny+pattern | ✅ | ✅ 改参/改权限/中断 |
 | 授权记忆 | ✅ persist_rule + 子命令深度合成 | always-allow | — | — | ✅ 子命令深度感知合成 |
 | 子 agent 权限 | ✅ 衰减派生(去 bypass+去高危 blanket+深度上限+不可弹窗) | Task 限工具集 | ✅ 衰减派生 | ✅ | （委托 CLI） |
 | 参数校验 | ⚠️ 硬编码别名表 | ✅ zod validateInput | ✅ schema-decode | ✅ | （透传） |
-| MCP 传输 | ⚠️ 仅 stdio | ✅ +WS* | ✅ +remote(SSE/HTTP)+OAuth | ✅ | （透传 CLI） |
+| MCP 传输 | 🔶 stdio + remote(SSE/HTTP)（无 OAuth） | ✅ +WS* | ✅ +remote(SSE/HTTP)+OAuth | ✅ | （透传 CLI） |
 | MCP 工具过滤 | allow_list | — | — | — | ✅ allow+block per-model |
-| 工具规模治理 | ❌ 全量上传 | ✅ deferred+ToolSearch | — | ⚠️ searchable | （透传） |
-| 工具输出脱敏 | ❌ 无 | — | — | ✅ result-middleware | — |
+| 工具规模治理 | 🔶 schema 数量预算（无 deferred 检索） | ✅ deferred+ToolSearch | — | ⚠️ searchable | （透传） |
+| 工具输出脱敏 | ✅ redact_secrets | — | — | ✅ result-middleware | — |
 | 可观测 | ⚠️ trace_id，无 per-call span | ✅ span+attrs | ✅ | ✅ | — |
 
 ---
@@ -62,15 +62,16 @@
 - **残留 / 取舍**:未做 opencode 那种"按子任务声明再收紧"或逐层递减;按用户 steer 刻意不过度收紧以免卡正常多级协作。单测 `tests/test_subagent_perms.py`(11 例)。
 - **对标**:opencode `deriveSubagentSessionPermission`(deny 子集 + task/todowrite 默认 deny)。
 
-### 4. 🟠 工具规模治理缺失（无动态加载）
-- **现状**：[tool_router.py `get_external_schemas()`](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/executors/tool_router.py) + [tool_loop_v1.py 的 schema 合并](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/executors/plugins/tool_loop_v1.py) 把工具 schema 全量上传给 LLM；MCP 工具一多即膨胀 context。
-- **对标**：Claude Code `src/utils/toolSearch.ts`——deferred 工具以 `defer_loading: true` 发送，经 `ToolSearchTool` 按需发现，并有 token 预算（`countToolDefinitionTokens`）。（即本对话所在 harness 正在用的机制。）
-- **建议**：对 MCP / 低频工具做 deferred 加载 + 工具检索，按 token 预算装配。
+### 4. 🔶 工具规模治理 — 已加预算上限（完整 deferred 检索为后续）
+- **现状（已实现预算）**：[tool_loop_v1._apply_external_schema_budget](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/executors/plugins/tool_loop_v1.py) 对外部(MCP) schema 设上限 `_MAX_EXTERNAL_TOOL_SCHEMAS=48`：builtin 永不裁,超额 MCP 工具不下发并在 system prompt 注一条"另有 N 个工具未加载,请用 allow_list 收窄"的提示 + 告警。直接堵住"MCP 工具一多 context 膨胀"。
+- **残留**：超额工具暂不可调用(未做 Claude Code 那种 `ToolSearchTool` 动态检索+按需装载);当前 0-1 个 server 远未触限,属预防性护栏。配合每 server `allow_list` 收窄是主手段。
+- **对标**：Claude Code `toolSearch.ts`(deferred + `countToolDefinitionTokens` token 预算)。
 
-### 5. 🟠 MCP 仅 stdio，无 remote / OAuth
-- **现状**：[mcp_client.py](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/executors/providers/mcp_client.py) 仅 `StdioServerParameters`；有 `allow_list` / `call_timeout` / 单 task 会话。✅ **自动重连已修复**（`4d666be`）：`execute()` 入口调 `_ensure_alive()`，会话 task 已死时尝试一次重连，由 `_reconnect_lock` 串行化（防重连风暴）+ `_RECONNECT_COOLDOWN=5s` 冷却（防持续锤击死服务）。真实未解决：**无 remote 传输**（接不了纯网络 API 工具生态）、**无 OAuth**（无授权）、**无 `ToolListChanged` 订阅**（server 增删工具不感知）。
-- **对标**：opencode `src/config/mcp.ts` 支持 Local + Remote（SSE/HTTP）+ OAuth（含 RFC 7591 动态注册）+ 每服务器 timeout；Claude Code 另带 `mcpWebSocketTransport.ts`*。
-- **建议**：加 remote(SSE/HTTP) 传输 + 授权 + `ToolListChanged` 订阅。
+### 5. 🔶 MCP remote / OAuth — remote 已实现，OAuth 待做
+- **现状（已实现）**：[mcp_client.py](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/executors/providers/mcp_client.py) 现支持三种传输:stdio + **remote SSE + remote streamable-HTTP**(`_open_transport` 按 config 的 `url`/`transport` 选择,`headers` 携带鉴权如 `Authorization: Bearer`);`from_config` 解析 `url`/`transport`/`headers`。✅ 自动重连(`4d666be`)。✅ **`ToolListChanged` 订阅**:`ClientSession(message_handler=_on_message)`,通知经 `_REFRESH` 哨兵在会话任务内安全 re-cache 工具表。
+- **残留**:**无 OAuth 三方授权流**(RFC 7591 动态注册)——目前靠 config 里的静态 `headers` 传 token;无独立健康检查(靠重连兜底)。
+- **对标**：opencode `src/config/mcp.ts`(Local+Remote+OAuth+per-server timeout)。
+- **单测**:`tests/test_mcp_provider.py`(remote 传输选择 + from_config remote + ToolListChanged 刷新)。
 
 ### 6. ✅ 授权记忆粒度（persist_rule）— 已修复（曾被低估为 🟠，实为安全问题）
 - **原问题**：`engine.py` 的 "always" 持久化为 `Rule(tool_pattern=tool_name, args_pattern="")`——**空 args_pattern = 放行该工具的全部调用**。即"始终允许 `git status`"会连带自动放行 `rm -rf /`。这不只是"不智能",是安全洞。
@@ -124,5 +125,5 @@
 ## 六、优先级建议
 
 1. **✅ 已完成（安全收益最高，多 agent 放大风险）**：#1 命令安全（tokenized 加固）、#2 输出脱敏、#3 子 agent 权限衰减、#6 授权记忆粒度。
-2. **待做（多 MCP / 规模化前置）**：#4 deferred 工具加载、#5 MCP remote+健康检查（MCP 自动重连/投毒/结果围栏已做）、#9 MCP 上下文过滤。
+2. **部分完成（多 MCP / 规模化）**：✅#4 schema 数量预算（完整 deferred 检索待做）、🔶#5 MCP remote+ToolListChanged 已做（OAuth/健康检查待做）；待做 #9 MCP 上下文过滤（按 bot/模型黑白名单）。
 3. **待做（体验/健壮性）**：#7 裁决契约扩展（改参/动态授权/中断）、#8 参数校验。

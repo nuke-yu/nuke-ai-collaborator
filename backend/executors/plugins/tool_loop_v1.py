@@ -75,6 +75,31 @@ async def _execute_tool_call(name: str, arguments: dict, context: dict) -> str:
     return res
 
 
+# Cap on external (MCP) tool schemas sent to the LLM, to bound prompt growth as
+# MCP servers/tools multiply. Builtins are never capped.
+_MAX_EXTERNAL_TOOL_SCHEMAS = 48
+
+
+def _apply_external_schema_budget(
+    mcp_schemas: list, max_n: int = _MAX_EXTERNAL_TOOL_SCHEMAS
+) -> tuple[list, list[str]]:
+    """Keep at most max_n external schemas; return (kept, deferred_tool_names)."""
+    if len(mcp_schemas) <= max_n:
+        return mcp_schemas, []
+    kept = mcp_schemas[:max_n]
+    deferred = [s["function"]["name"] for s in mcp_schemas[max_n:]]
+    return kept, deferred
+
+
+def _build_budget_note(deferred_names: list[str]) -> str:
+    shown = ", ".join(deferred_names[:30]) + ("…" if len(deferred_names) > 30 else "")
+    return (
+        f"\n\n[工具预算] 另有 {len(deferred_names)} 个 MCP 工具因数量预算未加载"
+        f"（{shown}）。如需使用，请在 mcp_servers.json 用 allow_list 收窄该服务器，"
+        f"或告知用户调整配置。"
+    )
+
+
 
 async def _tool_loop_core(
     system_prompt: str,
@@ -427,6 +452,23 @@ class ToolLoopRunner:
                 s for s in _tool_router.get_external_schemas()
                 if s["function"]["name"] not in builtin_names
             ]
+            # Tool-scale budget: many MCP tools blow up the prompt. Builtins are
+            # always kept; external (MCP) schemas are capped. Over-budget tools
+            # are deferred (not sent) and surfaced as a system-prompt note so the
+            # model knows they exist. (Full dynamic ToolSearch is a follow-up;
+            # narrow per-server via allow_list to stay under budget.)
+            mcp_schemas, deferred_names = _apply_external_schema_budget(mcp_schemas)
+            if deferred_names:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "tool schema budget: deferred %d MCP tool(s): %s",
+                    len(deferred_names), deferred_names,
+                )
+                _budget_note = _build_budget_note(deferred_names)
+                # Append to the base (reused every iteration, see L793) AND the
+                # already-copied current prompt (used for this first turn).
+                self.system_prompt_base += _budget_note
+                self.system_prompt += _budget_note
             self.tool_schemas = builtin_schemas + mcp_schemas
         else:
             # Fallback: router not initialized (test / worker process without lifespan)

@@ -42,6 +42,13 @@ def _make_mock_tool(name: str, description: str = "", schema: dict | None = None
     return t
 
 
+def _make_list_changed_notification():
+    m = MagicMock()
+    m.root = MagicMock()
+    m.root.method = "notifications/tools/list_changed"
+    return m
+
+
 def _make_mock_session(tools: list, call_result_text: str = "mock file content"):
     """Build a mock ClientSession that works inside the session_loop coroutine."""
     session = MagicMock()  # NOT AsyncMock at top level — individual methods are async
@@ -240,6 +247,28 @@ class TestMcpClientToolProvider(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(is_error)
         self.assertIn("不可信", result)
         self.assertIn("plain file body", result)
+        await p.close()
+
+    async def test_tool_list_changed_refreshes_tools(self):
+        """#6: a tools/list_changed notification triggers a tool-list refresh
+        (routed through the queue so it runs in the session task)."""
+        p = await _make_live_provider(tools=[_make_mock_tool("read_file")])
+        self.assertEqual({t.name for t in p.discover_tools()}, {"filesystem__read_file"})
+        # server now exposes an extra tool; simulate the notification.
+        p._mock_session.list_tools.return_value.tools = [
+            _make_mock_tool("read_file"), _make_mock_tool("write_file"),
+        ]
+        await p._on_message(_make_list_changed_notification())
+        await asyncio.sleep(0.05)   # let the session task process _REFRESH
+        self.assertIn("filesystem__write_file", {t.name for t in p.discover_tools()})
+        await p.close()
+
+    async def test_on_message_ignores_unrelated(self):
+        """A non-list_changed message must not enqueue a refresh."""
+        p = await _make_live_provider()
+        before = p._request_queue.qsize()
+        await p._on_message(object())   # arbitrary message, no .method
+        self.assertEqual(p._request_queue.qsize(), before)
         await p.close()
 
     async def test_result_secrets_redacted(self):
@@ -445,6 +474,46 @@ class TestFromConfig(unittest.TestCase):
     def test_missing_config_returns_empty(self):
         providers = McpClientToolProvider.from_config("/nonexistent/path.json")
         self.assertEqual(providers, [])
+
+    def test_loads_remote_server(self):
+        import tempfile
+        cfg = {"mcpServers": {"remote": {
+            "url": "https://mcp.example.com/sse", "transport": "sse",
+            "headers": {"Authorization": "Bearer T"}, "enabled": True,
+        }}}
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(cfg, f)
+            tmp = Path(f.name)
+        p = McpClientToolProvider.from_config(tmp)[0]
+        self.assertEqual(p._url, "https://mcp.example.com/sse")
+        self.assertEqual(p._transport, "sse")
+        self.assertEqual(p._headers, {"Authorization": "Bearer T"})
+        tmp.unlink()
+
+
+class TestTransportSelection(unittest.TestCase):
+    """#7: _open_transport picks stdio vs remote (sse/streamable-http) by config."""
+
+    def test_stdio_when_no_url(self):
+        p = McpClientToolProvider("s", "npx", ["x"])
+        with patch("executors.providers.mcp_client.stdio_client") as m:
+            m.return_value = "STDIO"
+            self.assertEqual(p._open_transport(), "STDIO")
+            m.assert_called_once()
+
+    def test_sse_when_url_and_sse(self):
+        p = McpClientToolProvider("s", "", [], url="https://x/sse", transport="sse")
+        with patch("mcp.client.sse.sse_client") as m:
+            m.return_value = "SSE"
+            self.assertEqual(p._open_transport(), "SSE")
+            m.assert_called_once()
+
+    def test_streamable_http_when_url_default(self):
+        p = McpClientToolProvider("s", "", [], url="https://x/mcp", transport="http")
+        with patch("mcp.client.streamable_http.streamablehttp_client") as m:
+            m.return_value = "HTTP"
+            self.assertEqual(p._open_transport(), "HTTP")
+            m.assert_called_once()
 
 
 class TestDispatchRouting(unittest.IsolatedAsyncioTestCase):

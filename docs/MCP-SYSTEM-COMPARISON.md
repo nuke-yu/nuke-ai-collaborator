@@ -8,21 +8,20 @@
 > ([mcp_client.py](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/executors/providers/mcp_client.py))
 > 已实现：单 task 会话所有权、`allow_list`、双侧 `asyncio.wait_for` 超时、配置化 HIL、
 > Claude Desktop 兼容的 `mcp_servers.json`，并已补齐**自动重连**与 **I/O 不可信防护**
-> （工具投毒扫描 + 结果围栏）。下表与 §五已据此校正；仍缺的能力（remote 传输 / OAuth /
-> ToolListChanged）见 §五与
+> （工具投毒扫描 + 结果围栏）、remote(SSE/HTTP) 传输与 ToolListChanged 订阅。下表与 §五已据此校正；仍缺的能力（OAuth 三方授权 / 健康检查）见 §五与
 > [TOOL-LAYER-GAP-ANALYSIS.md](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/docs/TOOL-LAYER-GAP-ANALYSIS.md)。
 
 ---
 
 ## 一、 MCP 协议能力与接入演进计划 (横向对比)
 
-本表聚焦于 **MCP 协议** 的原生支持、通道通信与服务生命周期管理。当前项目在此项上为 **🔶 stdio 客户端已实现**（含自动重连 + I/O 不可信防护；remote/OAuth/ToolListChanged 待补，见 §五）。
+本表聚焦于 **MCP 协议** 的原生支持、通道通信与服务生命周期管理。当前项目在此项上为 **✅ stdio + remote(SSE/HTTP) 客户端**（含自动重连 + ToolListChanged 订阅 + I/O 不可信防护；仅 OAuth 待补，见 §五）。
 
 | 维度 / 机制 | Claude Code (TypeScript)<br>[claude-code-haha-main](file:///Users/Nuke/claude-code-haha-main) | opencode (TypeScript)<br>[opencode](file:///Users/Nuke/opencode) | gsd-2 (TypeScript/Rust)<br>[gsd-2](file:///Users/Nuke/gsd-2) | openclaw (TypeScript)<br>[openclaw-main](file:///Users/Nuke/openclaw-main) | nuke-ai-collaborator (Python/SQLite)<br>[当前项目](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator) |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **MCP 协议角色** | **Server & Client**：<br>1. **Client**：作为客户端连接并加载外部 Server 的工具。<br>2. **Server**：通过 `entrypoints/mcp.ts` 暴露内置工具给其他 AI 宿主。 | **Client**：<br>实现完整的 MCP 客户端管理器，维护多个本地与远程连接状态。 | **Client**：<br>主要作为客户端基于项目根目录 `.mcp.json` 挂载外部工具，不涉及复杂的双向 Server 引擎。 | **Client**：<br>客户端模式，通过 Stdio 包装器连接底层服务器。 | **✅ Client（已实现）**：<br>`McpClientToolProvider` 作为客户端连接外部 stdio Server，经 `ToolRouter` 分流（每 server 一个 provider，工具名前缀 `{server}__`）。暂不作 Server 端暴露。 |
-| **传输协议实现** | **stdio / SSE**：<br>在客户端和服务端中都使用官方 SDK；服务端使用 `StdioServerTransport` 监听并处理来自外来客户端的同步进程管道数据。 | **stdio / SSE / StreamableHTTP**：<br>使用 `StdioClientTransport` 启动本地进程，以及 `SSEClientTransport` / `StreamableHTTPClientTransport` 执行远程通信。 | **stdio**：<br>基于 stdio 管道和 JSON-RPC 传输，对管道消息按 Tool 边界进行分发。 | **stdio / SSE**：<br>自定义 `OpenClawStdioClientTransport` 包装标准 I/O 管道，支持 stderr 数据流重定向与格式化日志记录。 | **🔶 stdio（已实现）/ remote（未做）**：<br>官方 `mcp` Python SDK 的 `stdio_client` + `StdioServerParameters`（env 合并保留 PATH）。**remote SSE/HTTP 尚未实现**（见 §五）。 |
-| **变化通知与感知** | **环境感知重连**：<br>随主进程生命周期加载，继承 Bash/MCP 环境变量并支持热插拔重载。 | **事件总线与热更新**：<br>使用 `setNotificationHandler` 监听 `ToolListChangedNotificationSchema`，当工具集变更时拉取新定义并向 Bus 广播 `ToolsChanged` 事件。 | **静态绑定**：<br>随后台任务拉起，主要在启动期根据配置初始化加载，不支持动态热重载。 | **Stderr 订阅监听**：<br>订阅 `transport.stderr.on("data")`，一旦捕获到崩溃或数据变动日志，触发动态重连和警告上报。 | **🔶 自动重连（已实现）/ 无 ToolListChanged**：<br>会话异常死亡后，`execute()` 经 `_ensure_alive()` 按冷却+锁尝试重连（已修复"一次崩溃永久报废"）。但 `initialize()` 仍一次性缓存工具表，**无 `ToolListChanged` 订阅**（server 增删工具不感知）。详见 §五。 |
+| **传输协议实现** | **stdio / SSE**：<br>在客户端和服务端中都使用官方 SDK；服务端使用 `StdioServerTransport` 监听并处理来自外来客户端的同步进程管道数据。 | **stdio / SSE / StreamableHTTP**：<br>使用 `StdioClientTransport` 启动本地进程，以及 `SSEClientTransport` / `StreamableHTTPClientTransport` 执行远程通信。 | **stdio**：<br>基于 stdio 管道和 JSON-RPC 传输，对管道消息按 Tool 边界进行分发。 | **stdio / SSE**：<br>自定义 `OpenClawStdioClientTransport` 包装标准 I/O 管道，支持 stderr 数据流重定向与格式化日志记录。 | **✅ stdio + remote(SSE/HTTP)**：<br>官方 `mcp` Python SDK：`stdio_client`（env 合并保留 PATH）+ `sse_client` / `streamablehttp_client`。`_open_transport` 按 config 的 `url`/`transport` 选择，`headers` 携带鉴权。 |
+| **变化通知与感知** | **环境感知重连**：<br>随主进程生命周期加载，继承 Bash/MCP 环境变量并支持热插拔重载。 | **事件总线与热更新**：<br>使用 `setNotificationHandler` 监听 `ToolListChangedNotificationSchema`，当工具集变更时拉取新定义并向 Bus 广播 `ToolsChanged` 事件。 | **静态绑定**：<br>随后台任务拉起，主要在启动期根据配置初始化加载，不支持动态热重载。 | **Stderr 订阅监听**：<br>订阅 `transport.stderr.on("data")`，一旦捕获到崩溃或数据变动日志，触发动态重连和警告上报。 | **✅ 自动重连 + ToolListChanged 订阅**：<br>会话异常死亡后 `execute()` 经 `_ensure_alive()` 按冷却+锁重连；`ClientSession(message_handler=_on_message)` 监听 `notifications/tools/list_changed`，通过 `_REFRESH` 哨兵在会话任务内安全 re-cache 工具表。详见 §五。 |
 | **子进程退出控制** | **主进程回收**：<br>随主进程生命周期释放。在 `src/main.tsx` 等中使用 pgrep 递归或标准退出机制进行关联进程回收。 | **未作深层强杀**：<br>仅依赖标准 `client.close()`，子进程可能在后台残留。 | **基于 Rust ps.rs 的跨平台强杀**：<br>使用 Crate `native/crates/engine/src/ps.rs` 中的原生进程树逻辑，精准实现子进程的树状 SIGTERM 强杀，无 pgrep 外部依赖。 | **管道流感知**：<br>基于 `transport.stderr.on("data")` 辅助感知崩溃。 | **🔶 哨兵 + 上下文管理器回收（已实现，无树强杀）**：<br>`close()` 投递 `_STOP` 哨兵让会话 task 退出，`async with stdio_client/ClientSession` 在**同一 task 内**解绑回收子进程（规避 anyio 跨 task cancel-scope）；worker 退出时 `tool_router.close_all()`。**无显式进程树 SIGTERM 强杀**，npx 派生的孙进程理论上可能残留（类似 opencode）。 |
 | **认证与 OAuth 机制** | **无/默认 OAuth**：<br>主要继承主应用的安全态与 credentials。 | **McpOAuthProvider**：<br>内置 `McpOAuthProvider`、`McpOAuthCallback` 与 `McpAuth` 服务，支持完整的 OAuth 客户端注册与三方鉴权流程。 | **静态配置挂载**：<br>在本地项目根目录 `.mcp.json` 中配置，不涉及复杂的用户三方认证流程。 | **OAuth 凭证解析**：<br>通过配置文件解析配置的敏感 headers 及 url 属性。 | **🔶 静态 env 注入（无 OAuth）**：<br>`mcp_servers.json` 的 `env` 合并到子进程环境（stdio 本地进程模型）；**无网络鉴权 / OAuth 层**——属 remote 传输的前置依赖，见 §五。 |
 
@@ -134,5 +133,5 @@ graph TD
 1.  **✅ 已修复：崩溃检测 + 自动重连**：`execute()` 入口调 `_ensure_alive()`——会话 task 已死时尝试一次重连，由 `_reconnect_lock` 串行化（防重连风暴）+ `_RECONNECT_COOLDOWN=5s` 冷却（防持续锤击死服务）；被 `close()` 主动关闭的 provider 不复活。(`mcp_client.py`)
 2.  **✅ 已修复：工具投毒静态扫描 (Tool Poisoning)**：`_cache_tools` 对每个工具的 name+description 跑 `_scan_injection`（EN+ZH 注入模式），命中即净化描述（不把投毒文本注入 system prompt）并告警。
 3.  **✅ 已修复：结果按不可信外部数据处理 (间接注入)**：`execute()` 对成功结果**无条件**包一道 `_wrap_untrusted` 围栏（标注"不可信外部数据、勿当指令"），命中注入模式再升级提示并告警；错误结果是我方文案不包裹。与 `TOOL-LAYER-GAP-ANALYSIS #2 输出脱敏`（防密钥外流，方向相反）互补。
-4.  **🟡 ToolListChanged 动态刷新**：对标 opencode `setNotificationHandler`；stdio 场景优先级低，未做。
-5.  **（已记于 `TOOL-LAYER-GAP-ANALYSIS`，不重复）** #5 remote(SSE/HTTP)+OAuth+健康检查；进程树强杀（§五步骤1的"未做"项）。
+4.  **✅ ToolListChanged 动态刷新**：`ClientSession(message_handler=_on_message)` → `notifications/tools/list_changed` → 经 `_REFRESH` 哨兵在会话任务内 re-cache（避免在读循环里做 I/O 死锁）。对标 opencode `setNotificationHandler`。
+5.  **仍缺（已记于 `TOOL-LAYER-GAP-ANALYSIS`）**：OAuth 三方授权（RFC 7591）、独立健康检查、进程树强杀（§五步骤1）。remote(SSE/HTTP) 与 ToolListChanged 已实现。
