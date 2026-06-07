@@ -125,7 +125,7 @@
 
 - 🔴 **`ChatWindow` 是 god component**：793 行、近 40 个 `useState`（`:20-58`）、一个 25 分支 `handleWsMessage`（`:170-265`）直接驱动十几个 state slice。前端版 DFT-036。`MemberList`（755 行）同样在膨胀。**建议**：WS 事件流收进 `useReducer`/store，`handleWsMessage` 退化为 `dispatch(event)`；按域拆 `useGroups/useMessages/usePresence/useWorkflow`。
 - 🔴 **同一 WS 协议两端无共享契约**：后端 28 种 typed event + 注册表，前端 `data.type` 字符串 + if-else 链消费，中间无共享 schema。加事件要改 `events.py` 又要记得加前端分支——DFT-006（`chunk` vs `delta`）类 bug 的结构来源，且只能运行时暴雷。**建议**：从 `events.py` 生成共享事件契约；前端 handler 表化（`const handlers = {stream_chunk: ...}`）；上 TypeScript（本项目"有状态 WS + 25 变体协议"正是 TS 收益最大场景）。
-- 🟠 **断线重连无事件补偿**：`useWebSocket` 3s 重连（`:33`）但无 catch-up；后端 bus fire-and-forget 不持久化。**一次 WS 抖动 = 该客户端永久丢失这段时间的消息/状态**，直到手动切群 refetch。**建议**：消息引入单调 seq，重连带 `last_seq` 回放缺口，或重连后对 active group 强制增量 refetch。
+- ~~🟠 **断线重连无事件补偿**~~ → **✅ 已修复（DFT-078）**：`handleReconnect`（`ChatWindow.jsx:409`）在重连后以最后一条消息的 `id` 调 `fetchMessages(afterId)` 拉回缺口消息并去重合并，同步 `syncCache`。`useWebSocket` 的 `reconnecting` 状态暴露给 `ChatHeader` 显示重连 UI。
 - 🟠 **`handleWsMessage` 闭包陈旧陷阱**：`socket.onmessage` 闭包捕获上次 connect 时的 `onMessage`（`useWebSocket.js:19-21,41`）。目前靠"几乎全用函数式 `setState`"绕开，是"靠纪律维持的隐患"——将来谁直接读一个 state 变量就会读到切群那刻的陈旧值。**建议**：`useRef` 持有最新 handler，`onmessage` 调 `ref.current(data)`。
 - 🟡 **缓存一致性手工且不齐**：`messages`/`messagesCache`/`reactionCache`/`membersCache` + `syncCache`，每次变更要记得两边都更。`stream_chunk`（`:189`）只更 `messages` 不更 cache → 流式中途切群再回半截消息丢失；`message_edited` 两边都更。25 分支纪律不统一。建议同样收进 reducer 统一处理。
 - 🟡 **硬编码配置 / 无 ErrorBoundary**：`ws://localhost:8000`（`useWebSocket.js:11`，非 wss/非 env）生产即挂；`addMember(1,...)` 硬编码 group 1（`App.jsx:20`）；render 一处 throw 白屏整个应用（无 ErrorBoundary）。

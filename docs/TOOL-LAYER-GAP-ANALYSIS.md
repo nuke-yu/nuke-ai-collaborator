@@ -62,10 +62,10 @@
 - **对标**：Claude Code `src/utils/toolSearch.ts`——deferred 工具以 `defer_loading: true` 发送，经 `ToolSearchTool` 按需发现，并有 token 预算（`countToolDefinitionTokens`）。（即本对话所在 harness 正在用的机制。）
 - **建议**：对 MCP / 低频工具做 deferred 加载 + 工具检索，按 token 预算装配。
 
-### 5. 🟠 MCP 仅 stdio，无 remote / OAuth / 健康检查
-- **现状**：[mcp_client.py](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/executors/providers/mcp_client.py) 仅 `StdioServerParameters`；有 `allow_list` / `call_timeout` / 单 task 会话，但无 remote 传输、无 OAuth、子进程死后「re-init 由调用方负责」无自动重连。
+### 5. 🟠 MCP 仅 stdio，无 remote / OAuth
+- **现状**：[mcp_client.py](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/executors/providers/mcp_client.py) 仅 `StdioServerParameters`；有 `allow_list` / `call_timeout` / 单 task 会话。✅ **自动重连已修复**（`4d666be`）：`execute()` 入口调 `_ensure_alive()`，会话 task 已死时尝试一次重连，由 `_reconnect_lock` 串行化（防重连风暴）+ `_RECONNECT_COOLDOWN=5s` 冷却（防持续锤击死服务）。真实未解决：**无 remote 传输**（接不了纯网络 API 工具生态）、**无 OAuth**（无授权）、**无 `ToolListChanged` 订阅**（server 增删工具不感知）。
 - **对标**：opencode `src/config/mcp.ts` 支持 Local + Remote（SSE/HTTP）+ OAuth（含 RFC 7591 动态注册）+ 每服务器 timeout；Claude Code 另带 `mcpWebSocketTransport.ts`*。
-- **建议**：加 remote(SSE/HTTP) 传输 + 鉴权 + 健康检查/重连。
+- **建议**：加 remote(SSE/HTTP) 传输 + 授权 + `ToolListChanged` 订阅。
 
 ### 6. 🟠 授权记忆太粗（persist_rule 不智能）
 - **现状**：[workspace_tools.py:513-518](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/executors/plugins/workspace_tools.py) `persist_rule` 存 `tool_pattern` / `args_pattern`，但 pattern 合成不智能。
