@@ -114,5 +114,45 @@ class TestAlwaysPersistsScopedPattern(unittest.TestCase):
         self.assertEqual(r["persist_rule"].args_pattern, "git push *")
 
 
+class TestWorkerAlwaysPersistsScoped(unittest.IsolatedAsyncioTestCase):
+    """Real-wiring guard: the worker PERMISSION_RESPONSE handler is the single
+    persistence authority and must save the SYNTHESIZED (scoped) pattern, not a
+    blanket empty one (the bug where 'always git status' auto-allowed rm -rf /)."""
+
+    async def test_always_response_saves_scoped_pattern(self):
+        from contextlib import asynccontextmanager
+        from unittest.mock import AsyncMock, patch
+        from runtime.worker import Worker
+        from runtime import ipc
+        import permissions
+        from permissions import engine
+        from permissions.models import _PendingRequest
+
+        w = Worker("wt", ipc.make_addr(f"wt_{os.getpid()}"))
+
+        @asynccontextmanager
+        async def _noop_ctx(gid):
+            yield
+        w._group_context = _noop_ctx
+
+        loop = asyncio.get_event_loop()
+        rid = "rid-test-1"
+        engine._pending[rid] = _PendingRequest(
+            future=loop.create_future(), bot_id=7, group_id=1,
+            tool_name="run_shell", arguments={"cmd": "git push origin main"},
+        )
+        try:
+            with patch.object(permissions, "save_rule", new=AsyncMock()) as save:
+                await w._handle({
+                    "type": ipc.protocol.PERMISSION_RESPONSE, "group_id": 1,
+                    "request_id": rid, "approved": True, "persistence": "always",
+                })
+                for _ in range(5):
+                    await asyncio.sleep(0)   # let bg.spawn(save_rule) run
+                save.assert_awaited_once_with(7, "run_shell", "git push *", "allow")
+        finally:
+            engine._pending.pop(rid, None)
+
+
 if __name__ == "__main__":
     unittest.main()

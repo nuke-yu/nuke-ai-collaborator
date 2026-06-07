@@ -227,8 +227,13 @@ class Worker:
                 persistence = msg.get("persistence", "once")
                 req = permissions.resolve(request_id, approved, persistence, group_id=gid)
                 if req and approved and persistence == "always":
+                    # Single authority for "always" persistence (all tools incl MCP).
+                    # Scope the rule to the kind of call approved (#5) instead of a
+                    # blanket allow-all-args — synthesized from the pending call's
+                    # tool + arguments.
+                    args_pattern = permissions.synthesize_args_pattern(req.tool_name, req.arguments)
                     async with self._group_context(gid):
-                        bg.spawn(permissions.save_rule(req.bot_id, req.tool_name, "", "allow"))
+                        bg.spawn(permissions.save_rule(req.bot_id, req.tool_name, args_pattern, "allow"))
                 return
 
             async with self._group_context(gid):

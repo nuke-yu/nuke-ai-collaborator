@@ -21,7 +21,6 @@ import editing
 from skills import run_skill
 import executors.compact as compact
 import permissions
-from core.bg import spawn as bg_spawn  # aliased: a local var named `bg` is used below
 from executors.plugins import win_sandbox
 
 # ---------------------------------------------------------------------------
@@ -699,12 +698,11 @@ async def _permission_check_hook(name: str, arguments: dict, context: dict) -> d
     if result["action"] == "deny":
         return {"block": True, "reason": result.get("reason", "权限拒绝")}
 
-    if result.get("persist_rule"):
-        rule = result["persist_rule"]
-        # DFT-063: held + exception-logged instead of a bare create_task.
-        bg_spawn(permissions.save_rule(
-            context.get("bot_id"), rule.tool_pattern, rule.args_pattern, rule.action
-        ))
+    # Note: persisting an "always" rule is handled in ONE place — the worker's
+    # PERMISSION_RESPONSE handler (runtime/worker.py), the universal path for every
+    # tool incl MCP, which synthesizes a scoped args_pattern (#5). Saving here too
+    # would double-write (and previously wrote a blanket rule that defeated the
+    # scoped one).
 
     return None
 
