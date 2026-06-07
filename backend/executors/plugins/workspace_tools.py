@@ -221,7 +221,11 @@ async def _spawn_agent_handler(bot_name: str, task: str, background: bool = Fals
         all_members=all_members,
         interaction=ctx.get("interaction"),
         spawn_depth=spawn_depth + 1,
-        ruleset=ctx.get("ruleset"),
+        # Attenuate the parent's permissions for the child (blast-radius
+        # containment): bypass doesn't propagate, blanket high-risk allows are
+        # dropped; deny + scoped allows are kept. The child also can't prompt
+        # (engine denies ask when spawn_depth>0).
+        ruleset=permissions.derive_subagent_ruleset(ctx.get("ruleset")),
     )
 
     if background:

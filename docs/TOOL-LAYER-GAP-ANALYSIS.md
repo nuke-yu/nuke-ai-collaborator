@@ -30,7 +30,7 @@
 | 命令安全决策 | ⚠️ 子串匹配 | ✅ 分类器 | 权限规则 | ✅ 容器+CodeQL | ✅ pattern 合成+粒度菜单 |
 | 权限裁决契约 | ⚠️ block/allow | ✅ 模式+多源分层 | ✅ ask/allow/deny+pattern | ✅ | ✅ 改参/改权限/中断 |
 | 授权记忆 | ✅ persist_rule + 子命令深度合成 | always-allow | — | — | ✅ 子命令深度感知合成 |
-| 子 agent 权限 | ⚠️ 整体继承+深度上限 | Task 限工具集 | ✅ 衰减派生 | ✅ | （委托 CLI） |
+| 子 agent 权限 | ✅ 衰减派生(去 bypass+去高危 blanket+深度上限+不可弹窗) | Task 限工具集 | ✅ 衰减派生 | ✅ | （委托 CLI） |
 | 参数校验 | ⚠️ 硬编码别名表 | ✅ zod validateInput | ✅ schema-decode | ✅ | （透传） |
 | MCP 传输 | ⚠️ 仅 stdio | ✅ +WS* | ✅ +remote(SSE/HTTP)+OAuth | ✅ | （透传 CLI） |
 | MCP 工具过滤 | allow_list | — | — | — | ✅ allow+block per-model |
@@ -53,10 +53,14 @@
 - **对标**:openclaw `tool-result-middleware.ts` 的 `AgentToolResultMiddleware` 链。
 - **残留**:仅静态格式匹配,自定义/无格式密钥仍可能漏;通用高熵检测因误报率高未做。
 
-### 3. 🟠 子 agent 权限只整体继承、不衰减
-- **现状**：[tool_loop_v1.py:362-363](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/executors/plugins/tool_loop_v1.py) 子 agent `self.ruleset = self.ctx.ruleset`（spawn 时 [workspace_tools.py:223](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/executors/plugins/workspace_tools.py) 原样下传父 ruleset），护栏仅 `_SPAWN_MAX_DEPTH` 深度上限。子 = 父的全部权限，无最小权限子集。
-- **对标**：opencode `src/agent/subagent-permissions.ts` 的 `deriveSubagentSessionPermission`：子 agent 拿到的是父的 deny 子集 + 父 agent 的 edit-deny，并把 `task`/`todowrite` 默认 deny（除非子 agent 显式允许）。
-- **建议**：派生时收敛为「父权限 ∩ 子任务所需」，深层默认收紧 spawn / write。
+### 3. ✅ 子 agent 权限衰减 — 已修复
+- **现状（已实现）**：spawn 不再原样下传父 ruleset。[workspace_tools._spawn_agent_handler](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/executors/plugins/workspace_tools.py) 改为 `ruleset=permissions.derive_subagent_ruleset(parent)`（[engine.py](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/permissions/engine.py)）。衰减策略(按本项目「可信内部工具 → 收敛爆炸半径」校准，非防对抗)：
+  - **bypassPermissions 不传递** → 子降为 `default`（bypass 父不会把无门禁的递归 shell/file 权交给子）。
+  - **deny 规则全部保留**(严格继承)。
+  - **空 args_pattern 的高危 ALLOW 丢弃**（`run_shell`/`write*`/`spawn_agent` 的"放行全部"、或 `*` 通配 allow）——子不继承"放行所有 shell";**有粒度的 allow(`git push *`)和低危 allow 保留**,正常预授权照常流转。
+  - 叠加既有约束:子 agent **无法弹窗**(engine `spawn_depth>0` 时 ask→deny)+ `_SPAWN_MAX_DEPTH` 深度上限。三者合起来 = 子权限收敛为「父的 deny + 父的有粒度/低危 allow」,且不可自行升权。
+- **残留 / 取舍**:未做 opencode 那种"按子任务声明再收紧"或逐层递减;按用户 steer 刻意不过度收紧以免卡正常多级协作。单测 `tests/test_subagent_perms.py`(11 例)。
+- **对标**:opencode `deriveSubagentSessionPermission`(deny 子集 + task/todowrite 默认 deny)。
 
 ### 4. 🟠 工具规模治理缺失（无动态加载）
 - **现状**：[tool_router.py `get_external_schemas()`](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/executors/tool_router.py) + [tool_loop_v1.py 的 schema 合并](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/executors/plugins/tool_loop_v1.py) 把工具 schema 全量上传给 LLM；MCP 工具一多即膨胀 context。
@@ -119,6 +123,6 @@
 
 ## 六、优先级建议
 
-1. **先做（安全收益最高，多 agent 放大风险）**：#1 命令安全分类器、#2 输出脱敏、#3 子 agent 权限衰减。
-2. **再做（多 MCP / 规模化前置）**：#4 deferred 工具加载、#5 MCP remote+健康检查、#9 MCP 上下文过滤。
-3. **体验/健壮性**：#6 智能授权记忆、#7 裁决契约扩展、#8 参数校验。
+1. **✅ 已完成（安全收益最高，多 agent 放大风险）**：#1 命令安全（tokenized 加固）、#2 输出脱敏、#3 子 agent 权限衰减、#6 授权记忆粒度。
+2. **待做（多 MCP / 规模化前置）**：#4 deferred 工具加载、#5 MCP remote+健康检查（MCP 自动重连/投毒/结果围栏已做）、#9 MCP 上下文过滤。
+3. **待做（体验/健壮性）**：#7 裁决契约扩展（改参/动态授权/中断）、#8 参数校验。

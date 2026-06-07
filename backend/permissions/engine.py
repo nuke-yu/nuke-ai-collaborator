@@ -69,6 +69,42 @@ def _matches(rule: Rule, tool_name: str, arguments: dict) -> bool:
     return True
 
 
+# Sub-agent attenuation policy (blast-radius containment, not adversarial-code
+# defense — this is a trusted internal tool). A spawned agent already cannot show
+# a prompt (engine step 6 denies ask when spawn_depth>0), so it can only use
+# rules it inherits. We further narrow what it inherits.
+_SUBAGENT_NON_INHERITABLE_MODES = frozenset({"bypassPermissions"})
+_SUBAGENT_HIGH_RISK_TOOLS = frozenset({
+    "run_shell", "write_file", "write_local_file", "read_local_file", "spawn_agent",
+})
+
+
+def _covers_high_risk(tool_pattern: str) -> bool:
+    return any(fnmatch.fnmatch(t, tool_pattern) for t in _SUBAGENT_HIGH_RISK_TOOLS)
+
+
+def derive_subagent_ruleset(parent: "Ruleset | None") -> "Ruleset | None":
+    """Attenuate a parent ruleset for a spawned sub-agent.
+
+    - bypassPermissions does NOT propagate: a bypass parent must not hand its
+      child unrestricted, recursive shell/file access. Child drops to 'default'
+      (and since it can't prompt, that means only explicit allow rules pass).
+    - All deny rules are kept (strict inheritance).
+    - Blanket high-risk ALLOW rules (empty args_pattern covering run_shell/write/
+      spawn, or a `*` allow) are dropped — a child must not inherit "allow ALL
+      shell ops". Scoped allows (e.g. `git push *`) and low-risk allows are kept,
+      so genuine pre-approvals still flow.
+    """
+    if parent is None:
+        return None
+    mode = "default" if parent.mode in _SUBAGENT_NON_INHERITABLE_MODES else parent.mode
+    rules = [
+        r for r in parent.rules
+        if not (r.action == "allow" and not r.args_pattern and _covers_high_risk(r.tool_pattern))
+    ]
+    return Ruleset(mode=mode, rules=rules)
+
+
 def _consume_once_grant(bot_id: int, group_id: int, tool_name: str, arguments: dict) -> bool:
     """Return True (and remove the grant) iff a once-grant matches this exact call."""
     key = (bot_id, group_id)
