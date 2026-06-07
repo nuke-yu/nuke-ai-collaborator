@@ -604,6 +604,25 @@ _TOOL_RESULT_MAX_CHARS = config.TOOL_RESULT_MAX_CHARS
 _TOOL_RESULT_HEAD_TAIL = _TOOL_RESULT_MAX_CHARS // 2
 
 
+async def _default_secret_redactor(
+    name: str, arguments: dict, result: str, context: dict
+) -> str | None:
+    """Mask credentials in tool output before it enters the shared model context.
+
+    Runs BEFORE the truncator (registration order) so the full, pre-truncation
+    text — including whatever truncation persists — is already redacted. Covers
+    builtin / run_shell / run_skill (MCP is redacted in its own provider)."""
+    from executors.redaction import redact_secrets
+    redacted, n = redact_secrets(result)
+    if n:
+        import logging
+        logging.getLogger(__name__).warning(
+            "redacted %d secret(s) from '%s' output", n, name
+        )
+        return redacted
+    return None
+
+
 async def _default_output_truncator(
     name: str, arguments: dict, result: str, context: dict
 ) -> str | None:
@@ -900,6 +919,9 @@ def register_workspace_tools() -> None:
     """Register all workspace tool handlers and hooks into the global tool_executor."""
     tool_executor.add_before_hook(_permission_check_hook)
     tool_executor.add_before_hook(_default_shell_guard)
+    # Redactor BEFORE truncator: secrets are masked on the full output before any
+    # head/tail truncation, so nothing truncation persists can leak a credential.
+    tool_executor.add_after_hook(_default_secret_redactor)
     tool_executor.add_after_hook(_default_output_truncator)
     handlers = {
         "read_file":        _handle_read_file,
