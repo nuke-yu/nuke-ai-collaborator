@@ -34,21 +34,24 @@ async def _init_tool_router() -> None:
     """Initialize ToolRouter providers in the background after worker startup.
 
     Runs as an asyncio task so it does NOT block the worker from connecting
-    to the Supervisor.  The _execute_tool_call fallback (tool_executor) handles
-    any tool calls that arrive before this completes.
+    to the Supervisor (fast path).  Any tool calls that arrive before this
+    completes fall back to tool_executor directly.
 
-    Priority order: Skill → Shell → MCP (slow: npx subprocess) → Builtin (catch-all)
+    Dispatch policy (see tool_loop_v1._dispatch_tool):
+      Builtin / skill / shell tools stay on tool_executor.execute() so the
+      global before-hooks (permission check + run_shell danger guard) fire.
+      Only MCP tools (NOT in tool_executor's registry) route through here.
+      → Do NOT register Skill/Shell providers: they would be unreachable for
+        execution and their schemas would be excluded by get_external_schemas().
+        Registering them only wastes memory and adds confusing log noise.
     """
     import logging
     from pathlib import Path
     from executors.tool_router import router as tool_router
-    from executors.providers import BuiltinToolProvider, SkillToolProvider, ShellToolProvider
+    from executors.providers import BuiltinToolProvider
     from executors.providers.mcp_client import McpClientToolProvider
 
     log = logging.getLogger(__name__)
-    tool_router.register_provider(SkillToolProvider())
-    tool_router.register_provider(ShellToolProvider())
-
     _mcp_cfg = Path(__file__).parent.parent / "mcp_servers.json"
     for _mcp_prov in McpClientToolProvider.from_config(_mcp_cfg):
         try:
@@ -58,8 +61,9 @@ async def _init_tool_router() -> None:
         except Exception as _e:
             log.warning(f"MCP server init failed [{_mcp_prov._server_name}], skipping: {_e}")
 
-    tool_router.register_provider(BuiltinToolProvider())  # catch-all last
+    tool_router.register_provider(BuiltinToolProvider())  # catch-all; excluded from external schemas
     log.info("ToolRouter ready: %s", [p.provider_id for p in tool_router._providers])
+
 
 
 async def run_worker(worker_id: str, addr: str) -> None:
