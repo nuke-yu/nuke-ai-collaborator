@@ -40,8 +40,12 @@ MCP_COLLECTOR_ID = "mcp-collector"       # collector 连接的 well-known worker
 MCP_CALL = "mcp_call"                    # worker→sup→collector：执行一个 MCP 工具
 MCP_RESULT = "mcp_result"                # collector→sup→worker：工具结果（按 request_id）
 MCP_SCHEMAS = "mcp_schemas"             # collector→sup→workers：当前 MCP 工具表快照（push）
+# OAuth（McpAuthTool 式）：bot 调 mcp_authenticate → 触发授权 → 返回授权 URL 进聊天；
+# 用户在浏览器授权 → main 的回调路由把 code/state 经 bus 直发 collector 完成握手。
+MCP_AUTH_START = "mcp_auth_start"        # worker→sup→collector：为某 server 启动 OAuth（回 MCP_RESULT 带 URL）
+MCP_OAUTH_CALLBACK = "mcp_oauth_callback"  # main→collector：授权码回调（code/state）
 
-MCP_BUS = frozenset({MCP_CALL, MCP_RESULT, MCP_SCHEMAS})
+MCP_BUS = frozenset({MCP_CALL, MCP_RESULT, MCP_SCHEMAS, MCP_AUTH_START, MCP_OAUTH_CALLBACK})
 
 # ── 控制帧（连接握手，不属于业务上/下行集） ────────────────────────────────
 HELLO = "hello"   # Worker / collector → Supervisor 首帧，自报 worker_id 完成注册
