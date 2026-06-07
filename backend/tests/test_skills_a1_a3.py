@@ -350,9 +350,9 @@ Please write_file to save the output.""", encoding="utf-8")
     def test_write_side_traversal_protection_c3(self):
         from skills.lifecycle import write_to_draft, update_skill_status, approve_draft_skill, reject_draft_skill
         
-        # Test write_to_draft traversal raise
-        with self.assertRaises(ValueError):
-            write_to_draft(bot_id=1, skill_name="../unsafe_name", content="content")
+        # Test write_to_draft traversal return
+        res = write_to_draft(bot_id=1, skill_name="../unsafe_name", content="content")
+        self.assertEqual(res, "[非法技能名]")
             
         # Test update_skill_status traversal return
         res = update_skill_status(bot_id=1, skill_name="dir/unsafe", new_status="active")

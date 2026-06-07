@@ -45,7 +45,7 @@ def file_lock(file_path: Path):
 def write_to_draft(bot_id: int, skill_name: str, content: str) -> str:
     """Write a skill directly to learned/draft/."""
     if not _is_safe_name(skill_name):
-        raise ValueError("[非法技能名]")
+        return "[非法技能名]"
     ws = bot_ws(bot_id)
     draft_path = ws / LEARNED_DRAFT / f"{skill_name}.md"
     with file_lock(draft_path):
