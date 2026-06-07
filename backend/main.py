@@ -45,22 +45,10 @@ async def lifespan(app: FastAPI):
     # 2. Discover plugins (needed for metadata APIs like /api/plugins)
     registry.discover()
 
-    # 2b. Initialize ToolRouter with providers in priority order (first match wins):
-    #     Skill → Shell → MCP → Builtin (catch-all)
-    from executors.tool_router import router as tool_router
-    from executors.providers import BuiltinToolProvider, SkillToolProvider, ShellToolProvider, McpClientToolProvider
-    from pathlib import Path
-    tool_router.register_provider(SkillToolProvider())
-    tool_router.register_provider(ShellToolProvider())
-    _mcp_cfg = Path(__file__).parent / "mcp_servers.json"
-    for _mcp_prov in McpClientToolProvider.from_config(_mcp_cfg):
-        try:
-            await _mcp_prov.initialize()
-            tool_router.register_provider(_mcp_prov)
-        except Exception as _e:
-            import logging as _log
-            _log.getLogger(__name__).warning(f"MCP server init failed, skipping: {_e}")
-    tool_router.register_provider(BuiltinToolProvider())  # catch-all: file I/O, spawn_agent, …
+    # 2b. ToolRouter providers are initialized in each worker process (runtime/entry.py
+    #     run_worker), NOT here.  main.py is the supervisor/API process and never
+    #     executes tool loops.  Registering providers here would waste resources and
+    #     leave worker-side routers empty (process-local singletons don't cross fork).
 
     
     # 3. Start AI client pool

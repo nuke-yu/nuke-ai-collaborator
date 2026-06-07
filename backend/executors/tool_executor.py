@@ -97,6 +97,15 @@ def register(tool_def: ToolDef, handler: Callable) -> None:
     _registry[tool_def.name] = tool_def
 
 
+def has_tool(name: str) -> bool:
+    """Public predicate: is `name` a builtin tool registered here?
+
+    Used by callers to decide whether a tool is a local builtin (handle here,
+    with the global before/after hooks) or something external like an MCP tool
+    (route through ToolRouter instead)."""
+    return name in _registry
+
+
 def add_before_hook(hook: Callable, *, condition: str | None = None, once: bool = False) -> None:
     """Register a before-tool hook (idempotent per fn+condition pair).
 

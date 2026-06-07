@@ -48,17 +48,30 @@ def _acc_usage(target: list, result: dict) -> None:
     })
 
 
-async def _execute_tool_call(name: str, arguments: dict, context: dict) -> str:
-    """Route tool calls through ToolRouter (MCP + builtin); extracted so tests can mock it.
+async def _dispatch_tool(name: str, arguments: dict, context: dict) -> tuple[str, bool]:
+    """Dispatch a tool call to the right executor, returning (result, is_error).
 
-    Falls back to tool_executor.execute() when the router has no providers
-    registered (e.g. worker processes or tests that bypass the lifespan startup).
+    Routing policy (deliberately NOT "everything through the router"):
+      - Builtin / skill / shell tools (anything registered in tool_executor)
+        stay on tool_executor.execute() so the global before-hooks — permission
+        check + run_shell danger guard — still fire. The ToolRouter is
+        first-match and would route run_shell → ShellProvider, skipping those
+        hooks (a silent security regression).
+      - MCP tools are NOT in tool_executor's registry, so route ONLY those
+        through the router (→ McpClientToolProvider, which applies its own HIL
+        gate + timeout). Guarded by has_providers() so a worker/test without
+        MCP falls straight through to tool_executor.
     """
-    from executors.tool_router import router as _tool_router
-    if _tool_router._providers:
-        res, _ = await _tool_router.execute(name, arguments, context=context)
-    else:
-        res, _ = await tool_executor.execute(name, arguments, context=context)
+    if not tool_executor.has_tool(name):
+        from executors.tool_router import router as _tool_router
+        if _tool_router.has_providers():
+            return await _tool_router.execute(name, arguments, context=context)
+    return await tool_executor.execute(name, arguments, context=context)
+
+
+async def _execute_tool_call(name: str, arguments: dict, context: dict) -> str:
+    """String-only wrapper around _dispatch_tool (used by the minimal test loop)."""
+    res, _ = await _dispatch_tool(name, arguments, context)
     return res
 
 
@@ -403,13 +416,16 @@ class ToolLoopRunner:
         # router has no providers registered yet (e.g. in tests that bypass
         # the lifespan startup).
         from executors.tool_router import router as _tool_router
-        if _tool_router._providers:
+        if _tool_router.has_providers():
             # Router is live: get builtin schemas filtered to manifest tools,
-            # then append any MCP schemas (they are not in the manifest).
+            # then append external (MCP) schemas only. We pull from
+            # get_external_schemas() — NOT get_all_schemas() — so the full
+            # builtin registry can't leak past the per-stage manifest whitelist.
             builtin_schemas = tool_executor.get_schemas(tool_names)
+            builtin_names = {b["function"]["name"] for b in builtin_schemas}
             mcp_schemas = [
-                s for s in _tool_router.get_all_schemas()
-                if s["function"]["name"] not in {b["function"]["name"] for b in builtin_schemas}
+                s for s in _tool_router.get_external_schemas()
+                if s["function"]["name"] not in builtin_names
             ]
             self.tool_schemas = builtin_schemas + mcp_schemas
         else:
@@ -542,7 +558,7 @@ class ToolLoopRunner:
             })
             
         raw_results = await asyncio.gather(*[
-            tool_executor.execute(c["name"], c["arguments"], context=self.execution_ctx)
+            _dispatch_tool(c["name"], c["arguments"], self.execution_ctx)
             for c in calls
         ])
         
@@ -589,8 +605,8 @@ class ToolLoopRunner:
                 "arguments": call.get("arguments", {}),
             })
             
-            tool_result, is_error = await tool_executor.execute(
-                call["name"], call["arguments"], context=self.execution_ctx
+            tool_result, is_error = await _dispatch_tool(
+                call["name"], call["arguments"], self.execution_ctx
             )
             await self.ctx.interaction.append_session_event(self.session_id, "tool_result", {
                 "tool_call_id": call["id"],
