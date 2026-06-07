@@ -30,33 +30,46 @@ def build_supervisor(addr: str, **kwargs):
     return Supervisor(addr, **kwargs)
 
 
-async def run_worker(worker_id: str, addr: str) -> None:
-    from executors import registry
-    registry.discover()                       # load bot executor plugins (once, at startup)
+async def _init_tool_router() -> None:
+    """Initialize ToolRouter providers in the background after worker startup.
 
-    # Initialize ToolRouter in THIS process — providers are process-local singletons.
-    #
-    # Dispatch policy (see tool_loop_v1._dispatch_tool): builtin / skill / shell
-    # tools are in tool_executor's registry and stay on tool_executor.execute()
-    # so the global before-hooks (permission check + run_shell danger guard)
-    # still fire.  Only MCP tools (NOT in the registry) are routed here.  That
-    # makes the Skill/Shell providers unreachable for execution, so we don't
-    # register them — registering them would only have leaked duplicate schemas.
-    # BuiltinToolProvider stays as the documented catch-all (harmless; its
-    # schemas are excluded from get_external_schemas()).
+    Runs as an asyncio task so it does NOT block the worker from connecting
+    to the Supervisor.  The _execute_tool_call fallback (tool_executor) handles
+    any tool calls that arrive before this completes.
+
+    Priority order: Skill → Shell → MCP (slow: npx subprocess) → Builtin (catch-all)
+    """
+    import logging
     from pathlib import Path
     from executors.tool_router import router as tool_router
-    from executors.providers import BuiltinToolProvider
+    from executors.providers import BuiltinToolProvider, SkillToolProvider, ShellToolProvider
     from executors.providers.mcp_client import McpClientToolProvider
+
+    log = logging.getLogger(__name__)
+    tool_router.register_provider(SkillToolProvider())
+    tool_router.register_provider(ShellToolProvider())
+
     _mcp_cfg = Path(__file__).parent.parent / "mcp_servers.json"
     for _mcp_prov in McpClientToolProvider.from_config(_mcp_cfg):
         try:
             await _mcp_prov.initialize()
             tool_router.register_provider(_mcp_prov)
+            log.info(f"MCP provider '{_mcp_prov._server_name}' registered.")
         except Exception as _e:
-            import logging as _log
-            _log.getLogger(__name__).warning(f"MCP server init failed [{_mcp_prov._server_name}], skipping: {_e}")
+            log.warning(f"MCP server init failed [{_mcp_prov._server_name}], skipping: {_e}")
+
     tool_router.register_provider(BuiltinToolProvider())  # catch-all last
+    log.info("ToolRouter ready: %s", [p.provider_id for p in tool_router._providers])
+
+
+async def run_worker(worker_id: str, addr: str) -> None:
+    from executors import registry
+    registry.discover()                       # load bot executor plugins (once, at startup)
+
+    # Initialize ToolRouter in the background — must NOT block here because the
+    # worker needs to connect to the Supervisor first (fast path).  Any tool calls
+    # that arrive before the router is ready fall back to tool_executor directly.
+    asyncio.create_task(_init_tool_router(), name=f"tool-router-init-{worker_id}")
 
     from skills.watcher import watcher
     watcher.start(asyncio.get_event_loop())
@@ -64,6 +77,7 @@ async def run_worker(worker_id: str, addr: str) -> None:
         await build_worker(worker_id, addr).run()
     finally:
         watcher.stop()
+        from executors.tool_router import router as tool_router
         await tool_router.close_all()          # terminate MCP subprocesses on worker exit
 
 
