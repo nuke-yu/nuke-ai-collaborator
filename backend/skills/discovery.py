@@ -43,26 +43,37 @@ def _scan_personal_layer_sync(skills_dir: Path) -> Dict[str, Dict]:
     personal = {}
     if not skills_dir.exists():
         return personal
-    for p in sorted(skills_dir.iterdir()):
-        if p.is_dir() and p.name == "learned":
-            continue
-        if p.is_dir():
-            sf = p / "SKILL.md"
-            if sf.exists():
-                meta = parse_skill_meta(sf)
+
+    def scan_dir(dir_to_scan: Path):
+        if not dir_to_scan.exists():
+            return
+        for p in sorted(dir_to_scan.iterdir()):
+            if p.is_dir():
+                if p.name in ("learned", "manual"):
+                    continue
+                sf = p / "SKILL.md"
+                if sf.exists() and p.name not in personal:
+                    meta = parse_skill_meta(sf)
+                    meta["layer"] = meta.get("layer") or "personal"
+                    personal[p.name] = {"name": p.name, "type": "md", "path": sf, **meta}
+            elif p.suffix == ".md" and p.stem not in personal:
+                meta = parse_skill_meta(p)
                 meta["layer"] = meta.get("layer") or "personal"
-                personal[p.name] = {"name": p.name, "type": "md", "path": sf, **meta}
-        elif p.suffix == ".md":
-            meta = parse_skill_meta(p)
-            meta["layer"] = meta.get("layer") or "personal"
-            personal[p.stem] = {"name": p.stem, "type": "md", "path": p, **meta}
-        elif p.suffix == ".py":
-            personal[p.stem] = {
-                "name": p.stem, "type": "py", "layer": "personal",
-                "description": "(代码技能)", "always": False,
-                "status": "active", "when_to_use": "", "learns": False,
-                "is_stub": False, "fm_keys": [], "path": p
-            }
+                personal[p.stem] = {"name": p.stem, "type": "md", "path": p, **meta}
+            elif p.suffix == ".py" and p.stem not in personal:
+                personal[p.stem] = {
+                    "name": p.stem, "type": "py", "layer": "personal",
+                    "description": "(代码技能)", "always": False,
+                    "status": "active", "when_to_use": "", "learns": False,
+                    "is_stub": False, "fm_keys": [], "path": p
+                }
+
+    # 1. Scan manual subfolder first if it exists
+    scan_dir(skills_dir / "manual")
+
+    # 2. Scan root of skills_dir for backwards compatibility, ignoring learned and manual
+    scan_dir(skills_dir)
+
     return personal
 
 
@@ -79,24 +90,37 @@ def _list_skills_sync(bot_id: int) -> List[Dict]:
         return []
     seen: set = set()
     result = []
-    for p in sorted(skills_dir.iterdir()):
-        if p.is_dir():
-            sf = p / "SKILL.md"
-            if sf.exists():
-                seen.add(p.name)
-                meta = parse_skill_meta(sf)
-                result.append({"name": p.name, "type": "md", "path": sf, **meta})
-        elif p.suffix == ".md" and p.stem not in seen:
-            seen.add(p.stem)
-            meta = parse_skill_meta(p)
-            result.append({"name": p.stem, "type": "md", "path": p, **meta})
-        elif p.suffix == ".py" and p.stem not in seen:
-            seen.add(p.stem)
-            result.append({
-                "name": p.stem, "type": "py", "path": p,
-                "description": "(代码技能，M3)", "always": False,
-                "is_stub": False, "fm_keys": []
-            })
+
+    def scan_dir(dir_to_scan: Path):
+        if not dir_to_scan.exists():
+            return
+        for p in sorted(dir_to_scan.iterdir()):
+            if p.is_dir():
+                if p.name in ("learned", "manual"):
+                    continue
+                sf = p / "SKILL.md"
+                if sf.exists() and p.name not in seen:
+                    seen.add(p.name)
+                    meta = parse_skill_meta(sf)
+                    result.append({"name": p.name, "type": "md", "path": sf, **meta})
+            elif p.suffix == ".md" and p.stem not in seen:
+                seen.add(p.stem)
+                meta = parse_skill_meta(p)
+                result.append({"name": p.stem, "type": "md", "path": p, **meta})
+            elif p.suffix == ".py" and p.stem not in seen:
+                seen.add(p.stem)
+                result.append({
+                    "name": p.stem, "type": "py", "path": p,
+                    "description": "(代码技能，M3)", "always": False,
+                    "is_stub": False, "fm_keys": []
+                })
+
+    # 1. Scan manual subfolder first if it exists
+    scan_dir(skills_dir / "manual")
+
+    # 2. Scan root of skills_dir for backwards compatibility, ignoring learned and manual
+    scan_dir(skills_dir)
+
     return result
 
 
@@ -185,6 +209,32 @@ def _list_skills_all_sync(bot_id: int, group_id: Optional[int] = None,
     if draft_dir.exists():
         for s in _scan_dir_sync(draft_dir, "learned"):
             s["status"] = "draft"
+            diagnostics = []
+            
+            # C1: Check naming collision with active skills
+            name = s.get("name")
+            if name in merged:
+                winner = merged[name]
+                winner_layer = winner.get("layer", "unknown")
+                diagnostics.append({
+                    "type": "collision",
+                    "severity": "warning",
+                    "message": f"命名冲突：已存在同名的激活技能 '{name}' ({winner_layer} 层)，此草稿将无法直接生效。"
+                })
+                log.warning("Draft Collision Warning: Draft skill '%s' collides with active skill in '%s' layer.", name, winner_layer)
+
+            # C2: Check high-privilege tools in draft
+            allowed_tools = s.get("allowed_tools", [])
+            high_privilege_tools = ["run_shell", "write_file", "write_to_file"]
+            triggered = [t for t in allowed_tools if t in high_privilege_tools]
+            if triggered:
+                diagnostics.append({
+                    "type": "privilege",
+                    "severity": "critical",
+                    "message": f"高权安全警告：此草稿技能声明了敏感工具权限（{', '.join(triggered)}），请谨慎审批。"
+                })
+
+            s["diagnostics"] = diagnostics
             drafts.append(s)
 
     # Compute injected field

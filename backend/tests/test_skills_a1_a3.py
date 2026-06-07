@@ -200,6 +200,93 @@ status: active
         self.assertIn("confirm-skill", names)
         self.assertIn("always-eligible", names)
 
+    def test_regex_naming_whitelist_c3(self):
+        from skills.metadata import _is_safe_name
+        self.assertTrue(_is_safe_name("valid-name-123_abc"))
+        self.assertFalse(_is_safe_name("invalid.name"))
+        self.assertFalse(_is_safe_name("invalid/name"))
+        self.assertFalse(_is_safe_name("invalid\\name"))
+        self.assertFalse(_is_safe_name("invalid name"))
+        self.assertFalse(_is_safe_name("UPPERCASE"))
+
+    def test_manual_folder_fallback_b3(self):
+        # Create a manual skill in the new manual/ subfolder
+        manual_dir = _TEST_WS_ROOT / "bot_ws_1" / "skills" / "manual"
+        manual_dir.mkdir(parents=True, exist_ok=True)
+        (manual_dir / "my-manual-skill.md").write_text("""---
+name: my-manual-skill
+layer: personal
+always: false
+---
+Manual skill body""", encoding="utf-8")
+
+        # Create a legacy personal skill directly in the skills/ root
+        legacy_dir = _TEST_WS_ROOT / "bot_ws_1" / "skills"
+        (legacy_dir / "my-legacy-skill.md").write_text("""---
+name: my-legacy-skill
+layer: personal
+always: false
+---
+Legacy skill body""", encoding="utf-8")
+
+        # List all skills
+        skills = _list_skills_all_sync(bot_id=1, group_id=1)
+        names = [s["name"] for s in skills]
+        
+        # Verify BOTH manual/ and legacy/ root skills are scanned
+        self.assertIn("my-manual-skill", names)
+        self.assertIn("my-legacy-skill", names)
+
+    def test_draft_diagnostics_c1_c2(self):
+        # Setup an active skill that will collide
+        sys_skill_path = self.test_sys / "read-file.md"
+        sys_skill_path.write_text("""---
+name: read-file
+always: true
+layer: system
+---
+System read-file body""", encoding="utf-8")
+
+        # Write a draft skill with naming collision and requesting high-privilege tools
+        draft_dir = _TEST_WS_ROOT / "bot_ws_1" / "skills" / "learned" / "draft"
+        draft_dir.mkdir(parents=True, exist_ok=True)
+        
+        # This draft is named "read-file" (collides with system skill) and requests "run_shell"
+        draft_file = draft_dir / "read-file.md"
+        draft_file.write_text("""---
+name: read-file
+layer: learned
+status: draft
+allowed-tools: run_shell, other_tool
+---
+Draft body""", encoding="utf-8")
+
+        skills = _list_skills_all_sync(bot_id=1, group_id=1)
+        # Find draft skill in list
+        draft_entry = next((s for s in skills if s["name"] == "read-file" and s["status"] == "draft"), None)
+        
+        self.assertIsNotNone(draft_entry)
+        diagnostics = draft_entry.get("diagnostics", [])
+        self.assertEqual(len(diagnostics), 2)
+        
+        diag_types = [d["type"] for d in diagnostics]
+        self.assertIn("collision", diag_types)
+        self.assertIn("privilege", diag_types)
+
+    def test_file_locking_c4(self):
+        from skills.lifecycle import file_lock
+        test_file = _TEST_WS_ROOT / "lock_test.txt"
+        test_file.parent.mkdir(parents=True, exist_ok=True)
+        test_file.write_text("content", encoding="utf-8")
+        
+        lock_path = test_file.with_suffix(".txt.lock")
+        self.assertFalse(lock_path.exists())
+        
+        with file_lock(test_file):
+            self.assertTrue(lock_path.exists())
+            
+        self.assertFalse(lock_path.exists())
+
 
 if __name__ == "__main__":
     unittest.main()

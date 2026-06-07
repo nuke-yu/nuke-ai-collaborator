@@ -270,6 +270,22 @@ function SkillRow({ skill, onToggle, onApprove, onReject, onTest, toggling }) {
         {skill.when_to_use && (
           <div className="text-xs text-gray-600 mt-0.5 truncate">触发：{skill.when_to_use}</div>
         )}
+        {skill.diagnostics && skill.diagnostics.length > 0 && (
+          <div className="mt-1.5 space-y-1">
+            {skill.diagnostics.map((diag, idx) => (
+              <div
+                key={idx}
+                className={`text-[10px] px-2 py-0.5 rounded border leading-tight ${
+                  diag.severity === 'critical'
+                    ? 'bg-red-950/40 border-red-900/40 text-red-300'
+                    : 'bg-yellow-950/40 border-yellow-900/40 text-yellow-300'
+                }`}
+              >
+                ⚠️ {diag.message}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Injected status */}

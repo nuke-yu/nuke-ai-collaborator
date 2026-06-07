@@ -1,15 +1,14 @@
 import os
 from pathlib import Path
+import re
 import yaml
 
 
 def _is_safe_name(name: str) -> bool:
-    """Reject names that could escape skills_dir (path separators, parent refs)."""
-    if not name or name != name.strip():
+    """Reject names that don't match the strict alphanumeric/dash/underscore pattern."""
+    if not name:
         return False
-    if os.path.isabs(name):
-        return False
-    return not ("/" in name or "\\" in name or ".." in name or "\x00" in name)
+    return bool(re.match(r"^[a-z0-9_-]+$", name))
 
 
 def _contained(base: Path, target: Path) -> bool:
@@ -24,21 +23,33 @@ def skill_path(skills_dir: Path, name: str) -> tuple[Path | None, str]:
     """Return (path, kind) for a skill. Directory structure takes priority.
 
     Defense-in-depth against path traversal: the model-supplied ``name`` is
-    rejected if it contains path separators / parent refs, and every candidate
+    rejected if it doesn't match the regex whitelist, and every candidate
     must resolve to a location inside ``skills_dir``. The primary guard lives in
     ``loader.run_skill`` (name must be a discovered skill).
     """
     if not _is_safe_name(name):
         return None, ""
-    dir_skill = skills_dir / name / "SKILL.md"
-    if dir_skill.exists() and _contained(skills_dir, dir_skill):
-        return dir_skill, "md"
-    flat_md = skills_dir / f"{name}.md"
-    if flat_md.exists() and _contained(skills_dir, flat_md):
-        return flat_md, "md"
-    flat_py = skills_dir / f"{name}.py"
-    if flat_py.exists() and _contained(skills_dir, flat_py):
-        return flat_py, "py"
+
+    # Check potential subdirectories: manual/ for personal/overrides, learned/active/ for learned, or root.
+    candidates = [
+        skills_dir / "manual",
+        skills_dir / "learned" / "active",
+        skills_dir
+    ]
+
+    for base_dir in candidates:
+        if not base_dir.exists():
+            continue
+        dir_skill = base_dir / name / "SKILL.md"
+        if dir_skill.exists() and _contained(skills_dir, dir_skill):
+            return dir_skill, "md"
+        flat_md = base_dir / f"{name}.md"
+        if flat_md.exists() and _contained(skills_dir, flat_md):
+            return flat_md, "md"
+        flat_py = base_dir / f"{name}.py"
+        if flat_py.exists() and _contained(skills_dir, flat_py):
+            return flat_py, "py"
+
     return None, ""
 
 
