@@ -1,6 +1,6 @@
 # Skill 系统架构 · 全景设计
 
-> 最后更新：2026-06-06
+> 最后更新：2026-06-07
 > 状态：已落地实现
 
 ---
@@ -30,7 +30,7 @@ workspaces/
 │       └── test-plan.md
 │
 ├── bot_{id}/skills/                   ◄── Bot 私有层
-│   ├── [用户手写的个人技能]                用户直接创建，立即生效
+│   ├── manual/                        ◄── 用户手写个人技能（直接创建，立即生效）
 │   └── learned/                       ◄── L4 LEARNED（自学沉淀）
 │       ├── draft/                         Bot 写入区（不自动生效）
 │       │   └── project-conventions.md
@@ -53,6 +53,7 @@ workspaces/
 | **L1 General** | `workspaces/system/skills/` | 系统级，全局只读 | 通用能力：文件读写、创建 skill、搜索代码 | 平台内置 |
 | **L2 Group** | `group_{id}/shared/skills/` | 群组领域，群组内共享 | 领域通用流程：环境搭建、测试命令、发布规范 | 用户 / Bot |
 | **L3 Role** | `workspaces/roles/{role}/skills/` | 角色专属，跟角色走不跟 Bot 走 | 角色能力：Developer → code-review；PM → write-spec | Bot 创建时按 role 自动生成 |
+| **Personal** | `bot_{id}/skills/manual/` | Bot 个人手写，私有生效 | 用户手动为该 Bot 创建的私有技能，立即生效 | 用户 |
 | **L4 Learned** | `bot_{id}/skills/learned/active/` | Bot 个人沉淀，可控扩展 | Bot 自学的项目规律、团队偏好 | Bot 写 draft/，用户审批后移入 active/ |
 
 ---
@@ -164,7 +165,7 @@ disabled
 
 ## 五、运行时加载顺序
 
-`list_skills()` 按以下顺序扫描，后层同名 skill 覆盖前层：
+`list_skills_all()` 按以下顺序扫描并进行合并，后层同名 skill 覆盖前层：
 
 ```
 L1  system/skills/
@@ -175,7 +176,7 @@ L3  roles/{bot.role}/skills/
      ↓ 合并
 L4  bot_{id}/skills/learned/active/
      ↓ 合并
-    bot_{id}/skills/（用户手写，非 learned）
+    bot_{id}/skills/manual/（用户手写个人技能，非 learned）
      ↓
      ┌──────────────────────────────────────┐
      │         最终 skill 列表               │
@@ -185,6 +186,10 @@ L4  bot_{id}/skills/learned/active/
      │  status: disabled → 跳过             │
      └──────────────────────────────────────┘
 ```
+
+> [!NOTE]
+> **编排器 Stage 角色映射机制**
+> 在编排流执行时，编排器通过 `current_stage_role` 获取当前 Stage 归属的角色系列（Role Family，如 `dev`, `qa`, `ba` 等），并与 Skill Frontmatter 中的 `stages` 过滤器列表比对。只有与当前 Stage 匹配的角色技能才会被加载注入，以实现不同阶段的技能隔离。
 
 ---
 
@@ -278,38 +283,25 @@ Skill 库面板
 
 ### 1. 多层级扫描与合并优先权 ([discovery.py](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/skills/discovery.py))
 * **层级扫描器 (`_scan_dir_sync`)**：支持两种 Skill 组织形态。既支持子文件夹打包式的技能包目录（如扫描 `name/SKILL.md`，优先提取），也支持根目录下平铺的单体 `.md` 文件和 `.py` 代码技能。
-* **后层覆写前层 (`_list_skills_all_sync`)**：
-  ```python
-  # L1 System -> L2 Group -> L3 Role -> L4 Learned/active -> Personal
-  merged.update(personal_skills)
-  ```
-  在合并字典时，使用顺序覆盖规则。同时会扫描 `learned/draft/` 并将状态标记为 `"draft"`（不注入，仅用作 UI 展示等待审批）。
-* **注入状态划分**：
-  - `status` 为 `disabled` 或 `deprecated` 的技能被设置 `injected = None`，表示不注入；
-  - `always: true` 的技能被设置 `injected = "full"`，代表全文注入系统提示词；
-  - 其余普通技能被设置 `injected = "metadata"`，元数据注入，供 LLM 懒加载。
+* **多层级与个人 (Manual) 技能加载**：
+  - 加载时，个人手写技能主要放置在 `bot_{id}/skills/manual/` 目录下。为了向下兼容，加载器在 `manual/` 子目录不存在或扫描完成后，也会额外扫描 `skills/` 的根目录，但会过滤并忽略 `manual` 和 `learned` 子文件夹。
+* **后层覆写与系统保护 (`_list_skills_all_sync`)**：
+  - 合并过程中，执行顺序覆盖规则：L1 System $\rightarrow$ L2 Group $\rightarrow$ L3 Role $\rightarrow$ L4 Learned/active $\rightarrow$ Personal。
+  - **A1 系统层保护防线**：如果在合并过程中发生低层技能试图重名覆盖系统技能的情况，合并器通过 `Path.is_relative_to(SYSTEM_SKILLS_ROOT.resolve())` 判定物理路径是否在系统目录内。如果是，则**禁止覆写**并产生警告日志，实现硬性的 First-Wins。
+  - **A3 局部合并回退 (Stub Fallback)**：支持通过 `is_stub: true` 的元数据来进行局部继承更新，其余重写会替换 content 物理路径与类型。
+* **两阶段审批与敏感权限静态审计 (C1 / C2 / C3)**：
+  - 扫描 `learned/draft/` 目录时，其状态始终设为 `"draft"`（不注入）。
+  - **C1 冲突检测**：若 Draft 名称与已激活的技能同名，则触发 collision warning，标记无法直接生效。
+  - **C2/C3 敏感权限审计**：静态扫描 Draft 技能中是否提及高权敏感工具（如 `run_shell` 或 `write_file`），包括 YAML `allowed_tools` 白名单以及 Markdown 正文纯文本提及。若检出，会自动附带 critical 安全诊断警告，并在前端 UI 强制提示用户注意。
 
-### 2. 沙箱边界与目录逃逸防御 ([metadata.py](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/skills/metadata.py))
+### 2. 沙箱边界与目录逃逸防御 ([metadata.py](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/skills/metadata.py) / [lifecycle.py](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/skills/lifecycle.py))
 为了防止恶意的智能体利用包含路径分隔符的技能名称读取系统敏感文件，我们构建了防御体系：
 * **命名安全阀 (`_is_safe_name`)**：
-  ```python
-  def _is_safe_name(name: str) -> bool:
-      if not name or name != name.strip():
-          return False
-      if os.path.isabs(name):
-          return False
-      return not ("/" in name or "\\" in name or ".." in name or "\x00" in name)
-  ```
-  拒绝一切包含斜杠、双点或零字节的名称。
+  - 采用正则表达式白名单模式：`^[a-z0-9_-]+$`。
+  - 严禁包含大写字母、斜杠、反斜杠、双点 `..` 或任何零字节字符。
+  - 此过滤规则作为强验证前置，应用在所有写操作与删除操作的 API 入口处。对于非法技能名，统一返回 `"[非法技能名]"` 错误说明。
 * **绝对包含性校验 (`_contained`)**：
-  ```python
-  def _contained(base: Path, target: Path) -> bool:
-      try:
-          return target.resolve().is_relative_to(base.resolve())
-      except (OSError, ValueError):
-          return False
-  ```
-  对目标路径进行 `.resolve()` 展开以处理任何软链接，强制校验其是否严格保留在 `base` 目录中，从而完全阻断了任何**符号链接越界逃逸（Symlink Escape）**漏洞。
+  - 对目标路径进行 `.resolve()` 展开以处理任何软链接，强制校验其是否严格保留在 `base` 目录中，从而完全阻断了任何**符号链接越界逃逸（Symlink Escape）**漏洞。
 
 ### 3. 技能处理管道与 shell 注入阻断 ([processor.py](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/skills/processor.py))
 * **参数替换机制 (`substitute_arguments`)**：全面兼容 Claude 规范，支持对技能内容中的 `$ARGUMENTS`, `$ARGUMENTS[N]`, `$N` 占位符进行入参替换。如果无占位符但传参非空，会在尾部追加 `ARGUMENTS: {args}`。
@@ -324,3 +316,9 @@ Skill 库面板
   在执行技能时，动态调用 `process_skill_content` 替换参数及 `${SKILL_DIR}` 变量。如果是包目录形式（`SKILL.md`），会自动归纳其同级子文件列表并以 `<skill_files>` 标签附加在 Prompt 后面。
 * **执行器副作用注入 (Executor Side-Effects)**：
   执行时，元数据（YAML frontmatter）里包含的控制变量（例如 `max_iterations`, `learns`, `allowed_tools`, `model`, `context: "fork"` 等）会直接作为 side-effects 写入当前的执行上下文 `ctx` 中，用来动态调整大模型执行本次技能时的循环次数上限、大模型选择或白名单工具范围。
+
+### 5. 并发文件锁与自毁竞态消除 ([lifecycle.py](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/skills/lifecycle.py))
+* **多进程/线程互斥锁 (`file_lock`)**：
+  - 通过 `file_lock` 上下文管理器，对所有技能的写/删/审批等操作实施跨平台的文件锁定（Unix 使用 `fcntl`，Windows 使用 `msvcrt`）。
+  - **防止自毁竞态（Anti-Inode Unlink Race）**：传统 flock 模式下在 `finally` 块中执行 `unlink` 锁文件的做法，容易引发 inode 被删除导致后续进程获取不同 inode 互斥锁的竞态。
+  - **解决方案**：文件锁统一在系统的 `/tmp/nuke_skill_locks/` 目录下管理，通过对目标技能文件绝对路径计算 SHA-256 得到固定的锁文件名（如 `[sha256].lock`）。锁定生命周期结束时**绝不执行 unlink**，从而彻底避免了 Inode 重用及自毁竞态问题。
