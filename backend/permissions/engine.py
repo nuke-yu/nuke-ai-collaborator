@@ -19,6 +19,7 @@ import uuid
 from typing import Any
 
 from .models import Rule, Ruleset, _PendingRequest
+from .patterns import synthesize_args_pattern
 
 
 # Default-deny an unanswered ask after this many seconds. Backstops the case
@@ -155,9 +156,15 @@ async def check(
             (tool_name, _args_hash(arguments))
         )
         return {"action": "allow"}
-    # persistence == "always" → caller saves to DB
+    # persistence == "always" → caller saves to DB. Scope the rule to the *kind*
+    # of call approved (e.g. `git push *`) instead of a blanket allow-all-args —
+    # otherwise approving one shell command auto-allows every future one.
     return {"action": "allow",
-            "persist_rule": Rule(tool_pattern=tool_name, args_pattern="", action="allow")}
+            "persist_rule": Rule(
+                tool_pattern=tool_name,
+                args_pattern=synthesize_args_pattern(tool_name, arguments),
+                action="allow",
+            )}
 
 
 def resolve(request_id: str, approved: bool, persistence: str = "once",

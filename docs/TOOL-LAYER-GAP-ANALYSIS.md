@@ -29,7 +29,7 @@
 | 工具执行 | 自有引擎 | 自有引擎 | Effect 服务 | 自有+容器 | 委托 CLI |
 | 命令安全决策 | ⚠️ 子串匹配 | ✅ 分类器 | 权限规则 | ✅ 容器+CodeQL | ✅ pattern 合成+粒度菜单 |
 | 权限裁决契约 | ⚠️ block/allow | ✅ 模式+多源分层 | ✅ ask/allow/deny+pattern | ✅ | ✅ 改参/改权限/中断 |
-| 授权记忆 | persist_rule（原样） | always-allow | — | — | ✅ 子命令深度感知合成 |
+| 授权记忆 | ✅ persist_rule + 子命令深度合成 | always-allow | — | — | ✅ 子命令深度感知合成 |
 | 子 agent 权限 | ⚠️ 整体继承+深度上限 | Task 限工具集 | ✅ 衰减派生 | ✅ | （委托 CLI） |
 | 参数校验 | ⚠️ 硬编码别名表 | ✅ zod validateInput | ✅ schema-decode | ✅ | （透传） |
 | MCP 传输 | ⚠️ 仅 stdio | ✅ +WS* | ✅ +remote(SSE/HTTP)+OAuth | ✅ | （透传 CLI） |
@@ -68,9 +68,14 @@
 - **对标**：opencode `src/config/mcp.ts` 支持 Local + Remote（SSE/HTTP）+ OAuth（含 RFC 7591 动态注册）+ 每服务器 timeout；Claude Code 另带 `mcpWebSocketTransport.ts`*。
 - **建议**：加 remote(SSE/HTTP) 传输 + 授权 + `ToolListChanged` 订阅。
 
-### 6. 🟠 授权记忆太粗（persist_rule 不智能）
-- **现状**：[workspace_tools.py:513-518](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/executors/plugins/workspace_tools.py) `persist_rule` 存 `tool_pattern` / `args_pattern`，但 pattern 合成不智能。
-- **对标**：gsd-2 `src/resources/extensions/claude-code-cli/stream-adapter.ts` 的 `buildBashPermissionPattern`——命令链提取（`cd /foo && gh pr list` 取有意义段）、剥 `sudo/env/VAR=`、**按子命令深度**捕获（`git push:*` 深 1、`gh pr create:*` 深 2、`aws/az/gcloud` 深 2）；`buildBashPermissionPatternOptions` 给用户 `Bash(gh:*)` / `Bash(gh pr:*)` / `Bash(gh pr list:*)` 粒度菜单。
+### 6. ✅ 授权记忆粒度（persist_rule）— 已修复（曾被低估为 🟠，实为安全问题）
+- **原问题**：`engine.py` 的 "always" 持久化为 `Rule(tool_pattern=tool_name, args_pattern="")`——**空 args_pattern = 放行该工具的全部调用**。即"始终允许 `git status`"会连带自动放行 `rm -rf /`。这不只是"不智能",是安全洞。
+- **现状（已实现）**：新增 [permissions/patterns.py](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/permissions/patterns.py) `synthesize_args_pattern()`，`engine.check` 在 always 分支据此合成**有粒度**的 pattern：
+  - run_shell：shlex 分词 → 剥 `VAR=val`/`sudo`/`env` → 按**子命令深度表**取识别前缀（`git push origin main`→`git push *`；`ls -la`→`ls *`；`docker compose up`→`docker compose *`；纯 `pwd`→精确 `pwd`），尾部 `" *"` 保 token 边界(`ls` 不会扩成 `lsof`)，glob 元字符转义。
+  - 路径类(write_file/read_local_file/write_local_file)→精确路径；spawn_agent→精确 bot_name；其余→空(回退)。
+  - 单测 `tests/test_permission_patterns.py`(16 例，含"`git push *` 规则不放行 `rm -rf /`")。
+- **残留**：服务端默认合成，未做 gsd-2 那种"让用户在 `Bash(gh:*)`/`Bash(gh pr:*)` 间选粒度"的前端菜单——需 WS 协议 + 前端改动，列为后续体验增强（功能性安全洞已堵）。
+- **对标**：gsd-2 `buildBashPermissionPattern`（子命令深度）+ `buildBashPermissionPatternOptions`（粒度菜单）。
 - **建议**：抄 gsd-2 的子命令深度表 + 链式提取，让「始终允许」生成精准、可选作用域的规则。多 agent 高频跑 git/gh/npm 收益大。
 
 ### 7. 🟡 权限裁决契约偏窄
