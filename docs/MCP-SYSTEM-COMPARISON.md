@@ -1,54 +1,84 @@
-# MCP (Model Context Protocol) 与工具执行机制横向对比
+# MCP (Model Context Protocol) 与本地工具执行机制横向对比及安全威胁模型
 
 > 最后更新：2026-06-07
-> 状态：设计与选型分析 (基于本地源码审计)
+> 状态：设计与选型分析 (基于本地源码审计与架构纠偏)
 
 ---
 
-## 一、 本地源码审计：智能体框架 MCP 架构横向对比表
+## 一、 MCP 协议能力与接入演进计划 (横向对比)
+
+本表聚焦于 **MCP 协议** 的原生支持、通道通信与服务生命周期管理。当前项目在此项上为 **N/A（规划中）**。
 
 | 维度 / 机制 | Claude Code (TypeScript)<br>[claude-code-haha-main](file:///Users/Nuke/claude-code-haha-main) | opencode (TypeScript)<br>[opencode](file:///Users/Nuke/opencode) | gsd-2 (TypeScript/Rust)<br>[gsd-2](file:///Users/Nuke/gsd-2) | openclaw (TypeScript)<br>[openclaw-main](file:///Users/Nuke/openclaw-main) | nuke-ai-collaborator (Python/SQLite)<br>[当前项目](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator) |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **协议角色** | **Server & Client**：<br>1. **Client**：作为客户端连接并加载外部 Server 的工具。<br>2. **Server**：通过 `entrypoints/mcp.ts` 等使用 `StdioServerTransport` 暴露服务给其他 AI 宿主。 | **Client**：<br>实现完整的 MCP 客户端管理器，维护多个本地与远程连接状态。 | **Client (以 .mcp.json 配置为主)**：<br>通过项目下的 `.mcp.json` 进行外部 MCP 客户端工具的挂载与管理；同时也支持轻量级的自定义 MCP Server 映射。 | **Client**：<br>客户端模式，通过 Stdio 包装器连接底层服务器。 | **本地 Plugin (无 MCP)**：<br>非 MCP 架构，目前通过本地 Python 模块动态反射加载工具并生成 OpenAI Schema。 |
-| **传输协议实现** | **stdio / SSE**：<br>在客户端和服务端中都使用官方 SDK；服务端使用 `StdioServerTransport` 监听并处理来自外来客户端的同步进程管道数据。 | **stdio / SSE / StreamableHTTP**：<br>使用 `StdioClientTransport` 启动本地进程，以及 `SSEClientTransport` / `StreamableHTTPClientTransport` 执行远程通信。 | **stdio / JSON-RPC**：<br>基于 stdio 的命令行与 JSON-RPC 传输，对管道消息按 Tool 边界进行分发。 | **stdio / SSE**：<br>自定义 `OpenClawStdioClientTransport` 包装标准 I/O 管道，支持 stderr 数据流重定向与格式化日志记录。 | **本地进程反射**：<br>不走 RPC/I/O 管道通信，使用 `importlib.util` 在主进程内直接反射实例化本地 Python 类。 |
-| **工具 Schema 转换** | **动态元数据注入**：<br>扫描并拉取外部 Server 暴露的 tools 列表；在其服务端中，通过 `ListToolsRequestSchema` 将内置功能暴露为规范参数。 | **AI SDK dynamicTool 转换**：<br>通过 `convertMcpTool` 将 MCP Tool 定义转换成 Vercel AI SDK 的 `dynamicTool`，利用 `jsonSchema` 校验参数并异步执行 `callTool`。 | **Schema 转换**：<br>将配置的 MCP 服务器工具通过静态 Schema 挂载并转换供任务大模型识别。 | **XML 格式平铺**：<br>将获取的 MCP schema 参数在 Prompt 构建时转换为 XML `<available_skills>` 平铺注入。 | **OpenAI 兼容 Schema**：<br>通过 `get_schemas()` 提取 Python 插件中的参数说明，转换为 OpenAI 格式 function 定义。 |
-| **热更新与动态感知** | **环境感知重连**：<br>随主进程生命周期加载，继承 Bash/MCP 环境变量并支持热插拔重载。 | **事件总线与热更新**：<br>使用 `setNotificationHandler` 监听 `ToolListChangedNotificationSchema`，当工具集变更时拉取新定义并向 Bus 广播 `ToolsChanged` 事件。 | **进程级绑定**：<br>随后台任务拉起，主要在启动期根据配置初始化加载，不支持动态重载。 | **Stderr 订阅监听**：<br>订阅 `transport.stderr.on("data")`，一旦捕获到崩溃或数据变动日志，触发动态重连和警告上报。 | **手动 reload()**：<br>通过 `reload()` 清空 before/after 钩子缓存并重新 `discover()` 扫描加载本地 `.py` 文件。 |
-| **子进程退出控制** | **主进程回收**：<br>随主进程生命周期释放。在 `src/main.tsx` 等中使用 pgrep 递归或标准退出机制进行关联进程回收。 | **基于 pgrep 的 PID 树强杀**：<br>使用 `pgrep -P` 在 Unix 环境下递归查找当前 Stdio 进程的子树 PID（`descendants`），并在退出时发送 `SIGTERM` 进行清理。 | **基于 Rust ps.rs 的跨平台强杀**：<br>使用 Crate `native/crates/engine/src/ps.rs` 中的原生进程树逻辑，精准实现子进程的树状 SIGTERM 强杀，无 pgrep 外部依赖。 | **管道流感知**：<br>基于 `transport.stderr.on("data")` 辅助感知崩溃。 | **本地同步阻塞**：<br>直接在进程中运行，利用 [win_sandbox.py](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/executors/plugins/win_sandbox.py) 在 Win 下实施 Job 内存限额。 |
-| **认证与 OAuth 机制** | **无/默认 OAuth**：<br>主要继承主应用的安全态与 credentials。 | **McpOAuthProvider**：<br>内置 `McpOAuthProvider`、`McpOAuthCallback` 与 `McpAuth` 服务，支持完整的 OAuth 客户端注册与三方鉴权流程。 | **静态配置挂载**：<br>在本地项目根目录 `.mcp.json` 中配置，不涉及复杂的用户三方认证流程。 | **OAuth 凭证解析**：<br>通过配置文件解析配置的敏感 headers 及 url 属性。 | **无**：<br>无鉴权层，工具为本地脚本，运行于当前的进程权限空间下。 |
+| **MCP 协议角色** | **Server & Client**：<br>1. **Client**：作为客户端连接并加载外部 Server 的工具。<br>2. **Server**：通过 `entrypoints/mcp.ts` 暴露内置工具给其他 AI 宿主。 | **Client**：<br>实现完整的 MCP 客户端管理器，维护多个本地与远程连接状态。 | **Client**：<br>主要作为客户端基于项目根目录 `.mcp.json` 挂载外部工具，不涉及复杂的双向 Server 引擎。 | **Client**：<br>客户端模式，通过 Stdio 包装器连接底层服务器。 | **N/A (规划中)**：<br>当前版本无原生 MCP 协议支持，计划采用插件化 Adapter 方式在未来阶段接入。 |
+| **传输协议实现** | **stdio / SSE**：<br>在客户端和服务端中都使用官方 SDK；服务端使用 `StdioServerTransport` 监听并处理来自外来客户端的同步进程管道数据。 | **stdio / SSE / StreamableHTTP**：<br>使用 `StdioClientTransport` 启动本地进程，以及 `SSEClientTransport` / `StreamableHTTPClientTransport` 执行远程通信。 | **stdio**：<br>基于 stdio 管道和 JSON-RPC 传输，对管道消息按 Tool 边界进行分发。 | **stdio / SSE**：<br>自定义 `OpenClawStdioClientTransport` 包装标准 I/O 管道，支持 stderr 数据流重定向与格式化日志记录。 | **N/A (规划中)**：<br>无 RPC 管道协议，未来计划采用 `asyncio.subprocess` (Stdio) 以及 `aiohttp` (SSE) 作为传输层。 |
+| **变化通知与感知** | **环境感知重连**：<br>随主进程生命周期加载，继承 Bash/MCP 环境变量并支持热插拔重载。 | **事件总线与热更新**：<br>使用 `setNotificationHandler` 监听 `ToolListChangedNotificationSchema`，当工具集变更时拉取新定义并向 Bus 广播 `ToolsChanged` 事件。 | **静态绑定**：<br>随后台任务拉起，主要在启动期根据配置初始化加载，不支持动态热重载。 | **Stderr 订阅监听**：<br>订阅 `transport.stderr.on("data")`，一旦捕获到崩溃或数据变动日志，触发动态重连和警告上报。 | **N/A**：<br>无动态连接通知机制。 |
+| **子进程退出控制** | **主进程回收**：<br>随主进程生命周期释放。在 `src/main.tsx` 等中使用 pgrep 递归或标准退出机制进行关联进程回收。 | **未作深层强杀**：<br>仅依赖标准 `client.close()`，子进程可能在后台残留。 | **基于 Rust ps.rs 的跨平台强杀**：<br>使用 Crate `native/crates/engine/src/ps.rs` 中的原生进程树逻辑，精准实现子进程的树状 SIGTERM 强杀，无 pgrep 外部依赖。 | **管道流感知**：<br>基于 `transport.stderr.on("data")` 辅助感知崩溃。 | **N/A**：<br>无进程常驻与子进程树管理。 |
+| **认证与 OAuth 机制** | **无/默认 OAuth**：<br>主要继承主应用的安全态与 credentials。 | **McpOAuthProvider**：<br>内置 `McpOAuthProvider`、`McpOAuthCallback` 与 `McpAuth` 服务，支持完整的 OAuth 客户端注册与三方鉴权流程。 | **静态配置挂载**：<br>在本地项目根目录 `.mcp.json` 中配置，不涉及复杂的用户三方认证流程。 | **OAuth 凭证解析**：<br>通过配置文件解析配置的敏感 headers 及 url 属性。 | **N/A**：<br>不具备网络与凭证认证层。 |
+
+---
+
+## 二、 本地工具执行核心能力 (横向对比)
+
+本表聚焦于 **非 MCP** 的本地工具运行控制、文件防线、参数转换与并发互斥保障，此项为当前项目的核心优势所在。
+
+| 维度 / 机制 | Claude Code (TypeScript)<br>[claude-code-haha-main](file:///Users/Nuke/claude-code-haha-main) | opencode (TypeScript)<br>[opencode](file:///Users/Nuke/opencode) | gsd-2 (TypeScript/Rust)<br>[gsd-2](file:///Users/Nuke/gsd-2) | openclaw (TypeScript)<br>[openclaw-main](file:///Users/Nuke/openclaw-main) | nuke-ai-collaborator (Python/SQLite)<br>[当前项目](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator) |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **沙箱隔离机制** | **指令级白名单**：<br>限制外部工具执行 Shell，但无强隔离沙箱。 | **角色权限网关**：<br>通过安全组匹配来限制文件及环境的操作。 | **Git 干净区隔离**：<br>通过克隆干净分支进行执行，崩溃后支持一键回滚。 | **Symlink 逃逸阻断**：<br>严格检验 realpath，禁止通过软链接逃逸出安全目录。 | **Win Job 内存限制**：<br>使用 [win_sandbox.py](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/executors/plugins/win_sandbox.py) 动态调用 Windows Job Objects 限制进程内存（跨平台则通过 `is_relative_to` 实施路径阻断）。 |
 | **并发锁与竞态消除** | **无/进程级**：<br>依赖异步串行，未针对具体文件资源实施并发安全锁。 | **无**：<br>依赖 Effect-TS 流程并发控制，无具体资源排他锁。 | **AbortSignal 联动**：<br>利用 RPC AbortSignal 控制长时工具（如 bash），超时或主动关闭时中止任务。 | **无**：<br>依赖运行时限制最大并发数。 | **SHA-256 临时锁**：<br>通过 [lifecycle.py](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/skills/lifecycle.py) 实现精细的文件级互斥，不执行 unlink 以消除 flock 竞态。 |
+| **参数容错与别名机制** | **占位符追加**：<br>支持 `$ARGUMENTS` 占位，如缺失则拼接到末尾。 | **TS 管道映射**：<br>在 TS 执行端进行硬编码替换。 | **Schema 强校验**：<br>遵循 JSON Schema 标准强校验，不匹配直接报错拒绝。 | **TOOL_RESULT_MAX_CHARS**：<br>对过大输出执行 `TOOL_RESULT_MAX_CHARS` (默认 8000 字符) 截断，避免 Token 膨胀。 | **别名自动容错**：<br>通过 `_normalize_arg_aliases` 容错映射 LLM 易写错的近义参数（如 `file_path` $\rightarrow$ `path`），大幅提升调用成功率。 |
+| **执行性能模型** | **单线程异步**：<br>Node.js 异步模型，密集 IO 容易排队阻塞。 | **Effect 异步并发**：<br>Effect-TS 并发管道流。 | **多进程隔离**：<br>为不同 Task 启动独立进程执行。 | **异步并发**：<br>标准的 Node.js 异步非阻塞执行。 | **多线程包裹**：<br>在 [api/workspace.py](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/api/workspace.py) 中将所有同步磁盘及文件锁操作使用 `asyncio.to_thread` 包装，防止阻塞事件循环。 |
 
 ---
 
-## 二、 各智能体框架具体实现细节
+## 三、 nuke-ai-collaborator 真实执行优劣势审计 (Gaps & Disadvantages)
 
-### 1. Claude Code / Claude-haha
-* **协议双向支持**：既是 MCP 客户端，也充当 MCP 服务端。
-  - 作为服务端：在 `entrypoints/mcp.ts`、`utils/computerUse/mcpServer.ts` 和 `utils/claudeInChrome/mcpServer.ts` 等入口中，使用 `StdioServerTransport` 搭配 `ListToolsRequestSchema` 暴露内置工具给其他 AI 主机。
-  - 作为客户端：使用 `StdioClientTransport` 启动外部 MCP 服务，并通过子进程继承环境变量。
-* **优点**：能够双向打通，既能作为宿主控制其他工具，也能被第三方应用集成。
+为了公允客观地评估我们的工具执行层，以下列出我们当前的优势与短板：
 
-### 2. opencode
-* **设计哲学**：以 Effect-TS 为异步基石的纯客户端管理器。
-* **子进程跟踪**：在 `packages/opencode/src/mcp/index.ts` 中，通过调用 `pgrep -P` 在 Unix 环境下递归查找当前 Stdio 进程的子树 PID（`descendants`），从而在退出时发送 `SIGTERM` 进行清理。
+### 优势 (Strengths)
+1. **防竞态互斥控制**：我们通过不 unlink 的 SHA-256 临时锁彻底消除了多进程/并发下的文件锁竞争态。
+2. **大模型调用容错率高**：支持 `file_path`/`filepath`/`filePath` 等参数的自动归一化，大幅减少了大模型由于别名导致的调用崩溃。
+3. **安全审计严格**：具备严格的正则白名单过滤（`^[a-z0-9_-]+$`）和二阶段 HIL 审批流程。
 
-### 3. gsd-2 (Get Shit Done)
-* **设计哲学与配置**：主要作为 MCP Client 使用，基于项目根目录下的 `.mcp.json` 来配置和集成外部工具。同时包含一个用于测试或被控的轻量级 `mcp-server.ts` 暴露自身能力。
-* **Rust 进程管理器**：子进程生命周期的可靠终止不依赖 `pgrep`，而是使用 Rust 编写的原生模块 `native/crates/engine/src/ps.rs`，实现跨平台（兼容 Windows 和 Unix）的子进程树递归扫描与 `SIGTERM/SIGKILL` 强杀清理。
-
-### 4. openclaw
-* **内置客户端**：内置了非常轻量级的 MCP Client 封装，能够基于 Node.js 的 child_process 接口与本地 stdio MCP 服务建立通信。
-* **Token 防膨胀机制**：在与多个 MCP 服务器通信时，如果返回的 XML/JSON 数据过大（>256KB），会自动触发截断（Truncation），并将本地路径中长物理路径缩短为相对表示，以此确保 context window 预算不被撑爆。
-
-### 5. nuke-ai-collaborator (我们的项目)
-* **实现逻辑**：我们使用 Python 开发了专属的本地插件执行器机制（[registry.py](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/executors/registry.py)），并不直接暴露 MCP 接口。
-* **设计优势**：
-  - **精细文件锁（Anti-Inode Unlink Race）**：通过 SHA-256 临时锁消除 flock 的自毁竞态（[lifecycle.py](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/skills/lifecycle.py)）。
-  - **参数自动容错**：在 [tool_executor.py](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/executors/tool_executor.py) 中，系统对大模型产生的错误别名参数（如 `file_path`, `contents`）进行拦截和映射，大幅降低了大模型执行工具时的报错概率。
-  - **二阶段审批防线**：任何由 Bot 自学沉淀的技能都必须被强制写入 `learned/draft/`，静态审计其对 `run_shell` 或 `write_file` 的依赖后，由人类用户二次确认方可激活。
+### 劣势与缺口 (Weaknesses & Gaps)
+1. **缺少远程工具扩展**：当前所有的工具都在主进程内以同步导入 Python 文件方式执行，无法无缝接入网络上的外部 API 工具生态。
+2. **跨平台沙箱隔离薄弱**：除了 Windows 平台下实现了 Job Object 内存硬限制外，在 macOS/Linux 下完全依赖主进程的权限运行，缺乏彻底的文件系统/进程级容器隔离。
+3. **阻塞事件循环隐患**：虽然使用了 `to_thread` 包装了磁盘读写，但对于部分同步的 CPU 密集型分析（如自定义正则校验），仍有阻塞主循环的风险。
+4. **无凭证与鉴权管理层**：项目目前不具备统一的 API 秘钥保管、凭证分发及三方 OAuth 鉴权网关。
 
 ---
 
-## 三、 未来 MCP 接入演进方案设计 (Evolution Path)
+## 四、 MCP 协议安全威胁模型与 HIL 闸门
+
+MCP 协议在为 AI 智能体打通工具生态的同时，引入了极高等级的安全风险。
+
+### 1. 核心威胁模型 (Threat Model)
+
+*   **工具毒化 (Tool Poisoning)**：
+    恶意或被劫持的外部 MCP Server 在被请求 `tools/list` 时，返回包含恶意的描述或恶意 Schema，诱导大模型调用该工具以执行注入的代码。
+*   **间接 Prompt 注入 (Indirect Prompt Injection)**：
+    大模型通过 MCP 资源（`resources/read`）读取了不受信任的外部数据（例如包含攻击指令的网页或邮件）。这些外部指令劫持了大模型的决策，诱导大模型利用其他高权工具（如 `run_shell`）向外部发送敏感数据。
+*   **供应链与凭证泄露**：
+    由于 MCP 客户端信任了本地配置文件中的 Stdio 命令，一旦本地配置文件被篡改，攻击者可以利用 Stdio command 启动任意本地二进制程序执行攻击。
+
+### 2. 我们的防护对策：HIL 人机确认闸门
+
+基于以上威胁，本项目在接入 MCP 时将采取 **HIL（人类协同确认）零信任防线**：
+
+```
+LLM Intent  ──►  [ tool_executor ]  ──►  [ HIL 审批队列 ]  ──►  人类审批  ──►  [ McpClientExecutor ]
+                                                                                   │
+                                                                                   ▼
+                                                                           [ 物理 MCP Server ]
+```
+
+*   **敏感分类审批**：所有的 MCP 工具在被执行前，中央路由器将通过 Namespace（`mcp::`）对其进行分类。所有涉及**写操作、数据外发或执行**的工具调用，强制在前端 UI 弹出审批卡片，未经人类确认绝对不向 MCP 服务端发送 JSON-RPC。
+*   **输入内容静态扫描**：对于远程 MCP 工具返回的数据，在送回大模型 Context 之前，执行静态注入扫描（检测敏感的指令前缀、System 重置词），阻断间接注入。
+
+---
+
+## 五、 未来 MCP 接入演进方案设计 (Evolution Path)
 
 根据项目的架构设计，我们在后续阶段接入 MCP 时，将采用**插件化的适配器模式**，确保与现有安全 and 锁机制的 100% 兼容。
 
@@ -56,26 +86,31 @@
 graph TD
     LLM[LLM Agent Core] -->|1. Tool Call| Exec[tool_executor.py]
     Exec -->|2. Before Hooks| Hook[Before-Hooks]
-    Exec -->|3. File Lock| Lock[file_lock SHA-256]
-    Exec -->|4. Dispatch| Adapter[mcp_client_executor.py]
+    Exec -->|3. Local Lock Check| Lock{Is Local Path?}
+    Lock -->|Yes| FileLock[file_lock SHA-256]
+    Lock -->|No| Dispatch[Dispatch]
+    FileLock --> Dispatch
+    Dispatch --> Adapter[mcp_client_executor.py]
     
     subgraph MCP Adapter Plugin
-        Adapter -->|5.1 StdioClientTransport| Stdio[Subprocess stdio]
-        Adapter -->|5.2 SSEClientTransport| SSE[Aiohttp SSE Client]
+        Adapter -->|Timeout Control| Stdio[Subprocess stdio]
+        Adapter -->|Timeout Control| SSE[Aiohttp SSE Client]
     end
     
-    Stdio -->|6. JSON-RPC| LocalMCP[Local MCP Server]
-    SSE -->|6. JSON-RPC| RemoteMCP[Remote MCP Server]
+    Stdio -->|JSON-RPC| LocalMCP[Local MCP Server]
+    SSE -->|JSON-RPC| RemoteMCP[Remote MCP Server]
 ```
 
 ### 接入实现步骤
 
-1. **新增 MCP 适配器插件**：
-   在 `backend/executors/plugins/` 下创建 [mcp_client_executor.py](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/executors/plugins/mcp_client_executor.py) 模块，作为 [BotExecutor](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/executors/base.py) 的子类。
-2. **连接与工具发现 (Connection & Discovery)**：
-   在适配器的 `register_tools()` 周期中，根据系统配置，通过 `asyncio.create_subprocess_exec` 建立 `stdio` 连接，或使用 HTTP/SSE 建立与远程 MCP 节点的连接。发送 `tools/list` 报文，并将其包装为本地的 `ToolDef` 对象注册进统一的 `registry` 中。
-3. **安全防线适配 (Security Alignment)**：
-   - **名称隔离**：将 MCP 暴露的工具加上命名空间前缀（例如 `mcp::github::create_issue`），避免与本地平铺工具命名冲突。
-   - **拦截保护**：保留并重用 `tool_executor` 的 before-hook 拦截。当检测到 `mcp::` 命名空间工具试图越界时，直接通过本地权限控制模块进行阻断。
-4. **共享并发锁保护**：
-   在分发执行前，适配器会根据工具涉及的文件资源计算 SHA-256 锁哈希，并调起 `file_lock`，确保跨进程的多任务工具并发安全性。
+1.  **动态客户端生命周期管理 (Subprocess Handoff)**：
+    *   在 `McpClientExecutor` 内部，使用 Python 的 `psutil` 追踪 Stdio 模式下启动的所有子进程。
+    *   在 `shutdown` 或热重载时，通过 `kill_process_tree()` 递归获取当前子树的所有 PID 并发送 `SIGTERM`，防止出现僵尸进程。
+2.  **远端调用超时控制与 Cancel (AbortSignal 等价物)**：
+    *   对于每一次 `session.call_tool`，包装 `asyncio.wait_for` 设定硬性超时阈值。
+    *   当发生超时或模型取消该会话时，主动抛出 `asyncio.CancelledError`，客户端向 MCP Server 发送取消通知并安全关闭网络/进程管道。
+3.  **治理体系 (Allow-list / Deny-list)**：
+    *   在 `config/mcp.json` 中配置每个 MCP 服务的工具黑白名单。即便 Server 暴露了 100 个工具，客户端也只将白名单内的工具映射注册给大模型，缩小攻击面。
+4.  **选择性本地锁桥接 (Selective File Locking)**：
+    *   **修正**：不再对远程 MCP 工具的所有参数盲目加锁。
+    *   *实现*：只有当 MCP 工具调用的参数明确包含我们系统内可解析的本地文件路径（如参数名为 `path` 且指向本地工作区内），才触发 [lifecycle.py](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/skills/lifecycle.py) 的 `file_lock`，对其余纯网络或虚拟资源不予干涉。
