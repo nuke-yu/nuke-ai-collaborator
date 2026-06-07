@@ -42,10 +42,10 @@
 
 ## 三、差距清单（按多 agent + 高频 shell + MCP 画像排序）
 
-### 1. 🔴 命令安全只靠子串匹配
-- **现状**：[workspace_tools.py:454-470](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/executors/plugins/workspace_tools.py) 的 `_default_shell_guard` 用 `pattern.lower() in cmd` 对 `_DANGEROUS_PATTERNS` 做子串匹配；base64 / 变量拼接 / 脚本文件体一律绕过。
-- **对标**：Claude Code `src/utils/classifierApprovals.ts` 用**分类器**（`BASH_CLASSIFIER` 判断 bash 命令是否可自动放行、`TRANSCRIPT_CLASSIFIER` 读 transcript 决定 auto 模式）；`src/Tool.ts` 的 `isSearchOrReadCommand()` 把读/搜命令归类自动放行。openclaw 直接上**容器沙箱** + 对 exec 边界做 CodeQL 高危扫描（`.github/codeql/codeql-mcp-process-tool-boundary-critical-security.yml`）。
-- **建议**：命令安全决策从子串升级到分类器（或至少 token/AST 级解析）；高危执行考虑容器/命名空间隔离。
+### 1. 🟡 命令安全为规则匹配（非 classifier 级）— 🔶 已加固
+- **现状（已校正 + 加固）**：`_check_shell_command` 两层——① **编译正则** denylist（`_DANGEROUS_PATTERNS`，非子串；含 `base64 -d`、`curl|sh`、`eval $()`、fork bomb、写块设备等结构性模式）；② **tokenized 分析**（`_check_tokenized`：shlex 去引号/转义 → 剥 `VAR=val`/`sudo`/`env` 等 wrapper → basename 识别危险二进制，并递归 `bash -c "<cmd>"`）。后者堵住了正则的引号/空格/路径前缀/wrapper/命令链绕过（`rm -rf "/"`、`r''m -rf /`、`/usr/sbin/fdisk`、`env X=1 rm -rf "$HOME"`、`cd /tmp && rm -rf /`、`bash -c "rm -rf /"`）。单测 `tests/test_shell_guard.py`（53 例）。
+- **残留（denylist 的本质上限，非本次目标）**：任意语言内联求值（`python -c "import os;os.system(...)"`）、运行期变量间接（`X=/; rm -rf $X`）、自写脚本再执行——静态 denylist 都不可能穷尽。**真正的一道闸是 HIL 权限门**（`_default_shell_guard` 无 ruleset fail-closed + `_permission_check_hook` ask/deny），denylist 仅为「即便规则放行也拦明显毁灭性命令」的 backstop。
+- **对标 / 后续**：Claude Code `classifierApprovals.ts`（LLM `BASH_CLASSIFIER` + `isSearchOrReadCommand()` 只读命令自动放行）；openclaw 容器沙箱 + exec 边界 CodeQL。要再进一步需 classifier 级判定或容器/命名空间隔离——非规则匹配能覆盖，列为后续增强。
 
 ### 2. 🔴 工具输出无密钥脱敏
 - **现状**：`executors/` 下无任何 redact/脱敏逻辑（全量 grep 零命中）；after-hook 只做截断。`run_shell` 打印的 env / token 直接进模型上下文，并会注回其他 agent。
