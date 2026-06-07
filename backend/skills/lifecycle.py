@@ -9,8 +9,15 @@ from .metadata import skill_path, parse_frontmatter, _is_safe_name
 @contextmanager
 def file_lock(file_path: Path):
     """Acquire an exclusive lock on the file_path to protect write operations."""
-    lock_path = file_path.with_suffix(file_path.suffix + ".lock")
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    import tempfile
+    import hashlib
+    
+    abs_path = str(file_path.resolve())
+    lock_name = hashlib.sha256(abs_path.encode("utf-8")).hexdigest() + ".lock"
+    lock_dir = Path(tempfile.gettempdir()) / "nuke_skill_locks"
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    lock_path = lock_dir / lock_name
+    
     fd = None
     try:
         fd = open(lock_path, "w")

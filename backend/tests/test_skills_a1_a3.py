@@ -292,17 +292,23 @@ Please write_file to save the output.""", encoding="utf-8")
 
     def test_file_locking_c4(self):
         from skills.lifecycle import file_lock
+        import tempfile
+        import hashlib
+        
         test_file = _TEST_WS_ROOT / "lock_test.txt"
         test_file.parent.mkdir(parents=True, exist_ok=True)
         test_file.write_text("content", encoding="utf-8")
         
-        lock_path = test_file.with_suffix(".txt.lock")
+        abs_path = str(test_file.resolve())
+        lock_name = hashlib.sha256(abs_path.encode("utf-8")).hexdigest() + ".lock"
+        lock_path = Path(tempfile.gettempdir()) / "nuke_skill_locks" / lock_name
+        
+        lock_path.unlink(missing_ok=True)
         self.assertFalse(lock_path.exists())
         
         with file_lock(test_file):
             self.assertTrue(lock_path.exists())
             
-        # After releasing, the lock file remains on disk, but the lock is released.
         # Verify we can acquire it again.
         with file_lock(test_file):
             self.assertTrue(lock_path.exists())
