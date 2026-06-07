@@ -1,5 +1,7 @@
 import asyncio
 import logging
+import os
+import threading
 from pathlib import Path
 from typing import List, Dict, Optional
 
@@ -7,6 +9,58 @@ from .constants import WORKSPACE_ROOT, SYSTEM_SKILLS_ROOT, ROLES_ROOT, bot_ws
 from .metadata import skill_path, parse_skill_meta
 
 log = logging.getLogger(__name__)
+
+# --------------------------------------------------------------------------- #
+# Four-layer scan cache (avoid re-reading + re-parsing every SKILL.md per turn)
+# --------------------------------------------------------------------------- #
+# list_skills_all() runs on EVERY prompt build (every bot, every turn). The cache
+# is keyed by (bot_id, group_id, role) and validated by a cheap mtime+size
+# signature of the relevant skill files, so an edit/add/delete is picked up
+# without reading file *contents* on a hit.
+#
+# Why signature-based rather than watcher-driven invalidation: the SkillWatcher
+# and this cache must be in the SAME process to communicate, and module-level
+# state does NOT cross fork. The mtime signature is correct in any process,
+# independent of whether a watcher runs there. invalidate_skills_cache() is an
+# extra same-process fast-path (called by the watcher) — not the correctness
+# mechanism.
+_SKILLS_CACHE: Dict[tuple, tuple] = {}   # key -> (signature, list[dict])
+_CACHE_LOCK = threading.Lock()
+
+
+def invalidate_skills_cache() -> None:
+    """Clear the four-layer scan cache (called by the watcher on skill changes)."""
+    with _CACHE_LOCK:
+        _SKILLS_CACHE.clear()
+
+
+def _scan_signature(bot_id: int, group_id: Optional[int], role: Optional[str]) -> tuple:
+    """Cheap fingerprint of all skill files for this (bot, group, role).
+
+    Walks the same layer dirs the full scan would, but only stats (mtime_ns,
+    size) instead of reading + YAML-parsing each file — detecting any change
+    (add / delete / edit) at a fraction of the cost."""
+    dirs = [SYSTEM_SKILLS_ROOT]
+    if group_id:
+        dirs.append(WORKSPACE_ROOT / f"group_{group_id}" / "shared" / "skills")
+    if role:
+        dirs.append(ROLES_ROOT / role / "skills")
+    dirs.append(bot_ws(bot_id) / "skills")  # personal: root + manual + learned/*
+
+    sig: list = []
+    for d in dirs:
+        if not d.exists():
+            continue
+        for root, _, files in os.walk(d):
+            for fn in files:
+                if fn.endswith((".md", ".py")):
+                    fp = os.path.join(root, fn)
+                    try:
+                        st = os.stat(fp)
+                        sig.append((fp, st.st_mtime_ns, st.st_size))
+                    except OSError:
+                        continue
+    return tuple(sorted(sig))
 
 
 def _scan_dir_sync(path: Path, layer: str) -> List[Dict]:
@@ -154,6 +208,17 @@ def _merge_skill_entry(merged: Dict[str, Dict], incoming: Dict) -> None:
         )
         return
 
+    # A5: Cross-layer override is by design (later layer wins), but a non-stub
+    # skill shadowing another layer's real content is worth a diagnostic so the
+    # collision is observable (mirrors gsd-2's winner/loser report).
+    if not incoming.get("is_stub", False) and not existing.get("is_stub", False):
+        if existing.get("path") and incoming.get("path") != existing.get("path"):
+            log.info(
+                "Skill override: '%s' — winner=%s (%s layer) shadows loser=%s (%s layer)",
+                name, incoming.get("path"), incoming.get("layer", "?"),
+                existing.get("path"), existing.get("layer", "?"),
+            )
+
     # A3: If overriding, perform a merged update (Deep Merge)
     merged_entry = dict(existing)
     
@@ -181,7 +246,25 @@ def _merge_skill_entry(merged: Dict[str, Dict], incoming: Dict) -> None:
 
 def _list_skills_all_sync(bot_id: int, group_id: Optional[int] = None,
                          role: Optional[str] = None) -> List[Dict]:
-    """Internal synchronous implementation of four-layer scan."""
+    """Cached four-layer scan. Returns fresh shallow copies so callers can mutate
+    top-level fields (e.g. `injected`) without poisoning the cache."""
+    key = (bot_id, group_id, role)
+    sig = _scan_signature(bot_id, group_id, role)
+    with _CACHE_LOCK:
+        entry = _SKILLS_CACHE.get(key)
+        if entry is not None and entry[0] == sig:
+            return [dict(s) for s in entry[1]]
+
+    result = _compute_skills_all(bot_id, group_id, role)
+
+    with _CACHE_LOCK:
+        _SKILLS_CACHE[key] = (sig, [dict(s) for s in result])
+    return result
+
+
+def _compute_skills_all(bot_id: int, group_id: Optional[int] = None,
+                        role: Optional[str] = None) -> List[Dict]:
+    """Internal synchronous implementation of four-layer scan (uncached)."""
     merged: Dict[str, Dict] = {}
 
     # L1 System

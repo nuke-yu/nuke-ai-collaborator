@@ -1,7 +1,24 @@
 # Tool Executor 架构重构设计方案 (分层路由器与 Provider 模式)
 
 > 最后更新：2026-06-07
-> 状态：设计选型中
+> 状态：**Plan B 目标设计稿（North Star）／未实施**
+
+> ⚠️ **实现者必读 —— 本文是目标态设计，不是当前已实现架构。**
+> 当前线上是 **Plan A 双车道**：本地工具（builtin / `run_shell` / `run_skill`）留在
+> `tool_executor._registry`，经 `tool_executor.execute()` 执行，全局 before/after hook
+> 在该层切入；只有 MCP 工具走 `ToolRouter`。**真实的 `tool_router.py` 不持有 hook**——
+> 与下文 §三.3 伪代码（hook 画在 router 里）不同。
+>
+> 因此，**不要直接照本文实现**，尤其：
+> - 不要注册 `SkillToolProvider` / `ShellToolProvider`（它们的 `execute()` 绕过全局
+>   hook；`ToolRouter` 为 first-match，注册即让 `run_shell`/`run_skill` 绕过权限/危险
+>   拦截——已发生过的安全回归，见 commit `d5ab65e`）。
+> - 不要假设 router 会跑 hook。
+>
+> 落地决策、迁移判据、不可协商约束、以及"hook 必须先进 router 本体"的安全前提，见
+> [TOOL-ROUTER-STRATEGIC-SOLUTION.md](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/docs/TOOL-ROUTER-STRATEGIC-SOLUTION.md)（§五迁移判据 / §六硬约束 / §七分阶段路径）。
+> 本文 §三.3 的"router 持有 `_before_hooks` / `_after_hooks` 并统一切入"正是迁移阶段 1
+> 必须先落地的形态——在那之前，上面那两个 provider 必须保持不注册。
 
 为解决当前项目中 `tool_executor.py` 全局扁平化耦合的问题，本方案设计了一套层次分明、高度解耦、面向接口的工具执行器路由系统。
 

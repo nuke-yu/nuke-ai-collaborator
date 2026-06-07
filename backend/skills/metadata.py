@@ -88,7 +88,7 @@ def parse_frontmatter(content: str) -> dict:
         fm["argument_hint"] = str(arg_hint)
         
     # Process boolean fields
-    for bool_key in ["always", "learns"]:
+    for bool_key in ["always", "learns", "template"]:
         if bool_key in raw_fm:
             val = raw_fm[bool_key]
             if isinstance(val, bool):
@@ -191,6 +191,7 @@ def parse_skill_meta(path: Path) -> dict:
             "status": fm.get("status", "active"),
             "layer": fm.get("layer", ""),
             "learns": fm.get("learns", False),
+            "template": fm.get("template", False),
             "paths": fm.get("paths", ""),
             "context": fm.get("context", "inline"),
             "shell": fm.get("shell", "bash"),

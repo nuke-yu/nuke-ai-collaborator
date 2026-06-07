@@ -1,24 +1,30 @@
 """
 providers/shell.py — ShellToolProvider
 
-Owns the run_shell tool exclusively:
-  - Dangerous-pattern blocking (tier-2 backstop)
-  - Env sanitization (_sandbox_env)
-  - CWD confinement to bot workspace
-  - Port interception & memory-limit wrapping
-  - asyncio subprocess management (foreground + background)
-  - Output truncation via the global after-hook (still in tool_executor)
+⚠️  DO NOT REGISTER THIS PROVIDER.  ⚠️
+================================================================================
+This is dormant Plan B scaffolding. It is intentionally NOT registered with the
+ToolRouter (see runtime/entry.py — workers register only MCP providers + the
+Builtin catch-all). It sits on NO execution path today.
 
-All shell-specific logic that used to live in workspace_tools.py as a global
-before-hook now belongs to this provider. The global _permission_check_hook
-in tool_executor still fires first (via BuiltinToolProvider's delegation path)
-for permission/ruleset gating — ShellToolProvider.execute() is only reached
-after hooks pass.
+execute() below calls the run_shell handler DIRECTLY and therefore BYPASSES the
+global before/after hooks — i.e. the permission check (_permission_check_hook)
+AND the dangerous-command guard (_default_shell_guard) that normally gate
+run_shell in tool_executor.
 
-Note: ShellToolProvider.execute() does NOT go through tool_executor.execute().
-It calls the handler directly, bypassing the global registry.  The before-hooks
-(permission + shell guard) are applied by the router's BuiltinToolProvider for
-the shell tool name BEFORE routing reaches here — so hook coverage is preserved.
+The ToolRouter is FIRST-MATCH. If you register this provider, run_shell calls
+will match here first and reach execute() WITHOUT any hook ever firing — a
+fail-open security regression (the exact one fixed in commit d5ab65e; see
+docs/TOOL-ROUTER-STRATEGIC-SOLUTION.md §四.3 / §八).
+
+Currently run_shell stays in tool_executor's registry and is dispatched via
+tool_executor.execute() (tool_loop_v1._dispatch_tool), so its hooks DO fire.
+That guarantee holds ONLY because this provider is unregistered.
+
+Before this provider may be registered, Plan B 阶段 1 must land first: hooks
+must be lifted into ToolRouter.execute() as a non-bypassable pipeline. Until
+then: leave it unregistered.
+================================================================================
 """
 import logging
 
@@ -47,9 +53,10 @@ class ShellToolProvider(ToolProvider):
     """
     Owns run_shell and all its sandboxing machinery.
 
-    Registering this provider with the ToolRouter is enough — it does NOT
-    need to call tool_executor.register() for run_shell.  The ToolRouter
-    will route run_shell calls here directly.
+    ⚠️ DO NOT REGISTER — see module docstring. execute() bypasses the global
+    permission/danger hooks; the ToolRouter is first-match, so registering this
+    would let run_shell reach execute() with NO hook firing (security
+    regression). run_shell is correctly served via tool_executor today.
     """
 
     @property

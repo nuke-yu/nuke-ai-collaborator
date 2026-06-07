@@ -54,6 +54,10 @@ class ToolRouter:
         self._providers.append(provider)
         logger.info(f"ToolRouter: registered provider '{provider.provider_id}'")
 
+    def has_providers(self) -> bool:
+        """Public predicate: True when at least one provider is registered."""
+        return bool(self._providers)
+
     def unregister_provider(self, provider_id: str) -> None:
         before = len(self._providers)
         self._providers = [p for p in self._providers if p.provider_id != provider_id]
@@ -73,6 +77,33 @@ class ToolRouter:
         """
         schemas = []
         for provider in self._providers:
+            for td in provider.discover_tools():
+                schemas.append({
+                    "type": "function",
+                    "function": {
+                        "name": td.name,
+                        "description": td.description,
+                        "parameters": td.parameters,
+                    },
+                })
+        return schemas
+
+    def get_external_schemas(self) -> list[dict]:
+        """
+        Return schemas for tools NOT backed by tool_executor's registry.
+
+        Callers (tool_loop_v1) already obtain builtin schemas via
+        tool_executor.get_schemas(tool_names) with the per-stage manifest
+        whitelist applied.  The BuiltinToolProvider mirrors that same registry,
+        so including it here would re-surface tools the manifest deliberately
+        excluded (a whitelist leak).  We therefore skip the 'builtin' catch-all
+        and return only external providers (MCP), which the manifest never
+        lists.
+        """
+        schemas = []
+        for provider in self._providers:
+            if provider.provider_id == "builtin":
+                continue
             for td in provider.discover_tools():
                 schemas.append({
                     "type": "function",

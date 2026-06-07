@@ -1,19 +1,29 @@
 """
 providers/skill.py — SkillToolProvider
 
-Owns the run_skill tool.  Skill execution goes through skills.run_skill()
-directly — no tool_executor registration needed.
+⚠️  DO NOT REGISTER THIS PROVIDER.  ⚠️
+================================================================================
+This is dormant Plan B scaffolding. It is intentionally NOT registered with the
+ToolRouter (see runtime/entry.py — workers register only MCP providers + the
+Builtin catch-all). It sits on NO execution path today.
 
-Why a dedicated provider:
-  - Skills are declarative Markdown documents, not Python handlers.
-  - Their lifecycle (discovery, argument substitution, markdown expansion)
-    is managed by the skills/ subsystem, not by the tool_executor registry.
-  - Separating them prevents skills from being accidentally affected by
-    global hooks that target "all tools" (e.g., a future rate-limiter that
-    shouldn't apply to local skill evaluation).
+execute() below calls skills.run_skill() DIRECTLY and therefore BYPASSES the
+global before/after hooks — including the permission check
+(_permission_check_hook) that normally gates run_skill in tool_executor.
 
-The global _permission_check_hook still fires for run_skill via the before-hook
-pipeline (BuiltinToolProvider path), so permission gating is preserved.
+The ToolRouter is FIRST-MATCH. If you register this provider, run_skill calls
+will match here first and reach execute() WITHOUT any hook ever firing — a
+fail-open permission regression (same class as the run_shell one fixed in
+commit d5ab65e; see docs/TOOL-ROUTER-STRATEGIC-SOLUTION.md §四.3 / §八).
+
+Currently run_skill stays in tool_executor's registry and is dispatched via
+tool_executor.execute() (tool_loop_v1._dispatch_tool), so its hooks DO fire.
+That guarantee holds ONLY because this provider is unregistered.
+
+Before this provider may be registered, Plan B 阶段 1 must land first: hooks
+must be lifted into ToolRouter.execute() as a non-bypassable pipeline. Until
+then: leave it unregistered.
+================================================================================
 """
 import logging
 
@@ -39,8 +49,10 @@ class SkillToolProvider(ToolProvider):
     """
     Routes run_skill calls directly to skills.run_skill().
 
-    This provider does NOT call tool_executor.execute() — skill execution
-    is handled entirely within the skills/ subsystem.
+    ⚠️ DO NOT REGISTER — see module docstring. execute() bypasses the global
+    permission hook; the ToolRouter is first-match, so registering this would
+    let run_skill reach execute() with NO hook firing (permission regression).
+    run_skill is correctly served via tool_executor today.
     """
 
     @property

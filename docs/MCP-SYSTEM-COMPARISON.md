@@ -2,20 +2,29 @@
 
 > 最后更新：2026-06-07
 > 状态：设计与选型分析 (基于本地源码审计与架构纠偏)
+>
+> ⚠️ **勘误（已按实现代码校正）**：本文早期版本把 nuke 的 MCP 记为「N/A（规划中）」，
+> 第五节也以「未来步骤」描述了部分已落地能力。实际上 stdio 模式 MCP 客户端
+> ([mcp_client.py](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/executors/providers/mcp_client.py))
+> 已实现：单 task 会话所有权、`allow_list`、双侧 `asyncio.wait_for` 超时、配置化 HIL、
+> Claude Desktop 兼容的 `mcp_servers.json`，并已补齐**自动重连**与 **I/O 不可信防护**
+> （工具投毒扫描 + 结果围栏）。下表与 §五已据此校正；仍缺的能力（remote 传输 / OAuth /
+> ToolListChanged）见 §五与
+> [TOOL-LAYER-GAP-ANALYSIS.md](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/docs/TOOL-LAYER-GAP-ANALYSIS.md)。
 
 ---
 
 ## 一、 MCP 协议能力与接入演进计划 (横向对比)
 
-本表聚焦于 **MCP 协议** 的原生支持、通道通信与服务生命周期管理。当前项目在此项上为 **N/A（规划中）**。
+本表聚焦于 **MCP 协议** 的原生支持、通道通信与服务生命周期管理。当前项目在此项上为 **🔶 stdio 客户端已实现**（含自动重连 + I/O 不可信防护；remote/OAuth/ToolListChanged 待补，见 §五）。
 
 | 维度 / 机制 | Claude Code (TypeScript)<br>[claude-code-haha-main](file:///Users/Nuke/claude-code-haha-main) | opencode (TypeScript)<br>[opencode](file:///Users/Nuke/opencode) | gsd-2 (TypeScript/Rust)<br>[gsd-2](file:///Users/Nuke/gsd-2) | openclaw (TypeScript)<br>[openclaw-main](file:///Users/Nuke/openclaw-main) | nuke-ai-collaborator (Python/SQLite)<br>[当前项目](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator) |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **MCP 协议角色** | **Server & Client**：<br>1. **Client**：作为客户端连接并加载外部 Server 的工具。<br>2. **Server**：通过 `entrypoints/mcp.ts` 暴露内置工具给其他 AI 宿主。 | **Client**：<br>实现完整的 MCP 客户端管理器，维护多个本地与远程连接状态。 | **Client**：<br>主要作为客户端基于项目根目录 `.mcp.json` 挂载外部工具，不涉及复杂的双向 Server 引擎。 | **Client**：<br>客户端模式，通过 Stdio 包装器连接底层服务器。 | **N/A (规划中)**：<br>当前版本无原生 MCP 协议支持，计划采用插件化 Adapter 方式在未来阶段接入。 |
-| **传输协议实现** | **stdio / SSE**：<br>在客户端和服务端中都使用官方 SDK；服务端使用 `StdioServerTransport` 监听并处理来自外来客户端的同步进程管道数据。 | **stdio / SSE / StreamableHTTP**：<br>使用 `StdioClientTransport` 启动本地进程，以及 `SSEClientTransport` / `StreamableHTTPClientTransport` 执行远程通信。 | **stdio**：<br>基于 stdio 管道和 JSON-RPC 传输，对管道消息按 Tool 边界进行分发。 | **stdio / SSE**：<br>自定义 `OpenClawStdioClientTransport` 包装标准 I/O 管道，支持 stderr 数据流重定向与格式化日志记录。 | **N/A (规划中)**：<br>无 RPC 管道协议，未来计划采用 `asyncio.subprocess` (Stdio) 以及 `aiohttp` (SSE) 作为传输层。 |
-| **变化通知与感知** | **环境感知重连**：<br>随主进程生命周期加载，继承 Bash/MCP 环境变量并支持热插拔重载。 | **事件总线与热更新**：<br>使用 `setNotificationHandler` 监听 `ToolListChangedNotificationSchema`，当工具集变更时拉取新定义并向 Bus 广播 `ToolsChanged` 事件。 | **静态绑定**：<br>随后台任务拉起，主要在启动期根据配置初始化加载，不支持动态热重载。 | **Stderr 订阅监听**：<br>订阅 `transport.stderr.on("data")`，一旦捕获到崩溃或数据变动日志，触发动态重连和警告上报。 | **N/A**：<br>无动态连接通知机制。 |
-| **子进程退出控制** | **主进程回收**：<br>随主进程生命周期释放。在 `src/main.tsx` 等中使用 pgrep 递归或标准退出机制进行关联进程回收。 | **未作深层强杀**：<br>仅依赖标准 `client.close()`，子进程可能在后台残留。 | **基于 Rust ps.rs 的跨平台强杀**：<br>使用 Crate `native/crates/engine/src/ps.rs` 中的原生进程树逻辑，精准实现子进程的树状 SIGTERM 强杀，无 pgrep 外部依赖。 | **管道流感知**：<br>基于 `transport.stderr.on("data")` 辅助感知崩溃。 | **N/A**：<br>无进程常驻与子进程树管理。 |
-| **认证与 OAuth 机制** | **无/默认 OAuth**：<br>主要继承主应用的安全态与 credentials。 | **McpOAuthProvider**：<br>内置 `McpOAuthProvider`、`McpOAuthCallback` 与 `McpAuth` 服务，支持完整的 OAuth 客户端注册与三方鉴权流程。 | **静态配置挂载**：<br>在本地项目根目录 `.mcp.json` 中配置，不涉及复杂的用户三方认证流程。 | **OAuth 凭证解析**：<br>通过配置文件解析配置的敏感 headers 及 url 属性。 | **N/A**：<br>不具备网络与凭证认证层。 |
+| **MCP 协议角色** | **Server & Client**：<br>1. **Client**：作为客户端连接并加载外部 Server 的工具。<br>2. **Server**：通过 `entrypoints/mcp.ts` 暴露内置工具给其他 AI 宿主。 | **Client**：<br>实现完整的 MCP 客户端管理器，维护多个本地与远程连接状态。 | **Client**：<br>主要作为客户端基于项目根目录 `.mcp.json` 挂载外部工具，不涉及复杂的双向 Server 引擎。 | **Client**：<br>客户端模式，通过 Stdio 包装器连接底层服务器。 | **✅ Client（已实现）**：<br>`McpClientToolProvider` 作为客户端连接外部 stdio Server，经 `ToolRouter` 分流（每 server 一个 provider，工具名前缀 `{server}__`）。暂不作 Server 端暴露。 |
+| **传输协议实现** | **stdio / SSE**：<br>在客户端和服务端中都使用官方 SDK；服务端使用 `StdioServerTransport` 监听并处理来自外来客户端的同步进程管道数据。 | **stdio / SSE / StreamableHTTP**：<br>使用 `StdioClientTransport` 启动本地进程，以及 `SSEClientTransport` / `StreamableHTTPClientTransport` 执行远程通信。 | **stdio**：<br>基于 stdio 管道和 JSON-RPC 传输，对管道消息按 Tool 边界进行分发。 | **stdio / SSE**：<br>自定义 `OpenClawStdioClientTransport` 包装标准 I/O 管道，支持 stderr 数据流重定向与格式化日志记录。 | **🔶 stdio（已实现）/ remote（未做）**：<br>官方 `mcp` Python SDK 的 `stdio_client` + `StdioServerParameters`（env 合并保留 PATH）。**remote SSE/HTTP 尚未实现**（见 §五）。 |
+| **变化通知与感知** | **环境感知重连**：<br>随主进程生命周期加载，继承 Bash/MCP 环境变量并支持热插拔重载。 | **事件总线与热更新**：<br>使用 `setNotificationHandler` 监听 `ToolListChangedNotificationSchema`，当工具集变更时拉取新定义并向 Bus 广播 `ToolsChanged` 事件。 | **静态绑定**：<br>随后台任务拉起，主要在启动期根据配置初始化加载，不支持动态热重载。 | **Stderr 订阅监听**：<br>订阅 `transport.stderr.on("data")`，一旦捕获到崩溃或数据变动日志，触发动态重连和警告上报。 | **🔶 自动重连（已实现）/ 无 ToolListChanged**：<br>会话异常死亡后，`execute()` 经 `_ensure_alive()` 按冷却+锁尝试重连（已修复"一次崩溃永久报废"）。但 `initialize()` 仍一次性缓存工具表，**无 `ToolListChanged` 订阅**（server 增删工具不感知）。详见 §五。 |
+| **子进程退出控制** | **主进程回收**：<br>随主进程生命周期释放。在 `src/main.tsx` 等中使用 pgrep 递归或标准退出机制进行关联进程回收。 | **未作深层强杀**：<br>仅依赖标准 `client.close()`，子进程可能在后台残留。 | **基于 Rust ps.rs 的跨平台强杀**：<br>使用 Crate `native/crates/engine/src/ps.rs` 中的原生进程树逻辑，精准实现子进程的树状 SIGTERM 强杀，无 pgrep 外部依赖。 | **管道流感知**：<br>基于 `transport.stderr.on("data")` 辅助感知崩溃。 | **🔶 哨兵 + 上下文管理器回收（已实现，无树强杀）**：<br>`close()` 投递 `_STOP` 哨兵让会话 task 退出，`async with stdio_client/ClientSession` 在**同一 task 内**解绑回收子进程（规避 anyio 跨 task cancel-scope）；worker 退出时 `tool_router.close_all()`。**无显式进程树 SIGTERM 强杀**，npx 派生的孙进程理论上可能残留（类似 opencode）。 |
+| **认证与 OAuth 机制** | **无/默认 OAuth**：<br>主要继承主应用的安全态与 credentials。 | **McpOAuthProvider**：<br>内置 `McpOAuthProvider`、`McpOAuthCallback` 与 `McpAuth` 服务，支持完整的 OAuth 客户端注册与三方鉴权流程。 | **静态配置挂载**：<br>在本地项目根目录 `.mcp.json` 中配置，不涉及复杂的用户三方认证流程。 | **OAuth 凭证解析**：<br>通过配置文件解析配置的敏感 headers 及 url 属性。 | **🔶 静态 env 注入（无 OAuth）**：<br>`mcp_servers.json` 的 `env` 合并到子进程环境（stdio 本地进程模型）；**无网络鉴权 / OAuth 层**——属 remote 传输的前置依赖，见 §五。 |
 
 ---
 
@@ -40,12 +49,15 @@
 1. **防竞态互斥控制**：我们通过不 unlink 的 SHA-256 临时锁彻底消除了多进程/并发下的文件锁竞争态。
 2. **大模型调用容错率高**：支持 `file_path`/`filepath`/`filePath` 等参数的自动归一化，大幅减少了大模型由于别名导致的调用崩溃。
 3. **安全审计严格**：具备严格的正则白名单过滤（`^[a-z0-9_-]+$`）和二阶段 HIL 审批流程。
+4. **MCP 单 task 会话所有权**：`stdio_client`+`ClientSession` 在专属 task 内 enter/exit，规避 anyio 跨 task cancel-scope 错误——与 opencode 同级。
+5. **MCP 双侧超时 + 配置化 HIL**：caller 侧与会话循环内都包 `asyncio.wait_for`；写类工具按 `require_approval_all`/`approval_tools`/写类名启发式三级门禁经 `permissions.check` 审批。
 
 ### 劣势与缺口 (Weaknesses & Gaps)
-1. **缺少远程工具扩展**：当前所有的工具都在主进程内以同步导入 Python 文件方式执行，无法无缝接入网络上的外部 API 工具生态。
+1. **MCP 仅 stdio，无 remote**：stdio 本地进程模式已可接入外部工具（崩溃后已能自动重连，见 §五.1），但**无 remote SSE/HTTP**，接不了纯网络 API 工具生态。
 2. **跨平台沙箱隔离薄弱**：除了 Windows 平台下实现了 Job Object 内存硬限制外，在 macOS/Linux 下完全依赖主进程的权限运行，缺乏彻底的文件系统/进程级容器隔离。
 3. **阻塞事件循环隐患**：虽然使用了 `to_thread` 包装了磁盘读写，但对于部分同步的 CPU 密集型分析（如自定义正则校验），仍有阻塞主循环的风险。
-4. **无凭证与鉴权管理层**：项目目前不具备统一的 API 秘钥保管、凭证分发及三方 OAuth 鉴权网关。
+4. **无凭证与鉴权管理层**：项目目前不具备统一的 API 秘钥保管、凭证分发及三方 OAuth 鉴权网关（remote MCP 的前置依赖）。
+5. **~~MCP I/O 未做不可信处理~~ → ✅ 已修复**：server 返回的工具描述与调用结果均已做注入扫描 + 结果围栏（见 §五.2/§五.3）。
 
 ---
 
@@ -78,9 +90,12 @@ LLM Intent  ──►  [ tool_executor ]  ──►  [ HIL 审批队列 ]  ─�
 
 ---
 
-## 五、 未来 MCP 接入演进方案设计 (Evolution Path)
+## 五、 MCP 接入演进路线 (Evolution Path — 现状已校正)
 
-根据项目的架构设计，我们在后续阶段接入 MCP 时，将采用**插件化的适配器模式**，确保与现有安全 and 锁机制的 100% 兼容。
+> 本节原为「未来设计」。实际上 stdio 客户端已落地，下方「接入实现步骤」逐条标注了
+> **已完成 / 部分 / 未做**，未做项即当前真实的 MCP 待办（与 `TOOL-LAYER-GAP-ANALYSIS.md` 对齐）。
+
+整体仍采用**插件化适配器模式**（`ToolProvider` + `ToolRouter`），与现有安全/锁机制兼容。
 
 ```mermaid
 graph TD
@@ -101,16 +116,23 @@ graph TD
     SSE -->|JSON-RPC| RemoteMCP[Remote MCP Server]
 ```
 
-### 接入实现步骤
+### 接入实现步骤（含现状标注）
 
-1.  **动态客户端生命周期管理 (Subprocess Handoff)**：
-    *   在 `McpClientExecutor` 内部，使用 Python 的 `psutil` 追踪 Stdio 模式下启动的所有子进程。
-    *   在 `shutdown` 或热重载时，通过 `kill_process_tree()` 递归获取当前子树的所有 PID 并发送 `SIGTERM`，防止出现僵尸进程。
-2.  **远端调用超时控制与 Cancel (AbortSignal 等价物)**：
-    *   对于每一次 `session.call_tool`，包装 `asyncio.wait_for` 设定硬性超时阈值。
-    *   当发生超时或模型取消该会话时，主动抛出 `asyncio.CancelledError`，客户端向 MCP Server 发送取消通知并安全关闭网络/进程管道。
-3.  **治理体系 (Allow-list / Deny-list)**：
-    *   在 `config/mcp.json` 中配置每个 MCP 服务的工具黑白名单。即便 Server 暴露了 100 个工具，客户端也只将白名单内的工具映射注册给大模型，缩小攻击面。
-4.  **选择性本地锁桥接 (Selective File Locking)**：
-    *   **修正**：不再对远程 MCP 工具的所有参数盲目加锁。
-    *   *实现*：只有当 MCP 工具调用的参数明确包含我们系统内可解析的本地文件路径（如参数名为 `path` 且指向本地工作区内），才触发 [lifecycle.py](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/skills/lifecycle.py) 的 `file_lock`，对其余纯网络或虚拟资源不予干涉。
+1.  **🔶 部分：动态客户端生命周期管理 (Subprocess Handoff)**：
+    *   **已做**：`close()` 投递 `_STOP` 哨兵让会话 task 退出，`async with` 在同 task 内回收子进程；worker 退出调 `tool_router.close_all()`。
+    *   **未做**：`psutil` / `kill_process_tree()` 递归 SIGTERM——npx 派生的孙进程理论上仍可能残留，需要时再补显式进程树强杀。
+2.  **✅ 已完成：远端调用超时控制与 Cancel**：
+    *   `session.call_tool` 在**会话循环内**包 `asyncio.wait_for(timeout=call_timeout)`；caller 侧 `execute()` 也包一层 `wait_for(asyncio.shield(future))`，双侧均不会被挂死调用拖住（`mcp_client.py:184,300`）。
+3.  **🔶 部分：治理体系 (Allow-list / Deny-list)**：
+    *   **已做**：`mcp_servers.json` 的 `allow_list` 在 `_cache_tools` 时按 server 端工具名过滤，只注册白名单工具，缩小攻击面。
+    *   **未做**：按 bot/场景/模型的 **deny-list / 动态黑白名单两段过滤**（对标 gsd-2 `mcp-filter.ts`，见 `TOOL-LAYER-GAP-ANALYSIS #9`）。
+4.  **⬜ 未做（可选）：选择性本地锁桥接 (Selective File Locking)**：
+    *   设想：仅当 MCP 工具参数明确指向本地工作区路径时才触发 [lifecycle.py](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/skills/lifecycle.py) 的 `file_lock`。当前 filesystem 类 MCP 与本地 `write_file` 走不同物理路径，优先级低。
+
+### MCP 缺口（按优先级，含现状标注）
+
+1.  **✅ 已修复：崩溃检测 + 自动重连**：`execute()` 入口调 `_ensure_alive()`——会话 task 已死时尝试一次重连，由 `_reconnect_lock` 串行化（防重连风暴）+ `_RECONNECT_COOLDOWN=5s` 冷却（防持续锤击死服务）；被 `close()` 主动关闭的 provider 不复活。(`mcp_client.py`)
+2.  **✅ 已修复：工具投毒静态扫描 (Tool Poisoning)**：`_cache_tools` 对每个工具的 name+description 跑 `_scan_injection`（EN+ZH 注入模式），命中即净化描述（不把投毒文本注入 system prompt）并告警。
+3.  **✅ 已修复：结果按不可信外部数据处理 (间接注入)**：`execute()` 对成功结果**无条件**包一道 `_wrap_untrusted` 围栏（标注"不可信外部数据、勿当指令"），命中注入模式再升级提示并告警；错误结果是我方文案不包裹。与 `TOOL-LAYER-GAP-ANALYSIS #2 输出脱敏`（防密钥外流，方向相反）互补。
+4.  **🟡 ToolListChanged 动态刷新**：对标 opencode `setNotificationHandler`；stdio 场景优先级低，未做。
+5.  **（已记于 `TOOL-LAYER-GAP-ANALYSIS`，不重复）** #5 remote(SSE/HTTP)+OAuth+健康检查；进程树强杀（§五步骤1的"未做"项）。
