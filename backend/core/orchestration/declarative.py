@@ -48,7 +48,7 @@ class DeclarativeOrchestrator(Orchestrator):
         ctx = self._ctx(group_id)
         return None if ctx is None else stage_handler(ctx.stage).current_pool_bots(ctx.stage)
 
-    def current_stage_name(self, group_id: int) -> str | None:
+    def current_stage_role(self, group_id: int) -> str | None:
         ctx = self._ctx(group_id)
         if ctx and ctx.stage:
             role = ctx.stage.get("role") or ""

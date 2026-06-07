@@ -337,7 +337,7 @@ Please write_file to save the output.""", encoding="utf-8")
             self.assertIsNotNone(orch)
             
             # Verify stage name resolves to its role family "dev"
-            current_stage = orch.current_stage_name(group_id)
+            current_stage = orch.current_stage_role(group_id)
             self.assertEqual(current_stage, "dev")
             
             # Test integration with filter_skills_by_context

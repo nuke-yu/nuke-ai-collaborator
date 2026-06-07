@@ -84,8 +84,8 @@ class Orchestrator(ABC):
         """当前在岗的一组 bot id（无池语义则 None）。"""
         return None
 
-    def current_stage_name(self, group_id: int) -> str | None:
-        """当前活跃阶段的名称（无阶段语义则为 None）。"""
+    def current_stage_role(self, group_id: int) -> str | None:
+        """当前活跃阶段的角色标识（无阶段语义则为 None）。"""
         return None
 
     def is_awaiting_confirm(self, group_id: int) -> bool:
