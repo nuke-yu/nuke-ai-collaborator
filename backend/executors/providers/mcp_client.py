@@ -276,8 +276,12 @@ class McpClientToolProvider(ToolProvider):
             return f"[MCP超时] 工具 '{name}' 执行超过 {self._call_timeout} 秒", True
 
         # Fence successful results as untrusted external data (indirect-injection
-        # defense). Errors are our own framing, not server data — leave as-is.
+        # defense) + redact credentials. MCP routes through the router, so it does
+        # NOT pass through tool_executor's after-hooks — redact here too. Errors
+        # are our own framing, not server data — leave as-is.
         if not is_error:
+            from executors.redaction import redact_secrets
+            result_text, _ = redact_secrets(result_text)
             result_text = _wrap_untrusted(self._server_name, real_name, result_text)
         return result_text, is_error
 

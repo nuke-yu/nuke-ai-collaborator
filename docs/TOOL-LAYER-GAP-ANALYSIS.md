@@ -47,10 +47,11 @@
 - **残留（denylist 的本质上限，非本次目标）**：任意语言内联求值（`python -c "import os;os.system(...)"`）、运行期变量间接（`X=/; rm -rf $X`）、自写脚本再执行——静态 denylist 都不可能穷尽。**真正的一道闸是 HIL 权限门**（`_default_shell_guard` 无 ruleset fail-closed + `_permission_check_hook` ask/deny），denylist 仅为「即便规则放行也拦明显毁灭性命令」的 backstop。
 - **对标 / 后续**：Claude Code `classifierApprovals.ts`（LLM `BASH_CLASSIFIER` + `isSearchOrReadCommand()` 只读命令自动放行）；openclaw 容器沙箱 + exec 边界 CodeQL。要再进一步需 classifier 级判定或容器/命名空间隔离——非规则匹配能覆盖，列为后续增强。
 
-### 2. 🔴 工具输出无密钥脱敏
-- **现状**：`executors/` 下无任何 redact/脱敏逻辑（全量 grep 零命中）；after-hook 只做截断。`run_shell` 打印的 env / token 直接进模型上下文，并会注回其他 agent。
-- **对标**：openclaw `extensions/tokenjuice/tool-result-middleware.ts` 提供 `AgentToolResultMiddleware` 链，对工具结果做脱敏。
-- **建议**：在 after-hook（或未来 router 管线）加一道输出脱敏中间件。多 agent 共享上下文使泄漏放大，优先级高。
+### 2. ✅ 工具输出密钥脱敏 — 已修复
+- **现状（已实现）**：[executors/redaction.py](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/executors/redaction.py) `redact_secrets()` 按高置信格式脱敏(PEM 私钥块、JWT、AWS AKID、GitHub `ghp_`/`github_pat_`、OpenAI/Anthropic `sk-`、Slack `xox*`、Google `AIza*`、带凭据 URL→只遮密码、`Authorization: Bearer`、`*KEY/TOKEN/SECRET/PASSWORD/...=值`→保留键名只遮值)。在**两个**汇出口接入:① tool_executor after-hook `_default_secret_redactor`,**注册在截断器之前**(全文先脱敏再截断,截断持久化的内容也安全)——覆盖 builtin/run_shell/run_skill;② `McpClientToolProvider.execute`(MCP 走 router 不经 after-hook,自带一道)。与 MCP 结果围栏互补(那是防注入流入,这是防密钥流出)。
+- **精度取舍**:高精度优先,只匹配可识别的密钥格式;不做通用高熵检测(否则会误遮 hash/ID/base64)。`PWD=`、`API_URL=` 等已验证不误遮。单测 `tests/test_redaction.py`(23 例)+ `test_mcp_provider.py::test_result_secrets_redacted`。
+- **对标**:openclaw `tool-result-middleware.ts` 的 `AgentToolResultMiddleware` 链。
+- **残留**:仅静态格式匹配,自定义/无格式密钥仍可能漏;通用高熵检测因误报率高未做。
 
 ### 3. 🟠 子 agent 权限只整体继承、不衰减
 - **现状**：[tool_loop_v1.py:362-363](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/executors/plugins/tool_loop_v1.py) 子 agent `self.ruleset = self.ctx.ruleset`（spawn 时 [workspace_tools.py:223](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/executors/plugins/workspace_tools.py) 原样下传父 ruleset），护栏仅 `_SPAWN_MAX_DEPTH` 深度上限。子 = 父的全部权限，无最小权限子集。

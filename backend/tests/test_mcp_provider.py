@@ -242,6 +242,17 @@ class TestMcpClientToolProvider(unittest.IsolatedAsyncioTestCase):
         self.assertIn("plain file body", result)
         await p.close()
 
+    async def test_result_secrets_redacted(self):
+        """#2 defect: secrets in an MCP result are redacted (MCP bypasses the
+        tool_executor after-hooks, so it must redact in its own path)."""
+        secret = "ghp_" + "a" * 40
+        p = await _make_live_provider(call_result_text=f"config: token={secret}")
+        result, is_error = await p.execute("filesystem__read_file", {"path": "/x"}, {})
+        self.assertFalse(is_error)
+        self.assertNotIn(secret, result)
+        self.assertIn("[REDACTED]", result)
+        await p.close()
+
     async def test_result_injection_escalated(self):
         """An MCP result carrying injection markers escalates the fence notice."""
         p = await _make_live_provider(
