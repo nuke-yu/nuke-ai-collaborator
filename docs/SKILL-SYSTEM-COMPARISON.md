@@ -23,33 +23,60 @@
 
 ## 二、 架构诊断建议与薄弱点反馈（Strict Architect Feedback）
 
+> ⚠️ **勘误（已按实现代码校正，2026-06-07）**：本节首版指出的 6 条隐患，多数已落地修复。
+> 现状速览：
+> | # | 隐患 | 现状 |
+> |:-:|:---|:---|
+> | 1 | Stub 覆盖丢 body | ✅ 已修复（`discovery._merge_skill_entry` A3 深合并） |
+> | 2 | 脆弱手工 YAML 解析 | ✅ 已修复（`metadata.parse_frontmatter` 改用 `yaml.safe_load`） |
+> | 3 | 生命周期无文件锁 | ✅ 已修复（`lifecycle.file_lock` SHA-256，fcntl/msvcrt 跨平台） |
+> | 4 | 无安全动态求值 | ⬜ 未做（按 DFT-022 一刀切禁 shell，属安全取舍） |
+> | 5 | 平铺命名空间冲突 | 🔶 部分（system 保护 + draft 冲突有诊断；非 system 层互覆盖仍静默） |
+> | 6 | 高频磁盘扫描 | ⬜ 未做（`watcher.py` 仅给前端发 WS 通知，后端 `list_skills_all` 每次仍全量扫盘） |
+>
+> 下文逐条保留原始诊断作为背景，并在每条标注现状。
+
 从严格又苛刻的架构师视角出发，我们当前的 Python Skill 实现虽然在顶层设计上具备了层级覆盖、沙箱逃逸 guard 等优秀思路，但底层代码结构存在以下技术硬伤和隐患：
 
-### 1. 覆写逻辑不完整（破坏性覆盖缺陷）
+### 1. 覆写逻辑不完整（破坏性覆盖缺陷） — ✅ 已修复
 在 [discovery.py](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/skills/discovery.py) 的 `_list_skills_all_sync` 中合并字典时，使用 `merged.update(personal_skills)` 执行了整轨覆盖。当用户通过 [lifecycle.py](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/skills/lifecycle.py) 中的 `update_skill_status` 禁用下层技能时，会在 Personal 层生成一个仅包含 frontmatter 的 Stub 存根文件：
 ```python
 stub = f"---\nname: {skill_name}\nlayer: personal\nstatus: {new_status}\n---\n"
 ```
 由于没有对内容进行深度合并（Deep Merge），该 Stub 会**彻底覆盖并弄丢**下层文件的技能内容 Body。当大模型未来重新启用该技能或尝试加载时，读到的是一个完全被掏空的技能。
 * **改进方案**：应改为**元数据深度合并**，即 Personal 层的 Stub 只重写 status 等特定字段，其物理文件内容在加载时若缺失，自动降级（Fallback）去读取下层定义。
+* **现状（已实现）**：[discovery.py:133 `_merge_skill_entry`](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/skills/discovery.py) 已做深合并——incoming 为 stub（`is_stub`）时只覆盖 `status`/`layer`，**保留下层的 `path`/`type`/body**；仅非 stub 才接管内容路径。`metadata.parse_skill_meta` 用 `is_stub = not body` 标记空 body。
 
-### 2. 脆弱的手工 YAML 解析器
+### 2. 脆弱的手工 YAML 解析器 — ✅ 已修复
 在 [metadata.py](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/skills/metadata.py) 的 `parse_frontmatter` 中，我们采用了自定义的字符串 Partition 和 Comma Split 方式解析元数据。
 当用户定义符合标准 YAML 规范的多行文本或层级列表时，手工解析器会完全崩溃或失效，使得 `allowed-tools` 等控制字段读取不全，对安全白名单构成隐患。
 * **改进方案**：引入 Python 标准的 `yaml.safe_load` 解析 Frontmatter，确保元数据解析逻辑绝对符合 YAML 标准。
+* **现状（已实现）**：[metadata.py:71](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/skills/metadata.py) 已改用 `yaml.safe_load`，再对 `allowed_tools`/`roles`/`stages` 等做 list↔逗号串双态归一、布尔/整数字段类型转换；解析失败 fail-safe 返回 `{}`。
 
-### 3. 并发安全与文件 I/O 竞争
+### 3. 并发安全与文件 I/O 竞争 — ✅ 已修复（文件锁）
 生命周期操作（写 Draft、审批、拒绝、改状态）直接以同步方式对磁盘进行覆盖与 Rename，没有任何文件锁（File Lock）或事务保障。在高并发会话或多 Agent 并行运行时，针对同一技能的操作极易发生冲突，引发 `FileNotFoundError` 或文件内容截断损坏。
 * **改进方案**：引入文件排他锁，或将技能生命周期状态和层级关系彻底**数据库化（SQLite）**，仅将磁盘作为初始导入源。
+* **现状（已实现文件锁）**：[lifecycle.py:9 `file_lock`](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/skills/lifecycle.py) 用按绝对路径 SHA-256 命名的临时锁文件（`fcntl.flock` / Windows `msvcrt.locking`，不 unlink 以消除 flock 竞态），`write_to_draft`/`update_skill_status`/`approve_draft_skill`/`reject_draft_skill` 全部包锁。SQLite 化属更彻底的演进方向，暂未做。
 
-### 4. 缺乏安全的动态求值引擎
+### 4. 缺乏安全的动态求值引擎 — ⬜ 未做（安全取舍）
 在 [processor.py](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/skills/processor.py) 中，为了防止恶意智能体进行注入，我们一刀切地禁用了 Shell 预执行（`!`）。这保证了绝对的安全，但也使得技能沦为纯静态 prompt 模板，失去了环境感知能力（例如根据当前工作区语言自动注入对应的测试流程规范）。
 * **改进方案**：引入一个隔离且安全的 Jinja2 沙箱或 Python 受限表达式计算器，在不给 RCE 任何可乘之机的前提下，允许根据环境动态计算 Prompt 变量。
+* **现状（未做，属取舍）**：[processor.py](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/skills/processor.py) 按 DFT-022 已彻底移除 skill 内嵌 `!`/`` !`cmd` `` 求值（自写 skill = RCE 链），目前只做 `$ARGUMENTS`/`${SKILL_DIR}` 静态替换。环境感知能力的缺失是**已知代价**；若要恢复，应走沙箱模板而非放开 shell。优先级看是否真有「按工作区语言注入测试规范」类需求。
 
-### 5. 平铺命名空间冲突
+### 5. 平铺命名空间冲突 — 🔶 部分修复
 所有技能在 `list_skills` 后被强行平铺合并，如果不同 Role（L3）或 Group（L2）下定义了同名的 `test.md` 技能，会出现隐式的覆盖冲突，且不输出任何 Collision 警告（gsd-2 有健全的冲突诊断警告报告）。
 * **改进方案**：在底层扫描时引入命名空间机制（例如 `role:developer::run-tests`），或者在发现重名冲突时生成 Collision Diagnostic Log 供系统排查。
+* **现状（部分）**：[discovery.py:150](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/skills/discovery.py) 对 **L1 system 层**有保护——下层不得遮蔽，且打 `Collision Warning`（含 winner/loser path）；draft 与激活技能同名也有 `collision` 诊断（`discovery.py:223`）。**仍缺**：L2/L3/personal 之间互相覆盖是按设计静默生效，无诊断日志——补一条 winner/loser 日志即可对齐 gsd-2。命名空间前缀化暂未做。
 
-### 6. 高频磁盘扫描开销
+### 6. 高频磁盘扫描开销 — ⬜ 未做
 每次运行技能或刷新 UI 时，系统都会高频同步扫描 4 层物理目录，在高负载下，这将成为系统响应时间的木桶短板。
 * **改进方案**：为 `list_skills_all` 引入基于 File Watcher 驱动的内存缓存（In-Memory Cache），实现秒级热更新的同时消除磁盘同步扫描延迟。
+* **现状（未做）**：[watcher.py](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/skills/watcher.py) 已有 watchdog，但**只用于给前端广播 `skills_changed` WS 事件**，并未驱动后端缓存。`list_skills_all` 在 [prompt_builder.py:31](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/core/orchestration/prompt_builder.py) 每次构建 prompt（每 bot 每轮）仍 `asyncio.to_thread` 全量扫 4 层盘。watcher 已在位，只差把它接成「失效驱动的内存缓存」。
+
+### 7. Skill 注入无 token 预算 / 体积上限 — ⬜ 未做（新增）
+
+> 此条不在首版 6 条之列，是本次源码复审新发现的缺口。
+
+[filter.py](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/skills/filter.py) 的冷热分流（`always:true` 全文常驻、其余只注 metadata）虽减了常驻预算，但**没有任何硬上限**：单个 skill body 多大都全量注入，`always` 技能数量也无封顶。当 always-skill 变多或某个 skill 很长时，system prompt 会无声膨胀、挤占对话预算。
+* **对标**：openclaw 单 skill `< 256KB`、总 prompt 默认 `< 18K` 字符，并把绝对路径压成 `~/`（省 token 兼防泄漏）；Claude Code `countToolDefinitionTokens` 走 token 预算。
+* **改进方案**：给注入加一道总 token 预算 + 单 skill 体积上限，超限的 `always` 技能自动降级为只注 metadata；并把注入文本里的绝对路径折叠为 `~/`。
