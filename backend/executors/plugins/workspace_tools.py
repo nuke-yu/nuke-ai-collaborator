@@ -9,6 +9,7 @@ import asyncio
 import fnmatch
 import os
 import re
+import shlex
 import sys
 from pathlib import Path
 
@@ -377,19 +378,183 @@ def _is_sensitive_path(path: str) -> bool:
 # Tool execution hooks
 # ---------------------------------------------------------------------------
 
-_DANGEROUS_PATTERNS = [
-    ("rm -rf /",       "禁止删除根目录"),
-    ("rm -rf ~",       "禁止删除 home 目录"),
-    ("rm -rf $HOME",   "禁止删除 home 目录"),
-    (":(){:|:&};:",    "禁止 fork bomb"),
-    ("mkfs",           "禁止格式化磁盘"),
-    ("dd if=/dev/",    "禁止 dd 写入磁盘"),
-    ("> /dev/sda",     "禁止写入磁盘设备"),
-    ("chmod -R 777 /", "禁止递归修改根目录权限"),
-    ("> /etc/passwd",  "禁止覆盖系统文件"),
-    ("shutdown",       "禁止关机命令"),
-    ("reboot",         "禁止重启命令"),
+# ---------------------------------------------------------------------------
+# Shell command safety: pre-compiled regex patterns (tier 2 backstop).
+#
+# Rationale for upgrading from substring to regex:
+#   Substring matching is trivially bypassed by extra whitespace, variable
+#   indirection, or obfuscation (e.g. `base64 -d | bash`).
+#   Regex with word boundaries and operator-aware splits are more precise
+#   while keeping false-positive rates low.
+#
+# These patterns are a BACKSTOP — the primary gate is the HIL permission
+# system (ruleset). This layer catches only the highest-severity commands
+# that should never be auto-approved regardless of ruleset.
+# ---------------------------------------------------------------------------
+
+_DANGEROUS_PATTERNS: list[tuple[re.Pattern, str]] = [
+    # --- system / disk destruction ---
+    (re.compile(r'\brm\s+\S*[rR]\S*\s+/\s*$', re.MULTILINE),
+     "禁止删除根目录"),
+    (re.compile(r'\brm\s+\S*[rR]\S*\s+(~|\$HOME)(\s|$)'),
+     "禁止删除家目录"),
+    (re.compile(r'\bmkfs\b', re.IGNORECASE),
+     "禁止格式化磁盘"),
+    (re.compile(r'\bdd\b.*\bif\s*=\s*/dev/', re.IGNORECASE),
+     "禁止 dd 读写磁盘设备"),
+    (re.compile(r'>\s*/dev/sd[a-z]\d*\b', re.IGNORECASE),
+     "禁止写入磁盘块设备"),
+    (re.compile(r'\bchmod\s+(\S+\s+)?777\s+/', re.IGNORECASE),
+     "禁止递归修改根目录权限"),
+    (re.compile(r'>\s*/etc/passwd\b'),
+     "禁止覆盖 /etc/passwd"),
+    (re.compile(r'>\s*/etc/shadow\b'),
+     "禁止覆盖 /etc/shadow"),
+    # --- system control ---
+    (re.compile(r'\b(shutdown|reboot|poweroff|halt)\b', re.IGNORECASE),
+     "禁止关机/重启命令"),
+    # fork bomb: :(){ :|:& };:
+    (re.compile(r':\s*\(\s*\)\s*\{[^}]*:\s*\|'),
+     "禁止 fork bomb"),
+    # --- execution obfuscation / RCE (NEW) ---
+    # base64 decode is a classic code obfuscation vector; block decoding
+    # regardless of what the decoded output is piped to.
+    (re.compile(r'\bbase64\s+(-d|--decode)\b', re.IGNORECASE),
+     "禁止 base64 解码（混淆执行风险）"),
+    # Downloading and immediately executing a remote script.
+    (re.compile(
+        r'\b(curl|wget)\b[^\n|]*\|\s*(bash|sh|zsh|dash|ash|python\d*|perl|ruby|node)\b',
+        re.IGNORECASE,
+    ), "禁止将网络下载内容直接管道到解释器执行"),
+    # eval with shell substitution — dynamic code execution.
+    (re.compile(r'\beval\b.*?(\$\(|`)'),
+     "禁止 eval 执行 shell 替换（代码注入风险）"),
 ]
+
+
+# --- run_shell danger check, layer 2: tokenized analysis ------------------
+# The raw-string regexes above match the literal command and are blind to
+# shell quoting/escaping/wrapping. A tokenized pass defeats the cheap evasions:
+#   rm -rf "/"        (quoted target)        r''m -rf /     (quoted command name)
+#   /usr/bin/fdisk …  (absolute path)        sudo rm -rf ~  (wrapper prefix)
+#   env X=1 rm -rf "$HOME"                    cd /tmp && rm -rf /   (command chain)
+# shlex dequotes + de-escapes, so all of the above resolve to the real binary.
+
+# Binaries destructive/irreversible enough to block outright (basename match).
+_BLOCK_BINARIES = frozenset({
+    "mkfs", "mke2fs", "mkdosfs", "fdisk", "parted", "mkswap", "wipefs",
+    "shutdown", "reboot", "poweroff", "halt", "init", "telinit",
+})
+
+# Command prefixes that wrap the real command — strip them to find argv0.
+_CMD_WRAPPERS = frozenset({
+    "sudo", "doas", "env", "command", "builtin", "exec", "nohup", "time",
+    "nice", "ionice", "stdbuf", "setsid", "xargs", "timeout",
+})
+
+# Shell interpreters: `bash -c "<cmd>"` hides the real command in a string arg,
+# evading both layers — so we recurse into the -c payload.
+_SHELL_INTERPRETERS = frozenset({"bash", "sh", "zsh", "dash", "ash", "ksh"})
+
+# rm targets that mean "catastrophic scope" once combined with -r/-f.
+_RM_CATASTROPHIC = frozenset({"/", "~", "$HOME", "${HOME}", "/*", "*", "~/*", "$HOME/*"})
+_RM_RECURSIVE_RE = re.compile(r"^-[a-zA-Z]*r[a-zA-Z]*$")
+
+
+def _iter_simple_commands(cmd: str) -> list[list[str]] | None:
+    """Tokenize cmd respecting quotes, split into argv lists on shell control
+    operators (; && || | & ( ) < >). Returns None if cmd can't be parsed
+    (unbalanced quotes) — caller then relies on the regex layer only."""
+    try:
+        lex = shlex.shlex(cmd, posix=True, punctuation_chars=True)
+        lex.whitespace_split = True
+        lex.commenters = ""          # '#' mid-command is not a comment for our purposes
+        tokens = list(lex)
+    except ValueError:
+        return None
+    commands: list[list[str]] = []
+    cur: list[str] = []
+    for tok in tokens:
+        if tok and all(ch in ";&|()<>\n" for ch in tok):   # operator token
+            if cur:
+                commands.append(cur)
+                cur = []
+        else:
+            cur.append(tok)
+    if cur:
+        commands.append(cur)
+    return commands
+
+
+def _resolved_argv0(argv: list[str]) -> tuple[str | None, list[str]]:
+    """Strip leading VAR=val assignments and wrapper commands; return
+    (basename_of_real_command, remaining_args). Returns (None, …) when the
+    command is variable/substitution indirection that can't be statically
+    resolved (e.g. `$CMD …`)."""
+    i = 0
+    changed = True
+    while changed and i < len(argv):
+        changed = False
+        # leading env-assignments (incl. those introduced by `env VAR=val`)
+        while i < len(argv) and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", argv[i]):
+            i += 1
+            changed = True
+        # wrapper command + its own flags
+        while i < len(argv) and os.path.basename(argv[i]) in _CMD_WRAPPERS:
+            i += 1
+            changed = True
+            while i < len(argv) and argv[i].startswith("-"):
+                i += 1
+    if i >= len(argv):
+        return None, []
+    c0 = argv[i]
+    if c0.startswith("$") or c0.startswith("`") or "$(" in c0:
+        return None, argv[i + 1:]
+    return os.path.basename(c0), argv[i + 1:]
+
+
+def _check_tokenized(cmd: str) -> tuple[bool, str]:
+    """Block dangerous operations identified on the shlex-resolved command."""
+    commands = _iter_simple_commands(cmd)
+    if commands is None:
+        return False, ""
+    for argv in commands:
+        base, rest = _resolved_argv0(argv)
+        if base is None:
+            continue
+        if base in _BLOCK_BINARIES:
+            return True, f"禁止危险命令 {base}"
+        if base in _SHELL_INTERPRETERS:
+            for j, a in enumerate(rest):
+                if a == "-c" and j + 1 < len(rest):
+                    inner_blocked, inner_reason = _check_shell_command(rest[j + 1])
+                    if inner_blocked:
+                        return True, inner_reason
+        if base == "rm" and any(_RM_RECURSIVE_RE.match(a) or a == "--recursive" for a in rest):
+            if any(a in _RM_CATASTROPHIC for a in rest if not a.startswith("-")):
+                return True, "禁止递归删除根目录/家目录"
+        if base in ("chmod", "chown") and any(a in ("-R", "--recursive") for a in rest):
+            if any(a == "/" for a in rest):
+                return True, f"禁止递归修改根目录{'权限' if base == 'chmod' else '属主'}"
+        if base == "dd" and any(a.startswith("if=/dev/") for a in rest):
+            return True, "禁止 dd 读写磁盘设备"
+    return False, ""
+
+
+def _check_shell_command(cmd: str) -> tuple[bool, str]:
+    """Check cmd for dangerous operations. Returns (blocked, reason).
+
+    Two layers (block if EITHER fires):
+      1. raw-string regexes (_DANGEROUS_PATTERNS) — catch structure that
+         tokenization loses (redirects, pipe-to-interpreter, fork bomb, eval+subst).
+      2. tokenized analysis (_check_tokenized) — shlex-resolve the real binary to
+         defeat quote/whitespace/path-prefix/wrapper/command-chain evasions.
+    """
+    for pattern, reason in _DANGEROUS_PATTERNS:
+        if pattern.search(cmd):
+            return True, reason
+    return _check_tokenized(cmd)
+
 
 # --- run_shell sandbox tier 1: env allowlist + cwd confinement -------------
 
@@ -463,11 +628,12 @@ async def _default_shell_guard(name: str, arguments: dict, context: dict) -> dic
         return None
     if context.get("ruleset") is None:
         return {"block": True, "reason": "run_shell 未接入权限系统（无 ruleset），出于安全已拒绝执行"}
-    cmd = (arguments.get("cmd") or "").strip().lower()
-    for pattern, reason in _DANGEROUS_PATTERNS:
-        if pattern.lower() in cmd:
-            return {"block": True, "reason": f"{reason}（命令：{arguments.get('cmd')}）"}
+    cmd = (arguments.get("cmd") or "").strip()
+    blocked, reason = _check_shell_command(cmd)
+    if blocked:
+        return {"block": True, "reason": f"{reason}（命令：{cmd}）"}
     return None
+
 
 
 # Tools that can escape the workspace or cause side effects. When no permission
