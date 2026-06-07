@@ -6,8 +6,9 @@ from typing import Callable
 
 from executors.base import ToolDef
 
-_handlers: dict[str, Callable] = {}
-_defs: dict[str, ToolDef] = {}
+# Single registry: name -> ToolDef (with .handler bound).
+# Replaces the two parallel dicts (_defs / _handlers) that used to exist.
+_registry: dict[str, ToolDef] = {}
 
 # LLMs frequently call file tools with a near-miss param name (`file_path`
 # instead of the declared `path`, `contents` instead of `content`), which blows
@@ -87,8 +88,13 @@ def _condition_matches(condition: str, name: str, arguments: dict) -> bool:
 # ---------------------------------------------------------------------------
 
 def register(tool_def: ToolDef, handler: Callable) -> None:
-    _handlers[tool_def.name] = handler
-    _defs[tool_def.name] = tool_def
+    """Register a tool definition together with its handler.
+
+    External callers (plugin register_tools() methods) keep the same
+    signature — no plugin changes required.
+    """
+    tool_def.handler = handler
+    _registry[tool_def.name] = tool_def
 
 
 def add_before_hook(hook: Callable, *, condition: str | None = None, once: bool = False) -> None:
@@ -165,12 +171,13 @@ async def execute(name: str, arguments: dict, context: dict | None = None) -> tu
         except Exception as e:
             return f"[钩子错误] {e}", True
 
-    if name not in _handlers:
+    if name not in _registry:
         return f"[错误] 工具 '{name}' 尚未实现", True
 
     is_error = False
     try:
-        handler = _handlers[name]
+        entry = _registry[name]
+        handler = entry.handler
         sig = inspect.signature(handler)
         
         is_truncated = arguments.pop("__truncated__", False)
@@ -231,7 +238,7 @@ async def execute(name: str, arguments: dict, context: dict | None = None) -> tu
 
 def is_concurrency_safe(name: str) -> bool:
     """Return True if the tool is read-only and safe to run in parallel."""
-    td = _defs.get(name)
+    td = _registry.get(name)
     return td.concurrency_safe if td else False
 
 
@@ -239,8 +246,8 @@ def get_schemas(names: list[str]) -> list[dict]:
     """Return OpenAI-format tool schemas for the given tool names."""
     result = []
     for name in names:
-        if name in _defs:
-            t = _defs[name]
+        if name in _registry:
+            t = _registry[name]
             result.append({
                 "type": "function",
                 "function": {

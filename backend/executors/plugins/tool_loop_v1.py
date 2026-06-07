@@ -49,9 +49,18 @@ def _acc_usage(target: list, result: dict) -> None:
 
 
 async def _execute_tool_call(name: str, arguments: dict, context: dict) -> str:
-    """Thin wrapper around tool_executor.execute — extracted so tests can mock it."""
-    res, _ = await tool_executor.execute(name, arguments, context=context)
+    """Route tool calls through ToolRouter (MCP + builtin); extracted so tests can mock it.
+
+    Falls back to tool_executor.execute() when the router has no providers
+    registered (e.g. worker processes or tests that bypass the lifespan startup).
+    """
+    from executors.tool_router import router as _tool_router
+    if _tool_router._providers:
+        res, _ = await _tool_router.execute(name, arguments, context=context)
+    else:
+        res, _ = await tool_executor.execute(name, arguments, context=context)
     return res
+
 
 
 async def _tool_loop_core(
@@ -389,7 +398,23 @@ class ToolLoopRunner:
             self.messages = list(history) + [{"role": "user", "content": user_content}]
 
         tool_names = [t.name for t in self.executor.manifest.tools]
-        self.tool_schemas = tool_executor.get_schemas(tool_names)
+        # Build schemas from ToolRouter so MCP tools are included alongside
+        # builtin tools.  Falls back to tool_executor.get_schemas() if the
+        # router has no providers registered yet (e.g. in tests that bypass
+        # the lifespan startup).
+        from executors.tool_router import router as _tool_router
+        if _tool_router._providers:
+            # Router is live: get builtin schemas filtered to manifest tools,
+            # then append any MCP schemas (they are not in the manifest).
+            builtin_schemas = tool_executor.get_schemas(tool_names)
+            mcp_schemas = [
+                s for s in _tool_router.get_all_schemas()
+                if s["function"]["name"] not in {b["function"]["name"] for b in builtin_schemas}
+            ]
+            self.tool_schemas = builtin_schemas + mcp_schemas
+        else:
+            # Fallback: router not initialized (test / worker process without lifespan)
+            self.tool_schemas = tool_executor.get_schemas(tool_names)
         # Per-stage tool whitelist (e.g. the BA requirements stage gets only
         # read/skill/ticket tools, so it physically can't write code). Filtering
         # the base schemas here means every iteration — and any skill-level

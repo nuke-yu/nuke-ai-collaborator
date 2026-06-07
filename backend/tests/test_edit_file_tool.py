@@ -52,8 +52,7 @@ class TestTruncationHintWiring(unittest.TestCase):
                 "write_file", {"path": "big.html", "content": "abc", "__truncated__": True}
             ))
         finally:
-            te._handlers.pop("write_file", None)
-            te._defs.pop("write_file", None)
+            te._registry.pop("write_file", None)
         self.assertIn("edit_file", result)
         self.assertNotIn("replace_file_content", result)
 

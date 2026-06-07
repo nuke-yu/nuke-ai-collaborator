@@ -1,7 +1,7 @@
 import asyncio
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 
 @dataclass
@@ -10,6 +10,10 @@ class ToolDef:
     description: str
     parameters: dict = field(default_factory=lambda: {"type": "object", "properties": {}})
     concurrency_safe: bool = False  # True = read-only, safe to run in parallel with other safe tools
+    # Optional: bind the handler directly to the definition so we don't need
+    # two parallel dicts (_defs / _handlers) in tool_executor.  Stays None for
+    # ToolDefs that are created declaratively (e.g. in PluginManifest serialisation).
+    handler: Callable | None = field(default=None, repr=False, compare=False)
 
 
 @dataclass
@@ -122,6 +126,54 @@ class ExecutionContext:
 class ExecutionResult:
     full_text: str
     msg_id: int | None
+
+
+class ToolProvider(ABC):
+    """
+    Abstract base for all tool-execution providers.
+
+    Each concrete provider is responsible for a single *kind* of tool
+    (builtin Python handlers, Skill-markdown expansions, MCP remote calls …).
+    The ToolRouter queries ``can_handle`` to route an incoming tool call to the
+    correct provider without any provider needing to know about the others.
+    """
+
+    @property
+    @abstractmethod
+    def provider_id(self) -> str:
+        """Stable identifier used in logs and metrics (e.g. 'builtin', 'skill', 'mcp')."""
+
+    @abstractmethod
+    def discover_tools(self) -> list["ToolDef"]:
+        """
+        Return all tool definitions this provider currently exposes.
+
+        Called by ToolRouter.get_all_schemas() to assemble the schema list sent
+        to the LLM.  Builtin providers return a static list synchronously.
+        A future McpClientToolProvider that needs async discovery should cache
+        the result after an initial async init and return it here synchronously.
+        """
+
+    @abstractmethod
+    def can_handle(self, name: str) -> bool:
+        """
+        Return True if this provider should execute the tool named *name*.
+
+        The router iterates registered providers in insertion order and hands
+        off to the first one that returns True.  Providers based on a namespace
+        prefix (e.g. ``mcp::``) should check for that prefix; providers for a
+        fixed set of names should do a membership test.
+        """
+
+    @abstractmethod
+    async def execute(self, name: str, arguments: dict, context: dict) -> tuple[str, bool]:
+        """
+        Execute the tool and return ``(result_text, is_error)``.
+
+        *arguments* has already been alias-normalized by the router before this
+        call; providers do not need to repeat the normalization.
+        is_error=True signals the router to treat the result as a failure.
+        """
 
 
 class BotExecutor(ABC):

@@ -68,8 +68,7 @@ class TestCellDispatch(unittest.IsolatedAsyncioTestCase):
         # tool_executor; reset it so a later test that assumes an empty executor
         # (e.g. test_decoupled_executor, which then takes tool_loop's no-tools
         # streaming branch) isn't perturbed by this heavyweight integration test.
-        tool_executor._defs.clear()
-        tool_executor._handlers.clear()
+        tool_executor._registry.clear()
         tool_executor.clear_before_hooks()
         tool_executor.clear_after_hooks()
         await db.aclose_writer()

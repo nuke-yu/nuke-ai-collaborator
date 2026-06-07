@@ -25,8 +25,7 @@ def _restore_global_state():
     yield
     te.clear_before_hooks()
     te.clear_after_hooks()
-    te._defs.clear()
-    te._handlers.clear()
+    te._registry.clear()
 
 
 def _make_async(return_value=None, block_with_reason: str | None = None):
