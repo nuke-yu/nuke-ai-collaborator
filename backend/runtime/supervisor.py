@@ -43,6 +43,9 @@ class Supervisor:
         self._server = None
         self._num_workers = kwargs.get("num_workers", 0)
         self._processes: list[asyncio.subprocess.Process] = []
+        # Latest MCP tool-schema snapshot pushed by the collector; cached so a
+        # worker connecting later (or after a ToolListChanged) gets the current set.
+        self._mcp_schemas: dict | None = None
 
     # ── lifecycle ─────────────────────────────────────────────────────────
 
@@ -50,6 +53,17 @@ class Supervisor:
         self._server = await ipc.serve(self.addr, self._on_worker_conn)
         if self._num_workers > 0:
             await self._spawn_workers(self._num_workers)
+            # MCP is a cross-group capability → one collector process, not per worker.
+            await self._spawn_collector()
+
+    async def _spawn_collector(self) -> None:
+        cmd = [sys.executable, "-m", "runtime.entry", "--role", "mcp-collector", "--addr", self.addr]
+        try:
+            proc = await asyncio.create_subprocess_exec(*cmd)
+            self._processes.append(proc)
+            log.info("supervisor: started mcp-collector (pid=%d)", proc.pid)
+        except Exception:
+            log.exception("supervisor: failed to spawn mcp-collector")
 
     async def _spawn_workers(self, k: int) -> None:
         log.info("supervisor: spawning %d worker processes", k)
@@ -108,6 +122,13 @@ class Supervisor:
                 except Exception: pass
             self._workers[wid] = writer
             log.info("supervisor: worker %s connected", wid)
+            # Hand a freshly-connected worker the current MCP schema snapshot so it
+            # can advertise MCP tools without a round-trip (collector pushes updates).
+            if wid != ipc.protocol.MCP_COLLECTOR_ID and self._mcp_schemas is not None:
+                try:
+                    await ipc.send_msg(writer, self._mcp_schemas)
+                except Exception:
+                    log.warning("supervisor: failed to send cached MCP schemas to %s", wid)
             while True:
                 frame = await ipc.recv_msg(reader)
                 await self._on_upstream(frame)
@@ -147,6 +168,30 @@ class Supervisor:
                     fut = self._pending_handoffs.get(gid)
                     if fut and not fut.done():
                         fut.set_result(True)
+                elif t == ipc.protocol.MCP_CALL:
+                    # worker → collector. If the collector is down, reply an error
+                    # to the origin worker so its awaiting call doesn't hang.
+                    if not await self.send_to_worker_id(ipc.protocol.MCP_COLLECTOR_ID, frame):
+                        await self.send_to_worker_id(frame.get("origin_worker_id"),
+                            ipc.protocol.envelope(
+                                ipc.protocol.MCP_RESULT, group_id=gid, trace_id=tid,
+                                request_id=frame.get("request_id"),
+                                origin_worker_id=frame.get("origin_worker_id"),
+                                result="[MCP错误] collector 未就绪", is_error=True,
+                            ))
+                elif t == ipc.protocol.MCP_RESULT:
+                    # collector → origin worker
+                    await self.send_to_worker_id(frame.get("origin_worker_id"), frame)
+                elif t == ipc.protocol.MCP_SCHEMAS:
+                    # collector pushed a new snapshot → cache + fan out to all workers
+                    self._mcp_schemas = frame
+                    for wid, writer in list(self._workers.items()):
+                        if wid == ipc.protocol.MCP_COLLECTOR_ID:
+                            continue
+                        try:
+                            await ipc.send_msg(writer, frame)
+                        except Exception:
+                            log.warning("supervisor: failed to push MCP schemas to %s", wid)
                 else:
                     log.debug("supervisor: unhandled upstream type=%s", t)
         except Exception:
@@ -197,6 +242,21 @@ class Supervisor:
         if writer is None:
             raise RuntimeError(f"no connected worker for group {group_id} (route -> {wid!r})")
         await ipc.send_msg(writer, msg)
+
+    async def send_to_worker_id(self, worker_id: str, msg: dict) -> bool:
+        """Send directly to a connection by worker_id (collector + MCP_RESULT relay,
+        which route by worker_id, not by group). Returns False if not connected."""
+        writer = self._workers.get(worker_id)
+        if writer is None:
+            log.warning("supervisor: no connection for worker_id=%s, dropping %s",
+                        worker_id, msg.get("type"))
+            return False
+        try:
+            await ipc.send_msg(writer, msg)
+            return True
+        except Exception:
+            log.exception("supervisor: send_to_worker_id failed for %s", worker_id)
+            return False
 
 
     async def _default_route(self, group_id: int) -> str:

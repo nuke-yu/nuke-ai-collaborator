@@ -51,6 +51,16 @@ class Worker:
         self._reader, self._writer = await ipc.connect(self.addr)
         # Identify ourselves so the Supervisor can route group→worker (CELL-12).
         await ipc.send_msg(self._writer, {"type": ipc.protocol.HELLO, "worker_id": self.worker_id})
+        # Wire the MCP bridge: McpProxyProvider sends MCP_CALL upstream through
+        # this connection and awaits the matching MCP_RESULT (collector on the bus).
+        from executors.mcp_bridge import bridge as _mcp_bridge
+        async def _send_mcp_call(rid, name, arguments, group_id, trace_id):
+            await ipc.send_msg(self._writer, ipc.protocol.envelope(
+                ipc.protocol.MCP_CALL, group_id=group_id or 0, trace_id=trace_id,
+                request_id=rid, origin_worker_id=self.worker_id,
+                tool=name, arguments=arguments,
+            ))
+        _mcp_bridge.install(send=_send_mcp_call, origin=self.worker_id)
         # Register the wildcard subscription synchronously BEFORE we start
         # processing downstream messages, so no early bus event is missed.
         self._sub = self.bus.subscribe_all()
@@ -96,6 +106,12 @@ class Worker:
             await asyncio.sleep(30)
 
     async def close(self) -> None:
+        # Fail any in-flight MCP calls instead of leaving them awaiting forever.
+        try:
+            from executors.mcp_bridge import bridge as _mcp_bridge
+            _mcp_bridge.reset()
+        except Exception:
+            pass
 
         if self._report_task:
             self._report_task.cancel()
@@ -219,6 +235,18 @@ class Worker:
                 await ipc.send_msg(self._writer, ipc.protocol.envelope(
                     ipc.protocol.LEASE_RELEASED, group_id=gid, trace_id=tid
                 ))
+                return
+
+            if t == ipc.protocol.MCP_SCHEMAS:
+                # Collector pushed a new MCP tool-schema snapshot (not group-scoped).
+                from executors.mcp_bridge import bridge as _mcp_bridge
+                _mcp_bridge.set_schemas((msg.get("payload") or {}).get("schemas", []))
+                return
+
+            if t == ipc.protocol.MCP_RESULT:
+                # Reply to an MCP tool call this worker dispatched to the collector.
+                from executors.mcp_bridge import bridge as _mcp_bridge
+                _mcp_bridge.resolve(msg.get("request_id"), msg.get("result"), bool(msg.get("is_error")))
                 return
 
             if t == ipc.protocol.PERMISSION_RESPONSE:

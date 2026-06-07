@@ -39,10 +39,12 @@ class MCPCollector:
         self._last_schema_sig = None
 
     async def _init_providers(self) -> None:
+        import os
         from executors.tool_router import ToolRouter
         from executors.providers.mcp_client import McpClientToolProvider
         self._router = ToolRouter()
-        cfg = Path(__file__).parent.parent / "mcp_servers.json"
+        # Config path is env-overridable (deployments / tests that want no MCP).
+        cfg = os.environ.get("MCP_SERVERS_CONFIG") or (Path(__file__).parent.parent / "mcp_servers.json")
         for prov in McpClientToolProvider.from_config(cfg):
             try:
                 await prov.initialize()

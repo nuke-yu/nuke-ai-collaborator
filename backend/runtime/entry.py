@@ -30,37 +30,26 @@ def build_supervisor(addr: str, **kwargs):
     return Supervisor(addr, **kwargs)
 
 
-async def _init_tool_router() -> None:
-    """Initialize ToolRouter providers in the background after worker startup.
+def _init_tool_router() -> None:
+    """Register the worker's ToolRouter providers (synchronous, no I/O).
 
-    Runs as an asyncio task so it does NOT block the worker from connecting
-    to the Supervisor (fast path).  Any tool calls that arrive before this
-    completes fall back to tool_executor directly.
+    MCP no longer runs in the worker: the cross-group mcp-collector process owns
+    all MCP connections, and McpProxyProvider forwards calls to it over the bus
+    (schemas arrive via MCP_SCHEMAS pushes). So the worker only needs the proxy +
+    the Builtin catch-all — no npx, no per-worker MCP subprocesses.
 
     Dispatch policy (see tool_loop_v1._dispatch_tool):
-      Builtin / skill / shell tools stay on tool_executor.execute() so the
-      global before-hooks (permission check + run_shell danger guard) fire.
-      Only MCP tools (NOT in tool_executor's registry) route through here.
-      → Do NOT register Skill/Shell providers: they would be unreachable for
-        execution and their schemas would be excluded by get_external_schemas().
-        Registering them only wastes memory and adds confusing log noise.
+      Builtin / skill / shell tools stay on tool_executor.execute() so the global
+      before-hooks (permission check + run_shell danger guard) fire. Only MCP
+      tools (NOT in tool_executor's registry) route through the proxy.
     """
     import logging
-    from pathlib import Path
     from executors.tool_router import router as tool_router
     from executors.providers import BuiltinToolProvider
-    from executors.providers.mcp_client import McpClientToolProvider
+    from executors.providers.mcp_proxy import McpProxyProvider
 
     log = logging.getLogger(__name__)
-    _mcp_cfg = Path(__file__).parent.parent / "mcp_servers.json"
-    for _mcp_prov in McpClientToolProvider.from_config(_mcp_cfg):
-        try:
-            await _mcp_prov.initialize()
-            tool_router.register_provider(_mcp_prov)
-            log.info(f"MCP provider '{_mcp_prov._server_name}' registered.")
-        except Exception as _e:
-            log.warning(f"MCP server init failed [{_mcp_prov._server_name}], skipping: {_e}")
-
+    tool_router.register_provider(McpProxyProvider())     # MCP via collector over the bus
     tool_router.register_provider(BuiltinToolProvider())  # catch-all; excluded from external schemas
     log.info("ToolRouter ready: %s", [p.provider_id for p in tool_router._providers])
 
@@ -70,10 +59,9 @@ async def run_worker(worker_id: str, addr: str) -> None:
     from executors import registry
     registry.discover()                       # load bot executor plugins (once, at startup)
 
-    # Initialize ToolRouter in the background — must NOT block here because the
-    # worker needs to connect to the Supervisor first (fast path).  Any tool calls
-    # that arrive before the router is ready fall back to tool_executor directly.
-    asyncio.create_task(_init_tool_router(), name=f"tool-router-init-{worker_id}")
+    # Register ToolRouter providers (proxy + builtin). Synchronous + no I/O now
+    # that MCP lives in the collector, so it's safe to do before connecting.
+    _init_tool_router()
 
     from skills.watcher import watcher
     watcher.start(asyncio.get_event_loop())
@@ -95,17 +83,22 @@ async def run_supervisor(addr: str, num_workers: int = 0) -> None:
 def main(argv=None) -> None:
     logging.basicConfig(level=logging.INFO)
     p = argparse.ArgumentParser(prog="runtime.entry")
-    p.add_argument("--role", required=True, choices=["supervisor", "worker"])
+    p.add_argument("--role", required=True, choices=["supervisor", "worker", "mcp-collector"])
     p.add_argument("--id", default="w0", help="worker id (worker role)")
     p.add_argument("--addr", default=None, help="IPC address (default per platform)")
     p.add_argument("--workers", type=int, default=0, help="number of worker processes to spawn (supervisor role)")
     args = p.parse_args(argv)
 
-    default_name = "supervisor" if args.role == "supervisor" else args.id
+    # supervisor & collector share the supervisor's IPC address (the collector
+    # connects to it); workers use their own id for the default address name.
+    default_name = "supervisor" if args.role in ("supervisor", "mcp-collector") else args.id
     addr = args.addr or ipc.make_addr(default_name)
 
     if args.role == "supervisor":
         asyncio.run(run_supervisor(addr, num_workers=args.workers))
+    elif args.role == "mcp-collector":
+        from runtime.mcp_collector import run_collector
+        asyncio.run(run_collector(addr))
     else:
         asyncio.run(run_worker(args.id, addr))
 
