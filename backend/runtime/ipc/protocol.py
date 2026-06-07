@@ -29,8 +29,22 @@ LEASE_RELEASED = "lease_released"        # CELL-18: Worker ACK that group is clo
 
 UPSTREAM = frozenset({BROADCAST, UNREAD_DELTA, STATS_REPORT, LEASE_RELEASED})
 
+# ── MCP collector 总线（跨群组单例进程，经 Supervisor 作 bus 中继）────────────
+# MCP 是跨群组通用能力，跑在独立的 mcp-collector 进程而非每个 worker。
+# 流向：worker ──MCP_CALL──▶ supervisor ──MCP_CALL──▶ collector
+#       worker ◀─MCP_RESULT── supervisor ◀─MCP_RESULT── collector
+# collector 启动/ToolListChanged 时 push MCP_SCHEMAS；supervisor 缓存并下推给各 worker。
+# 按 request_id 关联应答、origin_worker_id 回中继。权限在 worker 侧（call 前已 check），
+# collector 只是总线内侧可信执行器。
+MCP_COLLECTOR_ID = "mcp-collector"       # collector 连接的 well-known worker_id
+MCP_CALL = "mcp_call"                    # worker→sup→collector：执行一个 MCP 工具
+MCP_RESULT = "mcp_result"                # collector→sup→worker：工具结果（按 request_id）
+MCP_SCHEMAS = "mcp_schemas"             # collector→sup→workers：当前 MCP 工具表快照（push）
+
+MCP_BUS = frozenset({MCP_CALL, MCP_RESULT, MCP_SCHEMAS})
+
 # ── 控制帧（连接握手，不属于业务上/下行集） ────────────────────────────────
-HELLO = "hello"   # Worker → Supervisor 首帧，自报 worker_id 完成注册
+HELLO = "hello"   # Worker / collector → Supervisor 首帧，自报 worker_id 完成注册
 
 # 注：LOG_RECORD 走独立日志通道，**绝不**与业务隧道共用（§10.2 队头阻塞）。
 

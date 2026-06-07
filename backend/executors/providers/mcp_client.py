@@ -267,8 +267,12 @@ class McpClientToolProvider(ToolProvider):
 
         real_name = _strip_prefix(self._server_name, name)
 
-        # HIL gate: write/sensitive tools require human approval (config-driven)
-        if self._needs_approval(real_name):
+        # HIL gate: write/sensitive tools require human approval (config-driven).
+        # Skipped when the caller is pre-authorized — in the mcp-collector process
+        # the permission check already ran on the WORKER side before the call was
+        # sent over the bus (the collector is a trusted in-bus executor with no
+        # ruleset/broadcaster of its own).
+        if not context.get("_pre_authorized") and self._needs_approval(real_name):
             verdict = await self._check_hil(real_name, arguments, context)
             if verdict:
                 return verdict, True

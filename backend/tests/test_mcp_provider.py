@@ -337,6 +337,28 @@ class TestMcpClientToolProvider(unittest.IsolatedAsyncioTestCase):
         self.assertIn("安全拦截", result)
         await p.close()
 
+    async def test_pre_authorized_skips_hil(self):
+        """Trust boundary: in the collector the worker already ran permission, so
+        a write tool with _pre_authorized executes even without a ruleset
+        (instead of the fail-closed safety block)."""
+        p = await _make_live_provider()
+        result, is_error = await p.execute(
+            "filesystem__write_file", {"path": "/tmp/x", "content": "y"},
+            {"_pre_authorized": True},
+        )
+        self.assertFalse(is_error)              # NOT blocked
+        self.assertNotIn("安全拦截", result)
+        await p.close()
+
+    async def test_write_still_blocked_without_pre_authorized(self):
+        p = await _make_live_provider()
+        result, is_error = await p.execute(
+            "filesystem__write_file", {"path": "/tmp/x", "content": "y"}, {}
+        )
+        self.assertTrue(is_error)
+        self.assertIn("安全拦截", result)
+        await p.close()
+
     async def test_env_merges_with_os_environ(self):
         """Extra env vars should merge onto os.environ, not replace it."""
         import os
