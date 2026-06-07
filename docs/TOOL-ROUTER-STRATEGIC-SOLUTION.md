@@ -142,11 +142,31 @@ graph TD
 
 当前 [executors/providers/shell.py](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/executors/providers/shell.py)、
 [skill.py](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/executors/providers/skill.py)
-是早期 Plan B scaffolding 的残件：**已不再注册、不在任何执行链路上**，其 `execute()` 仍是"绕过 hook"的旧形态。
+是早期 Plan B scaffolding 的残件：**已不再注册（见 [runtime/entry.py](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/runtime/entry.py)，worker 只注册 MCP provider + Builtin catch-all）、不在任何执行链路上**，其 `execute()` 仍是直接调 handler、**绕过全局 hook** 的旧形态。
 
 - 它们**不**服务于任何现有场景（包括"skill 携带脚本文件"的经典用法——该用法由 `run_skill` 返回脚本路径、agent 再发受保护的 `run_shell` 执行，全程不碰这两个 provider）。
 - 保留它们作为 Plan B 阶段 3 的起点是可以的，但接入前**必须**先完成阶段 1（hook 进 router），否则直接注册会重新引入安全回归。
-- 在阶段 1 落地前，建议在这两个文件顶部标注"DO NOT REGISTER：当前 execute 绕过安全 hook，接入需先完成本文档阶段 1"。
+
+#### ✅ 已修复（曾经的活雷）：文件 docstring 曾写着与事实相反的"安全保证"
+
+> 状态：已于 docstring 修复后对齐。下文保留问题描述作为**为什么不能注册**的依据；`shell.py` / `skill.py` 顶部现已是 `DO NOT REGISTER` 警告（不再是下面引用的失实保证）。
+
+源码核对曾发现，这两个文件顶部的 docstring **不只是"旧形态"，而是在主动声称一个不存在的安全保证**，与本文档 §四.3 / §六的不变量当面矛盾。`shell.py` 当时的 docstring 原文：
+
+> "The global `_permission_check_hook` in tool_executor still fires first (via BuiltinToolProvider's delegation path) for permission/ruleset gating — `ShellToolProvider.execute()` is only reached after hooks pass."
+
+这句话是**错的**，且错得危险：
+
+1. 这两个 provider 根本没注册、不在任何路径上，"only reached after hooks pass" 描述的是一条**不存在的路径**；
+2. 更糟——`ToolRouter` 是 **first-match** 路由。一旦有人按 docstring 的暗示把 `ShellToolProvider` 注册进 router，`run_shell` 会**首匹配直达** `ShellToolProvider.execute()`，**跳过** `BuiltinToolProvider` 的委托路径，于是 `_permission_check_hook` / `_default_shell_guard` **根本不会触发**——正是 §四.3 修复过的那次安全回归。
+
+最坏链条：**未来开发者读到这段"hook 一定先跑"的 docstring → 信以为真 → 注册 provider → 静默重引入安全洞。** 这正是"不变量只活在战略文档、没编码进开发者会读的代码注释里"的复发隐患。
+
+**修复（已完成）**：已把这两个文件顶部那段"hooks fire first / only reached after hooks pass"的失实 docstring 删除，替换为 `DO NOT REGISTER` 警告——
+
+> `DO NOT REGISTER`：本 provider 的 `execute()` 直接调 handler，**绕过全局 before/after hook**（权限校验 + 危险命令拦截）。`ToolRouter` 为 first-match，注册即让 `run_shell`/`run_skill` 绕过安全闸（参见本文档 §四.3 的安全回归）。接入前必须先完成本文档阶段 1（hook 进 router 本体）。
+
+> 注：失实 docstring 发现于 commit `3785ec3` 时点，现已替换为上述警告（`shell.py` / `skill.py` 模块级 + class 级 docstring 均已更新）。本节与源码现已对齐。
 
 ---
 
