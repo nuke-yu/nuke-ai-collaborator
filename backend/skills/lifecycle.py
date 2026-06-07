@@ -3,7 +3,7 @@ import time
 from pathlib import Path
 from contextlib import contextmanager
 from .constants import LEARNED_DRAFT, LEARNED_ACTIVE, bot_ws
-from .metadata import skill_path, parse_frontmatter
+from .metadata import skill_path, parse_frontmatter, _is_safe_name
 
 
 @contextmanager
@@ -40,14 +40,12 @@ def file_lock(file_path: Path):
                 fd.close()
             except Exception:
                 pass
-            try:
-                lock_path.unlink(missing_ok=True)
-            except Exception:
-                pass
 
 
 def write_to_draft(bot_id: int, skill_name: str, content: str) -> str:
     """Write a skill directly to learned/draft/."""
+    if not _is_safe_name(skill_name):
+        raise ValueError("[非法技能名]")
     ws = bot_ws(bot_id)
     draft_path = ws / LEARNED_DRAFT / f"{skill_name}.md"
     with file_lock(draft_path):
@@ -58,6 +56,8 @@ def write_to_draft(bot_id: int, skill_name: str, content: str) -> str:
 
 def update_skill_status(bot_id: int, skill_name: str, new_status: str) -> str:
     """Toggle a skill's status. Creates a personal override stub for L1/L2/L3 skills."""
+    if not _is_safe_name(skill_name):
+        return "[非法技能名]"
     ws = bot_ws(bot_id)
     path, _ = skill_path(ws / "skills", skill_name)
 
@@ -110,6 +110,8 @@ def update_skill_status(bot_id: int, skill_name: str, new_status: str) -> str:
 
 def approve_draft_skill(bot_id: int, skill_name: str) -> str:
     """Move a skill from learned/draft/ to learned/active/."""
+    if not _is_safe_name(skill_name):
+        return "[非法技能名]"
     ws = bot_ws(bot_id)
     draft_dir = ws / LEARNED_DRAFT
     active_dir = ws / "skills" / "learned" / "active"
@@ -127,6 +129,8 @@ def approve_draft_skill(bot_id: int, skill_name: str) -> str:
 
 def reject_draft_skill(bot_id: int, skill_name: str) -> str:
     """Delete a skill from learned/draft/."""
+    if not _is_safe_name(skill_name):
+        return "[非法技能名]"
     ws = bot_ws(bot_id)
     src, _ = skill_path(ws / LEARNED_DRAFT, skill_name)
     if src is None:

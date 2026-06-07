@@ -139,7 +139,14 @@ def _merge_skill_entry(merged: Dict[str, Dict], incoming: Dict) -> None:
         return
 
     # A1: System protection (First-Wins for L1 System layer)
-    if existing.get("layer") == "system":
+    is_system = False
+    existing_path = existing.get("path")
+    if existing_path:
+        try:
+            is_system = Path(existing_path).resolve().is_relative_to(SYSTEM_SKILLS_ROOT.resolve())
+        except (ValueError, OSError):
+            pass
+    if is_system or existing.get("layer") == "system":
         log.warning(
             "Collision Warning: System skill '%s' is protected and cannot be shadowed by lower layer skill at '%s'. "
             "Winner: '%s', Loser: '%s'",
@@ -223,15 +230,26 @@ def _list_skills_all_sync(bot_id: int, group_id: Optional[int] = None,
                 })
                 log.warning("Draft Collision Warning: Draft skill '%s' collides with active skill in '%s' layer.", name, winner_layer)
 
-            # C2: Check high-privilege tools in draft
+            # C2: Check high-privilege tools in draft (allowed_tools + body text check)
             allowed_tools = s.get("allowed_tools", [])
-            high_privilege_tools = ["run_shell", "write_file", "write_to_file"]
+            high_privilege_tools = ["run_shell", "write_file"]
             triggered = [t for t in allowed_tools if t in high_privilege_tools]
+            
+            # Scan file body content for privilege tool mentions
+            if s.get("path"):
+                try:
+                    body_text = Path(s["path"]).read_text(encoding="utf-8").lower()
+                    for t in high_privilege_tools:
+                        if t in body_text and t not in triggered:
+                            triggered.append(t)
+                except Exception:
+                    pass
+
             if triggered:
                 diagnostics.append({
                     "type": "privilege",
                     "severity": "critical",
-                    "message": f"高权安全警告：此草稿技能声明了敏感工具权限（{', '.join(triggered)}），请谨慎审批。"
+                    "message": f"高权安全警告：此草稿技能声明或提及了敏感工具权限（{', '.join(triggered)}），请谨慎审批。"
                 })
 
             s["diagnostics"] = diagnostics

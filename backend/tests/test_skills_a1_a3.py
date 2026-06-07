@@ -273,6 +273,23 @@ Draft body""", encoding="utf-8")
         self.assertIn("collision", diag_types)
         self.assertIn("privilege", diag_types)
 
+        # Test 2: Draft that does not declare allowed-tools but mentions "write_file" in its body
+        draft_file_2 = draft_dir / "audit-test.md"
+        draft_file_2.write_text("""---
+name: audit-test
+layer: learned
+status: draft
+---
+Please write_file to save the output.""", encoding="utf-8")
+
+        skills = _list_skills_all_sync(bot_id=1, group_id=1)
+        draft_entry_2 = next((s for s in skills if s["name"] == "audit-test" and s["status"] == "draft"), None)
+        
+        self.assertIsNotNone(draft_entry_2)
+        diagnostics_2 = draft_entry_2.get("diagnostics", [])
+        self.assertEqual(len(diagnostics_2), 1)
+        self.assertEqual(diagnostics_2[0]["type"], "privilege")
+
     def test_file_locking_c4(self):
         from skills.lifecycle import file_lock
         test_file = _TEST_WS_ROOT / "lock_test.txt"
@@ -285,7 +302,92 @@ Draft body""", encoding="utf-8")
         with file_lock(test_file):
             self.assertTrue(lock_path.exists())
             
-        self.assertFalse(lock_path.exists())
+        # After releasing, the lock file remains on disk, but the lock is released.
+        # Verify we can acquire it again.
+        with file_lock(test_file):
+            self.assertTrue(lock_path.exists())
+
+    def test_current_stage_role_family_filter_integration(self):
+        import core.workflow as wf
+        from core.orchestration import registry as orch_registry
+        
+        group_id = 9999
+        wf.end(group_id)
+        
+        try:
+            # Start a stage with name="DevBot" and role="DevOps工程师" (family="dev")
+            stages = [
+                {
+                    "id": 1,
+                    "name": "DevBot",
+                    "role": "DevOps工程师",
+                    "stage_type": "single",
+                    "done_keyword": "[[DEV_DONE]]"
+                }
+            ]
+            wf.start(group_id, stages, "workflow_v1")
+            
+            orch = orch_registry.get("workflow_v1")
+            self.assertIsNotNone(orch)
+            
+            # Verify stage name resolves to its role family "dev"
+            current_stage = orch.current_stage_name(group_id)
+            self.assertEqual(current_stage, "dev")
+            
+            # Test integration with filter_skills_by_context
+            from skills.filter import filter_skills_by_context
+            skills = [
+                {"name": "dev-skill", "roles": ["dev"], "stages": ["dev"], "when_to_use": "build"},
+                {"name": "qa-skill", "roles": ["qa"], "stages": ["qa"], "when_to_use": "test"}
+            ]
+            
+            res = filter_skills_by_context(skills, "I want to build the code", bot_role="developer", current_stage=current_stage)
+            self.assertEqual(len(res), 1)
+            self.assertEqual(res[0]["name"], "dev-skill")
+        finally:
+            wf.end(group_id)
+
+    def test_write_side_traversal_protection_c3(self):
+        from skills.lifecycle import write_to_draft, update_skill_status, approve_draft_skill, reject_draft_skill
+        
+        # Test write_to_draft traversal raise
+        with self.assertRaises(ValueError):
+            write_to_draft(bot_id=1, skill_name="../unsafe_name", content="content")
+            
+        # Test update_skill_status traversal return
+        res = update_skill_status(bot_id=1, skill_name="dir/unsafe", new_status="active")
+        self.assertEqual(res, "[非法技能名]")
+        
+        # Test approve_draft_skill traversal return
+        res = approve_draft_skill(bot_id=1, skill_name="unsafe..name")
+        self.assertEqual(res, "[非法技能名]")
+        
+        # Test reject_draft_skill traversal return
+        res = reject_draft_skill(bot_id=1, skill_name="unsafe name")
+        self.assertEqual(res, "[非法技能名]")
+
+    def test_system_shadow_protection_by_path_a1(self):
+        sys_skill_path = self.test_sys / "run-tests.md"
+        sys_skill_path.write_text("""---
+name: run-tests
+always: true
+---
+System run-tests body""", encoding="utf-8")
+
+        bot_skills_dir = _TEST_WS_ROOT / "bot_ws_1" / "skills"
+        personal_skill_path = bot_skills_dir / "run-tests.md"
+        personal_skill_path.write_text("""---
+name: run-tests
+always: true
+layer: personal
+---
+Personal override""", encoding="utf-8")
+
+        skills = _list_skills_all_sync(bot_id=1, group_id=1)
+        run_tests_skill = next((s for s in skills if s["name"] == "run-tests"), None)
+        
+        self.assertIsNotNone(run_tests_skill)
+        self.assertEqual(run_tests_skill.get("path"), sys_skill_path)
 
 
 if __name__ == "__main__":

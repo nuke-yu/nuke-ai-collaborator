@@ -50,7 +50,12 @@ class DeclarativeOrchestrator(Orchestrator):
 
     def current_stage_name(self, group_id: int) -> str | None:
         ctx = self._ctx(group_id)
-        return ctx.stage.get("name") if ctx and ctx.stage else None
+        if ctx and ctx.stage:
+            role = ctx.stage.get("role") or ""
+            from core.role_router import _role_family
+            family = _role_family(role)
+            return family if family else ctx.stage.get("name")
+        return None
 
     def is_awaiting_confirm(self, group_id: int) -> bool:
         s = self._state.get(group_id)
