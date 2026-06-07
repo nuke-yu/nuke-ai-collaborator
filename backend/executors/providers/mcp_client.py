@@ -217,6 +217,16 @@ class McpClientToolProvider(ToolProvider):
     def can_handle(self, name: str) -> bool:
         return name.startswith(f"{self._server_name}__")
 
+    def approval_flags(self) -> dict[str, bool]:
+        """Map exposed tool name → whether it needs HIL approval, per THIS
+        server's config (require_approval_all / approval_tools / write heuristic).
+        The collector ships this to workers so the proxy gates per-server, not by
+        a one-size heuristic."""
+        return {
+            td.name: self._needs_approval(_strip_prefix(self._server_name, td.name))
+            for td in self._tools
+        }
+
     def is_initialized(self) -> bool:
         """Public predicate: True when the session task is alive and ready."""
         return self._session_task is not None and not self._session_task.done()

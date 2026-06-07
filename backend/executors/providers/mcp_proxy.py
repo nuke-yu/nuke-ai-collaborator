@@ -41,15 +41,24 @@ class McpProxyProvider(ToolProvider):
             trace_id=context.get("trace_id"),
         )
 
+    def _needs_approval(self, name: str, tool: str) -> bool:
+        """Per-server approval decision shipped by the collector (require_approval_all
+        / approval_tools / write heuristic). Falls back to the write-name heuristic
+        only if the flag is absent (e.g. schema not yet received)."""
+        for s in bridge.schemas:
+            if s.get("function", {}).get("name") == name and "needs_approval" in s:
+                return bool(s["needs_approval"])
+        from executors.providers.mcp_client import _MCP_WRITE_TOOLS
+        return tool in _MCP_WRITE_TOOLS
+
     async def _check_permission(self, name: str, arguments: dict, context: dict) -> str | None:
         """Worker-side HIL for MCP tools (collector runs them pre-authorized).
 
-        Mirrors the old in-provider _check_hil: write-class tools require approval
-        via the permissions pipeline; missing ruleset fails closed."""
+        Mirrors the old in-provider _check_hil: tools the owning server flags for
+        approval go through the permissions pipeline; missing ruleset fails closed."""
         server, _, tool = name.partition("__")
-        from executors.providers.mcp_client import _MCP_WRITE_TOOLS
-        if tool not in _MCP_WRITE_TOOLS:
-            return None  # read-class MCP tools: no prompt (preserve prior default)
+        if not self._needs_approval(name, tool):
+            return None  # no approval required for this tool
         import permissions
         ruleset = context.get("ruleset")
         if ruleset is None:

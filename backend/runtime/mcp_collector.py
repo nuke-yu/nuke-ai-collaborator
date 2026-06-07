@@ -54,7 +54,24 @@ class MCPCollector:
                 log.warning("collector: MCP init failed [%s]: %s", prov.provider_id, e)
 
     def _schemas(self) -> list:
-        return self._router.get_external_schemas() if self._router else []
+        """Merged MCP tool schemas across all servers, each annotated with a
+        per-server `needs_approval` flag (extra key; ignored when the worker
+        builds the LLM schema, read by the proxy's HIL gate)."""
+        if not self._router:
+            return []
+        schemas = self._router.get_external_schemas()
+        flags: dict[str, bool] = {}
+        for p in self._router._providers:
+            if hasattr(p, "approval_flags"):
+                try:
+                    flags.update(p.approval_flags())
+                except Exception:
+                    pass
+        for s in schemas:
+            name = s.get("function", {}).get("name")
+            if name in flags:
+                s["needs_approval"] = flags[name]
+        return schemas
 
     async def connect(self) -> None:
         self._reader, self._writer = await ipc.connect(self.addr)

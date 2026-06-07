@@ -89,6 +89,31 @@ class TestMcpProxyProvider(unittest.IsolatedAsyncioTestCase):
             self.assertIn("安全拦截", result)
             req.assert_not_awaited()       # blocked before forwarding
 
+    async def test_per_server_flag_gates_read_named_tool(self):
+        # server flagged a read-NAMED tool for approval → gated despite the heuristic
+        global_bridge.set_schemas([
+            {"function": {"name": "fs__read_file", "description": "", "parameters": {}},
+             "needs_approval": True},
+        ])
+        p = McpProxyProvider()
+        with patch.object(global_bridge, "request", new=AsyncMock()) as req:
+            result, is_error = await p.execute("fs__read_file", {}, {})   # no ruleset
+            self.assertTrue(is_error)
+            self.assertIn("安全拦截", result)
+            req.assert_not_awaited()
+
+    async def test_per_server_flag_allows_write_named_tool(self):
+        # server flagged a write-NAMED tool as NOT needing approval → forwarded
+        global_bridge.set_schemas([
+            {"function": {"name": "fs__write_file", "description": "", "parameters": {}},
+             "needs_approval": False},
+        ])
+        p = McpProxyProvider()
+        with patch.object(global_bridge, "request", new=AsyncMock(return_value=("ok", False))) as req:
+            result, is_error = await p.execute("fs__write_file", {"path": "/x"}, {})
+            self.assertEqual((result, is_error), ("ok", False))
+            req.assert_awaited_once()
+
 
 if __name__ == "__main__":
     unittest.main()

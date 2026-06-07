@@ -99,5 +99,31 @@ class TestMCPCollectorRoundTrip(unittest.IsolatedAsyncioTestCase):
                 pass
 
 
+class TestCollectorSchemaAnnotation(unittest.TestCase):
+    """Per-server HIL config travels to workers: the collector annotates each
+    pushed schema with the owning provider's needs_approval flag."""
+
+    def test_schemas_annotated_with_approval_flags(self):
+        from runtime.mcp_collector import MCPCollector
+
+        class _P:
+            provider_id = "mcp:fake"
+            def discover_tools(self):
+                return [ToolDef(name="fake__do", description="", parameters={}),
+                        ToolDef(name="fake__read", description="", parameters={})]
+            def can_handle(self, n): return n.startswith("fake__")
+            async def execute(self, n, a, c): return ("", False)
+            def approval_flags(self):
+                return {"fake__do": True, "fake__read": False}
+
+        coll = MCPCollector("x")
+        coll._router = ToolRouter()
+        coll._router.register_provider(_P())
+        by = {s["function"]["name"]: s.get("needs_approval") for s in coll._schemas()}
+        self.assertIs(by["fake__do"], True)
+        self.assertIs(by["fake__read"], False)
+
+
 if __name__ == "__main__":
     unittest.main()
+
