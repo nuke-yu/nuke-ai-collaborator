@@ -1,7 +1,21 @@
+import os
+import platform
+
 from .constants import bot_ws, WORKSPACE_ROOT, SYSTEM_SKILLS_ROOT, ROLES_ROOT
 from .metadata import skill_path, parse_skill_meta
 from .discovery import list_skills, list_skills_all
 from .processor import process_skill_content
+
+# Budget for always-on (常驻) skill bodies injected into every system prompt.
+# Without a cap, many/large always-skills silently balloon the prompt.
+_MAX_SKILL_BODY_CHARS = 8000       # per-skill full-body cap
+_MAX_ALWAYS_TOTAL_CHARS = 24000    # total budget across all always-skills
+
+
+def _fold_home(text: str) -> str:
+    """Collapse the host home-dir prefix to ~ (token saving + less path leak)."""
+    home = os.path.expanduser("~")
+    return text.replace(home, "~") if home and home != "~" else text
 
 
 def _skills_dir_for_layer(layer: str, bot_id: int,
@@ -20,20 +34,44 @@ def _skills_dir_for_layer(layer: str, bot_id: int,
 
 async def load_always_skills(bot_id: int, group_id: int | None = None,
                        role: str | None = None) -> list[dict]:
-    """Return full content for skills with always: true across all four layers."""
+    """Return full content for skills with always: true across all four layers.
+
+    Enforces a prompt budget: a body over _MAX_SKILL_BODY_CHARS, or one that
+    would overflow the _MAX_ALWAYS_TOTAL_CHARS running total, is DEGRADED to a
+    short summary (full text still reachable via run_skill). Skills are visited
+    in layer order (system first), so foundational layers keep priority.
+    """
     skills = await list_skills_all(bot_id, group_id=group_id, role=role)
     result = []
+    total = 0
     for skill in skills:
         if not skill.get("always"):
             continue
         # A3: Use the pre-resolved path from the discovery layer (handles stub fallbacks)
         path = skill.get("path")
         kind = skill.get("type", "md")
-        if path and kind == "md" and path.exists():
-            try:
-                result.append({"name": skill["name"], "content": path.read_text(encoding="utf-8")})
-            except Exception:
-                pass
+        if not (path and kind == "md" and path.exists()):
+            continue
+        try:
+            body = _fold_home(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+
+        name = skill["name"]
+        remaining = _MAX_ALWAYS_TOTAL_CHARS - total
+        if len(body) > _MAX_SKILL_BODY_CHARS or len(body) > remaining:
+            desc = skill.get("description", "")
+            summary = (
+                f"（常驻技能「{name}」正文 {len(body)} 字符，超出注入预算，"
+                f"此处仅注入摘要；需要全文请调用 run_skill(name=\"{name}\")）"
+                + (f"\n摘要：{desc}" if desc else "")
+            )
+            result.append({"name": name, "content": summary, "degraded": True})
+            total += len(summary)
+            continue
+
+        result.append({"name": name, "content": body})
+        total += len(body)
     return result
 
 
@@ -68,9 +106,24 @@ async def run_skill(bot_id: int, name: str, args: str = "", ctx: dict | None = N
     raw = path.read_text(encoding="utf-8")
     skill_dir = path.parent
 
+    # Env-aware templating is opt-in (`template: true`); only then do we expose a
+    # small set of SAFE variables to the sandboxed Jinja2 renderer. Gating on the
+    # flag avoids mangling existing skills that contain literal `{{ }}`.
+    template_vars = None
+    if skill_entry.get("template"):
+        template_vars = {
+            "os": platform.system(),
+            "is_windows": os.name == "nt",
+            "shell": "powershell" if os.name == "nt" else "/bin/sh",
+            "role": role or "",
+            "group_id": group_id,
+            "bot_id": bot_id,
+            "args": args,
+        }
+
     # Base directory header + full transformation pipeline
     content = f"Base directory for this skill: {skill_dir}\n\n{raw}"
-    content = await process_skill_content(content, skill_dir, args=args)
+    content = await process_skill_content(content, skill_dir, args=args, template_vars=template_vars)
 
     # Companion files (directory skills only)
     if path.name == "SKILL.md":

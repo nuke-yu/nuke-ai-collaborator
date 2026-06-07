@@ -95,6 +95,15 @@ class _SkillEventHandler(FileSystemEventHandler):
         info = _parse_path(path)
         if info is None:
             return
+        # Same-process fast-path: drop the four-layer scan cache immediately so a
+        # subsequent list_skills_all in THIS process sees the change without
+        # waiting for the mtime signature to diverge. (Correctness across
+        # processes is guaranteed by the signature, not by this hook.)
+        try:
+            from .discovery import invalidate_skills_cache
+            invalidate_skills_cache()
+        except Exception:
+            pass
         key = f"{info['source']}:{info.get('member_id') or info.get('group_id')}"
         self._debounce(key, info)
 

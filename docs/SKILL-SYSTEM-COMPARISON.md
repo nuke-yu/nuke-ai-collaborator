@@ -30,9 +30,10 @@
 > | 1 | Stub 覆盖丢 body | ✅ 已修复（`discovery._merge_skill_entry` A3 深合并） |
 > | 2 | 脆弱手工 YAML 解析 | ✅ 已修复（`metadata.parse_frontmatter` 改用 `yaml.safe_load`） |
 > | 3 | 生命周期无文件锁 | ✅ 已修复（`lifecycle.file_lock` SHA-256，fcntl/msvcrt 跨平台） |
-> | 4 | 无安全动态求值 | ⬜ 未做（按 DFT-022 一刀切禁 shell，属安全取舍） |
-> | 5 | 平铺命名空间冲突 | 🔶 部分（system 保护 + draft 冲突有诊断；非 system 层互覆盖仍静默） |
-> | 6 | 高频磁盘扫描 | ⬜ 未做（`watcher.py` 仅给前端发 WS 通知，后端 `list_skills_all` 每次仍全量扫盘） |
+> | 4 | 无安全动态求值 | ✅ 已修复（`processor.render_sandboxed`：Jinja2 SandboxedEnvironment，opt-in `template:true`，不重开 RCE） |
+> | 5 | 平铺命名空间冲突 | ✅ 已修复（system 保护 + draft 冲突 + 非 system 层覆盖 winner/loser 诊断日志） |
+> | 6 | 高频磁盘扫描 | ✅ 已修复（`discovery` mtime 签名缓存，每进程自洽 + watcher 同进程失效快路径） |
+> | 7 | 注入无 token 预算 | ✅ 已修复（`loader.load_always_skills` 单 skill 体积上限 + 总预算，超限降级摘要 + 路径折叠 `~`） |
 >
 > 下文逐条保留原始诊断作为背景，并在每条标注现状。
 
@@ -58,25 +59,26 @@ stub = f"---\nname: {skill_name}\nlayer: personal\nstatus: {new_status}\n---\n"
 * **改进方案**：引入文件排他锁，或将技能生命周期状态和层级关系彻底**数据库化（SQLite）**，仅将磁盘作为初始导入源。
 * **现状（已实现文件锁）**：[lifecycle.py:9 `file_lock`](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/skills/lifecycle.py) 用按绝对路径 SHA-256 命名的临时锁文件（`fcntl.flock` / Windows `msvcrt.locking`，不 unlink 以消除 flock 竞态），`write_to_draft`/`update_skill_status`/`approve_draft_skill`/`reject_draft_skill` 全部包锁。SQLite 化属更彻底的演进方向，暂未做。
 
-### 4. 缺乏安全的动态求值引擎 — ⬜ 未做（安全取舍）
+### 4. 缺乏安全的动态求值引擎 — ✅ 已修复
 在 [processor.py](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/skills/processor.py) 中，为了防止恶意智能体进行注入，我们一刀切地禁用了 Shell 预执行（`!`）。这保证了绝对的安全，但也使得技能沦为纯静态 prompt 模板，失去了环境感知能力（例如根据当前工作区语言自动注入对应的测试流程规范）。
 * **改进方案**：引入一个隔离且安全的 Jinja2 沙箱或 Python 受限表达式计算器，在不给 RCE 任何可乘之机的前提下，允许根据环境动态计算 Prompt 变量。
-* **现状（未做，属取舍）**：[processor.py](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/skills/processor.py) 按 DFT-022 已彻底移除 skill 内嵌 `!`/`` !`cmd` `` 求值（自写 skill = RCE 链），目前只做 `$ARGUMENTS`/`${SKILL_DIR}` 静态替换。环境感知能力的缺失是**已知代价**；若要恢复，应走沙箱模板而非放开 shell。优先级看是否真有「按工作区语言注入测试规范」类需求。
+* **现状（已实现，沙箱模板而非放开 shell）**：[processor.py `render_sandboxed`](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/skills/processor.py) 用 Jinja2 `SandboxedEnvironment` 恢复环境感知，**不重开 DFT-022 的 RCE**：清空 globals（无 `range`/`__import__` 等）、无 template loader（`{% include %}` 读不到文件）、未知变量渲染为空、任何异常 fail-safe 回退原文。**opt-in**：仅 frontmatter `template: true` 的 skill 才渲染（避免误伤含字面 `{{` 的既有 skill）；安全变量（os/shell/role/…）由 [loader.run_skill](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/skills/loader.py) 注入。
 
-### 5. 平铺命名空间冲突 — 🔶 部分修复
+### 5. 平铺命名空间冲突 — ✅ 已修复
 所有技能在 `list_skills` 后被强行平铺合并，如果不同 Role（L3）或 Group（L2）下定义了同名的 `test.md` 技能，会出现隐式的覆盖冲突，且不输出任何 Collision 警告（gsd-2 有健全的冲突诊断警告报告）。
 * **改进方案**：在底层扫描时引入命名空间机制（例如 `role:developer::run-tests`），或者在发现重名冲突时生成 Collision Diagnostic Log 供系统排查。
-* **现状（部分）**：[discovery.py:150](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/skills/discovery.py) 对 **L1 system 层**有保护——下层不得遮蔽，且打 `Collision Warning`（含 winner/loser path）；draft 与激活技能同名也有 `collision` 诊断（`discovery.py:223`）。**仍缺**：L2/L3/personal 之间互相覆盖是按设计静默生效，无诊断日志——补一条 winner/loser 日志即可对齐 gsd-2。命名空间前缀化暂未做。
+* **现状（已实现）**：system 层保护 + `Collision Warning`、draft 同名 `collision` 诊断照旧；另在 [discovery._merge_skill_entry](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/skills/discovery.py) 补了 **L2/L3/personal 跨层覆盖的 winner/loser 诊断日志**（A5，对齐 gsd-2）——覆盖仍按设计生效，但不再静默。命名空间前缀化（`role::name`）仍属未来增强，非必需。
 
-### 6. 高频磁盘扫描开销 — ⬜ 未做
+### 6. 高频磁盘扫描开销 — ✅ 已修复
 每次运行技能或刷新 UI 时，系统都会高频同步扫描 4 层物理目录，在高负载下，这将成为系统响应时间的木桶短板。
 * **改进方案**：为 `list_skills_all` 引入基于 File Watcher 驱动的内存缓存（In-Memory Cache），实现秒级热更新的同时消除磁盘同步扫描延迟。
-* **现状（未做）**：[watcher.py](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/skills/watcher.py) 已有 watchdog，但**只用于给前端广播 `skills_changed` WS 事件**，并未驱动后端缓存。`list_skills_all` 在 [prompt_builder.py:31](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/core/orchestration/prompt_builder.py) 每次构建 prompt（每 bot 每轮）仍 `asyncio.to_thread` 全量扫 4 层盘。watcher 已在位，只差把它接成「失效驱动的内存缓存」。
+* **现状（已实现，mtime 签名缓存）**：[discovery._list_skills_all_sync](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/skills/discovery.py) 按 `(bot_id, group_id, role)` 缓存,并以**全部 skill 文件的 (mtime_ns, size) 签名**校验——命中时不再 read+yaml 解析每个 SKILL.md。**为什么用签名而非纯 watcher 驱动**：SkillWatcher 与缓存须同进程才能通信、而模块级状态不跨 fork；签名在任何进程都正确（不依赖该进程是否跑 watcher）。`invalidate_skills_cache()` 作 watcher 同进程快路径（非正确性来源）。
 
-### 7. Skill 注入无 token 预算 / 体积上限 — ⬜ 未做（新增）
+### 7. Skill 注入无 token 预算 / 体积上限 — ✅ 已修复
 
 > 此条不在首版 6 条之列，是本次源码复审新发现的缺口。
 
 [filter.py](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/skills/filter.py) 的冷热分流（`always:true` 全文常驻、其余只注 metadata）虽减了常驻预算，但**没有任何硬上限**：单个 skill body 多大都全量注入，`always` 技能数量也无封顶。当 always-skill 变多或某个 skill 很长时，system prompt 会无声膨胀、挤占对话预算。
 * **对标**：openclaw 单 skill `< 256KB`、总 prompt 默认 `< 18K` 字符，并把绝对路径压成 `~/`（省 token 兼防泄漏）；Claude Code `countToolDefinitionTokens` 走 token 预算。
 * **改进方案**：给注入加一道总 token 预算 + 单 skill 体积上限，超限的 `always` 技能自动降级为只注 metadata；并把注入文本里的绝对路径折叠为 `~/`。
+* **现状（已实现）**：[loader.load_always_skills](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/skills/loader.py) 加 `_MAX_SKILL_BODY_CHARS=8000`（单 skill 上限）+ `_MAX_ALWAYS_TOTAL_CHARS=24000`（总预算）；超限者降级为摘要（保留 description + `run_skill` 取全文提示，置 `degraded` 标记），按层序（system 优先）分配预算；`_fold_home` 把 home 目录折叠为 `~`。char 级上限对标 openclaw（256KB/18K 字符）。
