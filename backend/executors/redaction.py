@@ -49,12 +49,16 @@ _PATTERNS: list[tuple[str, re.Pattern, int]] = [
     # Authorization: Bearer <token>  /  bare bearer token
     ("bearer", re.compile(
         r"(?i)(authorization\s*[:=]\s*(?:bearer\s+)?|bearer\s+)([A-Za-z0-9._\-]{20,})"), 2),
-    # KEY=value / KEY: value where the key name looks secret. PWD/PASSWD excluded
-    # (PWD is the shell's working-dir var — a common false positive).
+    # KEY="value" where the key name looks secret. QUOTED literal only, and the
+    # value must contain no code punctuation ()[]{}<> — so this never mangles code
+    # like `API_KEY = os.environ["X"]` or `PUBLIC_KEY = load_pem(...)` (the false
+    # positive that derailed the dev bot). PWD/PASSWD excluded (PWD = cwd var).
+    # Unquoted bare secrets in recognizable formats (ghp_/sk-/AKIA/JWT/…) are
+    # still caught by the format-specific patterns above, quoted or not.
     ("secret-assignment", re.compile(
         r"(?im)("
         r"[A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|PRIVATE)[A-Z0-9_]*"
-        r"\s*[:=]\s*)(['\"]?)([^\s'\"]{6,})(['\"]?)"), 3),
+        r"\s*[:=]\s*)(['\"])([^\s'\"(){}\[\]<>]{6,})(['\"])"), 3),
 ]
 
 

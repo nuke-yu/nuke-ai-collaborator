@@ -62,9 +62,9 @@ class TestRedactSecrets(unittest.TestCase):
         self._assert_redacted("Authorization: Bearer abcdef0123456789ABCDEF", "abcdef0123456789ABCDEF")
 
     def test_secret_named_assignment_keeps_key(self):
-        out, n = redact_secrets("DB_PASSWORD=supersecret123")
+        out, n = redact_secrets('DB_PASSWORD = "supersecret123"')   # quoted literal
         self.assertEqual(n, 1)
-        self.assertIn("DB_PASSWORD=", out)   # key name preserved
+        self.assertIn("DB_PASSWORD", out)    # key name preserved
         self.assertNotIn("supersecret123", out)
 
     def test_api_key_assignment(self):
@@ -73,6 +73,20 @@ class TestRedactSecrets(unittest.TestCase):
         self.assertNotIn("abcd1234efgh", out)
 
     # --- precision: must NOT redact these ---
+    # Regression: the secret-assignment heuristic must NOT mangle CODE — it once
+    # redacted `os.environ[` / `load_pem(` in `*KEY = <expr>`, corrupting the
+    # source the dev bot read back via run_shell and breaking its loop.
+
+    def test_code_assignment_not_mangled(self):
+        for code in (
+            'API_KEY = os.environ["X"]',
+            'PUBLIC_KEY = load_pem(open("k.pem"))',
+            'SECRET_KEY = settings.SECRET',
+            'self._token = build_token(user)',
+        ):
+            out, n = redact_secrets(code)
+            self.assertEqual(n, 0, f"falsely redacted code: {code!r} -> {out!r}")
+            self.assertEqual(out, code)
 
     def test_pwd_not_redacted(self):
         out, n = redact_secrets("PWD=/home/user/project")
