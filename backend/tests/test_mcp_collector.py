@@ -180,6 +180,43 @@ class TestCollectorAuth(unittest.IsolatedAsyncioTestCase):
         p, coll = await self._run_init_with_fake_oauth_provider(token=object())
         self.assertTrue(p.inited)                      # stored token → auto-connect
 
+    async def test_auth_start_inflight_guarded(self):
+        from runtime.mcp_collector import MCPCollector
+        coll = MCPCollector("x")
+        coll._writer = object()
+
+        class _P:
+            url = "https://r"
+            provider_id = "mcp:gh"
+        coll._find_provider = lambda s: _P()
+        coll._auth_inflight.add("gh")            # a flow is already in progress
+
+        sent = []
+        async def fake_send(w, m): sent.append(m)
+        with patch("runtime.ipc.send_msg", new=fake_send):
+            await coll._handle_auth_start({
+                "request_id": "a", "origin_worker_id": "w0", "server": "gh", "group_id": 1})
+        self.assertTrue(sent[0]["is_error"])
+        self.assertIn("进行中", sent[0]["result"])
+
+    async def test_push_schemas_content_aware(self):
+        from runtime.mcp_collector import MCPCollector
+        coll = MCPCollector("x")
+        coll._writer = object()
+        seq = iter([
+            [{"function": {"name": "t", "description": "v1", "parameters": {}}}],
+            [{"function": {"name": "t", "description": "v1", "parameters": {}}}],  # same → skip
+            [{"function": {"name": "t", "description": "v2", "parameters": {}}}],  # changed → push
+        ])
+        coll._schemas = lambda: next(seq)
+        sent = []
+        async def fake_send(w, m): sent.append(m)
+        with patch("runtime.ipc.send_msg", new=fake_send):
+            await coll._push_schemas()
+            await coll._push_schemas()
+            await coll._push_schemas()
+        self.assertEqual(len(sent), 2)               # content change (same name) re-pushed
+
     async def test_callback_url_uses_env(self):
         import os
         from runtime.mcp_collector import MCPCollector

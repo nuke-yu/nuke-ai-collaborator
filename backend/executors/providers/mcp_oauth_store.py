@@ -7,11 +7,15 @@ protocol (get/set tokens + client info), so OAuthClientProvider can persist and
 refresh tokens across collector restarts.
 """
 import time
+import os
 from pathlib import Path
 
 import aiosqlite
 
-_DEFAULT_DB = Path(__file__).resolve().parent.parent.parent / "mcp_oauth.db"
+# Env-overridable (read-only / container deploys can't write next to the source).
+_DEFAULT_DB = os.environ.get("MCP_OAUTH_DB") or str(
+    Path(__file__).resolve().parent.parent.parent / "mcp_oauth.db"
+)
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS mcp_oauth (
@@ -40,6 +44,9 @@ class MCPTokenStorage:
         return row[0] if row and row[0] else None
 
     async def _write(self, column: str, value: str) -> None:
+        # NOTE: `column` is f-string-interpolated but is ALWAYS an internal literal
+        # ("tokens_json" / "client_info_json") — never external input. Do NOT
+        # extend this to accept caller-supplied column names (SQL injection).
         async with aiosqlite.connect(self.db_path) as c:
             await c.execute(_SCHEMA)
             await c.execute(

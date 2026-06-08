@@ -27,7 +27,7 @@ class MCPAuthFlows:
     def begin(self, server: str) -> asyncio.Future:
         """Register intent to authenticate `server`; returns a future that
         resolves to the authorization URL once the SDK produces it."""
-        fut = asyncio.get_event_loop().create_future()
+        fut = asyncio.get_running_loop().create_future()
         self._url_fut[server] = fut
         return fut
 
@@ -36,7 +36,7 @@ class MCPAuthFlows:
             state = (parse_qs(urlparse(url).query).get("state") or [None])[0]
             if state:
                 self._state_by_server[server] = state
-                self._cb_fut[state] = asyncio.get_event_loop().create_future()
+                self._cb_fut[state] = asyncio.get_running_loop().create_future()
             f = self._url_fut.get(server)
             if f and not f.done():
                 f.set_result(url)

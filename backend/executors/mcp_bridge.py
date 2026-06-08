@@ -59,7 +59,7 @@ class MCPBridge:
             return "[MCP错误] collector 总线未就绪", True
         self._seq += 1
         rid = f"{self._origin}-{self._seq}"
-        fut = asyncio.get_event_loop().create_future()
+        fut = asyncio.get_running_loop().create_future()
         self._pending[rid] = fut
         try:
             await self._send(rid, name, arguments, group_id, trace_id)
@@ -80,7 +80,7 @@ class MCPBridge:
             return "[MCP认证错误] collector 总线未就绪", True
         self._seq += 1
         rid = f"{self._origin}-auth-{self._seq}"
-        fut = asyncio.get_event_loop().create_future()
+        fut = asyncio.get_running_loop().create_future()
         self._pending[rid] = fut
         try:
             await self._send_auth(rid, server, group_id, trace_id)

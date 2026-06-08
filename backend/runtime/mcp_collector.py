@@ -69,6 +69,7 @@ class MCPCollector:
         self._last_schema_sig = None
         from executors.providers.mcp_auth_flows import MCPAuthFlows
         self._flows = MCPAuthFlows()
+        self._auth_inflight: set = set()       # servers with an in-progress OAuth flow
 
     async def _init_providers(self) -> None:
         import os
@@ -129,8 +130,17 @@ class MCPCollector:
         log.info("collector: connected to supervisor at %s", self.addr)
 
     async def _push_schemas(self) -> None:
+        import hashlib
+        import json
         schemas = self._schemas()
-        sig = tuple(sorted(s["function"]["name"] for s in schemas))
+        # Content-aware signature: a tool changing its params/description (same
+        # name) must still re-push. Names-only diff would miss it AND the periodic
+        # loop uses this same check, so it would never propagate.
+        payload_str = json.dumps(
+            sorted(schemas, key=lambda x: x.get("function", {}).get("name", "")),
+            sort_keys=True, default=str,
+        )
+        sig = hashlib.sha256(payload_str.encode()).hexdigest()
         if sig == self._last_schema_sig:
             return
         self._last_schema_sig = sig
@@ -230,6 +240,8 @@ class MCPCollector:
         except Exception as e:
             log.warning("collector: OAuth init failed for '%s': %s", server, e)
             self._flows.fail(server, str(e))
+        finally:
+            self._auth_inflight.discard(server)   # flow ended (success or fail)
 
     async def _handle_auth_start(self, frame: dict) -> None:
         rid = frame.get("request_id")
@@ -248,16 +260,27 @@ class MCPCollector:
         if prov is None or not prov.url:
             await reply(f"[MCP认证] 未找到 remote server '{server}'（仅 remote+oauth 适用）", True)
             return
+        # Per-server guard: a concurrent MCP_AUTH_START for the same server would
+        # race set_auth()/initialize(). Check-and-set is atomic (no await between).
+        if server in self._auth_inflight:
+            await reply(f"[MCP认证] '{server}' 的授权正在进行中，请使用之前返回的链接完成", True)
+            return
+        self._auth_inflight.add(server)
+        spawned = False
         try:
             prov.set_auth(await self._build_auth_provider(prov, server))
             url_fut = self._flows.begin(server)
             t = asyncio.create_task(self._reinit_with_auth(prov, server))
             self._tasks.add(t); t.add_done_callback(self._tasks.discard)
+            spawned = True   # the reinit task now owns releasing _auth_inflight
             url = await asyncio.wait_for(url_fut, timeout=60)
             await reply(f"请在浏览器打开以下链接完成 '{server}' 的授权，完成后工具会自动可用：\n{url}", False)
         except Exception as e:
             self._flows.fail(server, str(e))
             await reply(f"[MCP认证错误] {e}", True)
+        finally:
+            if not spawned:
+                self._auth_inflight.discard(server)   # flow never started → release now
 
     async def run(self) -> None:
         await self._init_providers()

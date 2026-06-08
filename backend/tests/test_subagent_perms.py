@@ -81,6 +81,30 @@ class TestDeriveSubagentRuleset(unittest.TestCase):
         self.assertNotIn(("run_shell", ""), kept)
         self.assertNotIn(("spawn_agent", ""), kept)
 
+    def test_blanket_mcp_write_allow_dropped(self):
+        # MCP rules look like mcp::server::tool — a blanket write allow must drop.
+        parent = Ruleset(rules=[
+            Rule(tool_pattern="mcp::filesystem::write_file", args_pattern="", action="allow"),
+        ])
+        self.assertEqual(derive_subagent_ruleset(parent).rules, [])
+
+    def test_blanket_mcp_read_allow_kept(self):
+        parent = Ruleset(rules=[
+            Rule(tool_pattern="mcp::filesystem::read_file", args_pattern="", action="allow"),
+        ])
+        self.assertEqual(len(derive_subagent_ruleset(parent).rules), 1)  # read = not high-risk
+
+    def test_mcp_wildcard_allow_dropped(self):
+        parent = Ruleset(rules=[Rule(tool_pattern="mcp::*", args_pattern="", action="allow")])
+        self.assertEqual(derive_subagent_ruleset(parent).rules, [])
+
+    def test_scoped_mcp_write_allow_kept(self):
+        # a non-blanket MCP allow (has args_pattern) is a real pre-approval → keep
+        parent = Ruleset(rules=[
+            Rule(tool_pattern="mcp::filesystem::write_file", args_pattern="/tmp/*", action="allow"),
+        ])
+        self.assertEqual(len(derive_subagent_ruleset(parent).rules), 1)
+
     def test_does_not_mutate_parent(self):
         parent = Ruleset(mode="bypassPermissions", rules=[
             Rule(tool_pattern="run_shell", args_pattern="", action="allow"),

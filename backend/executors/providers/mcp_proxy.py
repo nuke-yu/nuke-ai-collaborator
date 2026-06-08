@@ -56,16 +56,20 @@ class McpProxyProvider(ToolProvider):
 
         Mirrors the old in-provider _check_hil: tools the owning server flags for
         approval go through the permissions pipeline; missing ruleset fails closed."""
-        server, _, tool = name.partition("__")
-        if not self._needs_approval(name, tool):
+        server, sep, tool = name.partition("__")
+        # Fail-safe: an un-namespaced name (no '__') can't be classified — require
+        # approval rather than silently skipping HIL. (Collector always prefixes,
+        # so this is defensive.)
+        if sep and not self._needs_approval(name, tool):
             return None  # no approval required for this tool
+        perm_name = f"mcp::{server}::{tool}" if sep else f"mcp::{name}"
         import permissions
         ruleset = context.get("ruleset")
         if ruleset is None:
-            return (f"[MCP安全拦截] '{server}/{tool}' 是写操作类工具，"
+            return (f"[MCP安全拦截] '{name}' 是写操作类/不可分类工具，"
                     f"但当前会话没有 ruleset，出于安全已拒绝执行")
         result = await permissions.check(
-            tool_name=f"mcp::{server}::{tool}",
+            tool_name=perm_name,
             arguments=arguments,
             ruleset=ruleset,
             bot_id=context.get("bot_id"),

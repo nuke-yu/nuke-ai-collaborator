@@ -80,7 +80,21 @@ _SUBAGENT_HIGH_RISK_TOOLS = frozenset({
 
 
 def _covers_high_risk(tool_pattern: str) -> bool:
-    return any(fnmatch.fnmatch(t, tool_pattern) for t in _SUBAGENT_HIGH_RISK_TOOLS)
+    if any(fnmatch.fnmatch(t, tool_pattern) for t in _SUBAGENT_HIGH_RISK_TOOLS):
+        return True
+    # MCP rules look like "mcp::server::tool" (or wildcards). A blanket allow for
+    # a write-class MCP tool — or any MCP wildcard — is high-risk for a sub-agent
+    # (e.g. mcp::filesystem::write_file). Lazy import avoids an import cycle.
+    if tool_pattern.startswith("mcp::"):
+        if "*" in tool_pattern:
+            return True
+        tool = tool_pattern.rsplit("::", 1)[-1]
+        try:
+            from executors.providers.mcp_client import _MCP_WRITE_TOOLS
+        except Exception:
+            return False
+        return tool in _MCP_WRITE_TOOLS
+    return False
 
 
 def derive_subagent_ruleset(parent: "Ruleset | None") -> "Ruleset | None":

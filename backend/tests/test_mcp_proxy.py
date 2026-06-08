@@ -123,6 +123,16 @@ class TestMcpProxyProvider(unittest.IsolatedAsyncioTestCase):
             self.assertIn("安全拦截", result)
             req.assert_not_awaited()
 
+    async def test_unnamespaced_tool_requires_approval(self):
+        # fail-safe: a name without '__' can't be classified → must require approval
+        global_bridge.set_schemas([{"function": {"name": "weirdname", "parameters": {}}}])
+        p = McpProxyProvider()
+        with patch.object(global_bridge, "request", new=AsyncMock()) as req:
+            result, is_error = await p.execute("weirdname", {}, {})   # no ruleset
+            self.assertTrue(is_error)
+            self.assertIn("安全拦截", result)
+            req.assert_not_awaited()
+
     async def test_per_server_flag_allows_write_named_tool(self):
         # server flagged a write-NAMED tool as NOT needing approval → forwarded
         global_bridge.set_schemas([
