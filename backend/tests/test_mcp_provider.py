@@ -282,6 +282,27 @@ class TestMcpClientToolProvider(unittest.IsolatedAsyncioTestCase):
         self.assertIn("[REDACTED]", result)
         await p.close()
 
+    async def test_large_result_truncated(self):
+        """MCP results bypass the global truncator → must be bounded at the
+        collector boundary (search_repositories returned 34k chars in the real
+        smoke test)."""
+        from core import config
+        big = "x" * (config.TOOL_RESULT_MAX_CHARS + 5000)
+        p = await _make_live_provider(call_result_text=big)
+        result, is_error = await p.execute("filesystem__read_file", {"path": "/x"}, {})
+        self.assertFalse(is_error)
+        self.assertIn("已省略", result)
+        # fence adds a small notice, but the body is bounded near the limit
+        self.assertLess(len(result), config.TOOL_RESULT_MAX_CHARS + 500)
+        await p.close()
+
+    async def test_small_result_not_truncated(self):
+        p = await _make_live_provider(call_result_text="short body")
+        result, _ = await p.execute("filesystem__read_file", {"path": "/x"}, {})
+        self.assertNotIn("已省略", result)
+        self.assertIn("short body", result)
+        await p.close()
+
     async def test_result_injection_escalated(self):
         """An MCP result carrying injection markers escalates the fence notice."""
         p = await _make_live_provider(

@@ -103,6 +103,20 @@ def _scan_injection(text: str) -> list[str]:
     return [r.pattern for r in _INJECTION_RE if r.search(text)]
 
 
+def _truncate_result(text: str) -> str:
+    """Bound an MCP result's size (head + tail). MCP results bypass tool_executor's
+    after-hooks, so the global output truncator never sees them — truncate here at
+    the collector boundary (also saves bus bandwidth). Uses the same budget as
+    local tools (config.TOOL_RESULT_MAX_CHARS)."""
+    from core import config
+    limit = config.TOOL_RESULT_MAX_CHARS
+    if len(text) <= limit:
+        return text
+    head_tail = limit // 2
+    dropped = len(text) - limit
+    return text[:head_tail] + f"\n\n[... {dropped:,} 字符已省略 ...]\n\n" + text[-head_tail:]
+
+
 def _wrap_untrusted(server_name: str, tool_name: str, text: str) -> str:
     """Fence an MCP result as untrusted external data (indirect-injection defense).
 
@@ -320,7 +334,8 @@ class McpClientToolProvider(ToolProvider):
         # are our own framing, not server data — leave as-is.
         if not is_error:
             from executors.redaction import redact_secrets
-            result_text, _ = redact_secrets(result_text)
+            result_text, _ = redact_secrets(result_text)   # mask secrets in the full text
+            result_text = _truncate_result(result_text)    # then bound size (head+tail)
             result_text = _wrap_untrusted(self._server_name, real_name, result_text)
         return result_text, is_error
 
