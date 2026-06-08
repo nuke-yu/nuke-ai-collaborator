@@ -188,3 +188,14 @@ OAuth 授权由 bot 调内置工具 `mcp_authenticate(server)` 触发。它走 `
 4. 期望：collector 完成换 token（落 `mcp_oauth.db`）→ 该 server 工具出现在后续轮次；
    重启后带 token 自动重连（SDK 刷新）。
 （总线/存储/流程编排接缝均已单测；上述 1–4 是唯一需真实 server 的部分。）
+
+### 4. 对真实 GitHub MCP 的 smoke 验证（stdio + PAT，非 OAuth）
+最低成本验证"对真实 server 跑通"——用 GitHub MCP 的本地 stdio + 个人令牌（PAT），
+端到端验证真实握手 / schema 解析 / 工具调用 / 结果围栏 / collector 总线往返（**不含 OAuth**）：
+```bash
+export GITHUB_PERSONAL_ACCESS_TOKEN=ghp_xxx     # read-scoped PAT 即可
+python3 -m pytest tests/test_mcp_github_smoke.py -v -s
+```
+默认 `npx -y @modelcontextprotocol/server-github`，可用 `GITHUB_MCP_COMMAND`/`GITHUB_MCP_ARGS`
+指向本地 `github-mcp-server` 二进制。无令牌时自动 SKIP（不影响常规测试）。两条用例:
+provider 直连真实 server；collector→bus→真实 server 完整往返。
