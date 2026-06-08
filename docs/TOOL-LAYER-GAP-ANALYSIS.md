@@ -1,6 +1,6 @@
 # 工具执行层横向对比与差距分析
 
-> 最后更新：2026-06-07
+> 最后更新：2026-06-08
 > 状态：分析报告
 > 关联文档：[TOOL-EXECUTOR-REFACTOR-DESIGN.md](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/docs/TOOL-EXECUTOR-REFACTOR-DESIGN.md)、[TOOL-ROUTER-STRATEGIC-SOLUTION.md](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/docs/TOOL-ROUTER-STRATEGIC-SOLUTION.md)、[MCP-SYSTEM-COMPARISON.md](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/docs/MCP-SYSTEM-COMPARISON.md)
 
@@ -32,7 +32,7 @@
 | 授权记忆 | ✅ persist_rule + 子命令深度合成 | always-allow | — | — | ✅ 子命令深度感知合成 |
 | 子 agent 权限 | ✅ 衰减派生(去 bypass+去高危 blanket+深度上限+不可弹窗) | Task 限工具集 | ✅ 衰减派生 | ✅ | （委托 CLI） |
 | 参数校验 | ⚠️ 硬编码别名表 | ✅ zod validateInput | ✅ schema-decode | ✅ | （透传） |
-| MCP 传输 | 🔶 stdio + remote(SSE/HTTP)（无 OAuth） | ✅ +WS* | ✅ +remote(SSE/HTTP)+OAuth | ✅ | （透传 CLI） |
+| MCP 传输 | ✅ stdio + remote(SSE/HTTP) + OAuth（collector 进程） | ✅ +WS* | ✅ +remote(SSE/HTTP)+OAuth | ✅ | （透传 CLI） |
 | MCP 工具过滤 | allow_list | — | — | — | ✅ allow+block per-model |
 | 工具规模治理 | 🔶 schema 数量预算（无 deferred 检索） | ✅ deferred+ToolSearch | — | ⚠️ searchable | （透传） |
 | 工具输出脱敏 | ✅ redact_secrets | — | — | ✅ result-middleware | — |
@@ -67,11 +67,12 @@
 - **残留**：超额工具暂不可调用(未做 Claude Code 那种 `ToolSearchTool` 动态检索+按需装载);当前 0-1 个 server 远未触限,属预防性护栏。配合每 server `allow_list` 收窄是主手段。
 - **对标**：Claude Code `toolSearch.ts`(deferred + `countToolDefinitionTokens` token 预算)。
 
-### 5. 🔶 MCP remote / OAuth — remote 已实现，OAuth 待做
-- **现状（已实现）**：[mcp_client.py](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/executors/providers/mcp_client.py) 现支持三种传输:stdio + **remote SSE + remote streamable-HTTP**(`_open_transport` 按 config 的 `url`/`transport` 选择,`headers` 携带鉴权如 `Authorization: Bearer`);`from_config` 解析 `url`/`transport`/`headers`。✅ 自动重连(`4d666be`)。✅ **`ToolListChanged` 订阅**:`ClientSession(message_handler=_on_message)`,通知经 `_REFRESH` 哨兵在会话任务内安全 re-cache 工具表。
-- **残留**:**无 OAuth 三方授权流**(RFC 7591 动态注册)——目前靠 config 里的静态 `headers` 传 token;无独立健康检查(靠重连兜底)。
-- **对标**：opencode `src/config/mcp.ts`(Local+Remote+OAuth+per-server timeout)。
-- **单测**:`tests/test_mcp_provider.py`(remote 传输选择 + from_config remote + ToolListChanged 刷新)。
+### 5. ✅ MCP remote + OAuth — 已实现（运行于 mcp-collector 进程）
+- **架构**：MCP 已迁到独立 **mcp-collector 进程**(跨群组单例,supervisor 作 bus);worker 经 `McpProxyProvider`+bridge 转发,collector 独占连接 + OAuth + 脱敏/围栏;权限留 worker。见 [mcp_collector.py](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/runtime/mcp_collector.py) / [mcp_proxy.py](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/executors/providers/mcp_proxy.py) / [mcp_bridge.py](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/executors/mcp_bridge.py)。
+- **传输**：stdio + remote SSE + remote streamable-HTTP(`_open_transport` 按 `url`/`transport` 选,`headers` 带鉴权);自动重连;`ToolListChanged` 订阅 → schema re-push 到 worker。
+- **OAuth（McpAuthTool 式，已实现）**：SDK `OAuthClientProvider`(PKCE/RFC 7591 动态注册/刷新);`mcp_authenticate(server)` 工具 → 授权 URL 进聊天 → 用户授权 → main `/mcp/oauth/callback` 经 bus 回 collector 完成 → tools 加载。token 存 [mcp_oauth.db](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/executors/providers/mcp_oauth_store.py);回调基址 env `PUBLIC_BASE_URL`(默认 `http://127.0.0.1:8000`);有 token 启动自动连、无 token 按需。
+- **残留**：独立健康检查(靠重连兜底)、进程树强杀;**OAuth 端到端握手需真实 server 验**(总线/存储/流程接缝已单测)。
+- **单测**:`test_mcp_provider`/`test_mcp_collector`/`test_mcp_proxy`/`test_supervisor_mcp_relay`/`test_mcp_auth_flows`/`test_mcp_oauth_store`。
 
 ### 6. ✅ 授权记忆粒度（persist_rule）— 已修复（曾被低估为 🟠，实为安全问题）
 - **原问题**：`engine.py` 的 "always" 持久化为 `Rule(tool_pattern=tool_name, args_pattern="")`——**空 args_pattern = 放行该工具的全部调用**。即"始终允许 `git status`"会连带自动放行 `rm -rf /`。这不只是"不智能",是安全洞。
@@ -125,5 +126,5 @@
 ## 六、优先级建议
 
 1. **✅ 已完成（安全收益最高，多 agent 放大风险）**：#1 命令安全（tokenized 加固）、#2 输出脱敏、#3 子 agent 权限衰减、#6 授权记忆粒度。
-2. **部分完成（多 MCP / 规模化）**：✅#4 schema 数量预算（完整 deferred 检索待做）、🔶#5 MCP remote+ToolListChanged 已做（OAuth/健康检查待做）；待做 #9 MCP 上下文过滤（按 bot/模型黑白名单）。
+2. **多 MCP / 规模化**：✅#4 schema 数量预算（完整 deferred 检索待做）、✅#5 MCP remote+ToolListChanged+OAuth 已做（独立健康检查/进程树强杀待做，OAuth 握手需真实 server 验）；待做 #9 MCP 上下文过滤（按 bot/模型黑白名单）。
 3. **待做（体验/健壮性）**：#7 裁决契约扩展（改参/动态授权/中断）、#8 参数校验。
