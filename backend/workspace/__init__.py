@@ -256,6 +256,23 @@ async def write_file(bot_id: int, path: str, content: str, group_id: int | None 
         return await _commit_text(ws, p, rel, path, content, bot_id, "write")
 
 
+def make_dir(bot_id: int, path: str) -> str:
+    """Create an (empty) directory in the bot workspace. Sandbox-confined.
+
+    Writing a file already mkdir-parents, so this is only needed for the
+    "new folder" action — e.g. building a directory-form skill folder-first
+    (skills/<name>/ then add SKILL.md + scripts) via the workspace panel.
+    """
+    ws = _get_effective_ws(bot_id, path)
+    p = _safe_path(ws, path)
+    if p is None:
+        return f"[错误] 非法路径: {path}"
+    if p.exists():
+        return "目录已存在" if p.is_dir() else f"[错误] 已存在同名文件: {path}"
+    p.mkdir(parents=True, exist_ok=True)
+    return f"已创建目录 {path}"
+
+
 async def edit_file(bot_id: int, path: str, old_string: str, new_string: str, replace_all: bool = False) -> str:
     ws = _get_effective_ws(bot_id, path)
     p = _safe_path(ws, path)

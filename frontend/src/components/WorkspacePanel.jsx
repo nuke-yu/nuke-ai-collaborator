@@ -19,7 +19,14 @@ export default function WorkspacePanel({ bot, groupId, onClose }) {
     if (res.ok) setTree(await res.json())
   }, [bot.id])
 
-  useEffect(() => { loadTree() }, [loadTree])
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      const res = await fetch(`/api/members/${bot.id}/workspace`)
+      if (!cancelled && res.ok) setTree(await res.json())
+    })()
+    return () => { cancelled = true }
+  }, [bot.id])
 
   // DFT-062: this early return must come AFTER every hook above. It used to sit
   // before the other ~13 hooks, so toggling the skills panel changed how many
@@ -89,16 +96,36 @@ export default function WorkspacePanel({ bot, groupId, onClose }) {
     setDirty(false)
   }
 
-  const files = tree.filter(n => !n.is_dir)
-  const dirs = tree.filter(n => n.is_dir)
+  const newFile = async () => {
+    const input = prompt('新建文件路径（相对工作区，例：skills/mytool.md 或 skills/mytool/run.sh）：', 'skills/')
+    const path = (input || '').trim()
+    if (!path || path.endsWith('/')) return
+    // .md skills get a frontmatter starter so discovery can parse them
+    const starter = path.endsWith('.md') ? '---\nname: \ndescription: \n---\n\n' : ''
+    const res = await fetch(`/api/members/${bot.id}/workspace/file`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path, content: starter }),
+    })
+    if (!res.ok) { alert('创建失败：' + (await res.text())); return }
+    await loadTree()
+    openFile(path)
+  }
 
-  const filesByDir = {}
-  files.forEach(f => {
-    const parts = f.path.split('/')
-    const dir = parts.length > 1 ? parts[0] : ''
-    if (!filesByDir[dir]) filesByDir[dir] = []
-    filesByDir[dir].push(f)
-  })
+  const newDir = async () => {
+    const input = prompt('新建文件夹路径（相对工作区，例：skills/mytool）：', 'skills/')
+    const path = (input || '').trim().replace(/\/+$/, '')
+    if (!path) return
+    const res = await fetch(`/api/members/${bot.id}/workspace/dir`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path }),
+    })
+    if (!res.ok) { alert('创建失败：' + (await res.text())); return }
+    await loadTree()
+  }
+
+  const root = buildTree(tree)
 
   return (
     <div className="fixed inset-0 bg-black/45 backdrop-blur-sm flex items-center justify-center z-50 animate-fade-in" onClick={onClose}>
@@ -118,32 +145,26 @@ export default function WorkspacePanel({ bot, groupId, onClose }) {
             >
               <span>⚡</span> Skill 管理
             </button>
+            <div className="mt-2 flex gap-1.5">
+              <button
+                onClick={newFile}
+                className="flex-1 text-xs px-2 py-1.5 rounded-lg bg-gray-700/60 hover:bg-gray-600 text-gray-200 transition-colors"
+              >
+                + 文件
+              </button>
+              <button
+                onClick={newDir}
+                className="flex-1 text-xs px-2 py-1.5 rounded-lg bg-gray-700/60 hover:bg-gray-600 text-gray-200 transition-colors"
+              >
+                + 文件夹
+              </button>
+            </div>
           </div>
           <div className="flex-1 overflow-y-auto py-2">
             {tree.length === 0 && (
               <div className="px-3 text-xs text-gray-500 mt-2">（空）</div>
             )}
-            {/* Root files */}
-            {(filesByDir[''] || []).map(f => (
-              <FileRow
-                key={f.path} name={f.name} active={selected === f.path}
-                onClick={() => openFile(f.path)}
-              />
-            ))}
-            {/* Subdirectories */}
-            {dirs.map(d => (
-              <div key={d.path}>
-                <div className="px-3 py-1 text-xs text-gray-500 font-medium mt-1 flex items-center gap-1">
-                  <span>📁</span>{d.name}
-                </div>
-                {(filesByDir[d.name] || []).map(f => (
-                  <FileRow
-                    key={f.path} name={f.name} indent active={selected === f.path}
-                    onClick={() => openFile(f.path)}
-                  />
-                ))}
-              </div>
-            ))}
+            <TreeLevel node={root} depth={0} selected={selected} onOpen={openFile} />
           </div>
         </div>
 
@@ -250,13 +271,64 @@ export default function WorkspacePanel({ bot, groupId, onClose }) {
   )
 }
 
-function FileRow({ name, active, indent, onClick }) {
+// Build a nested {name, dirs, files} tree from the flat [{path, name, is_dir}] list.
+function buildTree(flat) {
+  const root = { dirs: {}, files: [] }
+  const ensureDir = (parts) => {
+    let node = root
+    for (const part of parts) {
+      if (!node.dirs[part]) node.dirs[part] = { name: part, dirs: {}, files: [] }
+      node = node.dirs[part]
+    }
+    return node
+  }
+  flat.forEach(n => {
+    const parts = n.path.split('/')
+    if (n.is_dir) {
+      ensureDir(parts)
+    } else {
+      const node = parts.length > 1 ? ensureDir(parts.slice(0, -1)) : root
+      node.files.push(n)
+    }
+  })
+  return root
+}
+
+// Recursively render one tree level: files first, then nested directories.
+function TreeLevel({ node, depth, selected, onOpen }) {
+  const files = [...node.files].sort((a, b) => a.name.localeCompare(b.name))
+  const dirNames = Object.keys(node.dirs).sort()
+  return (
+    <>
+      {files.map(f => (
+        <FileRow
+          key={f.path} name={f.name} depth={depth} active={selected === f.path}
+          onClick={() => onOpen(f.path)}
+        />
+      ))}
+      {dirNames.map(name => (
+        <div key={name}>
+          <div
+            className="py-1 text-xs text-gray-500 font-medium mt-1 flex items-center gap-1"
+            style={{ paddingLeft: `${12 + depth * 14}px`, paddingRight: '12px' }}
+          >
+            <span>📁</span>{name}
+          </div>
+          <TreeLevel node={node.dirs[name]} depth={depth + 1} selected={selected} onOpen={onOpen} />
+        </div>
+      ))}
+    </>
+  )
+}
+
+function FileRow({ name, active, depth = 0, onClick }) {
   return (
     <button
       onClick={onClick}
-      className={`w-full text-left px-3 py-1.5 text-xs flex items-center gap-1.5 transition-colors ${
+      className={`w-full text-left py-1.5 text-xs flex items-center gap-1.5 transition-colors ${
         active ? 'bg-indigo-600/30 text-indigo-300' : 'text-gray-400 hover:bg-gray-800 hover:text-white'
-      } ${indent ? 'pl-7' : ''}`}
+      }`}
+      style={{ paddingLeft: `${12 + depth * 14}px`, paddingRight: '12px' }}
     >
       <span className="text-gray-500">📄</span>
       <span className="truncate">{name}</span>
