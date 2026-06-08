@@ -8,7 +8,7 @@ import asyncio
 import os
 import sys
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock, AsyncMock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -187,6 +187,69 @@ class TestCollectorAuth(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(coll._callback_url(), "http://127.0.0.1:8000/mcp/oauth/callback")
         with patch.dict(os.environ, {"PUBLIC_BASE_URL": "https://demo.example.com/"}):
             self.assertEqual(coll._callback_url(), "https://demo.example.com/mcp/oauth/callback")
+
+
+class TestCollectorOAuthClientSeed(unittest.IsolatedAsyncioTestCase):
+    """#1: a configured client_id/secret is pre-seeded into the token store so the
+    SDK skips RFC 7591 dynamic registration (servers like GitHub require it)."""
+
+    class _Prov:
+        url = "https://r.example.com"
+        oauth_cfg = {"client_id": "CID", "client_secret": "CS", "scope": "s"}
+
+    async def _build(self, oauth_cfg, existing=None):
+        from runtime.mcp_collector import MCPCollector
+        seeded = {}
+
+        class _FakeStore:
+            def __init__(self, server): pass
+            async def get_client_info(self): return existing
+            async def set_client_info(self, ci): seeded["ci"] = ci
+
+        prov = self._Prov(); prov.oauth_cfg = oauth_cfg
+        coll = MCPCollector("x")
+        with patch("executors.providers.mcp_oauth_store.MCPTokenStorage", _FakeStore), \
+             patch("mcp.client.auth.OAuthClientProvider", lambda **kw: ("AUTH", kw)):
+            await coll._build_auth_provider(prov, "remote")
+        return seeded
+
+    async def test_seeds_when_client_id_present(self):
+        seeded = await self._build({"client_id": "CID", "client_secret": "CS", "scope": "s"})
+        self.assertEqual(seeded["ci"].client_id, "CID")
+        self.assertEqual(seeded["ci"].client_secret, "CS")
+
+    async def test_no_seed_without_client_id(self):
+        seeded = await self._build({"scope": "s"})       # dynamic registration path
+        self.assertNotIn("ci", seeded)
+
+    async def test_no_reseed_when_already_stored(self):
+        from mcp.shared.auth import OAuthClientInformationFull
+        existing = OAuthClientInformationFull(client_id="OLD", redirect_uris=["https://x/cb"])
+        seeded = await self._build({"client_id": "NEW"}, existing=existing)
+        self.assertNotIn("ci", seeded)                   # stored info wins
+
+
+class TestKillDescendants(unittest.TestCase):
+    """#2: process-tree sweep on shutdown (orphaned npx/node grandchildren)."""
+
+    def test_terminates_then_kills_survivors(self):
+        from runtime import mcp_collector as mc
+        c1, c2 = MagicMock(), MagicMock()
+        with patch("psutil.Process") as P, \
+             patch("psutil.wait_procs", return_value=([c1], [c2])):
+            P.return_value.children.return_value = [c1, c2]
+            n = mc._kill_descendants()
+        self.assertEqual(n, 2)
+        c1.terminate.assert_called_once()
+        c2.terminate.assert_called_once()
+        c2.kill.assert_called_once()                      # survivor force-killed
+        c1.kill.assert_not_called()
+
+    def test_no_children_noop(self):
+        from runtime import mcp_collector as mc
+        with patch("psutil.Process") as P, patch("psutil.wait_procs", return_value=([], [])):
+            P.return_value.children.return_value = []
+            self.assertEqual(mc._kill_descendants(), 0)
 
 
 if __name__ == "__main__":

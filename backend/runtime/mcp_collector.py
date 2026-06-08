@@ -29,6 +29,36 @@ log = logging.getLogger(__name__)
 _SCHEMA_REPUSH_INTERVAL = 10  # seconds
 
 
+def _kill_descendants() -> int:
+    """Hard-kill orphaned descendant processes on collector shutdown.
+
+    The SDK terminates the immediate stdio child on context exit, but a launcher
+    like `npx` can leave its `node` grandchild orphaned. The collector owns ALL
+    MCP subprocesses, so on shutdown every descendant is fair game (process-tree
+    SIGTERM → SIGKILL). Returns how many were swept. No-op if psutil is absent."""
+    import os
+    try:
+        import psutil
+    except Exception:
+        return 0
+    try:
+        children = psutil.Process(os.getpid()).children(recursive=True)
+    except Exception:
+        return 0
+    for c in children:
+        try:
+            c.terminate()
+        except Exception:
+            pass
+    _gone, alive = psutil.wait_procs(children, timeout=3)
+    for c in alive:
+        try:
+            c.kill()
+        except Exception:
+            pass
+    return len(children)
+
+
 class MCPCollector:
     def __init__(self, addr: str):
         self.addr = addr
@@ -56,7 +86,7 @@ class MCPCollector:
                     # have a token — a token-less server must NOT block startup on
                     # an interactive flow; it's deferred to mcp_authenticate.
                     from executors.providers.mcp_oauth_store import MCPTokenStorage
-                    prov.set_auth(self._build_auth_provider(prov, server))
+                    prov.set_auth(await self._build_auth_provider(prov, server))
                     if await MCPTokenStorage(server).get_tokens() is None:
                         self._router.register_provider(prov)   # known, not yet connected
                         log.info("collector: oauth server '%s' deferred (run mcp_authenticate)", server)
@@ -154,13 +184,27 @@ class MCPCollector:
                 return p
         return None
 
-    def _build_auth_provider(self, prov, server: str):
+    async def _build_auth_provider(self, prov, server: str):
         from mcp.client.auth import OAuthClientProvider
-        from mcp.shared.auth import OAuthClientMetadata
+        from mcp.shared.auth import OAuthClientMetadata, OAuthClientInformationFull
         from executors.providers.mcp_oauth_store import MCPTokenStorage
         oauth = prov.oauth_cfg if isinstance(prov.oauth_cfg, dict) else {}
+        storage = MCPTokenStorage(server)
+        callback = self._callback_url()
+        # Pre-registered OAuth app: seed client info so the SDK skips RFC 7591
+        # dynamic registration (servers like GitHub require a pre-registered
+        # client_id/secret). Only seed once; stored info wins on later runs.
+        if oauth.get("client_id") and await storage.get_client_info() is None:
+            await storage.set_client_info(OAuthClientInformationFull(
+                client_id=oauth["client_id"],
+                client_secret=oauth.get("client_secret"),
+                redirect_uris=[callback],
+                grant_types=["authorization_code", "refresh_token"],
+                response_types=["code"],
+                scope=oauth.get("scope"),
+            ))
         meta = OAuthClientMetadata(
-            redirect_uris=[self._callback_url()],
+            redirect_uris=[callback],
             client_name="nuke-ai-collaborator",
             grant_types=["authorization_code", "refresh_token"],
             response_types=["code"],
@@ -169,7 +213,7 @@ class MCPCollector:
         return OAuthClientProvider(
             server_url=prov.url,
             client_metadata=meta,
-            storage=MCPTokenStorage(server),
+            storage=storage,
             redirect_handler=self._flows.redirect_handler_for(server),
             callback_handler=self._flows.callback_handler_for(server),
         )
@@ -205,7 +249,7 @@ class MCPCollector:
             await reply(f"[MCP认证] 未找到 remote server '{server}'（仅 remote+oauth 适用）", True)
             return
         try:
-            prov.set_auth(self._build_auth_provider(prov, server))
+            prov.set_auth(await self._build_auth_provider(prov, server))
             url_fut = self._flows.begin(server)
             t = asyncio.create_task(self._reinit_with_auth(prov, server))
             self._tasks.add(t); t.add_done_callback(self._tasks.discard)
@@ -246,6 +290,9 @@ class MCPCollector:
                 await self._router.close_all()
             if self._writer:
                 self._writer.close()
+            swept = _kill_descendants()       # reap orphaned npx/node grandchildren
+            if swept:
+                log.info("collector: swept %d residual subprocess(es) on shutdown", swept)
 
 
 async def run_collector(addr: str) -> None:
