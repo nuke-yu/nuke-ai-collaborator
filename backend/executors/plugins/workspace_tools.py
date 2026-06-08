@@ -913,6 +913,16 @@ async def _handle_write_local_file(path: str, content: str, context: dict = None
         return f"[写入错误] {e}"
 
 
+async def _handle_mcp_authenticate(server: str, context: dict = None) -> str:
+    """Start OAuth for a remote MCP server (McpAuthTool style): returns an
+    authorization URL for the user to open; tools load once they authorize."""
+    from executors.mcp_bridge import bridge
+    ctx = context or {}
+    result, _is_error = await bridge.authenticate(
+        server, group_id=ctx.get("group_id"), trace_id=ctx.get("trace_id"))
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Registration
 # ---------------------------------------------------------------------------
@@ -938,3 +948,22 @@ def register_workspace_tools() -> None:
     }
     for tdef in _WORKSPACE_TOOLS:
         tool_executor.register(tdef, handlers[tdef.name])
+
+    # MCP OAuth trigger (McpAuthTool style). Builtin so it stays on the hooked
+    # tool_executor path; bots that should authenticate MCP servers must include
+    # "mcp_authenticate" in their allowed_tools to have it surfaced to the LLM.
+    from executors.base import ToolDef as _ToolDef
+    tool_executor.register(
+        _ToolDef(
+            name="mcp_authenticate",
+            description="为需要 OAuth 授权的 remote MCP server 发起授权，返回授权链接交给用户在浏览器打开",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "server": {"type": "string", "description": "mcp_servers.json 中的 server 名"},
+                },
+                "required": ["server"],
+            },
+        ),
+        _handle_mcp_authenticate,
+    )

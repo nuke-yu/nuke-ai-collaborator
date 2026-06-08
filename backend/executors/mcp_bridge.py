@@ -21,6 +21,7 @@ _DEFAULT_TIMEOUT = 35
 class MCPBridge:
     def __init__(self):
         self._send = None                 # async (rid, name, args, group_id, trace_id) -> None
+        self._send_auth = None            # async (rid, server, group_id, trace_id) -> None
         self._origin = None               # this worker's id
         self._pending: dict[str, asyncio.Future] = {}
         self.schemas: list = []           # latest MCP tool-schema snapshot (OpenAI format)
@@ -30,8 +31,12 @@ class MCPBridge:
         self._send = send
         self._origin = origin
 
+    def install_auth(self, send_auth) -> None:
+        self._send_auth = send_auth
+
     def reset(self) -> None:
         self._send = None
+        self._send_auth = None
         for fut in self._pending.values():
             if not fut.done():
                 fut.set_result(("[MCP错误] 总线已断开", True))
@@ -66,6 +71,27 @@ class MCPBridge:
         except asyncio.TimeoutError:
             self._pending.pop(rid, None)
             return f"[MCP超时] 工具 '{name}' 超过 {timeout} 秒", True
+
+    async def authenticate(self, server: str, *, group_id, trace_id,
+                           timeout: int = 60) -> tuple[str, bool]:
+        """Start OAuth for a server; the collector replies (via MCP_RESULT) with
+        the authorization URL to surface to the user."""
+        if self._send_auth is None:
+            return "[MCP认证错误] collector 总线未就绪", True
+        self._seq += 1
+        rid = f"{self._origin}-auth-{self._seq}"
+        fut = asyncio.get_event_loop().create_future()
+        self._pending[rid] = fut
+        try:
+            await self._send_auth(rid, server, group_id, trace_id)
+        except Exception as e:
+            self._pending.pop(rid, None)
+            return f"[MCP认证错误] 发送失败: {e}", True
+        try:
+            return await asyncio.wait_for(asyncio.shield(fut), timeout)
+        except asyncio.TimeoutError:
+            self._pending.pop(rid, None)
+            return f"[MCP认证超时] 服务器 '{server}' 超过 {timeout} 秒", True
 
 
 # Per-process singleton.

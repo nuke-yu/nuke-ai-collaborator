@@ -60,7 +60,13 @@ class Worker:
                 request_id=rid, origin_worker_id=self.worker_id,
                 tool=name, arguments=arguments,
             ))
+        async def _send_mcp_auth(rid, server, group_id, trace_id):
+            await ipc.send_msg(self._writer, ipc.protocol.envelope(
+                ipc.protocol.MCP_AUTH_START, group_id=group_id or 0, trace_id=trace_id,
+                request_id=rid, origin_worker_id=self.worker_id, server=server,
+            ))
         _mcp_bridge.install(send=_send_mcp_call, origin=self.worker_id)
+        _mcp_bridge.install_auth(_send_mcp_auth)
         # Register the wildcard subscription synchronously BEFORE we start
         # processing downstream messages, so no early bus event is missed.
         self._sub = self.bus.subscribe_all()

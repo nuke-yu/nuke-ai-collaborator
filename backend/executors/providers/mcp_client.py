@@ -172,6 +172,7 @@ class McpClientToolProvider(ToolProvider):
         url: str | None = None,
         transport: str = "stdio",
         headers: dict[str, str] | None = None,
+        oauth: dict | None = None,
     ):
         self._server_name = server_name
         self._command = command
@@ -183,6 +184,8 @@ class McpClientToolProvider(ToolProvider):
         self._url = url
         self._transport = transport
         self._headers = headers or {}
+        self._oauth = oauth                # OAuth config block (None = no OAuth)
+        self._auth = None                  # SDK OAuthClientProvider, injected by collector
         self._allow_list = allow_list          # None = accept all
         self._call_timeout = call_timeout
         # HIL policy: which tools require human approval before execution.
@@ -216,6 +219,18 @@ class McpClientToolProvider(ToolProvider):
 
     def can_handle(self, name: str) -> bool:
         return name.startswith(f"{self._server_name}__")
+
+    def set_auth(self, auth) -> None:
+        """Inject the SDK OAuthClientProvider (collector wires this for OAuth servers)."""
+        self._auth = auth
+
+    @property
+    def url(self) -> str | None:
+        return self._url
+
+    @property
+    def oauth_cfg(self) -> dict | None:
+        return self._oauth
 
     def approval_flags(self) -> dict[str, bool]:
         """Map exposed tool name → whether it needs HIL approval, per THIS
@@ -383,9 +398,9 @@ class McpClientToolProvider(ToolProvider):
             headers = self._headers or None
             if self._transport == "sse":
                 from mcp.client.sse import sse_client
-                return sse_client(self._url, headers=headers)
+                return sse_client(self._url, headers=headers, auth=self._auth)
             from mcp.client.streamable_http import streamablehttp_client
-            return streamablehttp_client(self._url, headers=headers)
+            return streamablehttp_client(self._url, headers=headers, auth=self._auth)
         import os
         merged_env = {**os.environ, **self._extra_env} if self._extra_env else None
         params = StdioServerParameters(command=self._command, args=self._args, env=merged_env)
@@ -584,5 +599,6 @@ class McpClientToolProvider(ToolProvider):
                 url=url,
                 transport=spec.get("transport", "stdio" if not url else "http"),
                 headers=spec.get("headers") or {},
+                oauth=spec.get("oauth"),
             ))
         return providers

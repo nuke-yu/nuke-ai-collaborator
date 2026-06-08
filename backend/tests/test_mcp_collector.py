@@ -8,6 +8,7 @@ import asyncio
 import os
 import sys
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -122,6 +123,37 @@ class TestCollectorSchemaAnnotation(unittest.TestCase):
         by = {s["function"]["name"]: s.get("needs_approval") for s in coll._schemas()}
         self.assertIs(by["fake__do"], True)
         self.assertIs(by["fake__read"], False)
+
+
+class TestCollectorAuth(unittest.IsolatedAsyncioTestCase):
+
+    async def test_auth_start_unknown_server_errors(self):
+        from runtime.mcp_collector import MCPCollector
+        from unittest.mock import patch
+        coll = MCPCollector("x")
+        coll._router = ToolRouter()           # no providers → server not found
+        coll._writer = object()
+        sent = []
+        async def fake_send(w, m):
+            sent.append(m)
+        with patch("runtime.ipc.send_msg", new=fake_send):
+            await coll._handle_auth_start({
+                "request_id": "a1", "origin_worker_id": "w0",
+                "server": "nope", "group_id": 1,
+            })
+        self.assertEqual(len(sent), 1)
+        self.assertEqual(sent[0]["type"], ipc.protocol.MCP_RESULT)
+        self.assertTrue(sent[0]["is_error"])
+        self.assertEqual(sent[0]["request_id"], "a1")
+        self.assertEqual(sent[0]["origin_worker_id"], "w0")
+
+    async def test_callback_url_uses_env(self):
+        import os
+        from runtime.mcp_collector import MCPCollector
+        coll = MCPCollector("x")
+        self.assertEqual(coll._callback_url(), "http://127.0.0.1:8000/mcp/oauth/callback")
+        with patch.dict(os.environ, {"PUBLIC_BASE_URL": "https://demo.example.com/"}):
+            self.assertEqual(coll._callback_url(), "https://demo.example.com/mcp/oauth/callback")
 
 
 if __name__ == "__main__":

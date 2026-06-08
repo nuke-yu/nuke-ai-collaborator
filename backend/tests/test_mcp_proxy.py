@@ -42,6 +42,27 @@ class TestMCPBridge(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(is_error)
         self.assertIn("超时", result)
 
+    async def test_authenticate_roundtrip(self):
+        b = MCPBridge()
+        captured = {}
+        async def send_auth(rid, server, gid, tid):
+            captured.update(rid=rid, server=server)
+        b.install(AsyncMock(), "w0")
+        b.install_auth(send_auth)
+        task = asyncio.create_task(b.authenticate("github", group_id=1, trace_id="t"))
+        await asyncio.sleep(0)
+        b.resolve(captured["rid"], "https://auth/url", False)
+        result, is_error = await task
+        self.assertEqual((result, is_error), ("https://auth/url", False))
+        self.assertEqual(captured["server"], "github")
+        self.assertIn("auth", captured["rid"])
+
+    async def test_authenticate_no_bus(self):
+        b = MCPBridge()                               # no install_auth
+        result, is_error = await b.authenticate("x", group_id=1, trace_id="t")
+        self.assertTrue(is_error)
+        self.assertIn("未就绪", result)
+
     async def test_reset_fails_pending(self):
         b = MCPBridge()
         async def send(*a): pass

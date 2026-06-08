@@ -40,6 +40,17 @@ class TestSupervisorMcpRelay(unittest.IsolatedAsyncioTestCase):
         self.assertIs(writer, sup._workers[COLL])     # routed to collector
         self.assertEqual(msg["request_id"], "r1")
 
+    async def test_mcp_auth_start_relayed_to_collector(self):
+        sup = self._sup_with_workers("w0", COLL)
+        frame = ipc.protocol.envelope(
+            ipc.protocol.MCP_AUTH_START, group_id=1, request_id="a1",
+            origin_worker_id="w0", server="github",
+        )
+        sent = await self._capture(sup, frame)
+        self.assertEqual(len(sent), 1)
+        self.assertIs(sent[0][0], sup._workers[COLL])
+        self.assertEqual(sent[0][1]["server"], "github")
+
     async def test_mcp_result_relayed_to_origin_worker(self):
         sup = self._sup_with_workers("w0", COLL)
         frame = ipc.protocol.envelope(

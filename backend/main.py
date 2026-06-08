@@ -128,6 +128,21 @@ async def reload_plugins():
     return {"loaded": loaded, "failures": registry.failures()}
 
 
+@app.get("/mcp/oauth/callback")
+async def mcp_oauth_callback(code: str = "", state: str = ""):
+    """OAuth redirect target for MCP servers. Relays the authorization code to the
+    mcp-collector over the bus (it owns the in-flight flow, keyed by state)."""
+    from fastapi.responses import HTMLResponse
+    if sup_mod.supervisor and code and state:
+        await sup_mod.supervisor.send_to_worker_id(
+            ipc.protocol.MCP_COLLECTOR_ID,
+            ipc.protocol.envelope(
+                ipc.protocol.MCP_OAUTH_CALLBACK, group_id=0, code=code, state=state),
+        )
+        return HTMLResponse("<h3>✅ 授权完成，可以关闭此页面，回到对话即可。</h3>")
+    return HTMLResponse("<h3>授权回调缺少 code/state 参数。</h3>", status_code=400)
+
+
 @app.get("/api/system/status")
 async def system_status():
     """DFT-057: Aggregated metrics from Supervisor and all Workers."""

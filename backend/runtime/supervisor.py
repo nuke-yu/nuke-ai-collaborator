@@ -168,7 +168,7 @@ class Supervisor:
                     fut = self._pending_handoffs.get(gid)
                     if fut and not fut.done():
                         fut.set_result(True)
-                elif t == ipc.protocol.MCP_CALL:
+                elif t in (ipc.protocol.MCP_CALL, ipc.protocol.MCP_AUTH_START):
                     # worker → collector. If the collector is down, reply an error
                     # to the origin worker so its awaiting call doesn't hang.
                     if not await self.send_to_worker_id(ipc.protocol.MCP_COLLECTOR_ID, frame):
