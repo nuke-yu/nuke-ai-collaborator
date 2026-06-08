@@ -33,7 +33,7 @@
 | 子 agent 权限 | ✅ 衰减派生(去 bypass+去高危 blanket+深度上限+不可弹窗) | Task 限工具集 | ✅ 衰减派生 | ✅ | （委托 CLI） |
 | 参数校验 | ✅ 别名归一 + schema 必填/类型校验 | ✅ zod validateInput | ✅ schema-decode | ✅ | （透传） |
 | MCP 传输 | ✅ stdio + remote(SSE/HTTP) + OAuth（collector 进程） | ✅ +WS* | ✅ +remote(SSE/HTTP)+OAuth | ✅ | （透传 CLI） |
-| MCP 工具过滤 | allow_list | — | — | — | ✅ allow+block per-model |
+| MCP 工具过滤 | ✅ allow_list + per-bot allow/block | — | — | — | ✅ allow+block per-model |
 | 工具规模治理 | 🔶 schema 数量预算（无 deferred 检索） | ✅ deferred+ToolSearch | — | ⚠️ searchable | （透传） |
 | 工具输出脱敏 | ✅ redact_secrets | — | — | ✅ result-middleware | — |
 | 可观测 | ⚠️ trace_id，无 per-call span | ✅ span+attrs | ✅ | ✅ | — |
@@ -95,10 +95,10 @@
 - **对标**：Claude Code zod `validateInput()`;opencode schema-decode → `InvalidArgumentsError`。
 - **残留**：未做嵌套对象/数组元素的深校验、enum/范围校验——按需再加。
 
-### 9. 🟡 MCP 工具只能 allow，缺按上下文 block 过滤
-- **现状**：`mcp_client.py` 仅 provider 级 `allow_list`。
-- **对标**：gsd-2 `src/resources/extensions/gsd/mcp-filter.ts` 的 `computeMcpDisallowedTools`：扫 `.mcp.json` + `.claude/settings.json` 发现 server，按 model 算 allowlist + blocklist 两段，产出 `mcp__{name}__*` 禁用模式。
-- **建议**：支持按 bot / 场景 / 模型动态裁剪可见 MCP 工具集（黑白名单两段）。
+### 9. ✅ MCP 工具按 bot 黑白名单过滤 — 已实现
+- **现状**：两段过滤。① **provider 级 `allow_list`**(collector 侧,server 注册哪些工具);② **per-bot 可见性**([tool_loop_v1._filter_mcp_schemas](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/executors/plugins/tool_loop_v1.py)):bot 的 `executor_config.mcp = {"allow":[...], "block":[...]}`,fnmatch glob 匹配 `{server}__{tool}`(如 `github__*` / `github__create_issue` / `*`),block 优先、allow 为白名单。这样可"只让 dev bot 看到 github MCP"。
+- **取舍 / 残留**:与 `allowed_tools` 同为**可见性**过滤(LLM 看不到即不会调);未做执行期硬阻断(与现有 allowed_tools 模型一致)、未做 gsd-2 那种 **per-model** 维度(按需再加)。单测 `tests/test_tool_schema_budget.py::TestFilterMcpSchemas`(5 例)。
+- **对标**：gsd-2 `mcp-filter.ts` `computeMcpDisallowedTools`(per-model allow/block 两段)。
 
 ---
 
@@ -127,5 +127,5 @@
 ## 六、优先级建议
 
 1. **✅ 已完成（安全收益最高，多 agent 放大风险）**：#1 命令安全（tokenized 加固）、#2 输出脱敏、#3 子 agent 权限衰减、#6 授权记忆粒度。
-2. **多 MCP / 规模化**：✅#4 schema 数量预算（完整 deferred 检索待做）、✅#5 MCP remote+ToolListChanged+OAuth 已做（独立健康检查/进程树强杀待做，OAuth 握手需真实 server 验）；待做 #9 MCP 上下文过滤（按 bot/模型黑白名单）。
+2. **多 MCP / 规模化**：✅#4 schema 数量预算（完整 deferred 检索待做）、✅#5 MCP remote+ToolListChanged+OAuth 已做（独立健康检查/进程树强杀待做，OAuth 握手需真实 server 验）；✅#9 MCP 按 bot 黑白名单过滤已做（per-model 维度待按需）。
 3. **体验/健壮性**：✅#8 参数校验已做；待做 #7 裁决契约扩展（改参/动态授权/中断）。

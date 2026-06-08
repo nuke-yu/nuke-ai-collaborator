@@ -80,6 +80,24 @@ async def _execute_tool_call(name: str, arguments: dict, context: dict) -> str:
 _MAX_EXTERNAL_TOOL_SCHEMAS = 48
 
 
+def _filter_mcp_schemas(mcp_schemas: list, allow: list | None, block: list | None) -> list:
+    """Per-bot MCP tool visibility (#9). `allow`/`block` are fnmatch globs over the
+    exposed name `{server}__{tool}` (e.g. `github__*`, `github__create_issue`, `*`).
+    block wins; allow (if set) is a whitelist. None/empty → no restriction."""
+    if not allow and not block:
+        return mcp_schemas
+    import fnmatch
+    out = []
+    for s in mcp_schemas:
+        name = s.get("function", {}).get("name", "")
+        if block and any(fnmatch.fnmatch(name, p) for p in block):
+            continue
+        if allow and not any(fnmatch.fnmatch(name, p) for p in allow):
+            continue
+        out.append(s)
+    return out
+
+
 def _apply_external_schema_budget(
     mcp_schemas: list, max_n: int = _MAX_EXTERNAL_TOOL_SCHEMAS
 ) -> tuple[list, list[str]]:
@@ -452,6 +470,12 @@ class ToolLoopRunner:
                 s for s in _tool_router.get_external_schemas()
                 if s["function"]["name"] not in builtin_names
             ]
+            # Per-bot MCP visibility (#9): allow/block globs on `{server}__{tool}`
+            # (e.g. only the dev bot sees the github server). Config lives in the
+            # bot's executor_config.mcp = {"allow": [...], "block": [...]}.
+            _mcp_vis = (self.bot.get("executor_config") or {}).get("mcp") or {}
+            mcp_schemas = _filter_mcp_schemas(
+                mcp_schemas, _mcp_vis.get("allow"), _mcp_vis.get("block"))
             # Tool-scale budget: many MCP tools blow up the prompt. Builtins are
             # always kept; external (MCP) schemas are capped. Over-budget tools
             # are deferred (not sent) and surfaced as a system-prompt note so the
