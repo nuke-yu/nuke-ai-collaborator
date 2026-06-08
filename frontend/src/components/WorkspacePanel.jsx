@@ -125,6 +125,19 @@ export default function WorkspacePanel({ bot, groupId, onClose }) {
     await loadTree()
   }
 
+  const deletePath = async (path, isDir) => {
+    if (!confirm(`确认删除${isDir ? '文件夹' : '文件'}「${path}」${isDir ? '及其全部内容' : ''}？`)) return
+    const res = await fetch(
+      `/api/members/${bot.id}/workspace/file?path=${encodeURIComponent(path)}`,
+      { method: 'DELETE' }
+    )
+    if (!res.ok) { alert('删除失败：' + (await res.text())); return }
+    if (selected === path || (isDir && selected && selected.startsWith(path + '/'))) {
+      setSelected(null); setContent(''); setDirty(false)
+    }
+    await loadTree()
+  }
+
   const root = buildTree(tree)
 
   return (
@@ -164,7 +177,7 @@ export default function WorkspacePanel({ bot, groupId, onClose }) {
             {tree.length === 0 && (
               <div className="px-3 text-xs text-gray-500 mt-2">（空）</div>
             )}
-            <TreeLevel node={root} depth={0} selected={selected} onOpen={openFile} />
+            <TreeLevel node={root} depth={0} prefix="" selected={selected} onOpen={openFile} onDelete={deletePath} />
           </div>
         </div>
 
@@ -295,7 +308,7 @@ function buildTree(flat) {
 }
 
 // Recursively render one tree level: files first, then nested directories.
-function TreeLevel({ node, depth, selected, onOpen }) {
+function TreeLevel({ node, depth, prefix, selected, onOpen, onDelete }) {
   const files = [...node.files].sort((a, b) => a.name.localeCompare(b.name))
   const dirNames = Object.keys(node.dirs).sort()
   return (
@@ -303,35 +316,61 @@ function TreeLevel({ node, depth, selected, onOpen }) {
       {files.map(f => (
         <FileRow
           key={f.path} name={f.name} depth={depth} active={selected === f.path}
-          onClick={() => onOpen(f.path)}
+          onClick={() => onOpen(f.path)} onDelete={() => onDelete(f.path, false)}
         />
       ))}
-      {dirNames.map(name => (
-        <div key={name}>
-          <div
-            className="py-1 text-xs text-gray-500 font-medium mt-1 flex items-center gap-1"
-            style={{ paddingLeft: `${12 + depth * 14}px`, paddingRight: '12px' }}
-          >
-            <span>📁</span>{name}
+      {dirNames.map(name => {
+        const dirPath = prefix ? `${prefix}/${name}` : name
+        return (
+          <div key={name}>
+            <div
+              className="group/row py-1 text-xs text-gray-500 font-medium mt-1 flex items-center gap-1 hover:bg-gray-800/60"
+              style={{ paddingLeft: `${12 + depth * 14}px`, paddingRight: '6px' }}
+            >
+              <span>📁</span>
+              <span className="truncate flex-1">{name}</span>
+              <button
+                onClick={() => onDelete(dirPath, true)}
+                title="删除文件夹"
+                className="opacity-0 group-hover/row:opacity-100 text-gray-500 hover:text-red-400 px-1 flex-shrink-0 transition-opacity"
+              >
+                🗑
+              </button>
+            </div>
+            <TreeLevel
+              node={node.dirs[name]} depth={depth + 1} prefix={dirPath}
+              selected={selected} onOpen={onOpen} onDelete={onDelete}
+            />
           </div>
-          <TreeLevel node={node.dirs[name]} depth={depth + 1} selected={selected} onOpen={onOpen} />
-        </div>
-      ))}
+        )
+      })}
     </>
   )
 }
 
-function FileRow({ name, active, depth = 0, onClick }) {
+function FileRow({ name, active, depth = 0, onClick, onDelete }) {
   return (
-    <button
-      onClick={onClick}
-      className={`w-full text-left py-1.5 text-xs flex items-center gap-1.5 transition-colors ${
+    <div
+      className={`group/row w-full text-xs flex items-center transition-colors ${
         active ? 'bg-indigo-600/30 text-indigo-300' : 'text-gray-400 hover:bg-gray-800 hover:text-white'
       }`}
-      style={{ paddingLeft: `${12 + depth * 14}px`, paddingRight: '12px' }}
+      style={{ paddingRight: '6px' }}
     >
-      <span className="text-gray-500">📄</span>
-      <span className="truncate">{name}</span>
-    </button>
+      <button
+        onClick={onClick}
+        className="flex-1 min-w-0 text-left py-1.5 flex items-center gap-1.5"
+        style={{ paddingLeft: `${12 + depth * 14}px` }}
+      >
+        <span className="text-gray-500">📄</span>
+        <span className="truncate">{name}</span>
+      </button>
+      <button
+        onClick={onDelete}
+        title="删除文件"
+        className="opacity-0 group-hover/row:opacity-100 text-gray-500 hover:text-red-400 px-1 flex-shrink-0 transition-opacity"
+      >
+        🗑
+      </button>
+    </div>
   )
 }

@@ -273,6 +273,31 @@ def make_dir(bot_id: int, path: str) -> str:
     return f"已创建目录 {path}"
 
 
+def delete_path(bot_id: int, path: str) -> str:
+    """Delete a file or directory (recursive) in the bot workspace. Sandbox-confined.
+
+    Refuses the workspace root and write-protected files (MEMORY.md / RETRO_LATEST.md).
+    Backs the workspace panel's delete action for manual skills (single-file or
+    directory-form).
+    """
+    import shutil
+    ws = _get_effective_ws(bot_id, path)
+    p = _safe_path(ws, path)
+    if p is None:
+        return f"[错误] 非法路径: {path}"
+    if p == ws.resolve():
+        return "[错误] 不能删除工作区根目录"
+    if p.name in _WRITE_PROTECTED:
+        return f"[受保护] {p.name} 不可删除"
+    if not p.exists():
+        return f"[文件不存在] {path}"
+    if p.is_dir():
+        shutil.rmtree(p)
+    else:
+        p.unlink()
+    return f"已删除 {path}"
+
+
 async def edit_file(bot_id: int, path: str, old_string: str, new_string: str, replace_all: bool = False) -> str:
     ws = _get_effective_ws(bot_id, path)
     p = _safe_path(ws, path)

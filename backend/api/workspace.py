@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException
 import asyncio
 from db import get_db, get_member
 from workspace import (
-    list_workspace_tree, read_file, write_file, make_dir, bot_workspace, init_bot_workspace,
+    list_workspace_tree, read_file, write_file, make_dir, delete_path, bot_workspace, init_bot_workspace,
     list_file_history, read_file_history_version,
 )
 from skills import (
@@ -63,6 +63,20 @@ async def make_workspace_dir(member_id: int, body: dict):
         raise HTTPException(400, "path required")
     result = await asyncio.to_thread(make_dir, member_id, path)
     if result.startswith("[错误]"):
+        raise HTTPException(400, result)
+    return {"ok": True, "result": result, "files": list_workspace_tree(member_id)}
+
+
+@router.delete("/api/members/{member_id}/workspace/file")
+async def delete_workspace_file(member_id: int, path: str):
+    async with get_db() as db:
+        bot = await get_member(db, member_id)
+    if not bot or bot["type"] != "bot":
+        raise HTTPException(404, "Bot not found")
+    if not path:
+        raise HTTPException(400, "path required")
+    result = await asyncio.to_thread(delete_path, member_id, path)
+    if not result.startswith("已删除"):
         raise HTTPException(400, result)
     return {"ok": True, "result": result, "files": list_workspace_tree(member_id)}
 
