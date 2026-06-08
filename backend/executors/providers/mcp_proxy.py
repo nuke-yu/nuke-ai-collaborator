@@ -29,7 +29,7 @@ class McpProxyProvider(ToolProvider):
         return defs
 
     def can_handle(self, name: str) -> bool:
-        return any(s.get("function", {}).get("name") == name for s in bridge.schemas)
+        return bridge.schema_for(name) is not None
 
     async def execute(self, name: str, arguments: dict, context: dict) -> tuple[str, bool]:
         verdict = await self._check_permission(name, arguments, context)
@@ -45,9 +45,9 @@ class McpProxyProvider(ToolProvider):
         """Per-server approval decision shipped by the collector (require_approval_all
         / approval_tools / write heuristic). Falls back to the write-name heuristic
         only if the flag is absent (e.g. schema not yet received)."""
-        for s in bridge.schemas:
-            if s.get("function", {}).get("name") == name and "needs_approval" in s:
-                return bool(s["needs_approval"])
+        s = bridge.schema_for(name)
+        if s is not None and "needs_approval" in s:
+            return bool(s["needs_approval"])
         from executors.providers.mcp_client import _MCP_WRITE_TOOLS
         return tool in _MCP_WRITE_TOOLS
 

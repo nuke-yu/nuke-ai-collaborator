@@ -25,6 +25,7 @@ class MCPBridge:
         self._origin = None               # this worker's id
         self._pending: dict[str, asyncio.Future] = {}
         self.schemas: list = []           # latest MCP tool-schema snapshot (OpenAI format)
+        self._by_name: dict[str, dict] = {}   # name -> schema, for O(1) lookup (#6)
         self._seq = 0
 
     def install(self, send, origin: str) -> None:
@@ -44,6 +45,14 @@ class MCPBridge:
 
     def set_schemas(self, schemas) -> None:
         self.schemas = schemas or []
+        self._by_name = {
+            s["function"]["name"]: s
+            for s in self.schemas
+            if isinstance(s.get("function"), dict) and s["function"].get("name")
+        }
+
+    def schema_for(self, name: str) -> dict | None:
+        return self._by_name.get(name)
 
     def is_ready(self) -> bool:
         return self._send is not None

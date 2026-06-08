@@ -28,6 +28,14 @@ class TestMCPBridge(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(captured["rid"].startswith("w0-"))
         self.assertEqual(captured["gid"], 1)
 
+    def test_schema_for_o1_index(self):
+        b = MCPBridge()
+        b.set_schemas([{"function": {"name": "a__x", "description": "", "parameters": {}}}])
+        self.assertIsNotNone(b.schema_for("a__x"))
+        self.assertIsNone(b.schema_for("nope"))
+        b.set_schemas([])                       # rebuilt on each set
+        self.assertIsNone(b.schema_for("a__x"))
+
     async def test_request_not_ready(self):
         b = MCPBridge()                              # no install → bus not ready
         result, is_error = await b.request("x__y", {}, group_id=1, trace_id="t")

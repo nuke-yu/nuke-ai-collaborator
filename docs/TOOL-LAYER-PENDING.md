@@ -37,8 +37,8 @@ generality（给可信内部工具加当前无消费方的能力）或需外部�
 - **子 agent 权限衰减**（#3）：未做"按子任务声明再收紧"或逐层递减（刻意不过度收紧以免卡多级协作）。
 - **MCP 进程回收**：已做 shutdown 时进程树强杀；per-provider 重连路径的孙进程残留未单独清（重连罕见，shutdown 兜底）。
 - **可观测**：有 `trace_id` 全链路；无 per-call span / attrs。
-- **MCP proxy 查找**：`_needs_approval`/`can_handle` 对 `bridge.schemas` 线性扫描（每次工具调用两遍）。工具数多时加 name→schema dict cache（按 schema 快照失效）。当前工具少，premature。
-- **OAuth token 存储连接**：`mcp_oauth_store` 每次 read/write 开新 aiosqlite 连接；OAuth 并发刷新时连接抖动。刷新不频繁，低优；如需可改连接池/单连接。
+- ~~**MCP proxy 查找**~~ → ✅ 已做：`MCPBridge.set_schemas` 维护 name→schema dict，`schema_for()` O(1)，`can_handle`/`_needs_approval` 改用它。
+- **OAuth token 存储连接**：`mcp_oauth_store` 每次 read/write 开新 aiosqlite 连接；OAuth 并发刷新时连接抖动。**评估后保留**：刷新不频繁、收益低；而连接缓存与"每测试用临时 db 文件并删除"的测试模式冲突（缓存会持有已删文件的连接），引入的生命周期复杂度/风险 > 价值。如真出现并发刷新瓶颈再做。
 
 ---
 
