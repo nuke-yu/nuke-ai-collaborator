@@ -48,11 +48,26 @@ class MCPCollector:
         # Config path is env-overridable (deployments / tests that want no MCP).
         cfg = os.environ.get("MCP_SERVERS_CONFIG") or (Path(__file__).parent.parent / "mcp_servers.json")
         for prov in McpClientToolProvider.from_config(cfg):
+            server = prov.provider_id.removeprefix("mcp:")
             try:
+                if prov.oauth_cfg and prov.url:
+                    # OAuth server: attach the auth provider so stored tokens are
+                    # used/refreshed. Only auto-connect at startup if we already
+                    # have a token — a token-less server must NOT block startup on
+                    # an interactive flow; it's deferred to mcp_authenticate.
+                    from executors.providers.mcp_oauth_store import MCPTokenStorage
+                    prov.set_auth(self._build_auth_provider(prov, server))
+                    if await MCPTokenStorage(server).get_tokens() is None:
+                        self._router.register_provider(prov)   # known, not yet connected
+                        log.info("collector: oauth server '%s' deferred (run mcp_authenticate)", server)
+                        continue
                 await prov.initialize()
                 self._router.register_provider(prov)
                 log.info("collector: MCP provider '%s' ready", prov.provider_id)
             except Exception as e:
+                # Keep the provider registered so mcp_authenticate can retry it.
+                if prov not in self._router._providers:
+                    self._router.register_provider(prov)
                 log.warning("collector: MCP init failed [%s]: %s", prov.provider_id, e)
 
     def _schemas(self) -> list:

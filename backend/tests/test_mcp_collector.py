@@ -147,6 +147,39 @@ class TestCollectorAuth(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sent[0]["request_id"], "a1")
         self.assertEqual(sent[0]["origin_worker_id"], "w0")
 
+    async def _run_init_with_fake_oauth_provider(self, token):
+        from unittest.mock import AsyncMock
+        from runtime.mcp_collector import MCPCollector
+
+        class _P:
+            provider_id = "mcp:remote"
+            oauth_cfg = {"scope": "x"}
+            url = "https://r"
+            def __init__(self): self.inited = False
+            def set_auth(self, a): pass
+            async def initialize(self): self.inited = True
+            def discover_tools(self): return []
+            def can_handle(self, n): return False
+
+        p = _P()
+        coll = MCPCollector("x")
+        with patch("executors.providers.mcp_client.McpClientToolProvider.from_config",
+                   return_value=[p]), \
+             patch.object(MCPCollector, "_build_auth_provider", return_value=object()), \
+             patch("executors.providers.mcp_oauth_store.MCPTokenStorage") as MS:
+            MS.return_value.get_tokens = AsyncMock(return_value=token)
+            await coll._init_providers()
+        return p, coll
+
+    async def test_oauth_server_without_token_deferred(self):
+        p, coll = await self._run_init_with_fake_oauth_provider(token=None)
+        self.assertFalse(p.inited)                     # not connected at startup
+        self.assertIn(p, coll._router._providers)      # but registered (mcp_authenticate can retry)
+
+    async def test_oauth_server_with_token_connects(self):
+        p, coll = await self._run_init_with_fake_oauth_provider(token=object())
+        self.assertTrue(p.inited)                      # stored token → auto-connect
+
     async def test_callback_url_uses_env(self):
         import os
         from runtime.mcp_collector import MCPCollector
