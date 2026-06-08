@@ -22,11 +22,11 @@
 
 ## 一、 MCP 协议能力与接入演进计划 (横向对比)
 
-本表聚焦于 **MCP 协议** 的原生支持、通道通信与服务生命周期管理。当前项目在此项上为 **✅ stdio + remote(SSE/HTTP) 客户端**（含自动重连 + ToolListChanged 订阅 + I/O 不可信防护；仅 OAuth 待补，见 §五）。
+本表聚焦于 **MCP 协议** 的原生支持、通道通信与服务生命周期管理。当前项目在此项上为 **✅ stdio + remote(SSE/HTTP) 客户端（运行于独立 mcp-collector 进程）**（含自动重连 + ToolListChanged 订阅 + I/O 不可信防护 + McpAuthTool 式 OAuth，见 §五/§六）。
 
 | 维度 / 机制 | Claude Code (TypeScript)<br>[claude-code-haha-main](file:///Users/Nuke/claude-code-haha-main) | opencode (TypeScript)<br>[opencode](file:///Users/Nuke/opencode) | gsd-2 (TypeScript/Rust)<br>[gsd-2](file:///Users/Nuke/gsd-2) | openclaw (TypeScript)<br>[openclaw-main](file:///Users/Nuke/openclaw-main) | nuke-ai-collaborator (Python/SQLite)<br>[当前项目](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator) |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **MCP 协议角色** | **Server & Client**：<br>1. **Client**：作为客户端连接并加载外部 Server 的工具。<br>2. **Server**：通过 `entrypoints/mcp.ts` 暴露内置工具给其他 AI 宿主。 | **Client**：<br>实现完整的 MCP 客户端管理器，维护多个本地与远程连接状态。 | **Client**：<br>主要作为客户端基于项目根目录 `.mcp.json` 挂载外部工具，不涉及复杂的双向 Server 引擎。 | **Client**：<br>客户端模式，通过 Stdio 包装器连接底层服务器。 | **✅ Client（已实现）**：<br>`McpClientToolProvider` 作为客户端连接外部 stdio Server，经 `ToolRouter` 分流（每 server 一个 provider，工具名前缀 `{server}__`）。暂不作 Server 端暴露。 |
+| **MCP 协议角色** | **Server & Client**：<br>1. **Client**：作为客户端连接并加载外部 Server 的工具。<br>2. **Server**：通过 `entrypoints/mcp.ts` 暴露内置工具给其他 AI 宿主。 | **Client**：<br>实现完整的 MCP 客户端管理器，维护多个本地与远程连接状态。 | **Client**：<br>主要作为客户端基于项目根目录 `.mcp.json` 挂载外部工具，不涉及复杂的双向 Server 引擎。 | **Client**：<br>客户端模式，通过 Stdio 包装器连接底层服务器。 | **✅ Client（已实现，collector 进程）**：<br>独立 **mcp-collector 进程**(跨群组单例)用 `McpClientToolProvider` 连接 stdio + remote Server（每 server 一 provider，工具名前缀 `{server}__`）;worker 经 `McpProxyProvider` 走 bus 转发。暂不作 Server 端暴露。 |
 | **传输协议实现** | **stdio / SSE**：<br>在客户端和服务端中都使用官方 SDK；服务端使用 `StdioServerTransport` 监听并处理来自外来客户端的同步进程管道数据。 | **stdio / SSE / StreamableHTTP**：<br>使用 `StdioClientTransport` 启动本地进程，以及 `SSEClientTransport` / `StreamableHTTPClientTransport` 执行远程通信。 | **stdio**：<br>基于 stdio 管道和 JSON-RPC 传输，对管道消息按 Tool 边界进行分发。 | **stdio / SSE**：<br>自定义 `OpenClawStdioClientTransport` 包装标准 I/O 管道，支持 stderr 数据流重定向与格式化日志记录。 | **✅ stdio + remote(SSE/HTTP)**：<br>官方 `mcp` Python SDK：`stdio_client`（env 合并保留 PATH）+ `sse_client` / `streamablehttp_client`。`_open_transport` 按 config 的 `url`/`transport` 选择，`headers` 携带鉴权。 |
 | **变化通知与感知** | **环境感知重连**：<br>随主进程生命周期加载，继承 Bash/MCP 环境变量并支持热插拔重载。 | **事件总线与热更新**：<br>使用 `setNotificationHandler` 监听 `ToolListChangedNotificationSchema`，当工具集变更时拉取新定义并向 Bus 广播 `ToolsChanged` 事件。 | **静态绑定**：<br>随后台任务拉起，主要在启动期根据配置初始化加载，不支持动态热重载。 | **Stderr 订阅监听**：<br>订阅 `transport.stderr.on("data")`，一旦捕获到崩溃或数据变动日志，触发动态重连和警告上报。 | **✅ 自动重连 + ToolListChanged 订阅**：<br>会话异常死亡后 `execute()` 经 `_ensure_alive()` 按冷却+锁重连；`ClientSession(message_handler=_on_message)` 监听 `notifications/tools/list_changed`，通过 `_REFRESH` 哨兵在会话任务内安全 re-cache 工具表。详见 §五。 |
 | **子进程退出控制** | **主进程回收**：<br>随主进程生命周期释放。在 `src/main.tsx` 等中使用 pgrep 递归或标准退出机制进行关联进程回收。 | **未作深层强杀**：<br>仅依赖标准 `client.close()`，子进程可能在后台残留。 | **基于 Rust ps.rs 的跨平台强杀**：<br>使用 Crate `native/crates/engine/src/ps.rs` 中的原生进程树逻辑，精准实现子进程的树状 SIGTERM 强杀，无 pgrep 外部依赖。 | **管道流感知**：<br>基于 `transport.stderr.on("data")` 辅助感知崩溃。 | **🔶 collector 进程独占回收（无树强杀）**：<br>所有 MCP 子进程现归**独立 mcp-collector 进程**（非每 worker）所有;`close()` 投 `_STOP` 哨兵让会话 task 退出，`async with` 在同 task 内回收（规避 anyio 跨 task cancel-scope）;collector 退出 `close_all()`。supervisor 管 collector 生命周期。**仍无显式进程树 SIGTERM 强杀**(npx 孙进程理论可残留)。 |
@@ -59,7 +59,7 @@
 5. **MCP 双侧超时 + 配置化 HIL**：caller 侧与会话循环内都包 `asyncio.wait_for`；写类工具按 `require_approval_all`/`approval_tools`/写类名启发式三级门禁经 `permissions.check` 审批。
 
 ### 劣势与缺口 (Weaknesses & Gaps)
-1. **MCP 仅 stdio，无 remote**：stdio 本地进程模式已可接入外部工具（崩溃后已能自动重连，见 §五.1），但**无 remote SSE/HTTP**，接不了纯网络 API 工具生态。
+1. **~~MCP 仅 stdio~~ → ✅ stdio + remote(SSE/HTTP) + OAuth**：均已实现，运行于独立 collector 进程（见 §五/§六）。残留仅独立健康检查 / 进程树强杀。
 2. **跨平台沙箱隔离薄弱**：除了 Windows 平台下实现了 Job Object 内存硬限制外，在 macOS/Linux 下完全依赖主进程的权限运行，缺乏彻底的文件系统/进程级容器隔离。
 3. **阻塞事件循环隐患**：虽然使用了 `to_thread` 包装了磁盘读写，但对于部分同步的 CPU 密集型分析（如自定义正则校验），仍有阻塞主循环的风险。
 4. **~~无凭证与鉴权管理层~~ → ✅ OAuth 已实现**：remote MCP 支持 McpAuthTool 式 OAuth（授权码+PKCE+动态注册+刷新，token 存 `mcp_oauth.db`）。仍无统一的非-MCP API 密钥保管网关（范围之外）。
@@ -142,3 +142,49 @@ graph TD
 3.  **✅ 已修复：结果按不可信外部数据处理 (间接注入)**：`execute()` 对成功结果**无条件**包一道 `_wrap_untrusted` 围栏（标注"不可信外部数据、勿当指令"），命中注入模式再升级提示并告警；错误结果是我方文案不包裹。与 `TOOL-LAYER-GAP-ANALYSIS #2 输出脱敏`（防密钥外流，方向相反）互补。
 4.  **✅ ToolListChanged 动态刷新**：`ClientSession(message_handler=_on_message)` → `notifications/tools/list_changed` → 经 `_REFRESH` 哨兵在会话任务内 re-cache（避免在读循环里做 I/O 死锁）。对标 opencode `setNotificationHandler`。
 5.  **仍缺（已记于 `TOOL-LAYER-GAP-ANALYSIS`）**：独立健康检查、进程树强杀（§五步骤1）。remote(SSE/HTTP)、ToolListChanged、**OAuth（McpAuthTool 式，RFC 7591 动态注册）均已实现**——唯端到端握手需真实 OAuth server 验。
+
+---
+
+## 六、 使用与验证（collector 架构 + OAuth）
+
+### 1. 配置示例（`mcp_servers.json`）
+```jsonc
+{
+  "mcpServers": {
+    "filesystem": {                         // 本地 stdio
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "./workspace"],
+      "allow_list": ["read_file", "write_file"],
+      "enabled": true
+    },
+    "remote-api": {                         // 远程 + 静态 token
+      "url": "https://mcp.example.com/mcp",
+      "transport": "http",                  // "http"(streamable) | "sse"
+      "headers": {"Authorization": "Bearer <token>"},
+      "enabled": true
+    },
+    "oauth-api": {                          // 远程 + OAuth（McpAuthTool 式）
+      "url": "https://mcp.example.com/sse",
+      "transport": "sse",
+      "oauth": {"scope": "read write"},     // 出现 oauth 段即启用 OAuth
+      "enabled": true
+    }
+  }
+}
+```
+- 回调基址：env `PUBLIC_BASE_URL`（默认 `http://127.0.0.1:8000`）→ 回调 URL `{base}/mcp/oauth/callback`，需与授权服务器登记的 redirect 一致。
+- 配置路径可用 env `MCP_SERVERS_CONFIG` 覆盖。
+
+### 2. `mcp_authenticate` 工具的可见性
+OAuth 授权由 bot 调内置工具 `mcp_authenticate(server)` 触发。它走 `tool_executor`，
+但**只有 bot 的 `allowed_tools` 放开它（或 bot 未设 allowed_tools 限制=全放开）时**，
+才会下发给 LLM。要让某 bot 能发起 MCP 授权，在其 `allowed_tools` 里加入 `mcp_authenticate`。
+
+### 3. 端到端验证（需真实 OAuth MCP server）
+本地无 OAuth server fixture，握手只能对真实 server 验。步骤：
+1. 在 `mcp_servers.json` 配一个带 `oauth` 段的 remote server，设 `PUBLIC_BASE_URL`。
+2. 让一个 bot 的 `allowed_tools` 含 `mcp_authenticate`，对它说"给 \<server\> 授权"。
+3. bot 回授权 URL → 浏览器打开 → 授权 → 重定向到 `/mcp/oauth/callback`。
+4. 期望：collector 完成换 token（落 `mcp_oauth.db`）→ 该 server 工具出现在后续轮次；
+   重启后带 token 自动重连（SDK 刷新）。
+（总线/存储/流程编排接缝均已单测；上述 1–4 是唯一需真实 server 的部分。）
