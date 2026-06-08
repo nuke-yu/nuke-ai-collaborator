@@ -38,7 +38,7 @@ generality（给可信内部工具加当前无消费方的能力）或需外部�
 - **MCP 进程回收**：已做 shutdown 时进程树强杀；per-provider 重连路径的孙进程残留未单独清（重连罕见，shutdown 兜底）。
 - **可观测**：有 `trace_id` 全链路；无 per-call span / attrs。
 - ~~**MCP proxy 查找**~~ → ✅ 已做：`MCPBridge.set_schemas` 维护 name→schema dict，`schema_for()` O(1)，`can_handle`/`_needs_approval` 改用它。
-- **OAuth token 存储连接**：`mcp_oauth_store` 每次 read/write 开新 aiosqlite 连接；OAuth 并发刷新时连接抖动。**评估后保留**：刷新不频繁、收益低；而连接缓存与"每测试用临时 db 文件并删除"的测试模式冲突（缓存会持有已删文件的连接），引入的生命周期复杂度/风险 > 价值。如真出现并发刷新瓶颈再做。
+- ~~**OAuth token 存储连接**~~ → ✅ 已做：`mcp_oauth_store` 改为**按 db_path 共享一条惰性 aiosqlite 连接**（collector 单进程单 loop → 全程复用，消除 per-op 连接/线程抖动；aiosqlite 在单连接上串行化操作，并发刷新安全）。`aclose_all()` 在 collector 退出 + 测试 teardown 关闭；按 path 键避免跨 event-loop 复用（测试用唯一临时 db）。
 
 ---
 

@@ -16,7 +16,9 @@ class TestMCPTokenStorage(unittest.IsolatedAsyncioTestCase):
         self.tmp.close()
         self.db = self.tmp.name
 
-    def tearDown(self):
+    async def asyncTearDown(self):
+        from executors.providers.mcp_oauth_store import aclose_all
+        await aclose_all()                 # close the shared connection bound to this test's loop
         try:
             os.unlink(self.db)
         except OSError:
@@ -46,6 +48,15 @@ class TestMCPTokenStorage(unittest.IsolatedAsyncioTestCase):
         await s.set_tokens(OAuthToken(access_token="v1", token_type="Bearer"))
         await s.set_tokens(OAuthToken(access_token="v2", token_type="Bearer"))
         self.assertEqual((await s.get_tokens()).access_token, "v2")
+
+    async def test_connection_reused_per_path(self):
+        from executors.providers.mcp_oauth_store import _get_conn, aclose_all
+        c1 = await _get_conn(self.db)
+        c2 = await _get_conn(self.db)
+        self.assertIs(c1, c2)              # one shared connection — no per-op churn
+        await aclose_all()
+        c3 = await _get_conn(self.db)
+        self.assertIsNot(c3, c1)           # reopened after close
 
     async def test_clear(self):
         from mcp.shared.auth import OAuthToken

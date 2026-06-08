@@ -313,6 +313,11 @@ class MCPCollector:
                 await self._router.close_all()
             if self._writer:
                 self._writer.close()
+            try:
+                from executors.providers.mcp_oauth_store import aclose_all
+                await aclose_all()            # close shared OAuth token-store connections
+            except Exception:
+                pass
             swept = _kill_descendants()       # reap orphaned npx/node grandchildren
             if swept:
                 log.info("collector: swept %d residual subprocess(es) on shutdown", swept)
