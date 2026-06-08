@@ -22,6 +22,48 @@ _ARG_ALIASES = {
 }
 
 
+# JSON-schema type → acceptable Python type(s) for lightweight validation.
+_JSON_TYPE_PY = {
+    "string": (str,), "integer": (int,), "number": (int, float),
+    "boolean": (bool,), "array": (list,), "object": (dict,),
+}
+
+
+def _validate_arguments(name: str, arguments: dict, parameters: dict | None) -> str | None:
+    """Lightweight arg validation against the tool's JSON schema (#8).
+
+    Catches the common LLM mistakes — missing required args and wrong scalar
+    types — and returns a structured, model-readable error so the LLM can
+    self-correct. Deliberately lenient: no additionalProperties / format checks
+    (avoid false rejections); empty/absent schema → no-op.
+    """
+    if not isinstance(parameters, dict):
+        return None
+    props = parameters.get("properties")
+    if not isinstance(props, dict):
+        return None
+    errors: list[str] = []
+    for req in parameters.get("required", []) or []:
+        if req not in arguments:
+            errors.append(f"缺少必填参数 '{req}'")
+    for key, val in arguments.items():
+        spec = props.get(key)
+        if not isinstance(spec, dict) or val is None:
+            continue
+        jtype = spec.get("type")
+        py = _JSON_TYPE_PY.get(jtype)
+        if not py:
+            continue
+        # bool is a subclass of int — don't let True/False satisfy integer/number.
+        if jtype in ("integer", "number") and isinstance(val, bool):
+            errors.append(f"参数 '{key}' 应为 {jtype}，收到 boolean")
+        elif not isinstance(val, py):
+            errors.append(f"参数 '{key}' 应为 {jtype}，收到 {type(val).__name__}")
+    if errors:
+        return f"[参数错误] {'；'.join(errors)}。请按工具 '{name}' 的参数 schema 修正后重试。"
+    return None
+
+
 def _normalize_arg_aliases(arguments: dict, sig: inspect.Signature) -> None:
     """In-place: rename known alias kwargs to the handler's canonical param.
 
@@ -192,7 +234,11 @@ async def execute(name: str, arguments: dict, context: dict | None = None) -> tu
         is_truncated = arguments.pop("__truncated__", False)
         _normalize_arg_aliases(arguments, sig)
 
-        if is_truncated and name != "write_file":
+        validation_error = _validate_arguments(name, arguments, entry.parameters)
+        if validation_error:
+            tool_result = validation_error
+            is_error = True
+        elif is_truncated and name != "write_file":
             # Don't execute a truncated destructive call — but fall through so the
             # after-hooks below still run on this synthesized result.
             tool_result = (

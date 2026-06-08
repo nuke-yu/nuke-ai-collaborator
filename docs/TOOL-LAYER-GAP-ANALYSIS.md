@@ -31,7 +31,7 @@
 | 权限裁决契约 | ⚠️ block/allow | ✅ 模式+多源分层 | ✅ ask/allow/deny+pattern | ✅ | ✅ 改参/改权限/中断 |
 | 授权记忆 | ✅ persist_rule + 子命令深度合成 | always-allow | — | — | ✅ 子命令深度感知合成 |
 | 子 agent 权限 | ✅ 衰减派生(去 bypass+去高危 blanket+深度上限+不可弹窗) | Task 限工具集 | ✅ 衰减派生 | ✅ | （委托 CLI） |
-| 参数校验 | ⚠️ 硬编码别名表 | ✅ zod validateInput | ✅ schema-decode | ✅ | （透传） |
+| 参数校验 | ✅ 别名归一 + schema 必填/类型校验 | ✅ zod validateInput | ✅ schema-decode | ✅ | （透传） |
 | MCP 传输 | ✅ stdio + remote(SSE/HTTP) + OAuth（collector 进程） | ✅ +WS* | ✅ +remote(SSE/HTTP)+OAuth | ✅ | （透传 CLI） |
 | MCP 工具过滤 | allow_list | — | — | — | ✅ allow+block per-model |
 | 工具规模治理 | 🔶 schema 数量预算（无 deferred 检索） | ✅ deferred+ToolSearch | — | ⚠️ searchable | （透传） |
@@ -89,10 +89,11 @@
 - **对标**：gsd-2 `CanUseToolPermissionResult`（stream-adapter.ts:774）支持 `allow + updatedInput + updatedPermissions` 与 `deny + interrupt`；Claude Code 有 plan/acceptEdits/bypass/dontAsk/auto 等**模式**与 user/project/local/**policy**/cli/session **多来源分层规则**（`src/types/permissions.ts`）。
 - **建议**：裁决结果支持「改写入参（如自动修正路径）/ 动态授予 / 中断」；权限规则引入多来源分层（尤其管理员 policy 层）与 plan/acceptEdits 模式。
 
-### 8. 🟡 参数校验靠硬编码别名表
-- **现状**：[tool_executor.py:17-22](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/executors/tool_executor.py) `_ARG_ALIASES` 仅覆盖 `file_path/contents` 等少数；表外近似参数 → handler 抛 `unexpected kwarg` → `[执行错误]`，模型拿不到结构化纠错。
-- **对标**：Claude Code 每工具 zod `validateInput()`（`src/Tool.ts`）；opencode schema-decode 失败抛类型化 `InvalidArgumentsError` 并给模型「请按 schema 重写输入」。
-- **建议**：对每个工具的 parameters 做真校验 + 标准化纠错回馈。
+### 8. ✅ 参数校验 — 已实现（别名归一 + schema 校验）
+- **现状**：别名归一(`_ARG_ALIASES`)之后,`tool_executor.execute` 调 [`_validate_arguments`](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/executors/tool_executor.py) 按工具 JSON schema 校验:**缺必填参数**、**标量类型错**(含 bool 不当 integer)→ 返回**结构化中文错误**(`[参数错误] 缺少必填参数 'x'；参数 'y' 应为 integer…`)供 LLM 自纠,handler 不执行。
+- **取舍**：刻意**轻量、零误拒**——不做 additionalProperties/format 校验(避免误杀合法调用),空 schema 即 no-op。比 jsonschema 全量更可预测。单测 `tests/test_arg_validation.py`(8 例)。
+- **对标**：Claude Code zod `validateInput()`;opencode schema-decode → `InvalidArgumentsError`。
+- **残留**：未做嵌套对象/数组元素的深校验、enum/范围校验——按需再加。
 
 ### 9. 🟡 MCP 工具只能 allow，缺按上下文 block 过滤
 - **现状**：`mcp_client.py` 仅 provider 级 `allow_list`。
@@ -127,4 +128,4 @@
 
 1. **✅ 已完成（安全收益最高，多 agent 放大风险）**：#1 命令安全（tokenized 加固）、#2 输出脱敏、#3 子 agent 权限衰减、#6 授权记忆粒度。
 2. **多 MCP / 规模化**：✅#4 schema 数量预算（完整 deferred 检索待做）、✅#5 MCP remote+ToolListChanged+OAuth 已做（独立健康检查/进程树强杀待做，OAuth 握手需真实 server 验）；待做 #9 MCP 上下文过滤（按 bot/模型黑白名单）。
-3. **待做（体验/健壮性）**：#7 裁决契约扩展（改参/动态授权/中断）、#8 参数校验。
+3. **体验/健壮性**：✅#8 参数校验已做；待做 #7 裁决契约扩展（改参/动态授权/中断）。
