@@ -1,6 +1,6 @@
 # 工作区目录布局设计（Workspace Layout）
 
-> 最后更新：2026-06-08
+> 最后更新：2026-06-09
 > 状态：设计定稿（实现指导与标准）
 > 关联文档：[PROJECT-CELL-ISOLATION-V3.md](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/docs/PROJECT-CELL-ISOLATION-V3.md)、[BOT-COLLABORATION-DESIGN.md](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/docs/BOT-COLLABORATION-DESIGN.md)、[superpowers/specs/2026-06-07-multi-project-ai-team-foundation-redesign.md](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/docs/superpowers/specs/2026-06-07-multi-project-ai-team-foundation-redesign.md)
 
@@ -25,6 +25,7 @@
 2. **bot 私有 ≠ 群组共享**：bot 的身份/性格/能力/记忆/私有草稿属私有区，bot 之间互不可见；要协作交接的产物（代码、文档）才进共享区。
 3. **代码 = git 工作树，交付 = git merge**：代码是从 GitHub clone 下来的 git 工作树（一个项目可含多个微服务 repo）。Dev/QA 在**同一 checkout、同一 branch** 上协作；全绿后 `push → GitHub merge` 即交付。**不靠目录搬运区分"在制品/成品"——git 的 branch+merge 已是这条边界。**
 4. **持久知识 vs 易逝日志分级**：只有 4 样长期保留（代码 / 共享文档 / 记忆 / 对话）；其余（run 执行痕迹、私有草稿）按保留策略回收，不当文档永久堆积。
+5. **不变量：bot 必属一群**：每个 bot 恰好属于一个群组（`members.group_id` 对 bot 永远非空），bot 目录 ⟺ DB 有该 bot ⟺ 它有 group。不存在"无 group 的 bot"。`member_id=0 / group_id=0` 仅是系统消息的虚拟占位，**不是有工作区的 bot**。
 
 ---
 
@@ -151,31 +152,54 @@ run 记录是**一次执行的痕迹/取证**（调了哪些工具、中间推�
 
 ---
 
-## 八、实现指导（不影响目录树形状，落地时分章细化）
+## 八、实现指导（正路设计 · 无临时方案）
 
-> 以下为实现层接缝，记录于此作为标准；具体编码在实现阶段展开。
+> 这是未来整个协作的核心基础组件，按正路落地：**group 一等公民、显式贯穿；路径只有一个真相源；DB 反查只在边界发生一次。** 严禁把 DB 反查埋进叶子路径函数 + 缓存补救那种 hack。
 
-1. **`bot_workspace()` 路径变更 + 迁移**
-   - 现：`WORKSPACE_ROOT / f"bot_{bot_id}"`（顶层）。
-   - 改：`WORKSPACE_ROOT / f"group_{gid}" / "bots" / f"bot_{bot_id}"`。
-   - bot_id 全局唯一，`group_id` 由 `members` 表反查（与现有 `_get_effective_ws` 反查 group 同一路子）。
-   - **一次性迁移脚本**：把现有顶层 `workspaces/bot_*` 搬进各自群组的 `bots/` 下，避免两套布局长期并存（否则 `bot_workspace()` 要兼容两种，是债）。**迁移方式待确认。**
+### 8.0 三根支柱
 
-2. **共享区路径重定向**（`workspace/__init__.py::_get_effective_ws`）
-   - 现：白名单 `_SHARED_FILES`（4 个固定文件）+ `deliverables/` 前缀 → 重定向到 `group_workspace(group_id)`。
-   - 改：**移除 `deliverables/` 前缀**，新增共享前缀 `workspace/`、`docs/` → 重定向到 group shared；`_SHARED_FILES` 保留。`read_file/write_file/edit_file` 都走此函数，一处改全通。
-   - 约定：bot 用逻辑前缀 `workspace/repo1/…`、`docs/…` 即落到本群组共享区；其余落私有区。
+**① 单一布局真相源（`workspace/layout.py`，新建）**
+所有路径由一处纯函数计算，无 I/O，只吃显式 id：
+```
+group_dir(gid)            → workspaces/group_{gid}
+bot_dir(gid, bot_id)      → group_{gid}/bots/bot_{bot_id}
+group_shared_dir(gid)     → group_{gid}/shared
+group_runs_dir(gid)       → group_{gid}/runs
+```
+- 现状问题：bot 路径有**两处重复定义**——`workspace.bot_workspace(bot_id)` 与 `skills.constants.bot_ws(bot_id)`，必须始终一致，否则技能读不到必崩。
+- 改：二者**统一委托给 `layout.bot_dir`**，消灭重复定义。
 
-3. **shell 沙箱放行 group 共享区**（`workspace_tools.py::_resolve_shell_cwd` + `_check_shell_command_paths`）
-   - 现：cwd/路径只允许 `bot_workspace(bot_id)`。
-   - 扩展：额外放行 `group_workspace(bot 所属 group)`，否则 Dev/QA 无法在共享区 `run_shell` build/跑测/git 操作。
-   - 需确认 `git clone/branch/commit/push` 与网络访问不被高危命令 guard 误杀。
+**② group_id 显式贯穿（删掉所有反查）**
+group_id **本就已被上下文携带**——`ctx.group_id`、工具 `context["group_id"]`、技能层 `list_skills_all(member_id, group_id=…)` 都有它，只是没传进路径函数。
+- 改：VFS（`read_file/write_file/edit_file/list_workspace/make_dir/delete_path/bot_workspace`）、skills（discovery/loader/lifecycle）、shell 沙箱，统统加 `group_id` 形参，值从已携带它的 context 取。
+- **副产物（重要）**：`_get_effective_ws` 里现有的 `SELECT group_id FROM members` 反查可**直接删除**（group_id 由入参传入）。正路是**移除**现有 DB-in-path hack，而非新增。
 
-4. **git 凭证**：**系统层已统一配置**（Windows/Linux 一致），实现直接取用即可，无需按群组单配。
+**③ API 边界解析一次**
+前端走 `/api/members/{member_id}/...`，URL 只有 member_id。
+- 改：在 HTTP handler 入口解析一次 group_id。**这些 handler 本就已 `bot = await get_member(db, member_id)`**，返回的 `bot` 字典自带 `group_id` → 直接 `bot["group_id"]` 往下传，**零新增查询**。不改路由。
+- 这是合法的"边界建立上下文"：一次、在门口、显式下传；与"每个叶子函数偷偷查库"有本质区别。
 
-5. **Dev↔QA 交接时序**：**无并发约束**——角色顺序执行（一个 bot 干完才轮到下一个），同一时刻只有一个 bot 操作工作树，不存在并发读写 / index lock 冲突。无需额外编排规则。
+### 8.1 连带改动
 
-6. **可发现性**（`list_workspace` / 启动上下文）：让 bot 能看到本群组 `shared/`（含 `docs/`、`workspace/`）的存在，否则不知道有共享区可用。
+1. **路径模式扫描**：全仓扫写死 `bot_{` 的正则/拼接，统一改：
+   - `SkillWatcher._BOT_RE`：`^bot_(\d+)/skills/` → `^group_(\d+)/bots/bot_(\d+)/skills/`（member_id 取第二捕获组）。
+   - `clear_group_locks` 等以 `group_workspace(gid).parent` 为前缀的逻辑：新布局下 `group_{gid}/` 仍同时含 `bots/`+`shared/`，前缀清理语义不变，复核即可。
+
+2. **共享区路径重定向**（`_get_effective_ws`）：**移除 `deliverables/` 前缀**，新增共享前缀 `workspace/`、`docs/` → 重定向到 `group_shared_dir(gid)`；`_SHARED_FILES` 保留。bot 用 `workspace/repo1/…`、`docs/…` 即落群组共享区，其余落私有。
+
+3. **shell 沙箱放行 group 共享区**（`_resolve_shell_cwd` + `_check_shell_command_paths`）：除 `bot_dir(gid, bot_id)` 外额外放行 `group_shared_dir(gid)`，否则 Dev/QA 无法在共享区 `run_shell` build/跑测/git。需确认 `git clone/branch/commit/push` + 网络不被高危命令 guard 误杀。
+
+4. **可发现性**（`list_workspace` / 启动上下文）：让 bot 看到本群组 `shared/`（含 `docs/`、`workspace/`）存在。
+
+5. **git 凭证**：系统层已统一配置（Win/Linux 一致），直接取用，不按群组单配。
+
+6. **Dev↔QA 交接时序**：无并发约束——角色顺序执行，同一时刻仅一个 bot 操作工作树，无锁冲突，无需额外编排。
+
+### 8.2 迁移（一次性脚本）
+
+- 跑前整体备份 `workspaces/`。
+- 遍历 DB 中的 bot（按不变量必有 group）：`workspaces/bot_{id}` → `workspaces/group_{gid}/bots/bot_{id}`。
+- 磁盘上无 DB 记录的 `bot_*` 目录 = 改造前脏数据，按不变量本不该存在，**直接删除**（不归档、不兼容）。
 
 ---
 
