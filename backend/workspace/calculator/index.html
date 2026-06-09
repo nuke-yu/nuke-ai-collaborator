@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>计算器</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="calculator" role="application" aria-label="计算器">
+    <div class="display-area">
+      <input id="display" type="text" readonly placeholder="0" aria-label="表达式输入框" value="0">
+      <div id="result-display" aria-live="polite"></div>
+    </div>
+    <div class="button-grid">
+      <button class="btn btn-clear" aria-label="清空">C</button>
+      <button class="btn btn-backspace" aria-label="退格">⌫</button>
+      <button class="btn btn-paren btn-lparen" aria-label="左括号">(</button>
+      <button class="btn btn-paren btn-rparen" aria-label="右括号">)</button>
+
+      <button class="btn btn-digit" data-digit="7" aria-label="7">7</button>
+      <button class="btn btn-digit" data-digit="8" aria-label="8">8</button>
+      <button class="btn btn-digit" data-digit="9" aria-label="9">9</button>
+      <button class="btn btn-operator" data-operator="+" aria-label="加">+</button>
+
+      <button class="btn btn-digit" data-digit="4" aria-label="4">4</button>
+      <button class="btn btn-digit" data-digit="5" aria-label="5">5</button>
+      <button class="btn btn-digit" data-digit="6" aria-label="6">6</button>
+      <button class="btn btn-operator" data-operator="-" aria-label="减">−</button>
+
+      <button class="btn btn-digit" data-digit="1" aria-label="1">1</button>
+      <button class="btn btn-digit" data-digit="2" aria-label="2">2</button>
+      <button class="btn btn-digit" data-digit="3" aria-label="3">3</button>
+      <button class="btn btn-operator" data-operator="*" aria-label="乘">×</button>
+
+      <button class="btn btn-digit btn-span-2" data-digit="0" aria-label="0">0</button>
+      <button class="btn btn-dot" aria-label="小数点">.</button>
+      <button class="btn btn-operator" data-operator="/" aria-label="除">÷</button>
+
+      <button class="btn btn-equals btn-span-2" aria-label="等于">=</button>
+    </div>
+    <p style="margin-top:12px;text-align:center;font-size:12px;color:var(--text-secondary);">
+      键盘支持：数字 · 运算符 · Enter(=) · Backspace · Esc(C)
+    </p>
+  </div>
+  <script src="engine.js"></script>
+  <script src="script.js"></script>
+</body>
+</html>

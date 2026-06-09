@@ -1,5 +1,6 @@
 import logging
 import asyncio
+import re
 from typing import Optional, AsyncGenerator
 from ai.client import call_ai_once, call_ai_stream_messages, AIContextOverflowError, AIError
 from executors import compact
@@ -39,6 +40,14 @@ class AIService:
     - Automated context compaction on overflow.
     - Standardized error handling & UI broadcasts.
     """
+    # Regex patterns to extract thinking/reasoning from model responses
+    # DeepSeek uses ｜｜DSML｜｜思考｜｜...｜｜DSML｜｜结束思考｜｜
+    # Some models use <thought>...</thought> or ```think</think>
+    THINKING_PATTERNS = [
+        re.compile(r'[\｜\|]DSML[\｜\|]思考[\｜\|](.+?)[\｜\|]DSML[\｜\|]结束思考[\｜\|]', re.DOTALL),
+        re.compile(r'<thought>(.+?)</thought>', re.DOTALL),
+        re.compile(r'```think\n?(.+?)\n?```', re.DOTALL),
+    ]
     def __init__(self, ctx: ExecutionContext, session_id: str, temp_id: str):
         self.ctx = ctx
         self.session_id = session_id

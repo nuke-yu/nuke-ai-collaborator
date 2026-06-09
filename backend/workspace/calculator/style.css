@@ -1,0 +1,323 @@
+/* ============================================================
+   计算器样式
+   响应式设计：桌面 + 移动端
+   ============================================================ */
+
+/* ---------- 基础重置 ---------- */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  --bg: #f5f5f5;
+  --calc-bg: #ffffff;
+  --display-bg: #fafafa;
+  --display-border: #e0e0e0;
+  --text-primary: #1a1a1a;
+  --text-secondary: #666666;
+  --text-result: #2563eb;
+  --text-error: #dc2626;
+  --btn-digit-bg: #f0f0f0;
+  --btn-digit-hover: #e4e4e4;
+  --btn-digit-active: #d4d4d4;
+  --btn-operator-bg: #e8f0fe;
+  --btn-operator-hover: #d4e2fc;
+  --btn-operator-active: #b8cff8;
+  --btn-equals-bg: #2563eb;
+  --btn-equals-hover: #1d4ed8;
+  --btn-equals-active: #1e40af;
+  --btn-equals-text: #ffffff;
+  --btn-clear-bg: #fef2f2;
+  --btn-clear-hover: #fecaca;
+  --btn-clear-active: #fca5a5;
+  --shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
+  --radius: 12px;
+  --btn-radius: 8px;
+  --font-mono: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+/* 深色模式 */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1a1a2e;
+    --calc-bg: #16213e;
+    --display-bg: #0f3460;
+    --display-border: #1a1a3e;
+    --text-primary: #e0e0e0;
+    --text-secondary: #a0a0b0;
+    --text-result: #60a5fa;
+    --text-error: #f87171;
+    --btn-digit-bg: #1e293b;
+    --btn-digit-hover: #334155;
+    --btn-digit-active: #475569;
+    --btn-operator-bg: #1e3a5f;
+    --btn-operator-hover: #2a4a7f;
+    --btn-operator-active: #3a5a9f;
+    --btn-equals-bg: #3b82f6;
+    --btn-equals-hover: #2563eb;
+    --btn-equals-active: #1d4ed8;
+    --btn-equals-text: #ffffff;
+    --btn-clear-bg: #3b1a1a;
+    --btn-clear-hover: #5a2a2a;
+    --btn-clear-active: #7a3a3a;
+    --shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
+  }
+}
+
+/* ---------- 全局 ---------- */
+html {
+  height: 100%;
+}
+
+body {
+  font-family: var(--font-sans);
+  background: var(--bg);
+  height: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  padding: 16px;
+  transition: background 0.3s;
+}
+
+/* ---------- 计算器容器 ---------- */
+.calculator {
+  width: 100%;
+  max-width: 360px;
+  background: var(--calc-bg);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 20px;
+  transition: background 0.3s, box-shadow 0.3s;
+}
+
+/* ---------- 显示区域 ---------- */
+.display-area {
+  margin-bottom: 16px;
+}
+
+#display {
+  width: 100%;
+  height: 56px;
+  background: var(--display-bg);
+  border: 1px solid var(--display-border);
+  border-radius: var(--btn-radius);
+  padding: 0 16px;
+  font-family: var(--font-mono);
+  font-size: 28px;
+  font-weight: 600;
+  color: var(--text-primary);
+  text-align: right;
+  outline: none;
+  transition: background 0.3s, border-color 0.3s, color 0.3s;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+#display::placeholder {
+  color: var(--text-secondary);
+}
+
+#result-display {
+  margin-top: 8px;
+  padding: 0 16px;
+  font-family: var(--font-mono);
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text-result);
+  text-align: right;
+  min-height: 28px;
+  transition: color 0.3s;
+}
+
+#result-display.error {
+  color: var(--text-error);
+  font-size: 16px;
+  font-weight: 400;
+}
+
+/* ---------- 按钮网格 ---------- */
+.button-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+
+/* ---------- 通用按钮样式 ---------- */
+.btn {
+  height: 56px;
+  border: none;
+  border-radius: var(--btn-radius);
+  font-family: var(--font-sans);
+  font-size: 20px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.1s, box-shadow 0.15s;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn:active {
+  transform: scale(0.95);
+}
+
+/* ---------- 数字按钮 ---------- */
+.btn-digit {
+  background: var(--btn-digit-bg);
+  color: var(--text-primary);
+}
+
+.btn-digit:hover {
+  background: var(--btn-digit-hover);
+}
+
+.btn-digit:active {
+  background: var(--btn-digit-active);
+}
+
+/* ---------- 运算符按钮 ---------- */
+.btn-operator {
+  background: var(--btn-operator-bg);
+  color: var(--text-primary);
+  font-size: 22px;
+}
+
+.btn-operator:hover {
+  background: var(--btn-operator-hover);
+}
+
+.btn-operator:active {
+  background: var(--btn-operator-active);
+}
+
+/* ---------- 等号按钮 ---------- */
+.btn-equals {
+  background: var(--btn-equals-bg);
+  color: var(--btn-equals-text);
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.btn-equals:hover {
+  background: var(--btn-equals-hover);
+}
+
+.btn-equals:active {
+  background: var(--btn-equals-active);
+}
+
+/* ---------- 清空/退格按钮 ---------- */
+.btn-clear {
+  background: var(--btn-clear-bg);
+  color: var(--text-error);
+}
+
+.btn-clear:hover {
+  background: var(--btn-clear-hover);
+}
+
+.btn-clear:active {
+  background: var(--btn-clear-active);
+}
+
+.btn-backspace {
+  background: var(--btn-digit-bg);
+  color: var(--text-primary);
+}
+
+.btn-backspace:hover {
+  background: var(--btn-digit-hover);
+}
+
+.btn-backspace:active {
+  background: var(--btn-digit-active);
+}
+
+/* ---------- 括号按钮 ---------- */
+.btn-paren {
+  background: var(--btn-operator-bg);
+  color: var(--text-primary);
+  font-size: 18px;
+}
+
+.btn-paren:hover {
+  background: var(--btn-operator-hover);
+}
+
+.btn-paren:active {
+  background: var(--btn-operator-active);
+}
+
+/* ---------- 小数点按钮 ---------- */
+.btn-dot {
+  background: var(--btn-digit-bg);
+  color: var(--text-primary);
+  font-size: 24px;
+  font-weight: 700;
+}
+
+.btn-dot:hover {
+  background: var(--btn-digit-hover);
+}
+
+.btn-dot:active {
+  background: var(--btn-digit-active);
+}
+
+/* ---------- 跨列布局 ---------- */
+.btn-span-2 {
+  grid-column: span 2;
+}
+
+/* ---------- 响应式：小屏手机 ---------- */
+@media (max-width: 400px) {
+  .calculator {
+    padding: 12px;
+    border-radius: 8px;
+  }
+
+  .btn {
+    height: 48px;
+    font-size: 18px;
+    border-radius: 6px;
+  }
+
+  #display {
+    height: 48px;
+    font-size: 24px;
+  }
+
+  #result-display {
+    font-size: 18px;
+    min-height: 24px;
+  }
+
+  .button-grid {
+    gap: 8px;
+  }
+}
+
+/* ---------- 大屏桌面 ---------- */
+@media (min-width: 768px) {
+  .calculator {
+    max-width: 380px;
+    padding: 24px;
+  }
+
+  .btn {
+    height: 60px;
+    font-size: 22px;
+  }
+
+  #display {
+    height: 60px;
+    font-size: 32px;
+  }
+}

@@ -147,6 +147,64 @@ class RewakeInjected:
     message:  str
 
 
+# ─── AI Thinking/Reasoning ───────────────────────────────────────────────────
+# Patterns from claude-code-haha: Thinking is modeled as a first-class message type
+# with explicit start/delta/end events for streaming rendering
+
+@event("ai_thought_start")
+class AIThoughtStart:
+    """Signals the start of AI reasoning/thinking block."""
+    group_id:  int
+    temp_id:   str
+    iteration: int  # Which tool-call iteration (1, 2, 3, ...)
+
+@event("ai_thought_delta")
+class AIThoughtDelta:
+    """Streaming delta of AI thinking content."""
+    group_id:  int
+    temp_id:   str
+    delta:     str  # Thinking text chunk
+
+@event("ai_thought_end")
+class AIThoughtEnd:
+    """Signals end of AI reasoning/thinking block."""
+    group_id:  int
+    temp_id:   str
+    iteration: int
+
+
+# ─── Tool Execution Progress ─────────────────────────────────────────────────
+# Patterns from claude-code-haha: Tools have explicit lifecycle events
+
+@event("tool_progress_start")
+class ToolProgressStart:
+    """Signals a tool call has started executing."""
+    group_id:     int
+    temp_id:      str
+    tool_name:    str
+    tool_args:    Any  # JSON-serializable arguments
+    iteration:    int  # Which iteration this belongs to
+
+
+@event("tool_progress_running")
+class ToolProgressRunning:
+    """Periodic update during long-running tool execution."""
+    group_id:     int
+    temp_id:      str
+    tool_name:    str
+    message:      str  # Progress message (e.g., "Reading file...", "Writing 50%...")
+    elapsed_sec:  float
+
+
+@event("tool_progress_end")
+class ToolProgressEnd:
+    """Signals tool call has completed."""
+    group_id:     int
+    temp_id:      str
+    tool_name:    str
+    duration_sec: float  # Total execution time
+
+
 # ─── Tool 执行 ────────────────────────────────────────────────────────────────
 
 @event("tool_call")

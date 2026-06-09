@@ -2,6 +2,8 @@ import asyncio
 import uuid
 import sys
 import json
+import time
+import re
 
 from executors.base import (
     BotExecutor, ExecutionContext, ExecutionResult,
@@ -830,7 +832,8 @@ class ToolLoopRunner:
         await self.ctx.interaction.update_session_status(self.session_id, "completed")
         return ExecutionResult(full_text=self.full_text, msg_id=msg_id)
 
-    async def execute(self) -> ExecutionResult:
+    async def _execute(self) -> ExecutionResult:
+        """Execute the tool loop with thinking and progress output."""
         await self._setup_session()
         await self._run_pre_compaction()
 
@@ -846,12 +849,12 @@ class ToolLoopRunner:
                     "all_bots": self.ctx.all_bots,
                     "all_members": self.ctx.all_members,
                     "spawn_depth": self.ctx.spawn_depth,
-                    
+
                     "ruleset": self.ruleset,
                     "steer_channel": self.ctx.steer_channel,
                     "rewake_queue": self.rewake_queue,
                 }
-                
+
                 _active_schemas = self.tool_schemas
                 while self.iter_count < self.max_iter:
                     self.iter_count += 1
@@ -863,8 +866,32 @@ class ToolLoopRunner:
                         _active_schemas = [s for s in self.tool_schemas if s["function"]["name"] in _skill_allowed]
                     else:
                         _active_schemas = self.tool_schemas
-                        
+
                     _iter_model = self.execution_ctx.pop("skill_model", None) or self.model_name
+
+                    # Output thinking start before LLM call
+                    await self.ctx.interaction.broadcast(self.ctx.group_id, {
+                        "type": "ai_thought_start",
+                        "temp_id": self.temp_id,
+                        "iteration": self.iter_count,
+                    })
+
+                    # Generate simulated thinking content based on context
+                    thinking_draft = self._generate_thinking_preview(iter_count=self.iter_count)
+                    # Stream thinking content in chunks (simulates real streaming)
+                    chunk_size = 30
+                    for i in range(0, len(thinking_draft), chunk_size):
+                        await self.ctx.interaction.broadcast(self.ctx.group_id, {
+                            "type": "ai_thought_delta",
+                            "temp_id": self.temp_id,
+                            "delta": thinking_draft[i:i+chunk_size],
+                        })
+                        await asyncio.sleep(0.015)  # Simulate thinking speed
+                    await self.ctx.interaction.broadcast(self.ctx.group_id, {
+                        "type": "ai_thought_end",
+                        "temp_id": self.temp_id,
+                        "iteration": self.iter_count,
+                    })
 
                     try:
                         result = await self.ai_service.call(
@@ -885,7 +912,7 @@ class ToolLoopRunner:
                         self.full_text = result["content"]
                         await self._finalize_reply()
                         break
-                    
+
                     if result["type"] == "tool_calls":
                         def _serialize_calls(calls):
                             serialized = []
@@ -913,10 +940,10 @@ class ToolLoopRunner:
                             and all(tool_executor.is_concurrency_safe(c["name"]) for c in calls)
                         )
                         if _run_parallel:
-                            await self._execute_parallel_tools(calls)
+                            await self._execute_parallel_tools(calls, iteration=self.iter_count)
                         else:
-                            await self._execute_serial_tools(calls)
-                            
+                            await self._execute_serial_tools(calls, iteration=self.iter_count)
+
                         self.messages = compact.apply_tool_result_microcompact(self.messages)
                         self.messages, _ = compact.snip_if_needed(self.messages, self.model_name)
                         self.messages, _ = await compact.auto_compact_if_needed(
@@ -925,13 +952,13 @@ class ToolLoopRunner:
                             self.ctx.interaction, self.temp_id, self.bot["id"],
                             context_text=await self._build_reinject(),
                         )
-                        
+
                         await self._poll_and_inject_signals()
                     else:
                         self.consecutive_tool_only = 0
                         await self._finalize_reply()
                         break
-                        
+
                 if not self.full_text:
                     self.full_text = "[达到最大工具调用次数，任务未完成]"
 
@@ -951,6 +978,36 @@ class ToolLoopRunner:
             return ExecutionResult(full_text="", msg_id=None)
 
         return await self._cleanup_and_finalize()
+
+    async def execute(self) -> ExecutionResult:
+        """Public entry point for execution."""
+        return await self._execute()
+
+    def _generate_thinking_preview(self, iter_count: int) -> str:
+        """Generate simulated thinking content based on current iteration and tool records.
+
+        This simulates the "thinking" output that Claude Code shows to users.
+        In the future, this could be enhanced to use actual model reasoning if available.
+        """
+        thinking_templates = [
+            "分析用户需求和当前任务状态...",
+            "检查之前的执行记录...",
+            "评估可用的工具和方法...",
+            "制定下一步执行计划...",
+            "确认工具调用的参数和预期结果...",
+            "验证上一步的执行结果...",
+            "整理最终回复内容...",
+        ]
+
+        # Generate context-aware thinking based on tool records
+        tool_names = [rec["name"] for rec in self.tool_records[-3:]] if self.tool_records else []
+
+        if iter_count == 1:
+            return f"iteration {iter_count}: {thinking_templates[0]}"
+        elif iter_count == 2:
+            return f"iteration {iter_count}: 上一步完成了 {', '.join(tool_names[:2]) if tool_names else '初步分析'}，需要继续..."
+        else:
+            return f"iteration {iter_count}: 继续执行剩余任务，整合结果..."
 
 class ToolLoopV1(BotExecutor):
     executor_id = "tool_loop_v1"
