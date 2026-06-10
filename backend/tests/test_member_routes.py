@@ -10,6 +10,7 @@ from pathlib import Path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import db as database
+import db.writer as _db_writer
 import workspace
 
 # Configure test database and workspaces paths
@@ -17,6 +18,9 @@ TEST_DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__fi
 TEST_WORKSPACES_ROOT = Path(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) / "test_workspaces"
 
 database.DB_PATH = TEST_DB_PATH
+# add_member 走 write_connect()，它的默认路径来自 db.writer.DB_PATH —— 这是与
+# db.DB_PATH 不同的另一个模块全局；不一起重定向，写入会落进真实库（见 test_sessions）。
+_db_writer.DB_PATH = TEST_DB_PATH
 workspace.WORKSPACE_ROOT = TEST_WORKSPACES_ROOT
 # 路径真相源：layout 实时读取 skills.constants.WORKSPACE_ROOT，必须同步重定向，
 # 否则 init_bot_workspace 会把 bot 目录写进真实仓库目录。
@@ -85,7 +89,18 @@ class TestMemberRoutes(unittest.IsolatedAsyncioTestCase):
             data = response.json()
             self.assertIn("id", data)
             bot_id = data["id"]
-            
+            import sqlite3 as _sq
+            from db.context import current_db_path as _cdp
+            print("DBG ctxvar=", _cdp.get(), "db.DB_PATH=", database.DB_PATH, "writer.DB_PATH=", _db_writer.DB_PATH, "bot_id=", bot_id)
+            print("DBG test_chat.db members=", _sq.connect(TEST_DB_PATH).execute("SELECT id,name FROM members").fetchall())
+            async with database.get_db() as _d:
+                async with _d.execute("SELECT id,name FROM members") as _c:
+                    print("DBG get_db ALL members=", await _c.fetchall())
+            import aiosqlite as _ai
+            _rc = await _ai.connect(TEST_DB_PATH)
+            print("DBG raw aiosqlite members=", await (await _rc.execute("SELECT id,name FROM members")).fetchall())
+            await _rc.close()
+
             # Now verify the database has all the fields populated correctly
             async with database.get_db() as db:
                 db.row_factory = database.aiosqlite.Row

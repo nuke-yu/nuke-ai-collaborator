@@ -71,6 +71,31 @@ class TestMigrateLayout(unittest.TestCase):
         ok, problems = mig.verify(self.root, [(7, 3)])
         self.assertFalse(ok)
 
+    def test_conflict_listed_separately_from_already(self):
+        # 扁平与嵌套并存（双写 bug 后果）→ conflicts，不归入 already
+        _touch_bot_dir(self.root, 7)
+        nested = self.root / "group_3" / "bots" / "bot_7"
+        nested.mkdir(parents=True)
+        (nested / "AGENT.md").write_text("live", encoding="utf-8")  # 嵌套的活文件
+        report = mig.apply_migration(self.root, [(7, 3)], dry_run=True)
+        self.assertIn((7, 3), report["conflicts"])
+        self.assertNotIn((7, 3), report["already"])
+        self.assertEqual(report["moved"], [])
+
+    def test_merge_fills_missing_keeps_nested_and_drops_flat(self):
+        _touch_bot_dir(self.root, 7)   # flat: IDENTITY.md("id") + skills/
+        (self.root / "bot_7" / "AGENT.md").write_text("flat-agent", encoding="utf-8")
+        nested = self.root / "group_3" / "bots" / "bot_7"
+        nested.mkdir(parents=True)
+        (nested / "AGENT.md").write_text("live-agent", encoding="utf-8")  # 嵌套已有，保留
+        mig.apply_migration(self.root, [(7, 3)], dry_run=False, merge=True)
+        # 嵌套缺的 IDENTITY 被补入；嵌套已有的 AGENT 不被覆盖；扁平被删
+        self.assertEqual((nested / "IDENTITY.md").read_text(), "id")
+        self.assertEqual((nested / "AGENT.md").read_text(), "live-agent")
+        self.assertFalse((self.root / "bot_7").exists())
+        ok, _ = mig.verify(self.root, [(7, 3)])
+        self.assertTrue(ok)
+
 
 if __name__ == "__main__":
     unittest.main()

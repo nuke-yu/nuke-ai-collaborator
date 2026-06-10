@@ -409,6 +409,8 @@ from workspace.templates import (
     MEMORY_TEMPLATE,
     BOARD_TEMPLATE,
     SPEC_TEMPLATE,
+    API_CONTRACT_TEMPLATE,
+    RETRO_LATEST_TEMPLATE,
 )
 
 async def init_bot_workspace(bot: dict):
@@ -458,17 +460,18 @@ async def init_group_workspace(group_id: int, group_name: str = ""):
     (ws / "docs").mkdir(exist_ok=True)        # 群组共享文档（BA分析/QA报告/设计说明）
     (ws / "workspace").mkdir(exist_ok=True)   # 代码 git 树落点（仅放代码）
     (ws / "skills").mkdir(exist_ok=True)
+    (ws / "prs").mkdir(exist_ok=True)         # PR 记录（固定协调件目录）
     (ws.parent / "runs").mkdir(exist_ok=True)  # workspaces/group_{id}/runs/
 
     display = group_name or f"群组 {group_id}"
     today = date.today().isoformat()
 
-    board = BOARD_TEMPLATE.format(display=display, today=today)
-    spec = SPEC_TEMPLATE.format(display=display)
-
+    # 四个固定协调件全部建群即物理落地（含写保护的 RETRO_LATEST.md）
     for filename, content in [
-        ("BOARD.md", board),
-        ("SPEC.md", spec),
+        ("BOARD.md", BOARD_TEMPLATE.format(display=display, today=today)),
+        ("SPEC.md", SPEC_TEMPLATE.format(display=display)),
+        ("API_CONTRACT.md", API_CONTRACT_TEMPLATE.format(display=display)),
+        ("RETRO_LATEST.md", RETRO_LATEST_TEMPLATE.format(display=display)),
     ]:
         p = ws / filename
         if not p.exists():

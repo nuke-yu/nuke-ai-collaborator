@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI的进化之旅 · 五年级课堂</title>
+<link href="https://fonts.googleapis.com/css2?family=Bangers&family=Nunito:wght@400;700;800;900&display=swap" rel="stylesheet">
+<style>
+
+/* === CSS CUSTOM PROPERTIES === */
+:root {
+    --font-comic: 'Bangers', cursive;
+    --font-round: 'Nunito', sans-serif;
+    --card-bg: #ffffff;
+    --card-border: #1a1a2e;
+    --card-border-w: clamp(2px, 0.35vw, 3.5px);
+    --card-radius: clamp(14px, 2.2vw, 24px);
+    --card-shadow: 4px 5px 0 rgba(0,0,0,0.18);
+    --ease-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+    --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+    --title-size: clamp(2rem, 6vw, 5rem);
+    --h2-size: clamp(1.1rem, 2.8vw, 2rem);
+    --h3-size: clamp(0.9rem, 1.8vw, 1.4rem);
+    --body-size: clamp(0.8rem, 1.4vw, 1.05rem);
+    --small-size: clamp(0.65rem, 0.95vw, 0.82rem);
+    --slide-padding: clamp(1.2rem, 3.5vw, 3.5rem);
+    --content-gap: clamp(0.5rem, 1.2vh, 1.2rem);
+}
+
+/* === VIEWPORT BASE (mandatory) === */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; overflow-x: hidden; }
+html { scroll-snap-type: y mandatory; scroll-behavior: smooth; }
+body { font-family: var(--font-round); }
+
+.slide {
+    width: 100vw; height: 100vh; height: 100dvh;
+    overflow: hidden; scroll-snap-align: start;
+    display: flex; flex-direction: column;
+    position: relative;
+}
+.slide-content {
+    flex: 1; display: flex; flex-direction: column;
+    justify-content: center; max-height: 100%; overflow: hidden;
+    padding: var(--slide-padding);
+}
+
+@media (max-height: 700px) {
+    :root {
+        --slide-padding: clamp(0.7rem, 2.5vw, 1.8rem);
+        --content-gap: clamp(0.3rem, 0.8vh, 0.7rem);
+        --title-size: clamp(1.6rem, 5vw, 3.2rem);
+        --h2-size: clamp(0.9rem, 2.2vw, 1.5rem);
+        --body-size: clamp(0.72rem, 1.2vw, 0.92rem);
+    }
+}
+@media (max-height: 600px) {
+    :root { --title-size: clamp(1.3rem, 4vw, 2.5rem); --body-size: clamp(0.65rem, 1vw, 0.82rem); }
+    .nav-dots { display: none; }
+}
+@media (max-height: 500px) {
+    :root { --title-size: clamp(1.1rem, 3.2vw, 1.8rem); --slide-padding: clamp(0.4rem, 1.5vw, 0.8rem); }
+}
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.2s !important; }
+    html { scroll-behavior: auto; }
+}
+
+/* === PROGRESS BAR === */
+.progress-bar {
+    position: fixed; top: 0; left: 0; z-index: 1000;
+    height: clamp(4px, 0.55vh, 7px);
+    background: linear-gradient(90deg, #FF6B8A, #FF8E53, #FFD93D);
+    border-radius: 0 99px 99px 0;
+    box-shadow: 0 2px 8px rgba(255,107,138,0.5);
+    transition: width 0.4s var(--ease-out);
+}
+
+/* === NAV DOTS === */
+.nav-dots {
+    position: fixed; bottom: clamp(0.6rem,1.5vh,1.2rem); left: 50%;
+    transform: translateX(-50%); z-index: 1000;
+    display: flex; gap: clamp(4px,0.8vw,8px);
+    background: rgba(255,255,255,0.35); backdrop-filter: blur(8px);
+    padding: clamp(4px,0.8vw,7px) clamp(8px,1.2vw,14px);
+    border-radius: 99px; border: 1.5px solid rgba(255,255,255,0.5);
+}
+.nav-dot {
+    width: clamp(7px,1.1vw,10px); height: clamp(7px,1.1vw,10px);
+    border-radius: 50%; cursor: pointer;
+    background: rgba(26,26,46,0.2); border: 2px solid rgba(26,26,46,0.3);
+    transition: all 0.3s var(--ease-bounce);
+}
+.nav-dot.active { background: #1a1a2e; border-color: #1a1a2e; transform: scale(1.35); }
+.nav-dot:hover { transform: scale(1.2); }
+
+/* === CANDY BACKGROUNDS per slide === */
+.slide-1  { background: linear-gradient(135deg, #FF6B8A 0%, #FF8E53 60%, #FFC857 100%); }
+.slide-2  { background: linear-gradient(135deg, #48CAE4 0%, #0096C7 55%, #023E8A 100%); }
+.slide-3  { background: linear-gradient(135deg, #06D6A0 0%, #1B9AAA 55%, #3D405B 100%); }
+.slide-4  { background: linear-gradient(135deg, #9B5DE5 0%, #F15BB5 60%, #FF85A1 100%); }
+.slide-5  { background: linear-gradient(135deg, #E63946 0%, #FF6B35 50%, #FF9F1C 100%); }
+.slide-6  { background: linear-gradient(135deg, #F72585 0%, #7209B7 55%, #3A0CA3 100%); }
+.slide-7  { background: linear-gradient(135deg, #2DC653 0%, #1A936F 55%, #0077B6 100%); }
+.slide-8  { background: linear-gradient(135deg, #FB923C 0%, #F59E0B 55%, #EAB308 100%); }
+.slide-9  { background: linear-gradient(135deg, #1E1B4B 0%, #4C1D95 55%, #7C3AED 100%); }
+.slide-10 { background: linear-gradient(135deg, #FF6B8A 0%, #FF8E53 22%, #FFD93D 44%, #06D6A0 66%, #4895EF 88%, #9B5DE5 100%); }
+
+/* === HALFTONE DOTS (comic feel) === */
+.slide::before {
+    content: ''; position: absolute; inset: 0; pointer-events: none; z-index: 0;
+    background-image: radial-gradient(circle, rgba(0,0,0,0.055) 1.5px, transparent 1.5px);
+    background-size: 20px 20px;
+}
+
+/* === FLOATING DECO CIRCLES (candy feel) === */
+.deco { position: absolute; border-radius: 50%; pointer-events: none; z-index: 0; background: rgba(255,255,255,0.13); }
+.deco-a { width: clamp(70px,13vw,170px); height: clamp(70px,13vw,170px); top:-3%; right:6%; animation: flt-a 5s ease-in-out infinite; }
+.deco-b { width: clamp(45px,8vw,100px); height: clamp(45px,8vw,100px); bottom:4%; left:3%; animation: flt-b 6s ease-in-out infinite 1s; }
+.deco-c { width: clamp(25px,4.5vw,58px); height: clamp(25px,4.5vw,58px); top:17%; left:1.5%; background:rgba(255,255,255,0.2); animation: flt-a 4s ease-in-out infinite 0.7s; }
+@keyframes flt-a { 0%,100%{transform:translateY(0) scale(1)} 50%{transform:translateY(-11px) scale(1.04)} }
+@keyframes flt-b { 0%,100%{transform:translateY(0) scale(1)} 50%{transform:translateY(9px) scale(0.97)} }
+
+/* === STARBURSTS (boss slide) === */
+.star {
+    position: absolute; pointer-events: none; z-index: 1;
+    clip-path: polygon(50%0%,61%35%,98%35%,68%57%,79%91%,50%70%,21%91%,32%57%,2%35%,39%35%);
+}
+.star-a { width:clamp(55px,9vw,120px); height:clamp(55px,9vw,120px); top:4%; right:3%; background:rgba(255,255,255,0.22); animation:spin 9s linear infinite; }
+.star-b { width:clamp(35px,5.5vw,75px); height:clamp(35px,5.5vw,75px); bottom:7%; right:10%; background:rgba(255,220,0,0.45); animation:spin 6.5s linear infinite reverse; }
+.star-c { width:clamp(22px,3.5vw,50px); height:clamp(22px,3.5vw,50px); top:28%; right:18%; background:rgba(255,255,255,0.28); animation:spin 5s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* === LEVEL BADGE === */
+.badge {
+    display: inline-flex; align-items: center; gap: 0.4em;
+    background: rgba(255,255,255,0.92); border: var(--card-border-w) solid var(--card-border);
+    border-radius: 99px; padding: 0.18em 0.85em;
+    font-family: var(--font-comic); font-size: clamp(0.8rem,1.6vw,1.2rem);
+    color: var(--card-border); letter-spacing: 0.07em;
+    box-shadow: 3px 3px 0 rgba(0,0,0,0.12); width: fit-content;
+}
+.badge.boss { background: #FFD700; animation: badge-pop 1.6s ease-in-out infinite; }
+@keyframes badge-pop { 0%,100%{transform:scale(1)} 50%{transform:scale(1.06)} }
+
+/* === SLIDE TITLE === */
+.title {
+    font-family: var(--font-comic); font-size: var(--title-size); font-weight: 400;
+    line-height: 1.0; letter-spacing: 0.04em; color: white;
+    text-shadow: 3px 3px 0 rgba(0,0,0,0.22), -1px -1px 0 rgba(0,0,0,0.08);
+}
+.title-dark { color: #1a1a2e; text-shadow: 2px 2px 0 rgba(255,255,255,0.25); }
+
+/* === MAIN CARD (comic + candy) === */
+.card {
+    background: var(--card-bg); border: var(--card-border-w) solid var(--card-border);
+    border-radius: var(--card-radius); box-shadow: var(--card-shadow);
+    padding: clamp(0.85rem,2.2vh,1.8rem) clamp(1rem,2.5vw,2.2rem);
+    max-width: min(88vw, 880px); max-height: min(48vh, 400px);
+    overflow: hidden; position: relative; z-index: 5;
+}
+.card ul { list-style: none; display: flex; flex-direction: column; gap: clamp(0.28rem,0.7vh,0.65rem); }
+.card li { font-size: var(--body-size); font-weight: 700; color: #1a1a2e; line-height: 1.4; display: flex; align-items: flex-start; gap: 0.4em; }
+
+/* === FUN FACT === */
+.fact {
+    background: #FFD700; border: var(--card-border-w) solid var(--card-border);
+    border-radius: var(--card-radius); box-shadow: var(--card-shadow);
+    padding: 0.45em 1.1em; max-width: min(88vw, 820px);
+    position: relative; z-index: 5;
+}
+.fact p { font-size: var(--body-size); font-weight: 800; color: #1a1a2e; line-height: 1.4; }
+.fact p::before { content: '💡 趣味知识：'; }
+
+/* === LAYOUT HELPERS === */
+.col { position: relative; z-index: 5; display: flex; flex-direction: column; gap: var(--content-gap); }
+.center-col { align-items: flex-start; padding: var(--slide-padding); flex: 1; justify-content: center; overflow: hidden; }
+.row { display: flex; flex-direction: row; align-items: center; gap: clamp(1rem,3vw,3rem); padding: var(--slide-padding); flex: 1; overflow: hidden; }
+.half { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--content-gap); }
+
+/* === REVEAL ANIMATIONS === */
+.reveal { opacity: 0; transform: translateY(20px) scale(0.96); transition: opacity 0.5s var(--ease-out), transform 0.5s var(--ease-bounce); }
+.slide.visible .reveal { opacity: 1; transform: translateY(0) scale(1); }
+.slide.visible .reveal:nth-child(1) { transition-delay: 0.05s; }
+.slide.visible .reveal:nth-child(2) { transition-delay: 0.18s; }
+.slide.visible .reveal:nth-child(3) { transition-delay: 0.31s; }
+.slide.visible .reveal:nth-child(4) { transition-delay: 0.44s; }
+.slide.visible .reveal:nth-child(5) { transition-delay: 0.57s; }
+.pop { opacity: 0; transform: scale(0.55); transition: opacity 0.45s var(--ease-bounce), transform 0.45s var(--ease-bounce); }
+.slide.visible .pop { opacity: 1; transform: scale(1); }
+
+/* === SLIDE 5 BOSS overrides === */
+.slide-5 .title { font-size: clamp(3rem, 8.5vw, 7.5rem); text-shadow: 5px 5px 0 rgba(0,0,0,0.28), 0 0 40px rgba(255,255,255,0.2); }
+.stats { display: flex; flex-wrap: wrap; gap: clamp(0.4rem,0.8vw,0.8rem); z-index: 5; }
+.chip { background: rgba(255,255,255,0.18); border: 2px solid rgba(255,255,255,0.45); border-radius: var(--card-radius); padding: 0.4em 1em; color: white; font-weight: 800; font-size: var(--body-size); line-height: 1.3; }
+.chip strong { font-family: var(--font-comic); font-size: clamp(1.1rem,2.8vw,2rem); display: block; letter-spacing: 0.04em; }
+
+/* === SLIDE 3 emoji grid === */
+.emoji-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: clamp(0.4rem,1vw,1rem); max-width: min(55vw,320px); z-index: 5; }
+.emoji-cell { background: rgba(255,255,255,0.92); border: 2px solid #1a1a2e; border-radius: clamp(9px,1.4vw,16px); box-shadow: 3px 3px 0 rgba(0,0,0,0.12); display: flex; flex-direction: column; align-items: center; justify-content: center; padding: clamp(0.4rem,1vh,0.9rem) 0.3rem; gap: 0.25em; font-size: clamp(1.1rem,2.3vw,1.9rem); }
+.emoji-cell span { font-size: clamp(0.55rem,0.9vw,0.75rem); font-weight: 800; color: #1a1a2e; text-align: center; }
+
+/* === SLIDE 8 app grid === */
+.app-grid { display: grid; grid-template-columns: repeat(2,1fr); gap: clamp(0.4rem,1vw,0.9rem); max-height: min(44vh,340px); overflow: hidden; z-index: 5; width: min(88vw,800px); }
+.app-card { background: white; border: 2px solid #1a1a2e; border-radius: clamp(9px,1.4vw,16px); box-shadow: 3px 3px 0 rgba(0,0,0,0.1); padding: clamp(0.5rem,1.3vh,1rem) clamp(0.6rem,1.5vw,1.1rem); display: flex; flex-direction: column; gap: 0.2em; }
+.app-card .icon { font-size: clamp(1.1rem,2.2vw,1.7rem); }
+.app-card .name { font-weight: 900; color: #1a1a2e; font-size: var(--body-size); }
+.app-card .desc { font-size: var(--small-size); color: #555; font-weight: 700; line-height: 1.3; }
+
+/* === SLIDE 9 robot grid === */
+.robot-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: clamp(0.5rem,1.2vw,1.2rem); max-height: min(38vh,270px); overflow: hidden; z-index: 5; width: min(88vw,820px); }
+.robot-card { background: rgba(255,255,255,0.1); border: 2px solid rgba(255,255,255,0.38); border-radius: clamp(10px,1.5vw,18px); padding: clamp(0.5rem,1.2vh,1rem) 0.5rem; display: flex; flex-direction: column; align-items: center; gap: 0.35em; text-align: center; }
+.robot-card .r-icon { font-size: clamp(1.3rem,3vw,2.5rem); }
+.robot-card .r-name { font-family: var(--font-comic); font-size: var(--h3-size); color: #E9C46A; letter-spacing: 0.05em; }
+.robot-card .r-desc { font-size: var(--small-size); color: rgba(255,255,255,0.88); font-weight: 700; line-height: 1.3; }
+
+/* === SLIDE 10 closing question === */
+.q-box { background: rgba(255,255,255,0.9); border: var(--card-border-w) solid var(--card-border); border-radius: var(--card-radius); box-shadow: var(--card-shadow); padding: clamp(0.7rem,1.8vh,1.5rem) clamp(1rem,2.5vw,2rem); max-width: min(88vw,780px); text-align: center; position: relative; z-index: 5; }
+.q-box .q-main { font-family: var(--font-comic); font-size: var(--h2-size); color: #FF6B8A; letter-spacing: 0.04em; line-height: 1.2; }
+.q-box .q-hint { font-size: var(--body-size); font-weight: 700; color: #666; margin-top: 0.35em; }
+.slide-10::after { content: ''; position: absolute; inset: 0; pointer-events: none; z-index: 0; background: radial-gradient(ellipse at 20% 50%, rgba(255,107,138,0.3) 0%, transparent 40%), radial-gradient(ellipse at 80% 30%, rgba(6,214,160,0.3) 0%, transparent 40%), radial-gradient(ellipse at 50% 80%, rgba(72,149,239,0.3) 0%, transparent 40%); animation: shimmer 4s ease-in-out infinite; }
+@keyframes shimmer { 0%,100%{opacity:.7} 50%{opacity:1} }
+
+/* === INLINE EDITING === */
+.edit-hotzone { position: fixed; top: 0; left: 0; width: 80px; height: 80px; z-index: 10000; cursor: pointer; }
+.edit-toggle { position: fixed; top: 0.9rem; left: 0.9rem; background: #1a1a2e; color: white; border: none; border-radius: 99px; padding: 0.38em 0.85em; font-family: var(--font-round); font-size: 0.78rem; font-weight: 800; cursor: pointer; z-index: 10001; opacity: 0; pointer-events: none; transition: opacity 0.3s ease, transform 0.2s ease; box-shadow: 3px 3px 0 rgba(0,0,0,0.2); }
+.edit-toggle.show, .edit-toggle.active { opacity: 1; pointer-events: auto; }
+.edit-toggle.active { background: #06D6A0; }
+.edit-toggle:hover { transform: scale(1.06); }
+.edit-banner { position: fixed; top: 0; left: 0; right: 0; background: #1a1a2e; color: #FFD700; font-family: var(--font-round); font-weight: 800; font-size: 0.72rem; text-align: center; padding: 0.22em; z-index: 9999; opacity: 0; pointer-events: none; transition: opacity 0.3s ease; }
+.edit-banner.active { opacity: 1; pointer-events: auto; }
+body.edit-active [contenteditable] { outline: 2px dashed rgba(255,107,138,0.65); border-radius: 3px; cursor: text; min-width: 1em; }
+
+</style>
+</head>
+<body>
+
+<div class="progress-bar" id="progressBar"></div>
+<nav class="nav-dots" id="navDots" aria-label="幻灯片导航"></nav>
+<div class="edit-hotzone" id="editHotzone"></div>
+<button class="edit-toggle" id="editToggle">✏️ 编辑</button>
+<div class="edit-banner" id="editBanner">✏️ 编辑模式 — 点击文字修改 | Ctrl+S 保存 | 按 E 退出</div>
+
+<!-- =========================================================
+     SLIDE 1 · 序章 — AI 以前能干啥？
+     ========================================================= -->
+<section class="slide slide-1" aria-label="序章">
+    <div class="deco deco-a"></div><div class="deco deco-b"></div><div class="deco deco-c"></div>
+    <div class="col center-col">
+        <div class="badge pop">🎮 序章</div>
+        <h1 class="title reveal">从前，AI只会<br>做一件事！</h1>
+        <div class="card reveal">
+            <ul>
+                <li>🎯 以前的 AI 只能做 <strong>一件专门的事</strong></li>
+                <li>♟️ 下棋的 AI → 只能下棋，不能聊天</li>
+                <li>🌍 翻译的 AI → 只能翻译，不能画画</li>
+                <li>🤖 就像一个只会炒一道菜的厨师！</li>
+                <li>❓ 但在过去几年，这一切彻底改变了……</li>
+            </ul>
+        </div>
+        <div class="fact reveal"><p>这种"只会一件事"的AI，科学家叫它 <strong>专用AI（Narrow AI）</strong></p></div>
+    </div>
+</section>
+
+<!-- =========================================================
+     SLIDE 2 · 第1关 — AlphaGo 围棋冠军
+     ========================================================= -->
+<section class="slide slide-2" aria-label="第1关">
+    <div class="deco deco-a"></div><div class="deco deco-b"></div>
+    <div class="row">
+        <div class="half">
+            <div class="badge pop" style="background:#00B4D8;color:white;border-color:rgba(255,255,255,0.6);">♟️ 第 1 关</div>
+            <h1 class="title reveal">AI打败了<br>围棋冠军！</h1>
+            <p class="reveal" style="color:rgba(255,255,255,0.85);font-weight:800;font-size:var(--h3-size);">2016年3月 · AlphaGo vs 李世石</p>
+        </div>
+        <div class="half">
+            <div class="card reveal">
+                <ul>
+                    <li>📅 2016 年，谷歌的 AlphaGo 向世界冠军发起挑战</li>
+                    <li>🏆 比赛结果：<strong>AI 赢 4 局，人类赢 1 局</strong></li>
+                    <li>🌌 围棋的可能走法，比宇宙里的原子还要多！</li>
+                    <li>😱 全世界震惊了：<strong>AI 能比人类更厉害？！</strong></li>
+                </ul>
+            </div>
+            <div class="fact reveal"><p>围棋棋盘有361个格子，可能的棋局是 <strong>10 的 170 次方</strong>，比宇宙原子数多 10<sup>80</sup> 倍！</p></div>
+        </div>
+    </div>
+</section>
+
+<!-- =========================================================
+     SLIDE 3 · 第2关 — AI 学会了"看"
+     ========================================================= -->
+<section class="slide slide-3" aria-label="第2关">
+    <div class="deco deco-a"></div><div class="deco deco-c"></div>
+    <div class="row">
+        <div class="half">
+            <div class="badge pop" style="background:#06D6A0;color:#1a1a2e;border-color:#1a1a2e;">👀 第 2 关</div>
+            <h1 class="title reveal">AI有<br>眼睛了！</h1>
+            <div class="fact reveal" style="background:rgba(255,255,255,0.92);border-color:#1a1a2e;"><p>AI 识别一张图片的速度，比你眨一次眼还快！</p></div>
+        </div>
+        <div class="emoji-grid reveal">
+            <div class="emoji-cell">🐱<span>认出猫</span></div>
+            <div class="emoji-cell">🐶<span>认出狗</span></div>
+            <div class="emoji-cell">😊<span>人脸识别</span></div>
+            <div class="emoji-cell">🚗<span>自动驾驶</span></div>
+            <div class="emoji-cell">🩺<span>看 X 光片</span></div>
+            <div class="emoji-cell">📦<span>仓库分拣</span></div>
+        </div>
+    </div>
+</section>
+
+<!-- =========================================================
+     SLIDE 4 · 第3关 — AI 听懂人话了
+     ========================================================= -->
+<section class="slide slide-4" aria-label="第3关">
+    <div class="deco deco-a"></div><div class="deco deco-b"></div>
+    <div class="col center-col">
+        <div class="badge pop" style="background:#F15BB5;color:white;border-color:rgba(255,255,255,0.6);">🎙️ 第 3 关</div>
+        <h1 class="title reveal">跟AI说话，<br>它能听懂！</h1>
+        <div class="card reveal" style="width:min(88vw,800px);">
+            <ul>
+                <li>🗣️ 语音助手来了：<strong>Siri、小爱同学、小度</strong></li>
+                <li>🌍 实时翻译：你说中文，它立刻翻成英语给老外听</li>
+                <li>📖 AI 朗读故事、自动生成字幕、帮聋人朋友交流</li>
+                <li>🧠 背后技术叫 <strong>"自然语言处理（NLP）"</strong></li>
+            </ul>
+        </div>
+        <div class="fact reveal"><p>有了实时翻译，两个说不同语言的人可以直接对话，就像科幻电影一样！</p></div>
+    </div>
+</section>
+
+<!-- =========================================================
+     SLIDE 5 · BOSS 关 — ChatGPT 来了！
+     ========================================================= -->
+<section class="slide slide-5" aria-label="BOSS关">
+    <div class="deco deco-a"></div><div class="deco deco-b"></div>
+    <div class="star star-a"></div><div class="star star-b"></div><div class="star star-c"></div>
+    <div class="col center-col">
+        <div class="badge boss pop">⚡ BOSS 关！</div>
+        <h1 class="title reveal">ChatGPT<br>来了！</h1>
+        <div class="stats reveal">
+            <div class="chip"><strong>5天</strong>100万 用户</div>
+            <div class="chip"><strong>2个月</strong>1亿 用户</div>
+            <div class="chip"><strong>史上</strong>增长最快 App</div>
+        </div>
+        <div class="card reveal" style="width:min(88vw,800px);">
+            <ul>
+                <li>📅 <strong>2022 年 11 月 30 日</strong>，历史性的一天</li>
+                <li>💬 第一次，你可以跟 AI 聊任何话题，它都能回答！</li>
+                <li>🤩 就像突然多了一个什么都懂的超级朋友！</li>
+                <li>📊 Instagram 用了整整 2.5 年才到 1 亿用户</li>
+            </ul>
+        </div>
+    </div>
+</section>
+
+<!-- =========================================================
+     SLIDE 6 · 第5关 — AI 会画画了
+     ========================================================= -->
+<section class="slide slide-6" aria-label="第5关">
+    <div class="deco deco-a"></div><div class="deco deco-b"></div>
+    <div class="col center-col">
+        <div class="badge pop" style="background:#F72585;color:white;border-color:rgba(255,255,255,0.5);">🎨 第 5 关</div>
+        <h1 class="title reveal">说一句话，<br>AI就画出来！</h1>
+        <div class="card reveal" style="width:min(88vw,820px);">
+            <ul>
+                <li>✍️ 你写：<strong>"一只戴礼帽的猫在月球上喝茶"</strong></li>
+                <li>🖼️ AI 秒级生成一张画——完全按你说的来！</li>
+                <li>🎨 Midjourney、DALL-E、Stable Diffusion</li>
+                <li>🤔 问题来了：<strong>AI 的画算艺术吗？谁是"作者"？</strong></li>
+            </ul>
+        </div>
+        <div class="fact reveal" style="background:rgba(255,220,0,0.9);border-color:#1a1a2e;"><p>2022 年，一幅 AI 作品在美国艺术比赛中拿了<strong>第一名</strong>，引发全球争论！</p></div>
+    </div>
+</section>
+
+<!-- =========================================================
+     SLIDE 7 · 第6关 — AI 会唱歌拍视频
+     ========================================================= -->
+<section class="slide slide-7" aria-label="第6关">
+    <div class="deco deco-a"></div><div class="deco deco-c"></div>
+    <div class="row">
+        <div class="half">
+            <div class="badge pop" style="background:#2DC653;color:white;border-color:rgba(255,255,255,0.5);">🎵 第 6 关</div>
+            <h1 class="title reveal">AI开始当<br>创作者了！</h1>
+            <div class="fact reveal" style="background:rgba(255,255,255,0.92);border-color:#1a1a2e;"><p>OpenAI 的 Sora 能根据一句话生成 1 分钟的视频短片！</p></div>
+        </div>
+        <div class="half">
+            <div class="card reveal">
+                <ul>
+                    <li>🎵 <strong>Suno：</strong>给它歌词，它谱曲并演唱给你听</li>
+                    <li>🎬 <strong>Sora：</strong>一句话 → 生成一段真实感短片</li>
+                    <li>✍️ AI 写诗、写小说、写代码、写剧本</li>
+                    <li>🤝 人和 AI 一起合作，效率提升了 10 倍！</li>
+                    <li>💭 新职业出现：<strong>"AI 提示词工程师"</strong></li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- =========================================================
+     SLIDE 8 · 第7关 — AI 住进了手机
+     ========================================================= -->
+<section class="slide slide-8" aria-label="第7关">
+    <div class="deco deco-a"></div><div class="deco deco-b"></div>
+    <div class="col center-col">
+        <div class="badge pop" style="background:#FB923C;color:white;border-color:rgba(255,255,255,0.5);">📱 第 7 关</div>
+        <h1 class="title title-dark reveal">AI住进了<br>你的手机！</h1>
+        <div class="app-grid reveal">
+            <div class="app-card"><span class="icon">🔍</span><span class="name">搜索引擎</span><span class="desc">AI 直接给你总结好的答案</span></div>
+            <div class="app-card"><span class="icon">📸</span><span class="name">相机 App</span><span class="desc">AI 自动美化、识别场景</span></div>
+            <div class="app-card"><span class="icon">🎮</span><span class="name">游戏</span><span class="desc">AI 对手更聪明、AI 生成关卡</span></div>
+            <div class="app-card"><span class="icon">🎵</span><span class="name">音乐 App</span><span class="desc">AI 帮你发现你会喜欢的歌</span></div>
+        </div>
+        <div class="fact reveal" style="background:rgba(255,255,255,0.92);border-color:#1a1a2e;"><p>你刷短视频时，<strong>推荐给你的每一个视频</strong>，都是 AI 根据你的喜好选的！</p></div>
+    </div>
+</section>
+
+<!-- =========================================================
+     SLIDE 9 · 第8关 — AI 机器人来了
+     ========================================================= -->
+<section class="slide slide-9" aria-label="第8关">
+    <div class="deco deco-a" style="background:rgba(255,255,255,0.07);"></div>
+    <div class="deco deco-b" style="background:rgba(255,255,255,0.05);"></div>
+    <div class="col center-col">
+        <div class="badge pop" style="background:#7C3AED;color:white;border-color:rgba(255,255,255,0.4);">🤖 第 8 关 · 隐藏关卡！</div>
+        <h1 class="title reveal">AI要有<br>身体了！</h1>
+        <div class="robot-grid reveal">
+            <div class="robot-card"><span class="r-icon">🦾</span><span class="r-name">Figure 02</span><span class="r-desc">用手捡东西<br>自己想怎么做</span></div>
+            <div class="robot-card"><span class="r-icon">⚡</span><span class="r-name">Tesla Optimus</span><span class="r-desc">工厂里干活<br>越来越灵活</span></div>
+            <div class="robot-card"><span class="r-icon">🐕</span><span class="r-name">Boston Dynamics</span><span class="r-desc">会跑、会跳<br>会翻跟头！</span></div>
+        </div>
+        <div class="fact reveal" style="background:rgba(255,220,0,0.92);border-color:#1a1a2e;"><p>以前机器人只按固定程序动，现在它们能<strong>自己思考怎么完成任务</strong>！</p></div>
+    </div>
+</section>
+
+<!-- =========================================================
+     SLIDE 10 · 通关！你们是AI的同龄人
+     ========================================================= -->
+<section class="slide slide-10" aria-label="通关">
+    <div class="deco deco-a"></div><div class="deco deco-b"></div><div class="deco deco-c"></div>
+    <div class="col center-col" style="align-items:center;text-align:center;">
+        <div class="badge pop" style="background:#FFD700;color:#1a1a2e;border-color:#1a1a2e;font-size:clamp(0.9rem,1.9vw,1.4rem);">🎉 通关！AI 的进化之旅完成！</div>
+        <h1 class="title reveal" style="text-align:center;">你们是最特别<br>的那一代！</h1>
+        <div class="card reveal" style="width:min(88vw,780px);text-align:left;">
+            <ul>
+                <li>🌟 你们是历史上 <strong>第一代从小就有 AI 的孩子</strong></li>
+                <li>🎨 AI 会画画、写故事、唱歌、走路……</li>
+                <li>🧠 但有一件事 AI <strong>永远做不到</strong>：成为"你"</li>
+                <li>🚀 如何用好 AI，是你们这代人最重要的技能！</li>
+            </ul>
+        </div>
+        <div class="q-box reveal">
+            <div class="q-main">如果你有一个 AI 助手，<br>你最想让它帮你做什么？</div>
+            <div class="q-hint">💬 举手说说你的想法吧！</div>
+        </div>
+    </div>
+</section>
+
+<script>
+/* ======================================================
+   SLIDE PRESENTATION CONTROLLER
+   ====================================================== */
+class SlidePresentation {
+    constructor() {
+        this.slides = Array.from(document.querySelectorAll('.slide'));
+        this.total = this.slides.length;
+        this.current = 0;
+        this.bar = document.getElementById('progressBar');
+        this.dotsEl = document.getElementById('navDots');
+        this.buildDots();
+        this.observe();
+        this.keys();
+        this.wheel();
+        this.touch();
+        this.updateBar(0);
+    }
+
+    buildDots() {
+        /* Always clear before building — prevents duplicates if file is re-opened */
+        this.dotsEl.innerHTML = '';
+        this.slides.forEach((_, i) => {
+            const d = document.createElement('button');
+            d.className = 'nav-dot' + (i === 0 ? ' active' : '');
+            d.setAttribute('aria-label', `第 ${i+1} 页`);
+            d.addEventListener('click', () => this.go(i));
+            this.dotsEl.appendChild(d);
+        });
+    }
+
+    syncDots(i) {
+        this.dotsEl.querySelectorAll('.nav-dot').forEach((d, j) => d.classList.toggle('active', j === i));
+    }
+
+    updateBar(i) {
+        this.bar.style.width = (this.total > 1 ? (i / (this.total - 1)) * 100 : 100) + '%';
+    }
+
+    go(i) {
+        if (i < 0 || i >= this.total) return;
+        this.current = i;
+        this.slides[i].scrollIntoView({ behavior: 'smooth' });
+        this.syncDots(i);
+        this.updateBar(i);
+    }
+
+    next() { this.go(Math.min(this.current + 1, this.total - 1)); }
+    prev() { this.go(Math.max(this.current - 1, 0)); }
+
+    observe() {
+        const io = new IntersectionObserver(entries => {
+            entries.forEach(e => {
+                if (e.isIntersecting) {
+                    e.target.classList.add('visible');
+                    const idx = this.slides.indexOf(e.target);
+                    if (idx !== -1) { this.current = idx; this.syncDots(idx); this.updateBar(idx); }
+                }
+            });
+        }, { threshold: 0.55 });
+        this.slides.forEach(s => io.observe(s));
+    }
+
+    keys() {
+        document.addEventListener('keydown', e => {
+            if (e.target.getAttribute('contenteditable')) return;
+            if (['ArrowDown','ArrowRight',' ','PageDown'].includes(e.key)) { e.preventDefault(); this.next(); }
+            if (['ArrowUp','ArrowLeft','PageUp'].includes(e.key)) { e.preventDefault(); this.prev(); }
+            if (e.key === 'Home') { e.preventDefault(); this.go(0); }
+            if (e.key === 'End')  { e.preventDefault(); this.go(this.total - 1); }
+        });
+    }
+
+    wheel() {
+        let last = 0;
+        document.addEventListener('wheel', e => {
+            e.preventDefault();
+            const now = Date.now();
+            if (now - last < 800) return;
+            last = now;
+            e.deltaY > 0 ? this.next() : this.prev();
+        }, { passive: false });
+    }
+
+    touch() {
+        let y0 = 0, x0 = 0;
+        document.addEventListener('touchstart', e => { y0 = e.touches[0].clientY; x0 = e.touches[0].clientX; }, { passive: true });
+        document.addEventListener('touchend', e => {
+            const dy = y0 - e.changedTouches[0].clientY;
+            const dx = x0 - e.changedTouches[0].clientX;
+            if (Math.abs(dy) > Math.abs(dx) && Math.abs(dy) > 50) { dy > 0 ? this.next() : this.prev(); }
+        }, { passive: true });
+    }
+}
+
+/* ======================================================
+   INLINE EDITOR
+   ====================================================== */
+class InlineEditor {
+    constructor() {
+        this.active = false;
+        this.btn = document.getElementById('editToggle');
+        this.banner = document.getElementById('editBanner');
+        this.hotzone = document.getElementById('editHotzone');
+        this.hideT = null;
+
+        this.hotzone.addEventListener('mouseenter', () => { clearTimeout(this.hideT); this.btn.classList.add('show'); });
+        this.hotzone.addEventListener('mouseleave', () => { this.hideT = setTimeout(() => { if (!this.active) this.btn.classList.remove('show'); }, 400); });
+        this.btn.addEventListener('mouseenter', () => clearTimeout(this.hideT));
+        this.btn.addEventListener('mouseleave', () => { this.hideT = setTimeout(() => { if (!this.active) this.btn.classList.remove('show'); }, 400); });
+        this.hotzone.addEventListener('click', () => this.toggle());
+        this.btn.addEventListener('click', () => this.toggle());
+
+        document.addEventListener('keydown', e => {
+            if ((e.key === 'e' || e.key === 'E') && !e.target.getAttribute('contenteditable')) this.toggle();
+            if (e.ctrlKey && e.key === 's') { e.preventDefault(); if (this.active) this.export(); }
+        });
+    }
+
+    toggle() {
+        this.active = !this.active;
+        document.body.classList.toggle('edit-active', this.active);
+        this.btn.classList.toggle('active', this.active);
+        this.banner.classList.toggle('active', this.active);
+        this.btn.textContent = this.active ? '✅ 完成' : '✏️ 编辑';
+        const sel = '.title,.card li,.fact p,.q-main,.q-hint,.badge,.chip strong,.chip,.app-card .name,.app-card .desc,.robot-card .r-name,.robot-card .r-desc,.emoji-cell span,.r-icon,.app-card .icon';
+        document.querySelectorAll(sel).forEach(el => {
+            this.active ? el.setAttribute('contenteditable','true') : el.removeAttribute('contenteditable');
+        });
+    }
+
+    export() {
+        const els = Array.from(document.querySelectorAll('[contenteditable]'));
+        els.forEach(el => el.removeAttribute('contenteditable'));
+        document.body.classList.remove('edit-active');
+        this.btn.classList.remove('active','show');
+        this.banner.classList.remove('active');
+
+        const html = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
+
+        document.body.classList.add('edit-active');
+        els.forEach(el => el.setAttribute('contenteditable','true'));
+        this.btn.classList.add('active');
+        this.banner.classList.add('active');
+
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(new Blob([html], {type:'text/html'}));
+        a.download = 'ai-evolution-kids.html';
+        a.click();
+        URL.revokeObjectURL(a.href);
+    }
+}
+
+const pres = new SlidePresentation();
+const editor = new InlineEditor();
+</script>
+</body>
+</html>

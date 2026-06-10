@@ -127,6 +127,7 @@ async def add_member(group_id: int, req: AddMemberRequest):
         if req.type == "bot":
             await init_bot_workspace({
                 "id": bot_id,
+                "group_id": group_id,   # 关键：不传则落旧扁平区 workspaces/bot_{id}，而非 group_{id}/bots/
                 "name": req.name,
                 "role": req.role,
                 "system_prompt": req.system_prompt,
