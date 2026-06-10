@@ -52,9 +52,9 @@ def clear_group_locks(group_id: int):
 
 
 
-def bot_workspace(bot_id: int) -> Path:
+def bot_workspace(bot_id: int, group_id: int | None = None) -> Path:
     from workspace import layout
-    path = layout.bot_dir(None, bot_id)
+    path = layout.bot_dir(group_id, bot_id)
     path.mkdir(parents=True, exist_ok=True)
     for sub in _SUBDIRS:
         (path / sub).mkdir(exist_ok=True)
@@ -79,21 +79,34 @@ def _safe_path(workspace: Path, relative: str) -> Path | None:
 
 
 _SHARED_FILES = {"BOARD.md", "SPEC.md", "API_CONTRACT.md", "RETRO_LATEST.md"}
+# 共享前缀：落群组 shared 区。代码进 workspace/<repo>/，跨 repo 文档进 docs/，PR 记录进 prs/。
+# 注意不含 skills/——私有技能在 bots/bot_{id}/skills/，群组技能由 group 层单独管理。
+_SHARED_PREFIXES = ("workspace/", "docs/", "prs/")
+
+_UNSET = object()
 
 
-def _get_effective_ws(bot_id: int, path_str: str) -> Path:
+def _get_effective_ws(bot_id: int, path_str: str, group_id=_UNSET) -> Path:
+    """群组文件重定向。
+
+    group_id 由调用方显式传入（正路）——共享文件名 / 共享前缀 → 群组 shared 区，
+    其余 → bot 私有区，全程不查 DB。
+
+    过渡期：group_id 缺省时回退到旧的 DB 反查（Task 10 移除该回退）。
     """
-    Point 3: Group File Redirection.
-    Redirect shared files to group's shared folder; others to bot's private folder.
-    """
-    ws = bot_workspace(bot_id)
-    if path_str in _SHARED_FILES or path_str.startswith("deliverables/"):
+    if group_id is _UNSET:
+        # 过渡回退（Task 10 删除）：从 DB 反查 group_id
         from db import connect_sync
+        group_id = None
         with connect_sync() as conn:
             row = conn.execute("SELECT group_id FROM members WHERE id = ?", (bot_id,)).fetchone()
             if row:
-                return group_workspace(row[0])
-    return ws
+                group_id = row[0]
+
+    if path_str in _SHARED_FILES or path_str.startswith(_SHARED_PREFIXES):
+        if group_id is not None:
+            return group_workspace(group_id)
+    return bot_workspace(bot_id, group_id)
 
 
 
