@@ -579,16 +579,19 @@ def _sandbox_env() -> dict:
     }
 
 
-def _resolve_shell_cwd(cwd: str, bot_id) -> tuple[Path | None, str]:
+def _resolve_shell_cwd(cwd: str, bot_id, group_id: int | None = None) -> tuple[Path | None, str]:
     """Confine the shell working directory to the bot's workspace.
 
     Returns (path, "") on success or (None, reason) on rejection. An empty cwd
     defaults to the workspace root; relative paths resolve under it; any target
     that escapes the workspace (absolute path or '..' traversal) is rejected.
+
+    group_id 显式传入以解析 bot 私有区的嵌套路径（group_{gid}/bots/bot_{id}）。
+    群组共享区放行在 Phase 3 处理。
     """
     if bot_id is None:
         return None, "缺少 bot_id，无法确定工作区"
-    root = _ws.bot_workspace(bot_id).resolve()
+    root = _ws.bot_workspace(bot_id, group_id).resolve()
     candidate = (cwd or "").strip()
     if not candidate:
         return root, ""
@@ -721,26 +724,30 @@ def _with_personality(base_prompt: str, bot: dict) -> str:
 # ---------------------------------------------------------------------------
 
 async def _handle_read_file(path: str, offset: int | None = None, limit: int | None = None, context: dict = None, **kwargs) -> str:
-    bot_id = (context or {}).get("bot_id")
-    return await _ws.read_file(bot_id, path, offset=offset, limit=limit) if bot_id else "[错误] 缺少 bot_id"
+    ctx = context or {}
+    bot_id = ctx.get("bot_id")
+    return await _ws.read_file(bot_id, path, offset=offset, limit=limit, group_id=ctx.get("group_id")) if bot_id else "[错误] 缺少 bot_id"
 
 
 async def _handle_write_file(path: str, content: str, context: dict = None) -> str:
-    bot_id = (context or {}).get("bot_id")
-    return await _ws.write_file(bot_id, path, content) if bot_id else "[错误] 缺少 bot_id"
+    ctx = context or {}
+    bot_id = ctx.get("bot_id")
+    return await _ws.write_file(bot_id, path, content, group_id=ctx.get("group_id")) if bot_id else "[错误] 缺少 bot_id"
 
 
 async def _handle_edit_file(path: str, old_string: str, new_string: str,
                             replace_all: bool = False, context: dict = None) -> str:
-    bot_id = (context or {}).get("bot_id")
+    ctx = context or {}
+    bot_id = ctx.get("bot_id")
     if not bot_id:
         return "[错误] 缺少 bot_id"
-    return await _ws.edit_file(bot_id, path, old_string, new_string, replace_all=replace_all)
+    return await _ws.edit_file(bot_id, path, old_string, new_string, replace_all=replace_all, group_id=ctx.get("group_id"))
 
 
 async def _handle_list_workspace(context: dict = None) -> str:
-    bot_id = (context or {}).get("bot_id")
-    return await _ws.list_workspace(bot_id) if bot_id else "[错误] 缺少 bot_id"
+    ctx = context or {}
+    bot_id = ctx.get("bot_id")
+    return await _ws.list_workspace(bot_id, group_id=ctx.get("group_id")) if bot_id else "[错误] 缺少 bot_id"
 
 
 async def _handle_run_skill(name: str, args: str = "", context: dict = None) -> str:
@@ -811,8 +818,9 @@ async def _handle_run_shell(
     cmd: str, cwd: str = "", timeout: int = 30,
     background: bool = False, context: dict = None,
 ) -> str:
-    bot_id = (context or {}).get("bot_id")
-    work_dir, err = _resolve_shell_cwd(cwd, bot_id)
+    ctx = context or {}
+    bot_id = ctx.get("bot_id")
+    work_dir, err = _resolve_shell_cwd(cwd, bot_id, ctx.get("group_id"))
     if err:
         return f"[安全拒绝] {err}"
     
