@@ -4,6 +4,7 @@ import { useWebSocket } from '../hooks/useWebSocket'
 import { useNotifications } from '../hooks/useNotifications'
 import { useGroupStore } from '../store/groupStore'
 import { useChatStore } from '../store/chatStore'
+import { useShallow } from 'zustand/react/shallow'
 import GroupList from './GroupList'
 import ChatHeader from './ChatHeader'
 import MessageList from './MessageList'
@@ -34,7 +35,17 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
   const {
     setGroups, setActiveGroupId, setActiveMemberId, setGroup,
     setMembers, setMembersCache, setUnreadCounts,
-  } = useGroupStore()
+  } = useGroupStore(
+    useShallow((s) => ({
+      setGroups: s.setGroups,
+      setActiveGroupId: s.setActiveGroupId,
+      setActiveMemberId: s.setActiveMemberId,
+      setGroup: s.setGroup,
+      setMembers: s.setMembers,
+      setMembersCache: s.setMembersCache,
+      setUnreadCounts: s.setUnreadCounts,
+    }))
+  )
 
   // ── WS-driven chat state (chatStore) ─────────────────────────────────────
   const messages = useChatStore((s) => s.messages)
@@ -56,11 +67,29 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
   const hasMore = useChatStore((s) => s.hasMore)
   const loadingMore = useChatStore((s) => s.loadingMore)
   const {
-    setMessages, setTyping, setReactionMap, setReactionCache, setReadMap,
+    setMessages, setTyping, setReactionMap, setReactionCache,
     setMessagesCache, setPermRequest, setRecoveryPrompts, setWorkflow,
     setPins, setAwaySummary, setSkillDraftBots, setError,
     setHasMore, setLoadingMore, dispatchWsEvent,
-  } = useChatStore()
+  } = useChatStore(
+    useShallow((s) => ({
+      setMessages: s.setMessages,
+      setTyping: s.setTyping,
+      setReactionMap: s.setReactionMap,
+      setReactionCache: s.setReactionCache,
+      setMessagesCache: s.setMessagesCache,
+      setPermRequest: s.setPermRequest,
+      setRecoveryPrompts: s.setRecoveryPrompts,
+      setWorkflow: s.setWorkflow,
+      setPins: s.setPins,
+      setAwaySummary: s.setAwaySummary,
+      setSkillDraftBots: s.setSkillDraftBots,
+      setError: s.setError,
+      setHasMore: s.setHasMore,
+      setLoadingMore: s.setLoadingMore,
+      dispatchWsEvent: s.dispatchWsEvent,
+    }))
+  )
 
   // ── Local modal / layout state (stays as useState) ───────────────────────
   const [showTemplates, setShowTemplates] = useState(false)
@@ -307,8 +336,6 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
   const handleWsMessage = useCallback((data) => {
     dispatchWsEvent(data, notify)
   }, [dispatchWsEvent, notify])
-
-
 
   const handleReconnect = useCallback(async () => {
     if (!activeGroupId || messages.length === 0) return
