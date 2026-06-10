@@ -823,6 +823,49 @@ def _check_shell_command_paths(cmd: str, work_dir: Path) -> str | None:
     return None
 
 
+# ---------------------------------------------------------------------------
+# 共享工作树承重墙：per-group 进程内互斥（固定分片 → 同群组的并发 run_shell 同进程）
+# ---------------------------------------------------------------------------
+import threading as _threading
+from contextlib import asynccontextmanager as _asynccontextmanager
+
+_WORKTREE_LOCKS: dict = {}            # loop_id -> {group_id: asyncio.Lock}
+_WORKTREE_LOCKS_GUARD = _threading.Lock()
+
+
+def _get_worktree_lock(group_id: int) -> "asyncio.Lock":
+    """按 (event loop, group_id) 取/建进程内互斥锁。类比 workspace._get_path_lock。"""
+    loop_id = id(asyncio.get_running_loop())
+    with _WORKTREE_LOCKS_GUARD:
+        per_loop = _WORKTREE_LOCKS.setdefault(loop_id, {})
+        if group_id not in per_loop:
+            per_loop[group_id] = asyncio.Lock()
+        return per_loop[group_id]
+
+
+def _worktree_lock_for(work_dir: Path, group_id) -> "asyncio.Lock | None":
+    """work_dir 落在本群组 shared/workspace（git 工作树）下时返回该群组的锁，否则 None。"""
+    if group_id is None:
+        return None
+    try:
+        wt_root = (_ws.group_workspace(group_id).resolve() / "workspace")
+        if work_dir.resolve().is_relative_to(wt_root):
+            return _get_worktree_lock(group_id)
+    except (OSError, ValueError):
+        pass
+    return None
+
+
+@_asynccontextmanager
+async def _maybe_lock(lock):
+    """lock 为 None 时无操作；否则进入临界区。"""
+    if lock is None:
+        yield
+    else:
+        async with lock:
+            yield
+
+
 async def _handle_run_shell(
     cmd: str, cwd: str = "", timeout: int = 30,
     background: bool = False, context: dict = None,
@@ -861,24 +904,27 @@ async def _handle_run_shell(
                 msg += f"\n[端口分配] 系统已自动分配可用端口: {allocated_port} (注入为环境变量 PORT / APP_PORT)"
             return msg
             
-        proc = await asyncio.create_subprocess_exec(
-            *_DEFAULT_SHELL, safe_cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=str(work_dir),
-            env=sandbox_env,
-        )
-        if _IS_WINDOWS:
-            win_sandbox.apply_memory_limit(proc.pid, config.SHELL_MEMORY_LIMIT_BYTES)
-        
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=_max_timeout)
-        
+        # 前台执行：若 cwd 落在本群组共享工作树，串行化以防并发撞 .git/index。
+        # 后台进程是长驻服务（不持锁），故仅前台分支加锁。
+        async with _maybe_lock(_worktree_lock_for(work_dir, ctx.get("group_id"))):
+            proc = await asyncio.create_subprocess_exec(
+                *_DEFAULT_SHELL, safe_cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=str(work_dir),
+                env=sandbox_env,
+            )
+            if _IS_WINDOWS:
+                win_sandbox.apply_memory_limit(proc.pid, config.SHELL_MEMORY_LIMIT_BYTES)
+
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=_max_timeout)
+
         out = stdout.decode(errors="replace").strip()
         err = stderr.decode(errors="replace").strip()
         parts = []
         if intercepted_port:
             parts.append(f"[安全拦截] 已将硬编码端口 {intercepted_port} 替换为动态端口 {allocated_port}")
-            
+
         parts.append(f"exit_code: {proc.returncode}")
         if out:
             parts.append(f"stdout:\n{out}")
