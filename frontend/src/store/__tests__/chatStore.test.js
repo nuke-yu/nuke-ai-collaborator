@@ -212,6 +212,35 @@ describe('dispatchWsEvent — other events', () => {
     expect(useChatStore.getState().thoughtBlocks['t1'][1].completed).toBe(true)
   })
 
+  it('ai_thought_delta WITHOUT iteration routes to active block (no phantom "undefined")', () => {
+    // Regression: backend delta used to omit iteration → content landed in a
+    // ghost [undefined] key, rendering a second "iteration undefined" block.
+    useChatStore.getState().dispatchWsEvent({ type: 'ai_thought_start', temp_id: 't1', iteration: 1 }, notify)
+    useChatStore.getState().dispatchWsEvent({ type: 'ai_thought_delta', temp_id: 't1', delta: 'abc' }, notify)
+    const blocks = useChatStore.getState().thoughtBlocks['t1']
+    expect(Object.keys(blocks)).toEqual(['1'])          // exactly one block
+    expect(blocks[1].content).toBe('abc')               // content landed in block 1
+    expect(blocks).not.toHaveProperty('undefined')
+  })
+
+  it('stream_start tags the message with a stable thought_id', () => {
+    useChatStore.getState().dispatchWsEvent(
+      { type: 'stream_start', temp_id: 'tp9', member_id: 99, sender_name: 'Bot' }, notify)
+    const m = useChatStore.getState().messages.find((x) => x.temp_id === 'tp9')
+    expect(m.thought_id).toBe('tp9')
+  })
+
+  it('stream_end keeps thought_id so thinking survives after the turn', () => {
+    useChatStore.getState().dispatchWsEvent(
+      { type: 'stream_start', temp_id: 'tp9', member_id: 99, sender_name: 'Bot' }, notify)
+    useChatStore.getState().dispatchWsEvent(
+      { type: 'stream_end', temp_id: 'tp9', id: 555, created_at: 't', member_id: 99, sender_name: 'Bot', preview: 'hi' }, notify)
+    const m = useChatStore.getState().messages.find((x) => x.id === 555)
+    expect(m.temp_id).toBeUndefined()
+    expect(m.thought_id).toBe('tp9')   // stable ref preserved
+    expect(m.streaming).toBe(false)
+  })
+
   it('tool_progress_start creates block', () => {
     useChatStore.getState().dispatchWsEvent(
       { type: 'tool_progress_start', temp_id: 't1', tool_name: 'run_shell', tool_args: { cmd: 'ls' }, iteration: 1 },

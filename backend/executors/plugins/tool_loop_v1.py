@@ -885,6 +885,7 @@ class ToolLoopRunner:
                         await self.ctx.interaction.broadcast(self.ctx.group_id, {
                             "type": "ai_thought_delta",
                             "temp_id": self.temp_id,
+                            "iteration": self.iter_count,
                             "delta": thinking_draft[i:i+chunk_size],
                         })
                         await asyncio.sleep(0.015)  # Simulate thinking speed

@@ -164,6 +164,7 @@ class AIThoughtDelta:
     group_id:  int
     temp_id:   str
     delta:     str  # Thinking text chunk
+    iteration: int  # Which tool-call iteration this delta belongs to (must match start/end)
 
 @event("ai_thought_end")
 class AIThoughtEnd:

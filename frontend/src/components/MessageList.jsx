@@ -1,6 +1,6 @@
 import { Fragment } from 'react'
 import MessageBubble from './MessageBubble'
-import AIThoughtBlock from './AIThoughtBlock'
+import ThinkingSection from './ThinkingSection'
 import ToolProgressBlock from './ToolProgressBlock'
 import { useChatStore } from '../store/chatStore'
 import { useGroupStore } from '../store/groupStore'
@@ -100,13 +100,9 @@ export default function MessageList({
                 <div className="flex-1 h-px bg-gray-800" />
               </div>
             )}
-            {msg.temp_id && thoughtBlocks[msg.temp_id] && Object.entries(thoughtBlocks[msg.temp_id]).map(([iter, thought]) => (
-              <div key={`thought-${iter}`} className="px-4">
-                <AIThoughtBlock tempId={msg.temp_id} iteration={iter}>
-                  {thought.content}
-                </AIThoughtBlock>
-              </div>
-            ))}
+            {msg.thought_id && thoughtBlocks[msg.thought_id] && (
+              <ThinkingSection blocks={thoughtBlocks[msg.thought_id]} streaming={msg.streaming} />
+            )}
             {msg.temp_id && toolProgressBlocks && Object.entries(toolProgressBlocks)
               .filter(([key]) => key.startsWith(`${msg.temp_id}-`))
               .map(([key, tool]) => (

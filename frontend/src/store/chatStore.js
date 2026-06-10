@@ -73,6 +73,7 @@ export const useChatStore = create((set, get) => ({
           ...s.messages,
           {
             temp_id: data.temp_id,
+            thought_id: data.temp_id,   // stable ref so thinking survives stream_end (temp_id is cleared there)
             member_id: data.member_id,
             sender_name: data.sender_name,
             sender_type: data.sender_type,
@@ -226,19 +227,31 @@ export const useChatStore = create((set, get) => ({
       }))
 
     } else if (data.type === 'ai_thought_delta') {
-      set((s) => ({
-        thoughtBlocks: {
-          ...s.thoughtBlocks,
-          [data.temp_id]: {
-            ...s.thoughtBlocks[data.temp_id],
-            [data.iteration]: {
-              ...s.thoughtBlocks[data.temp_id]?.[data.iteration],
-              content:
-                (s.thoughtBlocks[data.temp_id]?.[data.iteration]?.content || '') + data.delta,
+      set((s) => {
+        const blocks = s.thoughtBlocks[data.temp_id] || {}
+        // Resilience: if a delta arrives without iteration, route it to the active
+        // (highest-numbered) block instead of a phantom [undefined] key. Object key
+        // order is numeric-ascending, so the last key is the current iteration.
+        let iter = data.iteration
+        if (iter === undefined || iter === null) {
+          const keys = Object.keys(blocks)
+          iter = keys.length ? keys[keys.length - 1] : 1
+        }
+        const prev = blocks[iter]
+        return {
+          thoughtBlocks: {
+            ...s.thoughtBlocks,
+            [data.temp_id]: {
+              ...blocks,
+              [iter]: {
+                iteration: prev?.iteration ?? Number(iter),
+                content: (prev?.content || '') + data.delta,
+                completed: prev?.completed ?? false,
+              },
             },
           },
-        },
-      }))
+        }
+      })
 
     } else if (data.type === 'ai_thought_end') {
       set((s) => ({
