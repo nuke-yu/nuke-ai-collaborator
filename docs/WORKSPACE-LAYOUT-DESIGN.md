@@ -1,7 +1,8 @@
 # 工作区目录布局设计（Workspace Layout）
 
-> 最后更新：2026-06-09
-> 状态：设计定稿（实现指导与标准）
+> 最后更新：2026-06-10
+> 状态：**已实现**（分支 refactor/workspace-layout，Phase 1–3 全部落地，全套测试绿）。本文同时作为实现指导与标准。
+> 实现计划见 [superpowers/plans/2026-06-10-workspace-layout-refactor.md](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/docs/superpowers/plans/2026-06-10-workspace-layout-refactor.md)
 > 关联文档：[PROJECT-CELL-ISOLATION-V3.md](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/docs/PROJECT-CELL-ISOLATION-V3.md)、[BOT-COLLABORATION-DESIGN.md](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/docs/BOT-COLLABORATION-DESIGN.md)、[superpowers/specs/2026-06-07-multi-project-ai-team-foundation-redesign.md](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/docs/superpowers/specs/2026-06-07-multi-project-ai-team-foundation-redesign.md)
 
 本文定义 `backend/workspaces/` 的目录布局、各区语义、持久/易逝分级与保留策略，作为后续实现的**指导与标准**。
@@ -148,7 +149,7 @@ run 记录是**一次执行的痕迹/取证**（调了哪些工具、中间推�
 | D2 | 旧 run 处理方式 | **归档到 `runs/archive/`**（按周期打包），保留可追溯。 |
 | D3 | `deliverables/` 去留 | **删除**——交付走 GitHub merge、不本地拷成品；其原有共享前缀重定向交给 `workspace/` + `docs/`（见 §八.2）。 |
 | D4 | git 凭证 | **系统层已统一配置**（Win/Linux 一致），直接取用，不按群组单配（见 §八.4）。 |
-| D5 | Dev↔QA 并发 | **无并发约束**——角色顺序执行，同一时刻仅一个 bot 操作工作树（见 §八.5）。 |
+| D5 | Dev↔QA 并发 | 调度为**固定分片**（supervisor 把 group→worker pinned，GroupLock lease 锁保证一群组同一时刻仅一个 worker 拥有），正常路径下角色顺序执行。但 `step.next_units` 并发派发 + 真人可 @ 多 bot + 子 agent，故**不靠"顺序"假设**：在 `run_shell` cwd 落 `shared/workspace/` 时加**按 group_id keyed 的进程内 `asyncio.Lock`**（承重墙），防并发撞 `.git/index`（见 §八.5）。 |
 
 ---
 
@@ -193,7 +194,7 @@ group_id **本就已被上下文携带**——`ctx.group_id`、工具 `context["
 
 5. **git 凭证**：系统层已统一配置（Win/Linux 一致），直接取用，不按群组单配。
 
-6. **Dev↔QA 交接时序**：无并发约束——角色顺序执行，同一时刻仅一个 bot 操作工作树，无锁冲突，无需额外编排。
+6. **Dev↔QA 交接时序**：正常路径角色顺序执行；但共享工作树不依赖该假设，靠 per-group 进程内互斥锁（承重墙）兜底并发写。交接边界＝Dev 落盘（同一 checkout/branch，QA 直接读测），交付＝git push → GitHub merge。
 
 ### 8.2 迁移（一次性脚本）
 
