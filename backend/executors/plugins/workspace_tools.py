@@ -582,28 +582,37 @@ def _sandbox_env() -> dict:
 def _resolve_shell_cwd(cwd: str, bot_id, group_id: int | None = None) -> tuple[Path | None, str]:
     """Confine the shell working directory to the bot's workspace.
 
-    Returns (path, "") on success or (None, reason) on rejection. An empty cwd
-    defaults to the workspace root; relative paths resolve under it; any target
-    that escapes the workspace (absolute path or '..' traversal) is rejected.
+    放行两个根：bot 私有区 group_{gid}/bots/bot_{id}，以及本群组共享区
+    group_{gid}/shared（Dev/QA 在 shared/workspace/<repo> 共享工作树上 build/跑测/git）。
 
-    group_id 显式传入以解析 bot 私有区的嵌套路径（group_{gid}/bots/bot_{id}）。
-    群组共享区放行在 Phase 3 处理。
+    相对 cwd 的落点与 VFS 重定向一致：以共享前缀（workspace/ docs/ prs/）开头 → 共享区，
+    否则 → 私有区。空 cwd 默认私有根。任何越出这两个根的目标（绝对路径越界 / '..' 穿越）拒绝。
     """
     if bot_id is None:
         return None, "缺少 bot_id，无法确定工作区"
-    root = _ws.bot_workspace(bot_id, group_id).resolve()
+    private_root = _ws.bot_workspace(bot_id, group_id).resolve()
+    shared_root = _ws.group_workspace(group_id).resolve() if group_id is not None else None
+
     candidate = (cwd or "").strip()
     if not candidate:
-        return root, ""
+        return private_root, ""
+
     p = Path(candidate)
-    target = (p if p.is_absolute() else root / p)
+    if p.is_absolute():
+        target = p
+    else:
+        first = candidate.replace("\\", "/").split("/", 1)[0] + "/"
+        base = shared_root if (shared_root is not None and first in _ws._SHARED_PREFIXES) else private_root
+        target = base / p
+
     try:
         target = target.resolve()
-        if target.is_relative_to(root):
-            return target, ""
+        for root in (private_root, shared_root):
+            if root is not None and target.is_relative_to(root):
+                return target, ""
     except (OSError, ValueError):
         pass
-    return None, f"工作目录越界，必须位于工作区内：{cwd}"
+    return None, f"工作目录越界，必须位于本群组工作区内：{cwd}"
 
 
 _TOOL_RESULT_MAX_CHARS = config.TOOL_RESULT_MAX_CHARS
