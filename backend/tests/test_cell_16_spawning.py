@@ -69,16 +69,13 @@ class TestCell16Spawning(unittest.IsolatedAsyncioTestCase):
 
         with patch.dict(os.environ, env):
             await sup.start()
-            # 1 worker + 1 mcp-collector.
-            self.assertEqual(len(sup._processes), 2)
-            proc = sup._processes[0]
-            self.assertIsNone(proc.returncode) # Still running
-            
+            await asyncio.sleep(0.2)  # let monitor tasks spin up
+            # 1 worker + 1 mcp-collector → 2 monitor tasks
+            self.assertEqual(len(sup._monitor_tasks), 2)
+
             await sup.stop()
             self.assertEqual(len(sup._processes), 0)
-            # Process should be terminated
-            await asyncio.sleep(0.1)
-            self.assertIsNotNone(proc.returncode)
+            self.assertEqual(len(sup._monitor_tasks), 0)
 
 if __name__ == "__main__":
     unittest.main()

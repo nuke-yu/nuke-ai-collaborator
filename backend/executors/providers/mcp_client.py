@@ -317,7 +317,7 @@ class McpClientToolProvider(ToolProvider):
                 return verdict, True
 
         # Dispatch to the session task via queue
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         reply_future: asyncio.Future = loop.create_future()
         await self._request_queue.put((real_name, arguments, reply_future))
 

@@ -43,6 +43,8 @@ class Supervisor:
         self._server = None
         self._num_workers = kwargs.get("num_workers", 0)
         self._processes: list[asyncio.subprocess.Process] = []
+        self._stopping = False
+        self._monitor_tasks: set[asyncio.Task] = set()
         # Latest MCP tool-schema snapshot pushed by the collector; cached so a
         # worker connecting later (or after a ToolListChanged) gets the current set.
         self._mcp_schemas: dict | None = None
@@ -50,6 +52,7 @@ class Supervisor:
     # ── lifecycle ─────────────────────────────────────────────────────────
 
     async def start(self) -> None:
+        tracing.setup_structured_logging(log_file="logs/supervisor.log")
         self._server = await ipc.serve(self.addr, self._on_worker_conn)
         if self._num_workers > 0:
             await self._spawn_workers(self._num_workers)
@@ -57,38 +60,67 @@ class Supervisor:
             await self._spawn_collector()
 
     async def _spawn_collector(self) -> None:
-        cmd = [sys.executable, "-m", "runtime.entry", "--role", "mcp-collector", "--addr", self.addr]
-        try:
-            proc = await asyncio.create_subprocess_exec(*cmd)
-            self._processes.append(proc)
-            log.info("supervisor: started mcp-collector (pid=%d)", proc.pid)
-        except Exception:
-            log.exception("supervisor: failed to spawn mcp-collector")
+        t = asyncio.create_task(self._run_process_loop(
+            "mcp-collector",
+            [sys.executable, "-m", "runtime.entry", "--role", "mcp-collector", "--addr", self.addr],
+        ))
+        self._monitor_tasks.add(t)
+        t.add_done_callback(self._monitor_tasks.discard)
 
     async def _spawn_workers(self, k: int) -> None:
         log.info("supervisor: spawning %d worker processes", k)
         for i in range(k):
             wid = f"w{i}"
-            # Use sys.executable to ensure we use the same python interpreter
-            # Use -m runtime.entry to start the worker
-            cmd = [sys.executable, "-m", "runtime.entry", "--role", "worker", "--id", wid, "--addr", self.addr]
+            t = asyncio.create_task(self._run_process_loop(
+                wid,
+                [sys.executable, "-m", "runtime.entry", "--role", "worker", "--id", wid, "--addr", self.addr],
+            ))
+            self._monitor_tasks.add(t)
+            t.add_done_callback(self._monitor_tasks.discard)
+
+    async def _run_process_loop(self, label: str, cmd: list) -> None:
+        """Spawn a subprocess and restart it with exponential backoff on crash."""
+        backoff = 1.0
+        while not self._stopping:
+            proc = None
             try:
                 proc = await asyncio.create_subprocess_exec(*cmd)
                 self._processes.append(proc)
-                log.info("supervisor: started worker %s (pid=%d)", wid, proc.pid)
+                log.info("supervisor: started %s (pid=%d)", label, proc.pid)
+                await proc.wait()
+                self._processes.remove(proc)
+                if self._stopping:
+                    break
+                log.warning("supervisor: %s exited (code=%d), restarting in %.0fs",
+                            label, proc.returncode, backoff)
+            except asyncio.CancelledError:
+                if proc:
+                    proc.terminate()
+                break
             except Exception:
-                log.exception("supervisor: failed to spawn worker %s", wid)
+                log.exception("supervisor: failed to spawn %s", label)
+            await asyncio.sleep(backoff)
+            backoff = min(backoff * 2, 60.0)
 
 
 
     async def stop(self) -> None:
-        # 1. Kill worker processes
+        self._stopping = True
+
+        # 1. Cancel monitor/restart tasks first so they don't re-spawn
+        for t in list(self._monitor_tasks):
+            t.cancel()
+        if self._monitor_tasks:
+            await asyncio.gather(*self._monitor_tasks, return_exceptions=True)
+        self._monitor_tasks.clear()
+
+        # 2. Kill worker processes
         for proc in self._processes:
             try:
                 proc.terminate()
             except Exception:
                 pass
-        
+
         if self._processes:
             await asyncio.gather(*(proc.wait() for proc in self._processes), return_exceptions=True)
         self._processes.clear()
@@ -305,7 +337,7 @@ class Supervisor:
 
         # 3. Handoff Protocol
         log.info("supervisor: initiating handoff of group %d from %s to %s", group_id, old_wid, new_worker_id)
-        fut = asyncio.get_event_loop().create_future()
+        fut = asyncio.get_running_loop().create_future()
         self._pending_handoffs[group_id] = fut
         
         try:

@@ -39,7 +39,7 @@ _PATTERNS: list[tuple[str, re.Pattern, int]] = [
     ("github", re.compile(r"\bgh[pousr]_[A-Za-z0-9]{36,}\b"), 0),
     # Anthropic (before OpenAI: sk-ant-… is a superset prefix)
     ("anthropic", re.compile(r"\bsk-ant-[A-Za-z0-9_-]{20,}\b"), 0),
-    ("openai", re.compile(r"\bsk-[A-Za-z0-9]{20,}\b"), 0),
+    ("openai", re.compile(r"\bsk-(?!ant-)[A-Za-z0-9]{20,}\b"), 0),
     # Slack
     ("slack", re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b"), 0),
     # Google API key

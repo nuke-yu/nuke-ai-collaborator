@@ -36,7 +36,7 @@ def _add_sync(message_id: int, content: str, role: str, bot_id: int):
     )
 
 async def add_to_chroma(message_id: int, content: str, role: str, bot_id: int):
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     await loop.run_in_executor(None, partial(_add_sync, message_id, content, role, bot_id))
 
 
@@ -55,7 +55,7 @@ def _query_sync(query: str, bot_id: int, top_k: int) -> list:
         return []
 
 async def retrieve_relevant(bot_id: int, query: str, top_k: int = 3) -> list:
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, partial(_query_sync, query, bot_id, top_k))
 
 

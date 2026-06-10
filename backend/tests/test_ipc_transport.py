@@ -90,7 +90,7 @@ class TestProtocolSchema(unittest.TestCase):
 
     def test_envelope_carries_routing_header(self):
         e = protocol.envelope(protocol.USER_MESSAGE, group_id=5, trace_id="x", content="c")
-        self.assertEqual(e, {"type": "user_message", "group_id": 5,
+        self.assertEqual(e, {"v": 1, "type": "user_message", "group_id": 5,
                              "trace_id": "x", "content": "c"})
 
 

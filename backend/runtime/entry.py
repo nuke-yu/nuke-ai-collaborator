@@ -64,7 +64,7 @@ async def run_worker(worker_id: str, addr: str) -> None:
     _init_tool_router()
 
     from skills.watcher import watcher
-    watcher.start(asyncio.get_event_loop())
+    watcher.start(asyncio.get_running_loop())
     try:
         await build_worker(worker_id, addr).run()
     finally:

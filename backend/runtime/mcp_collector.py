@@ -66,6 +66,7 @@ class MCPCollector:
         self._writer = None
         self._router = None
         self._tasks: set = set()
+        self._call_sem = asyncio.Semaphore(10)  # max concurrent MCP tool executions
         self._last_schema_sig = None
         from executors.providers.mcp_auth_flows import MCPAuthFlows
         self._flows = MCPAuthFlows()
@@ -165,13 +166,14 @@ class MCPCollector:
         arguments = frame.get("arguments") or {}
         gid = frame.get("group_id")
         tid = frame.get("trace_id")
-        try:
-            result, is_error = await self._router.execute(
-                name, arguments,
-                context={"_pre_authorized": True, "group_id": gid, "trace_id": tid},
-            )
-        except Exception as e:
-            result, is_error = f"[MCP collector 错误] {e}", True
+        async with self._call_sem:
+            try:
+                result, is_error = await self._router.execute(
+                    name, arguments,
+                    context={"_pre_authorized": True, "group_id": gid, "trace_id": tid},
+                )
+            except Exception as e:
+                result, is_error = f"[MCP collector 错误] {e}", True
         try:
             await ipc.send_msg(self._writer, ipc.protocol.envelope(
                 ipc.protocol.MCP_RESULT, group_id=gid, trace_id=tid,

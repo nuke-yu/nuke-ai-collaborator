@@ -304,6 +304,29 @@ async def migration_017(db):
     await db.commit()
 
 
+async def migration_018(db):
+    """Add missing indexes for query-hot columns (DFT-007/017).
+
+    messages(group_id, created_at) covers the common paginated history fetch.
+    messages(group_id, member_id) covers per-member message queries.
+    role_summaries(bot_id, group_id) covers per-bot summary lookup.
+    agent_sessions(status, updated_at) covers active-session polling.
+    All are CREATE INDEX IF NOT EXISTS so re-running is idempotent.
+    """
+    stmts = [
+        "CREATE INDEX IF NOT EXISTS idx_messages_group_created ON messages(group_id, created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_messages_group_member ON messages(group_id, member_id)",
+        "CREATE INDEX IF NOT EXISTS idx_role_summaries_bot_group ON role_summaries(bot_id, group_id)",
+        "CREATE INDEX IF NOT EXISTS idx_agent_sessions_status ON agent_sessions(status, updated_at)",
+    ]
+    for stmt in stmts:
+        try:
+            await db.execute(stmt)
+        except Exception:
+            pass  # table or column absent in this DB (e.g. central DB schema)
+    await db.commit()
+
+
 MIGRATIONS: list = [
     migration_001,
     migration_002,
@@ -322,6 +345,7 @@ MIGRATIONS: list = [
     migration_015,
     migration_016,
     migration_017,
+    migration_018,
 ]
 
 

@@ -53,6 +53,8 @@ HELLO = "hello"   # Worker / collector → Supervisor 首帧，自报 worker_id 
 # 注：LOG_RECORD 走独立日志通道，**绝不**与业务隧道共用（§10.2 队头阻塞）。
 
 
+PROTOCOL_VERSION = 1
+
 def envelope(msg_type: str, *, group_id: int, trace_id: str | None = None, **fields) -> dict:
     """构造带统一路由/追踪头的隧道消息（§10.2）。"""
-    return {"type": msg_type, "group_id": group_id, "trace_id": trace_id, **fields}
+    return {"v": PROTOCOL_VERSION, "type": msg_type, "group_id": group_id, "trace_id": trace_id, **fields}

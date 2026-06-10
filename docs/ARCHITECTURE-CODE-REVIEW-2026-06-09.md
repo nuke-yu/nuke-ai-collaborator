@@ -590,56 +590,56 @@ if (evt.data === 'auth_error') {
 
 ## 三、技术债务清单
 
+> **复核日期**: 2026-06-10 · 方法：逐文件代码精读，对照重构后代码实际状态更新
+
 ### P0 - 立即修复（兼容性/安全）
 
 | ID | 文件 | 行 | 问题 | 影响 | 状态 |
 |----|------|-----|------|------|------|
-| DFT-001 | `supervisor.py` | 308 | `get_event_loop()` → `get_running_loop()` | Python 3.10+ 兼容性 | ⚠️ 仍需检查 |
-| DFT-002 | `worker.py` | 67 | 同左 | 同左 | ⚠️ 仍需检查 |
-| DFT-003 | `engine.py` | 180 | 同左 | 同左 | ⚠️ 仍需检查 |
-| DFT-004 | `memory.py` | 39 | 同左 | 同左 | ⚠️ 仍需检查 |
-| DFT-005 | `api/auth.py` | - | 登录无速率限制 | 暴力破解风险 | 🔴 待修复 |
-| DFT-006 | `api/workspace.py` | - | 路径遍历未验证 | 文件读取漏洞 | 🔴 待修复 |
-| DFT-007 | `db/schema.py` | - | 缺少关键索引 | 查询性能 | 🔴 待修复 |
-| DFT-008 | `mcp_collector.py` | 265-268 | MCP_AUTH_START 并发锁非原子 | OAuth race condition | 🔴 待修复 |
-
-> **注意**: CLAUDE.md 记录的 `get_event_loop()` 问题（DFT-001~004），第二份验证报告显示 `mcp_bridge.py` 已修复，但第一份报告仍列为待修复。请交叉验证这些文件是否确实已修复。
+| DFT-001 | `runtime/supervisor.py` | 308 | `get_event_loop()` → `get_running_loop()` | Python 3.10+ 兼容性 | ✅ 已修复 |
+| DFT-002 | `ai/memory.py` | 39, 58 | 同左（注：实际在 memory.py，非 worker.py） | 同左 | ✅ 已修复 |
+| DFT-003 | `permissions/engine.py` | 180 | 同左 | 同左 | ✅ 已修复 |
+| DFT-004 | `ai/memory.py` | 39, 58 | 同左（与 DFT-002 同一位置，一并修复） | 同左 | ✅ 已修复 |
+| DFT-005 | `api/auth.py` | 32-45 | 登录无速率限制 | 暴力破解风险 | ✅ 已修复（IP 维度滑动窗口，5次/60s） |
+| DFT-006 | `workspace/__init__.py` | 71-78 | 路径遍历防护 | 文件读取漏洞 | ✅ 已修复（`_safe_path()` + `is_relative_to()` 检查） |
+| DFT-007 | `db/migrations.py` | - | messages / role_summaries 无复合索引 | 查询性能 | ✅ 已修复（migration_018） |
+| DFT-008 | `mcp_collector.py` | 265-268 | MCP_AUTH_START 并发锁非原子 | OAuth race condition | ✅ 已修复（`75fd79d`） |
 
 ### P1 - 短期优化（可用性/性能）
 
-| ID | 模块 | 改进点 | 收益 |
-|----|------|--------|------|
-| DFT-010 | `supervisor` | 添加 worker 自动重启机制 | 提高可用性 |
-| DFT-011 | `worker` | 添加断线重连（指数退避） | 网络鲁棒性 |
-| DFT-012 | `permissions` | 全局状态加锁保护 | 并发安全 |
-| DFT-013 | `compact` | 电路断路器加锁 | 并发安全 |
-| DFT-014 | `mcp_collector` | 添加并发限制 semaphore | 防止过载 |
-| DFT-015 | `ai/client.py` | 添加 LLM 响应缓存 (Redis) | 成本优化 |
-| DFT-016 | `api/auth.py` | 添加 refresh token 端点 | 用户体验 |
-| DFT-017 | `db/schema.py` | 添加缺失索引 | 查询性能 |
-| DFT-018 | `mcp_proxy.py` | 无 `__` 命名空间 HIL 逻辑优化 | 代码清晰性 | ⚠️ 低风险 |
+| ID | 模块 | 改进点 | 收益 | 状态 |
+|----|------|--------|------|------|
+| DFT-010 | `runtime/supervisor.py` | Worker 进程 crash 无自动重启，仅记录异常 | 提高可用性 | ✅ 已修复（`_run_process_loop` 指数退避重启，max 60s） |
+| DFT-011 | `runtime/worker.py` | 断线重连指数退避 | 网络鲁棒性 | ➖ 待确认（协议层未见明确实现） |
+| DFT-012 | `permissions/engine.py:34,37` | `_once_grants` / `_pending` 全局 dict 无 asyncio.Lock | 并发安全 | ✅ 已修复（check 函数关键写入段加 Lock） |
+| DFT-013 | `executors/compact.py:68,71` | `_compaction_failures` / `_db_compaction_locks` 无锁 | 并发安全 | ➖ asyncio 单线程内 await 点间操作原子，实际安全 |
+| DFT-014 | `runtime/mcp_collector.py:303,307` | `_handle_call` 创建 task 无 Semaphore 并发限制 | 防止过载 | ✅ 已修复（`asyncio.Semaphore(10)` 限制并发执行） |
+| DFT-015 | `ai/client.py` | LLM 响应缓存（Redis） | 成本优化 | ➖ 架构演进，非 bug |
+| DFT-016 | `api/auth.py` | 无 refresh token 端点，token 过期需重新登录 | 用户体验 | ✅ 已修复（`POST /api/auth/refresh`） |
+| DFT-017 | `db/schema.py` | 复合索引缺失（同 DFT-007） | 查询性能 | ✅ 已修复（migration_018，同 DFT-007） |
+| DFT-018 | `mcp_proxy.py` | 无 `__` 命名空间 HIL 逻辑 | 代码清晰性 | ✅ 不适用（逻辑已简化，无嵌套过深问题） |
 
 ### P2 - 中期优化（可维护性）
 
-| ID | 模块 | 改进点 | 收益 |
-|----|------|--------|------|
-| DFT-020 | `redaction.py` | 增强 OpenAI 模式特异性 | 降低误报 |
-| DFT-021 | `compact.py` | estimate_tokens 缓存 | 性能 |
-| DFT-022 | `discovery.py` | 大文件读取限制 | 内存安全 |
-| DFT-023 | `loader.py` | Jinja2 SandboxedEnvironment | 执行安全 |
-| DFT-024 | `ipc/protocol.py` | 协议版本字段 | 向后兼容 |
-| DFT-025 | `frontend/` | 状态管理迁移到 Zustand | 可维护性 |
+| ID | 模块 | 改进点 | 收益 | 状态 |
+|----|------|--------|------|------|
+| DFT-020 | `executors/redaction.py:42` | `sk-[A-Za-z0-9]{20,}` 特异性不足，可能误遮 | 降低误报 | ✅ 已修复（加 `(?!ant-)` 负向前瞻，排除 Anthropic token） |
+| DFT-021 | `executors/compact.py:90-101` | `estimate_tokens()` 无缓存，每次重算 | 性能 | ➖ 已优化（字符级累加，非 json.dumps；list 不可哈希无法 lru_cache） |
+| DFT-022 | `skills/discovery.py` | 技能大文件读取无大小限制 | 内存安全 | ➖ 低风险（技能文件通常小） |
+| DFT-023 | `skills/processor.py:82-92` | Jinja2 SandboxedEnvironment | 执行安全 | ✅ 已修复（已改用 `SandboxedEnvironment`） |
+| DFT-024 | `runtime/ipc/protocol.py` | 协议帧无版本字段 | 向后兼容 | ✅ 已修复（`PROTOCOL_VERSION = 1`，envelope 加 `v` 字段） |
+| DFT-025 | `frontend/src/components/ChatWindow.jsx` | 仍有 46 个 useState，无 Zustand/Jotai | 可维护性 | ❌ 仍是 defect |
 
 ### P3 - 长期优化（架构演进）
 
-| ID | 模块 | 改进点 | 收益 |
-|----|------|--------|------|
-| DFT-030 | `compact.py` | 增量 token 估算 | 性能 |
-| DFT-031 | `permissions` | 规则缓存 (LRU) | 性能 |
-| DFT-032 | `supervisor` | 进程树监控 (Prometheus) | 可观测性 |
-| DFT-033 | `runtime/` | 结构化日志 (JSON) | 调试效率 |
-| DFT-034 | `db/migrations.py` | 添加回滚 SQL 记录 | 可回滚性 |
-| DFT-035 | `ai/client.py` | 支持多 providers embedding | 灵活性 |
+| ID | 模块 | 改进点 | 收益 | 状态 |
+|----|------|--------|------|------|
+| DFT-030 | `executors/compact.py` | 增量 token 估算（当前全量重算） | 性能 | ❌ 仍是 defect |
+| DFT-031 | `permissions/` | 规则匹配无 LRU 缓存 | 性能 | ❌ 仍是 defect |
+| DFT-032 | `runtime/supervisor.py` | 无 Prometheus 进程监控 | 可观测性 | ❌ 仍是 defect |
+| DFT-033 | `runtime/supervisor.py` | 结构化日志（worker 有，supervisor 无） | 调试效率 | ✅ 已修复（`start()` 调用 `setup_structured_logging`） |
+| DFT-034 | `db/migrations.py` | 迁移无 rollback SQL，仅正向 DDL | 可回滚性 | ❌ 仍是 defect |
+| DFT-035 | `ai/client.py:101-111` | embedding 硬编码 DeepSeek `text-embedding-v2` | 灵活性 | ❌ 仍是 defect |
 
 ---
 
