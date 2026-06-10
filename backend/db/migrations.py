@@ -63,7 +63,30 @@ async def _safe_add_column(db, sql: str) -> None:
 # ---------------------------------------------------------------------------
 
 async def migration_001(db):
-    """Add all columns introduced after the initial schema release."""
+    """Add all columns introduced after the initial schema release.
+
+    Rollback (SQLite >= 3.35):
+        ALTER TABLE messages DROP COLUMN reply_to_id;
+        ALTER TABLE messages DROP COLUMN edited_at;
+        ALTER TABLE messages DROP COLUMN is_deleted;
+        ALTER TABLE messages DROP COLUMN file_url;
+        ALTER TABLE messages DROP COLUMN file_name;
+        ALTER TABLE messages DROP COLUMN file_size;
+        ALTER TABLE messages DROP COLUMN file_type;
+        ALTER TABLE messages DROP COLUMN is_auto_reply;
+        ALTER TABLE members DROP COLUMN model_provider;
+        ALTER TABLE members DROP COLUMN model_name;
+        ALTER TABLE members DROP COLUMN auto_reply;
+        ALTER TABLE members DROP COLUMN context_cleared_at;
+        ALTER TABLE members DROP COLUMN temperature;
+        ALTER TABLE members DROP COLUMN max_tokens;
+        ALTER TABLE members DROP COLUMN personality_prompt;
+        ALTER TABLE members DROP COLUMN executor_id;
+        ALTER TABLE members DROP COLUMN executor_config;
+        ALTER TABLE members DROP COLUMN done_keyword;
+        ALTER TABLE groups DROP COLUMN announcement;
+        ALTER TABLE role_summaries DROP COLUMN bot_id;
+    """
     stmts = [
         "ALTER TABLE messages ADD COLUMN reply_to_id INTEGER",
         "ALTER TABLE messages ADD COLUMN edited_at TIMESTAMP",
@@ -92,7 +115,12 @@ async def migration_001(db):
 
 
 async def migration_002(db):
-    """Add token usage columns to messages table."""
+    """Add token usage columns to messages table.
+
+    Rollback:
+        ALTER TABLE messages DROP COLUMN input_tokens;
+        ALTER TABLE messages DROP COLUMN output_tokens;
+    """
     stmts = [
         "ALTER TABLE messages ADD COLUMN input_tokens INTEGER DEFAULT NULL",
         "ALTER TABLE messages ADD COLUMN output_tokens INTEGER DEFAULT NULL",
@@ -103,7 +131,11 @@ async def migration_002(db):
 
 
 async def migration_003(db):
-    """Add cron_jobs table for the scheduler plugin."""
+    """Add cron_jobs table for the scheduler plugin.
+
+    Rollback:
+        DROP TABLE IF EXISTS cron_jobs;
+    """
     await db.execute("""
         CREATE TABLE IF NOT EXISTS cron_jobs (
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -126,7 +158,13 @@ async def migration_003(db):
 # ---------------------------------------------------------------------------
 
 async def migration_004(db):
-    """Add agent_sessions and session_events tables for crash-safe session recovery."""
+    """Add agent_sessions and session_events tables for crash-safe session recovery.
+
+    Rollback:
+        DROP INDEX IF EXISTS idx_session_events;
+        DROP TABLE IF EXISTS session_events;
+        DROP TABLE IF EXISTS agent_sessions;
+    """
     await db.execute("""
         CREATE TABLE IF NOT EXISTS agent_sessions (
             id            TEXT PRIMARY KEY,
@@ -162,7 +200,12 @@ async def migration_004(db):
 
 
 async def migration_005(db):
-    """Add cache token columns to messages table."""
+    """Add cache token columns to messages table.
+
+    Rollback:
+        ALTER TABLE messages DROP COLUMN cache_read_tokens;
+        ALTER TABLE messages DROP COLUMN cache_creation_tokens;
+    """
     stmts = [
         "ALTER TABLE messages ADD COLUMN cache_read_tokens INTEGER DEFAULT NULL",
         "ALTER TABLE messages ADD COLUMN cache_creation_tokens INTEGER DEFAULT NULL",
@@ -173,7 +216,12 @@ async def migration_005(db):
 
 
 async def migration_006(db):
-    """Add cache token columns to agent_sessions for session-level aggregation."""
+    """Add cache token columns to agent_sessions for session-level aggregation.
+
+    Rollback:
+        ALTER TABLE agent_sessions DROP COLUMN cache_read_tokens;
+        ALTER TABLE agent_sessions DROP COLUMN cache_creation_tokens;
+    """
     stmts = [
         "ALTER TABLE agent_sessions ADD COLUMN cache_read_tokens INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE agent_sessions ADD COLUMN cache_creation_tokens INTEGER NOT NULL DEFAULT 0",
@@ -189,6 +237,9 @@ async def migration_007(db):
     The orchestrator (DeclarativeOrchestrator) holds workflow progress in an
     in-memory dict; this table is its durable snapshot (one row per group),
     overwritten whenever the workflow state changes and cleared on completion.
+
+    Rollback:
+        DROP TABLE IF EXISTS workflow_state;
     """
     await db.execute("""
         CREATE TABLE IF NOT EXISTS workflow_state (
@@ -204,13 +255,21 @@ async def migration_007(db):
 
 
 async def migration_008(db):
-    """Add last_snapshot_json column to agent_sessions for full context snapshots."""
+    """Add last_snapshot_json column to agent_sessions for full context snapshots.
+
+    Rollback:
+        ALTER TABLE agent_sessions DROP COLUMN last_snapshot_json;
+    """
     await _safe_add_column(db, "ALTER TABLE agent_sessions ADD COLUMN last_snapshot_json TEXT")
     await db.commit()
 
 
 async def migration_009(db):
-    """Create tickets table for persistent task tracking and archiving."""
+    """Create tickets table for persistent task tracking and archiving.
+
+    Rollback:
+        DROP TABLE IF EXISTS tickets;
+    """
     await db.execute("""
         CREATE TABLE IF NOT EXISTS tickets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -231,7 +290,11 @@ async def migration_009(db):
 
 
 async def migration_010(db):
-    """Create group_locks table to persist the active bot state."""
+    """Create group_locks table to persist the active bot state.
+
+    Rollback:
+        DROP TABLE IF EXISTS group_locks;
+    """
     await db.execute("""
         CREATE TABLE IF NOT EXISTS group_locks (
             group_id INTEGER PRIMARY KEY,
@@ -245,19 +308,31 @@ async def migration_010(db):
 
 
 async def migration_011(db):
-    """Add traits_json column to members table for atomic skill composition."""
+    """Add traits_json column to members table for atomic skill composition.
+
+    Rollback:
+        ALTER TABLE members DROP COLUMN traits_json;
+    """
     await _safe_add_column(db, "ALTER TABLE members ADD COLUMN traits_json TEXT DEFAULT '[]'")
     await db.commit()
 
 
 async def migration_012(db):
-    """Add total_usd_cost column to tickets table for token cost tracking."""
+    """Add total_usd_cost column to tickets table for token cost tracking.
+
+    Rollback:
+        ALTER TABLE tickets DROP COLUMN total_usd_cost;
+    """
     await _safe_add_column(db, "ALTER TABLE tickets ADD COLUMN total_usd_cost REAL DEFAULT 0.0")
     await db.commit()
 
 
 async def migration_013(db):
-    """Add last_run_at column to cron_jobs for misfire detection and catch-up."""
+    """Add last_run_at column to cron_jobs for misfire detection and catch-up.
+
+    Rollback:
+        ALTER TABLE cron_jobs DROP COLUMN last_run_at;
+    """
     try:
         await db.execute("ALTER TABLE cron_jobs ADD COLUMN last_run_at TIMESTAMP")
     except Exception:
@@ -268,7 +343,17 @@ async def migration_013(db):
 async def migration_014(db):
     """CELL-14b: denormalize the sender's display fields onto each message so the
     messages query needs no cross-domain JOIN to the central `members` table
-    (group private DBs are self-contained). Backfill existing rows from members."""
+    (group private DBs are self-contained). Backfill existing rows from members.
+
+    Rollback:
+        ALTER TABLE messages DROP COLUMN sender_name;
+        ALTER TABLE messages DROP COLUMN sender_type;
+        ALTER TABLE messages DROP COLUMN sender_avatar;
+        ALTER TABLE messages DROP COLUMN sender_provider;
+        ALTER TABLE messages DROP COLUMN sender_model;
+        -- Note: the backfill UPDATE is non-reversible; member display data
+        -- may have changed since the migration ran.
+    """
     for col in ("sender_name TEXT", "sender_type TEXT", "sender_avatar TEXT",
                 "sender_provider TEXT", "sender_model TEXT"):
         await _safe_add_column(db, f"ALTER TABLE messages ADD COLUMN {col}")
@@ -286,20 +371,32 @@ async def migration_014(db):
 
 
 async def migration_015(db):
-    """CELL-15: Add assigned_worker_id to groups table for persistent routing."""
+    """CELL-15: Add assigned_worker_id to groups table for persistent routing.
+
+    Rollback:
+        ALTER TABLE groups DROP COLUMN assigned_worker_id;
+    """
     await _safe_add_column(db, "ALTER TABLE groups ADD COLUMN assigned_worker_id TEXT DEFAULT 'w0'")
     await db.commit()
 
 
 async def migration_016(db):
     """Add meta (JSON) to messages — carries structured payloads like the
-    workflow human-confirmation gate card (meta.kind = 'confirm_gate')."""
+    workflow human-confirmation gate card (meta.kind = 'confirm_gate').
+
+    Rollback:
+        ALTER TABLE messages DROP COLUMN meta;
+    """
     await _safe_add_column(db, "ALTER TABLE messages ADD COLUMN meta TEXT DEFAULT NULL")
     await db.commit()
 
 
 async def migration_017(db):
-    """Add away_summary column to groups table to cache pre-generated recap."""
+    """Add away_summary column to groups table to cache pre-generated recap.
+
+    Rollback:
+        ALTER TABLE groups DROP COLUMN away_summary;
+    """
     await _safe_add_column(db, "ALTER TABLE groups ADD COLUMN away_summary TEXT DEFAULT NULL")
     await db.commit()
 
@@ -312,6 +409,12 @@ async def migration_018(db):
     role_summaries(bot_id, group_id) covers per-bot summary lookup.
     agent_sessions(status, updated_at) covers active-session polling.
     All are CREATE INDEX IF NOT EXISTS so re-running is idempotent.
+
+    Rollback:
+        DROP INDEX IF EXISTS idx_messages_group_created;
+        DROP INDEX IF EXISTS idx_messages_group_member;
+        DROP INDEX IF EXISTS idx_role_summaries_bot_group;
+        DROP INDEX IF EXISTS idx_agent_sessions_status;
     """
     stmts = [
         "CREATE INDEX IF NOT EXISTS idx_messages_group_created ON messages(group_id, created_at)",
