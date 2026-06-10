@@ -624,7 +624,7 @@ if (evt.data === 'auth_error') {
 | ID | 模块 | 改进点 | 收益 | 状态 |
 |----|------|--------|------|------|
 | DFT-020 | `executors/redaction.py:42` | `sk-[A-Za-z0-9]{20,}` 特异性不足，可能误遮 | 降低误报 | ✅ 已修复（加 `(?!ant-)` 负向前瞻，排除 Anthropic token） |
-| DFT-021 | `executors/compact.py:90-101` | `estimate_tokens()` 无缓存，每次重算 | 性能 | ➖ 已优化（字符级累加，非 json.dumps；list 不可哈希无法 lru_cache） |
+| DFT-021 | `executors/compact.py:90-101` | `estimate_tokens()` 无缓存，每次重算 | 性能 | ✅ 已修复（DFT-030 完全解决；增量缓存 + id 复用防护）|
 | DFT-022 | `skills/discovery.py` | 技能大文件读取无大小限制 | 内存安全 | ➖ 低风险（技能文件通常小） |
 | DFT-023 | `skills/processor.py:82-92` | Jinja2 SandboxedEnvironment | 执行安全 | ✅ 已修复（已改用 `SandboxedEnvironment`） |
 | DFT-024 | `runtime/ipc/protocol.py` | 协议帧无版本字段 | 向后兼容 | ✅ 已修复（`PROTOCOL_VERSION = 1`，envelope 加 `v` 字段） |
@@ -634,8 +634,8 @@ if (evt.data === 'auth_error') {
 
 | ID | 模块 | 改进点 | 收益 | 状态 |
 |----|------|--------|------|------|
-| DFT-030 | `executors/compact.py` | 增量 token 估算（当前全量重算） | 性能 | ❌ 仍是 defect |
-| DFT-031 | `permissions/` | 规则匹配无 LRU 缓存 | 性能 | ❌ 仍是 defect |
+| DFT-030 | `executors/compact.py` | 增量 token 估算（当前全量重算） | 性能 | ✅ 已修复（`_token_cache` id+len+verifier 增量缓存；同 list 新增一条消息只算最后一条） |
+| DFT-031 | `permissions/` | 规则匹配无 LRU 缓存 | 性能 | ✅ 已修复（`_match_tool_pattern` + `_match_args_pattern` 各加 `@lru_cache`） |
 | DFT-032 | `runtime/supervisor.py` | 无 Prometheus 进程监控 | 可观测性 | ✅ 已修复（`runtime/metrics.py` pull-time collector + `GET /metrics`；进程存活/重启/RSS/CPU + worker 心跳新鲜度）|
 | DFT-033 | `runtime/supervisor.py` | 结构化日志（worker 有，supervisor 无） | 调试效率 | ✅ 已修复（`start()` 调用 `setup_structured_logging`） |
 | DFT-034 | `db/migrations.py` | 迁移无 rollback SQL，仅正向 DDL | 可回滚性 | ✅ 已修复（migration_001~018 docstring 均补充 Rollback SQL 注释） |
