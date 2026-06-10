@@ -40,4 +40,15 @@ describe('groupStore', () => {
     useGroupStore.getState().setGroups(prev => prev.map(g => ({ ...g, member_count: g.member_count + 1 })))
     expect(useGroupStore.getState().groups[0].member_count).toBe(4)
   })
+
+  it('setUnreadCounts accepts a direct value', () => {
+    useGroupStore.getState().setUnreadCounts({ 1: 5, 2: 3 })
+    expect(useGroupStore.getState().unreadCounts).toEqual({ 1: 5, 2: 3 })
+  })
+
+  it('setUnreadCounts accepts a function updater', () => {
+    useGroupStore.setState({ unreadCounts: { 1: 5 } })
+    useGroupStore.getState().setUnreadCounts(prev => ({ ...prev, 2: 0 }))
+    expect(useGroupStore.getState().unreadCounts).toEqual({ 1: 5, 2: 0 })
+  })
 })

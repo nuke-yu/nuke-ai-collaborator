@@ -19,5 +19,6 @@ export const useGroupStore = create((set) => ({
     set((s) => ({ members: typeof updater === 'function' ? updater(s.members) : updater })),
   setMembersCache: (updater) =>
     set((s) => ({ membersCache: typeof updater === 'function' ? updater(s.membersCache) : updater })),
-  setUnreadCounts: (counts) => set({ unreadCounts: counts }),
+  setUnreadCounts: (updater) =>
+    set((s) => ({ unreadCounts: typeof updater === 'function' ? updater(s.unreadCounts) : updater })),
 }))
