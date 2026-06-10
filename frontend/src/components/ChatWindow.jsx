@@ -25,13 +25,11 @@ import SuggestionBar from './SuggestionBar'
 
 export default function ChatWindow({ memberId, theme, onThemeChange, onLogout }) {
   // ── Group / membership state (groupStore) ────────────────────────────────
-  const groups = useGroupStore((s) => s.groups)
   const activeGroupId = useGroupStore((s) => s.activeGroupId)
   const activeMemberId = useGroupStore((s) => s.activeMemberId)
   const group = useGroupStore((s) => s.group)
   const members = useGroupStore((s) => s.members)
   const membersCache = useGroupStore((s) => s.membersCache)
-  const unreadCounts = useGroupStore((s) => s.unreadCounts)
   const {
     setGroups, setActiveGroupId, setActiveMemberId, setGroup,
     setMembers, setMembersCache, setUnreadCounts,
@@ -50,13 +48,8 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
   // ── WS-driven chat state (chatStore) ─────────────────────────────────────
   const messages = useChatStore((s) => s.messages)
   const typing = useChatStore((s) => s.typing)
-  const reactionMap = useChatStore((s) => s.reactionMap)
-  const readMap = useChatStore((s) => s.readMap)
-  const onlineSet = useChatStore((s) => s.onlineSet)
   const permRequest = useChatStore((s) => s.permRequest)
   const recoveryPrompts = useChatStore((s) => s.recoveryPrompts)
-  const thoughtBlocks = useChatStore((s) => s.thoughtBlocks)
-  const toolProgressBlocks = useChatStore((s) => s.toolProgressBlocks)
   const workflow = useChatStore((s) => s.workflow)
   const pins = useChatStore((s) => s.pins)
   const awaySummary = useChatStore((s) => s.awaySummary)
