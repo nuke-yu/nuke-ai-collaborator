@@ -628,7 +628,7 @@ if (evt.data === 'auth_error') {
 | DFT-022 | `skills/discovery.py` | 技能大文件读取无大小限制 | 内存安全 | ➖ 低风险（技能文件通常小） |
 | DFT-023 | `skills/processor.py:82-92` | Jinja2 SandboxedEnvironment | 执行安全 | ✅ 已修复（已改用 `SandboxedEnvironment`） |
 | DFT-024 | `runtime/ipc/protocol.py` | 协议帧无版本字段 | 向后兼容 | ✅ 已修复（`PROTOCOL_VERSION = 1`，envelope 加 `v` 字段） |
-| DFT-025 | `frontend/src/components/ChatWindow.jsx` | 仍有 46 个 useState，无 Zustand/Jotai | 可维护性 | ❌ 仍是 defect |
+| DFT-025 | `frontend/src/components/ChatWindow.jsx` | 仍有 46 个 useState，无 Zustand/Jotai | 可维护性 | ✅ 已修复（groupStore + chatStore；ChatWindow 降至 20 个 useState；handleWsMessage 150 行→1 行；MessageList/GroupList 直接订阅 store） |
 
 ### P3 - 长期优化（架构演进）
 
