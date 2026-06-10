@@ -49,11 +49,11 @@ def file_lock(file_path: Path):
                 pass
 
 
-def write_to_draft(bot_id: int, skill_name: str, content: str) -> str:
+def write_to_draft(bot_id: int, skill_name: str, content: str, group_id: int | None = None) -> str:
     """Write a skill directly to learned/draft/."""
     if not _is_safe_name(skill_name):
         return "[非法技能名]"
-    ws = bot_ws(bot_id)
+    ws = bot_ws(bot_id, group_id)
     draft_path = ws / LEARNED_DRAFT / f"{skill_name}.md"
     with file_lock(draft_path):
         draft_path.parent.mkdir(parents=True, exist_ok=True)
@@ -61,11 +61,11 @@ def write_to_draft(bot_id: int, skill_name: str, content: str) -> str:
     return skill_name
 
 
-def update_skill_status(bot_id: int, skill_name: str, new_status: str) -> str:
+def update_skill_status(bot_id: int, skill_name: str, new_status: str, group_id: int | None = None) -> str:
     """Toggle a skill's status. Creates a personal override stub for L1/L2/L3 skills."""
     if not _is_safe_name(skill_name):
         return "[非法技能名]"
-    ws = bot_ws(bot_id)
+    ws = bot_ws(bot_id, group_id)
     path, _ = skill_path(ws / "skills", skill_name)
 
     if path is None:
@@ -115,11 +115,11 @@ def update_skill_status(bot_id: int, skill_name: str, new_status: str) -> str:
         return f"[错误] {e}"
 
 
-def approve_draft_skill(bot_id: int, skill_name: str) -> str:
+def approve_draft_skill(bot_id: int, skill_name: str, group_id: int | None = None) -> str:
     """Move a skill from learned/draft/ to learned/active/."""
     if not _is_safe_name(skill_name):
         return "[非法技能名]"
-    ws = bot_ws(bot_id)
+    ws = bot_ws(bot_id, group_id)
     draft_dir = ws / LEARNED_DRAFT
     active_dir = ws / "skills" / "learned" / "active"
     active_dir.mkdir(parents=True, exist_ok=True)
@@ -134,11 +134,11 @@ def approve_draft_skill(bot_id: int, skill_name: str) -> str:
     return f"已审批通过：{skill_name} 移入 active/"
 
 
-def reject_draft_skill(bot_id: int, skill_name: str) -> str:
+def reject_draft_skill(bot_id: int, skill_name: str, group_id: int | None = None) -> str:
     """Delete a skill from learned/draft/."""
     if not _is_safe_name(skill_name):
         return "[非法技能名]"
-    ws = bot_ws(bot_id)
+    ws = bot_ws(bot_id, group_id)
     src, _ = skill_path(ws / LEARNED_DRAFT, skill_name)
     if src is None:
         return f"[未找到草稿技能 '{skill_name}']"

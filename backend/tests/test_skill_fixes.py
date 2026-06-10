@@ -114,7 +114,7 @@ class _SkillDirFixture(unittest.IsolatedAsyncioTestCase):
             mod.WORKSPACE_ROOT = _TEST_WS_ROOT
             mod.SYSTEM_SKILLS_ROOT = _TEST_WS_ROOT / "system" / "skills"
             mod.ROLES_ROOT = _TEST_WS_ROOT / "roles"
-            mod.bot_ws = lambda bot_id: _TEST_WS_ROOT / "bot_ws_1"
+            mod.bot_ws = lambda bot_id, group_id=None: _TEST_WS_ROOT / "bot_ws_1"
 
         self.test_sys = _TEST_WS_ROOT / "system" / "skills"
         self.test_sys.mkdir(parents=True, exist_ok=True)

@@ -28,8 +28,8 @@ def _skills_dir_for_layer(layer: str, bot_id: int,
     if layer == "role" and role:
         return ROLES_ROOT / role / "skills"
     if layer == "learned":
-        return bot_ws(bot_id) / "skills" / "learned" / "active"
-    return bot_ws(bot_id) / "skills"
+        return bot_ws(bot_id, group_id) / "skills" / "learned" / "active"
+    return bot_ws(bot_id, group_id) / "skills"
 
 
 async def load_always_skills(bot_id: int, group_id: int | None = None,

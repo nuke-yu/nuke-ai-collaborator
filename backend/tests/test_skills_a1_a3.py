@@ -40,12 +40,12 @@ class TestSkillsA1A3(unittest.IsolatedAsyncioTestCase):
         skill_discovery.WORKSPACE_ROOT = _TEST_WS_ROOT
         skill_discovery.SYSTEM_SKILLS_ROOT = self.test_sys
         skill_discovery.ROLES_ROOT = self.test_roles
-        skill_discovery.bot_ws = lambda bot_id: _TEST_WS_ROOT / "bot_ws_1"
+        skill_discovery.bot_ws = lambda bot_id, group_id=None: _TEST_WS_ROOT / "bot_ws_1"
 
         skill_loader.WORKSPACE_ROOT = _TEST_WS_ROOT
         skill_loader.SYSTEM_SKILLS_ROOT = self.test_sys
         skill_loader.ROLES_ROOT = self.test_roles
-        skill_loader.bot_ws = lambda bot_id: _TEST_WS_ROOT / "bot_ws_1"
+        skill_loader.bot_ws = lambda bot_id, group_id=None: _TEST_WS_ROOT / "bot_ws_1"
 
         # Create temporary directories
         self.test_sys.mkdir(parents=True, exist_ok=True)
