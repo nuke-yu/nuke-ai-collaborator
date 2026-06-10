@@ -22,7 +22,8 @@ log = logging.getLogger(__name__)
 _DEBOUNCE_SECS = 0.3
 
 # Matches paths inside any skills/ subdirectory we care about
-_BOT_RE    = re.compile(r"^bot_(\d+)[/\\]skills[/\\]")
+# bot 私有技能现位于 group_{gid}/bots/bot_{id}/skills/（嵌套），group_id=捕获组1，member_id=捕获组2
+_BOT_RE    = re.compile(r"^group_(\d+)[/\\]bots[/\\]bot_(\d+)[/\\]skills[/\\]")
 _GROUP_RE  = re.compile(r"^group_(\d+)[/\\]shared[/\\]skills[/\\]")
 _SYSTEM_RE = re.compile(r"^system[/\\]skills[/\\]")
 _ROLE_RE   = re.compile(r"^roles[/\\][^/\\]+[/\\]skills[/\\]")
@@ -40,7 +41,7 @@ def _parse_path(abs_path: str) -> dict | None:
 
     m = _BOT_RE.match(rel)
     if m:
-        return {"source": "bot", "member_id": int(m.group(1)), "group_id": None}
+        return {"source": "bot", "member_id": int(m.group(2)), "group_id": int(m.group(1))}
 
     m = _GROUP_RE.match(rel)
     if m:
