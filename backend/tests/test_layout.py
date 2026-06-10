@@ -33,5 +33,26 @@ class TestLayoutPhase1(unittest.TestCase):
             self.assertEqual(list(tmp_root.iterdir()), [])
 
 
+class TestLayoutDelegation(unittest.TestCase):
+    """bot_workspace / bot_ws / group_workspace 收口委托 layout（零行为变化）。"""
+
+    def test_bot_workspace_delegates_to_layout(self):
+        import workspace
+        # bot_workspace 保留 mkdir 副作用，但路径与 layout.bot_dir 一致
+        self.assertEqual(workspace.bot_workspace(7).resolve(), layout.bot_dir(7).resolve())
+
+    def test_skills_bot_ws_delegates_to_layout(self):
+        from skills.constants import bot_ws
+        self.assertEqual(bot_ws(7), layout.bot_dir(7))
+
+    def test_skills_group_ws_delegates_to_layout(self):
+        from skills.constants import group_ws
+        self.assertEqual(group_ws(3), layout.group_shared_dir(3))
+
+    def test_group_workspace_delegates_to_layout(self):
+        import workspace
+        self.assertEqual(workspace.group_workspace(3).resolve(), layout.group_shared_dir(3).resolve())
+
+
 if __name__ == "__main__":
     unittest.main()

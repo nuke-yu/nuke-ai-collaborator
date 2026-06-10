@@ -11,8 +11,11 @@ LEARNED_DRAFT = "skills/learned/draft"
 
 def bot_ws(bot_id: int) -> Path:
     """Return bot workspace path (no mkdir — caller is responsible)."""
-    return WORKSPACE_ROOT / f"bot_{bot_id}"
+    # 委托 layout（单一布局真相源）。函数内 import 避免与 layout 的循环依赖。
+    from workspace import layout
+    return layout.bot_dir(bot_id)
 
 
 def group_ws(group_id: int) -> Path:
-    return WORKSPACE_ROOT / f"group_{group_id}" / "shared"
+    from workspace import layout
+    return layout.group_shared_dir(group_id)

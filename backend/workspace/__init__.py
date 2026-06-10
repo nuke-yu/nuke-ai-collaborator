@@ -53,7 +53,8 @@ def clear_group_locks(group_id: int):
 
 
 def bot_workspace(bot_id: int) -> Path:
-    path = WORKSPACE_ROOT / f"bot_{bot_id}"
+    from workspace import layout
+    path = layout.bot_dir(bot_id)
     path.mkdir(parents=True, exist_ok=True)
     for sub in _SUBDIRS:
         (path / sub).mkdir(exist_ok=True)
@@ -61,7 +62,8 @@ def bot_workspace(bot_id: int) -> Path:
 
 
 def group_workspace(group_id: int) -> Path:
-    path = WORKSPACE_ROOT / f"group_{group_id}" / "shared"
+    from workspace import layout
+    path = layout.group_shared_dir(group_id)
     path.mkdir(parents=True, exist_ok=True)
     return path
 
