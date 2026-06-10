@@ -29,6 +29,16 @@ DB_COMPACTION_TOKEN_THRESHOLD = 30_000
 METRICS_ENABLED = os.environ.get("NUKE_METRICS_ENABLED", "1") != "0"
 METRICS_TOKEN = os.environ.get("NUKE_METRICS_TOKEN") or None
 
+# --- Embeddings (DFT-035) ---
+# Pluggable embedding backend. "local" uses chromadb's bundled MiniLM model
+# (offline, no API key, 384-dim); "openai"/"deepseek" call an OpenAI-compatible
+# /embeddings endpoint. Switching provider/model changes the vector dimension and
+# invalidates the stored index — run `python3 -m scripts.reindex_embeddings`
+# after changing these.
+EMBEDDING_PROVIDER = (os.environ.get("NUKE_EMBEDDING_PROVIDER") or "local").lower()
+EMBEDDING_MODEL = os.environ.get("NUKE_EMBEDDING_MODEL") or None      # None → provider default
+EMBEDDING_ENDPOINT = os.environ.get("NUKE_EMBEDDING_ENDPOINT") or None  # override base URL
+
 # --- Environment overrides ---
 if os.environ.get("NUKE_DEBUG"):
     DOOM_LOOP_THRESHOLD = 100

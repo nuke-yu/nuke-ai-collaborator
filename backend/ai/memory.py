@@ -3,7 +3,6 @@ import asyncio
 import logging
 from functools import partial
 import chromadb
-from chromadb.utils import embedding_functions
 from db import get_db
 
 log = logging.getLogger(__name__)
@@ -17,12 +16,18 @@ _chroma_collection = None
 def _get_collection():
     global _chroma_client, _chroma_collection
     if _chroma_collection is None:
+        from ai import embeddings  # DFT-035: config-driven embedding backend
         _chroma_client = chromadb.PersistentClient(path="./chroma_db")
-        _chroma_collection = _chroma_client.get_or_create_collection(
+        sig = embeddings.embedding_signature()
+        col = _chroma_client.get_or_create_collection(
             name="messages",
-            embedding_function=embedding_functions.DefaultEmbeddingFunction(),
-            metadata={"hnsw:space": "cosine"},
+            embedding_function=embeddings.get_embedding_function(),
+            metadata={"hnsw:space": "cosine", "emb_sig": sig},
         )
+        # Guard: refuse to serve a vector index built with a different model
+        # (dimensions are incompatible — see scripts.reindex_embeddings).
+        embeddings.verify_signature((col.metadata or {}).get("emb_sig"), sig)
+        _chroma_collection = col
     return _chroma_collection
 
 

@@ -98,17 +98,9 @@ def _require_key(keys: dict, name: str, label: str) -> str:
         raise AIError(f"未配置 {label} API Key，请在设置中填写")
     return val
 
-async def get_embedding(text: str) -> list:
-    api_key = _keys()["deepseek"]
-    async with _shared_client() as client:
-        response = await client.post(
-            "https://api.deepseek.com/v1/embeddings",
-            headers={"Authorization": f"Bearer {api_key}"},
-            json={"model": "text-embedding-v2", "input": text[:2000], "encoding_format": "float"},
-            timeout=30,
-        )
-        response.raise_for_status()
-        return response.json()["data"][0]["embedding"]
+# DFT-035: the old hardcoded DeepSeek get_embedding() lived here but had zero
+# callers. Embeddings are now a config-driven chromadb backend in ai/embeddings.py
+# (used by ai/memory.py); the DeepSeek/OpenAI API path moved there.
 
 async def call_ai(system_prompt: str, history: list, user_message: str,
                   temperature: float = 0.7, max_tokens: int = 4096) -> str:

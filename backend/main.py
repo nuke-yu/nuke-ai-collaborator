@@ -72,6 +72,8 @@ async def lifespan(app: FastAPI):
     from executors.tool_router import router as tool_router
     await tool_router.close_all()
     await ai_client.aclose_client()
+    from ai import embeddings as _embeddings
+    _embeddings.close_embedding_client()   # DFT-035: close sync embeddings client
     await db.aclose_writer()
 
 
