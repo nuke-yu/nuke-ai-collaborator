@@ -2,6 +2,8 @@ import { useEffect, useState, useRef, useCallback } from 'react'
 import { fetchAllGroups, fetchGroupInfo, fetchMessages, fetchUnreadCounts, fetchReactions, toggleReaction, createGroup, addMember, fetchPins, pinMessage, unpinMessage, resumeSession, cancelSessionRecovery, fetchGroupRecap, dismissGroupRecap, fetchPersonalRecap, fetchAiSuggestions } from '../api'
 import { useWebSocket } from '../hooks/useWebSocket'
 import { useNotifications } from '../hooks/useNotifications'
+import { useGroupStore } from '../store/groupStore'
+import { useChatStore } from '../store/chatStore'
 import GroupList from './GroupList'
 import ChatHeader from './ChatHeader'
 import MessageList from './MessageList'
@@ -21,56 +23,70 @@ import RecapBanner from './RecapBanner'
 import SuggestionBar from './SuggestionBar'
 
 export default function ChatWindow({ memberId, theme, onThemeChange, onLogout }) {
-  const [groups, setGroups] = useState([])
-  const [activeGroupId, setActiveGroupId] = useState(null)
-  const [activeMemberId, setActiveMemberId] = useState(null)
-  const [group, setGroup] = useState(null)
-  const [members, setMembers] = useState([])
-  const [membersCache, setMembersCache] = useState({})
-  const [messages, setMessages] = useState([])
-  const [messagesCache, setMessagesCache] = useState({})
-  const [reactionCache, setReactionCache] = useState({})
-  const [typing, setTyping] = useState(null)
+  // ── Group / membership state (groupStore) ────────────────────────────────
+  const groups = useGroupStore((s) => s.groups)
+  const activeGroupId = useGroupStore((s) => s.activeGroupId)
+  const activeMemberId = useGroupStore((s) => s.activeMemberId)
+  const group = useGroupStore((s) => s.group)
+  const members = useGroupStore((s) => s.members)
+  const membersCache = useGroupStore((s) => s.membersCache)
+  const unreadCounts = useGroupStore((s) => s.unreadCounts)
+  const {
+    setGroups, setActiveGroupId, setActiveMemberId, setGroup,
+    setMembers, setMembersCache, setUnreadCounts,
+  } = useGroupStore()
+
+  // ── WS-driven chat state (chatStore) ─────────────────────────────────────
+  const messages = useChatStore((s) => s.messages)
+  const typing = useChatStore((s) => s.typing)
+  const reactionMap = useChatStore((s) => s.reactionMap)
+  const readMap = useChatStore((s) => s.readMap)
+  const onlineSet = useChatStore((s) => s.onlineSet)
+  const permRequest = useChatStore((s) => s.permRequest)
+  const recoveryPrompts = useChatStore((s) => s.recoveryPrompts)
+  const thoughtBlocks = useChatStore((s) => s.thoughtBlocks)
+  const toolProgressBlocks = useChatStore((s) => s.toolProgressBlocks)
+  const workflow = useChatStore((s) => s.workflow)
+  const pins = useChatStore((s) => s.pins)
+  const awaySummary = useChatStore((s) => s.awaySummary)
+  const skillDraftBots = useChatStore((s) => s.skillDraftBots)
+  const error = useChatStore((s) => s.error)
+  const messagesCache = useChatStore((s) => s.messagesCache)
+  const reactionCache = useChatStore((s) => s.reactionCache)
+  const hasMore = useChatStore((s) => s.hasMore)
+  const loadingMore = useChatStore((s) => s.loadingMore)
+  const {
+    setMessages, setTyping, setReactionMap, setReactionCache, setReadMap,
+    setMessagesCache, setPermRequest, setRecoveryPrompts, setWorkflow,
+    setPins, setAwaySummary, setSkillDraftBots, setError,
+    setHasMore, setLoadingMore, dispatchWsEvent,
+  } = useChatStore()
+
+  // ── Local modal / layout state (stays as useState) ───────────────────────
   const [showTemplates, setShowTemplates] = useState(false)
   const [showApiKeys, setShowApiKeys] = useState(false)
   const [showAddMember, setShowAddMember] = useState(false)
   const [editingMember, setEditingMember] = useState(null)
   const [workspaceBot, setWorkspaceBot] = useState(null)
-  const [skillDraftBots, setSkillDraftBots] = useState(new Set()) // bot IDs with pending draft skills
-  const [error, setError] = useState(null)
-  const [workflow, setWorkflow] = useState(null)
   const [showWorkflowStart, setShowWorkflowStart] = useState(false)
   const [wfBotOrder, setWfBotOrder] = useState([])
-  const [readMap, setReadMap] = useState({})
-  const [hasMore, setHasMore] = useState(false)
-  const [loadingMore, setLoadingMore] = useState(false)
-  const [unreadCounts, setUnreadCounts] = useState({})
   const [showSearch, setShowSearch] = useState(false)
   const [showBotLogs, setShowBotLogs] = useState(false)
   const [replyingTo, setReplyingTo] = useState(null)
-  const [reactionMap, setReactionMap] = useState({})
   const [mobileTab, setMobileTab] = useState('chat')
   const [drafts, setDrafts] = useState({})
-  const [pins, setPins] = useState([])
   const [dragging, setDragging] = useState(false)
   const [highlightedId, setHighlightedId] = useState(null)
-  const [onlineSet, setOnlineSet] = useState(new Set())
   const [showStats, setShowStats] = useState(false)
   const [stats, setStats] = useState([])
-  const [permRequest, setPermRequest] = useState(null)
-  const [recoveryPrompts, setRecoveryPrompts] = useState([]) // Array of {session_id, bot_name, message, ...}
-  const [awaySummary, setAwaySummary] = useState(null)
   const [personalSummary, setPersonalSummary] = useState(null)
   const [loadingRecap, setLoadingRecap] = useState(false)
   const [aiSuggestions, setAiSuggestions] = useState([])
   const [suggestionsLoading, setSuggestionsLoading] = useState(false)
-  const personalRecapAt = useRef({}) // groupId -> last fetch ts（10s 防抖，避免频繁触发 LLM）
+
+  const personalRecapAt = useRef({})
   const { notify } = useNotifications()
   const bottomRef = useRef(null)
-
-  // State for AI thinking and tool progress blocks (temporary, not stored in messages)
-  const [thoughtBlocks, setThoughtBlocks] = useState({}) // temp_id -> { iteration, content, completed }
-  const [toolProgressBlocks, setToolProgressBlocks] = useState({}) // temp_id -> { tool_name, args, iteration, duration_sec }
 
   const handleFetchAiSuggestions = async () => {
     if (!activeGroupId || suggestionsLoading) return
@@ -288,177 +304,10 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
     }
   }, [loadMore])
 
-  const syncCache = (updater) => {
-    setMessagesCache(prev => {
-      const cur = prev[activeGroupId]
-      if (!cur) return prev
-      return { ...prev, [activeGroupId]: { ...cur, messages: updater(cur.messages) } }
-    })
-  }
+  const handleWsMessage = useCallback((data) => {
+    dispatchWsEvent(data, notify)
+  }, [dispatchWsEvent, notify])
 
-  const handleWsMessage = (data) => {
-    window.dispatchEvent(new CustomEvent('ws_bot_event', { detail: data }))
-    if (data.type === 'typing') {
-      setTyping({ sender_name: data.sender_name, avatar_color: data.avatar_color })
-    } else if (data.type === 'message') {
-      setTyping(null)
-      // Dedup by id: a reconnect / duplicate broadcast can deliver the same
-      // message twice, which would otherwise render it twice.
-      setMessages((prev) => prev.some(m => m.id === data.id) ? prev : [...prev, data])
-      syncCache(msgs => msgs.some(m => m.id === data.id) ? msgs : [...msgs, data])
-      if (data.member_id !== activeMemberId) notify(data.sender_name, data.content)
-    } else if (data.type === 'stream_start') {
-      setTyping(null)
-      setMessages(prev => [...prev, {
-        temp_id: data.temp_id,
-        member_id: data.member_id,
-        sender_name: data.sender_name,
-        sender_type: data.sender_type,
-        avatar_color: data.avatar_color,
-        content: '',
-        streaming: true,
-      }])
-    } else if (data.type === 'stream_chunk') {
-      setMessages(prev => prev.map(m =>
-        m.temp_id === data.temp_id ? { ...m, content: m.content + data.delta } : m
-      ))
-    } else if (data.type === 'stream_end') {
-      const finalize = ms => ms.map(m =>
-        m.temp_id === data.temp_id
-          ? { ...m, id: data.id, created_at: data.created_at, streaming: false, temp_id: undefined }
-          : m
-      )
-      setMessages(finalize)
-      syncCache(finalize)
-      if (data.member_id !== activeMemberId) notify(data.sender_name, data.preview)
-    } else if (data.type === 'compaction') {
-      const marker = {
-        _compact_marker: true,
-        id: `compact-${Date.now()}`,
-        strategy: data.strategy,
-        message: data.message,
-      }
-      setMessages(prev => [...prev, marker])
-    } else if (data.type === 'stream_aborted') {
-      setMessages(prev => prev.filter(m => m.temp_id !== data.temp_id))
-    } else if (data.type === 'permission_request') {
-      setPermRequest(data)
-    } else if (data.type === 'recovery_prompt') {
-      setRecoveryPrompts(prev => {
-        if (prev.find(p => p.session_id === data.session_id)) return prev
-        return [...prev, data]
-      })
-    } else if (data.type === 'stream_error') {
-      setMessages(prev => prev.filter(m => m.temp_id !== data.temp_id))
-      setError(data.message)
-      setTimeout(() => setError(null), 5000)
-    } else if (data.type === 'group_updated') {
-      setGroup(prev => prev ? { ...prev, name: data.name, announcement: data.announcement } : prev)
-      setGroups(prev => prev.map(g => g.id === data.id ? { ...g, name: data.name } : g))
-    } else if (data.type === 'reaction_updated') {
-      setReactionMap(prev => ({ ...prev, [String(data.message_id)]: data.reactions }))
-    } else if (data.type === 'message_edited') {
-      const applyEdit = ms => ms.map(m => m.id === data.id ? { ...m, content: data.content, edited: true } : m)
-      setMessages(applyEdit)
-      syncCache(applyEdit)
-    } else if (data.type === 'message_deleted') {
-      const applyDel = ms => ms.map(m => m.id === data.id ? { ...m, is_deleted: true } : m)
-      setMessages(applyDel)
-      syncCache(applyDel)
-    } else if (data.type === 'error') {
-      setError(data.message)
-      setTimeout(() => setError(null), 5000)
-    } else if (data.type === 'pins_updated') {
-      setPins(data.pins)
-    } else if (data.type === 'recap_updated') {
-      if (data.group_id === activeGroupId) {
-        setAwaySummary(data.away_summary)
-      }
-    } else if (data.type === 'read') {
-      setReadMap((prev) => ({ ...prev, [data.member_id]: data.last_read_id }))
-    } else if (data.type === 'online_members') {
-      setOnlineSet(new Set(data.member_ids))
-    } else if (data.type === 'presence') {
-      setOnlineSet(prev => {
-        const next = new Set(prev)
-        data.online ? next.add(data.member_id) : next.delete(data.member_id)
-        return next
-      })
-    } else if (data.type === 'member_removed') {
-      setMembers(prev => prev.filter(m => m.id !== data.member_id))
-      setMembersCache(prev => ({
-        ...prev,
-        [activeGroupId]: (prev[activeGroupId] || []).filter(m => m.id !== data.member_id)
-      }))
-      setGroups(prev => prev.map(g =>
-        g.id === activeGroupId ? { ...g, member_count: Math.max(0, (g.member_count ?? 1) - 1) } : g
-      ))
-    } else if (data.type === 'workflow_update') {
-      setWorkflow(data.active ? data : null)
-    } else if (data.type === 'skills_loaded') {
-      setMessages(prev => prev.map(m =>
-        m.temp_id === data.temp_id ? { ...m, skills_loaded: data.skills } : m
-      ))
-    } else if (data.type === 'skills_changed') {
-      window.dispatchEvent(new CustomEvent('skills_changed', { detail: data }))
-    } else if (data.type === 'skill_draft_added') {
-      window.dispatchEvent(new CustomEvent('skills_changed', { detail: { ...data, source: 'bot' } }))
-      if (data.member_id) {
-        setSkillDraftBots(prev => new Set([...prev, data.member_id]))
-      }
-    } else if (data.type === 'ai_thought_start') {
-      setThoughtBlocks(prev => ({
-        ...prev,
-        [data.temp_id]: {
-          ...prev[data.temp_id],
-          [data.iteration]: {
-            iteration: data.iteration,
-            content: '',
-            completed: false,
-          },
-        },
-      }))
-    } else if (data.type === 'ai_thought_delta') {
-      setThoughtBlocks(prev => ({
-        ...prev,
-        [data.temp_id]: {
-          ...prev[data.temp_id],
-          [data.iteration]: {
-            ...prev[data.temp_id]?.[data.iteration],
-            content: (prev[data.temp_id]?.[data.iteration]?.content || '') + data.delta,
-          },
-        },
-      }))
-    } else if (data.type === 'ai_thought_end') {
-      setThoughtBlocks(prev => ({
-        ...prev,
-        [data.temp_id]: {
-          ...prev[data.temp_id],
-          [data.iteration]: {
-            ...prev[data.temp_id]?.[data.iteration],
-            completed: true,
-          },
-        },
-      }))
-    } else if (data.type === 'tool_progress_start') {
-      setToolProgressBlocks(prev => ({
-        ...prev,
-        [`${data.temp_id}-${data.tool_name}`]: {
-          tool_name: data.tool_name,
-          args: data.tool_args,
-          iteration: data.iteration,
-          duration_sec: undefined,
-        },
-      }))
-    } else if (data.type === 'tool_progress_end') {
-      setToolProgressBlocks(prev => ({
-        ...prev,
-        [`${data.temp_id}-${data.tool_name}`]: {
-          ...prev[`${data.temp_id}-${data.tool_name}`],
-          duration_sec: data.duration_sec,
-        },
-      }))
-  }
 
 
   const handleReconnect = useCallback(async () => {
@@ -477,7 +326,7 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
           const uniqueNewer = newer.filter(m => !existingIds.has(m.id))
           return [...prev, ...uniqueNewer]
         })
-        syncCache(msgs => {
+        useChatStore.getState().syncCache(activeGroupId, (msgs) => {
           const existingIds = new Set(msgs.map(m => m.id))
           const uniqueNewer = newer.filter(m => !existingIds.has(m.id))
           return [...msgs, ...uniqueNewer]
