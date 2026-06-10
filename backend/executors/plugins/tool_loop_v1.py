@@ -612,7 +612,7 @@ class ToolLoopRunner:
             })
         return tool_result
 
-    async def _execute_parallel_tools(self, calls):
+    async def _execute_parallel_tools(self, calls, iteration=None):
         for call in calls:
             await self.ctx.interaction.broadcast(self.ctx.group_id, {
                 "type": "tool_call", "temp_id": self.temp_id,
@@ -660,7 +660,7 @@ class ToolLoopRunner:
                 "session_id": self.session_id,
             })
 
-    async def _execute_serial_tools(self, calls):
+    async def _execute_serial_tools(self, calls, iteration=None):
         for call in calls:
             await self.ctx.interaction.broadcast(self.ctx.group_id, {
                 "type": "tool_call", "temp_id": self.temp_id,

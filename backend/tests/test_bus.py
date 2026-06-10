@@ -45,6 +45,8 @@ class TestEventRegistry(unittest.TestCase):
             "message", "read", "presence", "typing", "error",
             "steer_queued", "followup_start", "steer_injected", "rewake_injected",
             "tool_call", "tool_result",
+            "tool_progress_start", "tool_progress_running", "tool_progress_end",
+            "ai_thought_start", "ai_thought_delta", "ai_thought_end",
             "react_thought", "react_action", "react_observation",
             "workflow_update", "workflow_paused",
             "compaction", "compaction_triggered", "compaction_completed", "skills_loaded",
