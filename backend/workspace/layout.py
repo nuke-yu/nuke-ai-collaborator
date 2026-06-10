@@ -23,6 +23,13 @@ def group_runs_dir(gid: int) -> Path:
     return group_dir(gid) / "runs"
 
 
-def bot_dir(bot_id: int) -> Path:
-    # Phase 1: 扁平兼容。Phase 2 改签名为 bot_dir(gid, bot_id) → 嵌套。
-    return WORKSPACE_ROOT / f"bot_{bot_id}"
+def bot_dir(gid: int | None, bot_id: int) -> Path:
+    """bot 私有区路径。
+
+    gid 显式给出 → 嵌套 group_{gid}/bots/bot_{id}（正路）。
+    gid is None → 过渡垫片，走旧扁平路径 bot_{id}（Task 4-9 期间保持系统可跑，
+    Task 10 移除垫片，强制显式 gid）。
+    """
+    if gid is None:
+        return WORKSPACE_ROOT / f"bot_{bot_id}"
+    return group_dir(gid) / "bots" / f"bot_{bot_id}"

@@ -13,7 +13,7 @@ def bot_ws(bot_id: int) -> Path:
     """Return bot workspace path (no mkdir — caller is responsible)."""
     # 委托 layout（单一布局真相源）。函数内 import 避免与 layout 的循环依赖。
     from workspace import layout
-    return layout.bot_dir(bot_id)
+    return layout.bot_dir(None, bot_id)
 
 
 def group_ws(group_id: int) -> Path:
