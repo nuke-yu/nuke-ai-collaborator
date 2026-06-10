@@ -70,6 +70,7 @@ class MCPCollector:
         from executors.providers.mcp_auth_flows import MCPAuthFlows
         self._flows = MCPAuthFlows()
         self._auth_inflight: set = set()       # servers with an in-progress OAuth flow
+        self._auth_locks: dict[str, asyncio.Lock] = {}  # per-server lock for OAuth race condition protection
 
     async def _init_providers(self) -> None:
         import os
@@ -258,29 +259,34 @@ class MCPCollector:
 
         prov = self._find_provider(server)
         if prov is None or not prov.url:
-            await reply(f"[MCP认证] 未找到 remote server '{server}'（仅 remote+oauth 适用）", True)
+            await reply(f"[MCP 认证] 未找到 remote server '{server}'（仅 remote+oauth 适用）", True)
             return
-        # Per-server guard: a concurrent MCP_AUTH_START for the same server would
-        # race set_auth()/initialize(). Check-and-set is atomic (no await between).
-        if server in self._auth_inflight:
-            await reply(f"[MCP认证] '{server}' 的授权正在进行中，请使用之前返回的链接完成", True)
-            return
-        self._auth_inflight.add(server)
-        spawned = False
-        try:
-            prov.set_auth(await self._build_auth_provider(prov, server))
-            url_fut = self._flows.begin(server)
-            t = asyncio.create_task(self._reinit_with_auth(prov, server))
-            self._tasks.add(t); t.add_done_callback(self._tasks.discard)
-            spawned = True   # the reinit task now owns releasing _auth_inflight
-            url = await asyncio.wait_for(url_fut, timeout=60)
-            await reply(f"请在浏览器打开以下链接完成 '{server}' 的授权，完成后工具会自动可用：\n{url}", False)
-        except Exception as e:
-            self._flows.fail(server, str(e))
-            await reply(f"[MCP认证错误] {e}", True)
-        finally:
-            if not spawned:
-                self._auth_inflight.discard(server)   # flow never started → release now
+
+        # Use per-server lock to prevent race condition in OAuth flow initiation
+        # (fix for DFT-008: MCP_AUTH_START 并发锁非原子问题)
+        lock = self._auth_locks.setdefault(server, asyncio.Lock())
+        async with lock:
+            # Double-check after acquiring lock
+            if server in self._auth_inflight:
+                await reply(f"[MCP 认证] '{server}' 的授权正在进行中，请使用之前返回的链接完成", True)
+                return
+
+            self._auth_inflight.add(server)
+            spawned = False
+            try:
+                prov.set_auth(await self._build_auth_provider(prov, server))
+                url_fut = self._flows.begin(server)
+                t = asyncio.create_task(self._reinit_with_auth(prov, server))
+                self._tasks.add(t); t.add_done_callback(self._tasks.discard)
+                spawned = True   # the reinit task now owns releasing _auth_inflight
+                url = await asyncio.wait_for(url_fut, timeout=60)
+                await reply(f"请在浏览器打开以下链接完成 '{server}' 的授权，完成后工具会自动可用：\n{url}", False)
+            except Exception as e:
+                self._flows.fail(server, str(e))
+                await reply(f"[MCP 认证错误] {e}", True)
+            finally:
+                if not spawned:
+                    self._auth_inflight.discard(server)   # flow never started → release now
 
     async def run(self) -> None:
         await self._init_providers()
