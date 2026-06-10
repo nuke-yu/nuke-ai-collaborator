@@ -120,6 +120,39 @@ class TestEstimateTokens(unittest.TestCase):
         self.assertGreater(result, 400)
 
 
+class TestEstimateTokensIncremental(unittest.TestCase):
+    """DFT-030: incremental cache in estimate_tokens."""
+
+    def setUp(self):
+        compact._token_cache.clear()
+
+    def test_cache_hit_on_second_call(self):
+        msgs = [_user("hello"), _asst("world")]
+        t1 = compact.estimate_tokens(msgs)
+        self.assertIn(id(msgs), compact._token_cache)
+        t2 = compact.estimate_tokens(msgs)
+        self.assertEqual(t1, t2)
+
+    def test_incremental_one_append_matches_full_recompute(self):
+        msgs = [_user("hello")]
+        compact.estimate_tokens(msgs)  # seed cache
+        msgs.append(_asst("world " * 20))
+        t_incr = compact.estimate_tokens(msgs)
+        # full recompute on a different list object with the same content
+        compact._token_cache.clear()
+        t_full = compact.estimate_tokens(list(msgs))
+        self.assertEqual(t_incr, t_full)
+
+    def test_new_list_object_does_full_recompute(self):
+        msgs1 = [_user("hello")]
+        msgs2 = [_user("hello")]  # different object, same content
+        t1 = compact.estimate_tokens(msgs1)
+        t2 = compact.estimate_tokens(msgs2)
+        self.assertEqual(t1, t2)
+        self.assertIn(id(msgs1), compact._token_cache)
+        self.assertIn(id(msgs2), compact._token_cache)
+
+
 class TestInjectContextAfterCompact(unittest.TestCase):
 
     def test_empty_context_returns_unchanged(self):

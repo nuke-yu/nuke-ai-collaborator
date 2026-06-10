@@ -70,6 +70,12 @@ _compaction_failures: dict[int, int] = {}
 # DB-level compaction concurrency guard
 _db_compaction_locks: set[int] = set()
 
+# Incremental token estimation cache: id(list) → (len, total_chars, last_ver)
+# last_ver = first-32-chars of last message content, used to detect id() reuse
+# (CPython may reuse the same memory address after a list is garbage-collected).
+_token_cache: dict[int, tuple[int, int, str]] = {}
+_TOKEN_CACHE_MAX = 32
+
 
 # ---------------------------------------------------------------------------
 # Token estimation & threshold helpers
@@ -87,19 +93,51 @@ def _content_chars(content) -> int:
     return len(str(content))
 
 
+def _msg_verifier(m: dict) -> str:
+    """First 32 chars of content — cheap sentinel to detect id() reuse."""
+    c = m.get("content") or ""
+    return c[:32] if isinstance(c, str) else str(c)[:32]
+
+
+def _message_chars(m: dict) -> int:
+    """Raw char count for one message (before the /4 scaling)."""
+    return _content_chars(m.get("content")) + len(m.get("name") or "") + _PER_MESSAGE_OVERHEAD
+
+
 def estimate_tokens(messages: list[dict]) -> int:
     """Coarse token estimate ≈ serialised char length / 4.
 
-    Sums per-message content length plus a small structural overhead instead of
-    json.dumps-ing the whole array on every call. estimate_tokens runs several
-    times per turn (snip, auto-compact, session-memory, db-compaction); the old
-    full-array json.dumps allocated and escaped one giant string each time.
+    Uses an incremental cache keyed by list identity + length. When the same
+    list grows by one message (the common case each tool-loop iteration), only
+    the new message is measured instead of iterating the whole list.
+    The last_ver sentinel guards against CPython id() reuse after GC.
+    estimate_tokens runs several times per turn (snip, auto-compact,
+    session-memory, db-compaction).
     """
-    total = 0
-    for m in messages:
-        total += _content_chars(m.get("content"))
-        total += len(m.get("name") or "") + _PER_MESSAGE_OVERHEAD
-    return total // 4
+    key = id(messages)
+    n = len(messages)
+    cached = _token_cache.get(key)
+    if cached is not None:
+        cached_n, cached_chars, cached_ver = cached
+        if cached_n == n:
+            curr_ver = _msg_verifier(messages[-1]) if n > 0 else ""
+            if curr_ver == cached_ver:
+                return cached_chars // 4
+        elif cached_n == n - 1:
+            # One message appended: verify the previous last element is unchanged
+            prev_ver = _msg_verifier(messages[-2]) if n >= 2 else ""
+            if prev_ver == cached_ver:
+                new_chars = cached_chars + _message_chars(messages[-1])
+                _token_cache[key] = (n, new_chars, _msg_verifier(messages[-1]))
+                return new_chars // 4
+
+    total_chars = sum(_message_chars(m) for m in messages)
+    if len(_token_cache) >= _TOKEN_CACHE_MAX:
+        for k in list(_token_cache)[: _TOKEN_CACHE_MAX // 2]:
+            del _token_cache[k]
+    ver = _msg_verifier(messages[-1]) if messages else ""
+    _token_cache[key] = (n, total_chars, ver)
+    return total_chars // 4
 
 
 def inject_context_after_compact(
