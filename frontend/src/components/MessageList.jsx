@@ -1,5 +1,7 @@
 import { Fragment } from 'react'
 import MessageBubble from './MessageBubble'
+import AIThoughtBlock from './AIThoughtBlock'
+import ToolProgressBlock from './ToolProgressBlock'
 
 export default function MessageList({
   messages,
@@ -20,7 +22,9 @@ export default function MessageList({
   onReact,
   onPin,
   onUnpin,
-  onConfirmGate
+  onConfirmGate,
+  thoughtBlocks = {},
+  toolProgressBlocks = {},
 }) {
   return (
     <div
@@ -94,6 +98,26 @@ export default function MessageList({
                 <div className="flex-1 h-px bg-gray-800" />
               </div>
             )}
+            {msg.temp_id && thoughtBlocks[msg.temp_id] && Object.entries(thoughtBlocks[msg.temp_id]).map(([iter, thought]) => (
+              <div key={`thought-${iter}`} className="px-4">
+                <AIThoughtBlock tempId={msg.temp_id} iteration={iter}>
+                  {thought.content}
+                </AIThoughtBlock>
+              </div>
+            ))}
+            {msg.temp_id && toolProgressBlocks && Object.entries(toolProgressBlocks)
+              .filter(([key]) => key.startsWith(`${msg.temp_id}-`))
+              .map(([key, tool]) => (
+                <div key={`tool-${key}`} className="px-4">
+                  <ToolProgressBlock
+                    tempId={msg.temp_id}
+                    toolName={tool.tool_name}
+                    args={tool.args}
+                    iteration={tool.iteration}
+                    durationSec={tool.duration_sec}
+                  />
+                </div>
+              ))}
             <div data-msg-id={msg.id}>
               <MessageBubble
                 msg={msg}

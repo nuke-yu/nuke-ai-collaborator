@@ -68,6 +68,10 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
   const { notify } = useNotifications()
   const bottomRef = useRef(null)
 
+  // State for AI thinking and tool progress blocks (temporary, not stored in messages)
+  const [thoughtBlocks, setThoughtBlocks] = useState({}) // temp_id -> { iteration, content, completed }
+  const [toolProgressBlocks, setToolProgressBlocks] = useState({}) // temp_id -> { tool_name, args, iteration, duration_sec }
+
   const handleFetchAiSuggestions = async () => {
     if (!activeGroupId || suggestionsLoading) return
     setSuggestionsLoading(true)
@@ -402,7 +406,58 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
       if (data.member_id) {
         setSkillDraftBots(prev => new Set([...prev, data.member_id]))
       }
-    }
+    } else if (data.type === 'ai_thought_start') {
+      setThoughtBlocks(prev => ({
+        ...prev,
+        [data.temp_id]: {
+          ...prev[data.temp_id],
+          [data.iteration]: {
+            iteration: data.iteration,
+            content: '',
+            completed: false,
+          },
+        },
+      }))
+    } else if (data.type === 'ai_thought_delta') {
+      setThoughtBlocks(prev => ({
+        ...prev,
+        [data.temp_id]: {
+          ...prev[data.temp_id],
+          [data.iteration]: {
+            ...prev[data.temp_id]?.[data.iteration],
+            content: (prev[data.temp_id]?.[data.iteration]?.content || '') + data.delta,
+          },
+        },
+      }))
+    } else if (data.type === 'ai_thought_end') {
+      setThoughtBlocks(prev => ({
+        ...prev,
+        [data.temp_id]: {
+          ...prev[data.temp_id],
+          [data.iteration]: {
+            ...prev[data.temp_id]?.[data.iteration],
+            completed: true,
+          },
+        },
+      }))
+    } else if (data.type === 'tool_progress_start') {
+      setToolProgressBlocks(prev => ({
+        ...prev,
+        [`${data.temp_id}-${data.tool_name}`]: {
+          tool_name: data.tool_name,
+          args: data.tool_args,
+          iteration: data.iteration,
+          duration_sec: undefined,
+        },
+      }))
+    } else if (data.type === 'tool_progress_end') {
+      setToolProgressBlocks(prev => ({
+        ...prev,
+        [`${data.temp_id}-${data.tool_name}`]: {
+          ...prev[`${data.temp_id}-${data.tool_name}`],
+          duration_sec: data.duration_sec,
+        },
+      }))
   }
 
 
@@ -792,6 +847,8 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
           onPin={(id) => pinMessage(activeGroupId, id)}
           onUnpin={(id) => unpinMessage(activeGroupId, id)}
           onConfirmGate={handleConfirmGate}
+          thoughtBlocks={thoughtBlocks}
+          toolProgressBlocks={toolProgressBlocks}
         />
         {isStreaming && (
           <div className="px-4 py-1 flex justify-center">
