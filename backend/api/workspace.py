@@ -21,7 +21,7 @@ async def get_workspace_tree(member_id: int):
         bot = await get_member(db, member_id)
     if not bot or bot["type"] != "bot":
         raise HTTPException(404, "Bot not found")
-    return list_workspace_tree(member_id)
+    return list_workspace_tree(member_id, bot["group_id"])
 
 
 @router.get("/api/members/{member_id}/workspace/file")
@@ -30,7 +30,7 @@ async def get_workspace_file(member_id: int, path: str):
         bot = await get_member(db, member_id)
     if not bot or bot["type"] != "bot":
         raise HTTPException(404, "Bot not found")
-    content = await read_file(member_id, path)
+    content = await read_file(member_id, path, group_id=bot["group_id"])
     if content.startswith("[错误]"):
         raise HTTPException(400, content)
     return {"path": path, "content": content}
@@ -46,7 +46,7 @@ async def put_workspace_file(member_id: int, body: dict):
     content = body.get("content", "")
     if not path:
         raise HTTPException(400, "path required")
-    result = await write_file(member_id, path, content)
+    result = await write_file(member_id, path, content, group_id=bot["group_id"])
     if result.startswith("[错误]"):
         raise HTTPException(400, result)
     return {"ok": True}
@@ -61,10 +61,10 @@ async def make_workspace_dir(member_id: int, body: dict):
     path = (body or {}).get("path", "").strip()
     if not path:
         raise HTTPException(400, "path required")
-    result = await asyncio.to_thread(make_dir, member_id, path)
+    result = await asyncio.to_thread(make_dir, member_id, path, bot["group_id"])
     if result.startswith("[错误]"):
         raise HTTPException(400, result)
-    return {"ok": True, "result": result, "files": list_workspace_tree(member_id)}
+    return {"ok": True, "result": result, "files": list_workspace_tree(member_id, bot["group_id"])}
 
 
 @router.delete("/api/members/{member_id}/workspace/file")
@@ -75,10 +75,10 @@ async def delete_workspace_file(member_id: int, path: str):
         raise HTTPException(404, "Bot not found")
     if not path:
         raise HTTPException(400, "path required")
-    result = await asyncio.to_thread(delete_path, member_id, path)
+    result = await asyncio.to_thread(delete_path, member_id, path, bot["group_id"])
     if not result.startswith("已删除"):
         raise HTTPException(400, result)
-    return {"ok": True, "result": result, "files": list_workspace_tree(member_id)}
+    return {"ok": True, "result": result, "files": list_workspace_tree(member_id, bot["group_id"])}
 
 
 @router.post("/api/members/{member_id}/workspace/init")
@@ -88,7 +88,7 @@ async def init_workspace(member_id: int):
     if not bot or bot["type"] != "bot":
         raise HTTPException(404, "Bot not found")
     await init_bot_workspace(bot)
-    return {"ok": True, "files": list_workspace_tree(member_id)}
+    return {"ok": True, "files": list_workspace_tree(member_id, bot["group_id"])}
 
 
 # ---------------------------------------------------------------------------
@@ -114,7 +114,7 @@ async def set_skill_status(member_id: int, skill_name: str, body: dict):
     new_status = body.get("status")
     if new_status not in ("active", "disabled"):
         raise HTTPException(400, "status must be 'active' or 'disabled'")
-    result = await asyncio.to_thread(update_skill_status, member_id, skill_name, new_status)
+    result = await asyncio.to_thread(update_skill_status, member_id, skill_name, new_status, bot["group_id"])
     return {"ok": True, "message": result}
 
 
@@ -124,7 +124,7 @@ async def approve_skill(member_id: int, skill_name: str):
         bot = await get_member(db, member_id)
     if not bot or bot["type"] != "bot":
         raise HTTPException(404, "Bot not found")
-    result = await asyncio.to_thread(approve_draft_skill, member_id, skill_name)
+    result = await asyncio.to_thread(approve_draft_skill, member_id, skill_name, bot["group_id"])
     if result.startswith("["):
         raise HTTPException(404, result)
     return {"ok": True, "message": result}
@@ -154,9 +154,9 @@ async def test_skill(member_id: int, skill_name: str, body: dict):
         from skills.constants import ROLES_ROOT as _ROLES
         sdir = _ROLES / bot["role"] / "skills"
     elif layer == "learned":
-        sdir = _skills_bot_ws(member_id) / "skills" / "learned" / "active"
+        sdir = _skills_bot_ws(member_id, bot["group_id"]) / "skills" / "learned" / "active"
     else:
-        sdir = _skills_bot_ws(member_id) / "skills"
+        sdir = _skills_bot_ws(member_id, bot["group_id"]) / "skills"
     path, kind = skill_path(sdir, skill_name)
     if path is None or kind != "md":
         raise HTTPException(404, "技能文件未找到")
@@ -183,7 +183,7 @@ async def get_file_history(member_id: int, path: str):
         bot = await get_member(db, member_id)
     if not bot or bot["type"] != "bot":
         raise HTTPException(404, "Bot not found")
-    return {"path": path, "versions": list_file_history(member_id, path)}
+    return {"path": path, "versions": list_file_history(member_id, path, bot["group_id"])}
 
 
 @router.get("/api/members/{member_id}/workspace/history/version")
@@ -192,7 +192,7 @@ async def get_history_version(member_id: int, path: str, ts: str):
         bot = await get_member(db, member_id)
     if not bot or bot["type"] != "bot":
         raise HTTPException(404, "Bot not found")
-    content = read_file_history_version(member_id, path, ts)
+    content = read_file_history_version(member_id, path, ts, bot["group_id"])
     if content.startswith("[错误]") or content.startswith("[版本不存在]"):
         raise HTTPException(404, content)
     return {"path": path, "ts": ts, "content": content}
@@ -204,7 +204,7 @@ async def reject_skill(member_id: int, skill_name: str):
         bot = await get_member(db, member_id)
     if not bot or bot["type"] != "bot":
         raise HTTPException(404, "Bot not found")
-    result = await asyncio.to_thread(reject_draft_skill, member_id, skill_name)
+    result = await asyncio.to_thread(reject_draft_skill, member_id, skill_name, bot["group_id"])
     if result.startswith("["):
         raise HTTPException(404, result)
     return {"ok": True, "message": result}
