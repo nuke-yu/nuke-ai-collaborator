@@ -22,6 +22,13 @@ AUTOCOMPACT_BUFFER_TOKENS = 13_000
 PRE_RUN_TOKEN_THRESHOLD = 20_000
 DB_COMPACTION_TOKEN_THRESHOLD = 30_000
 
+# --- Observability (DFT-032) ---
+# /metrics is enabled by default for internal Prometheus scraping. Set
+# NUKE_METRICS_TOKEN to require `Authorization: Bearer <token>` (use when the
+# endpoint is reachable beyond a trusted network); leave unset for internal-only.
+METRICS_ENABLED = os.environ.get("NUKE_METRICS_ENABLED", "1") != "0"
+METRICS_TOKEN = os.environ.get("NUKE_METRICS_TOKEN") or None
+
 # --- Environment overrides ---
 if os.environ.get("NUKE_DEBUG"):
     DOOM_LOOP_THRESHOLD = 100

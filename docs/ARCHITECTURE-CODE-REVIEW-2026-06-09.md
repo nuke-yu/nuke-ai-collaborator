@@ -636,7 +636,7 @@ if (evt.data === 'auth_error') {
 |----|------|--------|------|------|
 | DFT-030 | `executors/compact.py` | 增量 token 估算（当前全量重算） | 性能 | ❌ 仍是 defect |
 | DFT-031 | `permissions/` | 规则匹配无 LRU 缓存 | 性能 | ❌ 仍是 defect |
-| DFT-032 | `runtime/supervisor.py` | 无 Prometheus 进程监控 | 可观测性 | ❌ 仍是 defect |
+| DFT-032 | `runtime/supervisor.py` | 无 Prometheus 进程监控 | 可观测性 | ✅ 已修复（`runtime/metrics.py` pull-time collector + `GET /metrics`；进程存活/重启/RSS/CPU + worker 心跳新鲜度）|
 | DFT-033 | `runtime/supervisor.py` | 结构化日志（worker 有，supervisor 无） | 调试效率 | ✅ 已修复（`start()` 调用 `setup_structured_logging`） |
 | DFT-034 | `db/migrations.py` | 迁移无 rollback SQL，仅正向 DDL | 可回滚性 | ✅ 已修复（migration_001~018 docstring 均补充 Rollback SQL 注释） |
 | DFT-035 | `ai/client.py:101-111` | embedding 硬编码 DeepSeek `text-embedding-v2` | 灵活性 | ❌ 仍是 defect |

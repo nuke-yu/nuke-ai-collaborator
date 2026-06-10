@@ -42,7 +42,11 @@ class Supervisor:
         self._on_unread = on_unread              # async (group_id, payload) -> None
         self._server = None
         self._num_workers = kwargs.get("num_workers", 0)
-        self._processes: list[asyncio.subprocess.Process] = []
+        # DFT-032: carry the child's label alongside the handle so the metrics
+        # collector can attribute RSS/CPU/liveness per worker/collector.
+        self._processes: list[tuple[str, asyncio.subprocess.Process]] = []
+        self._restart_counts: dict[str, int] = {}      # label -> restart count
+        self._worker_stats_ts: dict[str, float] = {}   # worker_id -> last STATS_REPORT epoch
         self._stopping = False
         self._monitor_tasks: set[asyncio.Task] = set()
         # Latest MCP tool-schema snapshot pushed by the collector; cached so a
@@ -80,17 +84,22 @@ class Supervisor:
 
     async def _run_process_loop(self, label: str, cmd: list) -> None:
         """Spawn a subprocess and restart it with exponential backoff on crash."""
+        # DFT-032: seed the counter to 0 so the series exists before any restart.
+        self._restart_counts.setdefault(label, 0)
         backoff = 1.0
         while not self._stopping:
             proc = None
             try:
                 proc = await asyncio.create_subprocess_exec(*cmd)
-                self._processes.append(proc)
+                entry = (label, proc)
+                self._processes.append(entry)
                 log.info("supervisor: started %s (pid=%d)", label, proc.pid)
                 await proc.wait()
-                self._processes.remove(proc)
+                self._processes.remove(entry)
                 if self._stopping:
                     break
+                # DFT-032: count the restart (the loop is about to re-spawn).
+                self._restart_counts[label] = self._restart_counts.get(label, 0) + 1
                 log.warning("supervisor: %s exited (code=%d), restarting in %.0fs",
                             label, proc.returncode, backoff)
             except asyncio.CancelledError:
@@ -115,14 +124,15 @@ class Supervisor:
         self._monitor_tasks.clear()
 
         # 2. Kill worker processes
-        for proc in self._processes:
+        for _label, proc in self._processes:
             try:
                 proc.terminate()
             except Exception:
                 pass
 
         if self._processes:
-            await asyncio.gather(*(proc.wait() for proc in self._processes), return_exceptions=True)
+            await asyncio.gather(*(proc.wait() for _label, proc in self._processes),
+                                 return_exceptions=True)
         self._processes.clear()
 
         # 2. Close IPC connections
@@ -195,7 +205,9 @@ class Supervisor:
                     payload = frame.get("payload", {})
                     wid = payload.get("worker_id")
                     if wid:
+                        import time
                         self._worker_stats[wid] = payload
+                        self._worker_stats_ts[wid] = time.time()  # DFT-032 heartbeat freshness
                 elif t == ipc.protocol.LEASE_RELEASED:
                     fut = self._pending_handoffs.get(gid)
                     if fut and not fut.done():

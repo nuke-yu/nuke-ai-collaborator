@@ -3,7 +3,7 @@ import dataclasses
 import asyncio
 import os
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
@@ -155,6 +155,27 @@ async def system_status():
         "permissions": permissions.pending_stats(),
         "supervisor": sup_stats,
     }
+@app.get("/metrics")
+async def metrics(request: Request):
+    """DFT-032: Prometheus exposition for the Supervisor process fleet.
+
+    Single scrape target — the Supervisor is the sole aggregator of fleet state,
+    and workers are IPC-only subprocesses with no HTTP server of their own.
+    """
+    from core import config as _cfg
+    from runtime import metrics as _metrics
+    if not _cfg.METRICS_ENABLED:
+        return Response(status_code=404)
+    if _cfg.METRICS_TOKEN:
+        auth_header = request.headers.get("authorization", "")
+        if auth_header != f"Bearer {_cfg.METRICS_TOKEN}":
+            return Response(status_code=401)
+    if sup_mod.supervisor is None:
+        return Response(status_code=503)
+    body, content_type = _metrics.render_metrics(sup_mod.supervisor)
+    return Response(content=body, media_type=content_type)
+
+
 # ── WebSocket Shell (The Gateway) ────────────────────────────────────────
 
 class WSClientProxy:

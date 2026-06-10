@@ -1,0 +1,158 @@
+"""DFT-032: Prometheus process monitoring for the Supervisor fleet.
+
+The Supervisor is the single entry process and the sole aggregator of fleet
+state (V3 §10.1): it holds the subprocess handles (`_processes`), the live IPC
+connections (`_workers`), the worker-pushed app stats (`_worker_stats`), and the
+browser registry (`_browsers`). Workers are pure IPC subprocesses with no HTTP
+server of their own, so rather than scraping each worker, we expose ONE
+`/metrics` endpoint on the Supervisor process and let this collector read that
+authoritative state at scrape time (pull-based) — no double bookkeeping.
+
+The only genuinely event-driven metric is the restart counter, which the
+Supervisor increments in `_run_process_loop` when a child is restarted.
+
+Process-level RSS/CPU are read via psutil against the PIDs the Supervisor
+already tracks; any pid that has gone away is simply skipped.
+"""
+import logging
+
+from prometheus_client import CollectorRegistry, generate_latest, CONTENT_TYPE_LATEST
+from prometheus_client.core import GaugeMetricFamily, CounterMetricFamily
+
+try:
+    import psutil
+except Exception:  # pragma: no cover - psutil is a hard dep, but stay defensive
+    psutil = None
+
+log = logging.getLogger(__name__)
+
+
+def _dig(d, *keys, default=0):
+    """Best-effort nested lookup tolerant of missing keys / non-dicts."""
+    cur = d
+    for k in keys:
+        if not isinstance(cur, dict):
+            return default
+        cur = cur.get(k)
+        if cur is None:
+            return default
+    return cur
+
+
+class SupervisorCollector:
+    """A prometheus_client custom collector that snapshots a Supervisor.
+
+    Reads only via getattr with defaults so it tolerates a partially-initialised
+    Supervisor (e.g. during startup) without raising at scrape time.
+    """
+
+    def __init__(self, supervisor):
+        self._sup = supervisor
+
+    def collect(self):
+        sup = self._sup
+        import time
+
+        processes = list(getattr(sup, "_processes", []) or [])
+        restart_counts = dict(getattr(sup, "_restart_counts", {}) or {})
+        workers = dict(getattr(sup, "_workers", {}) or {})
+        worker_stats = dict(getattr(sup, "_worker_stats", {}) or {})
+        worker_stats_ts = dict(getattr(sup, "_worker_stats_ts", {}) or {})
+        browsers = dict(getattr(sup, "_browsers", {}) or {})
+
+        # ── supervisor liveness ──────────────────────────────────────────
+        up = GaugeMetricFamily("nuke_supervisor_up", "Supervisor process is serving (1).")
+        up.add_metric([], 1.0)
+        yield up
+
+        # ── process fleet ────────────────────────────────────────────────
+        alive = [(label, proc) for label, proc in processes
+                 if getattr(proc, "returncode", None) is None]
+        nproc = GaugeMetricFamily(
+            "nuke_worker_processes", "Number of live child processes (workers + collector).")
+        nproc.add_metric([], float(len(alive)))
+        yield nproc
+
+        proc_up = GaugeMetricFamily(
+            "nuke_process_up", "Child process is alive (1) keyed by label.", labels=["label"])
+        rss = GaugeMetricFamily(
+            "nuke_process_rss_bytes", "Child process resident set size in bytes.", labels=["label"])
+        cpu = GaugeMetricFamily(
+            "nuke_process_cpu_percent", "Child process CPU percent (instantaneous).", labels=["label"])
+        for label, proc in processes:
+            is_alive = getattr(proc, "returncode", None) is None
+            proc_up.add_metric([label], 1.0 if is_alive else 0.0)
+            pid = getattr(proc, "pid", None)
+            if is_alive and pid is not None and psutil is not None:
+                try:
+                    p = psutil.Process(pid)
+                    rss.add_metric([label], float(p.memory_info().rss))
+                    cpu.add_metric([label], float(p.cpu_percent(interval=None)))
+                except Exception:
+                    # pid vanished between snapshot and read; skip resource lines.
+                    pass
+        yield proc_up
+        yield rss
+        yield cpu
+
+        # ── restart counter (event-driven, incremented by the supervisor) ─
+        restarts = CounterMetricFamily(
+            "nuke_process_restarts",
+            "Total child-process restarts since supervisor start.", labels=["label"])
+        for label, count in restart_counts.items():
+            restarts.add_metric([label], float(count))
+        yield restarts
+
+        # ── IPC connection layer (distinct from "process alive") ──────────
+        connected = GaugeMetricFamily(
+            "nuke_worker_connected",
+            "Child has an active IPC connection to the supervisor (1).", labels=["worker_id"])
+        for wid in workers:
+            connected.add_metric([wid], 1.0)
+        yield connected
+
+        # ── worker-pushed app stats + heartbeat freshness ────────────────
+        bg_tasks = GaugeMetricFamily(
+            "nuke_worker_bg_tasks", "Active background tasks per worker.", labels=["worker_id"])
+        pending = GaugeMetricFamily(
+            "nuke_pending_permissions", "Pending HIL permission requests per worker.", labels=["worker_id"])
+        leases = GaugeMetricFamily(
+            "nuke_active_leases", "Active group leases per worker.", labels=["worker_id"])
+        age = GaugeMetricFamily(
+            "nuke_worker_stats_age_seconds",
+            "Seconds since the worker last reported stats (detects silent hangs).",
+            labels=["worker_id"])
+        now = time.time()
+        for wid, payload in worker_stats.items():
+            bg_tasks.add_metric([wid], float(_dig(payload, "bg", "active")))
+            pending.add_metric([wid], float(_dig(payload, "permissions", "pending")))
+            leases.add_metric([wid], float(_dig(payload, "lifecycle", "active_leases")))
+            ts = worker_stats_ts.get(wid)
+            if ts is not None:
+                age.add_metric([wid], max(0.0, now - ts))
+        yield bg_tasks
+        yield pending
+        yield leases
+        yield age
+
+        # ── browser connections per group ────────────────────────────────
+        browsers_g = GaugeMetricFamily(
+            "nuke_browsers_connected", "Browser clients connected per group.", labels=["group_id"])
+        for gid, clients in browsers.items():
+            try:
+                n = len(clients)
+            except Exception:
+                n = 0
+            browsers_g.add_metric([str(gid)], float(n))
+        yield browsers_g
+
+
+def render_metrics(supervisor):
+    """Render the Prometheus exposition for one supervisor snapshot.
+
+    Uses a fresh registry per call so the pull-based collector reads live state
+    and nothing leaks across scrapes. Returns (body_bytes, content_type).
+    """
+    registry = CollectorRegistry()
+    registry.register(SupervisorCollector(supervisor))
+    return generate_latest(registry), CONTENT_TYPE_LATEST
