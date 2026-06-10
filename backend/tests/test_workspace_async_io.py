@@ -68,11 +68,19 @@ class TestWorkspaceFileOffload(unittest.IsolatedAsyncioTestCase):
 
     async def asyncSetUp(self):
         self._tmp = tempfile.TemporaryDirectory()
-        self._patcher = patch.object(ws, "WORKSPACE_ROOT", Path(self._tmp.name).resolve())
-        self._patcher.start()
+        # 路径真相源是 skills.constants.WORKSPACE_ROOT（layout 实时读取它）；
+        # 同时保留 ws.WORKSPACE_ROOT 以覆盖 workspace 内直接引用（archive_run 等）。
+        root = Path(self._tmp.name).resolve()
+        self._patchers = [
+            patch("skills.constants.WORKSPACE_ROOT", root),
+            patch.object(ws, "WORKSPACE_ROOT", root),
+        ]
+        for p in self._patchers:
+            p.start()
 
     async def asyncTearDown(self):
-        self._patcher.stop()
+        for p in self._patchers:
+            p.stop()
         self._tmp.cleanup()
 
     async def test_read_file_runs_off_loop_thread(self):

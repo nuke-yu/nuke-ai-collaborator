@@ -18,7 +18,7 @@ from workspace import _get_effective_ws, layout
 class TestWorkspaceRedirect(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
-        self._p = patch.object(layout, "WORKSPACE_ROOT", Path(self._tmp.name))
+        self._p = patch("skills.constants.WORKSPACE_ROOT", Path(self._tmp.name).resolve())
         self._p.start()
 
     def tearDown(self):

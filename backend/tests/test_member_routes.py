@@ -18,6 +18,10 @@ TEST_WORKSPACES_ROOT = Path(os.path.dirname(os.path.dirname(os.path.abspath(__fi
 
 database.DB_PATH = TEST_DB_PATH
 workspace.WORKSPACE_ROOT = TEST_WORKSPACES_ROOT
+# 路径真相源：layout 实时读取 skills.constants.WORKSPACE_ROOT，必须同步重定向，
+# 否则 init_bot_workspace 会把 bot 目录写进真实仓库目录。
+import skills.constants as _skill_const
+_skill_const.WORKSPACE_ROOT = TEST_WORKSPACES_ROOT
 
 from main import app
 from httpx import AsyncClient
