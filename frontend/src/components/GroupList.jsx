@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react'
 import AutoReplyModal from './AutoReplyModal'
+import { useGroupStore } from '../store/groupStore'
+import { useChatStore } from '../store/chatStore'
 
 const THEMES = [
   { id: 'default-dark', name: '默认暗黑', icon: '🌙' },
@@ -11,16 +13,18 @@ const THEMES = [
 ]
 
 export default function GroupList({
-  groups, activeGroupId, unreadCounts = {},
   onSelect, onCreateGroup, onOpenTemplates, onOpenApiKeys,
   membersCache = {}, onOpenAddMember, onRemoveMember, onEditMember, onOpenWorkspace,
   theme = 'default-dark', onThemeChange,
-  onlineSet = new Set(),
   currentMemberId,
   onAutoReplySaved,
   skillDraftBots = new Set(),
   className = '',
 }) {
+  const groups = useGroupStore((s) => s.groups)
+  const activeGroupId = useGroupStore((s) => s.activeGroupId)
+  const unreadCounts = useGroupStore((s) => s.unreadCounts)
+  const onlineSet = useChatStore((s) => s.onlineSet)
   const [creating, setCreating] = useState(false)
   const [newName, setNewName] = useState('')
   const [expandedGroups, setExpandedGroups] = useState(new Set())

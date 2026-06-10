@@ -473,17 +473,12 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
       )}
 
       <GroupList
-        groups={groups}
-        activeGroupId={activeGroupId}
-        unreadCounts={unreadCounts}
-        members={members}
         className={tabClass('groups')}
         onSelect={(id) => { setActiveGroupId(id); setActiveMemberId(null); setMobileTab('chat') }}
         onOpenTemplates={() => setShowTemplates(true)}
         onOpenApiKeys={() => setShowApiKeys(true)}
         theme={theme}
         onThemeChange={onThemeChange}
-        onlineSet={onlineSet}
         currentMemberId={activeMemberId}
         membersCache={membersCache}
         onOpenAddMember={() => setShowAddMember(true)}
@@ -704,16 +699,10 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
         ))}
 
         <MessageList
-          messages={messages}
-          typing={typing}
-          memberId={activeMemberId}
           members={members}
-          readMap={readMap}
-          reactionMap={reactionMap}
           pins={pins}
           highlightedId={highlightedId}
           group={group}
-          onlineSet={onlineSet}
           loadingMore={loadingMore}
           scrollRef={scrollRef}
           bottomRef={bottomRef}
@@ -723,8 +712,6 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
           onPin={(id) => pinMessage(activeGroupId, id)}
           onUnpin={(id) => unpinMessage(activeGroupId, id)}
           onConfirmGate={handleConfirmGate}
-          thoughtBlocks={thoughtBlocks}
-          toolProgressBlocks={toolProgressBlocks}
         />
         {isStreaming && (
           <div className="px-4 py-1 flex justify-center">

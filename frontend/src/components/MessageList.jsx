@@ -2,18 +2,14 @@ import { Fragment } from 'react'
 import MessageBubble from './MessageBubble'
 import AIThoughtBlock from './AIThoughtBlock'
 import ToolProgressBlock from './ToolProgressBlock'
+import { useChatStore } from '../store/chatStore'
+import { useGroupStore } from '../store/groupStore'
 
 export default function MessageList({
-  messages,
-  typing,
-  memberId,
   members,
-  readMap,
-  reactionMap,
   pins,
   highlightedId,
   group,
-  onlineSet,
   loadingMore,
   scrollRef,
   bottomRef,
@@ -23,9 +19,15 @@ export default function MessageList({
   onPin,
   onUnpin,
   onConfirmGate,
-  thoughtBlocks = {},
-  toolProgressBlocks = {},
 }) {
+  const messages = useChatStore((s) => s.messages)
+  const typing = useChatStore((s) => s.typing)
+  const readMap = useChatStore((s) => s.readMap)
+  const reactionMap = useChatStore((s) => s.reactionMap)
+  const onlineSet = useChatStore((s) => s.onlineSet)
+  const thoughtBlocks = useChatStore((s) => s.thoughtBlocks)
+  const toolProgressBlocks = useChatStore((s) => s.toolProgressBlocks)
+  const memberId = useGroupStore((s) => s.activeMemberId)
   return (
     <div
       ref={scrollRef}
