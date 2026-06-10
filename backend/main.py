@@ -2,10 +2,14 @@ import json
 import dataclasses
 import asyncio
 import os
+import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+
+# Import feature flags early to initialize them
+from utils import feature_flags
 
 import db
 import scheduler
@@ -33,7 +37,10 @@ from executors import registry
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """CELL-22: Supervisor lifespan. Manages central DB and Worker fleet."""
-    # 1. Initialize central DB (routing/members/templates)
+    # 1. Initialize feature flags
+    feature_flags.initialize_feature_flags()
+
+    # 2. Initialize central DB (routing/members/templates)
     tracing.setup_structured_logging()
     await db.init_central_db()
 
