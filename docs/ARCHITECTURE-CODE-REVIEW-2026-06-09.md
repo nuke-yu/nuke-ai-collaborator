@@ -610,7 +610,7 @@ if (evt.data === 'auth_error') {
 | ID | 模块 | 改进点 | 收益 | 状态 |
 |----|------|--------|------|------|
 | DFT-010 | `runtime/supervisor.py` | Worker 进程 crash 无自动重启，仅记录异常 | 提高可用性 | ✅ 已修复（`_run_process_loop` 指数退避重启，max 60s） |
-| DFT-011 | `runtime/worker.py` | 断线重连指数退避 | 网络鲁棒性 | ➖ 待确认（协议层未见明确实现） |
+| DFT-011 | `runtime/worker.py` | 断线重连指数退避 | 网络鲁棒性 | ➖ 不需要修（IPC 是 UDS 本地套接字，断连意味着对端进程已死；`Worker.run()` 直接退出，Supervisor 的 `_run_process_loop` 以指数退避重启进程——DFT-010 已覆盖。进程内重连反而会带着 stale 状态重连，不如干净重启）|
 | DFT-012 | `permissions/engine.py:34,37` | `_once_grants` / `_pending` 全局 dict 无 asyncio.Lock | 并发安全 | ✅ 已修复（check 函数关键写入段加 Lock） |
 | DFT-013 | `executors/compact.py:68,71` | `_compaction_failures` / `_db_compaction_locks` 无锁 | 并发安全 | ➖ asyncio 单线程内 await 点间操作原子，实际安全 |
 | DFT-014 | `runtime/mcp_collector.py:303,307` | `_handle_call` 创建 task 无 Semaphore 并发限制 | 防止过载 | ✅ 已修复（`asyncio.Semaphore(10)` 限制并发执行） |
