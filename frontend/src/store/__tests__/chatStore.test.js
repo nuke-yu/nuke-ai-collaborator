@@ -75,6 +75,16 @@ describe('dispatchWsEvent — message events', () => {
     )
     expect(notify).not.toHaveBeenCalled()
   })
+
+  it('message updates messagesCache when entry exists', () => {
+    useChatStore.setState({ messagesCache: { 1: { messages: [] } } })
+    useChatStore.getState().dispatchWsEvent(
+      { type: 'message', id: 10, member_id: 99, sender_name: 'Bot', content: 'hi' },
+      notify
+    )
+    expect(useChatStore.getState().messagesCache[1].messages).toHaveLength(1)
+    expect(useChatStore.getState().messagesCache[1].messages[0].id).toBe(10)
+  })
 })
 
 describe('dispatchWsEvent — streaming', () => {
@@ -99,13 +109,14 @@ describe('dispatchWsEvent — streaming', () => {
   it('stream_end finalizes message with id', () => {
     useChatStore.setState({ messages: [{ temp_id: 'tmp1', content: 'Hello', streaming: true }] })
     useChatStore.getState().dispatchWsEvent(
-      { type: 'stream_end', temp_id: 'tmp1', id: 42, created_at: '2026-01-01', member_id: 99 },
+      { type: 'stream_end', temp_id: 'tmp1', id: 42, created_at: '2026-01-01', member_id: 99, sender_name: 'Bot', preview: 'Hello' },
       notify
     )
     const msg = useChatStore.getState().messages[0]
     expect(msg.id).toBe(42)
     expect(msg.streaming).toBe(false)
     expect(msg.temp_id).toBeUndefined()
+    expect(notify).toHaveBeenCalledWith('Bot', 'Hello')
   })
 
   it('stream_aborted removes placeholder', () => {
@@ -283,6 +294,8 @@ describe('dispatchWsEvent — other events', () => {
     expect(useGroupStore.getState().members).toHaveLength(1)
     expect(useGroupStore.getState().members[0].id).toBe(6)
     expect(useGroupStore.getState().groups[0].member_count).toBe(1)
+    expect(useGroupStore.getState().membersCache[1]).toHaveLength(1)
+    expect(useGroupStore.getState().membersCache[1][0].id).toBe(6)
   })
 
   it('skills_loaded updates skills on matching temp_id message', () => {

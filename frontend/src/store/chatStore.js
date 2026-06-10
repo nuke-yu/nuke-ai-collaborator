@@ -57,8 +57,8 @@ export const useChatStore = create((set, get) => ({
       set({ typing: { sender_name: data.sender_name, avatar_color: data.avatar_color } })
 
     } else if (data.type === 'message') {
-      set({ typing: null })
       set((s) => ({
+        typing: null,
         messages: s.messages.some((m) => m.id === data.id) ? s.messages : [...s.messages, data],
       }))
       syncCache(activeGroupId, (msgs) =>
