@@ -52,8 +52,9 @@ def clear_group_locks(group_id: int):
 
 
 
-def bot_workspace(bot_id: int) -> Path:
-    path = WORKSPACE_ROOT / f"bot_{bot_id}"
+def bot_workspace(bot_id: int, group_id: int | None = None) -> Path:
+    from workspace import layout
+    path = layout.bot_dir(group_id, bot_id)
     path.mkdir(parents=True, exist_ok=True)
     for sub in _SUBDIRS:
         (path / sub).mkdir(exist_ok=True)
@@ -61,7 +62,8 @@ def bot_workspace(bot_id: int) -> Path:
 
 
 def group_workspace(group_id: int) -> Path:
-    path = WORKSPACE_ROOT / f"group_{group_id}" / "shared"
+    from workspace import layout
+    path = layout.group_shared_dir(group_id)
     path.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -77,26 +79,26 @@ def _safe_path(workspace: Path, relative: str) -> Path | None:
 
 
 _SHARED_FILES = {"BOARD.md", "SPEC.md", "API_CONTRACT.md", "RETRO_LATEST.md"}
+# 共享前缀：落群组 shared 区。代码进 workspace/<repo>/，跨 repo 文档进 docs/，PR 记录进 prs/。
+# 注意不含 skills/——私有技能在 bots/bot_{id}/skills/，群组技能由 group 层单独管理。
+_SHARED_PREFIXES = ("workspace/", "docs/", "prs/")
 
+def _get_effective_ws(bot_id: int, path_str: str, group_id: int | None = None) -> Path:
+    """群组文件重定向（全程不查 DB —— group_id 由调用方在边界显式解析后传入）。
 
-def _get_effective_ws(bot_id: int, path_str: str) -> Path:
+    - 共享文件名 / 共享前缀（workspace/ docs/ prs/）+ 已知 group → 群组 shared 区。
+    - 其余 → bot 私有区，嵌套 group_{gid}/bots/bot_{id}。
+    - group_id 为 None（无群组上下文）→ 一律落 bot 私有（扁平），不再反查 DB。
     """
-    Point 3: Group File Redirection.
-    Redirect shared files to group's shared folder; others to bot's private folder.
-    """
-    ws = bot_workspace(bot_id)
-    if path_str in _SHARED_FILES or path_str.startswith("deliverables/"):
-        from db import connect_sync
-        with connect_sync() as conn:
-            row = conn.execute("SELECT group_id FROM members WHERE id = ?", (bot_id,)).fetchone()
-            if row:
-                return group_workspace(row[0])
-    return ws
+    is_shared = path_str in _SHARED_FILES or path_str.startswith(_SHARED_PREFIXES)
+    if is_shared and group_id is not None:
+        return group_workspace(group_id)
+    return bot_workspace(bot_id, group_id)
 
 
 
-async def read_file(bot_id: int, path: str, offset: int | None = None, limit: int | None = None) -> str:
-    ws = _get_effective_ws(bot_id, path)
+async def read_file(bot_id: int, path: str, offset: int | None = None, limit: int | None = None, group_id: int | None = None) -> str:
+    ws = _get_effective_ws(bot_id, path, group_id)
     p = _safe_path(ws, path)
     if p is None:
         return f"[错误] 非法路径: {path}"
@@ -154,8 +156,8 @@ def _save_to_history(ws: Path, p: Path) -> None:
         log.exception("vfs: failed to save history for %s", p)
 
 
-def list_file_history(bot_id: int, path: str) -> list[dict]:
-    ws = bot_workspace(bot_id)
+def list_file_history(bot_id: int, path: str, group_id: int | None = None) -> list[dict]:
+    ws = bot_workspace(bot_id, group_id)
     p = _safe_path(ws, path)
     if p is None:
         return []
@@ -166,8 +168,8 @@ def list_file_history(bot_id: int, path: str) -> list[dict]:
     return [{"ts": f.stem, "size": f.stat().st_size} for f in versions]
 
 
-def read_file_history_version(bot_id: int, path: str, ts: str) -> str:
-    ws = bot_workspace(bot_id)
+def read_file_history_version(bot_id: int, path: str, ts: str, group_id: int | None = None) -> str:
+    ws = bot_workspace(bot_id, group_id)
     p = _safe_path(ws, path)
     if p is None:
         return "[错误] 非法路径"
@@ -240,10 +242,9 @@ async def _commit_text(ws: Path, p: Path, rel: str, path: str, new_text: str, bo
 
 
 async def write_file(bot_id: int, path: str, content: str, group_id: int | None = None) -> str:
-    # group_id given (e.g. the system rendering BOARD.md) → write straight to the
-    # group's shared workspace, bypassing the bot-centric redirection (which can't
-    # resolve a group for bot_id=0).
-    ws = group_workspace(group_id) if group_id is not None else _get_effective_ws(bot_id, path)
+    # group_id 显式贯穿：交给 _get_effective_ws 统一路由（共享文件名/前缀 → 群组 shared，
+    # 其余 → bot 私有）。bot_id=0 的系统写（BOARD.md / prs/）天然走共享分支，不会落私有。
+    ws = _get_effective_ws(bot_id, path, group_id)
     p = _safe_path(ws, path)
     if p is None:
         return f"[错误] 非法路径: {path}"
@@ -256,14 +257,14 @@ async def write_file(bot_id: int, path: str, content: str, group_id: int | None 
         return await _commit_text(ws, p, rel, path, content, bot_id, "write")
 
 
-def make_dir(bot_id: int, path: str) -> str:
+def make_dir(bot_id: int, path: str, group_id: int | None = None) -> str:
     """Create an (empty) directory in the bot workspace. Sandbox-confined.
 
     Writing a file already mkdir-parents, so this is only needed for the
     "new folder" action — e.g. building a directory-form skill folder-first
     (skills/<name>/ then add SKILL.md + scripts) via the workspace panel.
     """
-    ws = _get_effective_ws(bot_id, path)
+    ws = _get_effective_ws(bot_id, path, group_id)
     p = _safe_path(ws, path)
     if p is None:
         return f"[错误] 非法路径: {path}"
@@ -273,7 +274,7 @@ def make_dir(bot_id: int, path: str) -> str:
     return f"已创建目录 {path}"
 
 
-def delete_path(bot_id: int, path: str) -> str:
+def delete_path(bot_id: int, path: str, group_id: int | None = None) -> str:
     """Delete a file or directory (recursive) in the bot workspace. Sandbox-confined.
 
     Refuses the workspace root and write-protected files (MEMORY.md / RETRO_LATEST.md).
@@ -281,7 +282,7 @@ def delete_path(bot_id: int, path: str) -> str:
     directory-form).
     """
     import shutil
-    ws = _get_effective_ws(bot_id, path)
+    ws = _get_effective_ws(bot_id, path, group_id)
     p = _safe_path(ws, path)
     if p is None:
         return f"[错误] 非法路径: {path}"
@@ -298,8 +299,8 @@ def delete_path(bot_id: int, path: str) -> str:
     return f"已删除 {path}"
 
 
-async def edit_file(bot_id: int, path: str, old_string: str, new_string: str, replace_all: bool = False) -> str:
-    ws = _get_effective_ws(bot_id, path)
+async def edit_file(bot_id: int, path: str, old_string: str, new_string: str, replace_all: bool = False, group_id: int | None = None) -> str:
+    ws = _get_effective_ws(bot_id, path, group_id)
     p = _safe_path(ws, path)
     if p is None:
         return f"[错误] 非法路径: {path}"
@@ -328,8 +329,8 @@ async def edit_file(bot_id: int, path: str, old_string: str, new_string: str, re
         return await _commit_text(ws, p, rel, path, updated, bot_id, "edit")
 
 
-async def list_workspace(bot_id: int) -> str:
-    ws = bot_workspace(bot_id)
+async def list_workspace(bot_id: int, group_id: int | None = None) -> str:
+    ws = bot_workspace(bot_id, group_id)
     lines = []
     for p in sorted(ws.rglob("*")):
         rel = p.relative_to(ws)
@@ -365,7 +366,7 @@ async def load_context_files(bot_id: int, group_id: int | None,
     rather than stuffing into system prompt.
     """
     blocks = []
-    bot_ws = bot_workspace(bot_id)
+    bot_ws = bot_workspace(bot_id, group_id)
     group_ws = group_workspace(group_id) if group_id else None
 
     for name in file_names:
@@ -418,7 +419,7 @@ async def init_bot_workspace(bot: dict):
     system_prompt = (bot.get("system_prompt") or "").strip() or f"你是 {name}，{role}。"
     personality_prompt = (bot.get("personality_prompt") or "").strip() or "- 诚实、专业、高效。"
 
-    ws = bot_workspace(bot_id)
+    ws = bot_workspace(bot_id, bot.get("group_id"))
 
     identity = IDENTITY_TEMPLATE.format(name=name, role=role, system_prompt=system_prompt)
     soul = SOUL_TEMPLATE.format(name=name, personality_prompt=personality_prompt)
@@ -439,9 +440,9 @@ async def init_bot_workspace(bot: dict):
 
 
 
-def list_workspace_tree(bot_id: int) -> list[dict]:
+def list_workspace_tree(bot_id: int, group_id: int | None = None) -> list[dict]:
     """Return file tree as list of {path, name, is_dir} for UI."""
-    ws = bot_workspace(bot_id)
+    ws = bot_workspace(bot_id, group_id)
     result = []
     for p in sorted(ws.rglob("*")):
         rel = str(p.relative_to(ws)).replace("\\", "/")
@@ -454,7 +455,8 @@ def list_workspace_tree(bot_id: int) -> list[dict]:
 async def init_group_workspace(group_id: int, group_name: str = ""):
     """Create default shared workspace files for a newly created group."""
     ws = group_workspace(group_id)
-    (ws / "deliverables").mkdir(exist_ok=True)
+    (ws / "docs").mkdir(exist_ok=True)        # 群组共享文档（BA分析/QA报告/设计说明）
+    (ws / "workspace").mkdir(exist_ok=True)   # 代码 git 树落点（仅放代码）
     (ws / "skills").mkdir(exist_ok=True)
     (ws.parent / "runs").mkdir(exist_ok=True)  # workspaces/group_{id}/runs/
 
@@ -489,6 +491,7 @@ async def append_log(
     tool_calls: list[str] | None = None,
     iterations: int = 0,
     executor: str = "",
+    group_id: int | None = None,
 ):
     """Append a structured timestamped entry to today's log file (non-blocking).
 
@@ -500,7 +503,7 @@ async def append_log(
         iterations:   Number of tool-loop iterations executed.
         executor:     Executor plugin id (e.g. 'tool_loop_v1').
     """
-    ws = bot_workspace(bot_id)
+    ws = bot_workspace(bot_id, group_id)
     log_file = ws / "logs" / f"{date.today().isoformat()}.md"
     ts = datetime.now().strftime("%H:%M")
 

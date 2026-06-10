@@ -579,28 +579,40 @@ def _sandbox_env() -> dict:
     }
 
 
-def _resolve_shell_cwd(cwd: str, bot_id) -> tuple[Path | None, str]:
+def _resolve_shell_cwd(cwd: str, bot_id, group_id: int | None = None) -> tuple[Path | None, str]:
     """Confine the shell working directory to the bot's workspace.
 
-    Returns (path, "") on success or (None, reason) on rejection. An empty cwd
-    defaults to the workspace root; relative paths resolve under it; any target
-    that escapes the workspace (absolute path or '..' traversal) is rejected.
+    放行两个根：bot 私有区 group_{gid}/bots/bot_{id}，以及本群组共享区
+    group_{gid}/shared（Dev/QA 在 shared/workspace/<repo> 共享工作树上 build/跑测/git）。
+
+    相对 cwd 的落点与 VFS 重定向一致：以共享前缀（workspace/ docs/ prs/）开头 → 共享区，
+    否则 → 私有区。空 cwd 默认私有根。任何越出这两个根的目标（绝对路径越界 / '..' 穿越）拒绝。
     """
     if bot_id is None:
         return None, "缺少 bot_id，无法确定工作区"
-    root = _ws.bot_workspace(bot_id).resolve()
+    private_root = _ws.bot_workspace(bot_id, group_id).resolve()
+    shared_root = _ws.group_workspace(group_id).resolve() if group_id is not None else None
+
     candidate = (cwd or "").strip()
     if not candidate:
-        return root, ""
+        return private_root, ""
+
     p = Path(candidate)
-    target = (p if p.is_absolute() else root / p)
+    if p.is_absolute():
+        target = p
+    else:
+        first = candidate.replace("\\", "/").split("/", 1)[0] + "/"
+        base = shared_root if (shared_root is not None and first in _ws._SHARED_PREFIXES) else private_root
+        target = base / p
+
     try:
         target = target.resolve()
-        if target.is_relative_to(root):
-            return target, ""
+        for root in (private_root, shared_root):
+            if root is not None and target.is_relative_to(root):
+                return target, ""
     except (OSError, ValueError):
         pass
-    return None, f"工作目录越界，必须位于工作区内：{cwd}"
+    return None, f"工作目录越界，必须位于本群组工作区内：{cwd}"
 
 
 _TOOL_RESULT_MAX_CHARS = config.TOOL_RESULT_MAX_CHARS
@@ -721,26 +733,30 @@ def _with_personality(base_prompt: str, bot: dict) -> str:
 # ---------------------------------------------------------------------------
 
 async def _handle_read_file(path: str, offset: int | None = None, limit: int | None = None, context: dict = None, **kwargs) -> str:
-    bot_id = (context or {}).get("bot_id")
-    return await _ws.read_file(bot_id, path, offset=offset, limit=limit) if bot_id else "[错误] 缺少 bot_id"
+    ctx = context or {}
+    bot_id = ctx.get("bot_id")
+    return await _ws.read_file(bot_id, path, offset=offset, limit=limit, group_id=ctx.get("group_id")) if bot_id else "[错误] 缺少 bot_id"
 
 
 async def _handle_write_file(path: str, content: str, context: dict = None) -> str:
-    bot_id = (context or {}).get("bot_id")
-    return await _ws.write_file(bot_id, path, content) if bot_id else "[错误] 缺少 bot_id"
+    ctx = context or {}
+    bot_id = ctx.get("bot_id")
+    return await _ws.write_file(bot_id, path, content, group_id=ctx.get("group_id")) if bot_id else "[错误] 缺少 bot_id"
 
 
 async def _handle_edit_file(path: str, old_string: str, new_string: str,
                             replace_all: bool = False, context: dict = None) -> str:
-    bot_id = (context or {}).get("bot_id")
+    ctx = context or {}
+    bot_id = ctx.get("bot_id")
     if not bot_id:
         return "[错误] 缺少 bot_id"
-    return await _ws.edit_file(bot_id, path, old_string, new_string, replace_all=replace_all)
+    return await _ws.edit_file(bot_id, path, old_string, new_string, replace_all=replace_all, group_id=ctx.get("group_id"))
 
 
 async def _handle_list_workspace(context: dict = None) -> str:
-    bot_id = (context or {}).get("bot_id")
-    return await _ws.list_workspace(bot_id) if bot_id else "[错误] 缺少 bot_id"
+    ctx = context or {}
+    bot_id = ctx.get("bot_id")
+    return await _ws.list_workspace(bot_id, group_id=ctx.get("group_id")) if bot_id else "[错误] 缺少 bot_id"
 
 
 async def _handle_run_skill(name: str, args: str = "", context: dict = None) -> str:
@@ -807,12 +823,56 @@ def _check_shell_command_paths(cmd: str, work_dir: Path) -> str | None:
     return None
 
 
+# ---------------------------------------------------------------------------
+# 共享工作树承重墙：per-group 进程内互斥（固定分片 → 同群组的并发 run_shell 同进程）
+# ---------------------------------------------------------------------------
+import threading as _threading
+from contextlib import asynccontextmanager as _asynccontextmanager
+
+_WORKTREE_LOCKS: dict = {}            # loop_id -> {group_id: asyncio.Lock}
+_WORKTREE_LOCKS_GUARD = _threading.Lock()
+
+
+def _get_worktree_lock(group_id: int) -> "asyncio.Lock":
+    """按 (event loop, group_id) 取/建进程内互斥锁。类比 workspace._get_path_lock。"""
+    loop_id = id(asyncio.get_running_loop())
+    with _WORKTREE_LOCKS_GUARD:
+        per_loop = _WORKTREE_LOCKS.setdefault(loop_id, {})
+        if group_id not in per_loop:
+            per_loop[group_id] = asyncio.Lock()
+        return per_loop[group_id]
+
+
+def _worktree_lock_for(work_dir: Path, group_id) -> "asyncio.Lock | None":
+    """work_dir 落在本群组 shared/workspace（git 工作树）下时返回该群组的锁，否则 None。"""
+    if group_id is None:
+        return None
+    try:
+        wt_root = (_ws.group_workspace(group_id).resolve() / "workspace")
+        if work_dir.resolve().is_relative_to(wt_root):
+            return _get_worktree_lock(group_id)
+    except (OSError, ValueError):
+        pass
+    return None
+
+
+@_asynccontextmanager
+async def _maybe_lock(lock):
+    """lock 为 None 时无操作；否则进入临界区。"""
+    if lock is None:
+        yield
+    else:
+        async with lock:
+            yield
+
+
 async def _handle_run_shell(
     cmd: str, cwd: str = "", timeout: int = 30,
     background: bool = False, context: dict = None,
 ) -> str:
-    bot_id = (context or {}).get("bot_id")
-    work_dir, err = _resolve_shell_cwd(cwd, bot_id)
+    ctx = context or {}
+    bot_id = ctx.get("bot_id")
+    work_dir, err = _resolve_shell_cwd(cwd, bot_id, ctx.get("group_id"))
     if err:
         return f"[安全拒绝] {err}"
     
@@ -844,24 +904,27 @@ async def _handle_run_shell(
                 msg += f"\n[端口分配] 系统已自动分配可用端口: {allocated_port} (注入为环境变量 PORT / APP_PORT)"
             return msg
             
-        proc = await asyncio.create_subprocess_exec(
-            *_DEFAULT_SHELL, safe_cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=str(work_dir),
-            env=sandbox_env,
-        )
-        if _IS_WINDOWS:
-            win_sandbox.apply_memory_limit(proc.pid, config.SHELL_MEMORY_LIMIT_BYTES)
-        
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=_max_timeout)
-        
+        # 前台执行：若 cwd 落在本群组共享工作树，串行化以防并发撞 .git/index。
+        # 后台进程是长驻服务（不持锁），故仅前台分支加锁。
+        async with _maybe_lock(_worktree_lock_for(work_dir, ctx.get("group_id"))):
+            proc = await asyncio.create_subprocess_exec(
+                *_DEFAULT_SHELL, safe_cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=str(work_dir),
+                env=sandbox_env,
+            )
+            if _IS_WINDOWS:
+                win_sandbox.apply_memory_limit(proc.pid, config.SHELL_MEMORY_LIMIT_BYTES)
+
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=_max_timeout)
+
         out = stdout.decode(errors="replace").strip()
         err = stderr.decode(errors="replace").strip()
         parts = []
         if intercepted_port:
             parts.append(f"[安全拦截] 已将硬编码端口 {intercepted_port} 替换为动态端口 {allocated_port}")
-            
+
         parts.append(f"exit_code: {proc.returncode}")
         if out:
             parts.append(f"stdout:\n{out}")

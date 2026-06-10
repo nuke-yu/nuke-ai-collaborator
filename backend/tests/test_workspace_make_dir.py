@@ -92,5 +92,35 @@ class TestDeletePath(unittest.TestCase):
         self.assertTrue(result.startswith("[文件不存在]"), result)
 
 
+class TestGroupIdThreading(unittest.TestCase):
+    """group_id 显式贯穿后的不变量（设计 §二.5）。"""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        # resolve() so the root matches _safe_path's resolved paths (macOS /var→/private/var)
+        self._p = patch("skills.constants.WORKSPACE_ROOT", Path(self._tmp.name).resolve())
+        self._p.start()
+
+    def tearDown(self):
+        self._p.stop()
+        self._tmp.cleanup()
+
+    def test_bot0_with_group_writes_shared_not_private(self):
+        import asyncio
+        import workspace
+        from workspace import layout
+        asyncio.run(workspace.write_file(0, "BOARD.md", "x", group_id=3))
+        self.assertTrue((layout.group_shared_dir(3) / "BOARD.md").exists())
+        # 绝不在私有区凭空造出 bot_0 目录
+        self.assertFalse((layout.group_dir(3) / "bots" / "bot_0").exists())
+
+    def test_make_dir_accepts_group_id_nested_private(self):
+        import workspace
+        from workspace import layout
+        r = workspace.make_dir(7, "newdir", group_id=3)
+        self.assertIn("已创建", r)
+        self.assertTrue((layout.bot_dir(3, 7) / "newdir").is_dir())
+
+
 if __name__ == "__main__":
     unittest.main()

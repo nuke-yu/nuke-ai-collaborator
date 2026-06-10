@@ -15,14 +15,15 @@ from pathlib import Path
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
-from .constants import WORKSPACE_ROOT
+from . import constants as _const
 
 log = logging.getLogger(__name__)
 
 _DEBOUNCE_SECS = 0.3
 
 # Matches paths inside any skills/ subdirectory we care about
-_BOT_RE    = re.compile(r"^bot_(\d+)[/\\]skills[/\\]")
+# bot 私有技能现位于 group_{gid}/bots/bot_{id}/skills/（嵌套），group_id=捕获组1，member_id=捕获组2
+_BOT_RE    = re.compile(r"^group_(\d+)[/\\]bots[/\\]bot_(\d+)[/\\]skills[/\\]")
 _GROUP_RE  = re.compile(r"^group_(\d+)[/\\]shared[/\\]skills[/\\]")
 _SYSTEM_RE = re.compile(r"^system[/\\]skills[/\\]")
 _ROLE_RE   = re.compile(r"^roles[/\\][^/\\]+[/\\]skills[/\\]")
@@ -34,13 +35,13 @@ def _parse_path(abs_path: str) -> dict | None:
     if p.suffix not in (".md", ".py"):
         return None
     try:
-        rel = str(p.relative_to(WORKSPACE_ROOT)).replace("\\", "/")
+        rel = str(p.relative_to(_const.WORKSPACE_ROOT)).replace("\\", "/")   # 实时读取，容忍重绑定
     except ValueError:
         return None
 
     m = _BOT_RE.match(rel)
     if m:
-        return {"source": "bot", "member_id": int(m.group(1)), "group_id": None}
+        return {"source": "bot", "member_id": int(m.group(2)), "group_id": int(m.group(1))}
 
     m = _GROUP_RE.match(rel)
     if m:
@@ -131,13 +132,14 @@ class SkillWatcher:
         self._observer: Observer | None = None
 
     def start(self, loop: asyncio.AbstractEventLoop):
-        if not WORKSPACE_ROOT.exists():
-            WORKSPACE_ROOT.mkdir(parents=True, exist_ok=True)
+        root = _const.WORKSPACE_ROOT
+        if not root.exists():
+            root.mkdir(parents=True, exist_ok=True)
         handler = _SkillEventHandler(loop)
         self._observer = Observer()
-        self._observer.schedule(handler, str(WORKSPACE_ROOT), recursive=True)
+        self._observer.schedule(handler, str(root), recursive=True)
         self._observer.start()
-        log.info("SkillWatcher started watching %s", WORKSPACE_ROOT)
+        log.info("SkillWatcher started watching %s", root)
 
     def stop(self):
         if self._observer:

@@ -340,7 +340,7 @@ class ToolLoopRunner:
         fresh_prefix, fresh_text = await self._get_fresh_context_prefix()
         ft_xml = compact.build_file_tracker_xml(self.file_tracker)
         file_contents = compact.build_file_contents_for_reinject(
-            self.file_tracker, workspace_dir=str(_bot_ws(self.bot["id"]))
+            self.file_tracker, workspace_dir=str(_bot_ws(self.bot["id"], self.ctx.group_id))
         )
         parts = [p for p in [fresh_text, ft_xml, file_contents] if p]
         return "\n\n".join(parts)
@@ -814,6 +814,7 @@ class ToolLoopRunner:
             tool_calls=tool_names_called,
             iterations=self.iter_count if tool_names_called else 0,
             executor=self.executor.executor_id,
+            group_id=self.ctx.group_id,
         ))
         if self.ctx.group_id and self.tool_records:
             bg.spawn(archive_run(

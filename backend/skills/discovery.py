@@ -45,7 +45,7 @@ def _scan_signature(bot_id: int, group_id: Optional[int], role: Optional[str]) -
         dirs.append(WORKSPACE_ROOT / f"group_{group_id}" / "shared" / "skills")
     if role:
         dirs.append(ROLES_ROOT / role / "skills")
-    dirs.append(bot_ws(bot_id) / "skills")  # personal: root + manual + learned/*
+    dirs.append(bot_ws(bot_id, group_id) / "skills")  # personal: root + manual + learned/*
 
     sig: list = []
     for d in dirs:
@@ -131,14 +131,14 @@ def _scan_personal_layer_sync(skills_dir: Path) -> Dict[str, Dict]:
     return personal
 
 
-async def list_skills(bot_id: int) -> List[Dict]:
+async def list_skills(bot_id: int, group_id: Optional[int] = None) -> List[Dict]:
     """Asynchronous listing of skills in bot's personal skills/ dir."""
-    return await asyncio.to_thread(_list_skills_sync, bot_id)
+    return await asyncio.to_thread(_list_skills_sync, bot_id, group_id)
 
 
-def _list_skills_sync(bot_id: int) -> List[Dict]:
+def _list_skills_sync(bot_id: int, group_id: Optional[int] = None) -> List[Dict]:
     """Internal synchronous personal skill list."""
-    ws = bot_ws(bot_id)
+    ws = bot_ws(bot_id, group_id)
     skills_dir = ws / "skills"
     if not skills_dir.exists():
         return []
@@ -283,7 +283,7 @@ def _compute_skills_all(bot_id: int, group_id: Optional[int] = None,
             _merge_skill_entry(merged, s)
 
     # L4 Learned/active
-    ws = bot_ws(bot_id)
+    ws = bot_ws(bot_id, group_id)
     for s in _scan_dir_sync(ws / "skills" / "learned" / "active", "learned"):
         s["status"] = "active"
         _merge_skill_entry(merged, s)

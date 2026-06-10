@@ -134,7 +134,7 @@ class TestSkillSelfWrite(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result["status"], 200)
 
-        draft_path = _TEST_WS_ROOT / f"bot_{bot_id}" / "skills" / "learned" / "draft" / "jira-reader.md"
+        draft_path = _TEST_WS_ROOT / f"group_{_GROUP_ID}" / "bots" / f"bot_{bot_id}" / "skills" / "learned" / "draft" / "jira-reader.md"
         self.assertTrue(draft_path.exists(), f"draft 文件不存在: {draft_path}")
 
         async with AsyncClient(app=app, base_url="http://test") as ac:
@@ -155,8 +155,8 @@ class TestSkillSelfWrite(unittest.IsolatedAsyncioTestCase):
             r = await ac.post(f"/api/members/{bot_id}/skills/learned/code-reviewer/approve")
         self.assertEqual(r.status_code, 200)
 
-        draft_path  = _TEST_WS_ROOT / f"bot_{bot_id}" / "skills" / "learned" / "draft"  / "code-reviewer.md"
-        active_path = _TEST_WS_ROOT / f"bot_{bot_id}" / "skills" / "learned" / "active" / "code-reviewer.md"
+        draft_path  = _TEST_WS_ROOT / f"group_{_GROUP_ID}" / "bots" / f"bot_{bot_id}" / "skills" / "learned" / "draft"  / "code-reviewer.md"
+        active_path = _TEST_WS_ROOT / f"group_{_GROUP_ID}" / "bots" / f"bot_{bot_id}" / "skills" / "learned" / "active" / "code-reviewer.md"
         self.assertFalse(draft_path.exists(),  "draft 文件应已移走")
         self.assertTrue(active_path.exists(),  "active 文件应存在")
 
@@ -175,7 +175,7 @@ class TestSkillSelfWrite(unittest.IsolatedAsyncioTestCase):
             r = await ac.post(f"/api/members/{bot_id}/skills/learned/bad-skill/reject")
         self.assertEqual(r.status_code, 200)
 
-        draft_path = _TEST_WS_ROOT / f"bot_{bot_id}" / "skills" / "learned" / "draft" / "bad-skill.md"
+        draft_path = _TEST_WS_ROOT / f"group_{_GROUP_ID}" / "bots" / f"bot_{bot_id}" / "skills" / "learned" / "draft" / "bad-skill.md"
         self.assertFalse(draft_path.exists(), "拒绝后草稿文件应被删除")
 
         async with AsyncClient(app=app, base_url="http://test") as ac:
@@ -198,8 +198,8 @@ class TestSkillSelfWrite(unittest.IsolatedAsyncioTestCase):
             })
         self.assertEqual(r.status_code, 200)
 
-        active_path = _TEST_WS_ROOT / f"bot_{bot_id}" / "skills" / "learned" / "active" / "bypass-attempt.md"
-        draft_path  = _TEST_WS_ROOT / f"bot_{bot_id}" / "skills" / "learned" / "draft"  / "bypass-attempt.md"
+        active_path = _TEST_WS_ROOT / f"group_{_GROUP_ID}" / "bots" / f"bot_{bot_id}" / "skills" / "learned" / "active" / "bypass-attempt.md"
+        draft_path  = _TEST_WS_ROOT / f"group_{_GROUP_ID}" / "bots" / f"bot_{bot_id}" / "skills" / "learned" / "draft"  / "bypass-attempt.md"
         self.assertFalse(active_path.exists(), "绕过写入 active 应被阻止")
         self.assertTrue(draft_path.exists(),   "应重定向写入 draft")
 
@@ -235,7 +235,7 @@ class TestSkillSelfWrite(unittest.IsolatedAsyncioTestCase):
             await _write_draft(ac, bot_id, "jira-helper", body=body)
             await ac.post(f"/api/members/{bot_id}/skills/learned/jira-helper/approve")
 
-        active_path = _TEST_WS_ROOT / f"bot_{bot_id}" / "skills" / "learned" / "active" / "jira-helper.md"
+        active_path = _TEST_WS_ROOT / f"group_{_GROUP_ID}" / "bots" / f"bot_{bot_id}" / "skills" / "learned" / "active" / "jira-helper.md"
         content = active_path.read_text(encoding="utf-8")
         self.assertIn(body, content)
 
