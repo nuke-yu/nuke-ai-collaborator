@@ -308,4 +308,14 @@ describe('dispatchWsEvent — other events', () => {
     useChatStore.getState().dispatchWsEvent({ type: 'skill_draft_added', member_id: 42, skill: 'x' }, notify)
     expect(useChatStore.getState().skillDraftBots.has(42)).toBe(true)
   })
+
+  it('skills_changed dispatches window CustomEvent', () => {
+    const fired = []
+    const handler = (e) => fired.push(e.detail)
+    window.addEventListener('skills_changed', handler)
+    useChatStore.getState().dispatchWsEvent({ type: 'skills_changed', skills: ['x'] }, notify)
+    window.removeEventListener('skills_changed', handler)
+    expect(fired).toHaveLength(1)
+    expect(fired[0].skills).toEqual(['x'])
+  })
 })

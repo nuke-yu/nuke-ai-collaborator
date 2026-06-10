@@ -225,6 +225,8 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
   useEffect(() => {
     if (!activeGroupId) return
     let active = true
+    useChatStore.getState().setThoughtBlocks({})
+    useChatStore.getState().setToolProgressBlocks({})
     setTyping(null)
     setActiveMemberId(null) // Reset activeMemberId to prevent connection with old member ID
     setUnreadCounts(prev => ({ ...prev, [activeGroupId]: 0 }))
