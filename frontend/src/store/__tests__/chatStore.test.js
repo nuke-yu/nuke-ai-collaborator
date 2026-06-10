@@ -229,4 +229,70 @@ describe('dispatchWsEvent — other events', () => {
     )
     expect(useChatStore.getState().recoveryPrompts).toHaveLength(1)
   })
+
+  it('compaction appends a compact marker', () => {
+    useChatStore.getState().dispatchWsEvent(
+      { type: 'compaction', strategy: 'trim', message: 'Context compacted' },
+      notify
+    )
+    const msgs = useChatStore.getState().messages
+    expect(msgs).toHaveLength(1)
+    expect(msgs[0]._compact_marker).toBe(true)
+    expect(msgs[0].strategy).toBe('trim')
+  })
+
+  it('stream_error removes placeholder and sets error', () => {
+    useChatStore.setState({ messages: [{ temp_id: 'tmp1', streaming: true }, { id: 1 }] })
+    useChatStore.getState().dispatchWsEvent({ type: 'stream_error', temp_id: 'tmp1', message: 'AI error' }, notify)
+    expect(useChatStore.getState().messages).toHaveLength(1)
+    expect(useChatStore.getState().error).toBe('AI error')
+  })
+
+  it('group_updated updates group and groups list via groupStore', () => {
+    useGroupStore.setState({ group: { id: 1, name: 'Old' }, groups: [{ id: 1, name: 'Old' }] })
+    useChatStore.getState().dispatchWsEvent({ type: 'group_updated', id: 1, name: 'New', announcement: 'Hi' }, notify)
+    expect(useGroupStore.getState().group.name).toBe('New')
+    expect(useGroupStore.getState().groups[0].name).toBe('New')
+  })
+
+  it('error sets error state', () => {
+    useChatStore.getState().dispatchWsEvent({ type: 'error', message: 'Something failed' }, notify)
+    expect(useChatStore.getState().error).toBe('Something failed')
+  })
+
+  it('recap_updated sets awaySummary for matching group', () => {
+    useGroupStore.setState({ activeGroupId: 1 })
+    useChatStore.getState().dispatchWsEvent({ type: 'recap_updated', group_id: 1, away_summary: 'You missed 5 msgs' }, notify)
+    expect(useChatStore.getState().awaySummary).toBe('You missed 5 msgs')
+  })
+
+  it('recap_updated ignores mismatched group_id', () => {
+    useGroupStore.setState({ activeGroupId: 1 })
+    useChatStore.getState().dispatchWsEvent({ type: 'recap_updated', group_id: 2, away_summary: 'other group' }, notify)
+    expect(useChatStore.getState().awaySummary).toBeNull()
+  })
+
+  it('member_removed removes from members and decrements count via groupStore', () => {
+    useGroupStore.setState({
+      activeGroupId: 1,
+      members: [{ id: 5, name: 'Alice' }, { id: 6, name: 'Bob' }],
+      membersCache: { 1: [{ id: 5 }, { id: 6 }] },
+      groups: [{ id: 1, member_count: 2 }],
+    })
+    useChatStore.getState().dispatchWsEvent({ type: 'member_removed', member_id: 5 }, notify)
+    expect(useGroupStore.getState().members).toHaveLength(1)
+    expect(useGroupStore.getState().members[0].id).toBe(6)
+    expect(useGroupStore.getState().groups[0].member_count).toBe(1)
+  })
+
+  it('skills_loaded updates skills on matching temp_id message', () => {
+    useChatStore.setState({ messages: [{ temp_id: 'tmp1', content: '' }] })
+    useChatStore.getState().dispatchWsEvent({ type: 'skills_loaded', temp_id: 'tmp1', skills: ['skill_a'] }, notify)
+    expect(useChatStore.getState().messages[0].skills_loaded).toEqual(['skill_a'])
+  })
+
+  it('skill_draft_added adds member_id to skillDraftBots', () => {
+    useChatStore.getState().dispatchWsEvent({ type: 'skill_draft_added', member_id: 42, skill: 'x' }, notify)
+    expect(useChatStore.getState().skillDraftBots.has(42)).toBe(true)
+  })
 })
