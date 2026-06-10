@@ -101,7 +101,9 @@ async def get_skills(member_id: int, group_id: int | None = None):
         bot = await get_member(db, member_id)
     if not bot or bot["type"] != "bot":
         raise HTTPException(404, "Bot not found")
-    skills = await list_skills_all(member_id, group_id=group_id, role=bot.get("role"))
+    # bot 恰属一个群组：用 bot 自身 group 作真相源（私有技能路径 + 群组共享技能层都靠它），
+    # 不信任可缺省的 query 参数，否则私有技能落 group_{gid}/bots/ 却按扁平路径去找会漏。
+    skills = await list_skills_all(member_id, group_id=bot["group_id"], role=bot.get("role"))
     return {"skills": skills}
 
 
@@ -139,7 +141,7 @@ async def test_skill(member_id: int, skill_name: str, body: dict):
     message = (body.get("message") or "").strip()
     if not message:
         raise HTTPException(400, "message required")
-    group_id = body.get("group_id")
+    group_id = bot["group_id"]   # bot 自身群组为真相源（私有/群组技能路径都靠它）
     skills = await list_skills_all(member_id, group_id=group_id, role=bot.get("role"))
     skill_info = next((s for s in skills if s["name"] == skill_name), None)
     if not skill_info:

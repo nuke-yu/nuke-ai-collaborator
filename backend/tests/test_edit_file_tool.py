@@ -21,7 +21,7 @@ class TestEditFileHandler(unittest.TestCase):
         with patch.object(wt._ws, "edit_file", new=AsyncMock(return_value="已修改 a.py")) as e:
             out = _run(wt._handle_edit_file("a.py", "x = 1", "x = 99", context={"bot_id": 1}))
         self.assertEqual(out, "已修改 a.py")
-        e.assert_awaited_once_with(1, "a.py", "x = 1", "x = 99", replace_all=False)
+        e.assert_awaited_once_with(1, "a.py", "x = 1", "x = 99", replace_all=False, group_id=None)
 
     def test_edit_file_missing_bot_id(self):
         out = _run(wt._handle_edit_file("a.py", "a", "b", context={}))

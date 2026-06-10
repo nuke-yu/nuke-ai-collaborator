@@ -15,7 +15,7 @@ from pathlib import Path
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
-from .constants import WORKSPACE_ROOT
+from . import constants as _const
 
 log = logging.getLogger(__name__)
 
@@ -35,7 +35,7 @@ def _parse_path(abs_path: str) -> dict | None:
     if p.suffix not in (".md", ".py"):
         return None
     try:
-        rel = str(p.relative_to(WORKSPACE_ROOT)).replace("\\", "/")
+        rel = str(p.relative_to(_const.WORKSPACE_ROOT)).replace("\\", "/")   # 实时读取，容忍重绑定
     except ValueError:
         return None
 
@@ -132,13 +132,14 @@ class SkillWatcher:
         self._observer: Observer | None = None
 
     def start(self, loop: asyncio.AbstractEventLoop):
-        if not WORKSPACE_ROOT.exists():
-            WORKSPACE_ROOT.mkdir(parents=True, exist_ok=True)
+        root = _const.WORKSPACE_ROOT
+        if not root.exists():
+            root.mkdir(parents=True, exist_ok=True)
         handler = _SkillEventHandler(loop)
         self._observer = Observer()
-        self._observer.schedule(handler, str(WORKSPACE_ROOT), recursive=True)
+        self._observer.schedule(handler, str(root), recursive=True)
         self._observer.start()
-        log.info("SkillWatcher started watching %s", WORKSPACE_ROOT)
+        log.info("SkillWatcher started watching %s", root)
 
     def stop(self):
         if self._observer:
