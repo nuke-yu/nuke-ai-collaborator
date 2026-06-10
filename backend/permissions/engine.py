@@ -13,6 +13,7 @@ Pipeline order per tool call:
 """
 import asyncio
 import fnmatch
+import functools
 import hashlib
 import json
 import uuid
@@ -53,21 +54,38 @@ def _args_hash(arguments: dict) -> str:
     ).hexdigest()
 
 
+@functools.lru_cache(maxsize=1024)
+def _match_tool_pattern(tool_name: str, pattern: str) -> bool:
+    return fnmatch.fnmatch(tool_name, pattern)
+
+
+@functools.lru_cache(maxsize=512)
+def _match_args_pattern(args_pattern: str, args_json: str) -> bool:
+    """Cache args-pattern matching keyed by (args_pattern, serialised args).
+
+    DFT-044: Recursive search in nested arguments to prevent bypass.
+    Deserialises args_json to preserve correct nested-search semantics.
+    """
+    arguments = json.loads(args_json)
+
+    def search_nested(val: Any) -> bool:
+        if isinstance(val, (str, int, float, bool)) or val is None:
+            return fnmatch.fnmatch(str(val), args_pattern)
+        if isinstance(val, dict):
+            return any(search_nested(v) for v in val.values())
+        if isinstance(val, list):
+            return any(search_nested(v) for v in val)
+        return fnmatch.fnmatch(str(val), args_pattern)
+
+    return any(search_nested(v) for v in arguments.values())
+
+
 def _matches(rule: Rule, tool_name: str, arguments: dict) -> bool:
-    if not fnmatch.fnmatch(tool_name, rule.tool_pattern):
+    if not _match_tool_pattern(tool_name, rule.tool_pattern):
         return False
     if rule.args_pattern:
-        # DFT-044: Recursive search in nested arguments to prevent bypass
-        def search_nested(val: Any) -> bool:
-            if isinstance(val, (str, int, float, bool)) or val is None:
-                return fnmatch.fnmatch(str(val), rule.args_pattern)
-            if isinstance(val, dict):
-                return any(search_nested(v) for v in val.values())
-            if isinstance(val, list):
-                return any(search_nested(v) for v in val)
-            return fnmatch.fnmatch(str(val), rule.args_pattern)
-
-        return any(search_nested(v) for v in arguments.values())
+        args_json = json.dumps(arguments, sort_keys=True, default=str)
+        return _match_args_pattern(rule.args_pattern, args_json)
     return True
 
 

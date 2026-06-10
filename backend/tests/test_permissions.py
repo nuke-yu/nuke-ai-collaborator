@@ -1,5 +1,6 @@
 """Tests for the permissions package: Rule/Ruleset model and decision pipeline."""
 import asyncio
+import json
 import pytest
 from permissions.models import Rule, Ruleset
 from permissions import engine
@@ -350,3 +351,30 @@ class TestResolveAuthz:
         assert bad is None, "cross-group approval must be rejected"
         assert good is not None
         assert r["action"] == "allow"
+
+
+# ---------------------------------------------------------------------------
+# DFT-031: LRU cache on _match_tool_pattern and _match_args_pattern
+# ---------------------------------------------------------------------------
+
+class TestMatchCaching:
+    def setup_method(self):
+        engine._match_tool_pattern.cache_clear()
+        engine._match_args_pattern.cache_clear()
+
+    def test_tool_pattern_cache_records_hits(self):
+        engine._match_tool_pattern("run_shell", "run_shell")
+        engine._match_tool_pattern("run_shell", "run_shell")
+        assert engine._match_tool_pattern.cache_info().hits >= 1
+
+    def test_args_pattern_cache_records_hits(self):
+        args_json = json.dumps({"cmd": "git status"}, sort_keys=True)
+        engine._match_args_pattern("git *", args_json)
+        engine._match_args_pattern("git *", args_json)
+        assert engine._match_args_pattern.cache_info().hits >= 1
+
+    def test_cached_semantics_match_original(self):
+        rule = Rule(tool_pattern="run_shell", args_pattern="git *", action="allow")
+        assert engine._matches(rule, "run_shell", {"cmd": "git status"})
+        assert engine._matches(rule, "run_shell", {"cmd": "git status"})  # cache hit
+        assert not engine._matches(rule, "run_shell", {"cmd": "ls -la"})
