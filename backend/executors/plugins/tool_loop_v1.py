@@ -324,45 +324,87 @@ class ToolLoopRunner:
         self.ruleset = None
         self.use_cached_mc = compact.should_use_cached_microcompact(self.provider)
 
-    async def _load_project_context(self) -> str | None:
+    async def _load_project_context(self, force: bool = False) -> str | None:
         """自动加载项目上下文：PROJECTS.md, SPEC.md, BOARD.md 等关键文件。
 
-        这些文件在每次 AI 推理时都会自动注入到系统提示中，确保：
+        加载策略：
+        - 当用户消息包含任务关键词（如"测试"、"开发"、"实现"）时加载
+        - 当 Bot 是 QA/Dev/BA 等角色且用户请求工作时加载
+        - 或者当 force=True 时强制加载
+        - 这样避免每次 AI 推理都加载不必要的上下文，只在 Bot 开始工作时加载
+
+        确保：
         - QA Bot 知道当前要测试哪个项目
         - Dev Bot 知道当前开发阶段和需求
         - 所有 Bot 对项目背景有一致的理解
 
-        返回格式化的上下文文本，如果文件不存在则返回 None。
+        Args:
+            force: 是否强制加载，默认 False
+
+        Returns:
+            格式化的上下文文本，如果不需要加载或文件不存在则返回 None。
         """
         from pathlib import Path
         from workspace import layout
 
-        context_parts = []
+        # 检查是否需要加载上下文
+        # 条件 1: 强制加载
+        # 条件 2: Bot 类型是 QA/Dev/BA 等角色
+        # 条件 3: 用户消息包含任务关键词
+        bot_type = self.bot.get("type", "")
+        bot_name = self.bot.get("name", "").lower()
 
-        # 1. 加载 PROJECTS.md（项目清单）
-        projects_path = layout.group_shared_dir(self.ctx.group_id) / "workspace" / "PROJECTS.md"
-        if projects_path.exists():
-            try:
-                projects_content = projects_path.read_text(encoding="utf-8")
-                context_parts.append(f"【当前项目清单】\n{projects_content}")
-            except Exception:
-                pass
+        is_work_bot = bot_type == "bot" and any(role in bot_name for role in ["qa", "dev", "ba", "test", "developer", "product", "analyst"])
 
-        # 2. 加载 SPEC.md（需求文档）
-        spec_path = layout.group_shared_dir(self.ctx.group_id) / "SPEC.md"
-        if spec_path.exists():
-            try:
-                spec_content = spec_path.read_text(encoding="utf-8")
-                context_parts.append(f"【需求文档】\n{spec_content}")
-            except Exception:
-                pass
+        if not force and not is_work_bot:
+            # 如果不是工作 Bot（比如是用户自己），需要检查是否包含任务关键词
+            task_keywords = ["测试", "开发", "实现", "构建", "写代码", "test", "dev",
+                           "develop", "code", "create", "build", "check", "verify"]
+            user_msg = self.ctx.user_message.lower() if self.ctx.user_message else ""
 
-        # 3. 加载 BOARD.md（工作看板）
-        board_path = layout.group_shared_dir(self.ctx.group_id) / "BOARD.md"
-        if board_path.exists():
-            try:
-                board_content = board_path.read_text(encoding="utf-8")
-                context_parts.append(f"【工作看板】\n{board_content}")
+            # 如果用户消息不包含任务关键词，说明不是在工作场景，不加载
+            if not any(kw in user_msg for kw in task_keywords):
+                return None
+
+        # Bot 角色自动加载项目上下文
+        if is_work_bot or force:
+            context_parts = []
+            has_context = False
+
+            # 1. 加载 PROJECTS.md（项目清单）- QA/Dev Bot 必读
+            projects_path = layout.group_shared_dir(self.ctx.group_id) / "workspace" / "PROJECTS.md"
+            if projects_path.exists():
+                try:
+                    projects_content = projects_path.read_text(encoding="utf-8")
+                    context_parts.append(f"【当前项目清单】\n{projects_content}")
+                    has_context = True
+                except Exception:
+                    pass
+
+            # 2. 加载 SPEC.md（需求文档）
+            spec_path = layout.group_shared_dir(self.ctx.group_id) / "SPEC.md"
+            if spec_path.exists():
+                try:
+                    spec_content = spec_path.read_text(encoding="utf-8")
+                    context_parts.append(f"【需求文档】\n{spec_content}")
+                    has_context = True
+                except Exception:
+                    pass
+
+            # 3. 加载 BOARD.md（工作看板）
+            board_path = layout.group_shared_dir(self.ctx.group_id) / "BOARD.md"
+            if board_path.exists():
+                try:
+                    board_content = board_path.read_text(encoding="utf-8")
+                    context_parts.append(f"【工作看板】\n{board_content}")
+                    has_context = True
+                except Exception:
+                    pass
+
+            return "\n\n".join(context_parts) if has_context else None
+
+        # 非工作 Bot 但不包含任务关键词，返回 None
+        return None
             except Exception:
                 pass
 
