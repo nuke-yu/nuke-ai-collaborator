@@ -53,10 +53,13 @@ AGENT_TEMPLATE = """# AGENT.md — {name} 的推理框架
 
 ### 📁 协作契约（固定文件）
 
-- `BOARD.md` - 工作看板
-- `SPEC.md` - 需求文档
+这些文件在新群组创建时**自动生成**，所有 Bot 都可以读取：
+
+- `BOARD.md` - 工作看板（记录当前迭代任务）
+- `SPEC.md` - 需求文档（记录项目需求）
 - `API_CONTRACT.md` - 接口契约
 - `RETRO_LATEST.md` - 最新复盘
+- `workspace/PROJECTS.md` - **项目清单（QA Bot 必读！）**
 
 ### 📁 私有区
 
@@ -65,9 +68,10 @@ AGENT_TEMPLATE = """# AGENT.md — {name} 的推理框架
 ### 🚫 常见错误
 
 - ❌ 把代码写在自己私有目录（如 `workspaces/group_3/bots/bot_1010/`）
-- ❌ 不先读取 PROJECTS.md 就假设要测试哪个项目
-- ✅ 应该写进共享区（如 `workspaces/group_3/shared/workspace/my-app/`）
-- ✅ QA bot 先读取 PROJECTS.md 确认当前项目再开始测试
+- ❌ QA Bot 不先读取 `workspace/PROJECTS.md` 就假设要测试哪个项目
+- ❌ 不查看 `SPEC.md` 和 `BOARD.md` 就开始开发/测试
+- ✅ 应该写进共享区（如 `workspace/my-app/`）
+- ✅ QA Bot **必须**先读取 `workspace/PROJECTS.md` 确认当前项目再开始测试
 
 要点：凡是别的角色要接手的产出，进共享区（`workspace/`、`docs/`、契约文件）；只有自己用的留私有。
 
@@ -100,33 +104,92 @@ MEMORY_TEMPLATE = """# {name} · 长期记忆
 
 BOARD_TEMPLATE = """# 工作看板 · {display}
 
+> 由 {role} Bot 维护，记录迭代任务和工作流。
+
 更新时间：{today}
+
+## 当前迭代目标
+
+**迭代名称**: Iteration 1 - 初始项目设置
+**负责人**: PM Bot
+**开始时间**: {today}
+**目标**: 建立基础项目结构，完成第一个功能实现
 
 ## Backlog
 | # | 需求 | 优先级 |
 |---|------|--------|
+| 1 | 创建项目工作区 | 高 |
+| 2 | 实现核心功能 | 高 |
+| 3 | 编写测试用例 | 中 |
+| 4 | 性能优化 | 低 |
 
 ## 进行中
 | # | 需求 | 负责人 | 状态 | Todo |
 |---|------|--------|------|------|
+| 1 | 项目初始化 | Dev Bot | 🟢 进行中 | 创建项目结构 |
 
 ## 已完成
 | # | 需求 | 负责人 | 完成时间 | 产出 |
-|---|------|--------|---------|------|
+|---|------|--------|----------|------|
+
+## 团队协作约定
+
+- **Dev Bot**: 在 `workspace/my-app/` 编写代码
+- **QA Bot**: 读取 `workspace/PROJECTS.md` 了解当前项目，从 `workspace/my-app/` 读取代码测试
+- **BA Bot**: 维护 `SPEC.md` 和 `BOARD.md`，跟踪项目进度
+
+## 测试流程
+
+1. QA Bot 读取 `workspace/PROJECTS.md` 确认当前活跃项目
+2. 阅读 `SPEC.md` 了解需求
+3. 读取项目代码进行验证
+4. 将测试结果写入 `docs/test-report.md`
 """
 
 SPEC_TEMPLATE = """# 需求文档 · {display}
 
-> 由 PM Bot 维护，记录项目背景、目标和详细需求。
+> 由 BA Bot 维护，记录项目背景、目标和详细需求。
 
 ## 项目背景
 
+这是一个使用 React 19 + Vite + Tailwind CSS 构建的 AI 协作平台。
 
 ## 核心需求
 
+### Phase 1 - 基础项目结构
+
+#### 1.1 工作区组织
+- ✅ 创建 `workspace/my-app/` 作为默认项目目录
+- ✅ 所有 Bot 代码共享在此目录
+- ✅ 建立 `PROJECTS.md` 项目清单
+
+#### 1.2 角色分工
+- **Dev Bot**: 在 `workspace/my-app/` 编写代码
+- **QA Bot**: 读取 `workspace/PROJECTS.md` 了解当前项目，从对应目录读取代码测试
+- **BA Bot**: 维护需求和任务板
+
+#### 1.3 测试流程
+1. QA Bot 读取 `workspace/PROJECTS.md` 确认当前活跃项目
+2. 阅读 `SPEC.md` 了解需求
+3. 读取项目代码进行验证
+4. 将测试结果写入 `docs/test-report.md`
+
+### Phase 2 - 功能开发
+- [ ] 实现核心业务功能
+- [ ] 编写单元测试
+- [ ] 性能优化
+
+### Phase 3 - 上线部署
+- [ ] 集成测试
+- [ ] 文档完善
+- [ ] 部署上线
 
 ## 验收标准
 
+- 所有功能符合 SPEC.md 描述
+- QA Bot 能通过 `workspace/PROJECTS.md` 快速定位测试项目
+- 测试结果清晰记录在 `docs/test-report.md`
+- 代码结构清晰，易于维护
 """
 
 API_CONTRACT_TEMPLATE = """# 接口契约 · {display}
