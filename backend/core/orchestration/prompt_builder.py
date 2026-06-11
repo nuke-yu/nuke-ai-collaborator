@@ -54,14 +54,16 @@ async def compile_system_prompt(
     
     for s in raw_skills:
         if s.get("status", "active") == "disabled":
-            skills_snapshot.append({**s, "injected": None})
+            inj = None
         elif s.get("always"):
-            skills_snapshot.append({**s, "injected": "full"})
+            inj = "full"
         elif not s.get("user_invocable", True):
-            skills_snapshot.append({**s, "injected": None})
+            inj = None
         else:
             inj = "metadata" if s["name"] in injected_names else None
-            skills_snapshot.append({**s, "injected": inj})
+        # Ensure all values are JSON-serializable (Path → str) before broadcasting.
+        safe = {k: str(v) if hasattr(v, "__fspath__") else v for k, v in s.items()}
+        skills_snapshot.append({**safe, "injected": inj})
             
     if any(s.get("always") for s in raw_skills if s.get("status", "active") != "disabled"):
         always_skills = await load_always_skills(bot["id"], ctx.group_id, bot.get("role"))
