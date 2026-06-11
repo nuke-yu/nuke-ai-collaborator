@@ -553,12 +553,13 @@ touch my-new-project/app.js
 
 ## QA 测试指引
 
-1. 查看 [SPEC.md](../SPEC.md) 了解需求
-2. 查看 [BOARD.md](../BOARD.md) 了解当前迭代目标
-3. 查看 [PR 文档](../prs/) 了解改动范围
-4. 用 `read_file(path="workspace/my-app/<文件名>")` 读取代码（路径以 `workspace/` 开头，系统自动路由到共享区）
-5. 用 `run_shell(cmd="...", cwd="workspace/my-app")` 在代码目录执行命令
-6. 将测试结果写入 [docs/test-report.md](../docs/test-report.md)
+1. 查看本文件**活跃项目**表格，取得当前项目的 **路径** 字段（如 `workspace/<project>/`）
+2. 查看 [SPEC.md](../SPEC.md) 了解需求和验收标准
+3. 查看 [BOARD.md](../BOARD.md) 了解当前迭代目标
+4. 查看 [PR 文档](../prs/) 了解改动范围
+5. 用 `read_file(path="workspace/<project>/<文件名>")` 读取代码（路径以 `workspace/` 开头，系统自动路由到共享区，不要用 `read_local_file`）
+6. 用 `run_shell(cmd="...", cwd="workspace/<project>")` 在代码目录执行命令
+7. 将测试结果写入 [docs/test-report.md](../docs/test-report.md)
 
 ## 添加新项目
 

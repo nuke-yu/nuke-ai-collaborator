@@ -33,13 +33,14 @@ AGENT_TEMPLATE = """# AGENT.md — {name} 的推理框架
 📍 **位置**: `workspace/<project-name>/...`
 
 作为**开发 bot**：
-- ✅ 代码写进 `workspace/my-app/`（或你创建的其他项目名）
-- ✅ 所有成员都能看到，QA 可以直接读取测试
-- ✅ 示例：`workspace/my-app/calculator.js`
+- ✅ 先读 `workspace/PROJECTS.md` 确认项目路径（如 `workspace/<project>/`）
+- ✅ 代码写进对应的 `workspace/<project>/` 目录，所有成员都能看到
+- ✅ 示例：`write_file(path="workspace/my-project/app.js", ...)`
 
 作为**测试 bot**：
-- 📖 用 `read_file(path="workspace/my-app/<文件名>")` 读取代码（路径以 `workspace/` 开头自动路由到共享区，不要用 `read_local_file`）
-- 🔧 用 `run_shell(cmd="...", cwd="workspace/my-app")` 在代码目录执行命令
+- 📋 先读 `workspace/PROJECTS.md` 取得当前活跃项目的实际路径（字段 **路径**）
+- 📖 用 `read_file(path="workspace/<project>/<文件名>")` 读取代码（路径以 `workspace/` 开头自动路由到共享区，不要用 `read_local_file`）
+- 🔧 用 `run_shell(cmd="...", cwd="workspace/<project>")` 在代码目录执行命令
 - 📝 测试报告写进 `docs/test-report.md`
 
 作为**产品/分析 bot**：
@@ -136,18 +137,17 @@ BOARD_TEMPLATE = """# 工作看板 · {display}
 ## 团队协作约定
 
 ### Dev Bot 工作指引
-1. 读取 SPEC.md 了解需求
-2. 读取 BOARD.md 了解当前任务
-3. 在 `workspace/my-app/` 编写代码
-4. 测试通过后更新 BOARD.md 状态
+1. 读取 `workspace/PROJECTS.md` 确认当前项目路径
+2. 读取 SPEC.md 了解需求，读取 BOARD.md 了解当前任务
+3. 在 `workspace/<project>/` 下编写代码（路径从 PROJECTS.md 获取）
+4. 完成后更新工单状态
 
 ### QA Bot 工作指引
-1. 读取 `workspace/PROJECTS.md` 确认当前活跃项目及代码路径
-2. 读取 SPEC.md 了解需求和验收标准
-3. 读取 BOARD.md 了解测试范围
-4. 用 `read_file(path="workspace/my-app/<文件名>")` 读取代码（不用 `read_local_file`）
-5. 用 `run_shell(cmd="...", cwd="workspace/my-app")` 执行测试命令
-6. 将测试结果写入 `docs/test-report.md`
+1. 读取 `workspace/PROJECTS.md` 确认当前活跃项目及其 **路径** 字段
+2. 读取 SPEC.md 了解需求和验收标准，读取 BOARD.md 了解测试范围
+3. 用 `read_file(path="workspace/<project>/<文件名>")` 读取代码（不用 `read_local_file`）
+4. 用 `run_shell(cmd="...", cwd="workspace/<project>")` 执行测试命令
+5. 将测试结果写入 `docs/test-report.md`
 
 ### BA Bot 工作指引
 1. 维护 SPEC.md 需求文档
