@@ -113,6 +113,8 @@ export default function MessageList({
                     args={tool.args}
                     iteration={tool.iteration}
                     durationSec={tool.duration_sec}
+                    result={tool.result}
+                    isError={tool.is_error}
                   />
                 </div>
               ))}

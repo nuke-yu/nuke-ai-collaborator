@@ -268,25 +268,30 @@ export const useChatStore = create((set, get) => ({
       }))
 
     } else if (data.type === 'tool_progress_start') {
+      const startKey = `${data.temp_id}-${data.call_id}`
       set((s) => ({
         toolProgressBlocks: {
           ...s.toolProgressBlocks,
-          [`${data.temp_id}-${data.tool_name}`]: {
+          [startKey]: {
             tool_name: data.tool_name,
             args: data.tool_args,
             iteration: data.iteration,
             duration_sec: undefined,
+            result: undefined,
           },
         },
       }))
 
     } else if (data.type === 'tool_progress_end') {
+      const endKey = `${data.temp_id}-${data.call_id}`
       set((s) => ({
         toolProgressBlocks: {
           ...s.toolProgressBlocks,
-          [`${data.temp_id}-${data.tool_name}`]: {
-            ...s.toolProgressBlocks[`${data.temp_id}-${data.tool_name}`],
+          [endKey]: {
+            ...s.toolProgressBlocks[endKey],
             duration_sec: data.duration_sec,
+            result: data.result,
+            is_error: data.is_error,
           },
         },
       }))

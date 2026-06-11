@@ -705,23 +705,31 @@ class ToolLoopRunner:
         return tool_result
 
     async def _execute_parallel_tools(self, calls, iteration=None):
+        _iter = iteration or self.iter_count
         for call in calls:
             await self.ctx.interaction.broadcast(self.ctx.group_id, {
                 "type": "tool_call", "temp_id": self.temp_id,
                 "tool": call["name"], "args": call["arguments"],
                 "session_id": self.session_id,
             })
+            await self.ctx.interaction.broadcast(self.ctx.group_id, {
+                "type": "tool_progress_start", "temp_id": self.temp_id,
+                "call_id": call["id"], "tool_name": call["name"],
+                "tool_args": call["arguments"], "iteration": _iter,
+            })
             await self.ctx.interaction.append_session_event(self.session_id, "tool_call", {
                 "tool_call_id": call["id"],
                 "tool_name": call["name"],
                 "arguments": call.get("arguments", {}),
             })
-            
+
+        _t0 = asyncio.get_event_loop().time()
         raw_results = await asyncio.gather(*[
             _dispatch_tool(c["name"], c["arguments"], self.execution_ctx)
             for c in calls
         ])
-        
+        _duration = round(asyncio.get_event_loop().time() - _t0, 2)
+
         for call, (tool_result, is_error) in zip(calls, raw_results):
             await self.ctx.interaction.append_session_event(self.session_id, "tool_result", {
                 "tool_call_id": call["id"],
@@ -730,10 +738,10 @@ class ToolLoopRunner:
                 "is_error": is_error,
             })
             self._track_vfs_modifications(call["name"], call["arguments"])
-            
+
             # Apply truncation if output is too long
             display_result, truncated_path = compact.truncate_tool_result(call["name"], tool_result, self.ctx.group_id, self.model_name)
-            
+
             self.tool_records.append({
                 "name": call["name"],
                 "args": call["arguments"],
@@ -751,35 +759,51 @@ class ToolLoopRunner:
                 "tool": call["name"], "result": display_result[:300],
                 "session_id": self.session_id,
             })
+            await self.ctx.interaction.broadcast(self.ctx.group_id, {
+                "type": "tool_progress_end", "temp_id": self.temp_id,
+                "call_id": call["id"], "tool_name": call["name"],
+                "duration_sec": _duration,
+                "result": display_result[:800],
+                "is_error": is_error,
+            })
 
     async def _execute_serial_tools(self, calls, iteration=None):
+        _iter = iteration or self.iter_count
         for call in calls:
             await self.ctx.interaction.broadcast(self.ctx.group_id, {
                 "type": "tool_call", "temp_id": self.temp_id,
                 "tool": call["name"], "args": call["arguments"],
                 "session_id": self.session_id,
             })
+            await self.ctx.interaction.broadcast(self.ctx.group_id, {
+                "type": "tool_progress_start", "temp_id": self.temp_id,
+                "call_id": call["id"], "tool_name": call["name"],
+                "tool_args": call["arguments"], "iteration": _iter,
+            })
             await self.ctx.interaction.append_session_event(self.session_id, "tool_call", {
                 "tool_call_id": call["id"],
                 "tool_name": call["name"],
                 "arguments": call.get("arguments", {}),
             })
-            
+
+            _t0 = asyncio.get_event_loop().time()
             tool_result, is_error = await _dispatch_tool(
                 call["name"], call["arguments"], self.execution_ctx
             )
+            _duration = round(asyncio.get_event_loop().time() - _t0, 2)
+
             await self.ctx.interaction.append_session_event(self.session_id, "tool_result", {
                 "tool_call_id": call["id"],
                 "tool_name": call["name"],
                 "result": tool_result,
                 "is_error": is_error,
             })
-            
+
             self._track_vfs_modifications(call["name"], call["arguments"])
-                    
+
             if call["name"] == "run_skill":
                 tool_result = await self._handle_run_skill_result(tool_result)
-                    
+
             display_result = tool_result
             if call["name"] == "write_file" and tool_result.startswith("__DRAFT_WRITTEN__:"):
                 skill_name = tool_result.split(":", 1)[1]
@@ -790,7 +814,7 @@ class ToolLoopRunner:
                     "skill_name": skill_name,
                     "message": f"{self.bot['name']} 写入了新的自学技能「{skill_name}」，请在 Skill 管理面板审批。",
                 })
-                
+
             # Apply truncation if output is too long
             display_result, truncated_path = compact.truncate_tool_result(call["name"], display_result, self.ctx.group_id, self.model_name)
 
@@ -805,12 +829,19 @@ class ToolLoopRunner:
                 "name": call["name"],
                 "content": display_result,
             })
-            
+
             await self.ctx.interaction.save_session_snapshot(self.session_id, self.messages)
             await self.ctx.interaction.broadcast(self.ctx.group_id, {
                 "type": "tool_result", "temp_id": self.temp_id,
                 "tool": call["name"], "result": display_result[:300],
                 "session_id": self.session_id,
+            })
+            await self.ctx.interaction.broadcast(self.ctx.group_id, {
+                "type": "tool_progress_end", "temp_id": self.temp_id,
+                "call_id": call["id"], "tool_name": call["name"],
+                "duration_sec": _duration,
+                "result": display_result[:800],
+                "is_error": is_error,
             })
 
     async def _run_pre_compaction(self):

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 
-export default function ToolProgressBlock({ tempId, toolName, args, iteration, durationSec }) {
+export default function ToolProgressBlock({ tempId, toolName, args, iteration, durationSec, result, isError }) {
   const [isExpanded, setIsExpanded] = useState(false)
   const [status, setStatus] = useState('running') // 'queued' | 'running' | 'completed'
 
@@ -49,7 +49,9 @@ export default function ToolProgressBlock({ tempId, toolName, args, iteration, d
   const statusColors = {
     queued: 'bg-blue-900/30 border-blue-700/50 text-blue-300',
     running: 'bg-green-900/30 border-green-700/50 text-green-300 animate-pulse',
-    completed: 'bg-emerald-900/30 border-emerald-700/50 text-emerald-300',
+    completed: isError
+      ? 'bg-red-900/30 border-red-700/50 text-red-300'
+      : 'bg-emerald-900/30 border-emerald-700/50 text-emerald-300',
   }
 
   return (
@@ -74,14 +76,21 @@ export default function ToolProgressBlock({ tempId, toolName, args, iteration, d
       </button>
 
       {isExpanded && (
-        <div className="p-3 border-t border-white/10 bg-black/20">
-          <div className="text-[10px] text-gray-500 mb-1 font-mono">Arguments:</div>
-          <pre className="text-xs text-gray-300 font-mono overflow-x-auto whitespace-pre-wrap">
-            {formatArgsForDisplay(args)}
-          </pre>
-          {durationSec !== undefined && (
-            <div className="mt-2 text-[10px] text-green-400">
-              ✓ Completed successfully
+        <div className="p-3 border-t border-white/10 bg-black/20 space-y-2">
+          <div>
+            <div className="text-[10px] text-gray-500 mb-1 font-mono uppercase tracking-wider">Arguments</div>
+            <pre className="text-xs text-gray-300 font-mono overflow-x-auto whitespace-pre-wrap">
+              {formatArgsForDisplay(args)}
+            </pre>
+          </div>
+          {result !== undefined && (
+            <div>
+              <div className={`text-[10px] mb-1 font-mono uppercase tracking-wider ${isError ? 'text-red-400' : 'text-gray-500'}`}>
+                {isError ? '⚠ Error Output' : 'Output'}
+              </div>
+              <pre className={`text-xs font-mono overflow-x-auto whitespace-pre-wrap max-h-48 overflow-y-auto rounded p-2 ${isError ? 'text-red-300 bg-red-950/30' : 'text-gray-200 bg-black/30'}`}>
+                {result || '(empty)'}
+              </pre>
             </div>
           )}
         </div>
