@@ -38,7 +38,8 @@ AGENT_TEMPLATE = """# AGENT.md — {name} 的推理框架
 - ✅ 示例：`workspace/my-app/calculator.js`
 
 作为**测试 bot**：
-- 📖 从 `workspace/my-app/` 读取代码进行验证
+- 📖 用 `read_file(path="workspace/my-app/<文件名>")` 读取代码（路径以 `workspace/` 开头自动路由到共享区，不要用 `read_local_file`）
+- 🔧 用 `run_shell(cmd="...", cwd="workspace/my-app")` 在代码目录执行命令
 - 📝 测试报告写进 `docs/test-report.md`
 
 作为**产品/分析 bot**：
@@ -141,12 +142,12 @@ BOARD_TEMPLATE = """# 工作看板 · {display}
 4. 测试通过后更新 BOARD.md 状态
 
 ### QA Bot 工作指引
-1. 读取 `workspace/PROJECTS.md` 确认当前活跃项目
-2. 读取 SPEC.md 了解需求
+1. 读取 `workspace/PROJECTS.md` 确认当前活跃项目及代码路径
+2. 读取 SPEC.md 了解需求和验收标准
 3. 读取 BOARD.md 了解测试范围
-4. 从对应项目目录读取代码测试
-5. 将测试结果写入 `docs/test-report.md`
-6. 在 BOARD.md 中更新测试状态
+4. 用 `read_file(path="workspace/my-app/<文件名>")` 读取代码（不用 `read_local_file`）
+5. 用 `run_shell(cmd="...", cwd="workspace/my-app")` 执行测试命令
+6. 将测试结果写入 `docs/test-report.md`
 
 ### BA Bot 工作指引
 1. 维护 SPEC.md 需求文档
