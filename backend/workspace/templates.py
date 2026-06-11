@@ -138,10 +138,10 @@ BOARD_TEMPLATE = """# 工作看板 · {display}
 ## 团队协作约定
 
 ### Dev Bot 工作指引
-1. `list_jira_tickets()` 查看 backlog，从工单的 `[项目:xxx]` 取项目名
+1. `list_jira_tickets()` 查看 backlog；工单有 `[项目:xxx]` 直接用，没有则从需求语义自己命名
 2. 读取 SPEC.md 了解需求，读取 BOARD.md 了解当前任务
 3. 在 `workspace/<project>/` 下编写代码
-4. 完成后：`update_jira_ticket(status="done")`，BOARD.md 自动更新
+4. 完成后：`update_jira_ticket(ticket_id="DFT-X", status="done", project="<project>")`，BOARD.md 自动显示 Project 列
 
 ### QA Bot 工作指引
 1. `list_jira_tickets()` 或读 BOARD.md —— 从 Project 列找到要测的项目名

@@ -39,8 +39,9 @@ RD_TOOLS = [
     ToolDef(
         name="update_jira_ticket",
         description=(
-            "更新 Jira 工单状态。Dev 开始任务时标 in_progress，完成后标 done；"
-            "QA 测试通过后也应把工单标 done。避免已完成任务被重新开发。"
+            "更新 Jira 工单状态。Dev 开始任务时标 in_progress，完成后标 done 并填写 project（"
+            "若 BA 建工单时未填，Dev 根据需求自行命名后在此写入）。BOARD.md 自动更新 Project 列，"
+            "QA 即可看到要测哪个项目。"
         ),
         parameters={
             "type": "object",
@@ -50,6 +51,10 @@ RD_TOOLS = [
                     "type": "string",
                     "enum": ["backlog", "in_progress", "done"],
                     "description": "新状态：backlog / in_progress / done",
+                },
+                "project": {
+                    "type": "string",
+                    "description": "（可选）所属项目名。BA 建单时未填、或 Dev 自行命名时在此补写，写入后 BOARD.md 立即可见。",
                 },
             },
             "required": ["ticket_id", "status"],
@@ -96,17 +101,17 @@ async def _list_jira(context=None):
     return "当前 Jira 工单：\n" + "\n".join(lines)
 
 
-async def _update_jira(ticket_id, status, context=None):
+async def _update_jira(ticket_id, status, project=None, context=None):
     gid = (context or {}).get("group_id")
     try:
-        result = await get_jira().update_ticket(gid, ticket_id, status)
+        result = await get_jira().update_ticket(gid, ticket_id, status, project=project)
     except ValueError as e:
         return f"[错误] {e}"
-    # Re-render BOARD.md so the change is immediately visible to all bots.
     from core.orchestration.rd_manager import rd_manager
     await rd_manager.render_board(gid)
     label = {"backlog": "待开发", "in_progress": "进行中", "done": "已完成"}.get(status, status)
-    return f"工单 {result['ticket_id']} 状态已更新为【{label}】"
+    project_hint = f"，项目：{result['project']}" if result.get("project") else ""
+    return f"工单 {result['ticket_id']} 状态已更新为【{label}】{project_hint}"
 
 
 async def _create_pr(title, description="", ticket_ids=None, context=None):

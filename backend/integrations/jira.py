@@ -25,8 +25,9 @@ class JiraClient(ABC):
         """列出本群工单：[{ticket_id, title, status, project, description, acceptance_criteria}]。"""
 
     @abstractmethod
-    async def update_ticket(self, group_id: int, ticket_id: str, status: str) -> dict:
-        """更新工单状态，返回 {ticket_id, status}。"""
+    async def update_ticket(self, group_id: int, ticket_id: str, status: str,
+                            project: str | None = None) -> dict:
+        """更新工单状态（及可选的项目名），返回 {ticket_id, status, project}。"""
 
 
 class LocalJiraClient(JiraClient):
@@ -74,18 +75,34 @@ class LocalJiraClient(JiraClient):
             })
         return out
 
-    async def update_ticket(self, group_id: int, ticket_id: str, status: str) -> dict:
+    async def update_ticket(self, group_id: int, ticket_id: str, status: str,
+                            project: str | None = None) -> dict:
         if status not in _VALID_STATUSES:
             raise ValueError(f"无效状态 '{status}'，可选值：{sorted(_VALID_STATUSES)}")
         async with write_connect() as db:
-            cur = await db.execute(
-                "UPDATE tickets SET status = ? WHERE ticket_id = ? AND group_id = ?",
-                (status, ticket_id, group_id),
-            )
+            if project is not None:
+                cur = await db.execute(
+                    "UPDATE tickets SET status = ?, project = ? "
+                    "WHERE ticket_id = ? AND group_id = ?",
+                    (status, project, ticket_id, group_id),
+                )
+            else:
+                cur = await db.execute(
+                    "UPDATE tickets SET status = ? WHERE ticket_id = ? AND group_id = ?",
+                    (status, ticket_id, group_id),
+                )
             await db.commit()
         if cur.rowcount == 0:
             raise ValueError(f"工单 {ticket_id} 不存在或不属于本群组")
-        return {"ticket_id": ticket_id, "status": status}
+        # Read back the final project value (may have been set previously)
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT project FROM tickets WHERE ticket_id = ? AND group_id = ?",
+                (ticket_id, group_id),
+            ) as cur:
+                row = await cur.fetchone()
+        final_project = (row[0] or "") if row else ""
+        return {"ticket_id": ticket_id, "status": status, "project": final_project}
 
 
 _client: JiraClient = LocalJiraClient()
