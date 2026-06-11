@@ -148,30 +148,6 @@ _WORKSPACE_TOOLS = [
             "required": ["bot_name", "task"],
         },
     ),
-    ToolDef(
-        name="update_project_status",
-        description="更新 PROJECTS.md 中项目的状态。Dev Bot 完成开发后调用（设为「待验收」），QA Bot 验收通过后调用（设为「已完成」）。群组内所有成员立即可见。",
-        parameters={
-            "type": "object",
-            "properties": {
-                "project": {
-                    "type": "string",
-                    "description": "项目名，与 PROJECTS.md 活跃项目表格中「项目名」列一致",
-                },
-                "status": {
-                    "type": "string",
-                    "enum": ["开发中", "待验收", "阻塞", "已完成"],
-                    "description": "新状态：开发中 / 待验收（Dev 完成后设置，通知 QA）/ 阻塞 / 已完成（QA 验收通过）",
-                },
-                "current_task": {
-                    "type": "string",
-                    "description": "（可选）同步更新「当前任务」列的描述，例如「Phase 2: 高级功能」",
-                },
-            },
-            "required": ["project", "status"],
-        },
-        concurrency_safe=False,
-    ),
 ]
 
 # ---------------------------------------------------------------------------
@@ -707,7 +683,6 @@ _APPROVAL_REQUIRED_TOOLS = frozenset({
 # 故这些工具不走权限询问，直接放行。
 _AUTO_ALLOW_TOOLS = frozenset({
     "create_jira_ticket", "list_jira_tickets", "update_jira_ticket", "create_pr",
-    "update_project_status",
 })
 
 
@@ -1018,81 +993,6 @@ async def _handle_write_local_file(path: str, content: str, context: dict = None
         return f"[写入错误] {e}"
 
 
-_PROJECT_STATUS_MAP = {
-    "开发中":   "🟢 开发中",
-    "待验收":   "🟡 待验收",
-    "阻塞":     "🔴 阻塞",
-    "已完成":   "✅ 已完成",
-    # also accept canonical forms with emoji
-    "🟢 开发中": "🟢 开发中",
-    "🟡 待验收": "🟡 待验收",
-    "🔴 阻塞":   "🔴 阻塞",
-    "✅ 已完成":  "✅ 已完成",
-}
-
-
-async def _handle_update_project_status(
-    project: str, status: str, current_task: str | None = None, context: dict = None
-) -> str:
-    ctx = context or {}
-    bot_id = ctx.get("bot_id")
-    group_id = ctx.get("group_id")
-    if not bot_id or not group_id:
-        return "[错误] 缺少 bot_id 或 group_id"
-
-    canonical = _PROJECT_STATUS_MAP.get(status.strip())
-    if canonical is None:
-        return f"[错误] 无效状态 '{status}'，可选：开发中 / 待验收 / 阻塞 / 已完成"
-
-    content = await _ws.read_file(bot_id, "workspace/PROJECTS.md", group_id=group_id)
-    if content.startswith("["):
-        return f"[错误] 无法读取 PROJECTS.md：{content}"
-
-    lines = content.splitlines()
-    table_updated = False
-    meta_updated = False
-    in_project_section = False
-    new_lines = []
-
-    for line in lines:
-        # Track metadata section (### <project>)
-        stripped = line.strip()
-        if stripped == f"### {project}":
-            in_project_section = True
-        elif stripped.startswith("### "):
-            in_project_section = False
-
-        # Update metadata **状态** line
-        if in_project_section and stripped.startswith("- **状态**:"):
-            line = f"- **状态**: {canonical}"
-            meta_updated = True
-
-        # Update table row: | project | path | owner | status | task |
-        cells = line.split("|")
-        if len(cells) >= 6 and cells[1].strip() == project:
-            cells[4] = f" {canonical} "
-            if current_task is not None:
-                cells[5] = f" {current_task} "
-            line = "|".join(cells)
-            table_updated = True
-
-        new_lines.append(line)
-
-    if not table_updated:
-        return f"[错误] 未找到项目 '{project}'，请确认名称与 PROJECTS.md 活跃项目表格一致"
-
-    new_content = "\n".join(new_lines)
-    if content.endswith("\n"):
-        new_content += "\n"
-
-    result = await _ws.write_file(bot_id, "workspace/PROJECTS.md", new_content, group_id=group_id)
-    if "错误" in result:
-        return result
-
-    task_hint = f"，当前任务: {current_task}" if current_task else ""
-    return f"✅ 项目 '{project}' 状态已更新为 {canonical}{task_hint}"
-
-
 async def _handle_mcp_authenticate(server: str, context: dict = None) -> str:
     """Start OAuth for a remote MCP server (McpAuthTool style): returns an
     authorization URL for the user to open; tools load once they authorize."""
@@ -1124,8 +1024,7 @@ def register_workspace_tools() -> None:
         "run_shell":        _handle_run_shell,
         "read_local_file":  _handle_read_local_file,
         "write_local_file": _handle_write_local_file,
-        "spawn_agent":            _spawn_agent_handler,
-        "update_project_status":  _handle_update_project_status,
+        "spawn_agent":  _spawn_agent_handler,
     }
     for tdef in _WORKSPACE_TOOLS:
         tool_executor.register(tdef, handlers[tdef.name])

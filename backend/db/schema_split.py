@@ -229,6 +229,7 @@ _GROUP_DDL = [
         group_id INTEGER NOT NULL,
         title TEXT,
         status TEXT DEFAULT 'backlog',
+        project TEXT DEFAULT '',
         assignee_id INTEGER,
         priority TEXT,
         metadata_json TEXT,

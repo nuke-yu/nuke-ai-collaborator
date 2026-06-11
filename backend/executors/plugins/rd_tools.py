@@ -18,13 +18,14 @@ from integrations.git import get_git
 RD_TOOLS = [
     ToolDef(
         name="create_jira_ticket",
-        description="创建一个 Jira 工单（含验收标准 AC）。BA 在需求确认后用它建工单。",
+        description="创建一个 Jira 工单（含验收标准 AC）。BA 在需求确认后用它建工单。project 字段关联工单到具体项目，BOARD.md 会显示该列方便 Dev/QA 定位。",
         parameters={
             "type": "object",
             "properties": {
                 "title": {"type": "string", "description": "工单标题"},
                 "description": {"type": "string", "description": "工单描述/范围"},
                 "acceptance_criteria": {"type": "string", "description": "验收标准(AC)，可多条"},
+                "project": {"type": "string", "description": "所属项目名（与 PROJECTS.md 中一致，如 my-app）。填写后 BOARD.md 自动显示项目列，Dev/QA 无需猜测。"},
             },
             "required": ["title"],
         },
@@ -73,10 +74,11 @@ RD_TOOLS = [
 ]
 
 
-async def _create_jira(title, description="", acceptance_criteria="", context=None):
+async def _create_jira(title, description="", acceptance_criteria="", project="", context=None):
     gid = (context or {}).get("group_id")
-    t = await get_jira().create_ticket(gid, title, description, acceptance_criteria)
-    return f"已创建 Jira 工单 {t['ticket_id']}：{title}"
+    t = await get_jira().create_ticket(gid, title, description, acceptance_criteria, project)
+    project_hint = f"（项目：{project}）" if project else ""
+    return f"已创建 Jira 工单 {t['ticket_id']}：{title}{project_hint}"
 
 
 async def _list_jira(context=None):
@@ -86,7 +88,8 @@ async def _list_jira(context=None):
         return "当前没有 Jira 工单。"
     lines = []
     for t in items:
-        line = f"- {t['ticket_id']} [{t['status']}] {t['title']}"
+        project_tag = f" [项目:{t['project']}]" if t.get("project") else ""
+        line = f"- {t['ticket_id']} [{t['status']}]{project_tag} {t['title']}"
         if t.get("acceptance_criteria"):
             line += f"\n    AC: {t['acceptance_criteria']}"
         lines.append(line)

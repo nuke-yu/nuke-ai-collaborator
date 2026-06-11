@@ -430,6 +430,16 @@ async def migration_018(db):
     await db.commit()
 
 
+async def migration_019(db):
+    """Add project column to tickets table for cross-project board visibility.
+
+    Rollback:
+        ALTER TABLE tickets DROP COLUMN project;
+    """
+    await _safe_add_column(db, "ALTER TABLE tickets ADD COLUMN project TEXT DEFAULT ''")
+    await db.commit()
+
+
 MIGRATIONS: list = [
     migration_001,
     migration_002,
@@ -449,6 +459,7 @@ MIGRATIONS: list = [
     migration_016,
     migration_017,
     migration_018,
+    migration_019,
 ]
 
 

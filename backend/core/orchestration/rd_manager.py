@@ -41,39 +41,37 @@ class RDManager:
         try:
             async with connect() as db:
                 async with db.execute(
-                    "SELECT ticket_id, title, status FROM tickets WHERE group_id = ? ORDER BY id DESC", 
+                    "SELECT ticket_id, title, status, COALESCE(project, '') "
+                    "FROM tickets WHERE group_id = ? ORDER BY id DESC",
                     (group_id,)
                 ) as cur:
                     rows = await cur.fetchall()
-                    
+
             if not rows:
                 content = "# 任务看板 (BOARD.md)\n\n(暂无任务)"
                 await write_file(0, "BOARD.md", content, group_id=group_id)
                 return
 
-            backlog = []
-            in_progress = []
-            done = []
-            
-            for tid, title, status in rows:
-                line = f"| {tid} | {title} | [-] | {status.title()} |"
-                if status == 'backlog': backlog.append(line)
-                elif status == 'in_progress': in_progress.append(line)
-                elif status == 'done': done.append(line)
-                
+            backlog, in_progress, done = [], [], []
+
+            for tid, title, status, project in rows:
+                proj_cell = project or "-"
+                line = f"| {tid} | {proj_cell} | {title} | [-] | {status.title()} |"
+                if status == "backlog":
+                    backlog.append(line)
+                elif status == "in_progress":
+                    in_progress.append(line)
+                elif status == "done":
+                    done.append(line)
+
+            header = "| ID | Project | Title | Assignee | Status |\n|---|---|---|---|---|\n"
             content = "# 任务看板 (BOARD.md)\n\n(由系统基于真实数据库渲染，手动修改无效)\n\n"
-            content += "## Backlog\n| ID | Title | Assignee | Status |\n|---|---|---|---|\n"
-            content += "\n".join(backlog) + "\n\n"
-            
-            content += "## In Progress\n| ID | Title | Assignee | Status |\n|---|---|---|---|\n"
-            content += "\n".join(in_progress) + "\n\n"
-            
-            content += "## Done\n| ID | Title | Assignee | Status |\n|---|---|---|---|\n"
-            content += "\n".join(done) + "\n"
-            
-            # Write without triggering an infinite loop
+            content += f"## Backlog\n{header}" + "\n".join(backlog) + "\n\n"
+            content += f"## In Progress\n{header}" + "\n".join(in_progress) + "\n\n"
+            content += f"## Done\n{header}" + "\n".join(done) + "\n"
+
             await write_file(0, "BOARD.md", content, group_id=group_id)
-            
+
         except Exception:
             log.exception("RDManager failed to render board for group %d", group_id)
 

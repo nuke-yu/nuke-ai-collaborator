@@ -33,12 +33,12 @@ AGENT_TEMPLATE = """# AGENT.md — {name} 的推理框架
 📍 **位置**: `workspace/<project-name>/...`
 
 作为**开发 bot**：
-- ✅ 先读 `workspace/PROJECTS.md`：从工单描述取项目名，或找 `🟢 开发中` 的项目
+- ✅ `list_jira_tickets()` 取得工单，工单里的 `[项目:xxx]` 标签就是项目名
 - ✅ 代码写进对应的 `workspace/<project>/` 目录，所有成员都能看到
-- ✅ 开发完成后，将 PROJECTS.md 中该项目的状态更新为 `🟡 待验收`，通知 QA Bot
+- ✅ 开发完成后 `update_jira_ticket(status="done")`，BOARD.md 自动更新
 
 作为**测试 bot**：
-- 📋 先读 `workspace/PROJECTS.md`：从工单描述取项目名，或找 `🟡 待验收` 的项目
+- 📋 `list_jira_tickets()` 或读 `BOARD.md` —— 从 Project 列取得项目名
 - 📖 用 `read_file(path="workspace/<project>/<文件名>")` 读取代码（路径以 `workspace/` 开头自动路由到共享区，不要用 `read_local_file`）
 - 🔧 用 `run_shell(cmd="...", cwd="workspace/<project>")` 在代码目录执行命令
 - 📝 测试报告写进 `docs/test-report.md`
@@ -73,8 +73,8 @@ AGENT_TEMPLATE = """# AGENT.md — {name} 的推理框架
 - ❌ QA Bot 不先读取 `workspace/PROJECTS.md` 就假设要测试哪个项目
 - ❌ 不查看 `SPEC.md` 和 `BOARD.md` 就开始开发/测试
 - ✅ 应该写进共享区（如 `workspace/my-app/`）
-- ✅ Dev Bot 开发完调用 `update_project_status(status="待验收")` 通知 QA，QA 验收通过后调用 `update_project_status(status="已完成")`
-- ✅ QA Bot 从 PROJECTS.md `🟡 待验收` 项目确定测试目标，或从工单标题/描述获取项目名
+- ✅ 工单建立时 BA 填写 `project` 字段，BOARD.md 自动显示 Project 列，Dev/QA 无需猜测项目名
+- ✅ PROJECTS.md 是项目元数据（路径/技术栈），不做状态跟踪；状态在 BOARD.md（从工单自动渲染）
 
 要点：凡是别的角色要接手的产出，进共享区（`workspace/`、`docs/`、契约文件）；只有自己用的留私有。
 
@@ -138,14 +138,14 @@ BOARD_TEMPLATE = """# 工作看板 · {display}
 ## 团队协作约定
 
 ### Dev Bot 工作指引
-1. 读取 `workspace/PROJECTS.md`：从工单描述取项目名，或找 `🟢 开发中` 的项目
+1. `list_jira_tickets()` 查看 backlog，从工单的 `[项目:xxx]` 取项目名
 2. 读取 SPEC.md 了解需求，读取 BOARD.md 了解当前任务
 3. 在 `workspace/<project>/` 下编写代码
-4. 完成后：`update_jira_ticket(status="done")` + `update_project_status(project="<project>", status="待验收")`
+4. 完成后：`update_jira_ticket(status="done")`，BOARD.md 自动更新
 
 ### QA Bot 工作指引
-1. 读取 `workspace/PROJECTS.md`：从工单描述取项目名，或找 `🟡 待验收` 的项目
-2. 读取 SPEC.md 了解需求和验收标准，读取 BOARD.md 了解测试范围
+1. `list_jira_tickets()` 或读 BOARD.md —— 从 Project 列找到要测的项目名
+2. 读取 SPEC.md 了解需求和验收标准
 3. 用 `read_file(path="workspace/<project>/<文件名>")` 读取代码（不用 `read_local_file`）
 4. 用 `run_shell(cmd="...", cwd="workspace/<project>")` 执行测试命令
 5. 将测试结果写入 `docs/test-report.md`
