@@ -134,21 +134,32 @@ BOARD_TEMPLATE = """# 工作看板 · {display}
 
 ## 团队协作约定
 
-- **Dev Bot**: 在 `workspace/my-app/` 编写代码
-- **QA Bot**: 读取 `workspace/PROJECTS.md` 了解当前项目，从 `workspace/my-app/` 读取代码测试
-- **BA Bot**: 维护 `SPEC.md` 和 `BOARD.md`，跟踪项目进度
+### Dev Bot 工作指引
+1. 读取 SPEC.md 了解需求
+2. 读取 BOARD.md 了解当前任务
+3. 在 `workspace/my-app/` 编写代码
+4. 测试通过后更新 BOARD.md 状态
 
-## 测试流程
+### QA Bot 工作指引
+1. 读取 `workspace/PROJECTS.md` 确认当前活跃项目
+2. 读取 SPEC.md 了解需求
+3. 读取 BOARD.md 了解测试范围
+4. 从对应项目目录读取代码测试
+5. 将测试结果写入 `docs/test-report.md`
+6. 在 BOARD.md 中更新测试状态
 
-1. QA Bot 读取 `workspace/PROJECTS.md` 确认当前活跃项目
-2. 阅读 `SPEC.md` 了解需求
-3. 读取项目代码进行验证
-4. 将测试结果写入 `docs/test-report.md`
+### BA Bot 工作指引
+1. 维护 SPEC.md 需求文档
+2. 维护 BOARD.md 任务板
+3. 维护 `workspace/PROJECTS.md` 项目清单
+4. 跟踪项目进度和状态
 """
 
 SPEC_TEMPLATE = """# 需求文档 · {display}
 
 > 由 BA Bot 维护，记录项目背景、目标和详细需求。
+
+**重要说明**：这份文档会在每次 AI 推理时自动加载到系统上下文中，所有 Bot 都会看到。
 
 ## 项目背景
 
@@ -161,7 +172,7 @@ SPEC_TEMPLATE = """# 需求文档 · {display}
 #### 1.1 工作区组织
 - ✅ 创建 `workspace/my-app/` 作为默认项目目录
 - ✅ 所有 Bot 代码共享在此目录
-- ✅ 建立 `PROJECTS.md` 项目清单
+- ✅ 建立 `workspace/PROJECTS.md` 项目清单
 
 #### 1.2 角色分工
 - **Dev Bot**: 在 `workspace/my-app/` 编写代码

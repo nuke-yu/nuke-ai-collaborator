@@ -317,12 +317,56 @@ class ToolLoopRunner:
         self.system_prompt_base = ""
         self.system_prompt = ""
         self.tool_schemas = []
-        
+
         self.rewake_queue = asyncio.Queue()
         self.execution_ctx = {}
-        
+
         self.ruleset = None
         self.use_cached_mc = compact.should_use_cached_microcompact(self.provider)
+
+    async def _load_project_context(self) -> str | None:
+        """自动加载项目上下文：PROJECTS.md, SPEC.md, BOARD.md 等关键文件。
+
+        这些文件在每次 AI 推理时都会自动注入到系统提示中，确保：
+        - QA Bot 知道当前要测试哪个项目
+        - Dev Bot 知道当前开发阶段和需求
+        - 所有 Bot 对项目背景有一致的理解
+
+        返回格式化的上下文文本，如果文件不存在则返回 None。
+        """
+        from pathlib import Path
+        from workspace import layout
+
+        context_parts = []
+
+        # 1. 加载 PROJECTS.md（项目清单）
+        projects_path = layout.group_shared_dir(self.ctx.group_id) / "workspace" / "PROJECTS.md"
+        if projects_path.exists():
+            try:
+                projects_content = projects_path.read_text(encoding="utf-8")
+                context_parts.append(f"【当前项目清单】\n{projects_content}")
+            except Exception:
+                pass
+
+        # 2. 加载 SPEC.md（需求文档）
+        spec_path = layout.group_shared_dir(self.ctx.group_id) / "SPEC.md"
+        if spec_path.exists():
+            try:
+                spec_content = spec_path.read_text(encoding="utf-8")
+                context_parts.append(f"【需求文档】\n{spec_content}")
+            except Exception:
+                pass
+
+        # 3. 加载 BOARD.md（工作看板）
+        board_path = layout.group_shared_dir(self.ctx.group_id) / "BOARD.md"
+        if board_path.exists():
+            try:
+                board_content = board_path.read_text(encoding="utf-8")
+                context_parts.append(f"【工作看板】\n{board_content}")
+            except Exception:
+                pass
+
+        return "\n\n".join(context_parts) if context_parts else None
 
     async def _get_fresh_context_prefix(self) -> tuple[str, str]:
         blocks = await load_context_files(
@@ -414,6 +458,9 @@ class ToolLoopRunner:
         history, user_msg = build_context_message(self.ctx.user_message, self.ctx.sender["name"], self.ctx.history)
         memory = await get_memory_context(self.bot["id"], self.bot.get("role") or "", self.ctx.user_message)
 
+        # 自动加载项目上下文：PROJECTS.md, SPEC.md, BOARD.md
+        project_context = await self._load_project_context()
+
         if self.executor.manifest.workspace.skill_discovery:
             self.system_prompt_base, self.skills_xml, self.skills_snapshot, self.always_skills = await compile_system_prompt(
                 self.bot, self.ctx, self.model_name, memory
@@ -426,6 +473,12 @@ class ToolLoopRunner:
             bot_traits = self.bot.get("traits", [])
             traits_section = load_traits(bot_traits)
             os_info = f"Windows (PowerShell)" if _IS_WINDOWS else f"{sys.platform} (shell: /bin/sh)"
+
+            # 构建系统提示，包含项目上下文
+            context_blocks = []
+            if project_context:
+                context_blocks.append(project_context)
+
             self.system_prompt_base = (
                 base
                 + (f"\n\n{memory}" if memory else "")
@@ -434,6 +487,7 @@ class ToolLoopRunner:
                 + f"\n\n【运行环境】\nOS: {os_info}\n路径分隔符: {'\\' if _IS_WINDOWS else '/'}\n使用 run_shell 执行命令时请使用适合当前 OS 的语法。"
                 + "\n\n【自学技能规则】\n当你发现可复用的规律或用户说「记住这个做法」时，用 write_file 将技能写入 `skills/learned/draft/<skill-name>.md`，系统会自动请求用户审批。禁止直接写入 `skills/learned/active/`。"
                 + self.ctx.workflow_suffix
+                + (f"\n\n【项目上下文】\n" + "\n\n".join(context_blocks) if context_blocks else "")
             )
         self.system_prompt = self.system_prompt_base
 
