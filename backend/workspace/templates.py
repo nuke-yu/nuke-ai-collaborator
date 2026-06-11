@@ -73,7 +73,7 @@ AGENT_TEMPLATE = """# AGENT.md — {name} 的推理框架
 - ❌ QA Bot 不先读取 `workspace/PROJECTS.md` 就假设要测试哪个项目
 - ❌ 不查看 `SPEC.md` 和 `BOARD.md` 就开始开发/测试
 - ✅ 应该写进共享区（如 `workspace/my-app/`）
-- ✅ Dev Bot 开发完必须将 PROJECTS.md 状态更新为 `🟡 待验收`，作为 QA 的开始信号
+- ✅ Dev Bot 开发完调用 `update_project_status(status="待验收")` 通知 QA，QA 验收通过后调用 `update_project_status(status="已完成")`
 - ✅ QA Bot 从 PROJECTS.md `🟡 待验收` 项目确定测试目标，或从工单标题/描述获取项目名
 
 要点：凡是别的角色要接手的产出，进共享区（`workspace/`、`docs/`、契约文件）；只有自己用的留私有。
@@ -141,7 +141,7 @@ BOARD_TEMPLATE = """# 工作看板 · {display}
 1. 读取 `workspace/PROJECTS.md`：从工单描述取项目名，或找 `🟢 开发中` 的项目
 2. 读取 SPEC.md 了解需求，读取 BOARD.md 了解当前任务
 3. 在 `workspace/<project>/` 下编写代码
-4. 完成后：更新工单状态为 `done` + 将 PROJECTS.md 中该项目状态改为 `🟡 待验收`
+4. 完成后：`update_jira_ticket(status="done")` + `update_project_status(project="<project>", status="待验收")`
 
 ### QA Bot 工作指引
 1. 读取 `workspace/PROJECTS.md`：从工单描述取项目名，或找 `🟡 待验收` 的项目
