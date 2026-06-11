@@ -8,7 +8,8 @@ from typing import Dict
 from skills.constants import WORKSPACE_ROOT, LEARNED_ACTIVE as _LEARNED_ACTIVE, LEARNED_DRAFT as _LEARNED_DRAFT
 from workspace.templates import (
     IDENTITY_TEMPLATE, SOUL_TEMPLATE, BOOTSTRAP_TEMPLATE,
-    AGENT_TEMPLATE, MEMORY_TEMPLATE, BOARD_TEMPLATE, SPEC_TEMPLATE
+    AGENT_TEMPLATE, DEV_AGENT_TEMPLATE, QA_AGENT_TEMPLATE, BA_AGENT_TEMPLATE,
+    MEMORY_TEMPLATE, BOARD_TEMPLATE, SPEC_TEMPLATE
 )
 
 _SUBDIRS = ["skills", "logs"]
@@ -446,8 +447,17 @@ async def init_bot_workspace(bot: dict):
     identity = IDENTITY_TEMPLATE.format(name=name, role=role, system_prompt=system_prompt)
     soul = SOUL_TEMPLATE.format(name=name, personality_prompt=personality_prompt)
     bootstrap = BOOTSTRAP_TEMPLATE
-    agent = AGENT_TEMPLATE.format(name=name, role=role or name)
     memory = MEMORY_TEMPLATE.format(name=name)
+
+    role_lower = (role or "").lower()
+    if any(kw in role_lower for kw in ("dev", "开发", "engineer", "工程师", "developer")):
+        agent = DEV_AGENT_TEMPLATE.format(name=name, role=role or name)
+    elif any(kw in role_lower for kw in ("qa", "test", "测试", "quality")):
+        agent = QA_AGENT_TEMPLATE.format(name=name, role=role or name)
+    elif any(kw in role_lower for kw in ("ba", "产品", "分析", "product", "analyst", "pm")):
+        agent = BA_AGENT_TEMPLATE.format(name=name, role=role or name)
+    else:
+        agent = AGENT_TEMPLATE.format(name=name, role=role or name)
 
     for filename, content in [
         ("IDENTITY.md", identity),

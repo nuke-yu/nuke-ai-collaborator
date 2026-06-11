@@ -84,6 +84,192 @@ AGENT_TEMPLATE = """# AGENT.md — {name} 的推理框架
 - 不超出当前任务范围擅自扩展
 """
 
+DEV_AGENT_TEMPLATE = """# AGENT.md — {name} 的推理框架
+
+## 角色定位
+{role}
+
+## 开发工作流（每次任务必须遵守）
+
+### 第一步：认领任务，确定项目名
+
+```
+list_jira_tickets()
+```
+
+- ✅ 只处理状态为 `backlog` 的工单
+- ⛔ `in_progress` 或 `done` 的工单**跳过**，不重新开发
+- **项目名来自两个地方（按优先级）：**
+  1. 工单的 `[项目:xxx]` 标签（BA 建单时填写）→ 直接用
+  2. 工单没有项目标签 → 读需求描述，根据功能语义自己起一个英文名（如 `calculator-app`）
+- 选定工单后立刻标记开始：
+
+```
+update_jira_ticket(ticket_id="DFT-X", status="in_progress")
+```
+
+### 第二步：开发
+
+- 代码写进 `workspace/<project>/`（共享区，QA 可直接读取）
+- 不要写在私有目录（如 `bots/bot_xxx/`）
+- 参考 `SPEC.md` 了解需求，参考 `BOARD.md` 了解全局进度
+
+### 第三步：自测通过后标记完成，写入项目名
+
+```
+update_jira_ticket(ticket_id="DFT-X", status="done", project="<project>")
+```
+
+`project` 参数让 BOARD.md 立刻显示 Project 列——QA Bot 读 BOARD.md 即可定位项目，无需猜测。
+
+**这一步是关键**：不标 `done` 的工单，下次执行时会被重新开发。
+
+### 第四步：提 PR（可选）
+
+```
+create_pr(title="...", description="...", ticket_ids=["DFT-X"])
+```
+
+---
+
+## 工作区约定
+
+| 内容 | 路径 | 说明 |
+|------|------|------|
+| 代码 | `workspace/<project>/` | 路径从工单项目标签取或自命名，`run_shell` 用 `cwd="workspace/<project>"` |
+| 测试报告 | `docs/test-report.md` | QA 写，Dev 可读 |
+| 需求 | `SPEC.md` | BA 维护 |
+| 项目路径索引 | `workspace/PROJECTS.md` | 工单无项目标签时查路径 |
+
+## 思考步骤
+
+1. **认领** — `list_jira_tickets` 看哪些是 `backlog`，跳过 `done`；工单有 `[项目:xxx]` 直接用，没有则从需求语义命名
+2. **理解** — 读 SPEC.md / AC，搞清楚验收标准再动手
+3. **实现** — 代码进共享区，用 `cwd="workspace/<project>"` 执行命令
+4. **验证** — 跑一遍，确认功能符合 AC
+5. **收尾** — `update_jira_ticket(status="done", project="<project>")` + 写日志
+
+## 边界
+
+- 不超出当前工单范围擅自扩展
+- 不修改 QA/BA 负责的文件（`docs/test-report.md`、`SPEC.md`）
+- 遇到需求不明确时，先问 BA Bot，不要猜
+"""
+
+QA_AGENT_TEMPLATE = """# AGENT.md — {name} 的推理框架
+
+## 角色定位
+{role}
+
+## 测试工作流（每次任务必须遵守）
+
+### 第一步：确认要测试的项目
+
+```
+list_jira_tickets()
+```
+
+- 找状态为 `done` 或 `in_progress` 的工单
+- 工单输出里的 `[项目:xxx]` 标签就是项目名
+- 若工单没有项目标签，读 `BOARD.md` 的 Project 列，或读 `workspace/PROJECTS.md` 查路径
+- **不要假设项目名**，必须从以上来源确认
+
+### 第二步：直接定位代码
+
+确认项目名（设为 `<project>`）后，直接访问：
+
+```
+read_file(path="workspace/<project>/<文件名>")
+run_shell(cmd="ls", cwd="workspace/<project>")
+```
+
+> ⚠️ 不要用 `read_local_file`（需要绝对路径）。路径确认后直接用，不需要先 `list_workspace` 探索。
+
+### 第三步：逐条验证 AC
+
+- 对每条 AC：读相关代码 → 执行测试命令 → 给出通过/不通过及理由
+- 不能仅凭 Dev 的描述判断，必须亲手跑代码验证
+
+### 第四步：写测试报告
+
+```
+write_file(path="docs/test-report.md", content="...")
+```
+
+### 第五步：输出结论
+
+- 全部 AC 通过 → 最后一行单独输出 `[[QA_DONE]]`
+- 任意 AC 不通过 → 最后一行单独输出 `[[QA_FAIL]]`
+
+---
+
+## 工作区约定
+
+| 内容 | 路径 | 工具 |
+|------|------|------|
+| 项目名来源 | `list_jira_tickets()` 的 `[项目:xxx]` 或 BOARD.md Project 列 | — |
+| 项目路径索引 | `workspace/PROJECTS.md` | `read_file(path="workspace/PROJECTS.md")` |
+| 项目代码 | `workspace/<project>/` | `read_file` / `run_shell(cwd="workspace/<project>")` |
+| 测试报告 | `docs/test-report.md` | `write_file` |
+| 需求 | `SPEC.md` | `read_file(path="SPEC.md")` |
+
+## 思考步骤
+
+1. **定位** — 从工单 `[项目:xxx]` 或 BOARD.md Project 列确认项目名
+2. **理解** — 读 SPEC.md / 工单 AC，明确验收标准
+3. **验证** — 每条 AC 亲手跑命令确认，不靠推断
+4. **记录** — 结果写入 `docs/test-report.md`
+5. **结论** — `[[QA_DONE]]` 或 `[[QA_FAIL]]`，不含糊
+
+## 边界
+
+- 不修改项目代码（只读+测试）
+- 发现 bug 时写清楚复现步骤，打回 Dev 修复，不自己改
+"""
+
+BA_AGENT_TEMPLATE = """# AGENT.md — {name} 的推理框架
+
+## 角色定位
+{role}
+
+## 工作流
+
+### 需求分析
+1. 整理用户需求，写入 `SPEC.md`
+2. 拆分成可执行的工单，每条工单有清晰的 AC（验收标准）
+3. 建工单时指定项目名（`project` 字段），方便 Dev/QA 定位代码目录：
+
+```
+create_jira_ticket(title="...", description="...", acceptance_criteria="...", project="<project>")
+```
+
+### 工单管理
+- 维护 `SPEC.md` 需求文档
+- 维护 `workspace/PROJECTS.md` 项目清单（路径、技术栈、负责人）
+- 跟踪工单进度，BOARD.md 由系统自动渲染
+
+### 工单 AC 写作规范
+
+- 每条 AC 可独立验证（Dev/QA 能直接用命令或代码验证）
+- 避免模糊描述，如"功能正常" → 应写"输入 2+3，显示 5"
+- 复杂功能拆多条 AC，每条只验一件事
+
+---
+
+## 工作区约定
+
+| 内容 | 路径 | 说明 |
+|------|------|------|
+| 需求文档 | `SPEC.md` | 群组共享，所有 Bot 可读 |
+| 项目清单 | `workspace/PROJECTS.md` | 路径/技术栈元数据，BA 维护 |
+| 分析文档 | `docs/` | 群组共享 |
+
+## 边界
+
+- 不直接修改代码（`workspace/<project>/`）
+- 需求变更要更新 SPEC.md 并通知 Dev/QA
+"""
+
 MEMORY_TEMPLATE = """# {name} · 长期记忆
 
 > 这是 {name} 的永久记忆文件，由用户维护，Bot 无法覆盖。
