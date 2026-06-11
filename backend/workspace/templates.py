@@ -33,12 +33,12 @@ AGENT_TEMPLATE = """# AGENT.md — {name} 的推理框架
 📍 **位置**: `workspace/<project-name>/...`
 
 作为**开发 bot**：
-- ✅ 先读 `workspace/PROJECTS.md` 确认项目路径（如 `workspace/<project>/`）
+- ✅ 先读 `workspace/PROJECTS.md`：从工单描述取项目名，或找 `🟢 开发中` 的项目
 - ✅ 代码写进对应的 `workspace/<project>/` 目录，所有成员都能看到
-- ✅ 示例：`write_file(path="workspace/my-project/app.js", ...)`
+- ✅ 开发完成后，将 PROJECTS.md 中该项目的状态更新为 `🟡 待验收`，通知 QA Bot
 
 作为**测试 bot**：
-- 📋 先读 `workspace/PROJECTS.md` 取得当前活跃项目的实际路径（字段 **路径**）
+- 📋 先读 `workspace/PROJECTS.md`：从工单描述取项目名，或找 `🟡 待验收` 的项目
 - 📖 用 `read_file(path="workspace/<project>/<文件名>")` 读取代码（路径以 `workspace/` 开头自动路由到共享区，不要用 `read_local_file`）
 - 🔧 用 `run_shell(cmd="...", cwd="workspace/<project>")` 在代码目录执行命令
 - 📝 测试报告写进 `docs/test-report.md`
@@ -73,7 +73,8 @@ AGENT_TEMPLATE = """# AGENT.md — {name} 的推理框架
 - ❌ QA Bot 不先读取 `workspace/PROJECTS.md` 就假设要测试哪个项目
 - ❌ 不查看 `SPEC.md` 和 `BOARD.md` 就开始开发/测试
 - ✅ 应该写进共享区（如 `workspace/my-app/`）
-- ✅ QA Bot **必须**先读取 `workspace/PROJECTS.md` 确认当前项目再开始测试
+- ✅ Dev Bot 开发完必须将 PROJECTS.md 状态更新为 `🟡 待验收`，作为 QA 的开始信号
+- ✅ QA Bot 从 PROJECTS.md `🟡 待验收` 项目确定测试目标，或从工单标题/描述获取项目名
 
 要点：凡是别的角色要接手的产出，进共享区（`workspace/`、`docs/`、契约文件）；只有自己用的留私有。
 
@@ -137,13 +138,13 @@ BOARD_TEMPLATE = """# 工作看板 · {display}
 ## 团队协作约定
 
 ### Dev Bot 工作指引
-1. 读取 `workspace/PROJECTS.md` 确认当前项目路径
+1. 读取 `workspace/PROJECTS.md`：从工单描述取项目名，或找 `🟢 开发中` 的项目
 2. 读取 SPEC.md 了解需求，读取 BOARD.md 了解当前任务
-3. 在 `workspace/<project>/` 下编写代码（路径从 PROJECTS.md 获取）
-4. 完成后更新工单状态
+3. 在 `workspace/<project>/` 下编写代码
+4. 完成后：更新工单状态为 `done` + 将 PROJECTS.md 中该项目状态改为 `🟡 待验收`
 
 ### QA Bot 工作指引
-1. 读取 `workspace/PROJECTS.md` 确认当前活跃项目及其 **路径** 字段
+1. 读取 `workspace/PROJECTS.md`：从工单描述取项目名，或找 `🟡 待验收` 的项目
 2. 读取 SPEC.md 了解需求和验收标准，读取 BOARD.md 了解测试范围
 3. 用 `read_file(path="workspace/<project>/<文件名>")` 读取代码（不用 `read_local_file`）
 4. 用 `run_shell(cmd="...", cwd="workspace/<project>")` 执行测试命令

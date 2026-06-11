@@ -544,22 +544,24 @@ touch my-new-project/app.js
 - **状态**: 🟢 开发中
 - **当前迭代**: Phase 1
 
-### 项目状态说明
+### 项目状态说明（Dev / QA 信号机制）
 
-- 🟢 **开发中** - 代码正在开发，可以随时测试
-- 🟡 **待验收** - 开发完成，等待 QA 验证
+- 🟢 **开发中** - Dev Bot 正在开发此项目
+- 🟡 **待验收** - Dev 完成开发后改为此状态，**QA Bot 以此判断要测哪个项目**
 - 🔴 **阻塞** - 有问题需要解决
 - ✅ **已完成** - 通过验收，可部署
 
+> **Dev Bot**：完成开发后，必须将本文件中该项目的状态改为 `🟡 待验收`，作为通知 QA 的信号。
+> **QA Bot**：开始测试前，先读本文件，找 `🟡 待验收` 的项目行，取其 **路径** 字段。若工单标题/描述里指定了项目名，优先用工单里的。
+
 ## QA 测试指引
 
-1. 查看本文件**活跃项目**表格，取得当前项目的 **路径** 字段（如 `workspace/<project>/`）
+1. 读本文件**活跃项目**表格，找状态为 `🟡 待验收` 的项目，取得其 **路径** 字段（如 `workspace/<project>/`）
 2. 查看 [SPEC.md](../SPEC.md) 了解需求和验收标准
 3. 查看 [BOARD.md](../BOARD.md) 了解当前迭代目标
-4. 查看 [PR 文档](../prs/) 了解改动范围
-5. 用 `read_file(path="workspace/<project>/<文件名>")` 读取代码（路径以 `workspace/` 开头，系统自动路由到共享区，不要用 `read_local_file`）
-6. 用 `run_shell(cmd="...", cwd="workspace/<project>")` 在代码目录执行命令
-7. 将测试结果写入 [docs/test-report.md](../docs/test-report.md)
+4. 用 `read_file(path="workspace/<project>/<文件名>")` 读取代码（路径以 `workspace/` 开头，系统自动路由到共享区，不要用 `read_local_file`）
+5. 用 `run_shell(cmd="...", cwd="workspace/<project>")` 在代码目录执行命令
+6. 将测试结果写入 [docs/test-report.md](../docs/test-report.md)
 
 ## 添加新项目
 
