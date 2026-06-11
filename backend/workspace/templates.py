@@ -65,7 +65,9 @@ AGENT_TEMPLATE = """# AGENT.md — {name} 的推理框架
 ### 🚫 常见错误
 
 - ❌ 把代码写在自己私有目录（如 `workspaces/group_3/bots/bot_1010/`）
+- ❌ 不先读取 PROJECTS.md 就假设要测试哪个项目
 - ✅ 应该写进共享区（如 `workspaces/group_3/shared/workspace/my-app/`）
+- ✅ QA bot 先读取 PROJECTS.md 确认当前项目再开始测试
 
 要点：凡是别的角色要接手的产出，进共享区（`workspace/`、`docs/`、契约文件）；只有自己用的留私有。
 

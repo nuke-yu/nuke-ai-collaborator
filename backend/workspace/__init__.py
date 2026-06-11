@@ -497,6 +497,60 @@ touch my-new-project/app.js
 """
         (default_project / "README.md").write_text(readme_content, encoding="utf-8")
 
+        # 创建 PROJECTS.md 项目清单（所有 Bot 都可以读取）
+        projects_md = ws / "workspace" / "PROJECTS.md"
+        if not projects_md.exists():
+            projects_content = f"""# 项目清单 · {group_name or '群组'}
+
+> 记录所有项目的元数据，由 PM/BA Bot 维护。
+
+## 活跃项目
+
+| 项目名 | 路径 | 负责人 | 状态 | 当前任务 |
+|--------|------|--------|------|----------|
+| my-app | `workspace/my-app/` | Dev | 🟢 开发中 | Phase 1: 基础功能 |
+
+## 项目元数据
+
+### my-app
+
+- **路径**: `workspace/my-app/`
+- **类型**: Web 应用
+- **技术栈**: HTML + CSS + JavaScript
+- **当前版本**: v0.1
+- **负责人**: Dev Bot
+- **测试负责人**: QA Bot
+- **BA 负责人**: BA Bot
+- **状态**: 🟢 开发中
+- **当前迭代**: Phase 1
+
+### 项目状态说明
+
+- 🟢 **开发中** - 代码正在开发，可以随时测试
+- 🟡 **待验收** - 开发完成，等待 QA 验证
+- 🔴 **阻塞** - 有问题需要解决
+- ✅ **已完成** - 通过验收，可部署
+
+## QA 测试指引
+
+1. 查看 [SPEC.md](../SPEC.md) 了解需求
+2. 查看 [BOARD.md](../BOARD.md) 了解当前迭代目标
+3. 查看 [PR 文档](../prs/) 了解改动范围
+4. 使用 `read_local_file` 读取项目代码
+5. 将测试结果写入 [docs/test-report.md](../docs/test-report.md)
+
+## 添加新项目
+
+创建新项目时，在上方表格添加一行，并在 `workspace/` 下创建对应目录。
+
+```bash
+# 示例：创建新项目
+mkdir workspace/my-new-project
+touch workspace/my-new-project/README.md
+```
+"""
+            projects_md.write_text(projects_content, encoding="utf-8")
+
     display = group_name or f"群组 {group_id}"
     today = date.today().isoformat()
 
