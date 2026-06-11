@@ -405,10 +405,6 @@ class ToolLoopRunner:
 
         # 非工作 Bot 但不包含任务关键词，返回 None
         return None
-            except Exception:
-                pass
-
-        return "\n\n".join(context_parts) if context_parts else None
 
     async def _get_fresh_context_prefix(self) -> tuple[str, str]:
         blocks = await load_context_files(

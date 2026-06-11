@@ -162,12 +162,18 @@ async def check(
     broadcaster: Any,
     group_id: int,
     spawn_depth: int = 0,
+    workspace_confined: bool = False,
 ) -> dict:
     """
     Returns one of:
       {"action": "allow"}
       {"action": "deny",  "reason": str}
       {"action": "allow", "persist_rule": Rule}  — user approved with "always"
+
+    workspace_confined: when True the caller has already verified the tool
+    operates entirely within the group workspace sandbox.  Deny rules still
+    take priority; allow rules still override; but if nothing has decided by
+    step 3.5 we skip the ask prompt and auto-allow.
     """
     # 1. bypassPermissions → allow everything
     if ruleset.mode == "bypassPermissions":
@@ -182,6 +188,11 @@ async def check(
     for rule in ruleset.rules:
         if rule.action == "allow" and _matches(rule, tool_name, arguments):
             return {"action": "allow"}
+
+    # 3.5. workspace-confined auto-allow: sandbox already restricts the blast
+    # radius to the group workspace; no human prompt needed.
+    if workspace_confined:
+        return {"action": "allow"}
 
     # 4. once-grant for this exact (bot, group, tool, args) — consumed on use
     if _consume_once_grant(bot_id, group_id, tool_name, arguments):

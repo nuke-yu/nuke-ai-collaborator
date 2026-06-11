@@ -697,6 +697,15 @@ async def _permission_check_hook(name: str, arguments: dict, context: dict) -> d
                     "reason": f"{name} 未接入权限系统（无 ruleset），出于安全已拒绝执行"}
         return None  # read-only workspace tools are safe without a ruleset
 
+    # run_shell confined to the group workspace is auto-allowed: the sandbox
+    # (_resolve_shell_cwd) already enforces path boundaries, and the danger guard
+    # (_default_shell_guard) blocks destructive patterns.  Deny rules still win.
+    workspace_confined = False
+    if name == "run_shell":
+        cwd = (arguments.get("cwd") or "").strip()
+        _, err = _resolve_shell_cwd(cwd, context.get("bot_id"), context.get("group_id"))
+        workspace_confined = (err is None)
+
     result = await permissions.check(
         tool_name=name,
         arguments=arguments,
@@ -705,6 +714,7 @@ async def _permission_check_hook(name: str, arguments: dict, context: dict) -> d
         broadcaster=context.get("broadcaster"),
         group_id=context.get("group_id"),
         spawn_depth=context.get("spawn_depth", 0),
+        workspace_confined=workspace_confined,
     )
 
     if result["action"] == "deny":
@@ -715,6 +725,13 @@ async def _permission_check_hook(name: str, arguments: dict, context: dict) -> d
     # tool incl MCP, which synthesizes a scoped args_pattern (#5). Saving here too
     # would double-write (and previously wrote a blanket rule that defeated the
     # scoped one).
+
+    # Hot-patch the in-memory ruleset so the same rule takes effect immediately
+    # within this session — without this, the DB write is async and the next
+    # identical call in the same tool loop still falls through to "ask".
+    persist_rule = result.get("persist_rule")
+    if persist_rule is not None:
+        ruleset.rules.append(persist_rule)
 
     return None
 

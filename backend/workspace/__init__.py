@@ -330,14 +330,34 @@ async def edit_file(bot_id: int, path: str, old_string: str, new_string: str, re
 
 
 async def list_workspace(bot_id: int, group_id: int | None = None) -> str:
+    def _tree(root: Path, skip_hidden: bool = True) -> list[str]:
+        lines = []
+        for p in sorted(root.rglob("*")):
+            if skip_hidden and any(part.startswith(".") for part in p.relative_to(root).parts):
+                continue
+            rel = p.relative_to(root)
+            indent = "  " * (len(rel.parts) - 1)
+            icon = "📁" if p.is_dir() else "📄"
+            lines.append(f"{indent}{icon} {p.name}")
+        return lines
+
+    sections = []
+
+    # Shared group workspace (code repos, docs, prs) — most relevant for Dev/QA
+    if group_id is not None:
+        shared = group_workspace(group_id)
+        shared_lines = _tree(shared)
+        # Remind bot to use relative paths like workspace/my-app as cwd in run_shell
+        header = "【共享工作区】（run_shell 用相对路径，如 cwd=\"workspace/my-app\"）"
+        sections.append(header + ("\n" + "\n".join(shared_lines) if shared_lines else "\n（空）"))
+
+    # Bot private workspace
     ws = bot_workspace(bot_id, group_id)
-    lines = []
-    for p in sorted(ws.rglob("*")):
-        rel = p.relative_to(ws)
-        indent = "  " * (len(rel.parts) - 1)
-        icon = "📁" if p.is_dir() else "📄"
-        lines.append(f"{indent}{icon} {p.name}")
-    return "\n".join(lines) if lines else "（工作区为空）"
+    private_lines = _tree(ws)
+    header = "【私有工作区】（仅本 bot 可见）"
+    sections.append(header + ("\n" + "\n".join(private_lines) if private_lines else "\n（空）"))
+
+    return "\n\n".join(sections) if sections else "（工作区为空）"
 
 
 
