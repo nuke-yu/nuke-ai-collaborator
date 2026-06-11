@@ -463,6 +463,40 @@ async def init_group_workspace(group_id: int, group_name: str = ""):
     (ws / "prs").mkdir(exist_ok=True)         # PR 记录（固定协调件目录）
     (ws.parent / "runs").mkdir(exist_ok=True)  # workspaces/group_{id}/runs/
 
+    # 创建默认项目目录（所有新群组都有初始项目结构）
+    default_project = ws / "workspace" / "my-app"
+    if not default_project.exists():
+        (default_project).mkdir(parents=True, exist_ok=True)
+        # 创建一个占位 README.md 说明项目结构
+        readme_content = f"""# {group_name or '项目'} · My App
+
+这是群组的默认项目目录。
+
+## 文件说明
+
+- `index.html` - 主页面
+- `style.css` - 样式表
+- `script.js` - JavaScript 逻辑
+
+## 开发流程
+
+1. Dev Bot 在此目录下编写代码
+2. QA Bot 从此处读取代码进行测试
+3. BA Bot 可参考实现验证需求
+
+## 添加新项目
+
+创建子目录即可：
+```bash
+mkdir my-new-project
+touch my-new-project/app.js
+```
+
+---
+*此目录由系统自动生成，所有成员 bot 都可以访问。*
+"""
+        (default_project / "README.md").write_text(readme_content, encoding="utf-8")
+
     display = group_name or f"群组 {group_id}"
     today = date.today().isoformat()
 

@@ -28,12 +28,44 @@ AGENT_TEMPLATE = """# AGENT.md — {name} 的推理框架
 
 ## 工作区写入约定
 
-写文件前先想清楚「谁需要看到它」，据此选落点：
+### 📁 代码和项目文件
 
-- **代码** → 写进 `workspace/<repo>/...`（群组共享的 git 工作树）。Dev 写、QA 读测都在同一份；交付靠 git push → GitHub merge，不靠目录搬运。
-- **要交接的文档**（需求拆解 / 设计说明 / 测试报告）→ 写进 `docs/...`（群组共享文档区）。跨多个 repo 的文档不要 commit 进某个微服务仓库。
-- **协作契约** → 固定文件 `BOARD.md` / `SPEC.md` / `API_CONTRACT.md`（群组共享）。
-- **自己的草稿 / 笔记 / 临时思考** → 直接写工作区根目录（你的私有区，别人看不到，随用随弃）。
+📍 **位置**: `workspace/<project-name>/...`
+
+作为**开发 bot**：
+- ✅ 代码写进 `workspace/my-app/`（或你创建的其他项目名）
+- ✅ 所有成员都能看到，QA 可以直接读取测试
+- ✅ 示例：`workspace/my-app/calculator.js`
+
+作为**测试 bot**：
+- 📖 从 `workspace/my-app/` 读取代码进行验证
+- 📝 测试报告写进 `docs/test-report.md`
+
+作为**产品/分析 bot**：
+- 📋 需求文档写进 `SPEC.md`（群组共享）
+- 📄 分析文档写进 `docs/`（群组共享）
+
+### 📁 文档和报告
+
+- **项目文档** → `docs/`（群组共享，所有人可读）
+- **测试报告** → `docs/test-report.md`（群组共享）
+- **设计说明** → `docs/design.md`（群组共享）
+
+### 📁 协作契约（固定文件）
+
+- `BOARD.md` - 工作看板
+- `SPEC.md` - 需求文档
+- `API_CONTRACT.md` - 接口契约
+- `RETRO_LATEST.md` - 最新复盘
+
+### 📁 私有区
+
+- **自己的草稿/笔记** → 工作区根目录（你的私有区，别人看不到）
+
+### 🚫 常见错误
+
+- ❌ 把代码写在自己私有目录（如 `workspaces/group_3/bots/bot_1010/`）
+- ✅ 应该写进共享区（如 `workspaces/group_3/shared/workspace/my-app/`）
 
 要点：凡是别的角色要接手的产出，进共享区（`workspace/`、`docs/`、契约文件）；只有自己用的留私有。
 

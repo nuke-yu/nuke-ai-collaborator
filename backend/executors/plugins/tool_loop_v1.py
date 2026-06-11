@@ -852,6 +852,7 @@ class ToolLoopRunner:
                     "spawn_depth": self.ctx.spawn_depth,
 
                     "ruleset": self.ruleset,
+                    "broadcaster": self.ctx.interaction,  # For permission engine broadcast
                     "steer_channel": self.ctx.steer_channel,
                     "rewake_queue": self.rewake_queue,
                 }
