@@ -3,6 +3,7 @@
 给 BA/Dev 在工作流里调用的结构化工具：
   - create_jira_ticket：BA 确认需求后建工单（含 AC）。
   - list_jira_tickets：Dev/QA 查看要做/要测的工单（只读）。
+  - update_jira_ticket：Dev/QA 更新工单状态（backlog → in_progress → done）。
   - create_pr：Dev 自测后提 PR（替身），关联 Jira 工单。
 
 工具产出落到 integrations 的本地替身(tickets 表 / 工作区文件)，真 Jira/Git 接入时
@@ -33,6 +34,25 @@ RD_TOOLS = [
         description="列出本群当前所有 Jira 工单（标题/状态/AC）。Dev/QA 用它查看要做/要测什么。",
         parameters={"type": "object", "properties": {}},
         concurrency_safe=True,
+    ),
+    ToolDef(
+        name="update_jira_ticket",
+        description=(
+            "更新 Jira 工单状态。Dev 开始任务时标 in_progress，完成后标 done；"
+            "QA 测试通过后也应把工单标 done。避免已完成任务被重新开发。"
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "ticket_id": {"type": "string", "description": "工单号，如 DFT-1"},
+                "status": {
+                    "type": "string",
+                    "enum": ["backlog", "in_progress", "done"],
+                    "description": "新状态：backlog / in_progress / done",
+                },
+            },
+            "required": ["ticket_id", "status"],
+        },
     ),
     ToolDef(
         name="create_pr",
@@ -73,6 +93,19 @@ async def _list_jira(context=None):
     return "当前 Jira 工单：\n" + "\n".join(lines)
 
 
+async def _update_jira(ticket_id, status, context=None):
+    gid = (context or {}).get("group_id")
+    try:
+        result = await get_jira().update_ticket(gid, ticket_id, status)
+    except ValueError as e:
+        return f"[错误] {e}"
+    # Re-render BOARD.md so the change is immediately visible to all bots.
+    from core.orchestration.rd_manager import rd_manager
+    await rd_manager.render_board(gid)
+    label = {"backlog": "待开发", "in_progress": "进行中", "done": "已完成"}.get(status, status)
+    return f"工单 {result['ticket_id']} 状态已更新为【{label}】"
+
+
 async def _create_pr(title, description="", ticket_ids=None, context=None):
     gid = (context or {}).get("group_id")
     pr = await get_git().create_pr(gid, title, description, ticket_ids)
@@ -85,6 +118,7 @@ def register_rd_tools() -> None:
     handlers = {
         "create_jira_ticket": _create_jira,
         "list_jira_tickets": _list_jira,
+        "update_jira_ticket": _update_jira,
         "create_pr": _create_pr,
     }
     for tdef in RD_TOOLS:

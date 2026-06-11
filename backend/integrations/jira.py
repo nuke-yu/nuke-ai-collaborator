@@ -10,6 +10,9 @@ from abc import ABC, abstractmethod
 from db import write_connect, get_db
 
 
+_VALID_STATUSES = frozenset({"backlog", "in_progress", "done"})
+
+
 class JiraClient(ABC):
     @abstractmethod
     async def create_ticket(self, group_id: int, title: str,
@@ -19,6 +22,10 @@ class JiraClient(ABC):
     @abstractmethod
     async def list_tickets(self, group_id: int) -> list[dict]:
         """列出本群工单：[{ticket_id, title, status, description, acceptance_criteria}]。"""
+
+    @abstractmethod
+    async def update_ticket(self, group_id: int, ticket_id: str, status: str) -> dict:
+        """更新工单状态，返回 {ticket_id, status}。"""
 
 
 class LocalJiraClient(JiraClient):
@@ -63,6 +70,19 @@ class LocalJiraClient(JiraClient):
                 "acceptance_criteria": meta.get("acceptance_criteria", ""),
             })
         return out
+
+    async def update_ticket(self, group_id: int, ticket_id: str, status: str) -> dict:
+        if status not in _VALID_STATUSES:
+            raise ValueError(f"无效状态 '{status}'，可选值：{sorted(_VALID_STATUSES)}")
+        async with write_connect() as db:
+            cur = await db.execute(
+                "UPDATE tickets SET status = ? WHERE ticket_id = ? AND group_id = ?",
+                (status, ticket_id, group_id),
+            )
+            await db.commit()
+        if cur.rowcount == 0:
+            raise ValueError(f"工单 {ticket_id} 不存在或不属于本群组")
+        return {"ticket_id": ticket_id, "status": status}
 
 
 _client: JiraClient = LocalJiraClient()

@@ -682,7 +682,7 @@ _APPROVAL_REQUIRED_TOOLS = frozenset({
 # RD 流水线的内部记账工具（Jira/PR 替身）：人把关在工作流的 4 道门，不在每次工具调用，
 # 故这些工具不走权限询问，直接放行。
 _AUTO_ALLOW_TOOLS = frozenset({
-    "create_jira_ticket", "list_jira_tickets", "create_pr",
+    "create_jira_ticket", "list_jira_tickets", "update_jira_ticket", "create_pr",
 })
 
 
