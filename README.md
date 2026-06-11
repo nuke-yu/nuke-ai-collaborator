@@ -102,31 +102,193 @@ Maximum file size: **10 MB**. Images are displayed inline; other files show as d
 
 ## Getting Started
 
+### Quick Start (Recommended)
+
+**One-command setup:**
+
+- **macOS / Linux**: `./start.sh`
+- **Windows**: Double-click `start.bat` or run `.\\start.bat` in PowerShell
+
+> For detailed installation instructions, platform-specific setup, and troubleshooting, see [docs/INSTALLATION.md](docs/INSTALLATION.md).
+
+---
+
 ### Requirements
 
-- Python 3.11+
-- Node.js 18+
+| Requirement | Minimum | Recommended |
+|-------------|---------|-------------|
+| Python | 3.11+ | 3.12+ |
+| Node.js | 18+ | 20+ LTS |
+| RAM | 4GB | 8GB+ (for local AI models) |
 
-### Backend Setup
+---
 
+### Manual Setup
+
+#### 1. Install Dependencies
+
+**Linux / macOS:**
 ```bash
 cd backend
+python3 -m venv venv
+source venv/bin/activate
 pip install -r requirements.txt
-python -m uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
-> The frontend dev server proxies `/api`, `/uploads` and `/ws` to `http://localhost:8000`, so the backend must listen on port **8000**.
-> Add `--reload` during development for auto-restart on code changes.
+**Windows (PowerShell / CMD):**
+```powershell
+cd backend
+py -m venv venv
+venv\Scripts\activate.bat
+pip install -r requirements.txt
+```
 
-### Frontend Setup
+> 💡 **Windows Note:** If you get `PermissionError` during installation, try running PowerShell as Administrator, or add `--user`:
+> ```powershell
+> pip install --user -r requirements.txt
+> ```
 
+#### 2. Start the Application
+
+**Backend:**
+```bash
+cd backend
+# Make sure venv is activated, then:
+python3 -m uvicorn main:app --host 0.0.0.0 --port 8000  # macOS/Linux
+# or
+python -m uvicorn main:app --host 0.0.0.0 --port 8000   # Windows
+```
+
+**Frontend (new terminal):**
 ```bash
 cd frontend
-npm install
+npm install      # Only needed once or when dependencies change
 npm run dev
 ```
 
-Open [http://localhost:5173](http://localhost:5173) and join to start.
+#### 3. First-time Setup
+
+When you first visit [http://localhost:5173](http://localhost:5173):
+
+1. **Register an account** - The central database (`backend/chat.db`) is created automatically on first start
+2. **Create your first group** - Click the "+" button in the sidebar
+3. **Add AI members** - Use the "Add Bot" feature to add assistants
+
+> ℹ️ The database is initialized automatically:
+> - **Central DB** (`chat.db`): Created on backend start with users, groups, members, templates tables
+> - **Group DBs** (`backend/workspaces/group_X/chat.db`): Created lazily when a group becomes active
+
+---
+
+### Quick Start Summary
+
+**Prerequisites:**
+- Python 3.11+ and Node.js 18+ installed
+- **Windows:** Visual C++ Build Tools installed (for native package compilation)
+
+---
+
+**macOS / Linux (two terminals):**
+
+```bash
+# Terminal 1 - Backend
+./start.sh
+
+# Terminal 2 - Frontend  
+cd frontend
+npm install    # First time only
+npm run dev
+```
+
+**Windows (two terminals/PowerShell):**
+
+```powershell
+# Terminal 1 - Backend
+.\start.bat
+
+# Terminal 2 - Frontend
+cd frontend
+npm install    # First time only
+npm run dev
+```
+
+---
+
+**Access:** Open [http://localhost:5173](http://localhost:5173) to start using the app.
+
+---
+
+### Troubleshooting
+
+#### Backend won't start on Windows
+
+1. **Check Python installation:**
+   ```powershell
+   python --version
+   # If not found, try:
+   py --version
+   ```
+
+2. **Install using Python Launcher:**
+   ```powershell
+   cd backend
+   py -m pip install -r requirements.txt
+   ```
+
+3. **Check port 8000 is available:**
+   ```powershell
+   netstat -ano | findstr :8000
+   # If something is using it, stop it:
+   tasklist | findstr <PID>
+   taskkill /PID <PID> /F
+   ```
+
+4. **If installation fails with "Visual C++" errors:**
+   - Download and install Visual C++ Build Tools:
+     https://visualstudio.microsoft.com/visual-cpp-build-tools/
+   - Select "Desktop development with C++" workload
+   - Required for packages like `chromadb`, `numpy`, `psutil`
+
+#### Frontend won't start
+
+1. **Check Node.js version:**
+   ```powershell
+   node --version
+   npm --version
+   ```
+
+2. **Clear node_modules and reinstall:**
+   ```powershell
+   cd frontend
+   Remove-Item -Recurse -Force node_modules
+   npm install
+   ```
+
+#### "WebSocket connection failed"
+
+- Make sure backend is running on port **8000**
+- Check Windows Firewall isn't blocking the connection
+- Try accessing `http://localhost:8000/api/health` to verify backend is up
+
+---
+
+### Environment Variables (Optional)
+
+Create a `.env` file in the `backend` directory:
+
+```env
+# API Keys (optional - configure via UI instead)
+OPENAI_API_KEY=sk-...
+ANTHROPIC_API_KEY=sk-ant-...
+DEEPSEEK_API_KEY=sk-...
+
+# Server Settings
+NUKE_WORKERS=4  # Number of worker processes (default: 4)
+```
+
+---
+
+Open [http://localhost:5173](http://localhost:5173) and start collaborating!
 
 ---
 
