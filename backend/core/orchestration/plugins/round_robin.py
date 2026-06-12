@@ -9,6 +9,7 @@ current_bot/system_suffix/end/advance/serialize/restore/resume_units），不碰
 spec = {"bots": [bot_dict, ...], "rounds": int}
 """
 from core.orchestration.base import Orchestrator, OrchestratorStep, WorkUnit
+import datetime
 
 
 class RoundRobinOrchestrator(Orchestrator):
@@ -52,7 +53,13 @@ class RoundRobinOrchestrator(Orchestrator):
         rounds = int(spec.get("rounds", 1))
         if not bots or rounds < 1:
             return OrchestratorStep()
-        self._state[group_id] = {"bots": bots, "rounds": rounds, "idx": 0, "round": 1}
+        self._state[group_id] = {
+            "bots": bots,
+            "rounds": rounds,
+            "idx": 0,
+            "round": 1,
+            "start_time": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+        }
         return self._step_to_current(group_id)
 
     def observe(self, group_id: int, bot_id: int, response: str) -> OrchestratorStep:
@@ -103,3 +110,7 @@ class RoundRobinOrchestrator(Orchestrator):
         if not s:
             return []
         return [self._unit(group_id, s["bots"][s["idx"]])]
+
+    def start_time(self, group_id: int) -> str | None:
+        s = self._state.get(group_id)
+        return s.get("start_time") if s else None

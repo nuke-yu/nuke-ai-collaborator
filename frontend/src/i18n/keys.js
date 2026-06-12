@@ -542,6 +542,12 @@ export const K = {
     finishBtn: 'workflow.finishBtn',
     manualAdvance: 'workflow.manualAdvance',
     titleLabel: 'workflow.titleLabel',
+    tabPipeline: 'workflow.tabPipeline',
+    tabDiscussion: 'workflow.tabDiscussion',
+    discussionRounds: 'workflow.discussionRounds',
+    discussionBots: 'workflow.discussionBots',
+    discussionSummarizer: 'workflow.discussionSummarizer',
+    noBotsSelected: 'workflow.noBotsSelected',
   },
   toolProgress: {
     running: 'toolProgress.running',

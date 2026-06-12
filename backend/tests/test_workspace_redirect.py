@@ -30,22 +30,22 @@ class TestWorkspaceRedirect(unittest.TestCase):
                  "workspace/repo1/main.py", "docs/qa-report.md", "prs/12.md"]
         for shared in cases:
             with self.subTest(path=shared):
-                r = _get_effective_ws(7, shared, group_id=3)
+                r, _ = _get_effective_ws(7, shared, group_id=3)
                 self.assertEqual(r.resolve(), layout.group_shared_dir(3).resolve())
 
     def test_private_path_stays_private_nested(self):
-        r = _get_effective_ws(7, "notes.md", group_id=3)
+        r, _ = _get_effective_ws(7, "notes.md", group_id=3)
         self.assertEqual(r.resolve(), layout.bot_dir(3, 7).resolve())
 
     def test_deliverables_no_longer_special(self):
         # deliverables/ 不再重定向到共享区，落私有
-        r = _get_effective_ws(7, "deliverables/app.py", group_id=3)
+        r, _ = _get_effective_ws(7, "deliverables/app.py", group_id=3)
         self.assertEqual(r.resolve(), layout.bot_dir(3, 7).resolve())
 
     def test_no_db_query_when_group_id_given(self):
         # group_id 显式给出 → 绝不查 DB（connect_sync 被调用即失败）
         with patch("db.connect_sync", side_effect=AssertionError("must not query DB")):
-            r = _get_effective_ws(7, "BOARD.md", group_id=3)
+            r, _ = _get_effective_ws(7, "BOARD.md", group_id=3)
         self.assertEqual(r.resolve(), layout.group_shared_dir(3).resolve())
 
 

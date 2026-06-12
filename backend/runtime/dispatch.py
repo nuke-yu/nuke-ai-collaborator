@@ -98,13 +98,63 @@ async def dispatch_user_message(msg: dict) -> None:
 
 
 async def dispatch_start_workflow(msg: dict) -> None:
-    """起 RD 人确认流水线（BA→Dev→QA 三道门）。在 worker 进程里 start，编排状态就落在
-    处理本群消息的同一个 worker 上（并经 workflow_store 持久化），首阶段(BA)由用户
-    驱动，故不立即派发 bot。角色按 role_router 家族匹配；缺角色则广播提示、不启动。"""
+    """在 worker 进程里 start 工作流。编排状态和派发的 background task 都跑在 Worker 进程上。"""
     gid = msg["group_id"]
+    body = msg.get("body")
+    import core.workflow as wf
+
+    if body:
+        orchestrator_id = body.get("orchestrator_id", "workflow_v1")
+        async with db.global_db() as cdb:
+            members = await db.get_members(cdb, gid)
+        bots = {m["id"]: m for m in members if m["type"] == "bot"}
+
+        if orchestrator_id != "workflow_v1":
+            # 非内置编排器：spec 形状由各编排器自定，这里只做通用的 bot_id → 成员解析。
+            spec = dict(body.get("spec", {}))
+            if "bots" in spec:
+                spec["bots"] = [bots[bid] for bid in spec["bots"] if bid in bots]
+            if not spec.get("bots"):
+                sys_name = "Workflow System" if msg.get("lang") == "en" else "工作流系统"
+                content = "No bots specified for custom workflow" if msg.get("lang") == "en" else "未指定工作流的 Bot"
+                await bus.broadcast(gid, {
+                    "type": "message", "member_id": 0, "sender_name": sys_name,
+                    "avatar_color": "#6366f1", "content": content,
+                })
+                return
+            await wf.apply(gid, wf.start(gid, spec, orchestrator_id))
+            return
+
+        stages_cfg = body.get("stages", [])
+        ordered = []
+        for cfg in stages_cfg:
+            if "pool" in cfg:
+                pool_bots = [bots[b["bot_id"]] for b in cfg["pool"] if b["bot_id"] in bots]
+                if pool_bots:
+                    ordered.append({
+                        "stage_type": "pool", "bots": pool_bots,
+                        "done_keyword": cfg.get("done_keyword", "完毕"),
+                        "in_progress": {}, "completed_tickets": [],
+                        "ticket_queue": [], "idle_bots": [],
+                    })
+            else:
+                bot = bots.get(cfg.get("bot_id"))
+                if bot:
+                    ordered.append({**bot, "stage_type": "single", "done_keyword": cfg.get("done_keyword", "完毕")})
+        if not ordered:
+            sys_name = "Workflow System" if msg.get("lang") == "en" else "工作流系统"
+            content = "No bots specified for workflow" if msg.get("lang") == "en" else "未指定工作流的 Bot"
+            await bus.broadcast(gid, {
+                "type": "message", "member_id": 0, "sender_name": sys_name,
+                "avatar_color": "#6366f1", "content": content,
+            })
+            return
+        await wf.apply(gid, wf.start(gid, ordered))
+        return
+
+    # 默认起 RD 人确认流水线（BA→Dev→QA 三道门）
     from core.role_router import _role_family
     from core.orchestration.pipeline import build_rd_pipeline
-    import core.workflow as wf
 
     async with db.global_db() as cdb:
         all_members = await db.get_members(cdb, gid)

@@ -541,7 +541,13 @@
     "awaitingConfirm": "⏳ Awaiting Confirmation",
     "finishBtn": "Done ✓",
     "manualAdvance": "Advance →",
-    "titleLabel": "Workflow"
+    "titleLabel": "Workflow",
+    "tabPipeline": "R&D Pipeline",
+    "tabDiscussion": "Multi-Bot Discussion",
+    "discussionRounds": "Discussion Rounds",
+    "discussionBots": "Participating Bots",
+    "discussionSummarizer": "Summarizer Bot",
+    "noBotsSelected": "Please select at least one bot"
   },
   "toolProgress": {
     "running": "Running",

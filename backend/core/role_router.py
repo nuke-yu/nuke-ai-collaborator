@@ -48,7 +48,7 @@ def build_image_content(text: str, file_url: str | None, file_type: str | None,
     return f"{text}\n[附图：{file_url}]"
 
 
-def build_context_message(message: str, sender_name: str, recent_messages: list) -> tuple:
+def build_context_message(message: str, sender_name: str, recent_messages: list, is_workflow: bool = False) -> tuple:
     from core.config import TOOL_RESULT_MAX_CHARS
 
     history_source = recent_messages
@@ -56,20 +56,49 @@ def build_context_message(message: str, sender_name: str, recent_messages: list)
         history_source = history_source[:-1]
 
     history = []
-    for msg in history_source[-8:]:
-        role = "assistant" if msg["sender_type"] == "bot" else "user"
-        content = msg["content"]
-        if content and isinstance(content, str) and len(content) > TOOL_RESULT_MAX_CHARS:
-            half = TOOL_RESULT_MAX_CHARS // 2
-            head = content[:half]
-            tail = content[-half:]
-            truncated_chars = len(content) - (len(head) + len(tail))
-            content = f"{head}\n\n[... 历史消息超长已自动截断 {truncated_chars:,} 字符 ...]\n\n{tail}"
+    
+    if is_workflow and len(history_source) > 8:
+        # Keep the trigger message (index 0) in full
+        # Keep the last 6 messages in full
+        # Intermediate messages (indices 1 to len-7) are compressed
+        for idx in range(len(history_source)):
+            msg = history_source[idx]
+            role = "assistant" if msg["sender_type"] == "bot" else "user"
+            content = msg["content"] or ""
+            
+            # Check if this is an intermediate message that needs compression
+            if idx > 0 and idx < len(history_source) - 6:
+                if len(content) > 150:
+                    content = content[:150] + "\n[... (此期发言已由系统自动压缩以节省上下文空间) ...]"
+            
+            # Standard truncation for ultra-long content
+            if len(content) > TOOL_RESULT_MAX_CHARS:
+                half = TOOL_RESULT_MAX_CHARS // 2
+                head = content[:half]
+                tail = content[-half:]
+                truncated_chars = len(content) - (len(head) + len(tail))
+                content = f"{head}\n\n[... 历史消息超长已自动截断 {truncated_chars:,} 字符 ...]\n\n{tail}"
+                
+            history.append({
+                "role": role,
+                "content": f"[{msg['sender_name']}]: {content}"
+            })
+    else:
+        # Default non-workflow behavior: keep the last 8 messages
+        for msg in history_source[-8:]:
+            role = "assistant" if msg["sender_type"] == "bot" else "user"
+            content = msg["content"]
+            if content and isinstance(content, str) and len(content) > TOOL_RESULT_MAX_CHARS:
+                half = TOOL_RESULT_MAX_CHARS // 2
+                head = content[:half]
+                tail = content[-half:]
+                truncated_chars = len(content) - (len(head) + len(tail))
+                content = f"{head}\n\n[... 历史消息超长已自动截断 {truncated_chars:,} 字符 ...]\n\n{tail}"
 
-        history.append({
-            "role": role,
-            "content": f"[{msg['sender_name']}]: {content}"
-        })
+            history.append({
+                "role": role,
+                "content": f"[{msg['sender_name']}]: {content}"
+            })
     
     if message and len(message) > TOOL_RESULT_MAX_CHARS:
         half = TOOL_RESULT_MAX_CHARS // 2

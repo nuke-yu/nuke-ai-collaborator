@@ -844,6 +844,53 @@ class TestRoundRobinOrchestrator(unittest.TestCase):
         self.assertEqual([u.bot["id"] for u in units], [2])
 
 
+class TestDiscussionOrchestrator(unittest.TestCase):
+    """验证多Bot讨论编排器（plugins/discussion.py）的轮转、总结阶段切换及合约规范。"""
+
+    def setUp(self):
+        from core.orchestration.plugins.discussion import DiscussionOrchestrator
+        self.orch = DiscussionOrchestrator()
+        self.bots = [{"id": 1, "name": "A"}, {"id": 2, "name": "B"}]
+
+    def test_begin_dispatches_first_speaker(self):
+        step = self.orch.begin(20, {"bots": self.bots, "rounds": 2, "summarizer_id": 2})
+        self.assertTrue(step.broadcast_state)
+        self.assertEqual(len(step.next_units), 1)
+        self.assertEqual(step.next_units[0].bot["id"], 1)
+        self.assertEqual(self.orch.current_bot(20)["id"], 1)
+
+    def test_observe_rotates_discussion_and_transitions_to_summary(self):
+        self.orch.begin(21, {"bots": self.bots, "rounds": 1, "summarizer_id": 2})
+        
+        # Round 1 - Bot A speaks
+        s1 = self.orch.observe(21, 1, "r1 a")
+        self.assertEqual(s1.next_units[0].bot["id"], 2)       # Then Bot B
+        
+        # Round 1 - Bot B speaks -> Round 2 starts, round > rounds, transitions to summary phase
+        s2 = self.orch.observe(21, 2, "r1 b")
+        self.assertEqual(s2.next_units[0].bot["id"], 2)       # Summary targeted at Bot B (summarizer)
+        
+        snap = self.orch.snapshot(21)
+        self.assertEqual(snap["phase"], "summary")
+        self.assertEqual(snap["current"], 1) # Stage index 1 is Summary
+        
+        # Summary finishes
+        s3 = self.orch.observe(21, 2, "final summary")
+        self.assertTrue(s3.done)
+
+    def test_serialize_restore_resume(self):
+        self.orch.begin(22, {"bots": self.bots, "rounds": 2, "summarizer_id": 1})
+        self.orch.observe(22, 1, "a")                          # Cursor to B
+        
+        blob = self.orch.serialize(22)
+        fresh = type(self.orch)()
+        fresh.restore(22, blob)
+        
+        self.assertEqual(fresh.current_bot(22)["id"], 2)
+        units = fresh.resume_units(22)
+        self.assertEqual([u.bot["id"] for u in units], [2])
+
+
 class TestOrchestratorPluggability(unittest.IsolatedAsyncioTestCase):
     """registry 发现第二编排器；门面按 group 路由到不同编排器且互相隔离。"""
 
@@ -1186,6 +1233,186 @@ class TestMarkGateConfirmed(unittest.IsolatedAsyncioTestCase):
         bad_cm.__aenter__ = AsyncMock(side_effect=RuntimeError("boom"))
         with patch.object(runner, "write_connect", return_value=bad_cm):
             await runner.mark_gate_confirmed(1, "1-0")  # 不应抛
+
+
+class TestWorkflowHistoryFiltering(unittest.IsolatedAsyncioTestCase):
+    """验证在 run_unit 里面对历史消息的过滤行为：防历史污染"""
+
+    async def test_history_filtering_retains_only_current_and_trigger(self):
+        from core import runner
+        from core.orchestration.base import WorkUnit
+        
+        class MockOrch:
+            def start_time(self, gid):
+                return "2026-06-12 12:00:00"
+            def observe(self, gid, bid, res):
+                return MagicMock(done=True, next_units=[], confirm_gate=None, announcements=[])
+            def snapshot(self, gid):
+                return {}
+
+        unit = WorkUnit(bot={"id": 1, "name": "BotA"}, executor_id="mock_exec")
+        
+        # Mock recent messages. Note: chronological order (oldest first).
+        recent_msgs = [
+            # Pre-start messages
+            {"id": 1, "sender_type": "bot", "content": "Old Bot Chat", "created_at": "2026-06-12 11:50:00"},
+            {"id": 2, "sender_type": "human", "content": "First User Prompt", "created_at": "2026-06-12 11:52:00"},
+            {"id": 3, "sender_type": "bot", "content": "Old Bot Ending Chat", "created_at": "2026-06-12 11:55:00"},
+            {"id": 4, "sender_type": "human", "content": "Start new discussion prompt", "created_at": "2026-06-12 11:59:00"},
+            # Post-start messages
+            {"id": 5, "sender_type": "bot", "content": "New Bot Chat 1", "created_at": "2026-06-12 12:01:00"},
+        ]
+        
+        fake_db = MagicMock()
+        fake_db_cm = MagicMock()
+        fake_db_cm.__aenter__ = AsyncMock(return_value=fake_db)
+        fake_db_cm.__aexit__ = AsyncMock(return_value=False)
+        
+        mock_executor = MagicMock()
+        
+        # We verify what history gets passed to execution context
+        intercepted_ctx = None
+        async def fake_executor_run(ctx):
+            nonlocal intercepted_ctx
+            intercepted_ctx = ctx
+            return MagicMock(full_text="Done")
+            
+        mock_executor.run = AsyncMock(side_effect=fake_executor_run)
+
+        with patch("core.runner.global_db", return_value=fake_db_cm), \
+             patch("core.runner.get_db", return_value=fake_db_cm), \
+             patch("core.runner.get_members", new=AsyncMock(return_value=[{"id": 1, "type": "bot"}])), \
+             patch("core.runner.get_messages", new=AsyncMock(return_value=recent_msgs)), \
+             patch("core.runner.exec_registry.get", return_value=mock_executor), \
+             patch("core.runner.apply_step", new=AsyncMock()):
+                 
+            await runner.run_unit(group_id=1, unit=unit, orch=MockOrch())
+            
+        self.assertIsNotNone(intercepted_ctx)
+        history = intercepted_ctx.history
+        self.assertEqual(len(history), 2)
+        self.assertEqual(history[0]["id"], 4)
+        self.assertEqual(history[1]["id"], 5)
+
+    async def test_workflow_history_compression(self):
+        from core.role_router import build_context_message
+        
+        # 10 messages total: 1 trigger, 9 bot messages
+        recent_msgs = [
+            {"id": 0, "sender_type": "human", "sender_name": "User", "content": "Trigger Question", "created_at": "12:00"},
+            {"id": 1, "sender_type": "bot", "sender_name": "Bot1", "content": "Long speech " * 50, "created_at": "12:01"},
+            {"id": 2, "sender_type": "bot", "sender_name": "Bot2", "content": "Long speech " * 50, "created_at": "12:02"},
+            {"id": 3, "sender_type": "bot", "sender_name": "Bot3", "content": "Long speech " * 50, "created_at": "12:03"},
+            {"id": 4, "sender_type": "bot", "sender_name": "Bot4", "content": "Long speech " * 50, "created_at": "12:04"},
+            {"id": 5, "sender_type": "bot", "sender_name": "Bot1", "content": "Current detail 1", "created_at": "12:05"},
+            {"id": 6, "sender_type": "bot", "sender_name": "Bot2", "content": "Current detail 2", "created_at": "12:06"},
+            {"id": 7, "sender_type": "bot", "sender_name": "Bot3", "content": "Current detail 3", "created_at": "12:07"},
+            {"id": 8, "sender_type": "bot", "sender_name": "Bot4", "content": "Current detail 4", "created_at": "12:08"},
+            {"id": 9, "sender_type": "bot", "sender_name": "Bot1", "content": "Latest detail 5", "created_at": "12:09"},
+        ]
+        
+        # Test default non-workflow behavior (only last 8 messages)
+        history_nw, _ = build_context_message("New Message", "System", recent_msgs, is_workflow=False)
+        self.assertEqual(len(history_nw), 8) # Sliced to last 8
+        self.assertEqual(history_nw[0]["content"], "[Bot2]: " + "Long speech " * 50)
+        
+        # Test workflow behavior (all messages kept, but intermediate ones compressed)
+        history_w, _ = build_context_message("New Message", "System", recent_msgs, is_workflow=True)
+        self.assertEqual(len(history_w), 10) # All 10 kept!
+        
+        # Message 0: Trigger (Kept in full)
+        self.assertEqual(history_w[0]["content"], "[User]: Trigger Question")
+        
+        # Messages 1 to 3: Intermediate (Compressed to 150 chars + warning)
+        self.assertTrue(len(history_w[1]["content"]) < 300)
+        self.assertIn("此期发言已由系统自动压缩", history_w[1]["content"])
+        self.assertTrue(len(history_w[2]["content"]) < 300)
+        self.assertIn("此期发言已由系统自动压缩", history_w[2]["content"])
+        
+        # Messages 4 to 9: Recent 6 messages (Kept in full)
+        self.assertEqual(history_w[4]["content"], "[Bot4]: " + "Long speech " * 50) # Index 4 (10 - 6 = 4) is in the last 6 messages, so kept in full!
+        self.assertEqual(history_w[9]["content"], "[Bot1]: Latest detail 5")
+
+    async def test_run_unit_semantic_viewpoint_compression(self):
+        from core import runner
+        from core.orchestration.base import WorkUnit
+        
+        # We define a MockOrch with an internal _state and start_time
+        class MockOrch:
+            def __init__(self):
+                self._state = {
+                    1: {
+                        "bots": [{"id": 1, "name": "Bot1"}, {"id": 2, "name": "Bot2"}],
+                        "viewpoints_summary": {}
+                    }
+                }
+            def start_time(self, gid):
+                return "2026-06-12 12:00:00"
+            def observe(self, gid, bid, res):
+                return MagicMock(done=True, next_units=[], confirm_gate=None, announcements=[])
+            def snapshot(self, gid):
+                return {}
+
+        unit = WorkUnit(bot={"id": 1, "name": "Bot1"}, executor_id="mock_exec")
+        
+        # 5 messages: 1 trigger, 4 bot messages.
+        # M = 2 (participating bots).
+        # Under M=2:
+        # Index 0: Trigger (Kept in full)
+        # Index 1: Bot1 Round 1 (to be compressed, msg ID 11)
+        # Index 2: Bot2 Round 1 (to be compressed, msg ID 12)
+        # Index 3, 4: Recent 2 messages (kept in full)
+        recent_msgs = [
+            {"id": 10, "sender_type": "human", "sender_name": "User", "content": "Trigger Question", "created_at": "2026-06-12 11:59:00"},
+            {"id": 11, "sender_type": "bot", "sender_name": "Bot1", "content": "Initial complex viewpoint A", "created_at": "2026-06-12 12:01:00"},
+            {"id": 12, "sender_type": "bot", "sender_name": "Bot2", "content": "Initial complex viewpoint B", "created_at": "2026-06-12 12:02:00"},
+            {"id": 13, "sender_type": "bot", "sender_name": "Bot1", "content": "Refuted B", "created_at": "2026-06-12 12:03:00"},
+            {"id": 14, "sender_type": "bot", "sender_name": "Bot2", "content": "Refuted A", "created_at": "2026-06-12 12:04:00"},
+        ]
+        
+        fake_db = MagicMock()
+        fake_db_cm = MagicMock()
+        fake_db_cm.__aenter__ = AsyncMock(return_value=fake_db)
+        fake_db_cm.__aexit__ = AsyncMock(return_value=False)
+        
+        mock_executor = MagicMock()
+        intercepted_ctx = None
+        async def fake_executor_run(ctx):
+            nonlocal intercepted_ctx
+            intercepted_ctx = ctx
+            return MagicMock(full_text="Done")
+        mock_executor.run = AsyncMock(side_effect=fake_executor_run)
+
+        # Mock call_ai_once to return a mock summary
+        mock_call_ai = AsyncMock(return_value={"content": "Compressed Viewpoint"})
+
+        orch_instance = MockOrch()
+        with patch("core.runner.global_db", return_value=fake_db_cm), \
+             patch("core.runner.get_db", return_value=fake_db_cm), \
+             patch("core.runner.get_members", new=AsyncMock(return_value=[{"id": 1, "type": "bot"}, {"id": 2, "type": "bot"}])), \
+             patch("core.runner.get_messages", new=AsyncMock(return_value=recent_msgs)), \
+             patch("core.runner.exec_registry.get", return_value=mock_executor), \
+             patch("core.runner.apply_step", new=AsyncMock()), \
+             patch("ai.client.call_ai_once", new=mock_call_ai):
+                 
+            await runner.run_unit(group_id=1, unit=unit, orch=orch_instance)
+            
+        self.assertIsNotNone(intercepted_ctx)
+        history = intercepted_ctx.history
+        # Should retain all 5 messages, but indices 1 and 2 must have compressed content
+        self.assertEqual(len(history), 5)
+        self.assertEqual(history[0]["content"], "Trigger Question")
+        self.assertEqual(history[1]["content"], "【此前发言摘要记录：Compressed Viewpoint】")
+        self.assertEqual(history[2]["content"], "【此前发言摘要记录：Compressed Viewpoint】")
+        self.assertEqual(history[3]["content"], "Refuted B")
+        self.assertEqual(history[4]["content"], "Refuted A")
+        
+        # Check that viewpoints_summary state has cached the results
+        self.assertEqual(orch_instance._state[1]["viewpoints_summary"]["11"], "Compressed Viewpoint")
+        self.assertEqual(orch_instance._state[1]["viewpoints_summary"]["12"], "Compressed Viewpoint")
+        
+        # Verify call_ai_once was called twice (once for Bot1 Round 1, once for Bot2 Round 1)
+        self.assertEqual(mock_call_ai.call_count, 2)
 
 
 if __name__ == "__main__":

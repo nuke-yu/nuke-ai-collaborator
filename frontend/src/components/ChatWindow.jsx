@@ -658,19 +658,13 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
         />
         {showWorkflowStart && (
           <WorkflowStartModal
-            stages={wfBotOrder}
-            onChangeStages={setWfBotOrder}
+            groupBots={members.filter(m => m.type === 'bot')}
             onClose={() => setShowWorkflowStart(false)}
-            onStart={async () => {
-              const stages = wfBotOrder.map(s => {
-                if (s.stage_type === 'pool') {
-                  return { pool: s.bots.map(b => ({ bot_id: b.id })), done_keyword: s.done_keyword || '完毕' }
-                }
-                return { bot_id: s.id, done_keyword: s.done_keyword || '完毕' }
-              })
+            onStart={async (payload) => {
               await fetch(`/api/groups/${activeGroupId}/workflow/start`, {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ stages }),
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
               })
               setShowWorkflowStart(false)
             }}

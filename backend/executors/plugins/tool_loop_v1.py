@@ -409,10 +409,14 @@ class ToolLoopRunner:
             self.ruleset = self.ctx.ruleset
         else:
             perm_mode = (self.bot.get("executor_config") or {}).get("permission_mode", "default")
-            db_rules = await permissions.load_rules(self.bot["id"])
+            try:
+                db_rules = await permissions.load_rules(self.bot["id"])
+            except Exception:
+                db_rules = []
             self.ruleset = permissions.Ruleset(rules=db_rules, mode=perm_mode)
 
-        history, user_msg = build_context_message(self.ctx.user_message, self.ctx.sender["name"], self.ctx.history)
+        is_wf = bool(self.ctx.workflow_suffix)
+        history, user_msg = build_context_message(self.ctx.user_message, self.ctx.sender["name"], self.ctx.history, is_workflow=is_wf)
         memory = await get_memory_context(self.bot["id"], self.bot.get("role") or "", self.ctx.user_message)
 
         if self.executor.manifest.workspace.skill_discovery:

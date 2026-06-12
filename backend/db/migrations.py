@@ -18,14 +18,7 @@ log = logging.getLogger(__name__)
 
 async def _safe_add_column(db, sql: str) -> None:
     """Run an idempotent ADD COLUMN, swallowing ONLY the benign 'duplicate
-    column' case.
-
-    SQLite has no `ADD COLUMN IF NOT EXISTS`, so re-running a migration raises
-    `OperationalError: duplicate column name: X`, which is safe to ignore. Any
-    OTHER error (`database is locked`, disk full, malformed SQL, missing table)
-    is re-raised so the migration is NOT recorded in `_schema_version` and gets
-    retried on the next startup instead of silently leaving a half-applied
-    schema marked as success (DFT-038).
+    column' case, and skipping if the table does not exist (split/legacy DBs).
     """
     try:
         parts = sql.split()
@@ -33,21 +26,14 @@ async def _safe_add_column(db, sql: str) -> None:
             table_name = parts[2].strip("`\"[]")
             from db.schema_split import CENTRAL_TABLES, GROUP_TABLES
             
-            # If the table is central-only, check if this DB is central (has 'groups' table)
-            if table_name in CENTRAL_TABLES:
-                cur = await db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='groups'")
+            # Check if the table is a known split table and exists in this database
+            if table_name in CENTRAL_TABLES or table_name in GROUP_TABLES:
+                cur = await db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table_name,))
                 if (await cur.fetchone()) is None:
-                    log.debug("Skipping central migration for table %s on group DB: %s", table_name, sql)
-                    return
-            
-            # If the table is group-only, check if this DB is a group DB (has 'messages' table)
-            if table_name in GROUP_TABLES:
-                cur = await db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='messages'")
-                if (await cur.fetchone()) is None:
-                    log.debug("Skipping group migration for table %s on central DB: %s", table_name, sql)
+                    log.debug("Skipping column migration for non-existent split table %s: %s", table_name, sql)
                     return
     except Exception as e:
-        log.warning("failed to check table domain for %s: %s", sql, e)
+        log.warning("failed to check table existence for %s: %s", sql, e)
 
     try:
         await db.execute(sql)

@@ -45,6 +45,15 @@ class Orchestrator(ABC):
     """编排器契约。与 BotExecutor 同构，按 orchestrator_id 注册、可插拔。"""
     orchestrator_id: str = ""
 
+    async def dispatch(self, group_id: int, message: dict, members: list, recent: list) -> OrchestratorStep:
+        """Unified dispatch entry point for human messages during active workflow.
+        
+        By default, returns an empty OrchestratorStep (does not trigger any bots).
+        Individual orchestrators can override this if human messages should trigger
+        actions (e.g. BA stage in DeclarativeOrchestrator).
+        """
+        return OrchestratorStep()
+
     @abstractmethod
     def begin(self, group_id: int, spec) -> OrchestratorStep:
         """开始编排，返回第一批工作（首阶段可能由用户驱动，返回空 units）。"""
@@ -108,6 +117,10 @@ class Orchestrator(ABC):
     def resume_units(self, group_id: int) -> list:
         """恢复后需要重新派发的在飞工作单元（list[WorkUnit]）。"""
         return []
+
+    def start_time(self, group_id: int) -> str | None:
+        """工作流启动的 UTC 时间字符串，格式 'YYYY-MM-DD HH:MM:SS' (或 None)"""
+        return None
 
     def info(self) -> dict:
         return {"orchestrator_id": self.orchestrator_id}

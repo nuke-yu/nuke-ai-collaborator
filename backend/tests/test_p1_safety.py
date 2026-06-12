@@ -90,6 +90,28 @@ class TestSensitivePathExtended(unittest.TestCase):
 class TestDoomLoopGuard(unittest.IsolatedAsyncioTestCase):
     """DFT-003 / DFT-035 doom loop protection in tool_loop_v1."""
 
+    async def asyncSetUp(self):
+        import db as _db_mod
+        from db.schema import init_db
+        import tempfile
+        self.tmp_dir = tempfile.TemporaryDirectory()
+        self.test_db = os.path.join(self.tmp_dir.name, "test_p1_safety.db")
+        self._orig = _db_mod.DB_PATH
+        _db_mod.DB_PATH = self.test_db
+        await init_db()
+        import aiosqlite
+        from db.migrations import run_migrations
+        async with aiosqlite.connect(self.test_db) as db:
+            await run_migrations(db)
+            await db.execute("INSERT INTO groups (id, name) VALUES (1, 'g')")
+            await db.execute("INSERT INTO members (id, group_id, name, type, role) VALUES (1, 1, 'bot', 'bot', 'dev')")
+            await db.commit()
+
+    async def asyncTearDown(self):
+        import db as _db_mod
+        _db_mod.DB_PATH = self._orig
+        self.tmp_dir.cleanup()
+
     async def test_consecutive_tool_only_loop_terminates(self):
         from executors.plugins.tool_loop_v1 import ToolLoopV1
         from executors.base import ExecutionContext

@@ -123,7 +123,7 @@ class TestMemberRoutes(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(row["done_keyword"], "FINISHED")
             
             # Check if workspace folders and metadata files were generated
-            bot_ws_dir = TEST_WORKSPACES_ROOT / f"bot_{bot_id}"
+            bot_ws_dir = TEST_WORKSPACES_ROOT / "group_1" / "bots" / f"bot_{bot_id}"
             self.assertTrue(bot_ws_dir.exists())
             self.assertTrue((bot_ws_dir / "skills").exists())
             self.assertTrue((bot_ws_dir / "logs").exists())

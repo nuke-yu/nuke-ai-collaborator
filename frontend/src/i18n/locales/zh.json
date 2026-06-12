@@ -541,7 +541,13 @@
     "awaitingConfirm": "⏳ 待你确认",
     "finishBtn": "完成 ✓",
     "manualAdvance": "手动推进 →",
-    "titleLabel": "工作流"
+    "titleLabel": "工作流",
+    "tabPipeline": "研发流水线",
+    "tabDiscussion": "多Bot讨论",
+    "discussionRounds": "讨论轮次",
+    "discussionBots": "参与讨论的 Bot",
+    "discussionSummarizer": "总结 Bot",
+    "noBotsSelected": "请至少选择一个 Bot 参与讨论"
   },
   "toolProgress": {
     "running": "执行中",

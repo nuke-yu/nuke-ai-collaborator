@@ -1,5 +1,7 @@
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { fetchGroupStats, exportGroupUrl } from '../api'
+import { K } from '../i18n/keys'
 
 export default function ChatHeader({
   activeGroupId,
@@ -13,6 +15,7 @@ export default function ChatHeader({
   onShowStats, onLogout,
   onShowBotLogs,
 }) {
+  const { t } = useTranslation()
   const [editingGroupName, setEditingGroupName] = useState(false)
   const [groupNameDraft, setGroupNameDraft] = useState('')
   const [showExportMenu, setShowExportMenu] = useState(false)
@@ -40,20 +43,21 @@ export default function ChatHeader({
             if (e.key === 'Escape') setEditingGroupName(false)
           }}
           onBlur={saveGroupName}
+          placeholder={t(K.chat.header.renamePlaceholder)}
           className="bg-gray-800 text-gray-100 font-semibold text-sm rounded px-2 py-0.5 outline-none focus:ring-1 focus:ring-indigo-500 w-40"
         />
       ) : (
         <button
           onClick={() => { setGroupNameDraft(group?.name || ''); setEditingGroupName(true) }}
           className="text-gray-300 font-semibold hover:text-white transition-colors"
-          title="点击重命名"
+          title={t(K.chat.header.renameTitle)}
         >
-          # {group?.name || '选择群组'}
+          # {group?.name || t(K.chat.header.selectGroup)}
         </button>
       )}
-      <span className="text-xs text-gray-500 ml-2">· {members.length} 名成员</span>
+      <span className="text-xs text-gray-500 ml-2">· {t(K.chat.header.members, { count: members.length })}</span>
       {reconnecting && (
-        <span className="text-xs text-yellow-400 animate-pulse">⚠ 连接断开，正在重连...</span>
+        <span className="text-xs text-yellow-400 animate-pulse">⚠ {t(K.chat.header.reconnecting)}</span>
       )}
       <div className="ml-auto flex items-center gap-1">
         {members.some(m => m.type === 'bot') && !workflow?.active && (
@@ -61,35 +65,35 @@ export default function ChatHeader({
             <button
               onClick={() => onStartRequirement?.()}
               className="text-xs px-2 py-1 rounded text-indigo-300 hover:text-white hover:bg-indigo-600/40 transition-colors"
-              title="开始需求流程（BA→Dev→QA，每步人确认）"
-            >📋 开始需求</button>
+              title={t(K.chat.header.startRequirementTitle)}
+            >📋 {t(K.chat.header.startRequirement)}</button>
             <button
               onClick={() => onShowWorkflowStart()}
-              className="text-sm px-2 py-1 rounded text-gray-500 hover:text-indigo-400 transition-colors"
-              title="启动自定义工作流"
-            >⚡</button>
+              className="text-xs px-2 py-1 rounded text-indigo-300 hover:text-white hover:bg-indigo-600/40 transition-colors"
+              title={t(K.chat.header.startWorkflowTitle)}
+            >💬 {t(K.workflow.tabDiscussion)}</button>
           </>
         )}
         <button
           onClick={async () => { const s = await fetchGroupStats(activeGroupId); onShowStats(s); }}
           className="text-sm px-2 py-1 rounded text-gray-500 hover:text-gray-300 transition-colors"
-          title="使用统计"
+          title={t(K.chat.header.statsTitle)}
         >📊</button>
         <div className="relative">
           <button
             onClick={() => setShowExportMenu(m => !m)}
             className={`text-sm px-2 py-1 rounded transition-colors ${showExportMenu ? 'text-indigo-400 bg-indigo-950/50' : 'text-gray-500 hover:text-gray-300'}`}
-            title="导出聊天记录"
+            title={t(K.chat.header.exportTitle)}
           >⬇️</button>
           {showExportMenu && (
             <div className="absolute right-0 top-full mt-1 bg-gray-800 border border-gray-700 rounded-lg shadow-xl overflow-hidden z-50 w-36">
               <a href={exportGroupUrl(activeGroupId, 'markdown')} download onClick={() => setShowExportMenu(false)}
                 className="flex items-center gap-2 px-3 py-2 text-xs text-gray-300 hover:bg-gray-700 transition-colors no-underline">
-                <span>📝</span> 导出 Markdown
+                <span>📝</span> {t(K.chat.header.exportMarkdown)}
               </a>
               <a href={exportGroupUrl(activeGroupId, 'json')} download onClick={() => setShowExportMenu(false)}
                 className="flex items-center gap-2 px-3 py-2 text-xs text-gray-300 hover:bg-gray-700 transition-colors no-underline">
-                <span>📋</span> 导出 JSON
+                <span>📋</span> {t(K.chat.header.exportJson)}
               </a>
             </div>
           )}
@@ -97,17 +101,17 @@ export default function ChatHeader({
         <button
           onClick={onLogout}
           className="text-sm px-2 py-1 rounded text-gray-500 hover:text-red-400 transition-colors"
-          title="退出登录"
+          title={t(K.chat.header.logout)}
         >🚪</button>
         <button
           onClick={() => onShowSearch()}
           className="text-sm px-2 py-1 rounded text-gray-500 hover:text-gray-300 transition-colors"
-          title="搜索消息 (⌘K)"
+          title={`${t(K.chat.header.search)} (⌘K)`}
         >🔍</button>
         <button
           onClick={() => onShowBotLogs()}
           className="text-sm px-2 py-1 rounded text-gray-500 hover:text-gray-300 transition-colors"
-          title="Bot 运行日志"
+          title={t(K.chat.header.botLogsTitle)}
         >📜</button>
       </div>
     </div>
