@@ -23,6 +23,7 @@ from ai.client import call_ai_once, call_ai_stream_messages, AIError, AIContextO
 from ai.memory import get_memory_context, add_to_chroma, maybe_summarize
 from core.role_router import build_context_message, build_image_content
 from workspace import load_context_files, format_context_blocks, append_log, archive_run
+import workspace as _ws
 from skills import list_skills_all, load_always_skills, filter_skills_by_context
 from skills.traits import load_traits
 from skills.constants import bot_ws as _bot_ws
@@ -324,88 +325,6 @@ class ToolLoopRunner:
         self.ruleset = None
         self.use_cached_mc = compact.should_use_cached_microcompact(self.provider)
 
-    async def _load_project_context(self, force: bool = False) -> str | None:
-        """自动加载项目上下文：PROJECTS.md, SPEC.md, BOARD.md 等关键文件。
-
-        加载策略：
-        - 当用户消息包含任务关键词（如"测试"、"开发"、"实现"）时加载
-        - 当 Bot 是 QA/Dev/BA 等角色且用户请求工作时加载
-        - 或者当 force=True 时强制加载
-        - 这样避免每次 AI 推理都加载不必要的上下文，只在 Bot 开始工作时加载
-
-        确保：
-        - QA Bot 知道当前要测试哪个项目
-        - Dev Bot 知道当前开发阶段和需求
-        - 所有 Bot 对项目背景有一致的理解
-
-        Args:
-            force: 是否强制加载，默认 False
-
-        Returns:
-            格式化的上下文文本，如果不需要加载或文件不存在则返回 None。
-        """
-        from pathlib import Path
-        from workspace import layout
-
-        # 检查是否需要加载上下文
-        # 条件 1: 强制加载
-        # 条件 2: Bot 类型是 QA/Dev/BA 等角色
-        # 条件 3: 用户消息包含任务关键词
-        bot_type = self.bot.get("type", "")
-        bot_name = self.bot.get("name", "").lower()
-
-        is_work_bot = bot_type == "bot" and any(role in bot_name for role in ["qa", "dev", "ba", "test", "developer", "product", "analyst"])
-
-        if not force and not is_work_bot:
-            # 如果不是工作 Bot（比如是用户自己），需要检查是否包含任务关键词
-            task_keywords = ["测试", "开发", "实现", "构建", "写代码", "test", "dev",
-                           "develop", "code", "create", "build", "check", "verify"]
-            user_msg = self.ctx.user_message.lower() if self.ctx.user_message else ""
-
-            # 如果用户消息不包含任务关键词，说明不是在工作场景，不加载
-            if not any(kw in user_msg for kw in task_keywords):
-                return None
-
-        # Bot 角色自动加载项目上下文
-        if is_work_bot or force:
-            context_parts = []
-            has_context = False
-
-            # 1. 加载 PROJECTS.md（项目清单）- QA/Dev Bot 必读
-            projects_path = layout.group_shared_dir(self.ctx.group_id) / "workspace" / "PROJECTS.md"
-            if projects_path.exists():
-                try:
-                    projects_content = projects_path.read_text(encoding="utf-8")
-                    context_parts.append(f"【当前项目清单】\n{projects_content}")
-                    has_context = True
-                except Exception:
-                    pass
-
-            # 2. 加载 SPEC.md（需求文档）
-            spec_path = layout.group_shared_dir(self.ctx.group_id) / "SPEC.md"
-            if spec_path.exists():
-                try:
-                    spec_content = spec_path.read_text(encoding="utf-8")
-                    context_parts.append(f"【需求文档】\n{spec_content}")
-                    has_context = True
-                except Exception:
-                    pass
-
-            # 3. 加载 BOARD.md（工作看板）
-            board_path = layout.group_shared_dir(self.ctx.group_id) / "BOARD.md"
-            if board_path.exists():
-                try:
-                    board_content = board_path.read_text(encoding="utf-8")
-                    context_parts.append(f"【工作看板】\n{board_content}")
-                    has_context = True
-                except Exception:
-                    pass
-
-            return "\n\n".join(context_parts) if has_context else None
-
-        # 非工作 Bot 但不包含任务关键词，返回 None
-        return None
-
     async def _get_fresh_context_prefix(self) -> tuple[str, str]:
         blocks = await load_context_files(
             self.bot["id"], self.ctx.group_id, self.executor.manifest.workspace.startup_files
@@ -496,9 +415,6 @@ class ToolLoopRunner:
         history, user_msg = build_context_message(self.ctx.user_message, self.ctx.sender["name"], self.ctx.history)
         memory = await get_memory_context(self.bot["id"], self.bot.get("role") or "", self.ctx.user_message)
 
-        # 自动加载项目上下文：PROJECTS.md, SPEC.md, BOARD.md
-        project_context = await self._load_project_context()
-
         if self.executor.manifest.workspace.skill_discovery:
             self.system_prompt_base, self.skills_xml, self.skills_snapshot, self.always_skills = await compile_system_prompt(
                 self.bot, self.ctx, self.model_name, memory
@@ -512,21 +428,23 @@ class ToolLoopRunner:
             traits_section = load_traits(bot_traits)
             os_info = f"Windows (PowerShell)" if _IS_WINDOWS else f"{sys.platform} (shell: /bin/sh)"
 
-            # 构建系统提示，包含项目上下文
-            context_blocks = []
-            if project_context:
-                context_blocks.append(project_context)
-
             self.system_prompt_base = (
                 base
                 + (f"\n\n{memory}" if memory else "")
                 + traits_section
                 + (f"\n\n【群组信息】\n{group_section}" if group_section else "")
                 + f"\n\n【运行环境】\nOS: {os_info}\n路径分隔符: {'\\' if _IS_WINDOWS else '/'}\n使用 run_shell 执行命令时请使用适合当前 OS 的语法。"
-                + "\n\n【自学技能规则】\n当你发现可复用的规律或用户说「记住这个做法」时，用 write_file 将技能写入 `skills/learned/draft/<skill-name>.md`，系统会自动请求用户审批。禁止直接写入 `skills/learned/active/`。"
+                + "\n\n【自学技能规则】\n当你发现可复用规律或用户说「记住这个做法」时，用 write_file 将技能写入 `skills/learned/draft/<skill-name>.md`，系统会自动请求用户审批。禁止直接写入 `skills/learned/active/`。"
                 + self.ctx.workflow_suffix
-                + (f"\n\n【项目上下文】\n" + "\n\n".join(context_blocks) if context_blocks else "")
             )
+
+        # Group workspace context: unconditionally injected for all group bots.
+        # Both skill_discovery and non-skill_discovery branches are covered here.
+        if self.ctx.group_id is not None:
+            group_ctx = await _ws.load_group_context(self.ctx.group_id)
+            if group_ctx:
+                self.system_prompt_base += f"\n\n{group_ctx}"
+
         self.system_prompt = self.system_prompt_base
 
         user_content = build_image_content(user_msg, self.ctx.file_url, self.ctx.file_type, self.provider)
