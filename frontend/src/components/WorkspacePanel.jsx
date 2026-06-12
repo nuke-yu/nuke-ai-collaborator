@@ -16,17 +16,36 @@ export default function WorkspacePanel({ bot, groupId, onClose }) {
 
   const loadTree = useCallback(async () => {
     const res = await fetch(`/api/members/${bot.id}/workspace`)
-    if (res.ok) setTree(await res.json())
-  }, [bot.id])
+    if (res.ok) {
+      const botTree = await res.json()
+      // Add shared workspace (workspace/<project>/*)
+      const sharedRes = await fetch(`/api/groups/${groupId}/workspace`)
+      if (sharedRes.ok) {
+        const sharedTree = await sharedRes.json()
+        setTree([...botTree, ...sharedTree])
+      } else {
+        setTree(botTree)
+      }
+    }
+  }, [bot.id, groupId])
 
   useEffect(() => {
     let cancelled = false
     ;(async () => {
       const res = await fetch(`/api/members/${bot.id}/workspace`)
-      if (!cancelled && res.ok) setTree(await res.json())
+      if (!cancelled && res.ok) {
+        const botTree = await res.json()
+        const sharedRes = await fetch(`/api/groups/${groupId}/workspace`)
+        if (sharedRes.ok) {
+          const sharedTree = await sharedRes.json()
+          if (!cancelled) setTree([...botTree, ...sharedTree])
+        } else {
+          if (!cancelled) setTree(botTree)
+        }
+      }
     })()
     return () => { cancelled = true }
-  }, [bot.id])
+  }, [bot.id, groupId])
 
   // DFT-062: this early return must come AFTER every hook above. It used to sit
   // before the other ~13 hooks, so toggling the skills panel changed how many
@@ -35,8 +54,15 @@ export default function WorkspacePanel({ bot, groupId, onClose }) {
     return <SkillPanel bot={bot} groupId={groupId} onClose={() => setShowSkills(false)} />
   }
 
+  // Filter out shared workspace files from editing (read-only)
+  const isSharedFile = (path) => path.startsWith("workspace/") || path.startsWith("docs/") || path.startsWith("prs/")
+
   const openFile = async (path) => {
     if (dirty && !confirm('有未保存的修改，确认切换？')) return
+    if (isSharedFile(path)) {
+      alert("共享区文件只读，请切换到私有工作区进行编辑。")
+      return
+    }
     const res = await fetch(`/api/members/${bot.id}/workspace/file?path=${encodeURIComponent(path)}`)
     if (res.ok) {
       const data = await res.json()
@@ -172,12 +198,16 @@ export default function WorkspacePanel({ bot, groupId, onClose }) {
                 + 文件夹
               </button>
             </div>
+            <div className="mt-2 text-[10px] text-gray-500 flex items-center gap-1">
+              <span title="共享区（只读）">🌐</span>
+              <span>共享区</span>
+            </div>
           </div>
           <div className="flex-1 overflow-y-auto py-2">
             {tree.length === 0 && (
               <div className="px-3 text-xs text-gray-500 mt-2">（空）</div>
             )}
-            <TreeLevel node={root} depth={0} prefix="" selected={selected} onOpen={openFile} onDelete={deletePath} />
+            <TreeLevel node={root} depth={0} prefix="" selected={selected} onOpen={openFile} onDelete={deletePath} isShared={false} />
           </div>
         </div>
 
@@ -284,43 +314,58 @@ export default function WorkspacePanel({ bot, groupId, onClose }) {
   )
 }
 
-// Build a nested {name, dirs, files} tree from the flat [{path, name, is_dir}] list.
+// Build a nested tree, splitting shared workspace into its own root section
 function buildTree(flat) {
   const root = { dirs: {}, files: [] }
-  const ensureDir = (parts) => {
-    let node = root
+  const sharedSection = { dirs: {}, files: [] }
+  const SHARED_PREFIXES = ['workspace/', 'docs/', 'prs/']
+
+  const ensureDir = (parts, section) => {
+    let node = section
     for (const part of parts) {
       if (!node.dirs[part]) node.dirs[part] = { name: part, dirs: {}, files: [] }
       node = node.dirs[part]
     }
     return node
   }
+
   flat.forEach(n => {
     const parts = n.path.split('/')
+    const isShared = SHARED_PREFIXES.some(p => n.path.startsWith(p))
+    const section = isShared ? sharedSection : root
+
     if (n.is_dir) {
-      ensureDir(parts)
+      ensureDir(parts, section)
     } else {
-      const node = parts.length > 1 ? ensureDir(parts.slice(0, -1)) : root
+      const node = parts.length > 1 ? ensureDir(parts.slice(0, -1), section) : section
       node.files.push(n)
     }
   })
+
+  // Merge shared section into root if it has content
+  if (Object.keys(sharedSection.dirs).length > 0 || sharedSection.files.length > 0) {
+    root.dirs['🌐 共享区'] = sharedSection
+  }
+
   return root
 }
 
 // Recursively render one tree level: files first, then nested directories.
-function TreeLevel({ node, depth, prefix, selected, onOpen, onDelete }) {
+function TreeLevel({ node, depth, prefix, selected, onOpen, onDelete, isShared = false }) {
   const files = [...node.files].sort((a, b) => a.name.localeCompare(b.name))
   const dirNames = Object.keys(node.dirs).sort()
   return (
     <>
       {files.map(f => (
         <FileRow
-          key={f.path} name={f.name} depth={depth} active={selected === f.path}
+          key={f.path} name={f.name} depth={depth} active={selected === f.path} isShared={isShared}
           onClick={() => onOpen(f.path)} onDelete={() => onDelete(f.path, false)}
         />
       ))}
       {dirNames.map(name => {
         const dirPath = prefix ? `${prefix}/${name}` : name
+        // Shared workspace is the root (starts with workspace/, docs/, prs/)
+        const childIsShared = !prefix && isShared
         return (
           <div key={name}>
             <div
@@ -328,18 +373,20 @@ function TreeLevel({ node, depth, prefix, selected, onOpen, onDelete }) {
               style={{ paddingLeft: `${12 + depth * 14}px`, paddingRight: '6px' }}
             >
               <span>📁</span>
-              <span className="truncate flex-1">{name}</span>
-              <button
-                onClick={() => onDelete(dirPath, true)}
-                title="删除文件夹"
-                className="opacity-0 group-hover/row:opacity-100 text-gray-500 hover:text-red-400 px-1 flex-shrink-0 transition-opacity"
-              >
-                🗑
-              </button>
+              <span className="truncate flex-1">{isShared && <span title="共享区（只读）">🌐</span>} {name}</span>
+              {!isShared && (
+                <button
+                  onClick={() => onDelete(dirPath, true)}
+                  title="删除文件夹"
+                  className="opacity-0 group-hover/row:opacity-100 text-gray-500 hover:text-red-400 px-1 flex-shrink-0 transition-opacity"
+                >
+                  🗑
+                </button>
+              )}
             </div>
             <TreeLevel
               node={node.dirs[name]} depth={depth + 1} prefix={dirPath}
-              selected={selected} onOpen={onOpen} onDelete={onDelete}
+              selected={selected} onOpen={onOpen} onDelete={onDelete} isShared={childIsShared}
             />
           </div>
         )
@@ -348,7 +395,7 @@ function TreeLevel({ node, depth, prefix, selected, onOpen, onDelete }) {
   )
 }
 
-function FileRow({ name, active, depth = 0, onClick, onDelete }) {
+function FileRow({ name, active, depth = 0, onClick, onDelete, isShared = false }) {
   return (
     <div
       className={`group/row w-full text-xs flex items-center transition-colors ${
@@ -362,15 +409,17 @@ function FileRow({ name, active, depth = 0, onClick, onDelete }) {
         style={{ paddingLeft: `${12 + depth * 14}px` }}
       >
         <span className="text-gray-500">📄</span>
-        <span className="truncate">{name}</span>
+        <span className="truncate">{isShared && <span title="共享区（只读）">🌐</span>} {name}</span>
       </button>
-      <button
-        onClick={onDelete}
-        title="删除文件"
-        className="opacity-0 group-hover/row:opacity-100 text-gray-500 hover:text-red-400 px-1 flex-shrink-0 transition-opacity"
-      >
-        🗑
-      </button>
+      {!isShared && (
+        <button
+          onClick={onDelete}
+          title="删除文件"
+          className="opacity-0 group-hover/row:opacity-100 text-gray-500 hover:text-red-400 px-1 flex-shrink-0 transition-opacity"
+        >
+          🗑
+        </button>
+      )}
     </div>
   )
 }

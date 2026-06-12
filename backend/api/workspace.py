@@ -1,9 +1,10 @@
 from fastapi import APIRouter, HTTPException
 import asyncio
+from pathlib import Path
 from db import get_db, get_member
 from workspace import (
     list_workspace_tree, read_file, write_file, make_dir, delete_path, bot_workspace, init_bot_workspace,
-    list_file_history, read_file_history_version,
+    list_file_history, read_file_history_version, group_workspace,
 )
 from skills import (
     list_skills_all, update_skill_status, approve_draft_skill, reject_draft_skill,
@@ -210,3 +211,18 @@ async def reject_skill(member_id: int, skill_name: str):
     if result.startswith("["):
         raise HTTPException(404, result)
     return {"ok": True, "message": result}
+
+
+@router.get("/api/groups/{group_id}/workspace")
+async def get_shared_workspace_tree(group_id: int):
+    """Return shared group workspace tree (workspace/<project>/*, docs/, prs/, BOARD.md, etc.)."""
+    def _list():
+        ws = group_workspace(group_id)
+        result = []
+        for p in ws.rglob("*"):
+            if p.is_relative_to(ws) and not str(p).startswith(str(ws / ".history")):
+                rel = str(p.relative_to(ws)).replace("\\", "/")
+                result.append({"path": rel, "name": p.name, "is_dir": p.is_dir()})
+        return result
+    return await asyncio.to_thread(_list)
+
