@@ -21,9 +21,10 @@ class RoundRobinOrchestrator(Orchestrator):
 
     # ── 内部 ──────────────────────────────────────────────────────────────────
 
-    def _unit(self, group_id: int, bot: dict) -> WorkUnit:
+    def _unit(self, group_id: int, bot: dict, trigger_msg: str = "") -> WorkUnit:
         return WorkUnit(
             bot=bot, executor_id="tool_loop_v1",
+            trigger_msg=trigger_msg or "请根据以上对话，发表你这一轮的看法。",
             prompt_suffix=self.system_suffix(group_id),
             is_workflow=True,
         )
@@ -75,12 +76,7 @@ class RoundRobinOrchestrator(Orchestrator):
         s["started"] = True
         bot = s["bots"][s["idx"]]
         return OrchestratorStep(
-            next_units=[WorkUnit(
-                bot=bot, executor_id="tool_loop_v1",
-                trigger_msg=content,
-                prompt_suffix=self.system_suffix(group_id),
-                is_workflow=True,
-            )],
+            next_units=[self._unit(group_id, bot, trigger_msg=content)],
             broadcast_state=True,
         )
 

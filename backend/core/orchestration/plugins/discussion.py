@@ -18,10 +18,17 @@ class DiscussionOrchestrator(Orchestrator):
 
     # ── Internal Helpers ──────────────────────────────────────────────────────
 
-    def _unit(self, group_id: int, bot: dict) -> WorkUnit:
+    def _unit(self, group_id: int, bot: dict, trigger_msg: str = "") -> WorkUnit:
+        s = self._state.get(group_id) or {}
+        if not trigger_msg:
+            if s.get("phase") == "summary":
+                trigger_msg = "讨论已结束，请根据以上各方发言，完成总结与评估。"
+            else:
+                trigger_msg = "请根据以上讨论内容，发表你在本轮的观点。"
         return WorkUnit(
             bot=bot,
             executor_id="tool_loop_v1",
+            trigger_msg=trigger_msg,
             prompt_suffix=self.system_suffix(group_id),
             is_workflow=True,
         )
@@ -102,14 +109,7 @@ class DiscussionOrchestrator(Orchestrator):
             return OrchestratorStep()
         s["started"] = True
         bot = s["bots"][s["idx"]]
-        unit = WorkUnit(
-            bot=bot,
-            executor_id="tool_loop_v1",
-            trigger_msg=content,
-            prompt_suffix=self.system_suffix(group_id),
-            is_workflow=True,
-        )
-        return OrchestratorStep(next_units=[unit], broadcast_state=True)
+        return OrchestratorStep(next_units=[self._unit(group_id, bot, trigger_msg=content)], broadcast_state=True)
 
     def observe(self, group_id: int, bot_id: int, response: str) -> OrchestratorStep:
         s = self._state.get(group_id)
