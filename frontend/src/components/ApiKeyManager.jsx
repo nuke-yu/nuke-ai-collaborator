@@ -26,6 +26,27 @@ const PROVIDERS = [
     masked: true,
   },
   {
+    key: 'minimax_api_key',
+    label: 'MiniMax',
+    hint: 'sk-...',
+    url: 'https://platform.minimaxi.com',
+    masked: true,
+  },
+  {
+    key: 'zhipu_api_key',
+    label: 'Zhipu GLM',
+    hint: 'sk-...',
+    url: 'https://open.bigmodel.cn/usercenter/proj-mgmt/apikeys',
+    masked: true,
+  },
+  {
+    key: 'qwen_api_key',
+    label: 'Qwen (Aliyun)',
+    hint: 'sk-...',
+    url: 'https://dashscope.console.aliyun.com/apiKey',
+    masked: true,
+  },
+  {
     key: 'ollama_base_url',
     label: 'Ollama',
     hint: 'http://localhost:11434',

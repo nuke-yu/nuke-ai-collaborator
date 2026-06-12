@@ -8,6 +8,9 @@ const PROVIDER_LABELS_KEYS = {
   deepseek: 'DeepSeek',
   openai: 'OpenAI',
   claude: 'Claude',
+  minimax: 'MiniMax',
+  zhipu: 'Zhipu GLM',
+  qwen: 'Qwen',
   ollama: null, // rendered with t(K.member.providerOllamaLocal)
 }
 
@@ -15,6 +18,9 @@ const PROVIDER_MODELS = {
   deepseek: ['deepseek-chat', 'deepseek-reasoner'],
   openai: ['gpt-4o', 'gpt-4o-mini', 'gpt-3.5-turbo'],
   claude: ['claude-opus-4-7', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001'],
+  minimax: ['abab6.5s-chat', 'abab6.5g-chat', 'abab6.5-chat'],
+  zhipu: ['glm-4', 'glm-4-flash', 'glm-4-air', 'glm-3-turbo'],
+  qwen: ['qwen-turbo', 'qwen-plus', 'qwen-max', 'qwen-long'],
   ollama: null,
 }
 

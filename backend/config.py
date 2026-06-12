@@ -9,6 +9,9 @@ FIELDS = {
     "openai_api_key": "OPENAI_API_KEY",
     "anthropic_api_key": "ANTHROPIC_API_KEY",
     "ollama_base_url": "OLLAMA_BASE_URL",
+    "minimax_api_key": "MINIMAX_API_KEY",
+    "zhipu_api_key": "ZHIPU_API_KEY",
+    "qwen_api_key": "QWEN_API_KEY",
 }
 
 def read_config() -> dict:

@@ -45,13 +45,22 @@ async def aclose_client() -> None:
     _client = None
 
 
+_OPENAI_COMPAT_PROVIDERS = {
+    "deepseek": ("https://api.deepseek.com/v1/chat/completions",                        "deepseek_api_key", "DeepSeek"),
+    "openai":   ("https://api.openai.com/v1/chat/completions",                          "openai_api_key",   "OpenAI"),
+    "minimax":  ("https://api.minimax.chat/v1/chat/completions",                        "minimax_api_key",  "MiniMax"),
+    "zhipu":    ("https://open.bigmodel.cn/api/paas/v4/chat/completions",               "zhipu_api_key",    "Zhipu GLM"),
+    "qwen":     ("https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",  "qwen_api_key",     "Qwen"),
+}
+
 def _keys():
-    return {
-        "deepseek": get_key("deepseek_api_key"),
-        "openai": get_key("openai_api_key"),
+    keys = {
         "anthropic": get_key("anthropic_api_key"),
         "ollama_url": get_key("ollama_base_url") or "http://localhost:11434",
     }
+    for prov, (_, key_field, _label) in _OPENAI_COMPAT_PROVIDERS.items():
+        keys[prov] = get_key(key_field)
+    return keys
 
 class AIError(Exception):
     pass
@@ -576,11 +585,9 @@ async def _dispatch_once(
     tools: list | None, use_cached_microcompact: bool,
 ) -> dict:
     """Single provider dispatch — no retry logic. Called by call_ai_once."""
-    if provider in ("deepseek", "openai"):
-        url = ("https://api.deepseek.com/v1/chat/completions" if provider == "deepseek"
-               else "https://api.openai.com/v1/chat/completions")
-        label = "DeepSeek" if provider == "deepseek" else "OpenAI"
-        api_key = _require_key(keys, "deepseek" if provider == "deepseek" else "openai", label)
+    if provider in _OPENAI_COMPAT_PROVIDERS:
+        url, _, label = _OPENAI_COMPAT_PROVIDERS[provider]
+        api_key = _require_key(keys, provider, label)
         return await _once_openai_compat(url, api_key, model, system_prompt,
                                          messages, temperature, max_tokens, tools)
     elif provider == "claude":
@@ -658,11 +665,9 @@ async def call_ai_stream_messages(
     """Streaming call from pre-built OpenAI-format messages (no system). Used by tool_loop final response."""
     keys = _keys()
     try:
-        if provider in ("deepseek", "openai"):
-            url = ("https://api.deepseek.com/v1/chat/completions" if provider == "deepseek"
-                   else "https://api.openai.com/v1/chat/completions")
-            label = "DeepSeek" if provider == "deepseek" else "OpenAI"
-            api_key = _require_key(keys, "deepseek" if provider == "deepseek" else "openai", label)
+        if provider in _OPENAI_COMPAT_PROVIDERS:
+            url, _, label = _OPENAI_COMPAT_PROVIDERS[provider]
+            api_key = _require_key(keys, provider, label)
             full_msgs = [{"role": "system", "content": system_prompt}] + messages
             async for chunk in _stream_openai_compat(url, api_key, model, full_msgs, temperature, max_tokens, usage_out=usage_out):
                 yield chunk
@@ -708,12 +713,10 @@ async def call_ai_stream(system_prompt: str, history: list, user_message: "str |
     """
     keys = _keys()
     try:
-        if provider in ("deepseek", "openai"):
-            url = ("https://api.deepseek.com/v1/chat/completions" if provider == "deepseek"
-                   else "https://api.openai.com/v1/chat/completions")
-            label = "DeepSeek" if provider == "deepseek" else "OpenAI"
-            api_key = _require_key(keys, "deepseek" if provider == "deepseek" else "openai", label)
-            # DeepSeek doesn't support vision; OpenAI does — keep list for openai, flatten for deepseek
+        if provider in _OPENAI_COMPAT_PROVIDERS:
+            url, _, label = _OPENAI_COMPAT_PROVIDERS[provider]
+            api_key = _require_key(keys, provider, label)
+            # Only OpenAI supports vision in this codebase; all others get text-only
             user_content = user_message if provider == "openai" else _text_only(user_message)
             messages = [{"role": "system", "content": system_prompt}]
             messages.extend(history[-10:])
