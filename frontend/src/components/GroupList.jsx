@@ -13,7 +13,7 @@ const THEMES = [
 ]
 
 export default function GroupList({
-  onSelect, onCreateGroup, onOpenTemplates, onOpenApiKeys,
+  onSelect, onCreateGroup, onDeleteGroup, onOpenTemplates, onOpenApiKeys,
   membersCache = {}, onOpenAddMember, onRemoveMember, onEditMember, onOpenWorkspace,
   theme = 'default-dark', onThemeChange,
   currentMemberId,
@@ -30,6 +30,7 @@ export default function GroupList({
   const [expandedGroups, setExpandedGroups] = useState(new Set())
   const [autoReplyTarget, setAutoReplyTarget] = useState(null)
   const [showThemeMenu, setShowThemeMenu] = useState(false)
+  const [confirmDeleteGroupId, setConfirmDeleteGroupId] = useState(null)
 
   useEffect(() => {
     if (activeGroupId) setExpandedGroups(prev => new Set([...prev, activeGroupId]))
@@ -119,30 +120,48 @@ export default function GroupList({
       <div className="flex-1 overflow-y-auto px-2 space-y-0.5">
         {groups.map((g) => (
           <div key={g.id}>
-            <button
-              onClick={() => {
-                if (activeGroupId !== g.id) onSelect(g.id)
-                setExpandedGroups(prev => {
-                  const next = new Set(prev)
-                  next.has(g.id) ? next.delete(g.id) : next.add(g.id)
-                  return next
-                })
-              }}
-              className={`w-full text-left flex items-center gap-2 px-2 py-1.5 rounded text-sm transition-colors ${
-                activeGroupId === g.id
-                  ? 'bg-indigo-600 text-white'
-                  : 'text-gray-400 hover:bg-gray-800 hover:text-white'
-              }`}
-            >
-              <span className="text-gray-500">#</span>
-              <span className="truncate flex-1">{g.name}</span>
-              <span className="text-gray-400 text-sm font-bold flex-shrink-0">({g.member_count ?? 0})</span>
-              {unreadCounts[g.id] > 0 && activeGroupId !== g.id && (
-                <span className="ml-auto bg-indigo-500 text-white text-xs font-bold rounded-full px-1.5 py-0.5 min-w-[18px] text-center leading-tight">
-                  {unreadCounts[g.id] > 99 ? '99+' : unreadCounts[g.id]}
-                </span>
+            <div className={`group/grp flex items-center gap-1 rounded text-sm transition-colors ${
+              activeGroupId === g.id ? 'bg-indigo-600' : 'hover:bg-gray-800'
+            }`}>
+              <button
+                onClick={() => {
+                  if (activeGroupId !== g.id) onSelect(g.id)
+                  setExpandedGroups(prev => {
+                    const next = new Set(prev)
+                    next.has(g.id) ? next.delete(g.id) : next.add(g.id)
+                    return next
+                  })
+                }}
+                className={`flex-1 text-left flex items-center gap-2 px-2 py-1.5 min-w-0 ${
+                  activeGroupId === g.id ? 'text-white' : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                <span className="text-gray-500">#</span>
+                <span className="truncate flex-1">{g.name}</span>
+                <span className="text-gray-400 text-sm font-bold flex-shrink-0">({g.member_count ?? 0})</span>
+                {unreadCounts[g.id] > 0 && activeGroupId !== g.id && (
+                  <span className="ml-auto bg-indigo-500 text-white text-xs font-bold rounded-full px-1.5 py-0.5 min-w-[18px] text-center leading-tight">
+                    {unreadCounts[g.id] > 99 ? '99+' : unreadCounts[g.id]}
+                  </span>
+                )}
+              </button>
+              {confirmDeleteGroupId === g.id ? (
+                <div className="flex items-center gap-1 pr-1 flex-shrink-0">
+                  <button onClick={() => { onDeleteGroup?.(g.id); setConfirmDeleteGroupId(null) }}
+                    className="text-xs bg-red-600 hover:bg-red-500 text-white px-1.5 py-0.5 rounded transition-colors">删除</button>
+                  <button onClick={() => setConfirmDeleteGroupId(null)}
+                    className="text-xs text-gray-400 hover:text-white px-1 py-0.5 rounded transition-colors">取消</button>
+                </div>
+              ) : (
+                <button
+                  onClick={(e) => { e.stopPropagation(); setConfirmDeleteGroupId(g.id) }}
+                  className="hidden group-hover/grp:flex items-center justify-center w-5 h-5 mr-1 rounded hover:bg-red-500/20 text-gray-600 hover:text-red-400 flex-shrink-0 transition-colors"
+                  title="删除群组"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+                </button>
               )}
-            </button>
+            </div>
 
             {expandedGroups.has(g.id) && (
               <div className="mt-0.5 mb-1">

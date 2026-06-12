@@ -59,6 +59,11 @@ export async function createGroup(name) {
   return res.json()
 }
 
+export async function deleteGroup(groupId) {
+  const res = await authFetch(`/api/groups/${groupId}`, { method: 'DELETE' })
+  return res.json()
+}
+
 export async function fetchPins(groupId) {
   return wsrpc.request({ query: 'pins', group_id: groupId })
 }

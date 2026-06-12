@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
-import { fetchAllGroups, fetchGroupInfo, fetchMessages, fetchUnreadCounts, fetchReactions, toggleReaction, createGroup, addMember, fetchPins, pinMessage, unpinMessage, resumeSession, cancelSessionRecovery, fetchGroupRecap, dismissGroupRecap, fetchPersonalRecap, fetchAiSuggestions } from '../api'
+import { fetchAllGroups, fetchGroupInfo, fetchMessages, fetchUnreadCounts, fetchReactions, toggleReaction, createGroup, deleteGroup, addMember, fetchPins, pinMessage, unpinMessage, resumeSession, cancelSessionRecovery, fetchGroupRecap, dismissGroupRecap, fetchPersonalRecap, fetchAiSuggestions } from '../api'
 import { useWebSocket } from '../hooks/useWebSocket'
 import { useNotifications } from '../hooks/useNotifications'
 import { useGroupStore } from '../store/groupStore'
@@ -514,6 +514,17 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
           setActiveGroupId(g.id)
           setActiveMemberId(null)
           setMobileTab('chat')
+        }}
+        onDeleteGroup={async (groupId) => {
+          await deleteGroup(groupId)
+          setGroups((prev) => {
+            const remaining = prev.filter(g => g.id !== groupId)
+            if (activeGroupId === groupId) {
+              setActiveGroupId(remaining.length > 0 ? remaining[0].id : null)
+              setActiveMemberId(null)
+            }
+            return remaining
+          })
         }}
       />
       {showAddMember && (

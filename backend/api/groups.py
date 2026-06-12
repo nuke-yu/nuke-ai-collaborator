@@ -80,6 +80,47 @@ async def get_group_info(group_id: int):
     return {"group": group, "members": members}
 
 
+@router.delete("/api/groups/{group_id}")
+async def delete_group(group_id: int):
+    """Fully purge a group: all members, their DB data, the group DB, and the on-disk workspace."""
+    async with get_db() as db:
+        group = await get_group(db, group_id)
+        if not group:
+            raise HTTPException(404, "Group not found")
+        members = await get_members(db, group_id)
+
+    # 1. Purge every member's central-DB data + the member row.
+    async with write_connect() as db:
+        for m in members:
+            for sql in (*_CENTRAL_REFS, *_MEMBER_DATA):
+                await _try_exec(db, sql, (m["id"],))
+            await _try_exec(db, "DELETE FROM members WHERE id=?", (m["id"],))
+        # Group-level central rows
+        await _try_exec(db, "DELETE FROM groups WHERE id=?", (group_id,))
+        await db.commit()
+
+    # 2. Drop the group's private DB file.
+    try:
+        from runtime.dbpaths import group_db_path
+        gpath = group_db_path(group_id)
+        if os.path.exists(gpath):
+            os.remove(gpath)
+    except Exception:
+        log.exception("delete_group: failed to remove group DB for %s", group_id)
+
+    # 3. Remove on-disk workspace (shared + bots).
+    try:
+        from workspace import layout
+        group_dir = layout.group_dir(group_id)
+        if group_dir.exists():
+            shutil.rmtree(group_dir)
+    except Exception:
+        log.exception("delete_group: failed to remove workspace for group %s", group_id)
+
+    await manager.broadcast(group_id, {"type": "group_deleted", "id": group_id})
+    return {"ok": True}
+
+
 @router.put("/api/groups/{group_id}")
 async def update_group(group_id: int, req: UpdateGroupRequest):
     async with write_connect() as db:
