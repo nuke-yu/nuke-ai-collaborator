@@ -166,6 +166,9 @@ class TestLoadGroupContext(unittest.IsolatedAsyncioTestCase):
                 result = await ws.load_group_context(99)
                 # no key docs exist → no doc sections; tree may be empty
                 self.assertIsInstance(result, str)
+                self.assertNotIn("【工作看板】", result)
+                self.assertNotIn("【项目清单】", result)
+                self.assertNotIn("【需求文档】", result)
             finally:
                 _c.WORKSPACE_ROOT = orig
 

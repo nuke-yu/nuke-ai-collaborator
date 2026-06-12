@@ -361,13 +361,25 @@ async def list_workspace(bot_id: int, group_id: int | None = None) -> str:
     return "\n\n".join(sections) if sections else "（工作区为空）"
 
 
+# ---------------------------------------------------------------------------
+# Context loading — hierarchical (group-level → bot-level)
+# ---------------------------------------------------------------------------
+
+def _read_md(path: Path) -> str | None:
+    if path.exists():
+        try:
+            return path.read_text(encoding="utf-8").strip()
+        except Exception:
+            pass
+    return None
+
+
 async def load_group_context(group_id: int) -> str:
     """群组共享工作区上下文：目录树 + 关键项目文档。
 
     无条件加载——所有群组 bot 都需要知道共享区有什么。
     gating 不在此做；调用方按需决定是否注入。
     """
-    import asyncio
 
     def _build() -> list[str]:
         shared = group_workspace(group_id)
@@ -403,19 +415,6 @@ async def load_group_context(group_id: int) -> str:
 
     parts = await asyncio.to_thread(_build)
     return "\n\n".join(parts) if parts else ""
-
-
-# ---------------------------------------------------------------------------
-# Context loading — hierarchical (group-level → bot-level)
-# ---------------------------------------------------------------------------
-
-def _read_md(path: Path) -> str | None:
-    if path.exists():
-        try:
-            return path.read_text(encoding="utf-8").strip()
-        except Exception:
-            pass
-    return None
 
 
 async def load_context_files(bot_id: int, group_id: int | None,
