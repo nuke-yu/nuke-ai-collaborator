@@ -1,0 +1,324 @@
+{
+  "common": {
+    "save": "保存",
+    "cancel": "取消",
+    "delete": "删除",
+    "edit": "编辑",
+    "confirm": "确认",
+    "close": "关闭",
+    "loading": "加载中...",
+    "error": "错误",
+    "success": "成功",
+    "add": "添加",
+    "remove": "移除",
+    "search": "搜索",
+    "clear": "清空",
+    "copy": "复制",
+    "copied": "已复制",
+    "more": "更多",
+    "less": "收起",
+    "refresh": "刷新",
+    "retry": "重试",
+    "submit": "提交",
+    "back": "返回",
+    "online": "在线",
+    "offline": "离线",
+    "yes": "是",
+    "no": "否"
+  },
+  "app": {
+    "title": "Nuke AI Collaborator",
+    "joinGroup": {
+      "subtitle": "请输入您的用户名以加入群组",
+      "namePlaceholder": "用户名",
+      "submit": "加入"
+    }
+  },
+  "auth": {
+    "login": {
+      "title": "欢迎回来",
+      "subtitle": "登录到你的账号",
+      "username": "用户名",
+      "password": "密码",
+      "button": "登录",
+      "switchToRegister": "还没有账号？注册"
+    },
+    "register": {
+      "title": "创建新账号",
+      "subtitle": "加入 Nuke AI Collaborator",
+      "email": "邮箱（可选）",
+      "button": "注册",
+      "switchToLogin": "已有账号？登录"
+    }
+  },
+  "sidebar": {
+    "theme": "主题",
+    "themeTitle": "选择主题皮肤",
+    "apiKeys": "API Key 管理",
+    "templates": "角色模板",
+    "groups": "群组",
+    "newGroup": "新建群组",
+    "groupNamePlaceholder": "群组名称",
+    "create": "创建",
+    "cancel": "取消",
+    "delete": "删除",
+    "deleteGroup": "删除群组",
+    "addMember": "添加成员",
+    "editBot": "编辑 Bot",
+    "skillPending": "有待审批的 Skill",
+    "workspaceFiles": "工作区文件",
+    "autoReplyEnabled": "已开启自动回复",
+    "setAutoReply": "设置自动回复",
+    "switchLang": "EN"
+  },
+  "themes": {
+    "default-dark": "默认暗黑",
+    "elegant-light": "极简明亮",
+    "elevenlabs": "ElevenLabs",
+    "hsbc": "HSBC 商务",
+    "cyberpunk": "赛博霓虹",
+    "glass": "毛玻璃幻彩"
+  },
+  "chat": {
+    "tabs": {
+      "groups": "群组",
+      "chat": "聊天"
+    },
+    "stats": {
+      "messages": "条消息",
+      "activeMembers": "位活跃成员"
+    },
+    "dragDrop": {
+      "title": "拖拽文件到这里",
+      "subtitle": "支持图片、文档等文件"
+    },
+    "recovery": {
+      "title": "有待恢复的会话",
+      "resume": "恢复",
+      "dismiss": "取消"
+    },
+    "header": {
+      "members": "位成员",
+      "reconnecting": "重连中...",
+      "rename": "重命名",
+      "renamePlaceholder": "输入新名称",
+      "exportMarkdown": "导出 Markdown",
+      "exportJson": "导出 JSON",
+      "logout": "退出登录",
+      "search": "搜索消息"
+    },
+    "input": {
+      "placeholder": "发送消息...",
+      "hint": "Enter 发送 · Shift+Enter 换行",
+      "uploadFile": "上传文件",
+      "send": "发送"
+    }
+  },
+  "message": {
+    "copy": "复制",
+    "copied": "已复制",
+    "collapse": "折叠",
+    "expand": "展开",
+    "tokenCount": "tokens",
+    "skillsLoaded": "个工具",
+    "pin": "置顶",
+    "unpin": "取消置顶",
+    "reply": "回复",
+    "emoji": "表情",
+    "delete": "删除",
+    "workflow": {
+      "confirm": "确认",
+      "modify": "修改",
+      "cancel": "取消"
+    },
+    "terminal": {
+      "label": "终端输出"
+    }
+  },
+  "member": {
+    "name": "名称",
+    "nameHelper": "Bot 在对话中显示的名字",
+    "type": "类型",
+    "typeBot": "Bot",
+    "typeHuman": "Human",
+    "role": "角色",
+    "rolePlaceholder": "例如：Developer、QA、PM",
+    "systemPrompt": "系统提示词",
+    "systemPromptPlaceholder": "输入 Bot 的系统提示词...",
+    "personality": "性格特征",
+    "personalityPlaceholder": "输入性格特征...",
+    "model": "模型",
+    "provider": "提供商",
+    "temperature": "温度",
+    "temperatureHelper": "较高 = 更有创意，较低 = 更稳定",
+    "maxTokens": "最大 Token 数",
+    "maxTokensHelper": "模型单次响应的最大 token 数",
+    "avatar": "头像",
+    "avatarColor": "颜色",
+    "bootstrap": "启动文件",
+    "bootstrapHelper": "每次对话开始时加载的文件列表",
+    "agentFramework": "Agent 推理框架",
+    "agentFrameworkHelper": "启用结构化思考和规划（从 AGENT.md 加载）",
+    "permissions": "权限设置",
+    "cronJobs": "定时任务",
+    "save": "保存",
+    "cancel": "取消",
+    "clearContext": "清空上下文",
+    "removeFromGroup": "从群组移除",
+    "addBot": "添加 Bot",
+    "addHuman": "添加真人",
+    "editMember": "编辑成员",
+    "doneKeyword": "完成关键词",
+    "doneKeywordHelper": "Bot 输出此关键词时自动结束工具循环",
+    "advancedSettings": "高级设置"
+  },
+  "workspace": {
+    "title": "工作区",
+    "shared": "共享",
+    "private": "私有",
+    "files": "文件",
+    "history": "历史",
+    "editor": "编辑器",
+    "save": "保存",
+    "cancel": "取消",
+    "delete": "删除",
+    "confirmDelete": "确认删除",
+    "confirmDeleteMessage": "确定要删除这个文件吗？",
+    "newFile": "新建文件",
+    "newFolder": "新建文件夹",
+    "rename": "重命名",
+    "noFiles": "暂无文件",
+    "loading": "加载中...",
+    "selectFile": "选择文件查看内容",
+    "viewHistory": "查看历史版本",
+    "restoreVersion": "恢复此版本"
+  },
+  "skill": {
+    "title": "技能管理",
+    "all": "全部",
+    "active": "已激活",
+    "pending": "待审批",
+    "test": "测试",
+    "add": "添加",
+    "edit": "编辑",
+    "delete": "删除",
+    "approve": "批准",
+    "reject": "拒绝",
+    "name": "名称",
+    "description": "描述",
+    "code": "代码",
+    "noSkills": "暂无技能",
+    "testInput": "测试输入",
+    "testOutput": "测试输出",
+    "save": "保存",
+    "cancel": "取消"
+  },
+  "botLog": {
+    "title": "Bot 日志",
+    "tabs": {
+      "realtime": "实时日志",
+      "agentLoop": "Agent循环",
+      "toolCalls": "工具调用",
+      "system": "系统"
+    },
+    "status": {
+      "running": "运行中",
+      "idle": "空闲",
+      "error": "错误"
+    },
+    "clearLogs": "清空日志",
+    "noLogs": "暂无日志"
+  },
+  "permission": {
+    "title": "权限请求",
+    "approve": "批准",
+    "reject": "拒绝",
+    "description": "描述",
+    "tool": "工具",
+    "args": "参数",
+    "allowAlways": "始终允许",
+    "allowOnce": "允许一次",
+    "deny": "拒绝"
+  },
+  "autoReply": {
+    "title": "自动回复",
+    "enable": "启用",
+    "disable": "禁用",
+    "message": "回复内容",
+    "messagePlaceholder": "输入自动回复内容...",
+    "save": "保存",
+    "cancel": "取消",
+    "toggleOn": "开启自动回复",
+    "toggleOff": "关闭自动回复"
+  },
+  "suggestion": {
+    "title": "建议",
+    "dismiss": "忽略"
+  },
+  "recap": {
+    "title": "期间摘要",
+    "dismiss": "知道了",
+    "generating": "生成摘要中...",
+    "triggerGenerate": "生成摘要"
+  },
+  "pinnedBar": {
+    "title": "置顶消息",
+    "viewAll": "查看全部",
+    "unpin": "取消置顶"
+  },
+  "apiKey": {
+    "title": "API Key 管理",
+    "provider": "提供商",
+    "key": "Key",
+    "keyPlaceholder": "输入 API Key...",
+    "save": "保存",
+    "cancel": "取消",
+    "delete": "删除",
+    "test": "测试",
+    "noKeys": "暂无 API Key",
+    "addKey": "添加 Key"
+  },
+  "template": {
+    "title": "角色模板",
+    "name": "模板名称",
+    "role": "角色",
+    "create": "创建模板",
+    "edit": "编辑",
+    "delete": "删除",
+    "use": "使用此模板",
+    "cancel": "取消",
+    "noTemplates": "暂无模板",
+    "save": "保存"
+  },
+  "workflow": {
+    "title": "工作流",
+    "start": "开始",
+    "cancel": "取消",
+    "confirm": "确认",
+    "modify": "修改",
+    "running": "执行中",
+    "done": "完成"
+  },
+  "toolProgress": {
+    "running": "执行中",
+    "done": "完成",
+    "error": "失败"
+  },
+  "announcement": {
+    "placeholder": "添加公告...",
+    "save": "保存",
+    "cancel": "取消",
+    "edit": "编辑公告"
+  },
+  "search": {
+    "placeholder": "搜索消息...",
+    "noResults": "未找到相关消息",
+    "results": "条结果",
+    "close": "关闭搜索"
+  },
+  "errorBoundary": {
+    "title": "页面出错了",
+    "message": "发生了意外错误，请刷新页面重试",
+    "reload": "刷新页面"
+  }
+}
