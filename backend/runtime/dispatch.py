@@ -113,28 +113,17 @@ async def dispatch_start_workflow(msg: dict) -> None:
         orch = orch_registry.get(orchestrator_id)
         spec = orch.parse_spec(body, bots)
 
-        if orchestrator_id != "workflow_v1":
-            if not spec.get("bots"):
-                sys_name = "Workflow System" if msg.get("lang") == "en" else "工作流系统"
-                content = "No bots specified for custom workflow" if msg.get("lang") == "en" else "未指定工作流的 Bot"
-                await bus.broadcast(gid, {
-                    "type": "message", "member_id": 0, "sender_name": sys_name,
-                    "avatar_color": "#6366f1", "content": content,
-                })
-                return
-            await wf.apply(gid, wf.start(gid, spec, orchestrator_id))
+        valid = spec.get("bots") or spec.get("stages")
+        if not valid:
+            sys_name = "Workflow System" if msg.get("lang") == "en" else "工作流系统"
+            content = "No bots specified for workflow" if msg.get("lang") == "en" else "未指定工作流的 Bot"
+            await bus.broadcast(gid, {
+                "type": "message", "member_id": 0, "sender_name": sys_name,
+                "avatar_color": "#6366f1", "content": content,
+            })
             return
-        else:
-            if not spec.get("stages"):
-                sys_name = "Workflow System" if msg.get("lang") == "en" else "工作流系统"
-                content = "No bots specified for workflow" if msg.get("lang") == "en" else "未指定工作流的 Bot"
-                await bus.broadcast(gid, {
-                    "type": "message", "member_id": 0, "sender_name": sys_name,
-                    "avatar_color": "#6366f1", "content": content,
-                })
-                return
-            await wf.apply(gid, wf.start(gid, spec["stages"], "workflow_v1"))
-            return
+        await wf.apply(gid, wf.start(gid, spec, orchestrator_id))
+        return
 
     # 默认起 RD 人确认流水线（BA→Dev→QA 三道门）
     from core.role_router import _role_family
@@ -170,7 +159,7 @@ async def dispatch_start_workflow(msg: dict) -> None:
         return
 
     stages = build_rd_pipeline(picked["ba"], picked["dev"], picked["qa"])
-    await wf.apply(gid, wf.start(gid, stages, "workflow_v1"))
+    await wf.apply(gid, wf.start(gid, {"stages": stages}, "workflow_v1"))
     ba, dev, qa = picked["ba"]["name"], picked["dev"]["name"], picked["qa"]["name"]
     content = (f"🚀 Pipeline started ({ba} → {dev} → {qa}). "
                f"Describe your requirements to {ba} — TA will clarify step by step. "

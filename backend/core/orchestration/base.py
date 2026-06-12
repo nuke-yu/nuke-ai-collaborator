@@ -127,5 +127,14 @@ class Orchestrator(ABC):
         """从前端 payload 的 body 中解析并还原出适合本编排器的 spec。"""
         return body.get("spec", {})
 
+    def get_viewpoints_cache(self, group_id: int) -> dict | None:
+        """返回语义摘要压缩缓存字典（就地修改即持久化）。
+        None 表示该编排器不支持语义压缩，runner 跳过压缩逻辑。"""
+        return None
+
+    def participant_count(self, group_id: int) -> int | None:
+        """返回当前工作流的参与 Bot 数，用于压缩窗口计算。None = 未知。"""
+        return None
+
     def info(self) -> dict:
         return {"orchestrator_id": self.orchestrator_id}

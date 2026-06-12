@@ -84,7 +84,6 @@ class DiscussionOrchestrator(Orchestrator):
             "phase": "discussion",
             "summarizer": summarizer,
             "start_time": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
-            "viewpoints_summary": {},
         }
         return self._step_to_current(group_id)
 
@@ -235,6 +234,15 @@ class DiscussionOrchestrator(Orchestrator):
     def start_time(self, group_id: int) -> str | None:
         s = self._state.get(group_id)
         return s.get("start_time") if s else None
+
+    def get_viewpoints_cache(self, group_id: int) -> dict | None:
+        s = self._state.get(group_id)
+        return s.setdefault("viewpoints_summary", {}) if s else None
+
+    def participant_count(self, group_id: int) -> int | None:
+        s = self._state.get(group_id)
+        bots = s.get("bots", []) if s else []
+        return len(bots) if bots else None
 
     def parse_spec(self, body: dict, all_bots: dict[int, dict]) -> dict:
         spec = dict(body.get("spec", {}))

@@ -148,11 +148,10 @@ async def run_unit(group_id: int, unit, orch) -> None:
         recent = list(reversed(filtered))
 
         # Semantic viewpoint-based compression for older rounds
-        state = getattr(orch, "_state", {}).get(group_id, {})
-        if isinstance(state, dict) and "viewpoints_summary" in state:
-            viewpoints_summary = state.setdefault("viewpoints_summary", {})
-            participating_bots = state.get("bots", [])
-            M = len(participating_bots) if participating_bots else len(all_bots) or 4
+        viewpoints_summary = orch.get_viewpoints_cache(group_id)
+        if viewpoints_summary is not None:
+            pc = orch.participant_count(group_id)
+            M = pc if pc else len(all_bots) or 4
             
             # If we have more than M + 1 messages (1 trigger + M latest round), compress the older ones
             if len(recent) > M + 1:

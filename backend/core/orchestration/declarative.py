@@ -127,7 +127,8 @@ class DeclarativeOrchestrator(Orchestrator):
 
     # ── 流转决策（纯函数，返回 OrchestratorStep） ────────────────────────────────
 
-    def begin(self, group_id: int, ordered_stages: list) -> OrchestratorStep:
+    def begin(self, group_id: int, spec) -> OrchestratorStep:
+        ordered_stages = spec["stages"] if isinstance(spec, dict) else spec
         self._state[group_id] = {"stages": ordered_stages, "current": 0}
         return OrchestratorStep(broadcast_state=True)
 

@@ -1245,6 +1245,10 @@ class TestWorkflowHistoryFiltering(unittest.IsolatedAsyncioTestCase):
         class MockOrch:
             def start_time(self, gid):
                 return "2026-06-12 12:00:00"
+            def get_viewpoints_cache(self, gid):
+                return None
+            def participant_count(self, gid):
+                return None
             def observe(self, gid, bid, res):
                 return MagicMock(done=True, next_units=[], confirm_gate=None, announcements=[])
             def snapshot(self, gid):
@@ -1343,14 +1347,14 @@ class TestWorkflowHistoryFiltering(unittest.IsolatedAsyncioTestCase):
         # We define a MockOrch with an internal _state and start_time
         class MockOrch:
             def __init__(self):
-                self._state = {
-                    1: {
-                        "bots": [{"id": 1, "name": "Bot1"}, {"id": 2, "name": "Bot2"}],
-                        "viewpoints_summary": {}
-                    }
-                }
+                self._cache = {}
+                self._bots = [{"id": 1, "name": "Bot1"}, {"id": 2, "name": "Bot2"}]
             def start_time(self, gid):
                 return "2026-06-12 12:00:00"
+            def get_viewpoints_cache(self, gid):
+                return self._cache
+            def participant_count(self, gid):
+                return len(self._bots)
             def observe(self, gid, bid, res):
                 return MagicMock(done=True, next_units=[], confirm_gate=None, announcements=[])
             def snapshot(self, gid):
@@ -1410,9 +1414,9 @@ class TestWorkflowHistoryFiltering(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(history[3]["content"], "Refuted B")
         self.assertEqual(history[4]["content"], "Refuted A")
         
-        # Check that viewpoints_summary state has cached the results
-        self.assertEqual(orch_instance._state[1]["viewpoints_summary"]["11"], "Compressed Viewpoint")
-        self.assertEqual(orch_instance._state[1]["viewpoints_summary"]["12"], "Compressed Viewpoint")
+        # Check that viewpoints_summary cache has cached the results
+        self.assertEqual(orch_instance._cache["11"], "Compressed Viewpoint")
+        self.assertEqual(orch_instance._cache["12"], "Compressed Viewpoint")
         
         # Verify call_ai_once was called twice (once for Bot1 Round 1, once for Bot2 Round 1)
         self.assertEqual(mock_call_ai.call_count, 2)
