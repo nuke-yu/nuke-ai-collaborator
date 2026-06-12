@@ -90,16 +90,29 @@
     },
     "stats": {
       "messages": "条消息",
-      "activeMembers": "位活跃成员"
+      "activeMembers": "位活跃成员",
+      "title": "使用统计",
+      "noData": "暂无数据",
+      "totalMessages": "共 {{count}} 条消息"
     },
     "dragDrop": {
       "title": "拖拽文件到这里",
-      "subtitle": "支持图片、文档等文件"
+      "subtitle": "支持图片、文档等文件",
+      "releaseToUpload": "释放以上传文件"
     },
     "recovery": {
-      "title": "有待恢复的会话",
+      "title": "任务恢复提示",
       "resume": "恢复",
-      "dismiss": "取消"
+      "dismiss": "取消",
+      "continueExec": "继续执行",
+      "abandonTask": "放弃任务"
+    },
+    "stopGenerate": "停止生成",
+    "errors": {
+      "fetchSuggestionsFailed": "获取 AI 建议失败",
+      "resumeFailed": "无法恢复会话：{{message}}",
+      "cancelRecoveryFailed": "无法取消恢复：{{message}}",
+      "removeMemberFailed": "删除成员失败：{{status}}"
     },
     "header": {
       "members": "{{count}} 名成员",

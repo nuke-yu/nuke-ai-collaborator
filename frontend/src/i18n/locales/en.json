@@ -90,16 +90,29 @@
     },
     "stats": {
       "messages": "messages",
-      "activeMembers": "active members"
+      "activeMembers": "active members",
+      "title": "Usage Stats",
+      "noData": "No data",
+      "totalMessages": "{{count}} messages total"
     },
     "dragDrop": {
       "title": "Drop files here",
-      "subtitle": "Images, documents and more"
+      "subtitle": "Images, documents and more",
+      "releaseToUpload": "Release to upload"
     },
     "recovery": {
-      "title": "Session pending recovery",
+      "title": "Task Recovery",
       "resume": "Resume",
-      "dismiss": "Dismiss"
+      "dismiss": "Dismiss",
+      "continueExec": "Continue",
+      "abandonTask": "Abandon"
+    },
+    "stopGenerate": "Stop generating",
+    "errors": {
+      "fetchSuggestionsFailed": "Failed to fetch AI suggestions",
+      "resumeFailed": "Failed to resume session: {{message}}",
+      "cancelRecoveryFailed": "Failed to cancel recovery: {{message}}",
+      "removeMemberFailed": "Failed to remove member: {{status}}"
     },
     "header": {
       "members": "{{count}} members",

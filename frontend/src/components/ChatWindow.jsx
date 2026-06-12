@@ -1,4 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
+import { useTranslation } from 'react-i18next'
+import { K } from '../i18n/keys'
 import { fetchAllGroups, fetchGroupInfo, fetchMessages, fetchUnreadCounts, fetchReactions, toggleReaction, createGroup, deleteGroup, addMember, fetchPins, pinMessage, unpinMessage, resumeSession, cancelSessionRecovery, fetchGroupRecap, dismissGroupRecap, fetchPersonalRecap, fetchAiSuggestions } from '../api'
 import { useWebSocket } from '../hooks/useWebSocket'
 import { useNotifications } from '../hooks/useNotifications'
@@ -24,6 +26,8 @@ import RecapBanner from './RecapBanner'
 import SuggestionBar from './SuggestionBar'
 
 export default function ChatWindow({ memberId, theme, onThemeChange, onLogout }) {
+  const { t } = useTranslation()
+
   // ── Group / membership state (groupStore) ────────────────────────────────
   const activeGroupId = useGroupStore((s) => s.activeGroupId)
   const activeMemberId = useGroupStore((s) => s.activeMemberId)
@@ -118,7 +122,7 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
       setAiSuggestions(data.suggestions || [])
     } catch (err) {
       console.error('Failed to fetch AI suggestions:', err)
-      notify('获取 AI 建议失败', 'error')
+      notify(t(K.chat.errors.fetchSuggestionsFailed), 'error')
     } finally {
       setSuggestionsLoading(false)
     }
@@ -392,7 +396,7 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
       await resumeSession(sessionId, activeGroupId)
       setRecoveryPrompts(prev => prev.filter(p => p.session_id !== sessionId))
     } catch (e) {
-      setError('无法恢复会话：' + e.message)
+      setError(t(K.chat.errors.resumeFailed, { message: e.message }))
     }
   }
 
@@ -401,7 +405,7 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
       await cancelSessionRecovery(sessionId, activeGroupId)
       setRecoveryPrompts(prev => prev.filter(p => p.session_id !== sessionId))
     } catch (e) {
-      setError('无法取消恢复：' + e.message)
+      setError(t(K.chat.errors.cancelRecoveryFailed, { message: e.message }))
     }
   }
 
@@ -446,7 +450,7 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
         <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center" onClick={() => setShowStats(false)}>
           <div className="bg-gray-800 border border-gray-700 rounded-2xl shadow-2xl w-80 overflow-hidden" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between px-5 py-4 border-b border-gray-700">
-              <span className="font-semibold text-gray-200 text-sm">📊 使用统计 · {group?.name}</span>
+              <span className="font-semibold text-gray-200 text-sm">📊 {t(K.chat.stats.title)} · {group?.name}</span>
               <button onClick={() => setShowStats(false)} className="text-gray-500 hover:text-gray-300 text-lg leading-none">✕</button>
             </div>
             <div className="p-4 space-y-2">
@@ -461,10 +465,10 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
                   </div>
                 </div>
               ))}
-              {stats.length === 0 && <p className="text-xs text-gray-500 text-center py-4">暂无数据</p>}
+              {stats.length === 0 && <p className="text-xs text-gray-500 text-center py-4">{t(K.chat.stats.noData)}</p>}
             </div>
             <div className="px-5 py-3 border-t border-gray-700 text-xs text-gray-600 text-right">
-              共 {stats.reduce((s, m) => s + m.count, 0)} 条消息
+              {t(K.chat.stats.totalMessages, { count: stats.reduce((s, m) => s + m.count, 0) })}
             </div>
           </div>
         </div>
@@ -498,7 +502,7 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
         onRemoveMember={async (id) => {
           const res = await fetch(`/api/groups/${activeGroupId}/members/${id}`, { method: 'DELETE' })
           if (!res.ok) {
-            setError('删除成员失败：' + res.status)
+            setError(t(K.chat.errors.removeMemberFailed, { status: res.status }))
             setTimeout(() => setError(null), 5000)
             return
           }
@@ -623,7 +627,7 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
 
         {dragging && (
           <div className="absolute inset-0 z-40 bg-indigo-500/10 border-2 border-dashed border-indigo-400 rounded-lg flex items-center justify-center pointer-events-none">
-            <span className="text-indigo-300 text-base font-medium">释放以上传文件</span>
+            <span className="text-indigo-300 text-base font-medium">{t(K.chat.dragDrop.releaseToUpload)}</span>
           </div>
         )}
 
@@ -683,7 +687,7 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
         {recoveryPrompts.map(p => (
           <div key={p.session_id} className="mx-4 mt-2 px-4 py-3 bg-indigo-950/80 border border-indigo-700 rounded-lg text-sm text-indigo-100 flex flex-col gap-2 shadow-lg animate-in slide-in-from-top duration-300">
             <div className="flex items-center justify-between">
-              <span className="font-semibold text-indigo-300">任务恢复提示</span>
+              <span className="font-semibold text-indigo-300">{t(K.chat.recovery.title)}</span>
               <button onClick={() => handleCancelRecovery(p.session_id)} className="text-indigo-400 hover:text-indigo-200">✕</button>
             </div>
             <p>{p.message}</p>
@@ -695,13 +699,13 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
                 onClick={() => handleResume(p.session_id)}
                 className="px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded text-xs transition-colors"
               >
-                继续执行
+                {t(K.chat.recovery.continueExec)}
               </button>
               <button
                 onClick={() => handleCancelRecovery(p.session_id)}
                 className="px-3 py-1 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded text-xs transition-colors"
               >
-                放弃任务
+                {t(K.chat.recovery.abandonTask)}
               </button>
             </div>
           </div>
@@ -731,7 +735,7 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
               <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
                 <rect x="6" y="6" width="12" height="12" rx="1" />
               </svg>
-              停止生成
+              {t(K.chat.stopGenerate)}
             </button>
           </div>
         )}
@@ -785,8 +789,8 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
       {/* 移动端底部导航 */}
       <div className="flex md:hidden fixed bottom-0 inset-x-0 z-50 bg-gray-900 border-t border-gray-700">
         {[
-          { tab: 'groups', icon: '☰', label: '群组' },
-          { tab: 'chat',   icon: '💬', label: '聊天' },
+          { tab: 'groups', icon: '☰', label: t(K.chat.tabs.groups) },
+          { tab: 'chat',   icon: '💬', label: t(K.chat.tabs.chat) },
         ].map(({ tab, icon, label }) => (
           <button
             key={tab}

@@ -91,15 +91,28 @@ export const K = {
     stats: {
       messages: 'chat.stats.messages',
       activeMembers: 'chat.stats.activeMembers',
+      title: 'chat.stats.title',
+      noData: 'chat.stats.noData',
+      totalMessages: 'chat.stats.totalMessages',
     },
     dragDrop: {
       title: 'chat.dragDrop.title',
       subtitle: 'chat.dragDrop.subtitle',
+      releaseToUpload: 'chat.dragDrop.releaseToUpload',
     },
     recovery: {
       title: 'chat.recovery.title',
       resume: 'chat.recovery.resume',
       dismiss: 'chat.recovery.dismiss',
+      continueExec: 'chat.recovery.continueExec',
+      abandonTask: 'chat.recovery.abandonTask',
+    },
+    stopGenerate: 'chat.stopGenerate',
+    errors: {
+      fetchSuggestionsFailed: 'chat.errors.fetchSuggestionsFailed',
+      resumeFailed: 'chat.errors.resumeFailed',
+      cancelRecoveryFailed: 'chat.errors.cancelRecoveryFailed',
+      removeMemberFailed: 'chat.errors.removeMemberFailed',
     },
     header: {
       members: 'chat.header.members',
