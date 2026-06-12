@@ -138,9 +138,12 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
 
   const loadRecap = useCallback(async (groupId) => {
     if (!groupId) return
+    if (useChatStore.getState().recapDismissed) return
     try {
       const data = await fetchGroupRecap(groupId)
-      setAwaySummary(data?.away_summary || null)
+      if (!useChatStore.getState().recapDismissed) {
+        setAwaySummary(data?.away_summary || null)
+      }
     } catch (err) {
       console.error('Failed to fetch group recap:', err)
     }
