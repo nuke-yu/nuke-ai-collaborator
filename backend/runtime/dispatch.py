@@ -84,7 +84,14 @@ async def dispatch_user_message(msg: dict) -> None:
     # Unified Orchestration Call
     orch = wf._orch_for(gid)
     step = await orch.dispatch(gid, saved, all_members, recent)
-    
+
+    # If user's UI is set to English, ask each bot to reply in English.
+    if msg.get("lang") == "en" and step.next_units:
+        lang_hint = ("\n\n[LANGUAGE: The user's interface language is English. "
+                     "Please think and respond ENTIRELY in English. Do not use Chinese.]")
+        for unit in step.next_units:
+            unit.prompt_suffix = (unit.prompt_suffix or "") + lang_hint
+
     if step.next_units:
         # Side-effects (broadcast typing, AI run, etc.) are handled by the runner
         bg.spawn_group(gid, wf.apply(gid, step))
@@ -109,26 +116,37 @@ async def dispatch_start_workflow(msg: dict) -> None:
         if fam in ("ba", "dev", "qa") and fam not in picked:
             picked[fam] = b
 
-    label = {"ba": "BA(需求)", "dev": "Dev(开发)", "qa": "QA(测试)"}
+    en = msg.get("lang") == "en"
+    label = ({"ba": "BA(Requirements)", "dev": "Dev", "qa": "QA"}
+             if en else {"ba": "BA(需求)", "dev": "Dev(开发)", "qa": "QA(测试)"})
+    sys_name = "Workflow System" if en else "工作流系统"
     missing = [r for r in ("ba", "dev", "qa") if r not in picked]
     if missing:
+        missing_labels = (", ".join(label[m] for m in missing) if en
+                          else "、".join(label[m] for m in missing))
+        content = (f"Cannot start pipeline: missing roles — {missing_labels}. "
+                   f"Please ensure the group has BA / Dev / QA bots (matched by role)."
+                   if en else
+                   f"无法开始需求流程：群里缺少角色 —— {missing_labels}"
+                   f"。请确保群内 BA / Dev / QA 各有一个 bot（按 role 识别）。")
         await bus.broadcast(gid, {
-            "type": "message", "member_id": 0, "sender_name": "工作流系统",
-            "avatar_color": "#6366f1",
-            "content": "无法开始需求流程：群里缺少角色 —— "
-                       + "、".join(label[m] for m in missing)
-                       + "。请确保群内 BA / Dev / QA 各有一个 bot（按 role 识别）。",
+            "type": "message", "member_id": 0, "sender_name": sys_name,
+            "avatar_color": "#6366f1", "content": content,
         })
         return
 
     stages = build_rd_pipeline(picked["ba"], picked["dev"], picked["qa"])
     await wf.apply(gid, wf.start(gid, stages, "workflow_v1"))
+    ba, dev, qa = picked["ba"]["name"], picked["dev"]["name"], picked["qa"]["name"]
+    content = (f"🚀 Pipeline started ({ba} → {dev} → {qa}). "
+               f"Describe your requirements to {ba} — TA will clarify step by step. "
+               f"A confirmation card will appear after each stage."
+               if en else
+               f"🚀 需求流程已开始（{ba} → {dev} → {qa}）。请向 {ba} 描述你的需求，"
+               f"TA 会和你逐步澄清；每完成一步会有一张确认卡片等你点确认。")
     await bus.broadcast(gid, {
-        "type": "message", "member_id": 0, "sender_name": "工作流系统",
-        "avatar_color": "#6366f1",
-        "content": (f"🚀 需求流程已开始（{picked['ba']['name']} → {picked['dev']['name']} "
-                    f"→ {picked['qa']['name']}）。请向 {picked['ba']['name']} 描述你的需求，"
-                    f"TA 会和你逐步澄清；每完成一步会有一张确认卡片等你点确认。"),
+        "type": "message", "member_id": 0, "sender_name": sys_name,
+        "avatar_color": "#6366f1", "content": content,
     })
 
 

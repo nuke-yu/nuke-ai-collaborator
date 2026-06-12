@@ -78,6 +78,7 @@ export function useWebSocket(groupId, memberId, onMessage, onReconnect, token, o
       ws.current.send(JSON.stringify({
         content,
         reply_to_id: replyToId,
+        lang: localStorage.getItem('lang') || 'zh',
         ...(fileData && { file_url: fileData.url, file_name: fileData.name, file_size: fileData.size, file_type: fileData.type }),
       }))
     }
