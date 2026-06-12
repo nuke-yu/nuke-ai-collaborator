@@ -16,6 +16,7 @@ export const useChatStore = create((set, get) => ({
   workflow: null,
   pins: [],
   awaySummary: null,
+  recapDismissed: false,
   skillDraftBots: new Set(),
   error: null,
   hasMore: false,
@@ -34,6 +35,8 @@ export const useChatStore = create((set, get) => ({
   setWorkflow: (workflow) => set({ workflow }),
   setPins: (pins) => set({ pins }),
   setAwaySummary: (summary) => set({ awaySummary: summary }),
+  dismissRecap: () => set({ awaySummary: null, recapDismissed: true }),
+  resetRecapDismissed: () => set({ recapDismissed: false }),
   setSkillDraftBots: (u) => set((s) => ({ skillDraftBots: typeof u === 'function' ? u(s.skillDraftBots) : u })),
   setError: (error) => set({ error }),
   setHasMore: (hasMore) => set({ hasMore }),
@@ -164,7 +167,7 @@ export const useChatStore = create((set, get) => ({
       set({ pins: data.pins })
 
     } else if (data.type === 'recap_updated') {
-      if (data.group_id === activeGroupId) {
+      if (data.group_id === activeGroupId && !get().recapDismissed) {
         set({ awaySummary: data.away_summary })
       }
 

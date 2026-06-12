@@ -66,6 +66,7 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
   const {
     setMessages, setTyping, setReactionMap, setReactionCache,
     setMessagesCache, setPermRequest, setRecoveryPrompts, setWorkflow,
+    dismissRecap, resetRecapDismissed,
     setPins, setAwaySummary, setSkillDraftBots, setError,
     setHasMore, setLoadingMore, dispatchWsEvent,
   } = useChatStore(
@@ -80,6 +81,8 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
       setWorkflow: s.setWorkflow,
       setPins: s.setPins,
       setAwaySummary: s.setAwaySummary,
+      dismissRecap: s.dismissRecap,
+      resetRecapDismissed: s.resetRecapDismissed,
       setSkillDraftBots: s.setSkillDraftBots,
       setError: s.setError,
       setHasMore: s.setHasMore,
@@ -160,9 +163,9 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
   const handleDismissRecap = async () => {
     if (!activeGroupId) return
     setPersonalSummary(null)
+    dismissRecap()   // sets awaySummary=null + recapDismissed=true in one shot
     try {
       await dismissGroupRecap(activeGroupId)
-      setAwaySummary(null)
     } catch (err) {
       console.error('Failed to dismiss group recap:', err)
     }
@@ -193,6 +196,7 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible' && activeGroupId) {
+        resetRecapDismissed()   // user came back from being away — allow recap to show
         loadRecap(activeGroupId)
         loadPersonalRecap(activeGroupId)
       }
@@ -228,6 +232,7 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
 
   useEffect(() => {
     if (!activeGroupId) return
+    resetRecapDismissed()   // switching group = new context, allow recap to show again
     let active = true
     useChatStore.getState().setThoughtBlocks({})
     useChatStore.getState().setToolProgressBlocks({})
