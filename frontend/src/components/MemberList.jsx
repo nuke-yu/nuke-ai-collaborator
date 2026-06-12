@@ -1,12 +1,14 @@
 import { useState, useCallback, useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
+import { K } from '../i18n/keys'
 
 const COLORS = ['#6366f1', '#8b5cf6', '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#ec4899']
 
-const PROVIDER_LABELS = {
+const PROVIDER_LABELS_KEYS = {
   deepseek: 'DeepSeek',
   openai: 'OpenAI',
   claude: 'Claude',
-  ollama: 'Ollama (本地)',
+  ollama: null, // rendered with t(K.member.providerOllamaLocal)
 }
 
 const PROVIDER_MODELS = {
@@ -16,9 +18,18 @@ const PROVIDER_MODELS = {
   ollama: null,
 }
 
-const PERSONALITY_DIMS = [
+const PERSONALITY_DIM_KEYS = [
+  { key: 'challenge',     labelKey: K.member.personalityDimChallenge,     hintKey: K.member.personalityDimChallengeHint },
+  { key: 'proactivity',   labelKey: K.member.personalityDimProactivity,   hintKey: K.member.personalityDimProactivityHint },
+  { key: 'expression',    labelKey: K.member.personalityDimExpression,    hintKey: K.member.personalityDimExpressionHint },
+  { key: 'detail',        labelKey: K.member.personalityDimDetail,        hintKey: K.member.personalityDimDetailHint },
+  { key: 'collaboration', labelKey: K.member.personalityDimCollaboration, hintKey: K.member.personalityDimCollaborationHint },
+]
+
+// Keep hardcoded texts for prompt generation (these are inserted into AI prompts, not UI)
+const PERSONALITY_DIMS_TEXTS = [
   {
-    key: 'challenge', label: '挑战性', hint: '执行 → 质疑',
+    key: 'challenge',
     texts: [
       '接受指令，执行为主，不主动质疑。',
       '适时提出疑问，平衡执行与独立思考。',
@@ -26,7 +37,7 @@ const PERSONALITY_DIMS = [
     ],
   },
   {
-    key: 'proactivity', label: '主动性', hint: '等待 → 预判',
+    key: 'proactivity',
     texts: [
       '等待明确指令后再行动，不超出任务范围。',
       '在任务范围内适当补充相关背景信息。',
@@ -34,7 +45,7 @@ const PERSONALITY_DIMS = [
     ],
   },
   {
-    key: 'expression', label: '表达风格', hint: '正式 → 口语',
+    key: 'expression',
     texts: [
       '语言正式、简洁，避免口语化和情绪词汇。',
       '语言自然，兼顾专业性与可读性。',
@@ -42,7 +53,7 @@ const PERSONALITY_DIMS = [
     ],
   },
   {
-    key: 'detail', label: '细节程度', hint: '结论 → 推理',
+    key: 'detail',
     texts: [
       '只给结论，省略推理过程和边界条件。',
       '关键处简要说明理由。',
@@ -50,7 +61,7 @@ const PERSONALITY_DIMS = [
     ],
   },
   {
-    key: 'collaboration', label: '协作倾向', hint: '独立 → 互动',
+    key: 'collaboration',
     texts: [
       '独立完成任务，专注自身职责范围。',
       '必要时与他人协调，不主动发起。',
@@ -59,31 +70,31 @@ const PERSONALITY_DIMS = [
   },
 ]
 
-const DEFAULT_SLIDERS = Object.fromEntries(PERSONALITY_DIMS.map(d => [d.key, 0.5]))
+const DEFAULT_SLIDERS = Object.fromEntries(PERSONALITY_DIM_KEYS.map(d => [d.key, 0.5]))
 
 function generatePersonalityPrompt(sliders) {
-  return PERSONALITY_DIMS.map(({ key, texts }) => {
+  return PERSONALITY_DIMS_TEXTS.map(({ key, texts }) => {
     const v = sliders[key] ?? 0.5
     const idx = v < 0.35 ? 0 : v < 0.68 ? 1 : 2
     return texts[idx]
   }).join('\n')
 }
 
-const CRON_PRESETS = [
-  { label: '工作日早 9 点',  value: '0 9 * * 1-5'  },
-  { label: '每天早 9 点',    value: '0 9 * * *'    },
-  { label: '每天午夜',       value: '0 0 * * *'    },
-  { label: '每小时整点',     value: '0 * * * *'    },
-  { label: '每 30 分钟',    value: '*/30 * * * *'  },
-  { label: '自定义…',        value: '__custom__'   },
+const CRON_PRESET_KEYS = [
+  { labelKey: K.member.cronPresetWeekday9,  value: '0 9 * * 1-5'  },
+  { labelKey: K.member.cronPresetDaily9,    value: '0 9 * * *'    },
+  { labelKey: K.member.cronPresetMidnight,  value: '0 0 * * *'    },
+  { labelKey: K.member.cronPresetHourly,    value: '0 * * * *'    },
+  { labelKey: K.member.cronPreset30min,     value: '*/30 * * * *'  },
+  { labelKey: K.member.cronPresetCustom,    value: '__custom__'   },
 ]
 
-const CRON_READABLE = {
-  '0 9 * * 1-5':  '工作日早 9 点',
-  '0 9 * * *':    '每天早 9 点',
-  '0 0 * * *':    '每天午夜',
-  '0 * * * *':    '每小时',
-  '*/30 * * * *': '每 30 分钟',
+const CRON_READABLE_KEYS = {
+  '0 9 * * 1-5':  K.member.cronPresetWeekday9,
+  '0 9 * * *':    K.member.cronPresetDaily9,
+  '0 0 * * *':    K.member.cronPresetMidnight,
+  '0 * * * *':    K.member.cronPresetHourly,
+  '*/30 * * * *': K.member.cronPreset30min,
 }
 
 const INIT_FORM = {
@@ -96,13 +107,13 @@ const INIT_FORM = {
   traits: [],
 }
 
-const AVAILABLE_TRAITS = [
-  { id: 'python_dev', label: 'Python 后端', description: '遵循 Python 后端开发规范' },
-  { id: 'jira_reader', label: 'Jira 看板达人', description: '熟悉 BOARD.md 看板协作流程' },
-  { id: 'git_ops', label: 'Git 专家', description: '精通 Git 操作和规范' },
-  { id: 'code_reviewer', label: '代码审查员', description: '严格把控代码质量' },
-  { id: 'frontend_dev', label: '前端开发', description: '精通 React/Vue 等框架' },
-  { id: 'test_writer', label: '测试专家', description: '擅长编写高覆盖率单元测试' },
+const AVAILABLE_TRAIT_KEYS = [
+  { id: 'python_dev',     labelKey: K.member.traitPythonDev,     descKey: K.member.traitPythonDevDesc },
+  { id: 'jira_reader',   labelKey: K.member.traitJiraReader,    descKey: K.member.traitJiraReaderDesc },
+  { id: 'git_ops',       labelKey: K.member.traitGitOps,        descKey: K.member.traitGitOpsDesc },
+  { id: 'code_reviewer', labelKey: K.member.traitCodeReviewer,  descKey: K.member.traitCodeReviewerDesc },
+  { id: 'frontend_dev',  labelKey: K.member.traitFrontendDev,   descKey: K.member.traitFrontendDevDesc },
+  { id: 'test_writer',   labelKey: K.member.traitTestWriter,    descKey: K.member.traitTestWriterDesc },
 ]
 
 const DEFAULT_BOOTSTRAP = `# BOOTSTRAP.md
@@ -153,6 +164,7 @@ _Good luck out there. Make it count._
 `
 
 export default function MemberList({ onAddMember, onEditMember, onClose, initialData }) {
+  const { t } = useTranslation()
   const isEdit = !!initialData
   const [form, setForm] = useState(() => {
     const base = isEdit ? { ...INIT_FORM, ...initialData } : INIT_FORM
@@ -274,7 +286,7 @@ export default function MemberList({ onAddMember, onEditMember, onClose, initial
       setCronPreset('0 9 * * 1-5')
       setCronCustom(false)
     } else {
-      try { setCronErr((await res.json()).detail || '创建失败') } catch { setCronErr('创建失败') }
+      try { setCronErr((await res.json()).detail || t(K.member.cronCreateFailed)) } catch { setCronErr(t(K.member.cronCreateFailed)) }
     }
   }
 
@@ -343,14 +355,14 @@ export default function MemberList({ onAddMember, onEditMember, onClose, initial
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={onClose}>
       <div className="bg-gray-800 rounded-2xl p-6 w-[600px] max-w-[95vw] shadow-xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-        <h2 className="text-white font-semibold mb-4">{isEdit ? '编辑成员' : '添加成员'}</h2>
+        <h2 className="text-white font-semibold mb-4">{isEdit ? t(K.member.editMember) : t(K.member.addMember)}</h2>
 
         <div className="space-y-3">
           <div>
-            <label className="text-xs text-gray-400 mb-1 block">名字</label>
+            <label className="text-xs text-gray-400 mb-1 block">{t(K.member.name)}</label>
             <input
               className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
-              placeholder="成员名字"
+              placeholder={t(K.member.namePlaceholder)}
               value={form.name}
               onChange={(e) => setField({ name: e.target.value })}
               autoFocus
@@ -359,15 +371,15 @@ export default function MemberList({ onAddMember, onEditMember, onClose, initial
 
           {!isEdit && (
             <div>
-              <label className="text-xs text-gray-400 mb-1 block">类型</label>
+              <label className="text-xs text-gray-400 mb-1 block">{t(K.member.type)}</label>
               <div className="flex gap-2">
-                {['human', 'bot'].map((t) => (
+                {['human', 'bot'].map((tp) => (
                   <button
-                    key={t}
-                    onClick={() => setField({ type: t })}
-                    className={`flex-1 py-1.5 rounded-lg text-sm transition-colors ${form.type === t ? 'bg-indigo-600 text-white' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'}`}
+                    key={tp}
+                    onClick={() => setField({ type: tp })}
+                    className={`flex-1 py-1.5 rounded-lg text-sm transition-colors ${form.type === tp ? 'bg-indigo-600 text-white' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'}`}
                   >
-                    {t === 'human' ? '👤 真人' : '🤖 AI 角色'}
+                    {tp === 'human' ? t(K.member.typeHumanLabel) : t(K.member.typeBotLabel)}
                   </button>
                 ))}
               </div>
@@ -377,19 +389,19 @@ export default function MemberList({ onAddMember, onEditMember, onClose, initial
           {form.type === 'bot' && (
             <>
               <div>
-                <label className="text-xs text-gray-400 mb-1 block">角色</label>
+                <label className="text-xs text-gray-400 mb-1 block">{t(K.member.role)}</label>
                 <input
                   className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
-                  placeholder="如：产品经理、架构师..."
+                  placeholder={t(K.member.rolePlaceholder2)}
                   value={form.role}
                   onChange={(e) => setField({ role: e.target.value })}
                 />
               </div>
               <div>
-                <label className="text-xs text-gray-400 mb-1 block">角色描述（System Prompt）</label>
+                <label className="text-xs text-gray-400 mb-1 block">{t(K.member.systemPromptLabel)}</label>
                 <textarea
                   className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
-                  placeholder="描述这个 AI 角色的职责和行为..."
+                  placeholder={t(K.member.systemPromptPlaceholder2)}
                   rows={3}
                   value={form.system_prompt}
                   onChange={(e) => setField({ system_prompt: e.target.value })}
@@ -397,38 +409,38 @@ export default function MemberList({ onAddMember, onEditMember, onClose, initial
               </div>
 
               <div className="space-y-1">
-                <label className="text-xs text-indigo-300 block">能力特征 (Traits)</label>
+                <label className="text-xs text-indigo-300 block">{t(K.member.traits)}</label>
                 <div className="flex flex-wrap gap-2 mt-1">
-                  {AVAILABLE_TRAITS.map(trait => (
+                  {AVAILABLE_TRAIT_KEYS.map(trait => (
                     <label key={trait.id} className={`flex items-center gap-2 text-sm px-3 py-1.5 rounded cursor-pointer transition-colors border ${form.traits?.includes(trait.id) ? 'bg-indigo-600/40 border-indigo-400 text-indigo-100' : 'bg-gray-800/40 border-gray-600 text-gray-400 hover:bg-gray-700/50'}`}>
                       <input type="checkbox" checked={form.traits?.includes(trait.id)} onChange={e => {
-                        const newTraits = e.target.checked ? [...(form.traits || []), trait.id] : (form.traits || []).filter(t => t !== trait.id)
+                        const newTraits = e.target.checked ? [...(form.traits || []), trait.id] : (form.traits || []).filter(tr => tr !== trait.id)
                         setField({ traits: newTraits })
                       }} className="hidden" />
-                      <span title={trait.description}>{trait.label}</span>
+                      <span title={t(trait.descKey)}>{t(trait.labelKey)}</span>
                     </label>
                   ))}
                 </div>
-                <p className="text-[10px] text-gray-500 mt-1">勾选后将自动挂载对应的原子能力，无需在提示词中重复编写。</p>
+                <p className="text-[10px] text-gray-500 mt-1">{t(K.member.traitsHelper)}</p>
               </div>
 
               <div>
-                <label className="text-xs text-gray-400 mb-1 block">模型提供商</label>
+                <label className="text-xs text-gray-400 mb-1 block">{t(K.member.provider)}</label>
                 <div className="grid grid-cols-2 gap-1.5">
-                  {Object.entries(PROVIDER_LABELS).map(([key, label]) => (
+                  {Object.entries(PROVIDER_LABELS_KEYS).map(([key, label]) => (
                     <button
                       key={key}
                       onClick={() => handleProviderChange(key)}
                       className={`py-1.5 rounded-lg text-xs transition-colors ${form.model_provider === key ? 'bg-indigo-600 text-white' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'}`}
                     >
-                      {label}
+                      {label !== null ? label : t(K.member.providerOllamaLocal)}
                     </button>
                   ))}
                 </div>
               </div>
 
               <div>
-                <label className="text-xs text-gray-400 mb-1 block">模型</label>
+                <label className="text-xs text-gray-400 mb-1 block">{t(K.member.model)}</label>
                 {PROVIDER_MODELS[form.model_provider] ? (
                   <select
                     className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
@@ -442,7 +454,7 @@ export default function MemberList({ onAddMember, onEditMember, onClose, initial
                 ) : (
                   <input
                     className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
-                    placeholder="如：llama3, qwen2, mistral..."
+                    placeholder={t(K.member.ollamaModelPlaceholder)}
                     value={form.model_name}
                     onChange={(e) => setField({ model_name: e.target.value })}
                   />
@@ -451,7 +463,7 @@ export default function MemberList({ onAddMember, onEditMember, onClose, initial
 
               <div>
                 <label className="text-xs text-gray-400 mb-1 block">
-                  Temperature（创意度）<span className="text-indigo-400 ml-1">{form.temperature}</span>
+                  {t(K.member.temperature)}<span className="text-indigo-400 ml-1">{form.temperature}</span>
                 </label>
                 <input
                   type="range" min="0" max="2" step="0.1"
@@ -460,12 +472,12 @@ export default function MemberList({ onAddMember, onEditMember, onClose, initial
                   onChange={(e) => setField({ temperature: parseFloat(e.target.value) })}
                 />
                 <div className="flex justify-between text-xs text-gray-500 mt-0.5">
-                  <span>0 精准</span><span>1 均衡</span><span>2 创意</span>
+                  <span>{t(K.member.temperatureLow)}</span><span>{t(K.member.temperatureMid)}</span><span>{t(K.member.temperatureHigh)}</span>
                 </div>
               </div>
 
               <div>
-                <label className="text-xs text-gray-400 mb-1 block">Max Tokens（最大输出长度）</label>
+                <label className="text-xs text-gray-400 mb-1 block">{t(K.member.maxTokensLabel)}</label>
                 <input
                   type="number" min="256" max="32768" step="256"
                   className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
@@ -475,7 +487,7 @@ export default function MemberList({ onAddMember, onEditMember, onClose, initial
               </div>
 
               <div>
-                <label className="text-xs text-gray-400 mb-1 block">Max Iterations（最大迭代步数限制）</label>
+                <label className="text-xs text-gray-400 mb-1 block">{t(K.member.maxIterationsLabel)}</label>
                 <input
                   type="number" min="1" max="1000" step="1"
                   className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
@@ -490,13 +502,13 @@ export default function MemberList({ onAddMember, onEditMember, onClose, initial
               </div>
 
               <div className="border-t border-gray-700 pt-3">
-                <label className="text-xs text-gray-400 mb-2 block font-medium">性格配置</label>
+                <label className="text-xs text-gray-400 mb-2 block font-medium">{t(K.member.personalityConfig)}</label>
                 <div className="space-y-2 mb-3">
-                  {PERSONALITY_DIMS.map(({ key, label, hint }) => (
+                  {PERSONALITY_DIM_KEYS.map(({ key, labelKey, hintKey }) => (
                     <div key={key}>
                       <div className="flex justify-between text-xs text-gray-500 mb-0.5">
-                        <span className="text-gray-300">{label}</span>
-                        <span>{hint}</span>
+                        <span className="text-gray-300">{t(labelKey)}</span>
+                        <span>{t(hintKey)}</span>
                       </div>
                       <input
                         type="range" min="0" max="1" step="0.01"
@@ -507,10 +519,10 @@ export default function MemberList({ onAddMember, onEditMember, onClose, initial
                     </div>
                   ))}
                 </div>
-                <label className="text-xs text-gray-400 mb-1 block">生成的指令集（可继续编辑）</label>
+                <label className="text-xs text-gray-400 mb-1 block">{t(K.member.personalityGenerated)}</label>
                 <textarea
                   className="w-full bg-gray-900 text-gray-200 rounded-lg px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
-                  placeholder="调整上方滑块自动生成，或直接填写性格指令..."
+                  placeholder={t(K.member.personalityPlaceholder)}
                   rows={5}
                   value={form.personality_prompt || ''}
                   onChange={(e) => setField({ personality_prompt: e.target.value })}
@@ -518,22 +530,22 @@ export default function MemberList({ onAddMember, onEditMember, onClose, initial
               </div>
 
               <div className="border-t border-gray-700 pt-3">
-                <label className="text-xs text-gray-400 mb-1 block">工作流完成词</label>
+                <label className="text-xs text-gray-400 mb-1 block">{t(K.member.doneKeyword)}</label>
                 <input
                   className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
-                  placeholder="如：完毕、done、任务完成（工作流推进关键词）"
+                  placeholder={t(K.member.doneKeywordPlaceholder)}
                   value={form.done_keyword || ''}
                   onChange={(e) => setField({ done_keyword: e.target.value })}
                 />
               </div>
 
               <div className="border-t border-gray-700 pt-3">
-                <label className="text-xs text-gray-400 mb-1 block">Bootstrap 启动脚本
-                  <span className="text-gray-600 ml-1">（Bot 每次启动时读取，可用 Markdown）</span>
+                <label className="text-xs text-gray-400 mb-1 block">{t(K.member.bootstrap)}
+                  <span className="text-gray-600 ml-1">{t(K.member.bootstrapSubtitle)}</span>
                 </label>
                 <textarea
                   className="w-full bg-gray-900 text-gray-200 rounded-lg px-3 py-2 text-xs font-mono outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
-                  placeholder="描述 Bot 启动时的行为、自我介绍方式、初始任务..."
+                  placeholder={t(K.member.bootstrapPlaceholder)}
                   rows={12}
                   value={bootstrap}
                   onChange={(e) => setBootstrap(e.target.value)}
@@ -541,12 +553,12 @@ export default function MemberList({ onAddMember, onEditMember, onClose, initial
               </div>
 
               <div className="border-t border-gray-700 pt-3">
-                <label className="text-xs text-gray-400 mb-1 block">Agent 推理框架
-                  <span className="text-gray-600 ml-1">（Bot 的大脑：思考方式、工作原则、行为边界）</span>
+                <label className="text-xs text-gray-400 mb-1 block">{t(K.member.agentFramework)}
+                  <span className="text-gray-600 ml-1">{t(K.member.agentFrameworkSubtitle)}</span>
                 </label>
                 <textarea
                   className="w-full bg-gray-900 text-gray-200 rounded-lg px-3 py-2 text-xs font-mono outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
-                  placeholder="定义 Bot 如何思考、决策、与他人协作..."
+                  placeholder={t(K.member.agentFrameworkPlaceholder)}
                   rows={12}
                   value={agent}
                   onChange={(e) => setAgent(e.target.value)}
@@ -554,24 +566,24 @@ export default function MemberList({ onAddMember, onEditMember, onClose, initial
               </div>
 
               <div className="border-t border-gray-700 pt-3">
-                <label className="text-xs text-gray-400 mb-2 block font-medium">权限模式</label>
+                <label className="text-xs text-gray-400 mb-2 block font-medium">{t(K.member.permissionMode)}</label>
                 <div className="flex gap-2">
                   {[
-                    { val: 'default',            label: '默认',     desc: '未知工具询问用户' },
-                    { val: 'bypassPermissions',  label: '全部允许', desc: '跳过所有权限检查' },
-                    { val: 'dontAsk',            label: '全部拒绝', desc: '未授权工具直接拒绝' },
+                    { val: 'default',            labelKey: K.member.permModeDefault,    descKey: K.member.permModeDefaultDesc },
+                    { val: 'bypassPermissions',  labelKey: K.member.permModeAllow,      descKey: K.member.permModeAllowDesc },
+                    { val: 'dontAsk',            labelKey: K.member.permModeDeny,       descKey: K.member.permModeDenyDesc },
                   ].map(opt => (
                     <button
                       key={opt.val}
                       onClick={() => setPermMode(opt.val)}
-                      title={opt.desc}
+                      title={t(opt.descKey)}
                       className={`flex-1 text-xs py-1.5 rounded-lg border transition-colors ${
                         permMode === opt.val
                           ? 'border-indigo-500 bg-indigo-600/20 text-indigo-300'
                           : 'border-gray-700 bg-gray-900 text-gray-400 hover:border-gray-600'
                       }`}
                     >
-                      {opt.label}
+                      {t(opt.labelKey)}
                     </button>
                   ))}
                 </div>
@@ -579,10 +591,10 @@ export default function MemberList({ onAddMember, onEditMember, onClose, initial
 
               {isEdit && (
                 <div className="border-t border-gray-700 pt-3">
-                  <label className="text-xs text-gray-400 mb-2 block font-medium">权限规则</label>
+                  <label className="text-xs text-gray-400 mb-2 block font-medium">{t(K.member.permissionRules)}</label>
                   <div className="space-y-1 mb-2">
                     {permRules.length === 0 && (
-                      <p className="text-xs text-gray-600 italic">暂无规则，未命中时按权限模式处理</p>
+                      <p className="text-xs text-gray-600 italic">{t(K.member.permissionRulesEmpty)}</p>
                     )}
                     {permRules.map(rule => (
                       <div key={rule.id} className="flex items-center gap-2 bg-gray-900 rounded-lg px-2 py-1.5">
@@ -600,7 +612,7 @@ export default function MemberList({ onAddMember, onEditMember, onClose, initial
                   <div className="flex gap-1.5">
                     <input
                       className="flex-1 bg-gray-900 text-gray-200 rounded-lg px-2 py-1.5 text-xs font-mono outline-none focus:ring-1 focus:ring-indigo-500"
-                      placeholder="工具名（如 run_shell）"
+                      placeholder={t(K.member.permRuleToolPlaceholder)}
                       value={newRule.tool_pattern}
                       onChange={e => setNewRule(r => ({ ...r, tool_pattern: e.target.value }))}
                       onKeyDown={e => e.key === 'Enter' && addPermRule()}
@@ -620,7 +632,7 @@ export default function MemberList({ onAddMember, onEditMember, onClose, initial
 
               {plugins.length > 0 && (
                 <div className="border-t border-gray-700 pt-3">
-                  <label className="text-xs text-gray-400 mb-2 block font-medium">执行引擎</label>
+                  <label className="text-xs text-gray-400 mb-2 block font-medium">{t(K.member.executionEngine)}</label>
                   <div className="space-y-1.5">
                     {plugins.map(p => (
                       <button
@@ -640,8 +652,8 @@ export default function MemberList({ onAddMember, onEditMember, onClose, initial
                         <p className="text-xs text-gray-400 mt-0.5 ml-4">{p.manifest.description}</p>
                         {p.manifest.tools.length > 0 && (
                           <div className="flex flex-wrap gap-1 mt-1 ml-4">
-                            {p.manifest.tools.map(t => (
-                              <span key={t.name} className="text-xs bg-gray-700 text-gray-300 px-1.5 py-0.5 rounded">{t.name}</span>
+                            {p.manifest.tools.map(tool => (
+                              <span key={tool.name} className="text-xs bg-gray-700 text-gray-300 px-1.5 py-0.5 rounded">{tool.name}</span>
                             ))}
                           </div>
                         )}
@@ -658,18 +670,18 @@ export default function MemberList({ onAddMember, onEditMember, onClose, initial
 
               {isEdit && (
                 <div className="border-t border-gray-700 pt-3">
-                  <label className="text-xs text-gray-400 mb-2 block font-medium">⏰ 定时任务</label>
+                  <label className="text-xs text-gray-400 mb-2 block font-medium">⏰ {t(K.member.cronJobs)}</label>
 
                   {/* existing jobs list */}
                   <div className="space-y-1.5 mb-3">
                     {cronJobs.length === 0 && (
-                      <p className="text-xs text-gray-600 italic">暂无定时任务</p>
+                      <p className="text-xs text-gray-600 italic">{t(K.member.cronJobsEmpty)}</p>
                     )}
                     {cronJobs.map(job => (
                       <div key={job.id} className="flex items-center gap-2 bg-gray-900 rounded-lg px-2.5 py-2">
                         <button
                           onClick={() => toggleCronJob(job.id)}
-                          title={job.enabled ? '点击禁用' : '点击启用'}
+                          title={job.enabled ? t(K.member.cronDisable) : t(K.member.cronEnable)}
                           className={`w-2 h-2 rounded-full flex-shrink-0 transition-colors ${job.enabled ? 'bg-green-400' : 'bg-gray-600'}`}
                         />
                         <div className="flex-1 min-w-0">
@@ -677,13 +689,13 @@ export default function MemberList({ onAddMember, onEditMember, onClose, initial
                             <span className="text-xs text-indigo-300 font-medium mr-1.5">{job.label}</span>
                           )}
                           <span className="text-xs font-mono text-gray-400">
-                            {CRON_READABLE[job.cron_expr] || job.cron_expr}
+                            {CRON_READABLE_KEYS[job.cron_expr] ? t(CRON_READABLE_KEYS[job.cron_expr]) : job.cron_expr}
                           </span>
                           <p className="text-xs text-gray-300 truncate mt-0.5">{job.message}</p>
                         </div>
                         <button
                           onClick={() => runCronJobNow(job.id)}
-                          title="立即触发一次"
+                          title={t(K.member.cronRunNow)}
                           className={`text-xs px-1.5 py-0.5 rounded transition-colors ${
                             cronRunning === job.id
                               ? 'text-yellow-400'
@@ -705,7 +717,7 @@ export default function MemberList({ onAddMember, onEditMember, onClose, initial
                     <div className="flex gap-1.5">
                       <input
                         className="flex-1 bg-gray-800 text-gray-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:ring-1 focus:ring-indigo-500"
-                        placeholder="标签（选填）"
+                        placeholder={t(K.member.cronLabelPlaceholder)}
                         value={newCron.label}
                         onChange={e => setNewCron(c => ({ ...c, label: e.target.value }))}
                       />
@@ -717,14 +729,14 @@ export default function MemberList({ onAddMember, onEditMember, onClose, initial
                         value={cronPreset}
                         onChange={e => handleCronPresetChange(e.target.value)}
                       >
-                        {CRON_PRESETS.map(p => (
-                          <option key={p.value} value={p.value}>{p.label}</option>
+                        {CRON_PRESET_KEYS.map(p => (
+                          <option key={p.value} value={p.value}>{t(p.labelKey)}</option>
                         ))}
                       </select>
                       {cronCustom && (
                         <input
                           className="flex-1 bg-gray-800 text-gray-200 rounded-lg px-2 py-1.5 text-xs font-mono outline-none focus:ring-1 focus:ring-indigo-500"
-                          placeholder="分 时 日 月 周（如 0 9 * * 1-5）"
+                          placeholder={t(K.member.cronCustomPlaceholder)}
                           value={newCron.cron_expr}
                           onChange={e => setNewCron(c => ({ ...c, cron_expr: e.target.value }))}
                         />
@@ -734,7 +746,7 @@ export default function MemberList({ onAddMember, onEditMember, onClose, initial
                     <div className="flex gap-1.5">
                       <input
                         className="flex-1 bg-gray-800 text-gray-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:ring-1 focus:ring-indigo-500"
-                        placeholder="触发时发送的消息，如「请生成今日日报」"
+                        placeholder={t(K.member.cronMessagePlaceholder)}
                         value={newCron.message}
                         onChange={e => setNewCron(c => ({ ...c, message: e.target.value }))}
                         onKeyDown={e => e.key === 'Enter' && addCronJob()}
@@ -742,7 +754,7 @@ export default function MemberList({ onAddMember, onEditMember, onClose, initial
                       <button
                         onClick={addCronJob}
                         className="bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg px-3 py-1.5 text-xs transition-colors flex-shrink-0"
-                      >添加</button>
+                      >{t(K.common.add)}</button>
                     </div>
 
                     {cronErr && (
@@ -755,7 +767,7 @@ export default function MemberList({ onAddMember, onEditMember, onClose, initial
           )}
 
           <div>
-            <label className="text-xs text-gray-400 mb-1 block">头像颜色</label>
+            <label className="text-xs text-gray-400 mb-1 block">{t(K.member.avatarColor)}</label>
             <div className="flex gap-2">
               {COLORS.map((c) => (
                 <button
@@ -770,8 +782,8 @@ export default function MemberList({ onAddMember, onEditMember, onClose, initial
         </div>
 
         <div className="flex gap-2 mt-5">
-          <button onClick={handleSubmit} className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg py-2 text-sm font-medium transition-colors">{isEdit ? '保存' : '添加'}</button>
-          <button onClick={onClose} className="flex-1 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-lg py-2 text-sm transition-colors">取消</button>
+          <button onClick={handleSubmit} className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg py-2 text-sm font-medium transition-colors">{isEdit ? t(K.member.save) : t(K.common.add)}</button>
+          <button onClick={onClose} className="flex-1 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-lg py-2 text-sm transition-colors">{t(K.member.cancel)}</button>
         </div>
       </div>
     </div>
