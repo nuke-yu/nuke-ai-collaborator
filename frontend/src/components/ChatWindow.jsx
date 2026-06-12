@@ -548,7 +548,7 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
         />
       )}
       {workspaceBot && (
-        <WorkspacePanel bot={workspaceBot} onClose={() => setWorkspaceBot(null)} />
+        <WorkspacePanel bot={workspaceBot} groupId={activeGroupId} onClose={() => setWorkspaceBot(null)} />
       )}
       <div className={`${tabClass('chat')} flex-1 min-w-0 flex flex-col md:flex-row`}>
       <div

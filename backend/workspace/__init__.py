@@ -84,22 +84,56 @@ _SHARED_FILES = {"BOARD.md", "SPEC.md", "API_CONTRACT.md", "RETRO_LATEST.md"}
 # 注意不含 skills/——私有技能在 bots/bot_{id}/skills/，群组技能由 group 层单独管理。
 _SHARED_PREFIXES = ("workspace/", "docs/", "prs/")
 
-def _get_effective_ws(bot_id: int, path_str: str, group_id: int | None = None) -> Path:
+def _normalize_vfs_path(path_str: str, bot_id: int, group_id: int | None) -> str:
+    """Strip absolute filesystem prefixes that bots sometimes leak into VFS calls.
+
+    Bots occasionally pass real filesystem paths (e.g. workspaces/group_3/shared/workspace/...)
+    instead of VFS-relative paths (workspace/...).  Strip the known prefix so routing
+    works correctly rather than silently writing to the wrong place.
+    """
+    from workspace import layout
+    root = layout._root()
+
+    # Strip leading WORKSPACE_ROOT dirname (e.g. "workspaces/group_3/..." → "group_3/...")
+    root_prefix = root.name + "/"
+    if path_str.startswith(root_prefix):
+        path_str = path_str[len(root_prefix):]
+
+    if group_id is None:
+        return path_str
+
+    # Strip group-relative shared prefix (e.g. "group_3/shared/" → "")
+    shared_rel = str(layout.group_shared_dir(group_id).relative_to(root)).replace("\\", "/") + "/"
+    if path_str.startswith(shared_rel):
+        return path_str[len(shared_rel):]
+
+    # Strip group-relative private prefix (e.g. "group_3/bots/bot_1010/" → "")
+    private_rel = str(layout.bot_dir(group_id, bot_id).relative_to(root)).replace("\\", "/") + "/"
+    if path_str.startswith(private_rel):
+        return path_str[len(private_rel):]
+
+    return path_str
+
+
+def _get_effective_ws(bot_id: int, path_str: str, group_id: int | None = None) -> tuple[Path, str]:
     """群组文件重定向（全程不查 DB —— group_id 由调用方在边界显式解析后传入）。
 
     - 共享文件名 / 共享前缀（workspace/ docs/ prs/）+ 已知 group → 群组 shared 区。
     - 其余 → bot 私有区，嵌套 group_{gid}/bots/bot_{id}。
     - group_id 为 None（无群组上下文）→ 一律落 bot 私有（扁平），不再反查 DB。
+
+    Returns (workspace_root, normalized_path_str).
     """
+    path_str = _normalize_vfs_path(path_str, bot_id, group_id)
     is_shared = path_str in _SHARED_FILES or path_str.startswith(_SHARED_PREFIXES)
     if is_shared and group_id is not None:
-        return group_workspace(group_id)
-    return bot_workspace(bot_id, group_id)
+        return group_workspace(group_id), path_str
+    return bot_workspace(bot_id, group_id), path_str
 
 
 
 async def read_file(bot_id: int, path: str, offset: int | None = None, limit: int | None = None, group_id: int | None = None) -> str:
-    ws = _get_effective_ws(bot_id, path, group_id)
+    ws, path = _get_effective_ws(bot_id, path, group_id)
     p = _safe_path(ws, path)
     if p is None:
         return f"[错误] 非法路径: {path}"
@@ -245,7 +279,7 @@ async def _commit_text(ws: Path, p: Path, rel: str, path: str, new_text: str, bo
 async def write_file(bot_id: int, path: str, content: str, group_id: int | None = None) -> str:
     # group_id 显式贯穿：交给 _get_effective_ws 统一路由（共享文件名/前缀 → 群组 shared，
     # 其余 → bot 私有）。bot_id=0 的系统写（BOARD.md / prs/）天然走共享分支，不会落私有。
-    ws = _get_effective_ws(bot_id, path, group_id)
+    ws, path = _get_effective_ws(bot_id, path, group_id)
     p = _safe_path(ws, path)
     if p is None:
         return f"[错误] 非法路径: {path}"
@@ -265,7 +299,7 @@ def make_dir(bot_id: int, path: str, group_id: int | None = None) -> str:
     "new folder" action — e.g. building a directory-form skill folder-first
     (skills/<name>/ then add SKILL.md + scripts) via the workspace panel.
     """
-    ws = _get_effective_ws(bot_id, path, group_id)
+    ws, path = _get_effective_ws(bot_id, path, group_id)
     p = _safe_path(ws, path)
     if p is None:
         return f"[错误] 非法路径: {path}"
@@ -283,7 +317,7 @@ def delete_path(bot_id: int, path: str, group_id: int | None = None) -> str:
     directory-form).
     """
     import shutil
-    ws = _get_effective_ws(bot_id, path, group_id)
+    ws, path = _get_effective_ws(bot_id, path, group_id)
     p = _safe_path(ws, path)
     if p is None:
         return f"[错误] 非法路径: {path}"
@@ -301,7 +335,7 @@ def delete_path(bot_id: int, path: str, group_id: int | None = None) -> str:
 
 
 async def edit_file(bot_id: int, path: str, old_string: str, new_string: str, replace_all: bool = False, group_id: int | None = None) -> str:
-    ws = _get_effective_ws(bot_id, path, group_id)
+    ws, path = _get_effective_ws(bot_id, path, group_id)
     p = _safe_path(ws, path)
     if p is None:
         return f"[错误] 非法路径: {path}"
