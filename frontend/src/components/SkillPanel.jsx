@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
+import { useTranslation } from 'react-i18next'
+import { K } from '../i18n/keys'
 
 const LAYER_LABEL = {
   system:   { text: 'System',   color: 'bg-purple-900/50 text-purple-300' },
@@ -9,12 +11,20 @@ const LAYER_LABEL = {
 }
 
 const INJECTED_LABEL = {
-  full:     { text: '全文注入', color: 'text-emerald-400' },
-  metadata: { text: '元数据',   color: 'text-sky-400' },
-  null:     { text: '未注入',   color: 'text-gray-600' },
+  full:     { textKey: 'full:全文注入',     color: 'text-emerald-400' },
+  metadata: { textKey: 'metadata:元数据',   color: 'text-sky-400' },
+  null:     { textKey: 'null:未注入',       color: 'text-gray-600' },
+}
+
+// Injected label display text (not translated — these are technical labels)
+const INJECTED_TEXT = {
+  full:     '全文注入',
+  metadata: '元数据',
+  null:     '未注入',
 }
 
 export default function SkillPanel({ bot, groupId, onClose }) {
+  const { t } = useTranslation()
   const [skills, setSkills] = useState([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState('all') // all / active / disabled / draft
@@ -65,7 +75,7 @@ export default function SkillPanel({ bot, groupId, onClose }) {
   }
 
   const reject = async (skill) => {
-    if (!confirm(`拒绝并删除草稿技能「${skill.name}」？`)) return
+    if (!confirm(t(K.skill.confirmReject, { name: skill.name }))) return
     await fetch(`/api/members/${bot.id}/skills/learned/${skill.name}/reject`, { method: 'POST' })
     await load()
   }
@@ -81,6 +91,13 @@ export default function SkillPanel({ bot, groupId, onClose }) {
   const draftCount = skills.filter(s => s.status === 'draft').length
   const layers = ['all', 'active', 'disabled', 'draft']
 
+  const filterLabel = (f) => {
+    if (f === 'all') return t(K.skill.all)
+    if (f === 'active') return t(K.skill.active)
+    if (f === 'disabled') return t(K.skill.disabled)
+    return t(K.skill.pending)
+  }
+
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={onClose}>
       <div
@@ -91,8 +108,8 @@ export default function SkillPanel({ bot, groupId, onClose }) {
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-700 flex-shrink-0">
           <div>
-            <div className="text-base font-semibold text-white">Skill 管理</div>
-            <div className="text-xs text-gray-500 mt-0.5">{bot.name} · {skills.length} 个技能</div>
+            <div className="text-base font-semibold text-white">{t(K.skill.title)}</div>
+            <div className="text-xs text-gray-500 mt-0.5">{bot.name} · {t(K.skill.count, { count: skills.length })}</div>
           </div>
           <div className="flex items-center gap-3">
             {/* Filter tabs */}
@@ -105,7 +122,7 @@ export default function SkillPanel({ bot, groupId, onClose }) {
                     filter === f ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:text-white'
                   }`}
                 >
-                  {f === 'all' ? '全部' : f === 'active' ? '已启用' : f === 'disabled' ? '已禁用' : '待审批'}
+                  {filterLabel(f)}
                   {f === 'draft' && draftCount > 0 && (
                     <span className="ml-1 bg-yellow-500 text-black text-[10px] font-bold rounded-full px-1">
                       {draftCount}
@@ -131,10 +148,10 @@ export default function SkillPanel({ bot, groupId, onClose }) {
         {/* Skill list */}
         <div className="flex-1 overflow-y-auto">
           {loading ? (
-            <div className="flex items-center justify-center h-full text-gray-500 text-sm">加载中…</div>
+            <div className="flex items-center justify-center h-full text-gray-500 text-sm">{t(K.common.loading)}</div>
           ) : filtered.length === 0 ? (
             <div className="flex items-center justify-center h-full text-gray-600 text-sm">
-              {filter === 'draft' ? '没有待审批的技能' : '暂无技能'}
+              {filter === 'draft' ? t(K.skill.noPendingSkills) : t(K.skill.noSkills)}
             </div>
           ) : (
             <div className="divide-y divide-gray-700/50">
@@ -147,6 +164,7 @@ export default function SkillPanel({ bot, groupId, onClose }) {
                   onReject={() => reject(skill)}
                   onTest={() => setTestSkill(skill)}
                   toggling={toggling === skill.name}
+                  t={t}
                 />
               ))}
             </div>
@@ -155,11 +173,11 @@ export default function SkillPanel({ bot, groupId, onClose }) {
 
         {/* Legend */}
         <div className="px-5 py-3 border-t border-gray-700 flex items-center gap-4 flex-shrink-0">
-          <span className="text-xs text-gray-600">注入状态：</span>
+          <span className="text-xs text-gray-600">{t(K.skill.injectedStatus)}</span>
           {Object.entries(INJECTED_LABEL).map(([k, v]) => (
-            <span key={k} className={`text-xs ${v.color}`}>● {v.text}</span>
+            <span key={k} className={`text-xs ${v.color}`}>● {INJECTED_TEXT[k]}</span>
           ))}
-          <span className="ml-auto text-xs text-gray-600">L1 System 技能只读</span>
+          <span className="ml-auto text-xs text-gray-600">{t(K.skill.systemReadonly)}</span>
         </div>
       </div>
     </div>
@@ -167,6 +185,7 @@ export default function SkillPanel({ bot, groupId, onClose }) {
 }
 
 function SkillTestPanel({ bot, groupId, skill, onClose }) {
+  const { t } = useTranslation()
   const [message, setMessage] = useState('')
   const [response, setResponse] = useState(null)
   const [loading, setLoading] = useState(false)
@@ -184,7 +203,7 @@ function SkillTestPanel({ bot, groupId, skill, onClose }) {
         body: JSON.stringify({ message: message.trim(), group_id: groupId || null }),
       })
       const data = await res.json()
-      if (!res.ok) throw new Error(data.detail || '请求失败')
+      if (!res.ok) throw new Error(data.detail || t(K.skill.requestFailed))
       setResponse(data.response)
     } catch (e) {
       setError(e.message)
@@ -198,22 +217,22 @@ function SkillTestPanel({ bot, groupId, skill, onClose }) {
       <div className="flex items-center justify-between px-5 py-4 border-b border-gray-700 flex-shrink-0">
         <div>
           <button onClick={onClose} className="text-xs text-gray-500 hover:text-gray-300 flex items-center gap-1 mb-1">
-            ← 返回
+            ← {t(K.common.back)}
           </button>
-          <div className="text-base font-semibold text-white">测试技能：{skill.name}</div>
+          <div className="text-base font-semibold text-white">{t(K.skill.testTitle, { name: skill.name })}</div>
           {skill.description && <div className="text-xs text-gray-500 mt-0.5">{skill.description}</div>}
         </div>
       </div>
       <div className="flex-1 flex flex-col gap-3 p-5 overflow-y-auto">
         <div>
-          <div className="text-xs text-gray-400 mb-1.5">输入消息</div>
+          <div className="text-xs text-gray-400 mb-1.5">{t(K.skill.inputMessage)}</div>
           <textarea
             className="w-full bg-gray-900 text-gray-100 text-sm rounded-lg px-3 py-2 resize-none outline-none focus:ring-1 focus:ring-indigo-500 font-mono"
             rows={4}
             value={message}
             onChange={e => setMessage(e.target.value)}
             onKeyDown={e => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') run() }}
-            placeholder="输入测试消息… (Cmd/Ctrl+Enter 发送)"
+            placeholder={t(K.skill.testPlaceholder)}
           />
         </div>
         <button
@@ -221,14 +240,14 @@ function SkillTestPanel({ bot, groupId, skill, onClose }) {
           disabled={!message.trim() || loading}
           className="self-start text-sm px-4 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white transition-colors"
         >
-          {loading ? '运行中…' : '运行测试'}
+          {loading ? t(K.skill.running) : t(K.skill.runTest)}
         </button>
         {error && (
           <div className="text-xs text-red-400 bg-red-900/20 rounded-lg px-3 py-2">{error}</div>
         )}
         {response !== null && (
           <div>
-            <div className="text-xs text-gray-400 mb-1.5">AI 响应</div>
+            <div className="text-xs text-gray-400 mb-1.5">{t(K.skill.aiResponse)}</div>
             <div className="bg-gray-900 rounded-lg px-3 py-2 text-sm text-gray-100 whitespace-pre-wrap leading-relaxed">
               {response}
             </div>
@@ -239,7 +258,7 @@ function SkillTestPanel({ bot, groupId, skill, onClose }) {
   )
 }
 
-function SkillRow({ skill, onToggle, onApprove, onReject, onTest, toggling }) {
+function SkillRow({ skill, onToggle, onApprove, onReject, onTest, toggling, t }) {
   const layer = LAYER_LABEL[skill.layer] || { text: skill.layer, color: 'bg-gray-700 text-gray-300' }
   const injected = INJECTED_LABEL[skill.injected] || INJECTED_LABEL['null']
   const isDraft = skill.status === 'draft'
@@ -261,14 +280,14 @@ function SkillRow({ skill, onToggle, onApprove, onReject, onTest, toggling }) {
             <span className="text-[10px] bg-indigo-900/50 text-indigo-300 px-1.5 py-0.5 rounded">always</span>
           )}
           {isDraft && (
-            <span className="text-[10px] bg-yellow-900/50 text-yellow-300 px-1.5 py-0.5 rounded">待审批</span>
+            <span className="text-[10px] bg-yellow-900/50 text-yellow-300 px-1.5 py-0.5 rounded">{t(K.skill.pending)}</span>
           )}
         </div>
         {skill.description && (
           <div className="text-xs text-gray-400 mt-0.5 truncate">{skill.description}</div>
         )}
         {skill.when_to_use && (
-          <div className="text-xs text-gray-600 mt-0.5 truncate">触发：{skill.when_to_use}</div>
+          <div className="text-xs text-gray-600 mt-0.5 truncate">{t(K.skill.trigger)}{skill.when_to_use}</div>
         )}
         {skill.diagnostics && skill.diagnostics.length > 0 && (
           <div className="mt-1.5 space-y-1">
@@ -291,7 +310,7 @@ function SkillRow({ skill, onToggle, onApprove, onReject, onTest, toggling }) {
       {/* Injected status */}
       {!isDraft && (
         <span className={`text-xs mt-1 flex-shrink-0 ${injected.color}`}>
-          {injected.text}
+          {INJECTED_TEXT[skill.injected] ?? INJECTED_TEXT['null']}
         </span>
       )}
 
@@ -303,13 +322,13 @@ function SkillRow({ skill, onToggle, onApprove, onReject, onTest, toggling }) {
               onClick={onApprove}
               className="text-xs px-2.5 py-1 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white transition-colors"
             >
-              通过
+              {t(K.skill.approve)}
             </button>
             <button
               onClick={onReject}
               className="text-xs px-2.5 py-1 rounded-lg bg-red-900/60 hover:bg-red-800 text-red-300 transition-colors"
             >
-              拒绝
+              {t(K.skill.reject)}
             </button>
           </>
         ) : (
@@ -318,7 +337,7 @@ function SkillRow({ skill, onToggle, onApprove, onReject, onTest, toggling }) {
               onClick={onTest}
               className="text-xs px-2.5 py-1 rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-300 transition-colors"
             >
-              测试
+              {t(K.skill.test)}
             </button>
             <button
               onClick={onToggle}

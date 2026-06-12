@@ -1,7 +1,10 @@
 import { useState, useEffect, useCallback } from 'react'
+import { useTranslation } from 'react-i18next'
+import { K } from '../i18n/keys'
 import SkillPanel from './SkillPanel'
 
 export default function WorkspacePanel({ bot, groupId, onClose }) {
+  const { t } = useTranslation()
   const [showSkills, setShowSkills] = useState(false)
   const [tree, setTree] = useState([])
   const [selected, setSelected] = useState(null)
@@ -58,9 +61,9 @@ export default function WorkspacePanel({ bot, groupId, onClose }) {
   const isSharedFile = (path) => path.startsWith("workspace/") || path.startsWith("docs/") || path.startsWith("prs/")
 
   const openFile = async (path) => {
-    if (dirty && !confirm('有未保存的修改，确认切换？')) return
+    if (dirty && !confirm(t(K.workspace.unsavedConfirm))) return
     if (isSharedFile(path)) {
-      alert("共享区文件只读，请切换到私有工作区进行编辑。")
+      alert(t(K.workspace.sharedReadonlyAlert))
       return
     }
     const res = await fetch(`/api/members/${bot.id}/workspace/file?path=${encodeURIComponent(path)}`)
@@ -123,7 +126,7 @@ export default function WorkspacePanel({ bot, groupId, onClose }) {
   }
 
   const newFile = async () => {
-    const input = prompt('新建文件路径（相对工作区，例：skills/mytool.md 或 skills/mytool/run.sh）：', 'skills/')
+    const input = prompt(t(K.workspace.newFilePrompt), t(K.workspace.newFileDefault))
     const path = (input || '').trim()
     if (!path || path.endsWith('/')) return
     // .md skills get a frontmatter starter so discovery can parse them
@@ -133,13 +136,13 @@ export default function WorkspacePanel({ bot, groupId, onClose }) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ path, content: starter }),
     })
-    if (!res.ok) { alert('创建失败：' + (await res.text())); return }
+    if (!res.ok) { alert(t(K.workspace.createFailed) + (await res.text())); return }
     await loadTree()
     openFile(path)
   }
 
   const newDir = async () => {
-    const input = prompt('新建文件夹路径（相对工作区，例：skills/mytool）：', 'skills/')
+    const input = prompt(t(K.workspace.newFolderPrompt), t(K.workspace.newFolderDefault))
     const path = (input || '').trim().replace(/\/+$/, '')
     if (!path) return
     const res = await fetch(`/api/members/${bot.id}/workspace/dir`, {
@@ -147,24 +150,27 @@ export default function WorkspacePanel({ bot, groupId, onClose }) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ path }),
     })
-    if (!res.ok) { alert('创建失败：' + (await res.text())); return }
+    if (!res.ok) { alert(t(K.workspace.createFailed) + (await res.text())); return }
     await loadTree()
   }
 
   const deletePath = async (path, isDir) => {
-    if (!confirm(`确认删除${isDir ? '文件夹' : '文件'}「${path}」${isDir ? '及其全部内容' : ''}？`)) return
+    const confirmMsg = isDir
+      ? t(K.workspace.confirmDeleteDir, { path })
+      : t(K.workspace.confirmDeleteFile, { path })
+    if (!confirm(confirmMsg)) return
     const res = await fetch(
       `/api/members/${bot.id}/workspace/file?path=${encodeURIComponent(path)}`,
       { method: 'DELETE' }
     )
-    if (!res.ok) { alert('删除失败：' + (await res.text())); return }
+    if (!res.ok) { alert(t(K.workspace.deleteFailed) + (await res.text())); return }
     if (selected === path || (isDir && selected && selected.startsWith(path + '/'))) {
       setSelected(null); setContent(''); setDirty(false)
     }
     await loadTree()
   }
 
-  const root = buildTree(tree)
+  const root = buildTree(tree, t(K.workspace.sharedZone))
 
   return (
     <div className="fixed inset-0 bg-black/45 backdrop-blur-sm flex items-center justify-center z-50 animate-fade-in" onClick={onClose}>
@@ -176,38 +182,38 @@ export default function WorkspacePanel({ bot, groupId, onClose }) {
         {/* Left: file tree */}
         <div className="w-52 flex-shrink-0 bg-gray-900 flex flex-col border-r border-gray-700">
           <div className="px-3 py-3 border-b border-gray-700">
-            <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-0.5">工作区</div>
+            <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-0.5">{t(K.workspace.title)}</div>
             <div className="text-sm text-white font-medium truncate">{bot.name}</div>
             <button
               onClick={() => setShowSkills(true)}
               className="mt-2 w-full text-xs px-2 py-1.5 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/40 text-indigo-300 text-left transition-colors flex items-center gap-1.5"
             >
-              <span>⚡</span> Skill 管理
+              <span>⚡</span> {t(K.workspace.skillManage)}
             </button>
             <div className="mt-2 flex gap-1.5">
               <button
                 onClick={newFile}
                 className="flex-1 text-xs px-2 py-1.5 rounded-lg bg-gray-700/60 hover:bg-gray-600 text-gray-200 transition-colors"
               >
-                + 文件
+                {t(K.workspace.addFile)}
               </button>
               <button
                 onClick={newDir}
                 className="flex-1 text-xs px-2 py-1.5 rounded-lg bg-gray-700/60 hover:bg-gray-600 text-gray-200 transition-colors"
               >
-                + 文件夹
+                {t(K.workspace.addFolder)}
               </button>
             </div>
             <div className="mt-2 text-[10px] text-gray-500 flex items-center gap-1">
-              <span title="共享区（只读）">🌐</span>
-              <span>共享区</span>
+              <span title={t(K.workspace.sharedZoneReadonly)}>🌐</span>
+              <span>{t(K.workspace.sharedZone)}</span>
             </div>
           </div>
           <div className="flex-1 overflow-y-auto py-2">
             {tree.length === 0 && (
-              <div className="px-3 text-xs text-gray-500 mt-2">（空）</div>
+              <div className="px-3 text-xs text-gray-500 mt-2">{t(K.workspace.empty)}</div>
             )}
-            <TreeLevel node={root} depth={0} prefix="" selected={selected} onOpen={openFile} onDelete={deletePath} isShared={false} />
+            <TreeLevel node={root} depth={0} prefix="" selected={selected} onOpen={openFile} onDelete={deletePath} isShared={false} t={t} />
           </div>
         </div>
 
@@ -217,24 +223,24 @@ export default function WorkspacePanel({ bot, groupId, onClose }) {
             <>
               <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700 flex-shrink-0">
                 <button onClick={() => setShowHistory(false)} className="text-xs text-gray-400 hover:text-white flex items-center gap-1">
-                  ← 返回编辑
+                  {t(K.workspace.backToEditor)}
                 </button>
-                <span className="text-xs text-gray-400 font-mono">{selected} · 历史版本</span>
+                <span className="text-xs text-gray-400 font-mono">{selected} · {t(K.workspace.historyVersions)}</span>
                 <button
                   onClick={restoreVersion}
                   disabled={historyPreviewContent === null}
                   className="text-xs px-3 py-1 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-40 text-white transition-colors"
                 >
-                  恢复此版本
+                  {t(K.workspace.restoreVersion)}
                 </button>
               </div>
               <div className="flex flex-1 overflow-hidden">
                 {/* Version list */}
                 <div className="w-44 flex-shrink-0 border-r border-gray-700 overflow-y-auto py-1">
                   {historyLoading ? (
-                    <div className="text-xs text-gray-500 p-3">加载中…</div>
+                    <div className="text-xs text-gray-500 p-3">{t(K.workspace.loading)}</div>
                   ) : historyVersions.length === 0 ? (
-                    <div className="text-xs text-gray-600 p-3">暂无历史版本</div>
+                    <div className="text-xs text-gray-600 p-3">{t(K.workspace.noHistory)}</div>
                   ) : historyVersions.map(v => (
                     <button
                       key={v.ts}
@@ -260,7 +266,7 @@ export default function WorkspacePanel({ bot, groupId, onClose }) {
                     />
                   ) : (
                     <div className="flex items-center justify-center h-full text-gray-600 text-sm">
-                      选择版本查看内容
+                      {t(K.workspace.selectVersion)}
                     </div>
                   )}
                 </div>
@@ -269,15 +275,15 @@ export default function WorkspacePanel({ bot, groupId, onClose }) {
           ) : (
             <>
               <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700 flex-shrink-0">
-                <span className="text-sm text-gray-300 font-mono">{selected || '选择文件查看'}</span>
+                <span className="text-sm text-gray-300 font-mono">{selected || t(K.workspace.selectFile)}</span>
                 <div className="flex items-center gap-2">
-                  {dirty && <span className="text-xs text-yellow-400">未保存</span>}
+                  {dirty && <span className="text-xs text-yellow-400">{t(K.workspace.unsaved)}</span>}
                   {selected && (
                     <button
                       onClick={openHistory}
                       className="text-xs px-2 py-1 rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-300 transition-colors"
                     >
-                      历史
+                      {t(K.workspace.history)}
                     </button>
                   )}
                   {selected && (
@@ -286,7 +292,7 @@ export default function WorkspacePanel({ bot, groupId, onClose }) {
                       disabled={saving || !dirty}
                       className="text-xs px-3 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white transition-colors"
                     >
-                      {saving ? '保存中…' : '保存'}
+                      {saving ? t(K.workspace.saving) : t(K.workspace.save)}
                     </button>
                   )}
                   <button onClick={onClose} className="text-gray-500 hover:text-white text-lg leading-none">×</button>
@@ -302,7 +308,7 @@ export default function WorkspacePanel({ bot, groupId, onClose }) {
                   />
                 ) : (
                   <div className="flex items-center justify-center h-full text-gray-600 text-sm">
-                    从左侧选择文件
+                    {t(K.workspace.selectFilePrompt)}
                   </div>
                 )}
               </div>
@@ -315,7 +321,7 @@ export default function WorkspacePanel({ bot, groupId, onClose }) {
 }
 
 // Build a nested tree, splitting shared workspace into its own root section
-function buildTree(flat) {
+function buildTree(flat, sharedZoneLabel) {
   const root = { dirs: {}, files: [] }
   const sharedSection = { dirs: {}, files: [] }
   const SHARED_PREFIXES = ['workspace/', 'docs/', 'prs/']
@@ -344,14 +350,14 @@ function buildTree(flat) {
 
   // Merge shared section into root if it has content
   if (Object.keys(sharedSection.dirs).length > 0 || sharedSection.files.length > 0) {
-    root.dirs['🌐 共享区'] = sharedSection
+    root.dirs[`🌐 ${sharedZoneLabel}`] = sharedSection
   }
 
   return root
 }
 
 // Recursively render one tree level: files first, then nested directories.
-function TreeLevel({ node, depth, prefix, selected, onOpen, onDelete, isShared = false }) {
+function TreeLevel({ node, depth, prefix, selected, onOpen, onDelete, isShared = false, t }) {
   const files = [...node.files].sort((a, b) => a.name.localeCompare(b.name))
   const dirNames = Object.keys(node.dirs).sort()
   return (
@@ -360,6 +366,8 @@ function TreeLevel({ node, depth, prefix, selected, onOpen, onDelete, isShared =
         <FileRow
           key={f.path} name={f.name} depth={depth} active={selected === f.path} isShared={isShared}
           onClick={() => onOpen(f.path)} onDelete={() => onDelete(f.path, false)}
+          sharedZoneReadonly={t('workspace.sharedZoneReadonly')}
+          deleteFileTitle={t('workspace.deleteFileTitle')}
         />
       ))}
       {dirNames.map(name => {
@@ -373,11 +381,11 @@ function TreeLevel({ node, depth, prefix, selected, onOpen, onDelete, isShared =
               style={{ paddingLeft: `${12 + depth * 14}px`, paddingRight: '6px' }}
             >
               <span>📁</span>
-              <span className="truncate flex-1">{isShared && <span title="共享区（只读）">🌐</span>} {name}</span>
+              <span className="truncate flex-1">{isShared && <span title={t('workspace.sharedZoneReadonly')}>🌐</span>} {name}</span>
               {!isShared && (
                 <button
                   onClick={() => onDelete(dirPath, true)}
-                  title="删除文件夹"
+                  title={t('workspace.deleteDirTitle')}
                   className="opacity-0 group-hover/row:opacity-100 text-gray-500 hover:text-red-400 px-1 flex-shrink-0 transition-opacity"
                 >
                   🗑
@@ -386,7 +394,7 @@ function TreeLevel({ node, depth, prefix, selected, onOpen, onDelete, isShared =
             </div>
             <TreeLevel
               node={node.dirs[name]} depth={depth + 1} prefix={dirPath}
-              selected={selected} onOpen={onOpen} onDelete={onDelete} isShared={childIsShared}
+              selected={selected} onOpen={onOpen} onDelete={onDelete} isShared={childIsShared} t={t}
             />
           </div>
         )
@@ -395,7 +403,7 @@ function TreeLevel({ node, depth, prefix, selected, onOpen, onDelete, isShared =
   )
 }
 
-function FileRow({ name, active, depth = 0, onClick, onDelete, isShared = false }) {
+function FileRow({ name, active, depth = 0, onClick, onDelete, isShared = false, sharedZoneReadonly, deleteFileTitle }) {
   return (
     <div
       className={`group/row w-full text-xs flex items-center transition-colors ${
@@ -409,12 +417,12 @@ function FileRow({ name, active, depth = 0, onClick, onDelete, isShared = false 
         style={{ paddingLeft: `${12 + depth * 14}px` }}
       >
         <span className="text-gray-500">📄</span>
-        <span className="truncate">{isShared && <span title="共享区（只读）">🌐</span>} {name}</span>
+        <span className="truncate">{isShared && <span title={sharedZoneReadonly}>🌐</span>} {name}</span>
       </button>
       {!isShared && (
         <button
           onClick={onDelete}
-          title="删除文件"
+          title={deleteFileTitle}
           className="opacity-0 group-hover/row:opacity-100 text-gray-500 hover:text-red-400 px-1 flex-shrink-0 transition-opacity"
         >
           🗑
