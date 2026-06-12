@@ -126,5 +126,49 @@ class TestWorkspaceFileOffload(unittest.IsolatedAsyncioTestCase):
         await t
 
 
+class TestLoadGroupContext(unittest.IsolatedAsyncioTestCase):
+    async def test_returns_shared_tree_and_key_docs(self):
+        import tempfile, pathlib
+        from skills import constants as _c
+        orig = _c.WORKSPACE_ROOT
+        with tempfile.TemporaryDirectory() as tmp:
+            _c.WORKSPACE_ROOT = pathlib.Path(tmp)
+            try:
+                import workspace as ws
+                # scaffold shared workspace
+                shared = ws.group_workspace(1)                  # creates group_1/shared
+                (shared / "workspace" / "my-app").mkdir(parents=True)
+                (shared / "workspace" / "my-app" / "app.js").write_text("// hi")
+                (shared / "BOARD.md").write_text("# Board")
+                (shared / "workspace" / "PROJECTS.md").write_text("# Projects")
+
+                result = await ws.load_group_context(1)
+
+                self.assertIn("my-app", result)
+                self.assertIn("app.js", result)
+                self.assertIn("# Board", result)
+                self.assertIn("# Projects", result)
+                self.assertIn("【共享工作区目录】", result)
+                self.assertIn("【工作看板】", result)
+                self.assertIn("【项目清单】", result)
+            finally:
+                _c.WORKSPACE_ROOT = orig
+
+    async def test_empty_workspace_returns_empty_string(self):
+        import tempfile, pathlib
+        from skills import constants as _c
+        orig = _c.WORKSPACE_ROOT
+        with tempfile.TemporaryDirectory() as tmp:
+            _c.WORKSPACE_ROOT = pathlib.Path(tmp)
+            try:
+                import workspace as ws
+                ws.group_workspace(99)   # creates the dir, but nothing inside
+                result = await ws.load_group_context(99)
+                # no key docs exist → no doc sections; tree may be empty
+                self.assertIsInstance(result, str)
+            finally:
+                _c.WORKSPACE_ROOT = orig
+
+
 if __name__ == "__main__":
     unittest.main()

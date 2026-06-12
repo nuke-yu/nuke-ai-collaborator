@@ -361,6 +361,49 @@ async def list_workspace(bot_id: int, group_id: int | None = None) -> str:
     return "\n\n".join(sections) if sections else "（工作区为空）"
 
 
+async def load_group_context(group_id: int) -> str:
+    """群组共享工作区上下文：目录树 + 关键项目文档。
+
+    无条件加载——所有群组 bot 都需要知道共享区有什么。
+    gating 不在此做；调用方按需决定是否注入。
+    """
+    import asyncio
+
+    def _build() -> list[str]:
+        shared = group_workspace(group_id)
+        parts: list[str] = []
+
+        # 1. 目录树
+        tree_lines: list[str] = []
+        for p in sorted(shared.rglob("*")):
+            if any(part.startswith(".") for part in p.relative_to(shared).parts):
+                continue
+            rel = p.relative_to(shared)
+            indent = "  " * (len(rel.parts) - 1)
+            icon = "📁" if p.is_dir() else "📄"
+            tree_lines.append(f"{indent}{icon} {p.name}")
+        header = (
+            "【共享工作区目录】"
+            "（read_file/write_file 用 workspace/... docs/... prs/... 前缀；"
+            "run_shell 用 cwd=\"workspace/my-app\"）"
+        )
+        parts.append(header + ("\n" + "\n".join(tree_lines) if tree_lines else "\n（空）"))
+
+        # 2. 关键项目文档（按存在情况加载）
+        for rel_path, label in [
+            ("workspace/PROJECTS.md", "项目清单"),
+            ("BOARD.md", "工作看板"),
+            ("SPEC.md", "需求文档"),
+        ]:
+            content = _read_md(shared / rel_path)
+            if content:
+                parts.append(f"【{label}】\n{content}")
+
+        return parts
+
+    parts = await asyncio.to_thread(_build)
+    return "\n\n".join(parts) if parts else ""
+
 
 # ---------------------------------------------------------------------------
 # Context loading — hierarchical (group-level → bot-level)
