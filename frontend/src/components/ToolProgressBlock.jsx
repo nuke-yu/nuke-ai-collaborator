@@ -1,6 +1,9 @@
 import { useState, useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
+import { K } from '../i18n/keys'
 
 export default function ToolProgressBlock({ tempId, toolName, args, iteration, durationSec, result, isError }) {
+  const { t } = useTranslation()
   const [isExpanded, setIsExpanded] = useState(false)
   const [status, setStatus] = useState('running') // 'queued' | 'running' | 'completed'
 
@@ -89,7 +92,7 @@ export default function ToolProgressBlock({ tempId, toolName, args, iteration, d
                 {isError ? '⚠ Error Output' : 'Output'}
               </div>
               <pre className={`text-xs font-mono overflow-x-auto whitespace-pre-wrap max-h-48 overflow-y-auto rounded p-2 ${isError ? 'text-red-300 bg-red-950/30' : 'text-gray-200 bg-black/30'}`}>
-                {result || '(empty)'}
+                {result || t(K.botLog.empty)}
               </pre>
             </div>
           )}

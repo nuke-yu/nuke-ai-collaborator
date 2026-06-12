@@ -1,10 +1,13 @@
 import { useState, useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
+import { K } from '../i18n/keys'
 
 const COLORS = ['#6366f1', '#8b5cf6', '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#ec4899']
 
 const empty = { name: '', role: '', system_prompt: '', avatar_color: '#6366f1' }
 
 export default function TemplateManager({ onClose, groupId, onAdded }) {
+  const { t } = useTranslation()
   const [templates, setTemplates] = useState([])
   const [editing, setEditing] = useState(null) // null | 'new' | template object
   const [form, setForm] = useState(empty)
@@ -43,19 +46,19 @@ export default function TemplateManager({ onClose, groupId, onAdded }) {
   const startEdit = (t) => { setEditing(t); setForm(t) }
   const startNew = () => { setEditing('new'); setForm(empty) }
 
-  const handleAddToGroup = async (t) => {
+  const handleAddToGroup = async (tmpl) => {
     if (!groupId) return
     await fetch(`/api/groups/${groupId}/members`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        name: t.name, type: 'bot', role: t.role,
-        system_prompt: t.system_prompt, avatar_color: t.avatar_color,
+        name: tmpl.name, type: 'bot', role: tmpl.role,
+        system_prompt: tmpl.system_prompt, avatar_color: tmpl.avatar_color,
         model_provider: 'deepseek', model_name: 'deepseek-chat',
       }),
     })
-    setAddedIds(prev => new Set([...prev, t.id]))
-    setTimeout(() => setAddedIds(prev => { const s = new Set(prev); s.delete(t.id); return s }), 2000)
+    setAddedIds(prev => new Set([...prev, tmpl.id]))
+    setTimeout(() => setAddedIds(prev => { const s = new Set(prev); s.delete(tmpl.id); return s }), 2000)
     onAdded?.()
   }
 
@@ -63,68 +66,68 @@ export default function TemplateManager({ onClose, groupId, onAdded }) {
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={onClose}>
       <div className="bg-gray-800 rounded-2xl w-[640px] max-h-[80vh] flex flex-col shadow-2xl" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-700">
-          <h2 className="text-white font-semibold">角色模板管理</h2>
+          <h2 className="text-white font-semibold">{t(K.template.titleManage)}</h2>
           <div className="flex gap-2">
-            <button onClick={startNew} className="bg-indigo-600 hover:bg-indigo-500 text-white text-sm px-3 py-1.5 rounded-lg transition-colors">+ 新建模板</button>
+            <button onClick={startNew} className="bg-indigo-600 hover:bg-indigo-500 text-white text-sm px-3 py-1.5 rounded-lg transition-colors">{t(K.template.newTemplate)}</button>
             <button onClick={onClose} className="text-gray-400 hover:text-white text-xl leading-none transition-colors">×</button>
           </div>
         </div>
 
         <div className="flex flex-1 min-h-0">
-          {/* 模板列表 */}
+          {/* Template list */}
           <div className="w-48 border-r border-gray-700 overflow-y-auto py-2">
-            {templates.map(t => (
+            {templates.map(tmpl => (
               <div
-                key={t.id}
-                onClick={() => startEdit(t)}
-                className={`group flex items-center gap-2 px-3 py-2 cursor-pointer transition-colors ${editing?.id === t.id ? 'bg-gray-700' : 'hover:bg-gray-700'}`}
+                key={tmpl.id}
+                onClick={() => startEdit(tmpl)}
+                className={`group flex items-center gap-2 px-3 py-2 cursor-pointer transition-colors ${editing?.id === tmpl.id ? 'bg-gray-700' : 'hover:bg-gray-700'}`}
               >
-                <div className="w-6 h-6 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-bold text-white" style={{ backgroundColor: t.avatar_color }}>
-                  {t.name[0]}
+                <div className="w-6 h-6 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-bold text-white" style={{ backgroundColor: tmpl.avatar_color }}>
+                  {tmpl.name[0]}
                 </div>
-                <span className="text-sm text-gray-200 truncate flex-1">{t.name}</span>
+                <span className="text-sm text-gray-200 truncate flex-1">{tmpl.name}</span>
                 {groupId && (
                   <button
-                    onClick={e => { e.stopPropagation(); handleAddToGroup(t) }}
-                    title="添加到当前群组"
+                    onClick={e => { e.stopPropagation(); handleAddToGroup(tmpl) }}
+                    title={t(K.template.addToGroup)}
                     className={`flex-shrink-0 text-xs px-1.5 py-0.5 rounded transition-all
-                      ${addedIds.has(t.id)
+                      ${addedIds.has(tmpl.id)
                         ? 'bg-green-600 text-white opacity-100'
                         : 'bg-indigo-600 hover:bg-indigo-500 text-white opacity-0 group-hover:opacity-100'
                       }`}
                   >
-                    {addedIds.has(t.id) ? '✓' : '+'}
+                    {addedIds.has(tmpl.id) ? '✓' : '+'}
                   </button>
                 )}
               </div>
             ))}
             {templates.length === 0 && (
-              <div className="text-gray-500 text-sm text-center py-8">暂无模板</div>
+              <div className="text-gray-500 text-sm text-center py-8">{t(K.template.noTemplates)}</div>
             )}
           </div>
 
-          {/* 编辑区 */}
+          {/* Edit area */}
           <div className="flex-1 p-5 overflow-y-auto">
             {editing ? (
               <div className="space-y-4">
                 <div>
-                  <label className="text-xs text-gray-400 mb-1 block">名字</label>
+                  <label className="text-xs text-gray-400 mb-1 block">{t(K.template.nameLabel)}</label>
                   <input className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
-                    value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="角色名字" autoFocus />
+                    value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder={t(K.template.nameLabel)} autoFocus />
                 </div>
                 <div>
-                  <label className="text-xs text-gray-400 mb-1 block">角色职位</label>
+                  <label className="text-xs text-gray-400 mb-1 block">{t(K.template.roleLabel)}</label>
                   <input className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
-                    value={form.role} onChange={e => setForm({ ...form, role: e.target.value })} placeholder="如：产品经理、架构师..." />
+                    value={form.role} onChange={e => setForm({ ...form, role: e.target.value })} placeholder={t(K.member.rolePlaceholder2)} />
                 </div>
                 <div>
-                  <label className="text-xs text-gray-400 mb-1 block">角色描述（System Prompt）</label>
+                  <label className="text-xs text-gray-400 mb-1 block">{t(K.member.systemPromptLabel)}</label>
                   <textarea className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
                     rows={6} value={form.system_prompt} onChange={e => setForm({ ...form, system_prompt: e.target.value })}
-                    placeholder="描述这个 AI 角色的职责、行为方式和回答风格..." />
+                    placeholder={t(K.member.systemPromptPlaceholder2)} />
                 </div>
                 <div>
-                  <label className="text-xs text-gray-400 mb-1 block">头像颜色</label>
+                  <label className="text-xs text-gray-400 mb-1 block">{t(K.template.avatarColor)}</label>
                   <div className="flex gap-2">
                     {COLORS.map(c => (
                       <button key={c} onClick={() => setForm({ ...form, avatar_color: c })}
@@ -134,23 +137,23 @@ export default function TemplateManager({ onClose, groupId, onAdded }) {
                   </div>
                 </div>
                 <div className="flex gap-2 pt-2">
-                  <button onClick={handleSave} className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg py-2 text-sm font-medium transition-colors">保存</button>
+                  <button onClick={handleSave} className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg py-2 text-sm font-medium transition-colors">{t(K.template.save)}</button>
                   {editing !== 'new' && groupId && (
                     <button
                       onClick={() => handleAddToGroup(editing)}
                       className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${addedIds.has(editing.id) ? 'bg-green-600 text-white' : 'bg-emerald-600 hover:bg-emerald-500 text-white'}`}
                     >
-                      {addedIds.has(editing.id) ? '✓ 已添加' : '+ 添加到群组'}
+                      {addedIds.has(editing.id) ? t(K.template.added) : t(K.template.addToGroup)}
                     </button>
                   )}
                   {editing !== 'new' && (
-                    <button onClick={() => handleDelete(editing.id)} className="bg-red-600/20 hover:bg-red-600/40 text-red-400 rounded-lg px-4 py-2 text-sm transition-colors">删除</button>
+                    <button onClick={() => handleDelete(editing.id)} className="bg-red-600/20 hover:bg-red-600/40 text-red-400 rounded-lg px-4 py-2 text-sm transition-colors">{t(K.template.delete)}</button>
                   )}
-                  <button onClick={() => { setEditing(null); setForm(empty) }} className="bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-lg px-4 py-2 text-sm transition-colors">取消</button>
+                  <button onClick={() => { setEditing(null); setForm(empty) }} className="bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-lg px-4 py-2 text-sm transition-colors">{t(K.template.cancel)}</button>
                 </div>
               </div>
             ) : (
-              <div className="flex items-center justify-center h-full text-gray-500 text-sm">选择一个模板编辑，或新建模板</div>
+              <div className="flex items-center justify-center h-full text-gray-500 text-sm">{t(K.template.selectOrCreate)}</div>
             )}
           </div>
         </div>

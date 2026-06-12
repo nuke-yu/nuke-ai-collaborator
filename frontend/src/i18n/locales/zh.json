@@ -352,7 +352,43 @@
       "error": "错误"
     },
     "clearLogs": "清空日志",
-    "noLogs": "暂无日志"
+    "noLogs": "暂无日志",
+    "sessionDetail": "Bot 执行详情",
+    "runLogs": "Bot 运行日志",
+    "backToList": "返回列表",
+    "refresh": "刷新数据",
+    "closePanel": "关闭面板",
+    "loadingList": "加载日志列表中...",
+    "noSessions": "此群组暂无 Bot 运行日志",
+    "noSessionsHint": "当 BA / Dev / QA Bot 执行任务或工具时，交互记录将记录在这里。",
+    "sessionId": "会话ID",
+    "modelProvider": "模型厂商",
+    "modelName": "模型名称",
+    "costEstimate": "消费估算",
+    "tabMessages": "💬 LLM 交互链",
+    "tabEvents": "⛓️ 工具链轨迹",
+    "loadingDetail": "加载详情中...",
+    "noMessages": "暂无 LLM 交互消息快照",
+    "streaming": "LLM Assistant (正在生成...)",
+    "toolsPending": "🔧 拟调用工具:",
+    "collapseBtn": "折叠 ➖",
+    "expandBtn": "展开 ➕",
+    "noEvents": "暂无工具运行轨迹事件",
+    "collapseResult": "收起 ➖",
+    "expandResult": "展开 ➕",
+    "statusRunning": "进行中",
+    "statusCompleted": "已完成",
+    "statusFailed": "失败",
+    "eventSessionStart": "会话启动",
+    "eventToolCall": "调用工具: {{name}}",
+    "eventToolResult": "工具结果: {{name}}",
+    "eventFork": "分叉子任务: {{name}}",
+    "eventJoin": "合并子任务: {{name}}",
+    "childSessionId": "子任务会话 ID: {{id}}",
+    "resultSummary": "结果摘要:",
+    "empty": "(空)",
+    "emptyCollapsed": "(空结果)",
+    "collapsedSuffix": " ... (已折叠)"
   },
   "permission": {
     "title": "权限请求",
@@ -363,7 +399,12 @@
     "args": "参数",
     "allowAlways": "始终允许",
     "allowOnce": "允许一次",
-    "deny": "拒绝"
+    "deny": "拒绝",
+    "requestTitle": "Bot 请求执行工具",
+    "requestSubtitle": "是否允许此次操作？",
+    "once": "仅此次",
+    "permanent": "永久允许",
+    "allow": "允许"
   },
   "autoReply": {
     "title": "自动回复",
@@ -374,7 +415,13 @@
     "save": "保存",
     "cancel": "取消",
     "toggleOn": "开启自动回复",
-    "toggleOff": "关闭自动回复"
+    "toggleOff": "关闭自动回复",
+    "header": "自动回复设置",
+    "enableLabel": "开启自动回复",
+    "enableHint": "有人 @ 你且你不在线时自动发送",
+    "replyContent": "回复内容",
+    "saving": "保存中...",
+    "examplePlaceholder": "例：我现在不在，稍后回复你～"
   },
   "suggestion": {
     "title": "建议",
@@ -401,7 +448,15 @@
     "delete": "删除",
     "test": "测试",
     "noKeys": "暂无 API Key",
-    "addKey": "添加 Key"
+    "addKey": "添加 Key",
+    "configured": "已配置 — 输入新值可替换",
+    "clear": "清除",
+    "getKey": "获取 →",
+    "hide": "隐藏",
+    "show": "显示",
+    "saving": "保存中...",
+    "saved": "✓ 已保存",
+    "storageNote": "Key 保存在服务器本地 app_config.json，不会上传到任何第三方。留空字段不会修改已有配置。"
   },
   "template": {
     "title": "角色模板",
@@ -413,7 +468,15 @@
     "use": "使用此模板",
     "cancel": "取消",
     "noTemplates": "暂无模板",
-    "save": "保存"
+    "save": "保存",
+    "selectOrCreate": "选择一个模板编辑，或新建模板",
+    "nameLabel": "名字",
+    "roleLabel": "角色职位",
+    "avatarColor": "头像颜色",
+    "addToGroup": "+ 添加到群组",
+    "added": "✓ 已添加",
+    "newTemplate": "+ 新建模板",
+    "titleManage": "角色模板管理"
   },
   "workflow": {
     "title": "工作流",
@@ -422,7 +485,19 @@
     "confirm": "确认",
     "modify": "修改",
     "running": "执行中",
-    "done": "完成"
+    "done": "完成",
+    "startTitle": "启动工作流",
+    "startDescription": "Bot 将按顺序依次接管对话；多人并行阶段会自动抢单分配任务。",
+    "doneKeywordLabel": "完成关键词",
+    "doneKeywordHint": "Bot 说出对应关键词时自动进入下一阶段",
+    "parallelStage": "并行开发阶段",
+    "doneWordLabel": "完成词",
+    "allDoneHint": "所有人说完此词后进入下一阶段",
+    "poolHint": "上一阶段会生成任务列表，开发者依次认领，做完一个自动领取下一个",
+    "awaitingConfirm": "⏳ 待你确认",
+    "finishBtn": "完成 ✓",
+    "manualAdvance": "手动推进 →",
+    "titleLabel": "工作流"
   },
   "toolProgress": {
     "running": "执行中",
@@ -433,7 +508,10 @@
     "placeholder": "添加公告...",
     "save": "保存",
     "cancel": "取消",
-    "edit": "编辑公告"
+    "edit": "编辑公告",
+    "editTitle": "编辑群公告",
+    "addPlaceholder": "添加群公告...",
+    "contentPlaceholder": "输入群公告内容..."
   },
   "search": {
     "title": "搜索消息",

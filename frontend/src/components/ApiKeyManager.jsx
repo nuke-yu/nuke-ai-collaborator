@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
 import { fetchConfig, saveConfig } from '../api'
+import { K } from '../i18n/keys'
 
 const PROVIDERS = [
   {
@@ -25,7 +27,7 @@ const PROVIDERS = [
   },
   {
     key: 'ollama_base_url',
-    label: 'Ollama 地址',
+    label: 'Ollama',
     hint: 'http://localhost:11434',
     url: null,
     masked: false,
@@ -33,6 +35,7 @@ const PROVIDERS = [
 ]
 
 export default function ApiKeyManager({ onClose }) {
+  const { t } = useTranslation()
   const [status, setStatus] = useState({})   // { key: { configured, preview } }
   const [values, setValues] = useState({})   // { key: inputValue }
   const [show, setShow] = useState({})       // { key: bool }
@@ -76,7 +79,7 @@ export default function ApiKeyManager({ onClose }) {
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={onClose}>
       <div className="bg-gray-800 rounded-2xl shadow-xl w-[480px] max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-700">
-          <h2 className="text-white font-semibold">API Key 管理</h2>
+          <h2 className="text-white font-semibold">{t(K.apiKey.title)}</h2>
           <button onClick={onClose} className="text-gray-500 hover:text-gray-300 text-lg leading-none">✕</button>
         </div>
 
@@ -100,13 +103,13 @@ export default function ApiKeyManager({ onClose }) {
                           onClick={() => handleClear(p.key)}
                           className="text-red-500 hover:text-red-400 transition-colors"
                         >
-                          清除
+                          {t(K.apiKey.clear)}
                         </button>
                       </>
                     )}
                     {p.url && (
                       <a href={p.url} target="_blank" rel="noreferrer" className="text-indigo-400 hover:text-indigo-300 transition-colors">
-                        获取 →
+                        {t(K.apiKey.getKey)}
                       </a>
                     )}
                   </div>
@@ -115,7 +118,7 @@ export default function ApiKeyManager({ onClose }) {
                   <input
                     type={p.masked && !isVisible ? 'password' : 'text'}
                     className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500 placeholder-gray-500 pr-10"
-                    placeholder={st.configured ? `已配置 — 输入新值可替换` : p.hint}
+                    placeholder={st.configured ? t(K.apiKey.configured) : p.hint}
                     value={val}
                     onChange={e => setValues(v => ({ ...v, [p.key]: e.target.value }))}
                   />
@@ -125,7 +128,7 @@ export default function ApiKeyManager({ onClose }) {
                       onClick={() => setShow(s => ({ ...s, [p.key]: !s[p.key] }))}
                       className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 text-xs"
                     >
-                      {isVisible ? '隐藏' : '显示'}
+                      {isVisible ? t(K.apiKey.hide) : t(K.apiKey.show)}
                     </button>
                   )}
                 </div>
@@ -140,15 +143,15 @@ export default function ApiKeyManager({ onClose }) {
             disabled={saving || Object.values(values).every(v => !v.trim())}
             className="flex-1 bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-700 disabled:text-gray-500 text-white rounded-lg py-2 text-sm font-medium transition-colors"
           >
-            {saving ? '保存中...' : saved ? '✓ 已保存' : '保存'}
+            {saving ? t(K.apiKey.saving) : saved ? t(K.apiKey.saved) : t(K.apiKey.save)}
           </button>
           <button onClick={onClose} className="px-4 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-lg py-2 text-sm transition-colors">
-            关闭
+            {t(K.common.close)}
           </button>
         </div>
 
         <div className="px-6 pb-4 text-xs text-gray-600">
-          Key 保存在服务器本地 app_config.json，不会上传到任何第三方。留空字段不会修改已有配置。
+          {t(K.apiKey.storageNote)}
         </div>
       </div>
     </div>

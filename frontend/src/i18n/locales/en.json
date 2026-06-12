@@ -352,7 +352,43 @@
       "error": "Error"
     },
     "clearLogs": "Clear Logs",
-    "noLogs": "No logs"
+    "noLogs": "No logs",
+    "sessionDetail": "Bot Session Detail",
+    "runLogs": "Bot Run Logs",
+    "backToList": "Back to List",
+    "refresh": "Refresh",
+    "closePanel": "Close Panel",
+    "loadingList": "Loading session list...",
+    "noSessions": "No Bot run logs in this group",
+    "noSessionsHint": "When BA / Dev / QA Bots execute tasks or tools, interaction records will appear here.",
+    "sessionId": "Session ID",
+    "modelProvider": "Model Provider",
+    "modelName": "Model Name",
+    "costEstimate": "Cost Estimate",
+    "tabMessages": "💬 LLM Message Chain",
+    "tabEvents": "⛓️ Tool Chain Trace",
+    "loadingDetail": "Loading detail...",
+    "noMessages": "No LLM message snapshots",
+    "streaming": "LLM Assistant (streaming...)",
+    "toolsPending": "🔧 Pending tool calls:",
+    "collapseBtn": "Collapse ➖",
+    "expandBtn": "Expand ➕",
+    "noEvents": "No tool trace events",
+    "collapseResult": "Collapse ➖",
+    "expandResult": "Expand ➕",
+    "statusRunning": "In Progress",
+    "statusCompleted": "Completed",
+    "statusFailed": "Failed",
+    "eventSessionStart": "Session Start",
+    "eventToolCall": "Tool Call: {{name}}",
+    "eventToolResult": "Tool Result: {{name}}",
+    "eventFork": "Fork subtask: {{name}}",
+    "eventJoin": "Join subtask: {{name}}",
+    "childSessionId": "Child Session ID: {{id}}",
+    "resultSummary": "Result Summary:",
+    "empty": "(empty)",
+    "emptyCollapsed": "(empty result)",
+    "collapsedSuffix": " ... (collapsed)"
   },
   "permission": {
     "title": "Permission Request",
@@ -363,7 +399,12 @@
     "args": "Arguments",
     "allowAlways": "Always Allow",
     "allowOnce": "Allow Once",
-    "deny": "Deny"
+    "deny": "Deny",
+    "requestTitle": "Bot Requests Tool Execution",
+    "requestSubtitle": "Allow this operation?",
+    "once": "This time only",
+    "permanent": "Always Allow",
+    "allow": "Allow"
   },
   "autoReply": {
     "title": "Auto Reply",
@@ -374,7 +415,13 @@
     "save": "Save",
     "cancel": "Cancel",
     "toggleOn": "Enable auto-reply",
-    "toggleOff": "Disable auto-reply"
+    "toggleOff": "Disable auto-reply",
+    "header": "Auto Reply Settings",
+    "enableLabel": "Enable auto-reply",
+    "enableHint": "Sent automatically when someone @ mentions you while offline",
+    "replyContent": "Reply Content",
+    "saving": "Saving...",
+    "examplePlaceholder": "e.g. I'm away, will reply later~"
   },
   "suggestion": {
     "title": "Suggestion",
@@ -401,7 +448,15 @@
     "delete": "Delete",
     "test": "Test",
     "noKeys": "No API keys",
-    "addKey": "Add Key"
+    "addKey": "Add Key",
+    "configured": "Configured — enter new value to replace",
+    "clear": "Clear",
+    "getKey": "Get →",
+    "hide": "Hide",
+    "show": "Show",
+    "saving": "Saving...",
+    "saved": "✓ Saved",
+    "storageNote": "Keys are stored locally in app_config.json and never uploaded to third parties. Empty fields will not overwrite existing config."
   },
   "template": {
     "title": "Role Templates",
@@ -413,7 +468,15 @@
     "use": "Use Template",
     "cancel": "Cancel",
     "noTemplates": "No templates",
-    "save": "Save"
+    "save": "Save",
+    "selectOrCreate": "Select a template to edit, or create a new one",
+    "nameLabel": "Name",
+    "roleLabel": "Role",
+    "avatarColor": "Avatar Color",
+    "addToGroup": "+ Add to Group",
+    "added": "✓ Added",
+    "newTemplate": "+ New Template",
+    "titleManage": "Role Template Manager"
   },
   "workflow": {
     "title": "Workflow",
@@ -422,7 +485,19 @@
     "confirm": "Confirm",
     "modify": "Modify",
     "running": "Running",
-    "done": "Done"
+    "done": "Done",
+    "startTitle": "Start Workflow",
+    "startDescription": "Bots will take over the conversation in sequence; parallel stages auto-assign tasks.",
+    "doneKeywordLabel": "Done Keyword",
+    "doneKeywordHint": "Bot moves to next stage when it outputs the keyword",
+    "parallelStage": "Parallel Dev Stage",
+    "doneWordLabel": "Done Word",
+    "allDoneHint": "All bots move to next stage after saying this word",
+    "poolHint": "Previous stage generates a task list; devs claim tasks one by one",
+    "awaitingConfirm": "⏳ Awaiting Confirmation",
+    "finishBtn": "Done ✓",
+    "manualAdvance": "Advance →",
+    "titleLabel": "Workflow"
   },
   "toolProgress": {
     "running": "Running",
@@ -433,7 +508,10 @@
     "placeholder": "Add announcement...",
     "save": "Save",
     "cancel": "Cancel",
-    "edit": "Edit Announcement"
+    "edit": "Edit Announcement",
+    "editTitle": "Edit Announcement",
+    "addPlaceholder": "Add announcement...",
+    "contentPlaceholder": "Enter announcement content..."
   },
   "search": {
     "title": "Search messages",

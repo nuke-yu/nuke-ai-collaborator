@@ -1,11 +1,15 @@
+import { useTranslation } from 'react-i18next'
+import { K } from '../i18n/keys'
+
 export default function WorkflowBar({ workflow, onNext, onEnd }) {
+  const { t } = useTranslation()
   if (!workflow?.active) return null
   const { stages, current } = workflow
   const isLast = current >= stages.length - 1
 
   return (
     <div className="bg-indigo-950/60 border-b border-indigo-800/40 px-4 py-2 flex items-center gap-3 flex-shrink-0">
-      <span className="text-xs text-indigo-400 font-semibold flex-shrink-0">工作流</span>
+      <span className="text-xs text-indigo-400 font-semibold flex-shrink-0">{t(K.workflow.titleLabel)}</span>
       <div className="flex items-center gap-1 flex-1 overflow-x-auto min-w-0">
         {stages.map((s, i) => (
           <div key={i} className="flex items-center gap-1 flex-shrink-0">
@@ -21,20 +25,20 @@ export default function WorkflowBar({ workflow, onNext, onEnd }) {
       <div className="flex items-center gap-2 flex-shrink-0">
         {workflow.awaiting_confirm && (
           <span className="text-xs text-amber-300 bg-amber-950/40 rounded px-1.5 py-0.5 animate-pulse flex-shrink-0">
-            ⏳ 待你确认
+            {t(K.workflow.awaitingConfirm)}
           </span>
         )}
         <button
           onClick={onNext}
           className="text-xs text-indigo-500 hover:text-indigo-300 transition-colors"
-          title="手动推进到下一阶段"
+          title={t(K.workflow.manualAdvance)}
         >
-          {isLast ? '完成 ✓' : '手动推进 →'}
+          {isLast ? t(K.workflow.finishBtn) : t(K.workflow.manualAdvance)}
         </button>
         <button
           onClick={onEnd}
           className="text-xs text-gray-600 hover:text-gray-400 transition-colors"
-          title="结束工作流"
+          title={t(K.workflow.done)}
         >✕</button>
       </div>
     </div>

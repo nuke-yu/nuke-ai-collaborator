@@ -1,6 +1,9 @@
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import { K } from '../i18n/keys'
 
 export default function PermissionRequestModal({ request, onRespond }) {
+  const { t } = useTranslation()
   const [persistence, setPersistence] = useState('once')
 
   const handleRespond = (approved) => {
@@ -20,14 +23,14 @@ export default function PermissionRequestModal({ request, onRespond }) {
             </svg>
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-white font-medium text-sm">Bot 请求执行工具</p>
-            <p className="text-gray-400 text-xs mt-0.5">是否允许此次操作？</p>
+            <p className="text-white font-medium text-sm">{t(K.permission.requestTitle)}</p>
+            <p className="text-gray-400 text-xs mt-0.5">{t(K.permission.requestSubtitle)}</p>
           </div>
         </div>
 
         <div className="bg-gray-900 rounded-lg p-3 mb-4 space-y-1.5">
           <div className="flex items-center gap-2">
-            <span className="text-xs text-gray-500 w-14 flex-shrink-0">工具</span>
+            <span className="text-xs text-gray-500 w-14 flex-shrink-0">{t(K.permission.tool)}</span>
             <span className="text-xs font-mono text-indigo-300 bg-indigo-900/30 px-2 py-0.5 rounded">
               {request.tool}
             </span>
@@ -53,7 +56,7 @@ export default function PermissionRequestModal({ request, onRespond }) {
                   : 'border-gray-700 bg-gray-900 text-gray-400 hover:border-gray-600'
               }`}
             >
-              {p === 'once' ? '仅此次' : '永久允许'}
+              {p === 'once' ? t(K.permission.once) : t(K.permission.permanent)}
             </button>
           ))}
         </div>
@@ -63,13 +66,13 @@ export default function PermissionRequestModal({ request, onRespond }) {
             onClick={() => handleRespond(true)}
             className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg py-2 text-sm font-medium transition-colors"
           >
-            允许
+            {t(K.permission.allow)}
           </button>
           <button
             onClick={() => handleRespond(false)}
             className="flex-1 bg-gray-700 hover:bg-gray-600 text-gray-200 rounded-lg py-2 text-sm transition-colors"
           >
-            拒绝
+            {t(K.permission.deny)}
           </button>
         </div>
       </div>

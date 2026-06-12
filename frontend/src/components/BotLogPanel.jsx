@@ -1,6 +1,9 @@
 import { useState, useEffect, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
+import { K } from '../i18n/keys'
 
 export default function BotLogPanel({ groupId, onClose }) {
+  const { t } = useTranslation()
   const [sessions, setSessions] = useState([])
   const [selectedSessionId, setSelectedSessionId] = useState(null)
   const [sessionDetail, setSessionDetail] = useState(null)
@@ -81,7 +84,7 @@ export default function BotLogPanel({ groupId, onClose }) {
   // Poll current session or session list if any session is 'running'
   useEffect(() => {
     const hasRunningSession = sessions.some(s => s.status === 'running') || (sessionDetail && sessionDetail.status === 'running')
-    
+
     if (hasRunningSession) {
       pollIntervalRef.current = setInterval(() => {
         fetchSessionsList(false)
@@ -128,7 +131,7 @@ export default function BotLogPanel({ groupId, onClose }) {
           selectedSessionIdRef.current = data.session_id
           setSelectedSessionId(data.session_id)
         }
-        
+
         // Immediately set/update session detail placeholder so subsequent stream_chunks are not dropped
         setSessionDetail(prev => {
           if (prev && prev.id === data.session_id) {
@@ -146,7 +149,7 @@ export default function BotLogPanel({ groupId, onClose }) {
             last_snapshot: []
           }
         })
-        
+
         setEvents(prev => {
           // Prevent duplicates
           if (prev.some(evt => evt.id === `start-${data.session_id}`)) return prev
@@ -338,12 +341,12 @@ export default function BotLogPanel({ groupId, onClose }) {
   const getStatusBadge = (status) => {
     switch (status) {
       case 'running':
-        return <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-green-500/20 text-green-400 border border-green-500/30 animate-pulse">进行中</span>
+        return <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-green-500/20 text-green-400 border border-green-500/30 animate-pulse">{t(K.botLog.statusRunning)}</span>
       case 'finished':
       case 'completed':
-        return <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">已完成</span>
+        return <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">{t(K.botLog.statusCompleted)}</span>
       case 'failed':
-        return <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-red-500/20 text-red-400 border border-red-500/30">失败</span>
+        return <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-red-500/20 text-red-400 border border-red-500/30">{t(K.botLog.statusFailed)}</span>
       default:
         return <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-gray-500/20 text-gray-400 border border-gray-500/30">{status}</span>
     }
@@ -363,24 +366,24 @@ export default function BotLogPanel({ groupId, onClose }) {
                 fetchSessionsList()
               }}
               className="p-1 rounded text-gray-400 hover:text-white hover:bg-gray-800 transition-colors"
-              title="返回列表"
+              title={t(K.botLog.backToList)}
             >
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
             </button>
           )}
           <span className="text-gray-200 font-semibold text-sm">
-            {selectedSessionId ? 'Bot 执行详情' : 'Bot 运行日志'}
+            {selectedSessionId ? t(K.botLog.sessionDetail) : t(K.botLog.runLogs)}
           </span>
         </div>
         <div className="flex items-center gap-1.5">
           <button
             onClick={handleRefresh}
             className="p-1 rounded text-gray-400 hover:text-white hover:bg-gray-800 transition-colors"
-            title="刷新数据"
+            title={t(K.botLog.refresh)}
           >
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
           </button>
-          <button onClick={onClose} className="p-1 rounded text-gray-400 hover:text-white hover:bg-gray-800 transition-colors" title="关闭面板">
+          <button onClick={onClose} className="p-1 rounded text-gray-400 hover:text-white hover:bg-gray-800 transition-colors" title={t(K.botLog.closePanel)}>
             <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
           </button>
         </div>
@@ -392,12 +395,12 @@ export default function BotLogPanel({ groupId, onClose }) {
           /* List View */
           <div className="flex flex-col h-full">
             {loadingList && sessions.length === 0 ? (
-              <div className="flex-1 flex items-center justify-center text-xs text-gray-500">加载日志列表中...</div>
+              <div className="flex-1 flex items-center justify-center text-xs text-gray-500">{t(K.botLog.loadingList)}</div>
             ) : sessions.length === 0 ? (
               <div className="flex-1 flex flex-col items-center justify-center gap-2 p-8 text-center">
                 <span className="text-3xl">📜</span>
-                <p className="text-xs text-gray-500">此群组暂无 Bot 运行日志</p>
-                <p className="text-[11px] text-gray-600">当 BA / Dev / QA Bot 执行任务或工具时，交互记录将记录在这里。</p>
+                <p className="text-xs text-gray-500">{t(K.botLog.noSessions)}</p>
+                <p className="text-[11px] text-gray-600">{t(K.botLog.noSessionsHint)}</p>
               </div>
             ) : (
               <div className="divide-y divide-gray-800">
@@ -456,22 +459,22 @@ export default function BotLogPanel({ groupId, onClose }) {
                     </div>
                     <div>
                       <h4 className="text-xs font-bold text-gray-200">{sessionDetail.bot_name}</h4>
-                      <p className="text-[10px] text-gray-500 font-mono">会话ID: {sessionDetail.id}</p>
+                      <p className="text-[10px] text-gray-500 font-mono">{t(K.botLog.sessionId)}: {sessionDetail.id}</p>
                     </div>
                   </div>
                   {getStatusBadge(sessionDetail.status)}
                 </div>
                 <div className="grid grid-cols-3 gap-2 text-[10px] font-mono text-gray-400 bg-gray-900/40 p-2 rounded">
                   <div>
-                    <span className="text-gray-600 block">模型厂商</span>
+                    <span className="text-gray-600 block">{t(K.botLog.modelProvider)}</span>
                     <span className="text-gray-300 truncate block">{sessionDetail.config?.provider || 'default'}</span>
                   </div>
                   <div>
-                    <span className="text-gray-600 block">模型名称</span>
+                    <span className="text-gray-600 block">{t(K.botLog.modelName)}</span>
                     <span className="text-gray-300 truncate block">{sessionDetail.config?.model_name || 'default'}</span>
                   </div>
                   <div>
-                    <span className="text-gray-600 block">消费估算</span>
+                    <span className="text-gray-600 block">{t(K.botLog.costEstimate)}</span>
                     <span className="text-emerald-500 block">${sessionDetail.cost_usd?.toFixed(4) || '0.0000'}</span>
                   </div>
                 </div>
@@ -486,7 +489,7 @@ export default function BotLogPanel({ groupId, onClose }) {
                   activeTab === 'messages' ? 'text-indigo-400 border-indigo-500 bg-indigo-500/5' : 'text-gray-500 border-transparent hover:text-gray-300'
                 }`}
               >
-                💬 LLM 交互链 ({sessionDetail?.last_snapshot?.length || 0})
+                {t(K.botLog.tabMessages)} ({sessionDetail?.last_snapshot?.length || 0})
               </button>
               <button
                 onClick={() => setActiveTab('events')}
@@ -494,20 +497,20 @@ export default function BotLogPanel({ groupId, onClose }) {
                   activeTab === 'events' ? 'text-indigo-400 border-indigo-500 bg-indigo-500/5' : 'text-gray-500 border-transparent hover:text-gray-300'
                 }`}
               >
-                ⛓️ 工具链轨迹 ({events.length})
+                {t(K.botLog.tabEvents)} ({events.length})
               </button>
             </div>
 
             {/* Tab Panels */}
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
               {loadingDetail && (
-                <div className="text-center text-xs text-gray-500 py-12">加载详情中...</div>
+                <div className="text-center text-xs text-gray-500 py-12">{t(K.botLog.loadingDetail)}</div>
               )}
 
               {!loadingDetail && activeTab === 'messages' && (
                 <div className="space-y-4">
                   {(!sessionDetail?.last_snapshot || sessionDetail.last_snapshot.length === 0) ? (
-                    <div className="text-center text-xs text-gray-600 py-12">暂无 LLM 交互消息快照</div>
+                    <div className="text-center text-xs text-gray-600 py-12">{t(K.botLog.noMessages)}</div>
                   ) : (
                     sessionDetail.last_snapshot.map((msg, idx) => {
                       const isUser = msg.role === 'user'
@@ -520,7 +523,7 @@ export default function BotLogPanel({ groupId, onClose }) {
                         roleLabel = 'User Prompt'
                         roleClass = 'bg-indigo-950/40 text-indigo-200 border-indigo-900/50'
                       } else if (isAssistant) {
-                        roleLabel = msg.streaming ? 'LLM Assistant (正在生成...)' : 'LLM Assistant'
+                        roleLabel = msg.streaming ? t(K.botLog.streaming) : 'LLM Assistant'
                         roleClass = 'bg-emerald-950/20 text-emerald-300 border-emerald-900/40'
                       } else if (isTool) {
                         roleLabel = `Tool Result: ${msg.name}`
@@ -539,11 +542,11 @@ export default function BotLogPanel({ groupId, onClose }) {
                                 onClick={() => toggleExpand(`msg-${idx}`)}
                                 className="text-indigo-400 hover:text-indigo-300 text-[10px]"
                               >
-                                {isExpanded ? '折叠 ➖' : '展开 ➕'}
+                                {isExpanded ? t(K.botLog.collapseBtn) : t(K.botLog.expandBtn)}
                               </button>
                             )}
                           </div>
-                          
+
                           {/* Content Body */}
                           <div className="p-3 text-xs leading-relaxed whitespace-pre-wrap select-text">
                             {isAssistant && msg.content && (
@@ -552,7 +555,7 @@ export default function BotLogPanel({ groupId, onClose }) {
 
                             {isAssistant && msg.tool_calls && (
                               <div className="mt-2 space-y-2">
-                                <p className="text-[10px] text-emerald-500 font-semibold">🔧 拟调用工具:</p>
+                                <p className="text-[10px] text-emerald-500 font-semibold">{t(K.botLog.toolsPending)}</p>
                                 {msg.tool_calls.map((tc, tcIdx) => (
                                   <div key={tcIdx} className="bg-black/35 p-2 rounded font-mono text-[11px] text-gray-400 space-y-1">
                                     <div className="text-indigo-400 font-bold">{tc.function?.name}</div>
@@ -570,8 +573,8 @@ export default function BotLogPanel({ groupId, onClose }) {
                                   <pre className="overflow-x-auto text-[10px] bg-black/30 p-2 rounded">{msg.content}</pre>
                                 ) : (
                                   <div className="text-gray-500 italic">
-                                    {msg.content?.slice(0, 150) || '(空结果)'}
-                                    {msg.content?.length > 150 && ' ... (已折叠)'}
+                                    {msg.content?.slice(0, 150) || t(K.botLog.emptyCollapsed)}
+                                    {msg.content?.length > 150 && t(K.botLog.collapsedSuffix)}
                                   </div>
                                 )}
                               </div>
@@ -591,7 +594,7 @@ export default function BotLogPanel({ groupId, onClose }) {
               {!loadingDetail && activeTab === 'events' && (
                 <div className="relative border-l border-gray-800 ml-2.5 pl-4 space-y-5 py-2">
                   {events.length === 0 ? (
-                    <div className="text-center text-xs text-gray-600 py-12 -ml-4">暂无工具运行轨迹事件</div>
+                    <div className="text-center text-xs text-gray-600 py-12 -ml-4">{t(K.botLog.noEvents)}</div>
                   ) : (
                     events.map((ev, idx) => {
                       const isStart = ev.event_type === 'session_start'
@@ -603,11 +606,11 @@ export default function BotLogPanel({ groupId, onClose }) {
                       let icon = '•'
                       let color = 'bg-gray-700'
                       let title = ev.event_type
-                      if (isStart) { icon = '🏁'; color = 'bg-blue-600'; title = '会话启动' }
-                      else if (isCall) { icon = '🔧'; color = 'bg-amber-600'; title = `调用工具: ${ev.payload?.tool_name}` }
-                      else if (isResult) { icon = '✅'; color = ev.payload?.is_error ? 'bg-red-600' : 'bg-green-600'; title = `工具结果: ${ev.payload?.tool_name}` }
-                      else if (isFork) { icon = '🔱'; color = 'bg-purple-600'; title = `分叉子任务: ${ev.payload?.skill_name}` }
-                      else if (isJoin) { icon = '🤝'; color = 'bg-indigo-600'; title = `合并子任务: ${ev.payload?.skill_name}` }
+                      if (isStart) { icon = '🏁'; color = 'bg-blue-600'; title = t(K.botLog.eventSessionStart) }
+                      else if (isCall) { icon = '🔧'; color = 'bg-amber-600'; title = t(K.botLog.eventToolCall, { name: ev.payload?.tool_name }) }
+                      else if (isResult) { icon = '✅'; color = ev.payload?.is_error ? 'bg-red-600' : 'bg-green-600'; title = t(K.botLog.eventToolResult, { name: ev.payload?.tool_name }) }
+                      else if (isFork) { icon = '🔱'; color = 'bg-purple-600'; title = t(K.botLog.eventFork, { name: ev.payload?.skill_name }) }
+                      else if (isJoin) { icon = '🤝'; color = 'bg-indigo-600'; title = t(K.botLog.eventJoin, { name: ev.payload?.skill_name }) }
 
                       const isExpanded = expandedItems.has(`ev-${ev.id}`)
 
@@ -617,7 +620,7 @@ export default function BotLogPanel({ groupId, onClose }) {
                           <div className={`absolute -left-[22.5px] top-0.5 w-4 h-4 rounded-full flex items-center justify-center text-[9px] text-white font-bold ${color}`}>
                             {icon}
                           </div>
-                          
+
                           {/* Event info block */}
                           <div className="space-y-1">
                             <div className="flex items-center justify-between gap-2">
@@ -653,7 +656,7 @@ export default function BotLogPanel({ groupId, onClose }) {
                                     onClick={() => toggleExpand(`ev-${ev.id}`)}
                                     className="text-indigo-400 hover:text-indigo-300 text-[10px]"
                                   >
-                                    {isExpanded ? '收起 ➖' : '展开 ➕'}
+                                    {isExpanded ? t(K.botLog.collapseResult) : t(K.botLog.expandResult)}
                                   </button>
                                 </div>
                                 {isExpanded ? (
@@ -662,7 +665,7 @@ export default function BotLogPanel({ groupId, onClose }) {
                                   </pre>
                                 ) : (
                                   <p className="text-xs text-gray-500 italic font-mono truncate">
-                                    {ev.payload.result || '(空)'}
+                                    {ev.payload.result || t(K.botLog.empty)}
                                   </p>
                                 )}
                               </div>
@@ -671,10 +674,10 @@ export default function BotLogPanel({ groupId, onClose }) {
                             {/* Fork/Join details */}
                             {(isFork || isJoin) && ev.payload?.child_session_id && (
                               <div className="bg-gray-900/60 p-2 rounded border border-gray-800 text-[10px] text-gray-500 font-mono">
-                                <div>子任务会话 ID: {ev.payload.child_session_id}</div>
+                                <div>{t(K.botLog.childSessionId, { id: ev.payload.child_session_id })}</div>
                                 {isJoin && ev.payload.result && (
                                   <div className="mt-1">
-                                    <div className="text-gray-600">结果摘要:</div>
+                                    <div className="text-gray-600">{t(K.botLog.resultSummary)}</div>
                                     <div className="text-gray-400 italic line-clamp-1">{ev.payload.result}</div>
                                   </div>
                                 )}
