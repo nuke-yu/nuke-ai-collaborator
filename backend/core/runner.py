@@ -8,6 +8,7 @@ core/runner.py — 编排层与执行层之间的胶水
   4. 按返回值施加副作用（广播系统消息 / WorkflowUpdate / 调度下一批单元）
 """
 import asyncio
+import dataclasses
 import json
 import logging
 
@@ -86,6 +87,14 @@ async def mark_gate_confirmed(group_id: int, gate_id: str) -> None:
         log.warning("mark_gate_confirmed failed for gate %s (group %s)", gate_id, group_id, exc_info=True)
 
 
+_WORKFLOW_UPDATE_FIELDS = {f.name for f in dataclasses.fields(WorkflowUpdate)}
+
+
+async def _publish_workflow_state(group_id: int, orch) -> None:
+    snap = {k: v for k, v in orch.snapshot(group_id).items() if k in _WORKFLOW_UPDATE_FIELDS}
+    await bus.publish(WorkflowUpdate(group_id=group_id, **snap))
+
+
 async def apply_step(group_id: int, orch, step) -> None:
     """把 OrchestratorStep 翻译成副作用。编排层决定，runner 执行。"""
     for ann in step.announcements:
@@ -93,10 +102,7 @@ async def apply_step(group_id: int, orch, step) -> None:
     if step.confirm_gate:
         await _post_confirm_gate(group_id, step.confirm_gate)
     if step.broadcast_state:
-        import dataclasses
-        valid_fields = {f.name for f in dataclasses.fields(WorkflowUpdate)}
-        snap = {k: v for k, v in orch.snapshot(group_id).items() if k in valid_fields}
-        await bus.publish(WorkflowUpdate(group_id=group_id, **snap))
+        await _publish_workflow_state(group_id, orch)
         blob = orch.serialize(group_id)
         if blob is not None:
             await workflow_store.save_state(
@@ -243,10 +249,7 @@ async def resume_workflows(group_id: int | None = None) -> None:
             continue
         # Route subsequent live observe (check_and_advance) to the right orchestrator.
         wf.bind(group_id, orchestrator_id)
-        import dataclasses
-        valid_fields = {f.name for f in dataclasses.fields(WorkflowUpdate)}
-        snap = {k: v for k, v in orch.snapshot(group_id).items() if k in valid_fields}
-        await bus.publish(WorkflowUpdate(group_id=group_id, **snap))
+        await _publish_workflow_state(group_id, orch)
         for unit in orch.resume_units(group_id):
             if unit.executor_id == "tool_loop_v1":
                 log.info("workflow group %s: skip resume of tool_loop_v1 unit (handled by recover_all)",

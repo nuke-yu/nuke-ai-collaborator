@@ -158,34 +158,7 @@ class DiscussionOrchestrator(Orchestrator):
                 )
 
     def snapshot(self, group_id: int) -> dict:
-        s = self._state.get(group_id)
-        if not s:
-            return {"active": False}
-        stages = [
-            {
-                "stage_type": "single",
-                "name": f"Discussion (Round {s['round']}/{s['rounds']})",
-                "avatar_color": "#818cf8",
-            },
-            {
-                "stage_type": "single",
-                "name": f"Summary & Pros/Cons ({s['summarizer'].get('name', 'Summarizer')})",
-                "avatar_color": "#10b981",
-            },
-        ]
-        current = 0 if s["phase"] == "discussion" else 1
-        return {
-            "active": True,
-            "type": "discussion",
-            "stages": stages,
-            "current": current,
-            "round": s["round"],
-            "rounds": s["rounds"],
-            "idx": s["idx"],
-            "phase": s["phase"],
-            "bots": [{"id": b.get("id"), "name": b.get("name", "")} for b in s["bots"]],
-            "summarizer": {"id": s["summarizer"].get("id"), "name": s["summarizer"].get("name", "")},
-        }
+        return self.snapshot_state(self._state.get(group_id))
 
     def snapshot_state(self, state: dict | None) -> dict:
         if not state:

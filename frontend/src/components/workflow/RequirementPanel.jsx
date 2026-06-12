@@ -5,13 +5,13 @@ import { K } from '../../i18n/keys'
 export default function RequirementPanel({ groupBots = [], onStart, onClose }) {
   const { t } = useTranslation()
 
-  // Helper to categorize bots based on roles
+  // Mirror backend _role_family() so default selection matches dispatch.py's auto-pipeline
   const getBotByRoleFamily = (family) => {
     return groupBots.find(b => {
-      const role = (b.role || '').toLowerCase()
-      if (family === 'ba') return role.includes('ba') || role.includes('product') || role.includes('analyst')
-      if (family === 'dev') return role.includes('dev') || role.includes('coder') || role.includes('engineer') || role.includes('programmer')
-      if (family === 'qa') return role.includes('qa') || role.includes('test')
+      const r = (b.role || '').toLowerCase()
+      if (family === 'qa') return ['qa', 'test', 'quality', '测试', '质量'].some(s => r.includes(s))
+      if (family === 'ba') return r === 'ba' || ['business', 'analyst', 'product', 'pm', '需求', '产品', '业务'].some(s => r.includes(s))
+      if (family === 'dev') return ['dev', 'engineer', 'developer', 'code', 'fullstack', 'full-stack', 'frontend', 'backend', '开发', '工程', '前端', '后端'].some(s => r.includes(s))
       return false
     })
   }
