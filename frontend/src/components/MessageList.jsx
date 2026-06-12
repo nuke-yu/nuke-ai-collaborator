@@ -1,6 +1,8 @@
-import { Fragment } from 'react'
+import { Fragment, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { K } from '../i18n/keys'
+
+const EMPTY_REACTIONS = {}
 import MessageBubble from './MessageBubble'
 import ThinkingSection from './ThinkingSection'
 import ToolProgressBlock from './ToolProgressBlock'
@@ -31,6 +33,7 @@ export default function MessageList({
   const toolProgressBlocks = useChatStore((s) => s.toolProgressBlocks)
   const memberId = useGroupStore((s) => s.activeMemberId)
   const { t } = useTranslation()
+  const pinsSet = useMemo(() => new Set(pins.map(p => p.id)), [pins])
   return (
     <div
       ref={scrollRef}
@@ -128,9 +131,9 @@ export default function MessageList({
                 members={members}
                 readMap={readMap}
                 onReply={onReply}
-                reactions={reactionMap[String(msg.id)] || {}}
+                reactions={reactionMap[String(msg.id)] || EMPTY_REACTIONS}
                 onReact={(emoji) => onReact(msg.id, emoji)}
-                isPinned={pins.some(p => p.id === msg.id)}
+                isPinned={pinsSet.has(msg.id)}
                 onPin={(id) => onPin(id)}
                 onUnpin={(id) => onUnpin(id)}
                 highlighted={msg.id === highlightedId}

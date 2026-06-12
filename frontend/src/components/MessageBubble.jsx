@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback, memo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { K } from '../i18n/keys'
 import ReactMarkdown from 'react-markdown'
@@ -208,7 +208,7 @@ const stripSentinels = (text) =>
     ? text.replace(/[\[【]{1,2}\s*[A-Za-z_]*_DONE\s*[\]】]{1,2}/g, '').replace(/\n{3,}/g, '\n\n').trim()
     : text
 
-export default function MessageBubble({ msg, isTyping, currentMemberId, members = [], readMap = {}, onReply, reactions = {}, onReact, isPinned, onPin, onUnpin, highlighted = false, onConfirmGate }) {
+function MessageBubble({ msg, isTyping, currentMemberId, members = [], readMap = {}, onReply, reactions = {}, onReact, isPinned, onPin, onUnpin, highlighted = false, onConfirmGate }) {
   const { t, i18n } = useTranslation()
   const [editing, setEditing] = useState(false)
   const [editText, setEditText] = useState(msg.content)
@@ -468,3 +468,17 @@ export default function MessageBubble({ msg, isTyping, currentMemberId, members 
     </div>
   )
 }
+
+function areEqual(prev, next) {
+  return (
+    prev.msg === next.msg &&
+    prev.highlighted === next.highlighted &&
+    prev.isPinned === next.isPinned &&
+    prev.reactions === next.reactions &&
+    prev.currentMemberId === next.currentMemberId &&
+    prev.isTyping === next.isTyping
+    // callbacks intentionally excluded: same behavior across renders
+  )
+}
+
+export default memo(MessageBubble, areEqual)
