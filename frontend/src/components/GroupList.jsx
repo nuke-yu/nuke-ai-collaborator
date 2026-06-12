@@ -174,6 +174,9 @@ export default function GroupList({
                       {(onlineSet.has(m.id) || m.type === 'bot') && <span className="absolute -bottom-px -right-px w-1.5 h-1.5 bg-green-400 rounded-full border border-gray-900" />}
                     </div>
                     <span className={`text-xs truncate flex-1 ${(onlineSet.has(m.id) || m.type === 'bot') ? 'text-gray-300' : 'text-gray-500'}`}>{m.name}</span>
+                    {m.type !== 'bot' && (
+                      <span className="group-hover:hidden text-xs text-gray-600 flex-shrink-0">👤</span>
+                    )}
                     {m.type === 'bot' && (
                       <>
                         {skillDraftBots.has(m.id)
