@@ -342,12 +342,12 @@ class ToolLoopRunner:
         return prefix, text
 
     async def _build_reinject(self) -> str:
-        fresh_prefix, fresh_text = await self._get_fresh_context_prefix()
+        fresh_prefix, _ = await self._get_fresh_context_prefix()
         ft_xml = compact.build_file_tracker_xml(self.file_tracker)
         file_contents = compact.build_file_contents_for_reinject(
             self.file_tracker, workspace_dir=str(_bot_ws(self.bot["id"], self.ctx.group_id))
         )
-        parts = [p for p in [fresh_text, ft_xml, file_contents] if p]
+        parts = [p for p in [fresh_prefix, ft_xml, file_contents] if p]
         return "\n\n".join(parts)
 
     async def _stream_final(self):

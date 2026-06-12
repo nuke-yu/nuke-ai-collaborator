@@ -39,7 +39,15 @@ class TestDynamicContext(unittest.IsolatedAsyncioTestCase):
             await db.execute("INSERT INTO members (id, group_id, name, type, role) VALUES (1, 1, 'WorkerBot', 'bot', 'dev')")
             await db.commit()
 
+        # Prevent _ws.load_group_context from hitting the real filesystem
+        self._load_group_ctx_patcher = patch(
+            "executors.plugins.tool_loop_v1._ws.load_group_context",
+            new=AsyncMock(return_value=""),
+        )
+        self._load_group_ctx_patcher.start()
+
     async def asyncTearDown(self):
+        self._load_group_ctx_patcher.stop()
         _db_mod.DB_PATH = self._orig
         if os.path.exists(_TEST_DB):
             os.remove(_TEST_DB)
