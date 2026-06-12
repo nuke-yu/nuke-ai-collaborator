@@ -4,6 +4,7 @@ import sys
 import json
 import time
 import re
+import aiosqlite
 
 from executors.base import (
     BotExecutor, ExecutionContext, ExecutionResult,
@@ -411,12 +412,11 @@ class ToolLoopRunner:
             perm_mode = (self.bot.get("executor_config") or {}).get("permission_mode", "default")
             try:
                 db_rules = await permissions.load_rules(self.bot["id"])
-            except Exception:
+            except aiosqlite.OperationalError:
                 db_rules = []
             self.ruleset = permissions.Ruleset(rules=db_rules, mode=perm_mode)
 
-        is_wf = bool(self.ctx.workflow_suffix)
-        history, user_msg = build_context_message(self.ctx.user_message, self.ctx.sender["name"], self.ctx.history, is_workflow=is_wf)
+        history, user_msg = build_context_message(self.ctx.user_message, self.ctx.sender["name"], self.ctx.history, is_workflow=self.ctx.is_workflow)
         memory = await get_memory_context(self.bot["id"], self.bot.get("role") or "", self.ctx.user_message)
 
         if self.executor.manifest.workspace.skill_discovery:

@@ -21,6 +21,11 @@ from executors import registry as exec_registry
 
 log = logging.getLogger(__name__)
 
+# Sentinel: marks a viewpoints_summary slot that is currently being compressed by
+# another concurrent run_unit task. Prevents duplicate AI calls across tasks
+# spawned in the same discussion round.
+_VIEWPOINT_PENDING = object()
+
 
 async def _post_system_msg(group_id: int, sender_bot_id: int, text: str) -> None:
     # save_message is a WRITE — it must go through the serialized writer
@@ -134,16 +139,12 @@ async def run_unit(group_id: int, unit, orch) -> None:
             return ts.strip()
         normalized_start = norm(start_time_str)
         filtered = []
-        trigger_msg = None
         for msg in reversed(recent):
             created_at = msg.get("created_at") or ""
             if norm(created_at) >= normalized_start:
                 filtered.append(msg)
-            else:
-                if msg.get("sender_type") == "human" and not trigger_msg:
-                    trigger_msg = msg
-        if trigger_msg:
-            filtered.append(trigger_msg)
+            elif msg.get("sender_type") == "human":
+                filtered.append(msg)
         recent = list(reversed(filtered))
 
         # Semantic viewpoint-based compression for older rounds
@@ -163,6 +164,8 @@ async def run_unit(group_id: int, unit, orch) -> None:
                     
                     msg_id_str = str(msg_id)
                     if msg_id_str not in viewpoints_summary:
+                        # Reserve slot before any await so concurrent tasks skip this msg
+                        viewpoints_summary[msg_id_str] = _VIEWPOINT_PENDING
                         content = msg.get("content") or ""
                         if content:
                             try:
@@ -185,15 +188,20 @@ async def run_unit(group_id: int, unit, orch) -> None:
                                 log.warning("Failed to generate viewpoint summary for msg %s: %r", msg_id, e)
                                 summary = content[:100] + "..."
                             viewpoints_summary[msg_id_str] = summary
-                    
-                    cached_summary = viewpoints_summary.get(msg_id_str, msg.get("content") or "")
-                    msg["content"] = f"【此前发言摘要记录：{cached_summary}】"
+                        else:
+                            del viewpoints_summary[msg_id_str]
+
+                    cached = viewpoints_summary.get(msg_id_str)
+                    if cached is _VIEWPOINT_PENDING or not cached:
+                        cached = msg.get("content") or ""
+                    msg["content"] = f"【此前发言摘要记录：{cached}】"
 
     ctx = ExecutionContext(
         bot=unit.bot, group_id=group_id, user_message=unit.trigger_msg,
         sender={"name": "系统"}, history=recent,
         all_bots=all_bots, all_members=members,
         workflow_suffix=unit.prompt_suffix,
+        is_workflow=unit.is_workflow,
         # Side-effect dispatcher: broadcasts via the bus + persists via the writer.
         # (Executors default this themselves when None, but wiring it here makes the
         # workflow path explicit and testable.)

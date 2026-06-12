@@ -241,7 +241,7 @@ class DeclarativeOrchestrator(Orchestrator):
                 suffix = self.system_suffix(group_id)
                 return OrchestratorStep(next_units=[
                     WorkUnit(bot=b, executor_id=(b.get("executor_id") or "tool_loop_v1"),
-                             trigger_msg=content, prompt_suffix=suffix)
+                             trigger_msg=content, prompt_suffix=suffix, is_workflow=True)
                     for b in participant_bots
                 ])
 

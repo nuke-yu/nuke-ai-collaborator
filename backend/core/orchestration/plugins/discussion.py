@@ -23,6 +23,7 @@ class DiscussionOrchestrator(Orchestrator):
             bot=bot,
             executor_id="tool_loop_v1",
             prompt_suffix=self.system_suffix(group_id),
+            is_workflow=True,
         )
 
     def _step_to_current(self, group_id: int) -> OrchestratorStep:

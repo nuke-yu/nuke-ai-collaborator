@@ -109,6 +109,7 @@ class ExecutionContext:
     interaction: InteractionAdapter = None  # Point 3: Side-effect dispatcher
     active_ticket_id: str | None = None      # Point 4: Current Jira ticket being worked on
     workflow_suffix: str = ""
+    is_workflow: bool = False
     group_name: str = ""
     group_announcement: str = ""
     steer_channel: asyncio.Queue | None = None

@@ -19,6 +19,7 @@ class WorkUnit:
     executor_id: str = "tool_loop_v1"      # 轴2：每个单元自己选执行插件
     trigger_msg: str = ""               # 触发语 → ExecutionContext.user_message
     prompt_suffix: str = ""             # 阶段指令 → ExecutionContext.workflow_suffix
+    is_workflow: bool = False           # 由编排器创建的单元设为 True → ExecutionContext.is_workflow
     tag: dict = field(default_factory=dict)  # 编排私有记账（ticket 等），不进执行层
 
 

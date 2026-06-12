@@ -1290,9 +1290,12 @@ class TestWorkflowHistoryFiltering(unittest.IsolatedAsyncioTestCase):
             
         self.assertIsNotNone(intercepted_ctx)
         history = intercepted_ctx.history
-        self.assertEqual(len(history), 2)
-        self.assertEqual(history[0]["id"], 4)
-        self.assertEqual(history[1]["id"], 5)
+        # All pre-start human messages (id=2, id=4) plus post-start messages (id=5)
+        # are retained; pre-start bot messages are dropped.
+        self.assertEqual(len(history), 3)
+        self.assertEqual(history[0]["id"], 2)
+        self.assertEqual(history[1]["id"], 4)
+        self.assertEqual(history[2]["id"], 5)
 
     async def test_workflow_history_compression(self):
         from core.role_router import build_context_message
