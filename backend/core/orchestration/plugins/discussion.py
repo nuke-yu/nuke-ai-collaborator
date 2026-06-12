@@ -83,9 +83,33 @@ class DiscussionOrchestrator(Orchestrator):
             "round": 1,
             "phase": "discussion",
             "summarizer": summarizer,
+            "started": False,   # wait for user to send the topic first
             "start_time": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
         }
-        return self._step_to_current(group_id)
+        # Do NOT dispatch here — wait for user's first message (the topic)
+        return OrchestratorStep(broadcast_state=True)
+
+    async def dispatch(self, group_id: int, message: dict, members: list, recent: list) -> OrchestratorStep:
+        """User's first message after start becomes the discussion topic trigger."""
+        s = self._state.get(group_id)
+        if not s:
+            return OrchestratorStep()
+        if s.get("started"):
+            # Discussion is running autonomously; ignore further user messages
+            return OrchestratorStep()
+        content = (message.get("content") or "").strip()
+        if not content:
+            return OrchestratorStep()
+        s["started"] = True
+        bot = s["bots"][s["idx"]]
+        unit = WorkUnit(
+            bot=bot,
+            executor_id="tool_loop_v1",
+            trigger_msg=content,
+            prompt_suffix=self.system_suffix(group_id),
+            is_workflow=True,
+        )
+        return OrchestratorStep(next_units=[unit], broadcast_state=True)
 
     def observe(self, group_id: int, bot_id: int, response: str) -> OrchestratorStep:
         s = self._state.get(group_id)
@@ -199,7 +223,7 @@ class DiscussionOrchestrator(Orchestrator):
 
     def resume_units(self, group_id: int) -> list:
         s = self._state.get(group_id)
-        if not s:
+        if not s or not s.get("started"):
             return []
         bot = s["summarizer"] if s["phase"] == "summary" else s["bots"][s["idx"]]
         return [self._unit(group_id, bot)]

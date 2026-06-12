@@ -802,15 +802,16 @@ class TestRoundRobinOrchestrator(unittest.TestCase):
         self.orch = RoundRobinOrchestrator()
         self.bots = [{"id": 1, "name": "A"}, {"id": 2, "name": "B"}]
 
-    def test_begin_dispatches_first_speaker(self):
+    def test_begin_waits_for_topic(self):
+        # begin() must NOT dispatch any bot — waits for user's first message
         step = self.orch.begin(10, {"bots": self.bots, "rounds": 2})
         self.assertTrue(step.broadcast_state)
-        self.assertEqual(len(step.next_units), 1)
-        self.assertEqual(step.next_units[0].bot["id"], 1)
+        self.assertEqual(len(step.next_units), 0)
         self.assertEqual(self.orch.current_bot(10)["id"], 1)
 
     def test_observe_rotates_and_wraps_rounds(self):
         self.orch.begin(11, {"bots": self.bots, "rounds": 2})
+        self.orch._state[11]["started"] = True  # simulate dispatch() called
         s1 = self.orch.observe(11, 1, "r1 a")
         self.assertEqual(s1.next_units[0].bot["id"], 2)       # 轮到 B
         s2 = self.orch.observe(11, 2, "r1 b")                  # B 说完 → 第2轮 A
@@ -820,6 +821,7 @@ class TestRoundRobinOrchestrator(unittest.TestCase):
 
     def test_done_after_all_rounds(self):
         self.orch.begin(12, {"bots": self.bots, "rounds": 1})
+        self.orch._state[12]["started"] = True
         self.orch.observe(12, 1, "a")
         step = self.orch.observe(12, 2, "b")                   # 1 轮跑满
         self.assertTrue(step.done)
@@ -827,12 +829,14 @@ class TestRoundRobinOrchestrator(unittest.TestCase):
 
     def test_observe_ignores_wrong_bot(self):
         self.orch.begin(13, {"bots": self.bots, "rounds": 1})
+        self.orch._state[13]["started"] = True
         step = self.orch.observe(13, 2, "B 抢话")              # 当前应是 A
         self.assertEqual(step.next_units, [])
         self.assertEqual(self.orch.current_bot(13)["id"], 1)
 
     def test_serialize_restore_resume(self):
         self.orch.begin(14, {"bots": self.bots, "rounds": 3})
+        self.orch._state[14]["started"] = True  # simulate dispatch() called
         self.orch.observe(14, 1, "a")                          # 游标到 B
         blob = self.orch.serialize(14)
         import json
@@ -852,16 +856,17 @@ class TestDiscussionOrchestrator(unittest.TestCase):
         self.orch = DiscussionOrchestrator()
         self.bots = [{"id": 1, "name": "A"}, {"id": 2, "name": "B"}]
 
-    def test_begin_dispatches_first_speaker(self):
+    def test_begin_waits_for_topic(self):
+        # begin() must NOT dispatch any bot — waits for user's first message
         step = self.orch.begin(20, {"bots": self.bots, "rounds": 2, "summarizer_id": 2})
         self.assertTrue(step.broadcast_state)
-        self.assertEqual(len(step.next_units), 1)
-        self.assertEqual(step.next_units[0].bot["id"], 1)
+        self.assertEqual(len(step.next_units), 0)
         self.assertEqual(self.orch.current_bot(20)["id"], 1)
 
     def test_observe_rotates_discussion_and_transitions_to_summary(self):
         self.orch.begin(21, {"bots": self.bots, "rounds": 1, "summarizer_id": 2})
-        
+        self.orch._state[21]["started"] = True  # simulate dispatch() called
+
         # Round 1 - Bot A speaks
         s1 = self.orch.observe(21, 1, "r1 a")
         self.assertEqual(s1.next_units[0].bot["id"], 2)       # Then Bot B
@@ -880,8 +885,9 @@ class TestDiscussionOrchestrator(unittest.TestCase):
 
     def test_serialize_restore_resume(self):
         self.orch.begin(22, {"bots": self.bots, "rounds": 2, "summarizer_id": 1})
+        self.orch._state[22]["started"] = True  # simulate dispatch() called
         self.orch.observe(22, 1, "a")                          # Cursor to B
-        
+
         blob = self.orch.serialize(22)
         fresh = type(self.orch)()
         fresh.restore(22, blob)
