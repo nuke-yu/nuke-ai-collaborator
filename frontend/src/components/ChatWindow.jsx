@@ -268,6 +268,9 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
         setGroup(group)
         setMembers(finalMembers)
         setMembersCache(prev => ({ ...prev, [activeGroupId]: finalMembers }))
+        setGroups(prev => prev.map(g =>
+          g.id === activeGroupId ? { ...g, member_count: finalMembers.length } : g
+        ))
         if (userMember) {
           setActiveMemberId(userMember.id)
         } else {
