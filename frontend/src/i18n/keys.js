@@ -29,6 +29,7 @@ export const K = {
   app: {
     title: 'app.title',
     joinGroup: {
+      title: 'app.joinGroup.title',
       subtitle: 'app.joinGroup.subtitle',
       namePlaceholder: 'app.joinGroup.namePlaceholder',
       submit: 'app.joinGroup.submit',
@@ -36,11 +37,13 @@ export const K = {
   },
   auth: {
     login: {
+      appTitle: 'auth.login.appTitle',
       title: 'auth.login.title',
       subtitle: 'auth.login.subtitle',
       username: 'auth.login.username',
       password: 'auth.login.password',
       button: 'auth.login.button',
+      loading: 'auth.login.loading',
       switchToRegister: 'auth.login.switchToRegister',
     },
     register: {
@@ -49,6 +52,7 @@ export const K = {
       email: 'auth.register.email',
       button: 'auth.register.button',
       switchToLogin: 'auth.register.switchToLogin',
+      successMessage: 'auth.register.successMessage',
     },
   },
   sidebar: {

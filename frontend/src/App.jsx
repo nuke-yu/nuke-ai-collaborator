@@ -1,10 +1,13 @@
 import Login from './components/Login'
 import ErrorBoundary from './components/ErrorBoundary'
 import { useState, useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
 import { addMember } from './api'
 import ChatWindow from './components/ChatWindow'
+import { K } from './i18n/keys'
 
 export default function App() {
+  const { t } = useTranslation()
   const [token, setToken] = useState(() => localStorage.getItem('token'))
   const [memberId, setMemberId] = useState(() => {
     const saved = localStorage.getItem('memberId')
@@ -24,11 +27,11 @@ export default function App() {
     const themeClasses = ['theme-default-dark', 'theme-elegant-light', 'theme-elevenlabs', 'theme-hsbc', 'theme-cyberpunk', 'theme-glass']
     themeClasses.forEach(cls => document.documentElement.classList.remove(cls))
     document.documentElement.classList.add(`theme-${theme}`)
-    
+
     // For general compatibility with light/dark utilities in plugins
     const isLight = theme === 'elegant-light' || theme === 'hsbc'
     document.documentElement.classList.toggle('light', isLight)
-    
+
     localStorage.setItem('app-theme', theme)
   }, [theme])
 
@@ -55,11 +58,11 @@ export default function App() {
     return (
       <div className="h-screen bg-gray-900 flex items-center justify-center">
         <div className="bg-gray-800 rounded-2xl p-8 w-80 shadow-xl">
-          <h1 className="text-white text-xl font-bold mb-2">AI 协作工作区</h1>
-          <p className="text-gray-400 text-sm mb-6">输入你的名字加入群组</p>
+          <h1 className="text-white text-xl font-bold mb-2">{t(K.app.joinGroup.title)}</h1>
+          <p className="text-gray-400 text-sm mb-6">{t(K.app.joinGroup.subtitle)}</p>
           <input
             className="w-full bg-gray-700 text-white rounded-lg px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-indigo-500 mb-4"
-            placeholder="你的名字"
+            placeholder={t(K.app.joinGroup.namePlaceholder)}
             value={name}
             onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleJoin()}
@@ -69,7 +72,7 @@ export default function App() {
             onClick={handleJoin}
             className="w-full bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg py-2.5 text-sm font-medium transition-colors"
           >
-            加入
+            {t(K.app.joinGroup.submit)}
           </button>
         </div>
       </div>

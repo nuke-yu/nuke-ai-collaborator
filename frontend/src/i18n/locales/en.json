@@ -29,6 +29,7 @@
   "app": {
     "title": "Nuke AI Collaborator",
     "joinGroup": {
+      "title": "AI Collaboration Workspace",
       "subtitle": "Enter your username to join a group",
       "namePlaceholder": "Username",
       "submit": "Join"
@@ -36,11 +37,13 @@
   },
   "auth": {
     "login": {
+      "appTitle": "AI Collaboration Platform",
       "title": "Welcome back",
       "subtitle": "Sign in to your account",
       "username": "Username",
       "password": "Password",
       "button": "Login",
+      "loading": "Processing...",
       "switchToRegister": "No account? Register"
     },
     "register": {
@@ -48,7 +51,8 @@
       "subtitle": "Join Nuke AI Collaborator",
       "email": "Email (optional)",
       "button": "Register",
-      "switchToLogin": "Already have an account? Login"
+      "switchToLogin": "Already have an account? Login",
+      "successMessage": "Registration successful, please log in"
     }
   },
   "sidebar": {

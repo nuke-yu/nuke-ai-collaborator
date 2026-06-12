@@ -29,6 +29,7 @@
   "app": {
     "title": "Nuke AI Collaborator",
     "joinGroup": {
+      "title": "AI 协作工作区",
       "subtitle": "请输入您的用户名以加入群组",
       "namePlaceholder": "用户名",
       "submit": "加入"
@@ -36,11 +37,13 @@
   },
   "auth": {
     "login": {
+      "appTitle": "AI 协作平台",
       "title": "欢迎回来",
       "subtitle": "登录到你的账号",
       "username": "用户名",
       "password": "密码",
       "button": "登录",
+      "loading": "正在处理...",
       "switchToRegister": "还没有账号？注册"
     },
     "register": {
@@ -48,7 +51,8 @@
       "subtitle": "加入 Nuke AI Collaborator",
       "email": "邮箱（可选）",
       "button": "注册",
-      "switchToLogin": "已有账号？登录"
+      "switchToLogin": "已有账号？登录",
+      "successMessage": "注册成功，请登录"
     }
   },
   "sidebar": {
