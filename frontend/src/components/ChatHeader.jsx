@@ -61,18 +61,11 @@ export default function ChatHeader({
       )}
       <div className="ml-auto flex items-center gap-1">
         {members.some(m => m.type === 'bot') && !workflow?.active && (
-          <>
-            <button
-              onClick={() => onStartRequirement?.()}
-              className="text-xs px-2 py-1 rounded text-indigo-300 hover:text-white hover:bg-indigo-600/40 transition-colors"
-              title={t(K.chat.header.startRequirementTitle)}
-            >📋 {t(K.chat.header.startRequirement)}</button>
-            <button
-              onClick={() => onShowWorkflowStart()}
-              className="text-xs px-2 py-1 rounded text-indigo-300 hover:text-white hover:bg-indigo-600/40 transition-colors"
-              title={t(K.chat.header.startWorkflowTitle)}
-            >💬 {t(K.workflow.tabDiscussion)}</button>
-          </>
+          <button
+            onClick={() => onShowWorkflowStart()}
+            className="text-xs px-2 py-1 rounded text-indigo-300 hover:text-white hover:bg-indigo-600/40 transition-colors"
+            title={t(K.chat.header.startWorkflowTitle)}
+          >⚡ {t(K.workflow.titleLabel) || '工作流'}</button>
         )}
         <button
           onClick={async () => { const s = await fetchGroupStats(activeGroupId); onShowStats(s); }}

@@ -280,3 +280,22 @@ class DeclarativeOrchestrator(Orchestrator):
             for b in target_bots
         ])
 
+    def parse_spec(self, body: dict, all_bots: dict[int, dict]) -> dict:
+        stages_cfg = body.get("stages", [])
+        ordered = []
+        for cfg in stages_cfg:
+            if "pool" in cfg:
+                pool_bots = [all_bots[b["bot_id"]] for b in cfg["pool"] if b["bot_id"] in all_bots]
+                if pool_bots:
+                    ordered.append({
+                        "stage_type": "pool", "bots": pool_bots,
+                        "done_keyword": cfg.get("done_keyword", "完毕"),
+                        "in_progress": {}, "completed_tickets": [],
+                        "ticket_queue": [], "idle_bots": [],
+                    })
+            else:
+                bot = all_bots.get(cfg.get("bot_id"))
+                if bot:
+                    ordered.append({**bot, "stage_type": "single", "done_keyword": cfg.get("done_keyword", "完毕")})
+        return {"stages": ordered}
+

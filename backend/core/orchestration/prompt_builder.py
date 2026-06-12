@@ -37,8 +37,8 @@ async def compile_system_prompt(
     ]
     
     # B1: Retrieve current workflow stage and awaiting_confirm state
-    from core.orchestration import registry as orch_registry
-    orch = orch_registry.get("workflow_v1")
+    import core.workflow as wf
+    orch = wf._orch_for(ctx.group_id)
     
     current_stage = orch.current_stage_role(ctx.group_id) if orch else None
     is_awaiting_confirm = orch.is_awaiting_confirm(ctx.group_id) if orch else False

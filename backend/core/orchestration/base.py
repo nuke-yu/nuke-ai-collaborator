@@ -122,5 +122,9 @@ class Orchestrator(ABC):
         """工作流启动的 UTC 时间字符串，格式 'YYYY-MM-DD HH:MM:SS' (或 None)"""
         return None
 
+    def parse_spec(self, body: dict, all_bots: dict[int, dict]) -> dict:
+        """从前端 payload 的 body 中解析并还原出适合本编排器的 spec。"""
+        return body.get("spec", {})
+
     def info(self) -> dict:
         return {"orchestrator_id": self.orchestrator_id}

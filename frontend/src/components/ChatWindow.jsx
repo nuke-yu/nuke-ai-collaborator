@@ -582,7 +582,6 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
           members={members}
           reconnecting={reconnecting}
           workflow={workflow}
-          onStartRequirement={() => sendRaw({ type: 'start_workflow', group_id: activeGroupId, lang: localStorage.getItem('lang') || 'zh' })}
           onShowSearch={() => { setShowSearch(s => !s); setShowBotLogs(false); }}
           onShowBotLogs={() => { setShowBotLogs(s => !s); setShowSearch(false); }}
           onShowStats={(s) => { setStats(s); setShowStats(true); }}

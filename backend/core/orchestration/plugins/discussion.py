@@ -234,3 +234,9 @@ class DiscussionOrchestrator(Orchestrator):
     def start_time(self, group_id: int) -> str | None:
         s = self._state.get(group_id)
         return s.get("start_time") if s else None
+
+    def parse_spec(self, body: dict, all_bots: dict[int, dict]) -> dict:
+        spec = dict(body.get("spec", {}))
+        if "bots" in spec:
+            spec["bots"] = [all_bots[bid] for bid in spec["bots"] if bid in all_bots]
+        return spec
