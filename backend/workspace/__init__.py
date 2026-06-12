@@ -569,44 +569,10 @@ async def init_group_workspace(group_id: int, group_name: str = ""):
     (ws / "prs").mkdir(exist_ok=True)         # PR 记录（固定协调件目录）
     (ws.parent / "runs").mkdir(exist_ok=True)  # workspaces/group_{id}/runs/
 
-    # 创建默认项目目录（所有新群组都有初始项目结构）
-    default_project = ws / "workspace" / "my-app"
-    if not default_project.exists():
-        (default_project).mkdir(parents=True, exist_ok=True)
-        # 创建一个占位 README.md 说明项目结构
-        readme_content = f"""# {group_name or '项目'} · My App
-
-这是群组的默认项目目录。
-
-## 文件说明
-
-- `index.html` - 主页面
-- `style.css` - 样式表
-- `script.js` - JavaScript 逻辑
-
-## 开发流程
-
-1. Dev Bot 在此目录下编写代码
-2. QA Bot 从此处读取代码进行测试
-3. BA Bot 可参考实现验证需求
-
-## 添加新项目
-
-创建子目录即可：
-```bash
-mkdir my-new-project
-touch my-new-project/app.js
-```
-
----
-*此目录由系统自动生成，所有成员 bot 都可以访问。*
-"""
-        (default_project / "README.md").write_text(readme_content, encoding="utf-8")
-
-        # 创建 PROJECTS.md 项目清单（所有 Bot 都可以读取）
-        projects_md = ws / "workspace" / "PROJECTS.md"
-        if not projects_md.exists():
-            projects_content = f"""# 项目清单 · {group_name or '群组'}
+    # 创建 PROJECTS.md 项目清单（空模板，由 Bot 按实际项目填充）
+    projects_md = ws / "workspace" / "PROJECTS.md"
+    if not projects_md.exists():
+        projects_content = f"""# 项目清单 · {group_name or '群组'}
 
 > 记录所有项目的元数据，由 PM/BA Bot 维护。
 
@@ -614,21 +580,6 @@ touch my-new-project/app.js
 
 | 项目名 | 路径 | 负责人 | 状态 | 当前任务 |
 |--------|------|--------|------|----------|
-| my-app | `workspace/my-app/` | Dev | 🟢 开发中 | Phase 1: 基础功能 |
-
-## 项目元数据
-
-### my-app
-
-- **路径**: `workspace/my-app/`
-- **类型**: Web 应用
-- **技术栈**: HTML + CSS + JavaScript
-- **当前版本**: v0.1
-- **负责人**: Dev Bot
-- **测试负责人**: QA Bot
-- **BA 负责人**: BA Bot
-- **状态**: 🟢 开发中
-- **当前迭代**: Phase 1
 
 ### 项目状态说明（Dev / QA 信号机制）
 
@@ -638,28 +589,22 @@ touch my-new-project/app.js
 - ✅ **已完成** - 通过验收，可部署
 
 > **Dev Bot**：完成开发后，必须将本文件中该项目的状态改为 `🟡 待验收`，作为通知 QA 的信号。
-> **QA Bot**：开始测试前，先读本文件，找 `🟡 待验收` 的项目行，取其 **路径** 字段。若工单标题/描述里指定了项目名，优先用工单里的。
+> **QA Bot**：开始测试前，先读本文件，找 `🟡 待验收` 的项目行，取其 **路径** 字段。若工单里指定了项目名，优先用工单里的。
 
 ## QA 测试指引
 
-1. 读本文件**活跃项目**表格，找状态为 `🟡 待验收` 的项目，取得其 **路径** 字段（如 `workspace/<project>/`）
+1. 读本文件**活跃项目**表格，找状态为 `🟡 待验收` 的项目，取得其 **路径** 字段
 2. 查看 [SPEC.md](../SPEC.md) 了解需求和验收标准
 3. 查看 [BOARD.md](../BOARD.md) 了解当前迭代目标
-4. 用 `read_file(path="workspace/<project>/<文件名>")` 读取代码（路径以 `workspace/` 开头，系统自动路由到共享区，不要用 `read_local_file`）
+4. 用 `read_file(path="workspace/<project>/<文件名>")` 读取代码
 5. 用 `run_shell(cmd="...", cwd="workspace/<project>")` 在代码目录执行命令
 6. 将测试结果写入 [docs/test-report.md](../docs/test-report.md)
 
 ## 添加新项目
 
 创建新项目时，在上方表格添加一行，并在 `workspace/` 下创建对应目录。
-
-```bash
-# 示例：创建新项目
-mkdir workspace/my-new-project
-touch workspace/my-new-project/README.md
-```
 """
-            projects_md.write_text(projects_content, encoding="utf-8")
+        projects_md.write_text(projects_content, encoding="utf-8")
 
     display = group_name or f"群组 {group_id}"
     today = date.today().isoformat()
