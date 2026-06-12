@@ -154,7 +154,7 @@ class TestLoadGroupContext(unittest.IsolatedAsyncioTestCase):
             finally:
                 _c.WORKSPACE_ROOT = orig
 
-    async def test_empty_workspace_returns_empty_string(self):
+    async def test_empty_workspace_returns_no_key_docs(self):
         import tempfile, pathlib
         from skills import constants as _c
         orig = _c.WORKSPACE_ROOT

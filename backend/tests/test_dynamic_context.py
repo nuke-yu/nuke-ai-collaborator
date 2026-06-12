@@ -119,8 +119,10 @@ class TestDynamicContext(unittest.IsolatedAsyncioTestCase):
         self.assertIn("ver 5", captured_prompts[2])
 
 class TestGetFreshContextPrefixGroupCtx(unittest.IsolatedAsyncioTestCase):
-    async def test_group_ctx_included_in_prefix(self):
-        """_get_fresh_context_prefix must include shared workspace context when group_id set."""
+    async def test_group_ctx_not_in_per_iter_prefix(self):
+        """_get_fresh_context_prefix must NOT include shared workspace context.
+        Group context is injected once into system_prompt_base during _setup_session,
+        so adding it here would cause it to appear twice in every AI call."""
         import tempfile, pathlib
         from skills import constants as _c
         orig_root = _c.WORKSPACE_ROOT
@@ -150,8 +152,10 @@ class TestGetFreshContextPrefixGroupCtx(unittest.IsolatedAsyncioTestCase):
                 runner.skills_xml = ""
 
                 prefix, _ = await runner._get_fresh_context_prefix()
-                self.assertIn("# Board content", prefix)
-                self.assertIn("【共享工作区目录】", prefix)
+                # Group context must NOT be in the per-iteration prefix to avoid duplication
+                self.assertNotIn("# Board content", prefix)
+                self.assertNotIn("【共享工作区目录】", prefix)
+                self.assertNotIn("【工作看板】", prefix)
             finally:
                 _c.WORKSPACE_ROOT = orig_root
 
