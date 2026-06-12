@@ -209,7 +209,7 @@ const stripSentinels = (text) =>
     : text
 
 export default function MessageBubble({ msg, isTyping, currentMemberId, members = [], readMap = {}, onReply, reactions = {}, onReact, isPinned, onPin, onUnpin, highlighted = false, onConfirmGate }) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const [editing, setEditing] = useState(false)
   const [editText, setEditText] = useState(msg.content)
   const [lightboxSrc, setLightboxSrc] = useState(null)
@@ -279,7 +279,7 @@ export default function MessageBubble({ msg, isTyping, currentMemberId, members 
             <span className="text-sm font-medium text-gray-200">{msg.sender_name}</span>
             <span className="text-xs text-indigo-400 bg-indigo-950/50 rounded px-1 py-0.5">{t(K.message.needsConfirm)}</span>
             <span className="text-xs text-gray-500">
-              {msg.created_at ? new Date(msg.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : ''}
+              {msg.created_at ? new Date(msg.created_at).toLocaleTimeString(i18n.language === 'en' ? 'en-US' : 'zh-CN', { hour: '2-digit', minute: '2-digit' }) : ''}
             </span>
           </div>
           <div className="border border-indigo-500/40 bg-indigo-950/20 rounded-xl px-4 py-3 inline-block max-w-lg">
@@ -314,7 +314,7 @@ export default function MessageBubble({ msg, isTyping, currentMemberId, members 
           <span className="text-sm font-medium text-gray-200">{msg.sender_name}</span>
           {msg.is_auto_reply && <span className="text-xs text-indigo-400 bg-indigo-950/50 rounded px-1 py-0.5">↩ {t(K.message.autoReply)}</span>}
           <span className="text-xs text-gray-500">
-            {msg.created_at ? new Date(msg.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : ''}
+            {msg.created_at ? new Date(msg.created_at).toLocaleTimeString(i18n.language === 'en' ? 'en-US' : 'zh-CN', { hour: '2-digit', minute: '2-digit' }) : ''}
           </span>
           {(msg.input_tokens || msg.output_tokens) && (
             <span className="text-[10px] text-gray-600 hover:text-gray-400 cursor-default transition-colors" title={`${t(K.message.inputTokens)} ${msg.input_tokens ?? 0} tokens · ${t(K.message.outputTokens)} ${msg.output_tokens ?? 0} tokens`}>

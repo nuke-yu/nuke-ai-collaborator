@@ -416,7 +416,13 @@
     "resultSummary": "Result Summary:",
     "empty": "(empty)",
     "emptyCollapsed": "(empty result)",
-    "collapsedSuffix": " ... (collapsed)"
+    "collapsedSuffix": " ... (collapsed)",
+    "roleUser": "User Prompt",
+    "roleLlm": "LLM Assistant",
+    "roleToolResult": "Tool Result: {{name}}",
+    "eventsArguments": "Arguments:",
+    "eventsSuccess": "Success",
+    "eventsFailed": "Execution Failed"
   },
   "permission": {
     "title": "Permission Request",

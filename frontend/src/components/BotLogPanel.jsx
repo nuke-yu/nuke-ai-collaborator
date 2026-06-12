@@ -520,13 +520,13 @@ export default function BotLogPanel({ groupId, onClose }) {
                       let roleLabel = msg.role
                       let roleClass = 'bg-gray-800 text-gray-300 border-gray-700'
                       if (isUser) {
-                        roleLabel = 'User Prompt'
+                        roleLabel = t(K.botLog.roleUser)
                         roleClass = 'bg-indigo-950/40 text-indigo-200 border-indigo-900/50'
                       } else if (isAssistant) {
-                        roleLabel = msg.streaming ? t(K.botLog.streaming) : 'LLM Assistant'
+                        roleLabel = msg.streaming ? t(K.botLog.streaming) : t(K.botLog.roleLlm)
                         roleClass = 'bg-emerald-950/20 text-emerald-300 border-emerald-900/40'
                       } else if (isTool) {
-                        roleLabel = `Tool Result: ${msg.name}`
+                        roleLabel = t(K.botLog.roleToolResult, { name: msg.name })
                         roleClass = 'bg-slate-900 text-slate-300 border-slate-800 font-mono text-[11px]'
                       }
 
@@ -638,7 +638,7 @@ export default function BotLogPanel({ groupId, onClose }) {
                             {/* Tool arguments payload */}
                             {isCall && ev.payload?.arguments && (
                               <div className="bg-gray-900/60 p-2 rounded border border-gray-800 font-mono text-[10px] text-gray-500 space-y-1">
-                                <div className="text-gray-600 font-semibold">Arguments:</div>
+                                <div className="text-gray-600 font-semibold">{t(K.botLog.eventsArguments)}</div>
                                 <pre className="overflow-x-auto text-gray-400">
                                   {JSON.stringify(ev.payload.arguments, null, 2)}
                                 </pre>
@@ -650,7 +650,7 @@ export default function BotLogPanel({ groupId, onClose }) {
                               <div className="bg-gray-900/60 p-2 rounded border border-gray-800 space-y-1 text-[11px]">
                                 <div className="flex justify-between items-center">
                                   <span className={ev.payload.is_error ? 'text-red-400 font-semibold' : 'text-green-400 font-semibold'}>
-                                    {ev.payload.is_error ? 'Execution Failed' : 'Success'}
+                                    {ev.payload.is_error ? t(K.botLog.eventsFailed) : t(K.botLog.eventsSuccess)}
                                   </span>
                                   <button
                                     onClick={() => toggleExpand(`ev-${ev.id}`)}

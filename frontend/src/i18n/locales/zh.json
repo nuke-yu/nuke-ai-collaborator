@@ -416,7 +416,13 @@
     "resultSummary": "结果摘要:",
     "empty": "(空)",
     "emptyCollapsed": "(空结果)",
-    "collapsedSuffix": " ... (已折叠)"
+    "collapsedSuffix": " ... (已折叠)",
+    "roleUser": "用户消息",
+    "roleLlm": "AI 回复",
+    "roleToolResult": "工具返回：{{name}}",
+    "eventsArguments": "参数：",
+    "eventsSuccess": "执行成功",
+    "eventsFailed": "执行失败"
   },
   "permission": {
     "title": "权限请求",

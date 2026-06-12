@@ -417,6 +417,12 @@ export const K = {
     empty: 'botLog.empty',
     emptyCollapsed: 'botLog.emptyCollapsed',
     collapsedSuffix: 'botLog.collapsedSuffix',
+    roleUser: 'botLog.roleUser',
+    roleLlm: 'botLog.roleLlm',
+    roleToolResult: 'botLog.roleToolResult',
+    eventsArguments: 'botLog.eventsArguments',
+    eventsSuccess: 'botLog.eventsSuccess',
+    eventsFailed: 'botLog.eventsFailed',
   },
   permission: {
     title: 'permission.title',
