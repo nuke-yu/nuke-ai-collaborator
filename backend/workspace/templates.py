@@ -300,7 +300,7 @@ MEMORY_TEMPLATE = """# {name} · 长期记忆
 
 BOARD_TEMPLATE = """# 工作看板 · {display}
 
-> 由 {role} Bot 维护，记录迭代任务和工作流。
+> 由 PM Bot 维护，记录迭代任务和工作流。
 
 更新时间：{today}
 
