@@ -140,8 +140,23 @@
     "pin": "Pin",
     "unpin": "Unpin",
     "reply": "Reply",
-    "emoji": "Emoji",
+    "emoji": "More emoji",
     "delete": "Delete",
+    "codeLines": "{{count}} lines",
+    "skillPermanent": "Permanent skill",
+    "skillOnDemand": "On-demand",
+    "autoReply": "Auto reply",
+    "inputTokens": "Input",
+    "outputTokens": "Output",
+    "withdraw": "Withdraw",
+    "withdrawn": "This message was withdrawn",
+    "image": "Image",
+    "download": "Download",
+    "edited": "Edited",
+    "readBy": "Read by",
+    "needsConfirm": "Needs confirmation",
+    "gateRevising": "Chose to modify — just send a message to adjust",
+    "fileAttachment": "[File attachment]",
     "workflow": {
       "confirm": "Confirm",
       "modify": "Modify",
@@ -425,7 +440,17 @@
   },
   "suggestion": {
     "title": "Suggestion",
-    "dismiss": "Dismiss"
+    "dismiss": "Dismiss",
+    "generating": "Generating...",
+    "aiSuggest": "AI Suggestions",
+    "confirmRework": "👍 Confirm send back for fixes",
+    "confirmContinue": "👍 Confirm and continue",
+    "wantModify": "✏️ I want to modify",
+    "wantModifyText": "I'd like to make the following adjustments:",
+    "stopGenerate": "🛑 Stop generating",
+    "startPipeline": "🚀 Start dev pipeline",
+    "viewRetro": "📄 Ask Bot to review dev retrospective (RETRO_LATEST.md)",
+    "viewRetroText": "Please read RETRO_LATEST.md in the workspace and tell me what to note."
   },
   "recap": {
     "title": "Away Summary",
@@ -526,5 +551,28 @@
     "title": "Something went wrong",
     "message": "An unexpected error occurred. Please refresh the page.",
     "reload": "Reload Page"
+  },
+  "thinking": {
+    "analyzing": "AI is analyzing tasks, forming a plan, evaluating tools…",
+    "done": "Thought for {{count}} steps",
+    "collapse": "▲ Collapse",
+    "expand": "▼ View",
+    "empty": "(no content)"
+  },
+  "emojiPicker": {
+    "catFaces": "Faces",
+    "catGestures": "Gestures",
+    "catCelebration": "Celebration",
+    "catAnimals": "Animals",
+    "catFood": "Food",
+    "catSymbols": "Symbols"
+  },
+  "messageList": {
+    "groupStart": "This is the beginning of {{name}}",
+    "groupMembers": "Group members",
+    "sendToStart": "Send a message to start the conversation 👇",
+    "contextCompressed": "Context compressed",
+    "today": "Today",
+    "yesterday": "Yesterday"
   }
 }

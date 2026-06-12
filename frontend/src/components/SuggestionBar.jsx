@@ -1,4 +1,6 @@
 import React from 'react'
+import { useTranslation } from 'react-i18next'
+import { K } from '../i18n/keys'
 
 export default function SuggestionBar({
   workflow,
@@ -11,8 +13,9 @@ export default function SuggestionBar({
   loading = false,
   onFetch
 }) {
-  const suggestions = deriveSuggestions(workflow, isStreaming, awaySummary, messages, members)
-  
+  const { t } = useTranslation()
+  const suggestions = deriveSuggestions(t, workflow, isStreaming, awaySummary, messages, members)
+
   const hasBots = members?.some(m => m.type === 'bot')
   const showAiButton = hasBots && !isStreaming
 
@@ -28,7 +31,7 @@ export default function SuggestionBar({
           {suggestions.length > 0 && (
             <>
               <span className="text-[10px] uppercase font-bold tracking-wider text-gray-500 mr-1 flex-shrink-0">
-                建议操作
+                {t(K.suggestion.title)}
               </span>
               <div className="flex flex-wrap gap-1.5 min-w-0">
                 {suggestions.map((s, idx) => {
@@ -73,11 +76,11 @@ export default function SuggestionBar({
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                 </svg>
-                正在生成...
+                {t(K.suggestion.generating)}
               </>
             ) : (
               <>
-                <span>✨</span> AI 建议
+                <span>✨</span> {t(K.suggestion.aiSuggest)}
               </>
             )}
           </button>
@@ -88,7 +91,7 @@ export default function SuggestionBar({
       {aiSuggestions.length > 0 && (
         <div className="flex items-start gap-2 border-t border-gray-800/30 pt-1.5 animate-fade-in">
           <span className="text-[10px] uppercase font-bold tracking-wider text-purple-400/80 mt-1.5 flex-shrink-0">
-            ✨ AI 建议
+            ✨ {t(K.suggestion.aiSuggest)}
           </span>
           <div className="flex flex-col gap-1.5 min-w-0 flex-1">
             {aiSuggestions.map((text, idx) => (
@@ -107,7 +110,7 @@ export default function SuggestionBar({
   )
 }
 
-function deriveSuggestions(workflow, isStreaming, awaySummary, messages, members) {
+function deriveSuggestions(t, workflow, isStreaming, awaySummary, messages, members) {
   const suggestions = []
 
   // 1. Confirm Gate (driven by workflow.awaiting_confirm)
@@ -115,13 +118,13 @@ function deriveSuggestions(workflow, isStreaming, awaySummary, messages, members
   if (isAwaitingConfirm) {
     const isRework = String(isAwaitingConfirm).endsWith('rework')
     suggestions.push({
-      label: isRework ? '👍 确认打回 Dev 修复' : '👍 确认并继续',
+      label: isRework ? t(K.suggestion.confirmRework) : t(K.suggestion.confirmContinue),
       action: 'confirm',
       variant: 'indigo'
     })
     suggestions.push({
-      label: '✏️ 我想修改',
-      text: '我想做以下调整：',
+      label: t(K.suggestion.wantModify),
+      text: t(K.suggestion.wantModifyText),
       variant: 'gray'
     })
   }
@@ -129,7 +132,7 @@ function deriveSuggestions(workflow, isStreaming, awaySummary, messages, members
   // 2. Running Task
   if (isStreaming) {
     suggestions.push({
-      label: '🛑 停止生成',
+      label: t(K.suggestion.stopGenerate),
       action: 'abort',
       variant: 'red'
     })
@@ -139,7 +142,7 @@ function deriveSuggestions(workflow, isStreaming, awaySummary, messages, members
   const isWorkflowActive = workflow?.active
   if (!isWorkflowActive && !isStreaming) {
     suggestions.push({
-      label: '🚀 开始开发流水线',
+      label: t(K.suggestion.startPipeline),
       action: 'start',
       variant: 'indigo'
     })
@@ -150,8 +153,8 @@ function deriveSuggestions(workflow, isStreaming, awaySummary, messages, members
     const firstBot = members?.find(m => m.type === 'bot')
     const botMention = firstBot ? `@${firstBot.name} ` : ''
     suggestions.push({
-      label: '📄 让 Bot 查看开发复盘 (RETRO_LATEST.md)',
-      text: `${botMention}请读取工作区的 RETRO_LATEST.md，并告诉我有什么需要注意的。`,
+      label: t(K.suggestion.viewRetro),
+      text: `${botMention}${t(K.suggestion.viewRetroText)}`,
       variant: 'purple'
     })
   }

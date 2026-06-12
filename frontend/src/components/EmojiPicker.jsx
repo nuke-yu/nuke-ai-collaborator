@@ -1,35 +1,40 @@
 import { useState, useRef, useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
+import { K } from '../i18n/keys'
 
-const CATEGORIES = [
+const CATEGORY_KEYS = [
   {
-    label: '😀', name: '表情',
+    label: '😀', nameKey: K.emojiPicker.catFaces,
     emojis: ['😀','😁','😂','🤣','😃','😄','😅','😆','😉','😊','😋','😎','😍','🥰','😘','🥲','😐','😑','😶','🙄','😏','😒','🥺','😢','😭','😤','😠','😡','🤬','🤯','😳','🥵','🥶','😱','😨','😰','😥','😓','🤗','🫡','🤔','🤫','🤭','😷','🤒','🤕','🥴','😵','🤑','😴','😪','🥱'],
   },
   {
-    label: '👋', name: '手势',
+    label: '👋', nameKey: K.emojiPicker.catGestures,
     emojis: ['👍','👎','👏','🙌','🤝','🤜','🤛','👊','✊','✌️','🤞','🫰','🤟','🤘','👌','🤌','🤏','🫳','🫴','☝️','👆','👇','👈','👉','🖐️','✋','🤚','👋','🤙','💪','🦾','🙏','🫶','🤲','👐'],
   },
   {
-    label: '🎉', name: '庆祝',
+    label: '🎉', nameKey: K.emojiPicker.catCelebration,
     emojis: ['🎉','🎊','🎈','🎁','🏆','🥇','🥈','🥉','🏅','🎖️','🥂','🍾','🎂','🎆','🎇','✨','🌟','💫','⭐','🌈','🎯','🎮','🎨','🎭','🎪','🎬','🎤','🎵','🎶','🎸','🥳','🎠','🎡','🎢','🎰'],
   },
   {
-    label: '🐶', name: '动物',
+    label: '🐶', nameKey: K.emojiPicker.catAnimals,
     emojis: ['🐶','🐱','🐭','🐹','🐰','🦊','🐻','🐼','🐨','🐯','🦁','🐮','🐷','🐸','🐙','🐠','🐡','🐬','🦋','🐝','🦉','🦄','🐲','🦕','🐊','🦈','🦭','🐳','🦒','🦓','🦏','🐘','🦛','🐪','🦘'],
   },
   {
-    label: '🍎', name: '食物',
+    label: '🍎', nameKey: K.emojiPicker.catFood,
     emojis: ['🍎','🍊','🍋','🍇','🍓','🥝','🍑','🥭','🍍','🥥','🥑','🍆','🥕','🌽','🍕','🍔','🌮','🌯','🥗','🍜','🍣','🍱','🍛','🍦','🎂','🍰','🍩','🍪','☕','🍺','🥤','🧃','🥂','🍾','🧋'],
   },
   {
-    label: '❤️', name: '符号',
+    label: '❤️', nameKey: K.emojiPicker.catSymbols,
     emojis: ['❤️','🧡','💛','💚','💙','💜','🖤','🤍','🤎','💔','❤️‍🔥','💯','🔥','💥','💢','💤','💬','💭','🗯️','✅','❌','⚠️','🚫','💡','🔑','🗝️','🔒','🔓','🚀','🛸','⚡','🌊','🌀','🌙','☀️'],
   },
 ]
 
 export default function EmojiPicker({ onSelect, onClose }) {
+  const { t } = useTranslation()
   const [activeTab, setActiveTab] = useState(0)
   const ref = useRef(null)
+
+  const CATEGORIES = CATEGORY_KEYS.map(cat => ({ ...cat, name: t(cat.nameKey) }))
 
   useEffect(() => {
     const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) onClose() }

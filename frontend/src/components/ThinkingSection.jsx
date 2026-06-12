@@ -1,4 +1,6 @@
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import { K } from '../i18n/keys'
 
 /**
  * Renders an AI message's thinking blocks compactly (Option B):
@@ -9,6 +11,7 @@ import { useState } from 'react'
  * `blocks` is the per-message map { iteration: { iteration, content, completed } }.
  */
 export default function ThinkingSection({ blocks, streaming }) {
+  const { t } = useTranslation()
   const [expanded, setExpanded] = useState(false)
 
   const entries = Object.entries(blocks || {})
@@ -31,7 +34,7 @@ export default function ThinkingSection({ blocks, streaming }) {
           <div className="p-3 border-t border-amber-700/30">
             <div className="text-sm text-gray-300 leading-relaxed whitespace-pre-wrap font-mono text-xs">
               {thought.content || (
-                <span className="italic text-amber-400/60">AI 正在分析任务、制定计划、评估工具…</span>
+                <span className="italic text-amber-400/60">{t(K.thinking.analyzing)}</span>
               )}
             </div>
           </div>
@@ -49,8 +52,8 @@ export default function ThinkingSection({ blocks, streaming }) {
           className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-amber-400/80 hover:bg-amber-900/20 transition-colors"
         >
           <span>✓</span>
-          <span className="font-medium">已思考 {entries.length} 步</span>
-          <span className="ml-auto text-amber-500/60">{expanded ? '▲ 收起' : '▼ 查看'}</span>
+          <span className="font-medium">{t(K.thinking.done, { count: entries.length })}</span>
+          <span className="ml-auto text-amber-500/60">{expanded ? t(K.thinking.collapse) : t(K.thinking.expand)}</span>
         </button>
         {expanded && (
           <div className="border-t border-amber-700/20 divide-y divide-amber-700/10">
@@ -58,7 +61,7 @@ export default function ThinkingSection({ blocks, streaming }) {
               <div key={iter} className="p-3">
                 <div className="text-[11px] text-amber-500/70 mb-1">iteration {iter}</div>
                 <div className="text-sm text-gray-300 leading-relaxed whitespace-pre-wrap font-mono text-xs">
-                  {thought.content || <span className="italic text-amber-400/50">（无内容）</span>}
+                  {thought.content || <span className="italic text-amber-400/50">{t(K.thinking.empty)}</span>}
                 </div>
               </div>
             ))}

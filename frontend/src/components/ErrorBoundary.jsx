@@ -1,6 +1,8 @@
 import React from 'react'
+import { withTranslation } from 'react-i18next'
+import { K } from '../i18n/keys'
 
-export default class ErrorBoundary extends React.Component {
+class ErrorBoundary extends React.Component {
   constructor(props) {
     super(props)
     this.state = { hasError: false, error: null }
@@ -15,13 +17,14 @@ export default class ErrorBoundary extends React.Component {
   }
 
   render() {
+    const { t } = this.props
     if (this.state.hasError) {
       return (
         <div className="h-screen bg-gray-900 flex flex-col items-center justify-center p-6 text-center">
           <div className="text-5xl mb-4">😵</div>
-          <h1 className="text-white text-xl font-bold mb-2">应用出错了</h1>
+          <h1 className="text-white text-xl font-bold mb-2">{t(K.errorBoundary.title)}</h1>
           <p className="text-gray-400 text-sm mb-6 max-w-md">
-            发生了一个意外错误，这可能是前端渲染 Bug 或网络抖动导致的。
+            {t(K.errorBoundary.message)}
           </p>
           <pre className="bg-black/40 text-red-400 p-4 rounded-lg text-xs mb-6 max-w-full overflow-auto text-left">
             {this.state.error?.toString()}
@@ -30,7 +33,7 @@ export default class ErrorBoundary extends React.Component {
             onClick={() => window.location.reload()}
             className="bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg px-6 py-2 text-sm font-medium transition-colors"
           >
-            刷新页面
+            {t(K.errorBoundary.reload)}
           </button>
         </div>
       )
@@ -39,3 +42,5 @@ export default class ErrorBoundary extends React.Component {
     return this.props.children
   }
 }
+
+export default withTranslation()(ErrorBoundary)

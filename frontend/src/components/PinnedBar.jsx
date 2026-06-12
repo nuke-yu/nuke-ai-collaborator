@@ -1,6 +1,9 @@
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import { K } from '../i18n/keys'
 
 export default function PinnedBar({ pins, onUnpin }) {
+  const { t } = useTranslation()
   const [expanded, setExpanded] = useState(false)
 
   if (!pins || pins.length === 0) return null
@@ -13,7 +16,7 @@ export default function PinnedBar({ pins, onUnpin }) {
         className="w-full flex items-center gap-2 px-4 py-2 hover:bg-gray-800/50 transition-colors text-left"
       >
         <span className="text-sm flex-shrink-0">📌</span>
-        <span className="text-xs text-gray-400 flex-shrink-0">{pins.length} 条置顶</span>
+        <span className="text-xs text-gray-400 flex-shrink-0">{t(K.pinnedBar.title)} ({pins.length})</span>
         {!expanded && (
           <span className="text-xs text-gray-500 truncate flex-1 ml-1">
             {pins[0].sender_name}：{pins[0].content?.slice(0, 60) || '[文件]'}
@@ -39,13 +42,13 @@ export default function PinnedBar({ pins, onUnpin }) {
                   {msg.sender_type === 'bot' && <span className="text-xs text-gray-600">🤖</span>}
                 </div>
                 <p className="text-xs text-gray-400 leading-relaxed line-clamp-2">
-                  {msg.is_deleted ? '此消息已撤回' : (msg.content || '[文件附件]')}
+                  {msg.is_deleted ? t(K.message.withdrawn) : (msg.content || t(K.message.fileAttachment))}
                 </p>
               </div>
               <button
                 onClick={() => onUnpin(msg.id)}
                 className="hidden group-hover:block text-gray-600 hover:text-red-400 text-xs flex-shrink-0 transition-colors mt-0.5"
-                title="取消置顶"
+                title={t(K.pinnedBar.unpin)}
               >
                 ✕
               </button>

@@ -1,6 +1,9 @@
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import { K } from '../i18n/keys'
 
 export default function RecapBanner({ summary, onDismiss, onRegenerate, loading }) {
+  const { t } = useTranslation()
   const [isDismissing, setIsDismissing] = useState(false)
 
   if (!summary && !loading) return null
@@ -36,7 +39,7 @@ export default function RecapBanner({ summary, onDismiss, onRegenerate, loading 
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 mb-1">
                 <span className="text-xs font-semibold tracking-wider text-indigo-300 uppercase">
-                  缺席重回 Recap
+                  {t(K.recap.title)}
                 </span>
                 {loading && (
                   <span className="flex h-2 w-2 relative">
@@ -63,7 +66,7 @@ export default function RecapBanner({ summary, onDismiss, onRegenerate, loading 
             <button
               onClick={onRegenerate}
               disabled={loading}
-              title="重新生成摘要"
+              title={t(K.recap.triggerGenerate)}
               className="p-1.5 rounded-lg text-gray-400 hover:text-gray-200 hover:bg-white/5 active:bg-white/10 disabled:opacity-50 transition-all duration-200"
             >
               <svg
@@ -80,7 +83,7 @@ export default function RecapBanner({ summary, onDismiss, onRegenerate, loading 
             {/* Dismiss Button */}
             <button
               onClick={handleDismiss}
-              title="忽略"
+              title={t(K.recap.dismiss)}
               className="p-1.5 rounded-lg text-gray-400 hover:text-gray-200 hover:bg-white/5 active:bg-white/10 transition-all duration-200"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">

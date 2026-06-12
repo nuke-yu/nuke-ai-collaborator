@@ -1,4 +1,6 @@
 import { Fragment } from 'react'
+import { useTranslation } from 'react-i18next'
+import { K } from '../i18n/keys'
 import MessageBubble from './MessageBubble'
 import ThinkingSection from './ThinkingSection'
 import ToolProgressBlock from './ToolProgressBlock'
@@ -28,6 +30,7 @@ export default function MessageList({
   const thoughtBlocks = useChatStore((s) => s.thoughtBlocks)
   const toolProgressBlocks = useChatStore((s) => s.toolProgressBlocks)
   const memberId = useGroupStore((s) => s.activeMemberId)
+  const { t } = useTranslation()
   return (
     <div
       ref={scrollRef}
@@ -44,11 +47,11 @@ export default function MessageList({
           <div className="text-5xl">💬</div>
           <div>
             <h3 className="text-gray-200 font-semibold text-base mb-1"># {group.name}</h3>
-            <p className="text-gray-500 text-sm">这是 <span className="text-indigo-400 font-medium">{group.name}</span> 的开始</p>
+            <p className="text-gray-500 text-sm">{t(K.messageList.groupStart, { name: group.name })}</p>
           </div>
           {members.length > 0 && (
             <div>
-              <p className="text-xs text-gray-600 mb-3">群组成员</p>
+              <p className="text-xs text-gray-600 mb-3">{t(K.messageList.groupMembers)}</p>
               <div className="flex gap-3 justify-center flex-wrap">
                 {members.map(m => (
                   <div key={m.id} className="flex flex-col items-center gap-1.5">
@@ -64,7 +67,7 @@ export default function MessageList({
               </div>
             </div>
           )}
-          <p className="text-xs text-gray-600 mt-2">发送消息开始对话 👇</p>
+          <p className="text-xs text-gray-600 mt-2">{t(K.messageList.sendToStart)}</p>
         </div>
       )}
       {messages.map((msg, i) => {
@@ -75,9 +78,9 @@ export default function MessageList({
         if (showDate) {
           const today = new Date().toDateString()
           const d = new Date(); d.setDate(d.getDate() - 1); const yesterday = d.toDateString()
-          if (msgDay === today) dateLabel = '今天'
-          else if (msgDay === yesterday) dateLabel = '昨天'
-          else dateLabel = new Date(msg.created_at).toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' })
+          if (msgDay === today) dateLabel = t(K.messageList.today)
+          else if (msgDay === yesterday) dateLabel = t(K.messageList.yesterday)
+          else dateLabel = new Date(msg.created_at).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })
         }
         if (msg._compact_marker) {
           return (
@@ -85,7 +88,7 @@ export default function MessageList({
               <div className="flex-1 h-px bg-indigo-900/50" />
               <span className="text-[11px] text-indigo-400/70 flex-shrink-0 flex items-center gap-1.5">
                 <span>⚡</span>
-                <span>{msg.message || '上下文已压缩'}</span>
+                <span>{msg.message || t(K.messageList.contextCompressed)}</span>
               </span>
               <div className="flex-1 h-px bg-indigo-900/50" />
             </div>

@@ -1,4 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
+import { useTranslation } from 'react-i18next'
+import { K } from '../i18n/keys'
 import ReactMarkdown from 'react-markdown'
 import * as wsrpc from '../wsrpc'
 import EmojiPicker from './EmojiPicker'
@@ -7,6 +9,7 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
 
 function CollapsibleCode({ language, code }) {
+  const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const [copied, setCopied] = useState(false)
   const lines = code.split('\n').length
@@ -26,7 +29,7 @@ function CollapsibleCode({ language, code }) {
       >
         <span className="flex items-center gap-2">
           <span className="text-indigo-400 font-mono">{language || 'code'}</span>
-          <span>{lines} 行</span>
+          <span>{t(K.message.codeLines, { count: lines })}</span>
         </span>
         <span className="flex items-center gap-2">
           <span
@@ -34,9 +37,9 @@ function CollapsibleCode({ language, code }) {
             onClick={handleCopy}
             className={`transition-colors ${copied ? 'text-green-400' : 'text-gray-500 hover:text-gray-300'}`}
           >
-            {copied ? '✓ 已复制' : '复制'}
+            {copied ? `✓ ${t(K.message.copied)}` : t(K.message.copy)}
           </span>
-          <span className="text-gray-500">{open ? '▲ 收起' : '▼ 展开'}</span>
+          <span className="text-gray-500">{open ? `▲ ${t(K.message.collapse)}` : `▼ ${t(K.message.expand)}`}</span>
         </span>
       </button>
       {open && (
@@ -161,6 +164,7 @@ const mdComponents = {
 }
 
 function SkillsStrip({ skills }) {
+  const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const injected = skills.filter(s => s.injected)
   if (!injected.length) return null
@@ -171,7 +175,7 @@ function SkillsStrip({ skills }) {
         className="flex items-center gap-1 hover:text-gray-300 transition-colors"
       >
         <span>⚡</span>
-        <span>{injected.length} 个技能已加载</span>
+        <span>{injected.length} {t(K.message.skillsLoaded)}</span>
         <span className="text-gray-600 ml-0.5">{open ? '▲' : '▼'}</span>
       </button>
       {open && (
@@ -179,7 +183,7 @@ function SkillsStrip({ skills }) {
           {injected.map(s => (
             <span
               key={s.name}
-              title={s.injected === 'full' ? '常驻技能' : '按需注入'}
+              title={s.injected === 'full' ? t(K.message.skillPermanent) : t(K.message.skillOnDemand)}
               className={`px-1.5 py-0.5 rounded text-xs ${
                 s.injected === 'full'
                   ? 'bg-green-900/40 text-green-400 border border-green-800/50'
@@ -205,6 +209,7 @@ const stripSentinels = (text) =>
     : text
 
 export default function MessageBubble({ msg, isTyping, currentMemberId, members = [], readMap = {}, onReply, reactions = {}, onReact, isPinned, onPin, onUnpin, highlighted = false, onConfirmGate }) {
+  const { t } = useTranslation()
   const [editing, setEditing] = useState(false)
   const [editText, setEditText] = useState(msg.content)
   const [lightboxSrc, setLightboxSrc] = useState(null)
@@ -272,7 +277,7 @@ export default function MessageBubble({ msg, isTyping, currentMemberId, members 
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-0.5">
             <span className="text-sm font-medium text-gray-200">{msg.sender_name}</span>
-            <span className="text-xs text-indigo-400 bg-indigo-950/50 rounded px-1 py-0.5">需确认</span>
+            <span className="text-xs text-indigo-400 bg-indigo-950/50 rounded px-1 py-0.5">{t(K.message.needsConfirm)}</span>
             <span className="text-xs text-gray-500">
               {msg.created_at ? new Date(msg.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : ''}
             </span>
@@ -280,19 +285,19 @@ export default function MessageBubble({ msg, isTyping, currentMemberId, members 
           <div className="border border-indigo-500/40 bg-indigo-950/20 rounded-xl px-4 py-3 inline-block max-w-lg">
             <div className="text-sm text-gray-200 mb-2">{msg.content}</div>
             {status === 'confirmed' ? (
-              <div className="text-sm text-green-400">✅ 已确认</div>
+              <div className="text-sm text-green-400">✅ {t(K.message.workflow.confirm)}</div>
             ) : status === 'revising' ? (
-              <div className="text-sm text-gray-400">✏️ 已选择修改 —— 直接发消息调整即可</div>
+              <div className="text-sm text-gray-400">✏️ {t(K.message.gateRevising)}</div>
             ) : (
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => { onConfirmGate?.(msg.meta.gate_id); setGateState('confirmed') }}
                   className="px-3 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium transition-colors"
-                >✅ 确认</button>
+                >✅ {t(K.message.workflow.confirm)}</button>
                 <button
                   onClick={() => setGateState('revising')}
                   className="px-3 py-1 rounded-lg border border-gray-600 text-gray-300 hover:bg-gray-700 text-sm transition-colors"
-                >✏️ 修改</button>
+                >✏️ {t(K.message.workflow.modify)}</button>
               </div>
             )}
           </div>
@@ -307,12 +312,12 @@ export default function MessageBubble({ msg, isTyping, currentMemberId, members 
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 mb-0.5">
           <span className="text-sm font-medium text-gray-200">{msg.sender_name}</span>
-          {msg.is_auto_reply && <span className="text-xs text-indigo-400 bg-indigo-950/50 rounded px-1 py-0.5">↩ 自动回复</span>}
+          {msg.is_auto_reply && <span className="text-xs text-indigo-400 bg-indigo-950/50 rounded px-1 py-0.5">↩ {t(K.message.autoReply)}</span>}
           <span className="text-xs text-gray-500">
             {msg.created_at ? new Date(msg.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : ''}
           </span>
           {(msg.input_tokens || msg.output_tokens) && (
-            <span className="text-[10px] text-gray-600 hover:text-gray-400 cursor-default transition-colors" title={`输入 ${msg.input_tokens ?? 0} tokens · 输出 ${msg.output_tokens ?? 0} tokens`}>
+            <span className="text-[10px] text-gray-600 hover:text-gray-400 cursor-default transition-colors" title={`${t(K.message.inputTokens)} ${msg.input_tokens ?? 0} tokens · ${t(K.message.outputTokens)} ${msg.output_tokens ?? 0} tokens`}>
               {((msg.input_tokens ?? 0) + (msg.output_tokens ?? 0)).toLocaleString()}t
             </span>
           )}
@@ -326,7 +331,7 @@ export default function MessageBubble({ msg, isTyping, currentMemberId, members 
                 onClick={(e) => { e.stopPropagation(); setShowEmojiPicker(p => !p) }}
                 onMouseDown={(e) => e.stopPropagation()}
                 className="text-xs text-gray-500 hover:text-gray-300 leading-none px-0.5"
-                title="更多表情"
+                title={t(K.message.emoji)}
               >＋</button>
               {showEmojiPicker && (
                 <div className="absolute top-6 left-0 z-50">
@@ -335,16 +340,16 @@ export default function MessageBubble({ msg, isTyping, currentMemberId, members 
               )}
               <span className="w-px h-3 bg-gray-700 mx-1" />
               {onReply && (
-                <button onClick={() => onReply(msg)} className="text-xs text-gray-500 hover:text-indigo-400">↩ 回复</button>
+                <button onClick={() => onReply(msg)} className="text-xs text-gray-500 hover:text-indigo-400">↩ {t(K.message.reply)}</button>
               )}
               {msg.id && (isPinned
-                ? <button onClick={() => onUnpin?.(msg.id)} className="text-xs text-yellow-600 hover:text-yellow-400">取消置顶</button>
-                : <button onClick={() => onPin?.(msg.id)} className="text-xs text-gray-500 hover:text-yellow-400">📌 置顶</button>
+                ? <button onClick={() => onUnpin?.(msg.id)} className="text-xs text-yellow-600 hover:text-yellow-400">{t(K.message.unpin)}</button>
+                : <button onClick={() => onPin?.(msg.id)} className="text-xs text-gray-500 hover:text-yellow-400">📌 {t(K.message.pin)}</button>
               )}
               {isOwn && (
                 <>
-                  <button onClick={() => { setEditing(true); setEditText(msg.content) }} className="text-xs text-gray-500 hover:text-yellow-400">编辑</button>
-                  <button onClick={handleWithdraw} className="text-xs text-gray-500 hover:text-red-400">撤回</button>
+                  <button onClick={() => { setEditing(true); setEditText(msg.content) }} className="text-xs text-gray-500 hover:text-yellow-400">{t(K.common.edit)}</button>
+                  <button onClick={handleWithdraw} className="text-xs text-gray-500 hover:text-red-400">{t(K.message.withdraw)}</button>
                 </>
               )}
             </span>
@@ -362,7 +367,7 @@ export default function MessageBubble({ msg, isTyping, currentMemberId, members 
           <SkillsStrip skills={msg.skills_loaded} />
         )}
         {msg.is_deleted ? (
-          <p className="text-sm text-gray-500 italic">此消息已撤回</p>
+          <p className="text-sm text-gray-500 italic">{t(K.message.withdrawn)}</p>
         ) : editing ? (
           <div className="flex flex-col gap-1.5">
             <textarea
@@ -377,8 +382,8 @@ export default function MessageBubble({ msg, isTyping, currentMemberId, members 
               rows={3}
             />
             <div className="flex gap-2 text-xs">
-              <button onClick={handleEditSave} className="text-indigo-400 hover:text-indigo-300">保存</button>
-              <button onClick={() => setEditing(false)} className="text-gray-500 hover:text-gray-300">取消</button>
+              <button onClick={handleEditSave} className="text-indigo-400 hover:text-indigo-300">{t(K.common.save)}</button>
+              <button onClick={() => setEditing(false)} className="text-gray-500 hover:text-gray-300">{t(K.common.cancel)}</button>
             </div>
           </div>
         ) : msg.streaming ? (
@@ -398,7 +403,7 @@ export default function MessageBubble({ msg, isTyping, currentMemberId, members 
             {msg.file_url && msg.file_type?.startsWith('image/') && (
               <img
                 src={msg.file_url}
-                alt={msg.file_name || '图片'}
+                alt={msg.file_name || t(K.message.image)}
                 className="mt-1.5 max-w-xs max-h-64 rounded-lg object-contain cursor-zoom-in hover:opacity-90 transition-opacity"
                 onClick={() => setLightboxSrc(msg.file_url)}
               />
@@ -421,13 +426,13 @@ export default function MessageBubble({ msg, isTyping, currentMemberId, members 
                   <div className="text-xs text-gray-200 truncate">{msg.file_name}</div>
                   <div className="text-xs text-gray-500">{msg.file_size ? `${(msg.file_size / 1024).toFixed(1)} KB` : ''}</div>
                 </div>
-                <span className="text-xs text-indigo-400 flex-shrink-0 ml-auto">下载</span>
+                <span className="text-xs text-indigo-400 flex-shrink-0 ml-auto">{t(K.message.download)}</span>
               </a>
             )}
           </div>
         )}
         {msg.edited && !msg.is_deleted && (
-          <span className="text-xs text-gray-600 mt-0.5 block">（已编辑）</span>
+          <span className="text-xs text-gray-600 mt-0.5 block">({t(K.message.edited)})</span>
         )}
         {Object.keys(reactions).length > 0 && (
           <div className="flex flex-wrap gap-1 mt-1.5">
@@ -454,7 +459,7 @@ export default function MessageBubble({ msg, isTyping, currentMemberId, members 
           const readers = members.filter(m => m.id !== currentMemberId && (readMap[m.id] || 0) >= msg.id)
           return readers.length > 0 ? (
             <div className="text-xs text-gray-500 mt-0.5">
-              已读 {readers.map(r => r.name).join('、')}
+              {t(K.message.readBy)} {readers.map(r => r.name).join('、')}
             </div>
           ) : null
         })()}

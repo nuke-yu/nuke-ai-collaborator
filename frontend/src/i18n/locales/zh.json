@@ -140,8 +140,23 @@
     "pin": "置顶",
     "unpin": "取消置顶",
     "reply": "回复",
-    "emoji": "表情",
+    "emoji": "更多表情",
     "delete": "删除",
+    "codeLines": "{{count}} 行",
+    "skillPermanent": "常驻技能",
+    "skillOnDemand": "按需注入",
+    "autoReply": "自动回复",
+    "inputTokens": "输入",
+    "outputTokens": "输出",
+    "withdraw": "撤回",
+    "withdrawn": "此消息已撤回",
+    "image": "图片",
+    "download": "下载",
+    "edited": "已编辑",
+    "readBy": "已读",
+    "needsConfirm": "需确认",
+    "gateRevising": "已选择修改 —— 直接发消息调整即可",
+    "fileAttachment": "[文件附件]",
     "workflow": {
       "confirm": "确认",
       "modify": "修改",
@@ -425,7 +440,17 @@
   },
   "suggestion": {
     "title": "建议",
-    "dismiss": "忽略"
+    "dismiss": "忽略",
+    "generating": "正在生成...",
+    "aiSuggest": "AI 建议",
+    "confirmRework": "👍 确认打回 Dev 修复",
+    "confirmContinue": "👍 确认并继续",
+    "wantModify": "✏️ 我想修改",
+    "wantModifyText": "我想做以下调整：",
+    "stopGenerate": "🛑 停止生成",
+    "startPipeline": "🚀 开始开发流水线",
+    "viewRetro": "📄 让 Bot 查看开发复盘 (RETRO_LATEST.md)",
+    "viewRetroText": "请读取工作区的 RETRO_LATEST.md，并告诉我有什么需要注意的。"
   },
   "recap": {
     "title": "期间摘要",
@@ -526,5 +551,28 @@
     "title": "页面出错了",
     "message": "发生了意外错误，请刷新页面重试",
     "reload": "刷新页面"
+  },
+  "thinking": {
+    "analyzing": "AI 正在分析任务、制定计划、评估工具…",
+    "done": "已思考 {{count}} 步",
+    "collapse": "▲ 收起",
+    "expand": "▼ 查看",
+    "empty": "（无内容）"
+  },
+  "emojiPicker": {
+    "catFaces": "表情",
+    "catGestures": "手势",
+    "catCelebration": "庆祝",
+    "catAnimals": "动物",
+    "catFood": "食物",
+    "catSymbols": "符号"
+  },
+  "messageList": {
+    "groupStart": "这是 {{name}} 的开始",
+    "groupMembers": "群组成员",
+    "sendToStart": "发送消息开始对话 👇",
+    "contextCompressed": "上下文已压缩",
+    "today": "今天",
+    "yesterday": "昨天"
   }
 }
