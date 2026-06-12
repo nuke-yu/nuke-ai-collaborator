@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect, forwardRef, useImperativeHandle } from 'react'
+import { useTranslation } from 'react-i18next'
 import { uploadFile } from '../api'
 import EmojiPicker from './EmojiPicker'
+import { K } from '../i18n/keys'
 
 function formatSize(bytes) {
   if (bytes < 1024) return `${bytes} B`
@@ -9,6 +11,7 @@ function formatSize(bytes) {
 }
 
 const MessageInput = forwardRef(function MessageInput({ onSend, members = [], disabled = false, replyingTo = null, onCancelReply, groupId, defaultValue = '', onDraftSave }, ref) {
+  const { t } = useTranslation()
   const [text, setText] = useState(defaultValue)
   const [mention, setMention] = useState(null)
   const [selectedIndex, setSelectedIndex] = useState(0)
@@ -161,7 +164,7 @@ const MessageInput = forwardRef(function MessageInput({ onSend, members = [], di
                 {m.type === 'all' ? '✦' : m.name[0]}
               </div>
               <span className="text-sm text-gray-200">{m.name}</span>
-              {m.type === 'all' && <span className="text-xs text-gray-400 ml-auto">所有人</span>}
+              {m.type === 'all' && <span className="text-xs text-gray-400 ml-auto">{t(K.chat.input.mentionAll)}</span>}
               {m.type === 'bot' && <span className="text-xs text-gray-500 ml-auto">🤖</span>}
             </button>
           ))}
@@ -179,7 +182,7 @@ const MessageInput = forwardRef(function MessageInput({ onSend, members = [], di
       <div className="bg-gray-800 rounded-xl overflow-hidden">
         {replyingTo && (
           <div className="flex items-center gap-2 px-4 pt-2.5 pb-2 border-b border-gray-700 text-xs">
-            <span className="text-gray-500">回复</span>
+            <span className="text-gray-500">{t(K.message.reply)}</span>
             <span className="text-indigo-400 font-medium">{replyingTo.sender_name}</span>
             <span className="text-gray-500 truncate flex-1">{replyingTo.content.slice(0, 60)}{replyingTo.content.length > 60 ? '...' : ''}</span>
             <button onClick={onCancelReply} className="text-gray-500 hover:text-gray-300 flex-shrink-0">✕</button>
@@ -213,10 +216,10 @@ const MessageInput = forwardRef(function MessageInput({ onSend, members = [], di
             onClick={() => fileInputRef.current?.click()}
             disabled={disabled || uploading}
             className="text-gray-500 hover:text-gray-300 disabled:text-gray-700 transition-colors flex-shrink-0 pb-1"
-            title="上传文件"
+            title={t(K.chat.input.uploadFile)}
           >
             {uploading ? (
-              <span className="text-xs text-indigo-400">上传中...</span>
+              <span className="text-xs text-indigo-400">{t(K.chat.input.uploading)}</span>
             ) : (
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
@@ -227,7 +230,7 @@ const MessageInput = forwardRef(function MessageInput({ onSend, members = [], di
             ref={textareaRef}
             className="flex-1 bg-transparent text-gray-100 text-sm resize-none outline-none placeholder-gray-500 max-h-32 disabled:opacity-50 disabled:cursor-not-allowed"
             rows={1}
-            placeholder={disabled ? "连接断开，无法发送" : "发送消息... (@ 提及成员)"}
+            placeholder={disabled ? t(K.chat.input.disabledPlaceholder) : t(K.chat.input.placeholder)}
             value={text}
             disabled={disabled}
             onChange={handleChange}
@@ -267,7 +270,7 @@ const MessageInput = forwardRef(function MessageInput({ onSend, members = [], di
             onMouseDown={(e) => e.stopPropagation()}
             disabled={disabled}
             className={`text-lg leading-none flex-shrink-0 transition-colors disabled:opacity-30 ${showEmojiPicker ? 'text-yellow-400' : 'text-gray-500 hover:text-gray-300'}`}
-            title="表情"
+            title={t(K.message.emoji)}
           >
             😊
           </button>
@@ -276,11 +279,11 @@ const MessageInput = forwardRef(function MessageInput({ onSend, members = [], di
             disabled={disabled || (!text.trim() && !pendingFile)}
             className="text-indigo-400 hover:text-indigo-300 disabled:text-gray-600 text-sm font-medium transition-colors flex-shrink-0"
           >
-            发送
+            {t(K.chat.input.send)}
           </button>
         </div>
       </div>
-      <div className="text-xs text-gray-600 mt-1 px-1">Enter 发送 · Shift+Enter 换行 · @ 提及 · 粘贴或拖拽图片上传</div>
+      <div className="text-xs text-gray-600 mt-1 px-1">{t(K.chat.input.hintFull)}</div>
     </div>
   )
 })

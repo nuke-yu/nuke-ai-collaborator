@@ -102,20 +102,32 @@
       "dismiss": "取消"
     },
     "header": {
-      "members": "位成员",
-      "reconnecting": "重连中...",
+      "members": "{{count}} 名成员",
+      "reconnecting": "连接断开，正在重连...",
       "rename": "重命名",
+      "renameTitle": "点击重命名",
       "renamePlaceholder": "输入新名称",
+      "selectGroup": "选择群组",
       "exportMarkdown": "导出 Markdown",
       "exportJson": "导出 JSON",
+      "exportTitle": "导出聊天记录",
       "logout": "退出登录",
-      "search": "搜索消息"
+      "search": "搜索消息",
+      "startRequirement": "开始需求",
+      "startRequirementTitle": "开始需求流程（BA→Dev→QA，每步人确认）",
+      "startWorkflowTitle": "启动自定义工作流",
+      "statsTitle": "使用统计",
+      "botLogsTitle": "Bot 运行日志"
     },
     "input": {
-      "placeholder": "发送消息...",
+      "placeholder": "发送消息... (@ 提及成员)",
+      "disabledPlaceholder": "连接断开，无法发送",
       "hint": "Enter 发送 · Shift+Enter 换行",
+      "hintFull": "Enter 发送 · Shift+Enter 换行 · @ 提及 · 粘贴或拖拽图片上传",
       "uploadFile": "上传文件",
-      "send": "发送"
+      "uploading": "上传中...",
+      "send": "发送",
+      "mentionAll": "所有人"
     }
   },
   "message": {
@@ -315,10 +327,13 @@
     "edit": "编辑公告"
   },
   "search": {
-    "placeholder": "搜索消息...",
-    "noResults": "未找到相关消息",
-    "results": "条结果",
-    "close": "关闭搜索"
+    "title": "搜索消息",
+    "placeholder": "输入关键词...",
+    "noResults": "没有找到相关消息",
+    "results": "共 {{count}} 条结果",
+    "close": "关闭搜索",
+    "searching": "搜索中...",
+    "typeToSearch": "输入关键词开始搜索"
   },
   "errorBoundary": {
     "title": "页面出错了",

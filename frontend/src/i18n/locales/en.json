@@ -102,20 +102,32 @@
       "dismiss": "Dismiss"
     },
     "header": {
-      "members": "members",
-      "reconnecting": "Reconnecting...",
+      "members": "{{count}} members",
+      "reconnecting": "Connection lost, reconnecting...",
       "rename": "Rename",
+      "renameTitle": "Click to rename",
       "renamePlaceholder": "Enter new name",
+      "selectGroup": "Select group",
       "exportMarkdown": "Export Markdown",
       "exportJson": "Export JSON",
+      "exportTitle": "Export chat history",
       "logout": "Logout",
-      "search": "Search messages"
+      "search": "Search messages",
+      "startRequirement": "Start Requirement",
+      "startRequirementTitle": "Start requirement flow (BA→Dev→QA, confirm each step)",
+      "startWorkflowTitle": "Start custom workflow",
+      "statsTitle": "Usage stats",
+      "botLogsTitle": "Bot run logs"
     },
     "input": {
-      "placeholder": "Send a message...",
+      "placeholder": "Send a message... (@ mention members)",
+      "disabledPlaceholder": "Disconnected, cannot send",
       "hint": "Enter to send · Shift+Enter for newline",
+      "hintFull": "Enter to send · Shift+Enter for newline · @ mention · Paste or drag image to upload",
       "uploadFile": "Upload file",
-      "send": "Send"
+      "uploading": "Uploading...",
+      "send": "Send",
+      "mentionAll": "Everyone"
     }
   },
   "message": {
@@ -315,10 +327,13 @@
     "edit": "Edit Announcement"
   },
   "search": {
-    "placeholder": "Search messages...",
+    "title": "Search messages",
+    "placeholder": "Enter keywords...",
     "noResults": "No messages found",
-    "results": "results",
-    "close": "Close search"
+    "results": "{{count}} results",
+    "close": "Close search",
+    "searching": "Searching...",
+    "typeToSearch": "Enter keywords to search"
   },
   "errorBoundary": {
     "title": "Something went wrong",

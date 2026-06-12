@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
 import { searchMessages } from '../api'
+import { K } from '../i18n/keys'
 
 function highlight(text, keyword) {
   if (!keyword.trim()) return text
@@ -20,6 +22,7 @@ function snippet(content, keyword, radius = 60) {
 }
 
 export default function SearchPanel({ groupId, onClose, onJump }) {
+  const { t } = useTranslation()
   const [query, setQuery] = useState('')
   const [results, setResults] = useState([])
   const [loading, setLoading] = useState(false)
@@ -66,8 +69,8 @@ export default function SearchPanel({ groupId, onClose, onJump }) {
     <div className="w-full md:w-80 flex-shrink-0 bg-gray-900 border-l border-gray-700 flex flex-col">
       {/* 标题栏 */}
       <div className="h-14 flex items-center justify-between px-4 border-b border-gray-700 flex-shrink-0">
-        <span className="text-gray-200 font-semibold text-sm">搜索消息</span>
-        <button onClick={onClose} className="text-gray-500 hover:text-gray-300 text-lg leading-none">✕</button>
+        <span className="text-gray-200 font-semibold text-sm">{t(K.search.title)}</span>
+        <button onClick={onClose} title={t(K.search.close)} className="text-gray-500 hover:text-gray-300 text-lg leading-none">✕</button>
       </div>
 
       {/* 搜索框 */}
@@ -76,7 +79,7 @@ export default function SearchPanel({ groupId, onClose, onJump }) {
           ref={inputRef}
           value={query}
           onChange={e => setQuery(e.target.value)}
-          placeholder="输入关键词..."
+          placeholder={t(K.search.placeholder)}
           className="w-full bg-gray-800 text-gray-100 text-sm rounded-lg px-3 py-2 outline-none focus:ring-1 focus:ring-indigo-500 placeholder-gray-500"
         />
       </div>
@@ -84,13 +87,13 @@ export default function SearchPanel({ groupId, onClose, onJump }) {
       {/* 结果列表 */}
       <div className="flex-1 overflow-y-auto">
         {loading && (
-          <div className="text-center text-xs text-gray-500 py-6">搜索中...</div>
+          <div className="text-center text-xs text-gray-500 py-6">{t(K.search.searching)}</div>
         )}
         {!loading && query && results.length === 0 && (
-          <div className="text-center text-xs text-gray-500 py-6">没有找到相关消息</div>
+          <div className="text-center text-xs text-gray-500 py-6">{t(K.search.noResults)}</div>
         )}
         {!loading && !query && (
-          <div className="text-center text-xs text-gray-600 py-6">输入关键词开始搜索</div>
+          <div className="text-center text-xs text-gray-600 py-6">{t(K.search.typeToSearch)}</div>
         )}
         {results.map(msg => (
           <div key={msg.id} onClick={() => onJump?.(msg.id)} className="px-4 py-3 border-b border-gray-800 hover:bg-gray-800/50 transition-colors cursor-pointer">
@@ -113,7 +116,7 @@ export default function SearchPanel({ groupId, onClose, onJump }) {
           </div>
         ))}
         {results.length > 0 && (
-          <div className="text-center text-xs text-gray-600 py-2">共 {results.length} 条结果</div>
+          <div className="text-center text-xs text-gray-600 py-2">{t(K.search.results, { count: results.length })}</div>
         )}
       </div>
     </div>
