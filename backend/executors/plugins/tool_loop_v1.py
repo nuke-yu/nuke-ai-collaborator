@@ -335,6 +335,10 @@ class ToolLoopRunner:
             prefix += f"【工作区文件】\n{text}\n\n"
         if self.skills_xml:
             prefix += f"{self.skills_xml}\n使用 run_skill(name=\"技能名\") 调用\n\n"
+        if self.ctx.group_id is not None:
+            group_ctx = await _ws.load_group_context(self.ctx.group_id)
+            if group_ctx:
+                prefix += f"{group_ctx}\n\n"
         return prefix, text
 
     async def _build_reinject(self) -> str:

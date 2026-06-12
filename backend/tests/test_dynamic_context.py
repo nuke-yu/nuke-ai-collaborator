@@ -110,5 +110,43 @@ class TestDynamicContext(unittest.IsolatedAsyncioTestCase):
         self.assertIn("ver 3", captured_prompts[1])
         self.assertIn("ver 5", captured_prompts[2])
 
+class TestGetFreshContextPrefixGroupCtx(unittest.IsolatedAsyncioTestCase):
+    async def test_group_ctx_included_in_prefix(self):
+        """_get_fresh_context_prefix must include shared workspace context when group_id set."""
+        import tempfile, pathlib
+        from skills import constants as _c
+        orig_root = _c.WORKSPACE_ROOT
+        with tempfile.TemporaryDirectory() as tmp:
+            _c.WORKSPACE_ROOT = pathlib.Path(tmp)
+            try:
+                import workspace as ws_mod
+                shared = ws_mod.group_workspace(5)
+                (shared / "BOARD.md").write_text("# Board content")
+
+                from executors.plugins.tool_loop_v1 import ToolLoopRunner, ToolLoopV1
+                from executors.base import ExecutionContext
+
+                ctx = ExecutionContext(
+                    bot={"id": 1, "name": "Dev", "type": "bot"},
+                    group_id=5,
+                    user_message="hello",
+                    sender={"id": 0, "name": "user", "type": "human"},
+                    history=[],
+                    all_bots=[],
+                    all_members=[],
+                )
+                runner = ToolLoopRunner.__new__(ToolLoopRunner)
+                runner.bot = ctx.bot
+                runner.ctx = ctx
+                runner.executor = ToolLoopV1()
+                runner.skills_xml = ""
+
+                prefix, _ = await runner._get_fresh_context_prefix()
+                self.assertIn("# Board content", prefix)
+                self.assertIn("【共享工作区目录】", prefix)
+            finally:
+                _c.WORKSPACE_ROOT = orig_root
+
+
 if __name__ == "__main__":
     unittest.main()
