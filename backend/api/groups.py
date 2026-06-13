@@ -30,9 +30,9 @@ async def _try_exec(conn, sql, params):
 _CENTRAL_REFS = (
     "DELETE FROM permission_rules WHERE bot_id=?",
     "DELETE FROM cron_jobs WHERE bot_id=?",
-    "DELETE FROM role_summaries WHERE bot_id=?",
 )
 _MEMBER_DATA = (
+    "DELETE FROM role_summaries WHERE bot_id=?",
     "DELETE FROM session_events WHERE session_id IN (SELECT id FROM agent_sessions WHERE bot_id=?)",
     "DELETE FROM agent_sessions WHERE bot_id=?",
     # Rows that FK-reference the member's MESSAGES must go before the messages

@@ -594,6 +594,7 @@ async def auto_compact_if_needed(
     temp_id: str,
     bot_id: int,
     context_text: str = "",
+    keep_recent: int = 0,
 ) -> tuple[list[dict], bool]:
     """Run AI compaction pipeline (Strategies 3 → 4) if context exceeds threshold.
 
@@ -609,10 +610,24 @@ async def auto_compact_if_needed(
     if _circuit_open(group_id):
         return messages, False
 
+    if len(messages) <= keep_recent:
+        return messages, False
+
+    split_idx = len(messages) - keep_recent
+    # Walk left past tool messages to avoid splitting a tool-call group
+    while 0 < split_idx < len(messages) and messages[split_idx].get("role") == "tool":
+        split_idx -= 1
+
+    if split_idx <= 0:
+        return messages, False
+
+    to_compact = messages[:split_idx]
+    recent = messages[split_idx:]
+
     # Strategy 3: session-memory delta compaction
     try:
         result = await _try_session_memory_compact(
-            messages, system_prompt, provider, model_name, temperature
+            to_compact, system_prompt, provider, model_name, temperature
         )
     except Exception as exc:
         logger.warning("Strategy 3 error: %s", exc)
@@ -625,12 +640,12 @@ async def auto_compact_if_needed(
             "strategy": "session_memory",
             "message": "上下文已通过增量摘要压缩",
         })
-        return inject_context_after_compact(result, context_text), True
+        return inject_context_after_compact(result + recent, context_text), True
 
     # Strategy 4: full AI compaction with structured prompt
     try:
         result = await _ai_compact(
-            messages, system_prompt, provider, model_name, temperature
+            to_compact, system_prompt, provider, model_name, temperature
         )
     except Exception as exc:
         logger.warning("Strategy 4 error: %s", exc)
@@ -643,7 +658,7 @@ async def auto_compact_if_needed(
             "strategy": "ai_full",
             "message": "上下文已通过 AI 全量摘要压缩（9 段结构化）",
         })
-        return inject_context_after_compact(result, context_text), True
+        return inject_context_after_compact(result + recent, context_text), True
 
     _record_failure(group_id)
     return messages, False

@@ -999,6 +999,7 @@ class ToolLoopRunner:
                             self.system_prompt, self.provider, self.temperature,
                             self.ctx.interaction, self.temp_id, self.bot["id"],
                             context_text=await self._build_reinject(),
+                            keep_recent=6,
                         )
 
                         await self._poll_and_inject_signals()
