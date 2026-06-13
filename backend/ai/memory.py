@@ -73,6 +73,14 @@ class ChromaStore:
                 col.delete(ids=[del_id])
             except Exception:
                 log.warning("ChromaStore: failed to delete conflicting ID %s", del_id)
+                
+        # 隐私与治理：敏感信息脱敏 (PII & Secret Redaction)
+        try:
+            from executors.redaction import redact_secrets
+            f_content, _ = redact_secrets(f_content)
+        except Exception:
+            log.exception("ChromaStore: secret redaction failed")
+            
         col.upsert(
             ids=[f_id],
             documents=[f_content],
@@ -93,6 +101,17 @@ class ChromaStore:
     def delete_sync(cls, where: dict):
         col = cls.get_collection()
         col.delete(where=where)
+
+    @classmethod
+    def prune_expired_memories_sync(cls, max_age_seconds: float = 180 * 86400):
+        """物理清除过期的旧记忆 (遗忘机制：TTL)"""
+        col = cls.get_collection()
+        t_threshold = time.time() - max_age_seconds
+        try:
+            col.delete(where={"timestamp": {"$lt": t_threshold}})
+            log.info("ChromaStore: pruned memories older than %d seconds", max_age_seconds)
+        except Exception:
+            log.exception("ChromaStore: failed to prune expired memories")
 
 
 # ── 3. FactExtractor ── 关键事实与噪音快筛
@@ -258,6 +277,13 @@ async def add_to_chroma(message_id: int, content: str, role: str, bot_id: int, g
             partial(ChromaStore.write_fact_sync, fact_id, fact, metadata, del_id)
         )
 
+    # 3. 遗忘机制：写入时有 10% 的概率被动在后台运行过期记忆的 TTL 清理，防爆库
+    import random
+    if random.random() < 0.1:
+        bg_run = loop.run_in_executor(None, ChromaStore.prune_expired_memories_sync)
+        # Avoid blocking, let it run in background
+        asyncio.create_task(bg_run)
+
 
 async def retrieve_relevant(bot_id: int, group_id: int | None, query: str, top_k: int = 3) -> list:
     loop = asyncio.get_running_loop()
@@ -274,6 +300,7 @@ async def retrieve_relevant(bot_id: int, group_id: int | None, query: str, top_k
         )
         
         if not results or not results.get("documents") or not results["documents"][0]:
+            log.info("Memory RAG: query='%s', bot_id=%s, group_id=%s, candidates_fetched=0", query, bot_id, group_id)
             return []
             
         docs = results["documents"][0]
@@ -283,7 +310,14 @@ async def retrieve_relevant(bot_id: int, group_id: int | None, query: str, top_k
         
         # 绝对指数衰减打分与精排
         ranker = TimeDecayRanker()
-        return ranker.rank(docs, metas, dists, ids, top_k)
+        relevant = ranker.rank(docs, metas, dists, ids, top_k)
+        
+        # 可观测性评估：记录命中与排序指标
+        log.info(
+            "Memory RAG Retrieval: query='%s', bot_id=%s, group_id=%s, fetched=%d, returned=%d",
+            query, bot_id, group_id, len(docs), len(relevant)
+        )
+        return relevant
     except Exception:
         log.exception("retrieve_relevant: failed to fetch similar memories")
         return []

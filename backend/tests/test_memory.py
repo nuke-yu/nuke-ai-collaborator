@@ -279,6 +279,34 @@ class TestChromaMemoryEnhancements(unittest.IsolatedAsyncioTestCase):
         if os.path.exists(TEST_DB_PATH):
             os.remove(TEST_DB_PATH)
 
+    @patch("ai.memory._get_collection")
+    async def test_write_fact_redacts_secrets(self, mock_get_col):
+        mock_col = MagicMock()
+        mock_get_col.return_value = mock_col
+        
+        memory.ChromaStore.write_fact_sync(
+            f_id="test_key_redact",
+            f_content="Setting API_KEY=sk-1234567890abcdef1234567890abcdef for deployment",
+            metadata={"bot_id": 5}
+        )
+        
+        mock_col.upsert.assert_called_once()
+        kwargs = mock_col.upsert.call_args[1]
+        self.assertNotIn("sk-1234567890abcdef1234567890abcdef", kwargs["documents"][0])
+        self.assertIn("[REDACTED]", kwargs["documents"][0])
+
+    @patch("ai.memory._get_collection")
+    async def test_prune_expired_memories(self, mock_get_col):
+        mock_col = MagicMock()
+        mock_get_col.return_value = mock_col
+        
+        memory.ChromaStore.prune_expired_memories_sync(max_age_seconds=1000)
+        
+        mock_col.delete.assert_called_once()
+        kwargs = mock_col.delete.call_args[1]
+        self.assertIn("timestamp", kwargs["where"])
+        self.assertIn("$lt", kwargs["where"]["timestamp"])
+
 
 if __name__ == "__main__":
     unittest.main()
