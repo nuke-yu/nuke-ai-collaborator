@@ -180,8 +180,10 @@ async def clear_bot_context(db, member_id: int, group_id: int):
             "clear_bot_context: failed to delete role_summaries (bot_id=%s, group_id=%s)", member_id, group_id
         )
 
-    from ai.memory import delete_bot_memory
-    await delete_bot_memory(member_id, group_id)
+    # 删除经记忆组件的 forget() 接口，与读(recall)/写(observe)统一走同一 provider 抽象。
+    # 删除是物理清理，恒用默认 Chroma 实现（不受 bot 的 memory=off 策略影响）。
+    from ai.memory_provider import get_memory_provider
+    await get_memory_provider().forget(member_id, group_id)
 
 
 async def update_member_full(db, member_id: int, data: dict):
