@@ -21,7 +21,7 @@ from executors.plugins.rd_tools import RD_TOOLS, register_rd_tools
 from db import get_db
 import permissions
 from ai.client import call_ai_once, call_ai_stream_messages, AIError, AIContextOverflowError
-from ai.memory import get_memory_context, add_to_chroma, maybe_summarize, maybe_reflect
+from ai.memory_provider import get_memory_provider, MemoryContext, MemoryEvent
 from core.role_router import build_context_message, build_image_content
 from workspace import load_context_files, format_context_blocks, append_log, archive_run
 import workspace as _ws
@@ -296,6 +296,8 @@ class ToolLoopRunner:
         self.bf_config = (self.bot.get("executor_config") or {}).get("before_finalize")
         self.model_name = self.bot.get("model_name", "deepseek-chat")
         self.provider = self.bot.get("model_provider", "deepseek")
+        # 可插拔记忆组件：按 bot 策略注入（默认 Chroma，可禁用/替换），loop 只依赖协议。
+        self.memory = get_memory_provider(self.bot)
         self.temperature = self.bot.get("temperature", 0.7)
         # Per-model output budget: default to the model's real ceiling (not a flat
         # 4096), clamp an explicit config down to that ceiling. Avoids large-file
@@ -417,7 +419,10 @@ class ToolLoopRunner:
             self.ruleset = permissions.Ruleset(rules=db_rules, mode=perm_mode)
 
         history, user_msg = build_context_message(self.ctx.user_message, self.ctx.sender["name"], self.ctx.history, is_workflow=self.ctx.is_workflow)
-        memory = await get_memory_context(self.bot["id"], self.bot.get("role") or "", self.ctx.user_message, self.ctx.group_id, self.ctx.history)
+        memory = await self.memory.recall(MemoryContext(
+            bot_id=self.bot["id"], group_id=self.ctx.group_id,
+            role=self.bot.get("role") or "", query=self.ctx.user_message, history=self.ctx.history,
+        ))
 
         if self.executor.manifest.workspace.skill_discovery:
             self.system_prompt_base, self.skills_xml, self.skills_snapshot, self.always_skills = await compile_system_prompt(
@@ -843,9 +848,13 @@ class ToolLoopRunner:
             if m.get("role") == "tool" and m.get("name")
         ]
         
-        bg.spawn(add_to_chroma(msg_id, self.full_text, self.bot.get("role") or "", self.bot["id"], self.ctx.group_id, self.provider, self.model_name))
-        bg.spawn(maybe_summarize(self.ctx.group_id, self.bot["id"], self.bot.get("role") or self.bot["name"], [self.bot["id"]]))
-        bg.spawn(maybe_reflect(self.ctx.group_id, self.bot["id"], self.bot.get("role") or self.bot["name"], self.provider, self.model_name))
+        # 写路径：一次 observe，由记忆组件内部决定触发 ingest + summarize + reflect。
+        bg.spawn(self.memory.observe(MemoryEvent(
+            bot_id=self.bot["id"], group_id=self.ctx.group_id,
+            role=self.bot.get("role") or "", bot_name=self.bot["name"],
+            message_id=msg_id, text=self.full_text,
+            provider=self.provider, model=self.model_name,
+        )))
         bg.spawn(bus.publish(CompactionTriggered(
             group_id=self.ctx.group_id,
             bot_id=self.bot["id"],

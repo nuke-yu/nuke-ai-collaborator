@@ -67,7 +67,7 @@ class TestAbortSignal(unittest.IsolatedAsyncioTestCase):
             yield
 
         with patch("permissions.load_rules", new=AsyncMock(return_value=[])), \
-             patch(f"{_mod}.get_memory_context", new=AsyncMock(return_value="")), \
+             patch("ai.memory.get_memory_context", new=AsyncMock(return_value="")), \
              patch(f"{_mod}.load_context_files", new=AsyncMock(return_value=[])), \
              patch(f"{_mod}.format_context_blocks", return_value=""), \
              patch(f"{_mod}.list_skills_all", new=AsyncMock(return_value=[])), \

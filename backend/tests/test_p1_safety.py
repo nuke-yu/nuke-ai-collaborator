@@ -140,7 +140,7 @@ class TestDoomLoopGuard(unittest.IsolatedAsyncioTestCase):
 
         m = "executors.plugins.tool_loop_v1."
         with patch("core.orchestration.ai_service.call_ai_once", new=AsyncMock(side_effect=mock_call)), \
-             patch(m + "get_memory_context", new=AsyncMock(return_value="")), \
+             patch("ai.memory.get_memory_context", new=AsyncMock(return_value="")), \
              patch(m + "load_context_files", new=AsyncMock(return_value=[])), \
              patch(m + "list_skills_all", return_value=[]), \
              patch(m + "load_always_skills", return_value=[]), \

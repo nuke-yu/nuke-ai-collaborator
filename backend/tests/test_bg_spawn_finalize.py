@@ -46,7 +46,7 @@ class TestBgSpawnFinalize(unittest.IsolatedAsyncioTestCase):
         spawned = []
 
         def fake_spawn(coro):
-            spawned.append(coro)
+            spawned.append(getattr(coro, "__qualname__", "") or getattr(coro, "__name__", ""))
             coro.close()  # we only assert it was scheduled via bg.spawn
             return MagicMock()
 
@@ -61,24 +61,28 @@ class TestBgSpawnFinalize(unittest.IsolatedAsyncioTestCase):
              patch("core.orchestration.ai_service.call_ai_once",
                    new=AsyncMock(return_value={"type": "text", "content": "done", "usage": {}})), \
              patch(m + "load_context_files", new=AsyncMock(return_value=[])), \
-             patch(m + "get_memory_context", new=AsyncMock(return_value="")), \
+             patch("ai.memory.get_memory_context", new=AsyncMock(return_value="")), \
              patch(m + "list_skills_all", new=AsyncMock(return_value=[])), \
              patch(m + "load_always_skills", new=AsyncMock(return_value=[])), \
              patch(m + "get_db", new=MagicMock()), \
-             patch(m + "add_to_chroma", new=AsyncMock()), \
-             patch(m + "maybe_summarize", new=AsyncMock()), \
+             patch("ai.memory.add_to_chroma", new=AsyncMock()), \
+             patch("ai.memory.maybe_summarize", new=AsyncMock()), \
              patch(m + "append_log", new=AsyncMock()), \
              patch(m + "archive_run", new=AsyncMock()), \
              patch("executors.compact.maybe_compact_db_history", new=AsyncMock()), \
              patch("executors.compact.apply_tool_result_microcompact", side_effect=lambda x: x):
             await ToolLoopV1().run(ctx)
 
-        # The unconditional finalize side effects (chroma / summarize / compact /
-        # append_log) must all be scheduled via bg.spawn — 4 or more.
+        # 记忆写路径现已收敛为单个 memory.observe（内部触发 ingest+summarize+reflect），
+        # 与 compaction publish、append_log 一并经 bg.spawn 调度，而非裸 asyncio.create_task。
         self.assertGreaterEqual(
-            len(spawned), 4,
-            f"expected finalize side effects via bg.spawn, got {len(spawned)} "
+            len(spawned), 3,
+            f"expected finalize side effects via bg.spawn, got {spawned} "
             "(a regression to bare asyncio.create_task)",
+        )
+        self.assertTrue(
+            any("observe" in n for n in spawned),
+            f"记忆写路径 (memory.observe) 必须经 bg.spawn 调度，实际: {spawned}",
         )
 
 
