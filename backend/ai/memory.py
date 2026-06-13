@@ -17,10 +17,11 @@ SUMMARY_THRESHOLD = config.SUMMARY_THRESHOLD
 # ── 1. 事实过滤与冲突检测提示词 ───────────────────────────────────────
 FACT_EXTRACTION_PROMPT = """你是一个记忆过滤与事实提取助手。你的任务是从以下智能体的发言中，提取出值得长期记住的关键技术决策、用户偏好、重要配置修改或项目结论。
 如果是无意义的客套话（如'好的'、'没问题'）、中间调试过程、过渡性废话或临时性的工具报错，请直接返回'NO_SALIENT_INFO'。
-否则，请以极其简练的中文陈述句提取出核心事实，每条一行（不要带序号、前缀或标点符号），例如：
-将服务端口修改为8080
-用户偏好使用Python进行脚本编写
-项目已切换到React 19版本
+否则，请提取核心事实并附带重要性打分（Salience Score，介于 0.0 到 1.0 之间，值越高代表信息对后续开发和项目决策越重要，例如技术决策为 0.9，配置修改为 0.8，用户偏好为 0.7）。
+每行一条事实，格式为：事实内容|分数（不要带序号、前缀或任何标点符号），例如：
+将服务端口修改为8080|0.9
+用户偏好使用Python进行脚本编写|0.7
+项目已切换到React 19版本|0.9
 
 发言内容：
 """
@@ -107,6 +108,21 @@ class ChromaStore:
         col.delete(where=where)
 
     @classmethod
+    def update_access_stats_sync(cls, ids: list[str], metas: list[dict]):
+        """异步更新检索到的记忆的访问频率和时间，以支持 LRU 淘汰机制。"""
+        if not ids:
+            return
+        col = cls.get_collection()
+        try:
+            for idx, item_id in enumerate(ids):
+                meta = metas[idx] if idx < len(metas) else {}
+                meta["access_count"] = meta.get("access_count", 0) + 1
+                meta["last_accessed"] = time.time()
+                col.update(ids=[item_id], metadatas=[meta])
+        except Exception:
+            log.warning("ChromaStore: failed to update access stats for %s", ids)
+
+    @classmethod
     def delete_ids_sync(cls, ids: list[str]):
         """按 ID 批量删除（用于一次性清除被新事实覆盖失效的旧记忆）。"""
         if not ids:
@@ -134,7 +150,7 @@ class FactExtractor:
     """提取发言中的高价值事实，过滤 conversational noise (如“好的”)。"""
     
     @staticmethod
-    async def extract(content: str, provider: str = "deepseek", model: str = "deepseek-chat") -> list[str]:
+    async def extract(content: str, provider: str = "deepseek", model: str = "deepseek-chat") -> list[tuple[str, float]]:
         if not content or not content.strip() or len(content.strip()) < 15:
             return []
 
@@ -150,11 +166,24 @@ class FactExtractor:
             text = text.strip()
             if not text or "NO_SALIENT_INFO" in text:
                 return []
-            return [
-                line.strip()
-                for line in text.split("\n")
-                if line.strip() and not line.strip().startswith("#")
-            ]
+            
+            extracted = []
+            for line in text.split("\n"):
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if "|" in line:
+                    parts = line.split("|")
+                    fact_text = parts[0].strip()
+                    try:
+                        score = float(parts[1].strip())
+                        score = max(0.0, min(1.0, score))
+                    except ValueError:
+                        score = 0.5
+                    extracted.append((fact_text, score))
+                else:
+                    extracted.append((line, 0.5))
+            return extracted
         except Exception:
             log.exception("FactExtractor: failed to extract facts")
             return []
@@ -239,30 +268,49 @@ class ConflictResolver:
 
 # ── 5. TimeDecayRanker ── 绝对指数衰减排序
 class TimeDecayRanker:
-    """基于物理时间差应用绝对指数衰减的排序器（半衰期默认7天）。"""
+    """基于物理时间差应用绝对指数衰减的排序器（半衰期默认7天），融合重要性和关键字增强并设绝对相似度下限。"""
 
-    def __init__(self, half_life_days: float = 7.0):
+    def __init__(self, half_life_days: float = 7.0, similarity_floor: float = 0.65):
         self.decay_const = 0.693147 / (half_life_days * 86400.0)
+        self.similarity_floor = similarity_floor
 
-    def rank(self, docs: list[str], metas: list[dict], dists: list[float], top_k: int) -> list[str]:
+    def rank(self, docs: list[str], metas: list[dict], dists: list[float], top_k: int, query: str = "") -> list[str]:
         t_now = time.time()
         scored = []
         
+        # 提取查询语句中的核心英文/数字关键字，用于精确名词/配置的检索加权增强
+        keywords = []
+        if query:
+            keywords = [w.lower() for w in re.findall(r'[a-zA-Z0-9\u4e00-\u9fa5]+', query) if len(w) > 1]
+            
         for idx in range(len(docs)):
             dist = dists[idx] if idx < len(dists) else 1.0
             sim = max(0.0, min(1.0, 1.0 - dist))
             
+            # 🔴 检索加绝对相似度下限（防检索幻觉，文档头号坑）
+            if sim < self.similarity_floor:
+                continue
+                
             meta = metas[idx] if idx < len(metas) else {}
+            importance = meta.get("importance", 0.5)  # 获取写入时存进 metadata 的重要性分值
+            
             t_val = meta.get("timestamp")
             if t_val is None:
-                # 兼容旧数据：若没有 timestamp，假定为 30 天前的旧数据以产生充分衰减
                 t_val = t_now - 30.0 * 86400.0
                 
             delta_t = max(0.0, t_now - t_val)
             recency = math.exp(-self.decay_const * delta_t)
             
-            # 绝对衰减加权：0.7 * 语义相似度 + 0.3 * 时间衰减指数
-            score = 0.7 * sim + 0.3 * recency
+            # 🟡 混合检索关键字增强：如果文档中匹配到了特定的精确名词/配置，则提升其打分
+            keyword_boost = 0.0
+            if keywords:
+                doc_lower = docs[idx].lower()
+                matches = sum(1 for kw in keywords if kw in doc_lower)
+                if matches > 0:
+                    keyword_boost = min(0.2, 0.08 * matches)
+            
+            # 🟡 完整三因子加权公式：0.5 * 语义相似度 + 0.3 * 时间衰减 + 0.2 * 重要性 + keyword_boost
+            score = 0.5 * sim + 0.3 * recency + 0.2 * importance + keyword_boost
             scored.append((score, docs[idx]))
             
         scored.sort(key=lambda x: x[0], reverse=True)
@@ -326,17 +374,20 @@ async def add_to_chroma(message_id: int, content: str, role: str, bot_id: int, g
     if not facts:
         return
 
-    # 2. 批量消解冲突（将 N 次冲突检测合并为 1 次 LLM 调用，防限流）
-    del_ids = await ConflictResolver.resolve_batch(facts, bot_id, group_id, provider, model)
+    # 2. 批量消解冲突
+    del_ids = await ConflictResolver.resolve_batch([f[0] for f in facts], bot_id, group_id, provider, model)
 
     loop = asyncio.get_running_loop()
 
-    # 3. 写入全部新事实
-    for idx, fact in enumerate(facts):
+    # 3. 写入全部新事实并保存重要性评分与访问频次统计
+    for idx, (fact, score) in enumerate(facts):
         metadata = {
             "bot_id": bot_id,
             "role": role or "",
-            "timestamp": time.time()
+            "timestamp": time.time(),
+            "importance": score,       # 存入重要性分数 (Problem 2)
+            "access_count": 0,         # 写入初始访问次数 (支持 LRU 淘汰)
+            "last_accessed": time.time()
         }
         if group_id is not None:
             metadata["group_id"] = group_id
@@ -384,15 +435,25 @@ async def retrieve_relevant(bot_id: int, group_id: int | None, query: str, top_k
         metas = results["metadatas"][0] if results.get("metadatas") else []
         dists = results["distances"][0] if results.get("distances") else []
         
-        # 绝对指数衰减打分与精排
+        # 绝对指数衰减打分与精排，包含重要性与关键字增强
         ranker = TimeDecayRanker()
-        relevant = ranker.rank(docs, metas, dists, top_k)
+        relevant = ranker.rank(docs, metas, dists, top_k, query)
         
         # 可观测性评估：记录命中与排序指标
         log.info(
             "Memory RAG Retrieval: query='%s', bot_id=%s, group_id=%s, fetched=%d, returned=%d",
             query, bot_id, group_id, len(docs), len(relevant)
         )
+        
+        # 异步更新检索到的记忆的访问频率和时间，以支持 LRU 淘汰机制
+        if results.get("ids") and results["ids"][0]:
+            retrieved_ids = results["ids"][0][:len(relevant)]
+            retrieved_metas = results["metadatas"][0][:len(relevant)]
+            loop.run_in_executor(
+                None,
+                partial(ChromaStore.update_access_stats_sync, retrieved_ids, retrieved_metas)
+            )
+            
         return relevant
     except Exception:
         log.exception("retrieve_relevant: failed to fetch similar memories")

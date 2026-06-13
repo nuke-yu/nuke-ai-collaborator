@@ -390,5 +390,108 @@ class TestChromaMemoryEnhancements(unittest.IsolatedAsyncioTestCase):
             os.remove(TEST_DB_PATH)
 
 
+class TestMemoryAuditFixes(unittest.IsolatedAsyncioTestCase):
+
+    def setUp(self):
+        import time
+        self.time = time
+
+    def test_similarity_floor_filtering(self):
+        """测试相似度低于绝对下限（0.65）的内容不会被召回注入。"""
+        from ai.memory import TimeDecayRanker
+        ranker = TimeDecayRanker(similarity_floor=0.65)
+        
+        # Doc A: dist = 0.3 (similarity = 0.7 > 0.65)
+        # Doc B: dist = 0.4 (similarity = 0.6 < 0.65)
+        docs = ["Doc A", "Doc B"]
+        metas = [{"timestamp": self.time.time(), "importance": 0.8}, {"timestamp": self.time.time(), "importance": 0.8}]
+        dists = [0.3, 0.4]
+        
+        results = ranker.rank(docs, metas, dists, top_k=2)
+        self.assertIn("Doc A", results)
+        self.assertNotIn("Doc B", results)
+
+    @patch("ai.client.call_ai_once", new_callable=AsyncMock)
+    async def test_salience_score_parsing(self, mock_call_once):
+        """测试 FactExtractor.extract 能够正确解析带重要性得分的格式。"""
+        from ai.memory import FactExtractor
+        
+        # 模拟 LLM 返回混合格式
+        mock_call_once.return_value = {
+            "type": "text",
+            "content": "修改数据库配置|0.9\n偏好前端语言|0.7\n普通事实（无分数）"
+        }
+        
+        # 传入 > 15 字符的文本以通过长度过滤
+        facts = await FactExtractor.extract("经过讨论，我们需要将系统运行端口修改为8080")
+        self.assertEqual(len(facts), 3)
+        self.assertEqual(facts[0], ("修改数据库配置", 0.9))
+        self.assertEqual(facts[1], ("偏好前端语言", 0.7))
+        self.assertEqual(facts[2], ("普通事实（无分数）", 0.5))
+
+    def test_three_factor_score_weighting(self):
+        """测试 0.5 * sim + 0.3 * recency + 0.2 * importance 三因子公式和重要度排序。"""
+        from ai.memory import TimeDecayRanker
+        ranker = TimeDecayRanker(similarity_floor=0.0)
+        
+        # 保证时间基本一致，排除时间衰减干扰
+        t_now = self.time.time()
+        docs = ["Doc Low Importance", "Doc High Importance"]
+        metas = [
+            {"timestamp": t_now, "importance": 0.1},
+            {"timestamp": t_now, "importance": 0.9}
+        ]
+        # 相似度一样
+        dists = [0.2, 0.2]
+        
+        results = ranker.rank(docs, metas, dists, top_k=2)
+        # 高重要度的分高，应该排第一
+        self.assertEqual(results[0], "Doc High Importance")
+
+    def test_keyword_boosting(self):
+        """测试混合检索关键字精确匹配加分。"""
+        from ai.memory import TimeDecayRanker
+        ranker = TimeDecayRanker(similarity_floor=0.0)
+        
+        t_now = self.time.time()
+        docs = ["database connection pool config on port 8080", "regular memory entry without keywords"]
+        metas = [
+            {"timestamp": t_now, "importance": 0.5},
+            {"timestamp": t_now, "importance": 0.5}
+        ]
+        # 相似度完全一样，且无关键字加分时两者分值应当一样。查询 "port 8080" 应该给第一条加分。
+        dists = [0.3, 0.3]
+        
+        results = ranker.rank(docs, metas, dists, top_k=2, query="find port 8080 settings")
+        self.assertEqual(results[0], "database connection pool config on port 8080")
+
+    @patch("ai.memory._get_collection")
+    async def test_lru_access_stats_update(self, mock_get_col):
+        """测试 retrieve_relevant 在召回成功后异步触发 access_count 与 last_accessed 的 LRU 状态更新。"""
+        mock_col = MagicMock()
+        mock_get_col.return_value = mock_col
+        
+        mock_col.query.return_value = {
+            "documents": [["Test Memory Doc"]],
+            "metadatas": [[{"bot_id": 5, "timestamp": self.time.time(), "importance": 0.8}]],
+            "distances": [[0.1]],
+            "ids": [["123_0"]]
+        }
+        
+        results = await memory.retrieve_relevant(bot_id=5, group_id=9, query="test query", top_k=1)
+        self.assertEqual(len(results), 1)
+        
+        await asyncio.sleep(0.1)  # 等待 loop.run_in_executor 中的异步更新执行
+        
+        # 确认 update 被调用以更新 access 统计信息
+        mock_col.update.assert_called_once()
+        update_kwargs = mock_col.update.call_args[1]
+        self.assertEqual(update_kwargs["ids"], ["123_0"])
+        meta = update_kwargs["metadatas"][0]
+        self.assertEqual(meta["access_count"], 1)
+        self.assertGreater(meta["last_accessed"], 0)
+
+
 if __name__ == "__main__":
     unittest.main()
+
