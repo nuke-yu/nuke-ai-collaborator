@@ -314,7 +314,9 @@ class TimeDecayRanker:
         # 提取查询语句中的核心英文/数字关键字，用于精确名词/配置的检索加权增强
         keywords = []
         if query:
-            keywords = [w.lower() for w in re.findall(r'[a-zA-Z0-9\u4e00-\u9fa5]+', query) if len(w) > 1]
+            # \u53ea\u53d6\u82f1\u6570\u5173\u952e\u5b57\uff088080/React/CDG\uff09\uff1a\u4e2d\u6587\u65e0\u7a7a\u683c\u5206\u8bcd\uff0c\u6574\u6bb5\u6210\u4e00\u4e2a token\u3001
+            # \u51e0\u4e4e\u4e0d\u53ef\u80fd\u5b50\u4e32\u547d\u4e2d\u6587\u6863\u800c\u5f92\u589e\u566a\u58f0\uff1b\u4e2d\u6587\u8bed\u4e49\u5339\u914d\u7531\u5411\u91cf\u76f8\u4f3c\u5ea6\u627f\u62c5\u3002
+            keywords = [w.lower() for w in re.findall(r'[a-zA-Z0-9]+', query) if len(w) > 1]
             
         for idx in range(len(docs)):
             dist = dists[idx] if idx < len(dists) else 1.0
@@ -678,6 +680,11 @@ async def maybe_reflect(group_id: int, bot_id: int, role: str,
         if len(facts) < config.REFLECT_MIN_FACTS:
             return
         if sum(f[1] for f in facts) < config.REFLECT_IMPORTANCE_THRESHOLD:
+            # 重要性不足：正常下几条就越过阈值；但若长期只积累低价值事实始终不触发，
+            # 水位线永不推进、fetch 无界增长。超过积压上限时强制推进水位线丢弃这批
+            # 低价值事实（avg importance 极低，本就该被遗忘），消除增长。
+            if len(facts) > config.REFLECT_MAX_BACKLOG:
+                await _set_reflection_watermark(bot_id, group_id, max_ts)
             return
 
         new_level = min(max_level + 1, config.REFLECT_MAX_LEVEL)
@@ -902,13 +909,17 @@ async def backfill_chroma_timestamps(dry_run: bool = False) -> dict:
         try:
             with ctx:
                 async with get_db() as db:
-                    ph = ",".join("?" * len(by_msg))
-                    async with db.execute(
-                        f"SELECT id, created_at FROM messages WHERE id IN ({ph})",
-                        list(by_msg.keys()),
-                    ) as cur:
-                        for row in await cur.fetchall():
-                            created[row[0]] = row[1]
+                    # 分批查询，避免单条 IN(...) 超过 SQLite 占位符上限（旧版 999）
+                    msg_ids = list(by_msg.keys())
+                    for off in range(0, len(msg_ids), 500):
+                        chunk = msg_ids[off:off + 500]
+                        ph = ",".join("?" * len(chunk))
+                        async with db.execute(
+                            f"SELECT id, created_at FROM messages WHERE id IN ({ph})",
+                            chunk,
+                        ) as cur:
+                            for row in await cur.fetchall():
+                                created[row[0]] = row[1]
         except Exception:
             log.exception("backfill_chroma_timestamps: DB read failed for group %s", gid)
             continue

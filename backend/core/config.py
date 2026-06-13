@@ -57,6 +57,9 @@ MEMORY_SIMILARITY_FLOOR = float(os.environ.get("NUKE_MEMORY_SIMILARITY_FLOOR") o
 REFLECT_IMPORTANCE_THRESHOLD = float(os.environ.get("NUKE_REFLECT_IMPORTANCE_THRESHOLD") or 3.0)
 REFLECT_MIN_FACTS = int(os.environ.get("NUKE_REFLECT_MIN_FACTS") or 5)
 REFLECT_MAX_INSIGHTS = int(os.environ.get("NUKE_REFLECT_MAX_INSIGHTS") or 5)
+# 积压上限：自上次反思以来未触发的事实超过此数，强制推进水位线丢弃这批（importance 极低、
+# 本就该遗忘），避免重要性始终不达阈值时水位线永不推进、每条消息 fetch 无界增长。
+REFLECT_MAX_BACKLOG = int(os.environ.get("NUKE_REFLECT_MAX_BACKLOG") or 50)
 
 # 遗忘 TTL（天）：原子事实较短，反思洞察作为沉淀的语义知识保留更久 (P2)。
 MEMORY_TTL_DAYS = float(os.environ.get("NUKE_MEMORY_TTL_DAYS") or 180.0)

@@ -669,6 +669,88 @@ class TestMemoryAuditFixes(unittest.IsolatedAsyncioTestCase):
             except Exception:
                 pass
 
+    def test_keyword_boost_alnum_only_for_mixed_query(self):
+        """#1: 关键字增强只认英数。中文混合查询中的端口号 8080 仍应给含它的文档加分。"""
+        from ai.memory import TimeDecayRanker
+        import time as _t
+        ranker = TimeDecayRanker(similarity_floor=0.0)
+        t_now = _t.time()
+        docs = ["将服务端口改为8080", "一段无关的中文记忆内容"]
+        metas = [
+            {"timestamp": t_now, "importance": 0.5, "mem_type": "fact"},
+            {"timestamp": t_now, "importance": 0.5, "mem_type": "fact"},
+        ]
+        dists = [0.3, 0.3]  # 相似度相同，差异只来自关键字 8080
+        results = ranker.rank(docs, metas, dists, top_k=2, query="怎么把服务端口改成8080")
+        self.assertEqual(results[0], "将服务端口改为8080")
+
+    @patch("ai.memory._set_reflection_watermark", new_callable=AsyncMock)
+    @patch("ai.memory._get_reflection_watermark", new_callable=AsyncMock)
+    @patch("ai.client.call_ai_once", new_callable=AsyncMock)
+    @patch("ai.memory._get_collection")
+    @patch("core.config.REFLECT_MAX_BACKLOG", 4)
+    async def test_maybe_reflect_force_advances_watermark_on_backlog(
+        self, mock_get_col, mock_call_once, mock_wm_get, mock_wm_set
+    ):
+        """#2: 大量低重要性事实始终不触发时，超过积压上限要强制推进水位线（不空跑 LLM）。"""
+        import time as _t
+        mock_col = MagicMock()
+        mock_get_col.return_value = mock_col
+        mock_wm_get.return_value = 0.0
+        t_now = _t.time()
+        # 6 条 importance=0.1 的事实：数量≥MIN(5)、Σ=0.6<3.0、且 >MAX_BACKLOG(4)
+        mock_col.get.return_value = {
+            "ids": [f"{i}_0" for i in range(6)],
+            "documents": [f"琐碎事实{i}" for i in range(6)],
+            "metadatas": [{"mem_type": "fact", "importance": 0.1, "timestamp": t_now} for _ in range(6)],
+        }
+        await memory.maybe_reflect(group_id=9, bot_id=5, role="dev")
+        await asyncio.sleep(0.05)
+
+        mock_call_once.assert_not_called()        # 未触发归纳
+        mock_wm_set.assert_awaited_once()         # 但水位线被强制推进
+        self.assertAlmostEqual(mock_wm_set.await_args[0][2], t_now, places=3)
+
+    @patch("ai.memory._get_collection")
+    async def test_backfill_chunks_large_in_clause(self, mock_get_col):
+        """#3: 单群缺 timestamp 的消息 >999 时，IN(...) 必须分批，不能触发 too many SQL variables。"""
+        import tempfile, os as _os
+        from unittest.mock import patch as _patch
+        import db as _db
+        from db.schema_split import init_group_db
+        from db.migrations import run_migrations
+
+        N = 1100
+        d = tempfile.mkdtemp(); gp = _os.path.join(d, "chat.db")
+        await init_group_db(gp)
+        async with _db.connect(gp) as c:
+            await run_migrations(c)
+            for i in range(1, N + 1):
+                await c.execute(
+                    "INSERT INTO messages (id, group_id, member_id, content, created_at) "
+                    "VALUES (?, 7, 1, ?, '2026-06-12 12:00:00')",
+                    (i, f"m{i}"),
+                )
+            await c.commit()
+
+        mock_col = MagicMock()
+        mock_get_col.return_value = mock_col
+        # 1100 条无 timestamp、带 group_id 的记忆 → 全部需要回填
+        mock_col.get.return_value = {
+            "ids": [str(i) for i in range(1, N + 1)],
+            "metadatas": [{"bot_id": 1, "group_id": 7} for _ in range(N)],
+        }
+        try:
+            with _patch("runtime.dbpaths.group_db_path", return_value=gp):
+                stats = await memory.backfill_chroma_timestamps(dry_run=False)
+            self.assertEqual(stats["updated"], N)   # 全部回填，未因 IN 占位符超限崩溃
+            mock_col.update.assert_called()
+        finally:
+            try:
+                _os.remove(gp); _os.rmdir(d)
+            except Exception:
+                pass
+
 
 if __name__ == "__main__":
     unittest.main()
