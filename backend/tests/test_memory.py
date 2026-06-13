@@ -170,6 +170,8 @@ class TestChromaMemoryEnhancements(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(kwargs["metadatas"][0]["group_id"], 9)
         self.assertEqual(kwargs["metadatas"][0]["role"], "assistant")
         self.assertIn("timestamp", kwargs["metadatas"][0])
+        # 打分模型来源必须随事实落库，供将来换模型时按刻度归一化重标
+        self.assertEqual(kwargs["metadatas"][0]["scored_by_model"], "claude/claude-opus-4-8")
         # #1: 群组配置的 provider/model 必须透传给 LLM 调用，而非写死 deepseek
         self.assertEqual(mock_call_once.call_args[0][2], "claude")
         self.assertEqual(mock_call_once.call_args[0][3], "claude-opus-4-8")
@@ -400,9 +402,46 @@ class TestChromaMemoryEnhancements(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(kwargs["ids"], ["12_0"])
         self.assertIn("timestamp", kwargs["metadatas"][0])
         self.assertGreater(kwargs["metadatas"][0]["timestamp"], 0)
-        
+
         if os.path.exists(TEST_DB_PATH):
             os.remove(TEST_DB_PATH)
+
+    @patch("ai.memory._get_collection")
+    async def test_backfill_scored_by_model_stamps_missing_only(self, mock_get_col):
+        """缺 scored_by_model 的条目打上 label；已有的跳过；保留其余 metadata。"""
+        mock_col = MagicMock()
+        mock_get_col.return_value = mock_col
+        mock_col.get.return_value = {
+            "ids": ["1_0", "2_0", "refl_x"],
+            "metadatas": [
+                {"bot_id": 5, "importance": 0.9},               # 缺字段 → 应回填
+                {"bot_id": 5, "scored_by_model": "claude/x"},   # 已有 → 应跳过
+                {"bot_id": 6},                                   # 缺字段 → 应回填
+            ],
+        }
+
+        stats = await memory.backfill_chroma_scored_by_model(label="legacy/unknown")
+
+        self.assertEqual(stats, {"scanned": 3, "need": 2, "updated": 2})
+        mock_col.update.assert_called_once()
+        kwargs = mock_col.update.call_args[1]
+        self.assertEqual(kwargs["ids"], ["1_0", "refl_x"])
+        # 占位 label 落到两条缺字段记录上，且原有 metadata 不被破坏
+        self.assertEqual(kwargs["metadatas"][0]["scored_by_model"], "legacy/unknown")
+        self.assertEqual(kwargs["metadatas"][0]["importance"], 0.9)
+        self.assertEqual(kwargs["metadatas"][1]["scored_by_model"], "legacy/unknown")
+        self.assertEqual(kwargs["metadatas"][1]["bot_id"], 6)
+
+    @patch("ai.memory._get_collection")
+    async def test_backfill_scored_by_model_dry_run_writes_nothing(self, mock_get_col):
+        mock_col = MagicMock()
+        mock_get_col.return_value = mock_col
+        mock_col.get.return_value = {"ids": ["1_0"], "metadatas": [{"bot_id": 5}]}
+
+        stats = await memory.backfill_chroma_scored_by_model(dry_run=True)
+
+        self.assertEqual(stats, {"scanned": 1, "need": 1, "updated": 1})
+        mock_col.update.assert_not_called()
 
 
 class TestMemoryAuditFixes(unittest.IsolatedAsyncioTestCase):

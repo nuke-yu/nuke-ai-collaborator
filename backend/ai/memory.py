@@ -445,6 +445,7 @@ async def add_to_chroma(message_id: int, content: str, role: str, bot_id: int, g
             "timestamp": time.time(),
             "importance": score,       # 存入重要性分数，供检索三因子加权 (Problem 2)
             "mem_type": "fact",        # 区分情景/原子事实 vs 反思洞察 (P1 巩固层)
+            "scored_by_model": f"{provider}/{model}",  # 打分模型来源，供将来换模型时按刻度归一化重标
         }
         if group_id is not None:
             metadata["group_id"] = group_id
@@ -761,6 +762,7 @@ async def maybe_reflect(group_id: int, bot_id: int, role: str,
                     "mem_type": "reflection",
                     "level": new_level,         # 反思层级 (P3)，封顶后不再被归纳
                     "source_ids": source_ids,   # A-MEM 链接：本反思由哪些记忆提炼而来
+                    "scored_by_model": f"{provider}/{model}",  # 打分模型来源，供将来换模型时按刻度归一化重标
                 }
                 if group_id is not None:
                     metadata["group_id"] = group_id
@@ -978,5 +980,71 @@ async def backfill_chroma_timestamps(dry_run: bool = False) -> dict:
             log.info("backfill_chroma_timestamps: group %s updated %d record(s)", gid, len(upd_ids))
         except Exception:
             log.exception("backfill_chroma_timestamps: update failed for group %s", gid)
+
+    return stats
+
+
+async def backfill_chroma_scored_by_model(dry_run: bool = False, label: str = "legacy/unknown") -> dict:
+    """回填 Chroma 中缺失 `scored_by_model` 的旧记忆，统一标记为 `label`（默认 legacy/unknown）。
+
+    add_to_chroma / maybe_reflect 开始写入 scored_by_model 之前产生的记忆没有该字段。它不影响
+    检索，但将来某群组切换打分模型时，需要据此圈出"用旧模型打分"的存量记忆做 salience 归一化
+    重标。本脚本给所有缺该字段的记忆打上统一占位 label，把这条退路留好。
+
+    Chroma 是全局单库，scored_by_model 不依赖任何 group DB，直接全表扫描回填即可（无需像
+    timestamp 那样按 group 分桶查 messages 表）。返回统计：{"scanned","need","updated"}。
+    dry_run=True 时只统计与日志、不写回。幂等：已有 scored_by_model 的条目跳过，可安全重跑。
+    """
+    loop = asyncio.get_running_loop()
+    stats = {"scanned": 0, "need": 0, "updated": 0}
+
+    def _get_all_memories_sync():
+        col = ChromaStore.get_collection()
+        return col.get(include=["metadatas"])
+
+    try:
+        memories = await loop.run_in_executor(None, _get_all_memories_sync)
+    except Exception:
+        log.exception("backfill_chroma_scored_by_model: failed to read collection")
+        return stats
+
+    if not memories or not memories.get("ids"):
+        return stats
+
+    ids = memories["ids"]
+    metas = memories.get("metadatas") or []
+    stats["scanned"] = len(ids)
+
+    upd_ids: list[str] = []
+    upd_metas: list[dict] = []
+    for idx, item_id in enumerate(ids):
+        meta = dict(metas[idx]) if idx < len(metas) and metas[idx] else {}
+        if meta.get("scored_by_model"):
+            continue
+        stats["need"] += 1
+        meta["scored_by_model"] = label
+        upd_ids.append(item_id)
+        upd_metas.append(meta)
+
+    if not upd_ids:
+        return stats
+    stats["updated"] = len(upd_ids)
+    if dry_run:
+        log.info("backfill_chroma_scored_by_model (dry-run): would update %d record(s)", len(upd_ids))
+        return stats
+
+    def _update_batch_sync(uids: list[str], umetas: list[dict]):
+        col = ChromaStore.get_collection()
+        col.update(ids=uids, metadatas=umetas)
+
+    try:
+        # 分批写回，避免单次 col.update 超过 Chroma 的批量上限
+        for off in range(0, len(upd_ids), 500):
+            chunk_ids = upd_ids[off:off + 500]
+            chunk_metas = upd_metas[off:off + 500]
+            await loop.run_in_executor(None, partial(_update_batch_sync, chunk_ids, chunk_metas))
+        log.info("backfill_chroma_scored_by_model: updated %d record(s) as %r", len(upd_ids), label)
+    except Exception:
+        log.exception("backfill_chroma_scored_by_model: update failed")
 
     return stats
