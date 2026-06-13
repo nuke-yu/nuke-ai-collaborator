@@ -255,9 +255,10 @@ class ConflictResolver:
 class TimeDecayRanker:
     """基于物理时间差应用绝对指数衰减的排序器（半衰期默认7天），融合重要性和关键字增强并设绝对相似度下限。"""
 
-    def __init__(self, half_life_days: float = 7.0, similarity_floor: float = 0.65):
+    def __init__(self, half_life_days: float = 7.0, similarity_floor: float | None = None):
         self.decay_const = 0.693147 / (half_life_days * 86400.0)
-        self.similarity_floor = similarity_floor
+        # None → 用配置项（可经 NUKE_MEMORY_SIMILARITY_FLOOR 覆盖）；显式传值用于测试。
+        self.similarity_floor = config.MEMORY_SIMILARITY_FLOOR if similarity_floor is None else similarity_floor
 
     def rank(self, docs: list[str], metas: list[dict], dists: list[float], top_k: int, query: str = "") -> list[str]:
         t_now = time.time()

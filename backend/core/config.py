@@ -39,6 +39,16 @@ EMBEDDING_PROVIDER = (os.environ.get("NUKE_EMBEDDING_PROVIDER") or "local").lowe
 EMBEDDING_MODEL = os.environ.get("NUKE_EMBEDDING_MODEL") or None      # None → provider default
 EMBEDDING_ENDPOINT = os.environ.get("NUKE_EMBEDDING_ENDPOINT") or None  # override base URL
 
+# --- Memory Retrieval (RAG ranking) ---
+# Absolute cosine-similarity floor for injecting a memory into context: candidates
+# scoring below this are dropped BEFORE ranking, to curb retrieval-hallucination
+# (a semantically-far memory being fed to the LLM as if relevant). Tune per
+# embedding model — too high → "amnesia" (nothing retrieved), too low → noise.
+# Watch the `returned=N` count in the "Memory RAG Retrieval" log under real
+# traffic. Default suits a higher-similarity model; the bundled local MiniLM may
+# need a lower value.
+MEMORY_SIMILARITY_FLOOR = float(os.environ.get("NUKE_MEMORY_SIMILARITY_FLOOR") or 0.65)
+
 # --- Environment overrides ---
 if os.environ.get("NUKE_DEBUG"):
     DOOM_LOOP_THRESHOLD = 100
