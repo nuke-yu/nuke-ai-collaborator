@@ -6,101 +6,79 @@
 
 ## 1. 整体架构拓扑 (Architecture Topology)
 
-记忆系统采用**“双轨存储、项目单元物理隔离、具备语义防冲突与物理衰减”**的设计模式。
+记忆系统采用**“双轨存储、项目单元物理隔离、具备语义防冲突与物理衰减”**的设计模式，由三条主链路组成：写入提取、周期反思、检索装配，全部跑在 Group 物理隔离之上。
 
+### 1.1 记忆写入与提取流水线 (Memory Ingestion Pipeline)
+
+```mermaid
+flowchart TD
+    MSG["💬 智能体对话原始消息 (Message)"]
+    EXTRACT["FactExtractor.extract()<br/>群组实际配置的 LLM 抽取"]
+    DROP["🛑 直接过滤 / 丢弃<br/>(如 '好的' / '收到')"]
+    FACTS["提取出原子事实 (Salient Facts)<br/>带 Salience Score 0.0 ~ 1.0"]
+    CONFLICT["ConflictResolver.resolve_batch()<br/>批量检索 Top-3 候选 (余弦距离 &lt; 0.25)"]
+    JUDGE["LLM 批量比对排他性冲突"]
+    DELETE["ChromaStore.delete_ids_sync()<br/>批量物理删除被覆盖旧事实"]
+    WRITE["ChromaStore.write_fact_sync() 写入新事实<br/>(自动脱敏, mem_type='fact', scored_by_model)"]
+    PRUNE["ChromaStore.prune_expired_memories_sync()<br/>按 Fact TTL 物理清理"]
+
+    MSG --> EXTRACT
+    EXTRACT -- "长度 &lt; 8 字符" --> DROP
+    EXTRACT --> FACTS
+    FACTS --> CONFLICT
+    CONFLICT -- "合并为单次 LLM 判定" --> JUDGE
+    JUDGE -- "返回失效旧 ID" --> DELETE
+    DELETE --> WRITE
+    JUDGE -- "无冲突" --> WRITE
+    WRITE -. "10% 概率被动触发" .-> PRUNE
 ```
-+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────+
-│                                              智能体记忆系统整体设计架构图 (Memory System Overview)                         │
-+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────+
 
- ───【 1. 记忆写入与提取流水线 (Memory Ingestion Pipeline) 】────────────────────────────────────────────────────────────────
- 
- [ 💬 智能体对话原始消息 (Message) ]
-               │
-               ▼
-   [ FactExtractor.extract() ] ───(长度 < 8 字符)───> [ 🛑 直接过滤/丢弃 (如 "好的", "收到") ]
-               │ (通过群组实际配置的 LLM 模型抽取)
-               ▼
-   [ 提取出原子事实 (Salient Facts) ] ➜ 带有重要性评分 Salience Score (0.0 ~ 1.0)
-               │
-               ▼
-   [ ConflictResolver.resolve_batch() ] ───(批量检索)───> 检索 ChromaDB 中余弦距离 < 0.25 (相似度 > 0.75) 的 Top-3 候选旧事实
-               │
-               ▼ (合并为单次 LLM 判定冲突)
-   [ LLM 批量比对排他性冲突 ] ───(返回被覆盖失效的旧 ID)───> [ ChromaStore.delete_ids_sync() 批量物理删除 ]
-               │
-               ▼
-   [ ChromaStore.write_fact_sync() 写入新事实 ] ───(自动敏感信息脱敏)───> 写入 ChromaDB (类型 mem_type='fact')
-               │
-               └─(10% 概率被动触发)─> [ ChromaStore.prune_expired_memories_sync() ] ➜ 按 TTL 物理清理过期事实 (Fact TTL)
- 
+### 1.2 知识固化与周期反思机制 (Periodic Reflection & Knowledge Compaction)
 
- ───【 2. 知识固化与周期反思机制 (Periodic Reflection & Knowledge Compaction) 】──────────────────────────────────────────────
- 
-               ┌────────────────────────────────────────────────────────┐
-               │ 1. 增量获取: 根据 reflection_state 水位线时间戳从       │
-               │    ChromaDB 中读取水位线之后积累的新事实。             │
-               └──────────────────────────┬─────────────────────────────┘
-                                          │
-                                          ▼
-               ┌────────────────────────────────────────────────────────┐
-               │ 2. 触发闸门: 新事实条数 >= REFLECT_MIN_FACTS 且          │
-               │    累积重要性权重评分之和 >= REFLECT_IMPORTANCE_THRESHOLD│
-               └──────────────────────────┬─────────────────────────────┘
-                                          ├─(重要性不足但积压事实超限 REFLECT_MAX_BACKLOG)─> [ 强制推进水位线丢弃低价值事实 ]
-                                          │
-                                          ▼ (双轨配合)
-   ┌──────────────────────────────────────┴─────────────────────────────────────┐
-   │ maybe_reflect() 反思巩固 LLM 提炼高阶洞察 (Insights)                         │
-   └──────────────────────────────────────┬─────────────────────────────────────┘
-                                          │
-                                          ▼
-   ┌──────────────────────────────────────┴─────────────────────────────────────┐
-   │ 3. 写回 Chroma: 标记类型 mem_type='reflection', 保存高 Salience Score。    │
-   │    写入 A-MEM 溯源链接: 记录 source_ids (本反思源自哪些原子事实/旧反思 ID) │
-   └──────────────────────────────────────┬─────────────────────────────────────┘
-                                          │
-                                          ▼ (双轨配合)
-   ┌──────────────────────────────────────┴─────────────────────────────────────┐
-   │ 4. 推进水位线: 将当前批次最新的事实 timestamp 保存进 [reflection_state]     │
-   │    表，底层自动通过 _memory_db() 路由至对应的 Group SQLite 数据库。       │
-   └──────────────────────────────────────┬─────────────────────────────────────┘
-                                          └─(10% 后台执行)─> 按更长的反思 TTL 清理老旧洞察 (Reflect TTL)
+```mermaid
+flowchart TD
+    WM["① 增量获取: 按 reflection_state 水位线时间戳<br/>读取水位线之后积累的新事实"]
+    GATE{"② 触发闸门<br/>条数 ≥ REFLECT_MIN_FACTS<br/>且 Σsalience ≥ REFLECT_IMPORTANCE_THRESHOLD"}
+    FORCE["强制推进水位线<br/>丢弃低价值事实"]
+    REFLECT["maybe_reflect() 反思巩固<br/>LLM 提炼高阶洞察 (Insights)"]
+    WRITEBACK["③ 写回 Chroma: mem_type='reflection', 高 Salience<br/>A-MEM 溯源链接 source_ids (源自哪些事实/旧反思)"]
+    ADVANCE["④ 推进水位线: 最新事实 timestamp 存入 reflection_state<br/>经 _memory_db() 路由至对应 Group SQLite DB"]
+    TTL["按更长的 Reflect TTL 清理老旧洞察"]
 
-
- ───【 3. 记忆检索与上下文装配机制 (Retrieval & Context Assembler) 】─────────────────────────────────────────────────────────
- 
- [ 🔍 用户 Query / Trigger 话术 ]
-               │
-               ▼
-   [ QueryRewriter.rewrite() ] ➜ 本地启发式判定是否为模板化短指令 (如 "继续", "下一步", "发表观点")
-               │
-               ├─(是模板化通用指令)─> 从本地对话历史中提取最新真人实质消息作为重写检索词
-               └─(否，保持原 Query)─┘
-               │
-               ▼
-   [ ChromaStore.query_similar_sync() 向量检索 ]
-               │ (按 bot_id 和 group_id 严格前置过滤隔离)
-               ▼
-   [ 召回语义相似度候选集 (Top-N) ] ───(余弦距离过滤)───> 剔除相似度低于相似度下限 (MEMORY_SIMILARITY_FLOOR) 的文档
-               │
-               ▼
-   [ TimeDecayRanker.rank() 精排 ] ➜ 融合公式: 0.5 * 相似度 + 0.3 * 时间衰减 + 0.2 * 重要性 + 关键字增强 + 反思加成
-               │
-               ├─► 时间衰减: exp(-λ * Δt)，半衰期为 7 天
-               ├─► Alphanumeric Boost: 检索词中精确数字/配置英文名词匹配加分 (+0.08/次，最高 +0.2)
-               └─► Reflection Bonus: 属于 mem_type='reflection' 的记忆直接在最终打分上额外叠加奖励分
-               │
-               ▼
-   ┌──────────┴──────────────────────────┐     ┌────────────────────────────────────────────────────────┐
-   │ 相关历史记录 (Top-K)                │     │ SQLite 历史摘要: 异步加载 role_summaries 中当前 bot    │
-   │ (如 facts 或 reflections 文本)     │     │ 在当前 Group 下的最新 3 条提炼摘要 (maybe_summarize 产生)│
-   └──────────┬──────────────────────────┘     └──────────┬─────────────────────────────────────────────┘
-              │                                           │
-              └───────────────────────────────────┬───────┘
-                                                  ▼
-                                   [ 🧠 最终组装装配注入 LLM 上下文 ]
+    WM --> GATE
+    GATE -- "重要性不足但积压 &gt; REFLECT_MAX_BACKLOG" --> FORCE
+    GATE -- "通过" --> REFLECT
+    REFLECT --> WRITEBACK
+    WRITEBACK --> ADVANCE
+    ADVANCE -. "10% 后台执行" .-> TTL
 ```
+
+### 1.3 记忆检索与上下文装配机制 (Retrieval & Context Assembler)
+
+```mermaid
+flowchart TD
+    QUERY["🔍 用户 Query / Trigger 话术"]
+    REWRITE{"QueryRewriter.rewrite()<br/>是否模板化短指令?<br/>(如 '继续' / '下一步' / '发表观点')"}
+    SUBST["从本地对话历史提取最新真人实质消息<br/>作为重写检索词"]
+    VECTOR["ChromaStore.query_similar_sync() 向量检索<br/>(按 bot_id + group_id 严格前置硬隔离)"]
+    FLOOR["相似度过滤<br/>剔除低于 MEMORY_SIMILARITY_FLOOR 的文档"]
+    RANK["TimeDecayRanker.rank() 精排<br/>0.5·Sim + 0.3·Recency + 0.2·Importance<br/>+ KeywordBoost + ReflectionBonus"]
+    TOPK["相关历史记录 Top-K<br/>(facts / reflections 文本)"]
+    SUMM["SQLite 历史摘要: role_summaries 中当前 bot<br/>在当前 Group 下的最新 3 条摘要 (maybe_summarize 产生)"]
+    ASSEMBLE["🧠 最终组装装配注入 LLM 上下文"]
+
+    QUERY --> REWRITE
+    REWRITE -- "是 (模板化通用指令)" --> SUBST
+    REWRITE -- "否 (保持原 Query)" --> VECTOR
+    SUBST --> VECTOR
+    VECTOR --> FLOOR
+    FLOOR --> RANK
+    RANK --> TOPK
+    TOPK --> ASSEMBLE
+    SUMM --> ASSEMBLE
+```
+
+> 精排 `RANK` 的子因子：时间衰减 `recency = exp(-λ·Δt)`（半衰期 7 天）；Alphanumeric Boost（检索词中精确数字/配置英文名词命中，+0.08/次，封顶 +0.2）；Reflection Bonus（`mem_type='reflection'` 在最终打分上额外叠加奖励分）。详见 §2.3。
 
 ---
 
@@ -146,25 +124,19 @@
 
 对于 SQLite 中的非结构化大历史，我们实现了如下的动态分库查找与切换机制：
 
-```
-                    ┌──────────────────────────────────────┐
-                    │            _memory_db()              │
-                    │        表连接与数据库文件路由        │
-                    └──────────────────┬───────────────────┘
-                                       │
-                ┌──────────────────────┴──────────────────────┐
-                │ 探测当前连接对应的 DB (如 chat.db)          │
-                │ 是否存在 role_summaries 等关系表？           │
-                └──────────────────────┬──────────────────────┘
-                                       │
-                      ┌────────────────┴────────────────┐
-                      ▼ 是                              ▼ 否
-            ┌───────────────────┐             ┌───────────────────┐
-            │   Monolithic 模式 │             │    Split-DB 模式  │
-            │   (单库/单元测试) │             │  (生产多群组隔离) │
-            │ 直接复用默认连接  │             │ 路由至私有群数据库│
-            │  (test_chat.db)   │             │   (group_X.db)    │
-            └───────────────────┘             └───────────────────┘
+```mermaid
+flowchart TD
+    ENTRY["_memory_db(table, group_id, write=?)<br/>表连接与数据库文件路由"]
+    PROBE{"探测默认连接 (如 chat.db) 是否含<br/>role_summaries / reflection_state 等关系表?<br/>(结果进 _table_presence_cache 静态缓存)"}
+    MONO["Monolithic 模式 (单库 / 单元测试)<br/>直接复用默认连接 (test_chat.db)"]
+    SPLIT["Split-DB 模式 (生产多群组隔离)<br/>路由至私有群数据库 (group_X.db)"]
+    ALIGN["读写对齐: 读端 ContextVar 路由 /<br/>写端 write_connect(_default_db_path())<br/>同一 table 读写解析到同一 path"]
+
+    ENTRY --> PROBE
+    PROBE -- "是" --> MONO
+    PROBE -- "否" --> SPLIT
+    MONO --> ALIGN
+    SPLIT --> ALIGN
 ```
 
 ### 3.1 动态探测与缓存路由表
@@ -188,3 +160,5 @@
    修正了 `maybe_summarize` 的外部直接调用测试。通过 `_table_exists_in_default_db` 在探测不到表时回落群组数据库前，做好了默认 test_chat.db 拦截，彻底消除了单元测试对本地磁盘存在的 `group_1.db` 的污染。
 4. **反思水位线防爆卡兜底**:
    引入了 `REFLECT_MAX_BACKLOG` 水位强制截断逻辑，解决了低质量日志积压引起的水位线停滞不前问题。
+5. **打分模型来源溯源 (scored_by_model)**:
+   `add_to_chroma` / `maybe_reflect` 写入时记录 `scored_by_model`（`provider/model`），使将来某 Group 切换打分模型时可按来源对旧刻度 salience 做归一化重标；存量记忆经 `scripts.backfill_chroma_scored_by_model` 一次性标为 `legacy/unknown`。
