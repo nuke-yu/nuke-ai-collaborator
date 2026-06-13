@@ -107,6 +107,17 @@ class ChromaStore:
         col.delete(where=where)
 
     @classmethod
+    def delete_ids_sync(cls, ids: list[str]):
+        """按 ID 批量删除（用于一次性清除被新事实覆盖失效的旧记忆）。"""
+        if not ids:
+            return
+        col = cls.get_collection()
+        try:
+            col.delete(ids=ids)
+        except Exception:
+            log.exception("ChromaStore: failed to delete conflicting IDs %s", ids)
+
+    @classmethod
     def prune_expired_memories_sync(cls, max_age_seconds: float = 180 * 86400):
         """物理清除过期的旧记忆 (遗忘机制：TTL)"""
         col = cls.get_collection()
@@ -319,8 +330,8 @@ async def add_to_chroma(message_id: int, content: str, role: str, bot_id: int, g
     del_ids = await ConflictResolver.resolve_batch(facts, bot_id, group_id, provider, model)
 
     loop = asyncio.get_running_loop()
-    
-    # 3. 对每个事实执行写入，并清除对应冲突 ID
+
+    # 3. 写入全部新事实
     for idx, fact in enumerate(facts):
         metadata = {
             "bot_id": bot_id,
@@ -329,17 +340,23 @@ async def add_to_chroma(message_id: int, content: str, role: str, bot_id: int, g
         }
         if group_id is not None:
             metadata["group_id"] = group_id
-            
+
         fact_id = f"{message_id}_{idx}"
-        
-        # 如果有该新事实对应的失效旧记忆，将其删除
-        del_id = del_ids[idx] if idx < len(del_ids) else None
         await loop.run_in_executor(
             None,
-            partial(ChromaStore.write_fact_sync, fact_id, fact, metadata, del_id)
+            partial(ChromaStore.write_fact_sync, fact_id, fact, metadata)
         )
 
-    # 4. 遗忘机制：写入时有 10% 的概率被动在后台运行过期记忆的 TTL 清理，防爆库
+    # 4. 一次性删除被新事实整体覆盖而失效的旧记忆。del_ids 是一组陈旧记忆 ID，
+    #    与具体哪条新事实没有位置对应关系，故必须批量删除（不能按 facts 下标配对，
+    #    否则 len(del_ids) > len(facts) 时多出的冲突 ID 永不删除、陈旧事实残留）。
+    if del_ids:
+        await loop.run_in_executor(
+            None,
+            partial(ChromaStore.delete_ids_sync, del_ids)
+        )
+
+    # 5. 遗忘机制：写入时有 10% 的概率被动在后台运行过期记忆的 TTL 清理，防爆库
     import random
     if random.random() < 0.1:
         loop.run_in_executor(None, ChromaStore.prune_expired_memories_sync)

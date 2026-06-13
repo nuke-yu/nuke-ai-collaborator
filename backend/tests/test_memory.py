@@ -174,6 +174,46 @@ class TestChromaMemoryEnhancements(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(mock_call_once.call_args[0][2], "claude")
         self.assertEqual(mock_call_once.call_args[0][3], "claude-opus-4-8")
 
+    @patch("ai.client.call_ai_once", new_callable=AsyncMock)
+    @patch("ai.memory._get_collection")
+    async def test_add_to_chroma_deletes_all_conflicting_ids(self, mock_get_col, mock_call_once):
+        """冲突旧记忆 ID 必须全部按 ID 批量删除，与新事实条数无位置对应关系。
+
+        回归：旧实现 del_ids[idx] 按 facts 下标配对，当冲突 ID 数 > 事实数时
+        多出的 ID 永不删除，陈旧事实残留。
+        """
+        mock_col = MagicMock()
+        mock_get_col.return_value = mock_col
+        # 召回 2 条相似旧事实，距离均 < 0.25 → 都进冲突候选池
+        mock_col.query.return_value = {
+            "documents": [["将服务端口修改为3000", "服务端口设置为5000"]],
+            "ids": [["7_0", "9_1"]],
+            "distances": [[0.1, 0.15]],
+        }
+        # 第 1 次调用：事实抽取（1 条事实）；第 2 次：批量冲突判定，返回 2 个旧 ID
+        mock_call_once.side_effect = [
+            {"type": "text", "content": "将服务端口修改为8080"},
+            {"type": "text", "content": '["7_0", "9_1"]'},
+        ]
+
+        await memory.add_to_chroma(
+            message_id=50,
+            content="经过讨论，我们决定将服务端口从3000改为8080。",
+            role="assistant",
+            bot_id=5,
+            group_id=9,
+            provider="deepseek",
+            model="deepseek-chat",
+        )
+
+        await asyncio.sleep(0.1)
+
+        # 1 条新事实写入
+        mock_col.upsert.assert_called_once()
+        self.assertEqual(mock_col.upsert.call_args[1]["ids"], ["50_0"])
+        # 2 个冲突旧 ID 一次性批量删除（即便 > 事实条数）
+        mock_col.delete.assert_called_once_with(ids=["7_0", "9_1"])
+
     @patch("ai.memory._get_collection")
     async def test_retrieve_relevant_group_id_filter_and_recency_rerank(self, mock_get_col):
         mock_col = MagicMock()
