@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AI的进化之旅 · 五年级课堂</title>
+<title>AI 的进化之旅 · 五年级课堂</title>
 <link href="https://fonts.googleapis.com/css2?family=Bangers&family=Nunito:wght@400;700;800;900&display=swap" rel="stylesheet">
 <style>
 
@@ -95,16 +95,18 @@ body { font-family: var(--font-round); }
 .nav-dot:hover { transform: scale(1.2); }
 
 /* === CANDY BACKGROUNDS per slide === */
-.slide-1  { background: linear-gradient(135deg, #FF6B8A 0%, #FF8E53 60%, #FFC857 100%); }
-.slide-2  { background: linear-gradient(135deg, #48CAE4 0%, #0096C7 55%, #023E8A 100%); }
-.slide-3  { background: linear-gradient(135deg, #06D6A0 0%, #1B9AAA 55%, #3D405B 100%); }
-.slide-4  { background: linear-gradient(135deg, #9B5DE5 0%, #F15BB5 60%, #FF85A1 100%); }
-.slide-5  { background: linear-gradient(135deg, #E63946 0%, #FF6B35 50%, #FF9F1C 100%); }
-.slide-6  { background: linear-gradient(135deg, #F72585 0%, #7209B7 55%, #3A0CA3 100%); }
-.slide-7  { background: linear-gradient(135deg, #2DC653 0%, #1A936F 55%, #0077B6 100%); }
-.slide-8  { background: linear-gradient(135deg, #FB923C 0%, #F59E0B 55%, #EAB308 100%); }
-.slide-9  { background: linear-gradient(135deg, #1E1B4B 0%, #4C1D95 55%, #7C3AED 100%); }
-.slide-10 { background: linear-gradient(135deg, #FF6B8A 0%, #FF8E53 22%, #FFD93D 44%, #06D6A0 66%, #4895EF 88%, #9B5DE5 100%); }
+.slide-1      { background: linear-gradient(135deg, #FF6B8A 0%, #FF8E53 60%, #FFC857 100%); }
+.slide-1-new  { background: linear-gradient(135deg, #A855F7 0%, #7C3AED 55%, #5B21B6 100%); }
+.slide-2      { background: linear-gradient(135deg, #48CAE4 0%, #0096C7 55%, #023E8A 100%); }
+.slide-3      { background: linear-gradient(135deg, #06D6A0 0%, #1B9AAA 55%, #3D405B 100%); }
+.slide-4      { background: linear-gradient(135deg, #9B5DE5 0%, #F15BB5 60%, #FF85A1 100%); }
+.slide-5      { background: linear-gradient(135deg, #E63946 0%, #FF6B35 50%, #FF9F1C 100%); }
+.slide-6      { background: linear-gradient(135deg, #F72585 0%, #7209B7 55%, #3A0CA3 100%); }
+.slide-7      { background: linear-gradient(135deg, #2DC653 0%, #1A936F 55%, #0077B6 100%); }
+.slide-8      { background: linear-gradient(135deg, #FB923C 0%, #F59E0B 55%, #EAB308 100%); }
+.slide-9      { background: linear-gradient(135deg, #1E1B4B 0%, #4C1D95 55%, #7C3AED 100%); }
+.slide-10     { background: linear-gradient(135deg, #F59E0B 0%, #EF4444 50%, #DC2626 100%); }
+.slide-11     { background: linear-gradient(135deg, #FF6B8A 0%, #FF8E53 22%, #FFD93D 44%, #06D6A0 66%, #4895EF 88%, #9B5DE5 100%); }
 
 /* === HALFTONE DOTS (comic feel) === */
 .slide::before {
@@ -155,8 +157,8 @@ body { font-family: var(--font-round); }
 .card {
     background: var(--card-bg); border: var(--card-border-w) solid var(--card-border);
     border-radius: var(--card-radius); box-shadow: var(--card-shadow);
-    padding: clamp(0.85rem,2.2vh,1.8rem) clamp(1rem,2.5vw,2.2rem);
-    max-width: min(88vw, 880px); max-height: min(48vh, 400px);
+    padding: clamp(0.7rem,1.8vh,1.4rem) clamp(0.8rem,2vw,1.6rem);
+    max-width: min(88vw, 880px); max-height: min(42vh, 340px);
     overflow: hidden; position: relative; z-index: 5;
 }
 .card ul { list-style: none; display: flex; flex-direction: column; gap: clamp(0.28rem,0.7vh,0.65rem); }
@@ -166,7 +168,7 @@ body { font-family: var(--font-round); }
 .fact {
     background: #FFD700; border: var(--card-border-w) solid var(--card-border);
     border-radius: var(--card-radius); box-shadow: var(--card-shadow);
-    padding: 0.45em 1.1em; max-width: min(88vw, 820px);
+    padding: 0.35em 0.9em; max-width: min(88vw, 820px);
     position: relative; z-index: 5;
 }
 .fact p { font-size: var(--body-size); font-weight: 800; color: #1a1a2e; line-height: 1.4; }
@@ -186,8 +188,59 @@ body { font-family: var(--font-round); }
 .slide.visible .reveal:nth-child(3) { transition-delay: 0.31s; }
 .slide.visible .reveal:nth-child(4) { transition-delay: 0.44s; }
 .slide.visible .reveal:nth-child(5) { transition-delay: 0.57s; }
+.slide.visible .reveal:nth-child(6) { transition-delay: 0.7s; }
 .pop { opacity: 0; transform: scale(0.55); transition: opacity 0.45s var(--ease-bounce), transform 0.45s var(--ease-bounce); }
 .slide.visible .pop { opacity: 1; transform: scale(1); }
+
+/* === NEURAL NET ANIMATION === */
+.neural-container {
+    position: relative;
+    width: 55vw;
+    height: 75vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 5;
+}
+.neural-layer {
+    position: absolute;
+    display: flex;
+    flex-direction: column;
+    gap: clamp(20px, 3vw, 35px);
+}
+.neural-neuron {
+    width: clamp(25px, 4vw, 45px);
+    height: clamp(25px, 4vw, 45px);
+    border-radius: 50%;
+    background: white;
+    border: 2px solid rgba(255,255,255,0.8);
+    box-shadow: 0 0 0 4px rgba(168,85,247,0.6), 0 0 20px rgba(168,85,247,0.4);
+    position: relative;
+    animation: pulse-neuron 2s ease-in-out infinite;
+}
+.neural-layer-1 { left: 10%; }
+.neural-layer-2 { left: 32%; }
+.neural-layer-3 { left: 54%; }
+.neural-layer-4 { left: 76%; }
+/* Animated signal particles */
+.signal {
+    position: absolute;
+    width: 10px;
+    height: 10px;
+    background: #FFD700;
+    border-radius: 50%;
+    box-shadow: 0 0 20px #FFD700, 0 0 40px #FFA500, 0 0 60px rgba(168,85,247,0.8);
+    opacity: 0.9;
+    animation: signal-travel 2.5s linear infinite;
+}
+@keyframes pulse-neuron {
+    0%, 100% { transform: scale(1); box-shadow: 0 0 0 4px rgba(168,85,247,0.6), 0 0 20px rgba(168,85,247,0.4); }
+    50% { transform: scale(1.25); box-shadow: 0 0 0 8px rgba(168,85,247,0.9), 0 0 40px rgba(168,85,247,0.7); }
+}
+@keyframes signal-travel {
+    0% { transform: translate(0, 0); opacity: 1; }
+    100% { transform: translate(var(--dx), var(--dy)); opacity: 0; }
+}
 
 /* === SLIDE 5 BOSS overrides === */
 .slide-5 .title { font-size: clamp(3rem, 8.5vw, 7.5rem); text-shadow: 5px 5px 0 rgba(0,0,0,0.28), 0 0 40px rgba(255,255,255,0.2); }
@@ -214,11 +267,11 @@ body { font-family: var(--font-round); }
 .robot-card .r-name { font-family: var(--font-comic); font-size: var(--h3-size); color: #E9C46A; letter-spacing: 0.05em; }
 .robot-card .r-desc { font-size: var(--small-size); color: rgba(255,255,255,0.88); font-weight: 700; line-height: 1.3; }
 
-/* === SLIDE 10 closing question === */
+/* === SLIDE 11 closing question === */
 .q-box { background: rgba(255,255,255,0.9); border: var(--card-border-w) solid var(--card-border); border-radius: var(--card-radius); box-shadow: var(--card-shadow); padding: clamp(0.7rem,1.8vh,1.5rem) clamp(1rem,2.5vw,2rem); max-width: min(88vw,780px); text-align: center; position: relative; z-index: 5; }
 .q-box .q-main { font-family: var(--font-comic); font-size: var(--h2-size); color: #FF6B8A; letter-spacing: 0.04em; line-height: 1.2; }
 .q-box .q-hint { font-size: var(--body-size); font-weight: 700; color: #666; margin-top: 0.35em; }
-.slide-10::after { content: ''; position: absolute; inset: 0; pointer-events: none; z-index: 0; background: radial-gradient(ellipse at 20% 50%, rgba(255,107,138,0.3) 0%, transparent 40%), radial-gradient(ellipse at 80% 30%, rgba(6,214,160,0.3) 0%, transparent 40%), radial-gradient(ellipse at 50% 80%, rgba(72,149,239,0.3) 0%, transparent 40%); animation: shimmer 4s ease-in-out infinite; }
+.slide-11::after { content: ''; position: absolute; inset: 0; pointer-events: none; z-index: 0; background: radial-gradient(ellipse at 20% 50%, rgba(255,107,138,0.3) 0%, transparent 40%), radial-gradient(ellipse at 80% 30%, rgba(6,214,160,0.3) 0%, transparent 40%), radial-gradient(ellipse at 50% 80%, rgba(72,149,239,0.3) 0%, transparent 40%); animation: shimmer 4s ease-in-out infinite; }
 @keyframes shimmer { 0%,100%{opacity:.7} 50%{opacity:1} }
 
 /* === INLINE EDITING === */
@@ -248,7 +301,7 @@ body.edit-active [contenteditable] { outline: 2px dashed rgba(255,107,138,0.65);
     <div class="deco deco-a"></div><div class="deco deco-b"></div><div class="deco deco-c"></div>
     <div class="col center-col">
         <div class="badge pop">🎮 序章</div>
-        <h1 class="title reveal">从前，AI只会<br>做一件事！</h1>
+        <h1 class="title reveal">从前，AI 只会<br>做一件事！</h1>
         <div class="card reveal">
             <ul>
                 <li>🎯 以前的 AI 只能做 <strong>一件专门的事</strong></li>
@@ -258,20 +311,87 @@ body.edit-active [contenteditable] { outline: 2px dashed rgba(255,107,138,0.65);
                 <li>❓ 但在过去几年，这一切彻底改变了……</li>
             </ul>
         </div>
-        <div class="fact reveal"><p>这种"只会一件事"的AI，科学家叫它 <strong>专用AI（Narrow AI）</strong></p></div>
+        <div class="fact reveal"><p>这种"只会一件事"的 AI，科学家叫它 <strong>专用 AI（Narrow AI）</strong></p></div>
     </div>
 </section>
 
 <!-- =========================================================
-     SLIDE 2 · 第1关 — AlphaGo 围棋冠军
+     SLIDE 1.5 · 神经网络 = AI 的大脑
      ========================================================= -->
-<section class="slide slide-2" aria-label="第1关">
+<section class="slide slide-1-new" aria-label="神经网络">
+    <div class="deco deco-a"></div><div class="deco deco-b"></div><div class="deco deco-c"></div>
+    <div class="row" style="align-items:center;">
+        <div class="half">
+            <div class="badge pop" style="background:#A855F7;color:white;border-color:rgba(255,255,255,0.6);">🧠 揭秘时刻</div>
+            <h1 class="title reveal" style="margin-bottom:0.5rem;">AI 的大脑<br>长什么样？</h1>
+            <div class="card reveal" style="max-width:100%; max-height:100%; margin-top:0.5rem;">
+                <ul>
+                    <li>🧠 AI 的大脑叫 <strong>"神经网络"</strong> — 像一堆神经元连在一起</li>
+                    <li>👁️ <strong>输入：</strong> 眼睛看到图片、耳朵听到声音</li>
+                    <li>⚡ <strong>信号传递：</strong> 金黄色的光点在神经元之间"咻咻咻"地跑</li>
+                    <li>🔗 <strong>隐藏层：</strong> 一层层处理信息（就像剥洋葱！）</li>
+                    <li>🎯 <strong>输出：</strong> AI 说"这是只猫"、"这是李白"</li>
+                </ul>
+            </div>
+            <div class="fact reveal" style="margin-top:0.5rem;"><p>人类大脑有 <strong>860 亿个神经元</strong>，而大型 AI 神经网络有 <strong>上万亿个"连接"</strong> — 但原理很像！</p></div>
+        </div>
+        <div class="half" style="display:flex; justify-content:center; align-items:center; padding:0;">
+            <div class="neural-container reveal">
+                <!-- Input label -->
+                <div style="position:absolute; left:-10%; top:5%; color:#E9D5FF; font-family:var(--font-comic); font-size:clamp(0.9rem,1.5vw,1.4rem); text-align:left; background:rgba(168,85,247,0.35); padding:0.5em 0.7em; border-radius:12px; backdrop-filter: blur(4px);">
+                    👀 看到图片、听到声音
+                </div>
+                <!-- Input layer -->
+                <div class="neural-layer neural-layer-1">
+                    <div class="neural-neuron" style="animation-delay: 0s;"></div>
+                    <div class="neural-neuron" style="animation-delay: 0.3s;"></div>
+                    <div class="neural-neuron" style="animation-delay: 0.6s;"></div>
+                    <div class="neural-neuron" style="animation-delay: 0.9s;"></div>
+                </div>
+                <!-- Hidden layer 1 -->
+                <div class="neural-layer neural-layer-2">
+                    <div class="neural-neuron" style="animation-delay: 0.2s;"></div>
+                    <div class="neural-neuron" style="animation-delay: 0.5s;"></div>
+                    <div class="neural-neuron" style="animation-delay: 0.8s;"></div>
+                    <div class="neural-neuron" style="animation-delay: 1.1s;"></div>
+                </div>
+                <!-- Hidden layer 2 -->
+                <div class="neural-layer neural-layer-3">
+                    <div class="neural-neuron" style="animation-delay: 0.4s;"></div>
+                    <div class="neural-neuron" style="animation-delay: 0.7s;"></div>
+                    <div class="neural-neuron" style="animation-delay: 1.0s;"></div>
+                    <div class="neural-neuron" style="animation-delay: 1.3s;"></div>
+                </div>
+                <!-- Output layer -->
+                <div class="neural-layer neural-layer-4">
+                    <div class="neural-neuron" style="animation-delay: 0.6s;"></div>
+                    <div class="neural-neuron" style="animation-delay: 0.9s;"></div>
+                    <div class="neural-neuron" style="animation-delay: 1.2s;"></div>
+                </div>
+                <!-- Output label -->
+                <div style="position:absolute; right:-10%; top:5%; color:#E9D5FF; font-family:var(--font-comic); font-size:clamp(0.9rem,1.5vw,1.4rem); text-align:right; background:rgba(168,85,247,0.35); padding:0.5em 0.7em; border-radius:12px; backdrop-filter: blur(4px);">
+                    ✅ 这是猫！
+                </div>
+                <!-- Animated signal particles - travel from left to right side -->
+                <div class="signal" style="top:15%; left:5%; --dx:80vw; animation-delay:0s;"></div>
+                <div class="signal" style="top:35%; left:5%; --dx:80vw; animation-delay:0.8s;"></div>
+                <div class="signal" style="top:55%; left:5%; --dx:80vw; animation-delay:1.6s;"></div>
+                <div class="signal" style="top:75%; left:5%; --dx:80vw; animation-delay:2.4s;"></div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- =========================================================
+     SLIDE 2 · 第 1 关 — AlphaGo 围棋冠军
+     ========================================================= -->
+<section class="slide slide-2" aria-label="第 1 关">
     <div class="deco deco-a"></div><div class="deco deco-b"></div>
     <div class="row">
         <div class="half">
             <div class="badge pop" style="background:#00B4D8;color:white;border-color:rgba(255,255,255,0.6);">♟️ 第 1 关</div>
-            <h1 class="title reveal">AI打败了<br>围棋冠军！</h1>
-            <p class="reveal" style="color:rgba(255,255,255,0.85);font-weight:800;font-size:var(--h3-size);">2016年3月 · AlphaGo vs 李世石</p>
+            <h1 class="title reveal">AI 打败了<br>围棋冠军！</h1>
+            <p class="reveal" style="color:rgba(255,255,255,0.85);font-weight:800;font-size:var(--h3-size);">2016 年 3 月 · AlphaGo vs 李世石</p>
         </div>
         <div class="half">
             <div class="card reveal">
@@ -282,20 +402,20 @@ body.edit-active [contenteditable] { outline: 2px dashed rgba(255,107,138,0.65);
                     <li>😱 全世界震惊了：<strong>AI 能比人类更厉害？！</strong></li>
                 </ul>
             </div>
-            <div class="fact reveal"><p>围棋棋盘有361个格子，可能的棋局是 <strong>10 的 170 次方</strong>，比宇宙原子数多 10<sup>80</sup> 倍！</p></div>
+            <div class="fact reveal"><p>围棋棋盘有 361 个格子，可能的棋局是 <strong>10 的 170 次方</strong>，比宇宙原子数多 10<sup>80</sup> 倍！</p></div>
         </div>
     </div>
 </section>
 
 <!-- =========================================================
-     SLIDE 3 · 第2关 — AI 学会了"看"
+     SLIDE 3 · 第 2 关 — AI 学会了"看"
      ========================================================= -->
-<section class="slide slide-3" aria-label="第2关">
+<section class="slide slide-3" aria-label="第 2 关">
     <div class="deco deco-a"></div><div class="deco deco-c"></div>
     <div class="row">
         <div class="half">
             <div class="badge pop" style="background:#06D6A0;color:#1a1a2e;border-color:#1a1a2e;">👀 第 2 关</div>
-            <h1 class="title reveal">AI有<br>眼睛了！</h1>
+            <h1 class="title reveal">AI 有<br>眼睛了！</h1>
             <div class="fact reveal" style="background:rgba(255,255,255,0.92);border-color:#1a1a2e;"><p>AI 识别一张图片的速度，比你眨一次眼还快！</p></div>
         </div>
         <div class="emoji-grid reveal">
@@ -310,13 +430,13 @@ body.edit-active [contenteditable] { outline: 2px dashed rgba(255,107,138,0.65);
 </section>
 
 <!-- =========================================================
-     SLIDE 4 · 第3关 — AI 听懂人话了
+     SLIDE 4 · 第 3 关 — AI 听懂人话了
      ========================================================= -->
-<section class="slide slide-4" aria-label="第3关">
+<section class="slide slide-4" aria-label="第 3 关">
     <div class="deco deco-a"></div><div class="deco deco-b"></div>
     <div class="col center-col">
         <div class="badge pop" style="background:#F15BB5;color:white;border-color:rgba(255,255,255,0.6);">🎙️ 第 3 关</div>
-        <h1 class="title reveal">跟AI说话，<br>它能听懂！</h1>
+        <h1 class="title reveal">跟 AI 说话，<br>它能听懂！</h1>
         <div class="card reveal" style="width:min(88vw,800px);">
             <ul>
                 <li>🗣️ 语音助手来了：<strong>Siri、小爱同学、小度</strong></li>
@@ -332,15 +452,15 @@ body.edit-active [contenteditable] { outline: 2px dashed rgba(255,107,138,0.65);
 <!-- =========================================================
      SLIDE 5 · BOSS 关 — ChatGPT 来了！
      ========================================================= -->
-<section class="slide slide-5" aria-label="BOSS关">
+<section class="slide slide-5" aria-label="BOSS 关">
     <div class="deco deco-a"></div><div class="deco deco-b"></div>
     <div class="star star-a"></div><div class="star star-b"></div><div class="star star-c"></div>
     <div class="col center-col">
         <div class="badge boss pop">⚡ BOSS 关！</div>
         <h1 class="title reveal">ChatGPT<br>来了！</h1>
         <div class="stats reveal">
-            <div class="chip"><strong>5天</strong>100万 用户</div>
-            <div class="chip"><strong>2个月</strong>1亿 用户</div>
+            <div class="chip"><strong>5 天</strong>100 万 用户</div>
+            <div class="chip"><strong>2 个月</strong>1 亿 用户</div>
             <div class="chip"><strong>史上</strong>增长最快 App</div>
         </div>
         <div class="card reveal" style="width:min(88vw,800px);">
@@ -355,13 +475,13 @@ body.edit-active [contenteditable] { outline: 2px dashed rgba(255,107,138,0.65);
 </section>
 
 <!-- =========================================================
-     SLIDE 6 · 第5关 — AI 会画画了
+     SLIDE 6 · 第 5 关 — AI 会画画了
      ========================================================= -->
-<section class="slide slide-6" aria-label="第5关">
+<section class="slide slide-6" aria-label="第 5 关">
     <div class="deco deco-a"></div><div class="deco deco-b"></div>
     <div class="col center-col">
         <div class="badge pop" style="background:#F72585;color:white;border-color:rgba(255,255,255,0.5);">🎨 第 5 关</div>
-        <h1 class="title reveal">说一句话，<br>AI就画出来！</h1>
+        <h1 class="title reveal">说一句话，<br>AI 就画出来！</h1>
         <div class="card reveal" style="width:min(88vw,820px);">
             <ul>
                 <li>✍️ 你写：<strong>"一只戴礼帽的猫在月球上喝茶"</strong></li>
@@ -375,14 +495,14 @@ body.edit-active [contenteditable] { outline: 2px dashed rgba(255,107,138,0.65);
 </section>
 
 <!-- =========================================================
-     SLIDE 7 · 第6关 — AI 会唱歌拍视频
+     SLIDE 7 · 第 6 关 — AI 会唱歌拍视频
      ========================================================= -->
-<section class="slide slide-7" aria-label="第6关">
+<section class="slide slide-7" aria-label="第 6 关">
     <div class="deco deco-a"></div><div class="deco deco-c"></div>
     <div class="row">
         <div class="half">
             <div class="badge pop" style="background:#2DC653;color:white;border-color:rgba(255,255,255,0.5);">🎵 第 6 关</div>
-            <h1 class="title reveal">AI开始当<br>创作者了！</h1>
+            <h1 class="title reveal">AI 开始当<br>创作者了！</h1>
             <div class="fact reveal" style="background:rgba(255,255,255,0.92);border-color:#1a1a2e;"><p>OpenAI 的 Sora 能根据一句话生成 1 分钟的视频短片！</p></div>
         </div>
         <div class="half">
@@ -400,13 +520,13 @@ body.edit-active [contenteditable] { outline: 2px dashed rgba(255,107,138,0.65);
 </section>
 
 <!-- =========================================================
-     SLIDE 8 · 第7关 — AI 住进了手机
+     SLIDE 8 · 第 7 关 — AI 住进了手机
      ========================================================= -->
-<section class="slide slide-8" aria-label="第7关">
+<section class="slide slide-8" aria-label="第 7 关">
     <div class="deco deco-a"></div><div class="deco deco-b"></div>
     <div class="col center-col">
         <div class="badge pop" style="background:#FB923C;color:white;border-color:rgba(255,255,255,0.5);">📱 第 7 关</div>
-        <h1 class="title title-dark reveal">AI住进了<br>你的手机！</h1>
+        <h1 class="title title-dark reveal">AI 住进了<br>你的手机！</h1>
         <div class="app-grid reveal">
             <div class="app-card"><span class="icon">🔍</span><span class="name">搜索引擎</span><span class="desc">AI 直接给你总结好的答案</span></div>
             <div class="app-card"><span class="icon">📸</span><span class="name">相机 App</span><span class="desc">AI 自动美化、识别场景</span></div>
@@ -418,14 +538,14 @@ body.edit-active [contenteditable] { outline: 2px dashed rgba(255,107,138,0.65);
 </section>
 
 <!-- =========================================================
-     SLIDE 9 · 第8关 — AI 机器人来了
+     SLIDE 9 · 第 8 关 — AI 机器人来了
      ========================================================= -->
-<section class="slide slide-9" aria-label="第8关">
+<section class="slide slide-9" aria-label="第 8 关">
     <div class="deco deco-a" style="background:rgba(255,255,255,0.07);"></div>
     <div class="deco deco-b" style="background:rgba(255,255,255,0.05);"></div>
     <div class="col center-col">
         <div class="badge pop" style="background:#7C3AED;color:white;border-color:rgba(255,255,255,0.4);">🤖 第 8 关 · 隐藏关卡！</div>
-        <h1 class="title reveal">AI要有<br>身体了！</h1>
+        <h1 class="title reveal">AI 要有<br>身体了！</h1>
         <div class="robot-grid reveal">
             <div class="robot-card"><span class="r-icon">🦾</span><span class="r-name">Figure 02</span><span class="r-desc">用手捡东西<br>自己想怎么做</span></div>
             <div class="robot-card"><span class="r-icon">⚡</span><span class="r-name">Tesla Optimus</span><span class="r-desc">工厂里干活<br>越来越灵活</span></div>
@@ -436,9 +556,29 @@ body.edit-active [contenteditable] { outline: 2px dashed rgba(255,107,138,0.65);
 </section>
 
 <!-- =========================================================
-     SLIDE 10 · 通关！你们是AI的同龄人
+     SLIDE 10 · 为什么这很重要
      ========================================================= -->
-<section class="slide slide-10" aria-label="通关">
+<section class="slide slide-10" aria-label="意义">
+    <div class="deco deco-a"></div><div class="deco deco-b"></div>
+    <div class="col center-col">
+        <div class="badge pop" style="background:#E11D48;color:white;border-color:rgba(255,255,255,0.5);">💡 为什么这很重要</div>
+        <h1 class="title reveal">这不是魔法<br>是计算方式的改变！</h1>
+        <div class="card reveal" style="width:min(88vw,820px);">
+            <ul>
+                <li>🔧 <strong>传统电脑：</strong>你用公式告诉它怎么做 — "如果 A 则 B"</li>
+                <li>🧠 <strong>AI（神经网络）：</strong>你给它例子让它自己学规律</li>
+                <li>📈 以前：写 1000 行代码 → 现在：喂 100 万张图片</li>
+                <li>🔄 <strong>核心变化：</strong>从"编程"变成了"训练"</li>
+            </ul>
+        </div>
+        <div class="fact reveal"><p>这就像从"教小孩一本说明书"变成了"陪小孩玩，让他自己悟出规则"！</p></div>
+    </div>
+</section>
+
+<!-- =========================================================
+     SLIDE 11 · 通关！你们是 AI 的同龄人
+     ========================================================= -->
+<section class="slide slide-11" aria-label="通关">
     <div class="deco deco-a"></div><div class="deco deco-b"></div><div class="deco deco-c"></div>
     <div class="col center-col" style="align-items:center;text-align:center;">
         <div class="badge pop" style="background:#FFD700;color:#1a1a2e;border-color:#1a1a2e;font-size:clamp(0.9rem,1.9vw,1.4rem);">🎉 通关！AI 的进化之旅完成！</div>

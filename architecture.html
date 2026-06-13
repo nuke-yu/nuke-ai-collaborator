@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Nuke AI Collaborator · 系统架构看板</title>
+    <title>Nuke AI Collaborator · System Architecture Blueprint</title>
     <!-- Google Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <!-- Tailwind CSS CDN -->
@@ -22,7 +22,7 @@
     </script>
     <style>
         body {
-            background: radial-gradient(circle at 50% 0%, #0d1527 0%, #070a12 100%);
+            background: radial-gradient(circle at 50% 0%, #0c1222 0%, #05070c 100%);
             color: #f3f4f6;
             font-family: 'Outfit', sans-serif;
             overflow-x: hidden;
@@ -33,7 +33,7 @@
             height: 6px;
         }
         ::-webkit-scrollbar-track {
-            background: #070a12;
+            background: #05070c;
         }
         ::-webkit-scrollbar-thumb {
             background: #1e293b;
@@ -44,10 +44,18 @@
         }
         /* Glassmorphism Panel */
         .glass-panel {
-            background: rgba(15, 23, 42, 0.45);
+            background: rgba(10, 15, 30, 0.65);
             backdrop-filter: blur(12px);
             -webkit-backdrop-filter: blur(12px);
             border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        /* Blueprint Grid Background */
+        .blueprint-bg {
+            background-image: 
+                linear-gradient(rgba(99, 102, 241, 0.04) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(99, 102, 241, 0.04) 1px, transparent 1px);
+            background-size: 24px 24px;
+            background-color: #070911;
         }
         /* Pipeline flow animations */
         @keyframes flow {
@@ -57,16 +65,18 @@
         }
         .flow-line {
             stroke-dasharray: 8, 8;
-            animation: flow 1.5s linear infinite;
+            animation: flow 2s linear infinite;
             transition: stroke 0.3s, stroke-width 0.3s, opacity 0.3s;
         }
         /* Pulse Animation */
         @keyframes pulse-glow {
             0%, 100% {
-                box-shadow: 0 0 15px rgba(99, 102, 241, 0.2);
+                box-shadow: 0 0 15px rgba(99, 102, 241, 0.15);
+                border-color: rgba(99, 102, 241, 0.2);
             }
             50% {
-                box-shadow: 0 0 25px rgba(99, 102, 241, 0.45);
+                box-shadow: 0 0 25px rgba(99, 102, 241, 0.4);
+                border-color: rgba(99, 102, 241, 0.5);
             }
         }
         .pulse-card {
@@ -78,314 +88,677 @@
         }
         .node-card:hover {
             transform: translateY(-4px) scale(1.02);
-            box-shadow: 0 10px 25px -5px rgba(99, 102, 241, 0.3);
+            box-shadow: 0 10px 25px -5px rgba(99, 102, 241, 0.25);
             border-color: rgba(99, 102, 241, 0.4);
-            background: rgba(15, 23, 42, 0.7);
+            background: rgba(15, 23, 42, 0.85);
+        }
+        /* Unimplemented Feature Node Glow */
+        .unimplemented-card {
+            border-style: dashed !important;
+            border-width: 1.5px !important;
+            border-color: rgba(245, 158, 11, 0.35) !important;
+            background: rgba(245, 158, 11, 0.03);
+            transition: all 0.3s ease;
+        }
+        .unimplemented-card:hover {
+            border-color: rgba(245, 158, 11, 0.8) !important;
+            background: rgba(245, 158, 11, 0.08);
+            box-shadow: 0 0 20px rgba(245, 158, 11, 0.2);
+        }
+        /* Folder Tree Items */
+        .tree-item {
+            transition: background 0.15s ease;
+        }
+        .tree-item:hover {
+            background: rgba(255, 255, 255, 0.03);
         }
     </style>
 </head>
 <body class="min-h-screen flex flex-col antialiased">
     <!-- Header -->
-    <header class="sticky top-0 z-50 w-full glass-panel px-8 py-4 flex items-center justify-between shadow-xl">
+    <header class="sticky top-0 z-50 w-full glass-panel px-8 py-4 flex flex-col md:flex-row items-center justify-between shadow-xl gap-4">
         <div class="flex items-center gap-3">
-            <span class="text-3xl">🏗️</span>
+            <span class="text-3xl animate-pulse">🏗️</span>
             <div>
-                <h1 class="text-xl font-bold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 via-purple-400 to-pink-400">Nuke AI Collaborator</h1>
-                <p class="text-xs text-gray-400 font-medium tracking-wide">系统核心技术架构与交互诊断面板</p>
+                <div class="flex items-center gap-2">
+                    <h1 class="text-xl font-bold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 via-purple-400 to-emerald-400">Nuke AI Collaborator</h1>
+                    <span class="text-[9px] px-1.5 py-0.5 rounded bg-indigo-950/40 text-indigo-400 border border-indigo-900 font-mono">v2026.06</span>
+                </div>
+                <p class="text-xs text-gray-400 font-medium tracking-wide">Intelligent Group Collaboration System · Compute Isolation &amp; Security Sandbox Architecture</p>
             </div>
         </div>
         
-        <!-- Filter Controls -->
-        <div class="flex items-center gap-2 bg-slate-950/60 p-1.5 rounded-xl border border-slate-800">
-            <button onclick="setFlowFilter('all')" id="btn-flow-all" class="flow-btn px-4 py-2 text-xs font-semibold rounded-lg bg-indigo-600/90 text-white shadow-md transition-all">
-                👁️ 全部流水线
+        <!-- Tab Switcher -->
+        <div class="flex items-center gap-1.5 bg-slate-950/60 p-1 rounded-xl border border-slate-800">
+            <button onclick="switchTab('diagram')" id="tab-btn-diagram" class="px-4 py-2 text-xs font-semibold rounded-lg bg-indigo-600/90 text-white shadow-md transition-all flex items-center gap-1.5">
+                📡 System Topology &amp; Flows
             </button>
-            <button onclick="setFlowFilter('ws')" id="btn-flow-ws" class="flow-btn px-4 py-2 text-xs font-semibold rounded-lg text-gray-400 hover:text-white transition-all">
-                ⚡ WS 实时流
+            <button onclick="switchTab('tree')" id="tab-btn-tree" class="px-4 py-2 text-xs font-semibold rounded-lg text-gray-400 hover:text-white transition-all flex items-center gap-1.5">
+                📁 Directory Hierarchy &amp; Component Tree
             </button>
-            <button onclick="setFlowFilter('http')" id="btn-flow-http" class="flow-btn px-4 py-2 text-xs font-semibold rounded-lg text-gray-400 hover:text-white transition-all">
-                🌐 HTTP API 流
-            </button>
-            <button onclick="setFlowFilter('agentic')" id="btn-flow-agentic" class="flow-btn px-4 py-2 text-xs font-semibold rounded-lg text-gray-400 hover:text-white transition-all">
-                🤖 代理沙箱流
+            <button onclick="switchTab('backlog')" id="tab-btn-backlog" class="px-4 py-2 text-xs font-semibold rounded-lg text-gray-400 hover:text-white transition-all flex items-center gap-1.5">
+                🚀 Planned / Unimplemented Features
             </button>
         </div>
 
         <div class="flex items-center gap-3">
-            <button onclick="window.location.reload()" class="p-2 text-gray-400 hover:text-white bg-slate-900 border border-slate-800 rounded-lg transition-all" title="重新加载">
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99"/></svg>
-            </button>
-            <button onclick="toggleFullscreen()" class="p-2 text-indigo-400 hover:text-indigo-300 bg-indigo-950/30 border border-indigo-900/50 rounded-lg transition-all" title="全屏查看">
+            <!-- Flow Filter Controls for Diagram -->
+            <div id="flow-filters" class="hidden sm:flex items-center gap-1.5 bg-slate-950/40 p-1 rounded-lg border border-slate-900">
+                <button onclick="setFlowFilter('all')" id="btn-flow-all" class="flow-btn px-2.5 py-1.5 text-[10px] font-semibold rounded bg-slate-800 text-white transition-all font-bold">All</button>
+                <button onclick="setFlowFilter('ws')" id="btn-flow-ws" class="flow-btn px-2.5 py-1.5 text-[10px] font-semibold rounded text-gray-400 hover:text-white transition-all">WSRPC</button>
+                <button onclick="setFlowFilter('ipc')" id="btn-flow-ipc" class="flow-btn px-2.5 py-1.5 text-[10px] font-semibold rounded text-gray-400 hover:text-white transition-all">IPC Channels</button>
+                <button onclick="setFlowFilter('sandbox')" id="btn-flow-sandbox" class="flow-btn px-2.5 py-1.5 text-[10px] font-semibold rounded text-gray-400 hover:text-white transition-all">Tool Sandbox</button>
+                <button onclick="setFlowFilter('mcp')" id="btn-flow-mcp" class="flow-btn px-2.5 py-1.5 text-[10px] font-semibold rounded text-gray-400 hover:text-white transition-all">MCP Proxy</button>
+                <button onclick="setFlowFilter('planned')" id="btn-flow-planned" class="flow-btn px-2.5 py-1.5 text-[10px] font-semibold rounded text-amber-500 hover:text-amber-400 transition-all font-bold">✨ Unimplemented</button>
+            </div>
+            
+            <button onclick="toggleFullscreen()" class="p-2 text-indigo-400 hover:text-indigo-300 bg-indigo-950/30 border border-indigo-900/50 rounded-lg transition-all" title="Toggle Fullscreen">
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75v4.5m0-4.5h-4.5m4.5 0L15 9m5.25 11.25v-4.5m0 4.5h-4.5m4.5 0l-6-6"/></svg>
             </button>
         </div>
     </header>
 
-    <!-- Content Workspace -->
-    <div class="flex-1 w-full max-w-[1540px] mx-auto p-6 grid grid-cols-1 xl:grid-cols-4 gap-6 items-stretch">
+    <!-- Main Workspace -->
+    <div class="flex-1 w-full max-w-[1600px] mx-auto p-6 grid grid-cols-1 xl:grid-cols-4 gap-6 items-stretch">
         
-        <!-- Architecture Diagram Area (Canvas) -->
-        <div class="xl:col-span-3 glass-panel rounded-2xl p-6 shadow-2xl relative overflow-auto flex items-center justify-center min-h-[85vh]">
-            
-            <!-- Canvas container with fixed sizing to ensure perfect absolute connection layout -->
-            <div class="relative w-[1140px] h-[920px] scale-90 xl:scale-100 origin-center flex-shrink-0" id="canvas-container">
-                
-                <!-- BACKGROUND SVG PIPELINE CHANNELS -->
-                <svg class="absolute inset-0 pointer-events-none" width="1140" height="920" style="z-index: 0;" id="connections-svg">
-                    <!-- Client -> Gateway connections -->
-                    <path id="path-ui-ws" d="M 210 155 C 210 200 560 200 560 260" stroke="#3b82f6" stroke-width="2" fill="none" class="flow-line ws-flow" />
-                    <path id="path-ui-api" d="M 210 155 C 210 200 910 200 910 260" stroke="#10b981" stroke-width="2" fill="none" class="flow-line http-flow" />
-                    <path id="path-ws-server" d="M 560 190 L 560 260" stroke="#06b6d4" stroke-width="3.5" fill="none" class="flow-line ws-flow" />
-                    <path id="path-api-router" d="M 910 190 L 910 260" stroke="#10b981" stroke-width="2.5" fill="none" class="flow-line http-flow" />
+        <!-- Tab 1: System Diagram (Default) -->
+        <div id="tab-diagram" class="xl:col-span-3 glass-panel rounded-2xl p-6 shadow-2xl relative overflow-auto flex items-center justify-center min-h-[85vh] blueprint-bg">
+            <div class="relative w-[1200px] h-[900px] scale-90 xl:scale-100 origin-center flex-shrink-0" id="canvas-container">
+                <!-- SVG Connections Grid -->
+                <svg class="absolute inset-0 pointer-events-none" width="1200" height="900" style="z-index: 0;" id="connections-svg">
+                    <!-- ==================== FLOW LINES ==================== -->
+                    <!-- 1. BROWSER TO GATEWAY -->
+                    <path id="path-chat-ws" d="M 245 175 L 325 175" stroke="#3b82f6" stroke-width="3" fill="none" class="flow-line ws-flow" />
+                    <path id="path-workspace-http" d="M 245 280 C 285 280 285 175 325 175" stroke="#10b981" stroke-width="2" fill="none" class="flow-line ws-flow" />
+                    <path id="path-skill-http" d="M 245 385 C 285 385 285 175 325 175" stroke="#10b981" stroke-width="2" fill="none" class="flow-line ws-flow" />
+                    <path id="path-permission-ws" d="M 325 175 C 285 175 285 515 245 515" stroke="#a855f7" stroke-width="2" fill="none" class="flow-line ws-flow" />
+                    <path id="path-granularity-menu" d="M 140 585 L 140 550" stroke="#fbbf24" stroke-width="2" stroke-dasharray="6,4" fill="none" class="flow-line planned-flow" />
 
-                    <!-- Gateway Layer connections -->
-                    <path id="path-ws-mgr" d="M 450 295 L 320 295" stroke="#06b6d4" stroke-width="2.5" fill="none" class="flow-line ws-flow" stroke-dasharray="8,8" />
-                    
-                    <!-- Gateway -> Orchestration Layer -->
-                    <path id="path-ws-orch" d="M 560 330 L 560 400" stroke="#8b5cf6" stroke-width="3" fill="none" class="flow-line ws-flow" />
-                    <path id="path-http-db" d="M 910 330 C 910 370 790 370 790 780" stroke="#10b981" stroke-width="1.5" fill="none" class="flow-line http-flow" />
+                    <!-- 2. GATEWAY INTERNAL -->
+                    <path id="path-ws-supervisor" d="M 430 210 L 430 280" stroke="#3b82f6" stroke-width="3" fill="none" class="flow-line ws-flow" />
+                    <path id="path-sup-metrics" d="M 430 350 L 430 420" stroke="#a855f7" stroke-width="2" fill="none" class="flow-line ipc-flow" />
 
-                    <!-- Orchestration Layer connections -->
-                    <path id="path-orch-router" d="M 450 435 L 320 435" stroke="#8b5cf6" stroke-width="2" fill="none" class="flow-line ws-flow" />
-                    <path id="path-orch-wf" d="M 670 435 L 800 435" stroke="#a855f7" stroke-width="2.5" fill="none" class="flow-line agentic-flow" />
+                    <!-- 3. GATEWAY TO WORKER (IPC BOUNDARY) -->
+                    <path id="path-sup-worker" d="M 535 315 C 575 315 580 210 620 210" stroke="#a855f7" stroke-width="3.5" fill="none" class="flow-line ipc-flow" />
+                    <path id="path-worker-metrics" d="M 620 210 C 580 210 575 455 535 455" stroke="#a855f7" stroke-width="2" fill="none" class="flow-line ipc-flow" />
 
-                    <!-- Orchestration -> Execution -->
-                    <path id="path-orch-exec" d="M 560 470 C 560 500 210 500 210 540" stroke="#8b5cf6" stroke-width="2.5" fill="none" class="flow-line ws-flow agentic-flow" />
-                    <path id="path-exec-simple" d="M 210 575 C 210 610 560 510 560 540" stroke="#ec4899" stroke-width="2" fill="none" class="flow-line ws-flow" />
-                    <path id="path-exec-loop" d="M 210 575 C 210 610 910 510 910 540" stroke="#ec4899" stroke-width="2.5" fill="none" class="flow-line agentic-flow" />
+                    <!-- 4. WORKER INTERNAL FLOW -->
+                    <path id="path-orchestrator-lifecycle" d="M 725 175 L 725 150" stroke="#f43f5e" stroke-width="2.5" fill="none" class="flow-line ipc-flow" />
+                    <path id="path-orchestrator-loop" d="M 725 245 L 725 270" stroke="#f43f5e" stroke-width="3" fill="none" class="flow-line ipc-flow" />
+                    <path id="path-loop-executor" d="M 725 340 L 725 365" stroke="#f43f5e" stroke-width="3" fill="none" class="flow-line sandbox-flow" />
+                    <path id="path-executor-guard" d="M 725 435 L 725 460" stroke="#ec4899" stroke-width="2.5" fill="none" class="flow-line sandbox-flow" />
+                    <path id="path-guard-workspace" d="M 725 530 L 725 555" stroke="#10b981" stroke-width="2.5" fill="none" class="flow-line sandbox-flow" />
+                    <path id="path-workspace-mcp" d="M 725 625 L 725 650" stroke="#06b6d4" stroke-width="2.5" fill="none" class="flow-line mcp-flow" />
 
-                    <!-- Execution -> Workspace FS -->
-                    <path id="path-loop-tools" d="M 910 610 L 910 660" stroke="#f43f5e" stroke-width="2" fill="none" class="flow-line agentic-flow" />
+                    <!-- 5. WORKER TO EXTERNAL STORAGE / SERVICES -->
+                    <path id="path-lifecycle-db" d="M 830 115 C 885 115 890 210 945 210" stroke="#6366f1" stroke-width="2" fill="none" class="flow-line ipc-flow" />
+                    <path id="path-lifecycle-vfs" d="M 830 115 C 885 115 890 315 945 315" stroke="#10b981" stroke-width="2" fill="none" class="flow-line ipc-flow" />
+                    <path id="path-loop-llm" d="M 830 305 C 885 305 890 115 945 115" stroke="#f59e0b" stroke-width="2.5" fill="none" class="flow-line ipc-flow" />
+                    <path id="path-workspace-vfs" d="M 830 590 C 885 590 890 315 945 315" stroke="#10b981" stroke-width="2" fill="none" class="flow-line sandbox-flow" />
+                    <path id="path-workspace-shell" d="M 830 590 C 885 590 890 420 945 420" stroke="#ec4899" stroke-width="2.5" fill="none" class="flow-line sandbox-flow" />
 
-                    <!-- Execution -> Memory / LLM Gateway -->
-                    <path id="path-simple-mem" d="M 560 610 C 560 670 580 670 580 780" stroke="#6366f1" stroke-width="2" fill="none" class="flow-line ws-flow" />
-                    <path id="path-loop-mem" d="M 910 610 C 910 710 580 710 580 780" stroke="#6366f1" stroke-width="2" fill="none" class="flow-line agentic-flow" />
-                    
-                    <path id="path-simple-llm" d="M 560 610 C 560 730 910 730 910 780" stroke="#f59e0b" stroke-width="2" fill="none" class="flow-line ws-flow" />
-                    <path id="path-loop-llm" d="M 910 610 C 910 720 910 750 910 780" stroke="#f59e0b" stroke-width="2.5" fill="none" class="flow-line agentic-flow" />
+                    <!-- 6. MCP COLLECTOR FLOWS -->
+                    <path id="path-mcp-collector" d="M 725 720 L 725 785" stroke="#06b6d4" stroke-width="3" fill="none" class="flow-line mcp-flow" />
+                    <path id="path-collector-mcp" d="M 830 820 L 945 820" stroke="#14b8a6" stroke-width="3" fill="none" class="flow-line mcp-flow" />
 
-                    <!-- Memory -> Storage DB / Chroma -->
-                    <path id="path-mem-sqlite" d="M 580 815 C 580 850 150 850 150 850" stroke="#6366f1" stroke-width="2" fill="none" class="flow-line ws-flow agentic-flow" />
-                    <path id="path-mem-chroma" d="M 580 815 C 580 850 360 850 360 850" stroke="#6366f1" stroke-width="2" fill="none" class="flow-line agentic-flow" />
-                    
-                    <!-- Workflow -> DB / WS -->
-                    <path id="path-wf-db" d="M 910 470 C 910 500 750 500 750 780" stroke="#a855f7" stroke-width="2" fill="none" class="flow-line agentic-flow" />
-                    <path id="path-wf-ws" d="M 910 470 C 910 470 1200 470 1200 295 C 1200 295 800 295 320 295" stroke="#a855f7" stroke-width="2" fill="none" class="flow-line agentic-flow" />
+                    <!-- 7. UNIMPLEMENTED / PLANNED FEATURE CONNECTIONS (Dashed) -->
+                    <!-- Input Rewriting Hook -->
+                    <path id="path-planned-rewrite" d="M 620 495 C 575 495 580 620 535 620" stroke="#fbbf24" stroke-width="2" stroke-dasharray="6,4" fill="none" class="flow-line planned-flow" />
+                    <path id="path-planned-rewrite-exec" d="M 535 620 C 580 620 575 400 620 400" stroke="#fbbf24" stroke-width="2" stroke-dasharray="6,4" fill="none" class="flow-line planned-flow" />
+                    <!-- Docker Sandbox -->
+                    <path id="path-planned-docker" d="M 830 590 C 885 590 890 525 945 525" stroke="#fbbf24" stroke-width="2" stroke-dasharray="6,4" fill="none" class="flow-line planned-flow" />
+                    <path id="path-planned-docker-vfs" d="M 1050 560 C 1090 560 1090 350 1050 350" stroke="#10b981" stroke-width="1.5" stroke-dasharray="6,4" fill="none" class="flow-line planned-flow" />
+                    <!-- BASH Classifier -->
+                    <path id="path-planned-classifier" d="M 830 495 C 885 495 890 630 945 630" stroke="#fbbf24" stroke-width="2" stroke-dasharray="6,4" fill="none" class="flow-line planned-flow" />
+                    <path id="path-planned-classifier-shell" d="M 1050 665 C 1090 665 1090 455 1050 455" stroke="#f59e0b" stroke-width="2" stroke-dasharray="6,4" fill="none" class="flow-line planned-flow" />
                 </svg>
 
-                <!-- LAYER 1: CLIENT LAYER -->
-                <div class="absolute text-[10px] font-bold uppercase tracking-widest text-blue-400/60 left-[4px] top-[90px]">Layer 1: Client Layer</div>
-                <div class="absolute w-[1140px] border-b border-dashed border-blue-950/60 left-0 top-[105px]"></div>
+                <!-- PROCESS CONTAINER 1: BROWSER CLIENTS -->
+                <div class="absolute text-[10px] font-bold uppercase tracking-wider text-blue-400/60 left-[20px] top-[95px]">1. Browsers (React 19 Frontend)</div>
+                <div class="absolute w-[240px] h-[690px] border border-blue-500/10 bg-blue-500/5 rounded-2xl left-[20px] top-[110px]" style="z-index: 1;"></div>
                 
-                <!-- UI Components Card -->
-                <div onclick="selectNode('ui-components')" id="card-ui-components" class="node-card absolute left-[100px] top-[120px] w-[220px] h-[70px] glass-panel rounded-xl px-4 py-3 cursor-pointer flex items-center gap-3 select-none" style="z-index: 10;">
-                    <div class="w-10 h-10 rounded-lg bg-blue-600/20 text-blue-400 flex items-center justify-center text-lg">💻</div>
+                <!-- Chat Window Card -->
+                <div onclick="selectNode('chat-window')" id="card-chat-window" class="node-card absolute left-[35px] top-[140px] w-[210px] h-[70px] glass-panel border-blue-500/30 rounded-xl px-4 py-3 cursor-pointer flex items-center gap-3 select-none" style="z-index: 10;">
+                    <div class="w-10 h-10 rounded-lg bg-blue-600/20 text-blue-400 flex items-center justify-center text-lg">💬</div>
                     <div class="flex-1 min-w-0">
-                        <div class="text-xs font-semibold text-gray-200 truncate">UI Components</div>
+                        <div class="text-xs font-semibold text-gray-200 truncate">Chat Window UI</div>
                         <div class="text-[10px] text-blue-400 truncate">ChatWindow.jsx</div>
                     </div>
                     <div class="text-[9px] px-1.5 py-0.5 rounded bg-blue-900/40 text-blue-300 font-mono border border-blue-800/40">React</div>
                 </div>
 
-                <!-- useWebSocket Card -->
-                <div onclick="selectNode('use-websocket')" id="card-use-websocket" class="node-card absolute left-[450px] top-[120px] w-[220px] h-[70px] glass-panel rounded-xl px-4 py-3 cursor-pointer flex items-center gap-3 select-none" style="z-index: 10;">
-                    <div class="w-10 h-10 rounded-lg bg-cyan-600/20 text-cyan-400 flex items-center justify-center text-lg">⚡</div>
+                <!-- Workspace Panel Card -->
+                <div onclick="selectNode('workspace-panel')" id="card-workspace-panel" class="node-card absolute left-[35px] top-[245px] w-[210px] h-[70px] glass-panel border-blue-500/30 rounded-xl px-4 py-3 cursor-pointer flex items-center gap-3 select-none" style="z-index: 10;">
+                    <div class="w-10 h-10 rounded-lg bg-blue-600/20 text-blue-400 flex items-center justify-center text-lg">📁</div>
                     <div class="flex-1 min-w-0">
-                        <div class="text-xs font-semibold text-gray-200 truncate">useWebSocket Hook</div>
-                        <div class="text-[10px] text-cyan-400 truncate">useWebSocket.js</div>
+                        <div class="text-xs font-semibold text-gray-200 truncate">VFS Workspace Panel</div>
+                        <div class="text-[10px] text-blue-400 truncate">WorkspacePanel.jsx</div>
                     </div>
-                    <div class="text-[9px] px-1.5 py-0.5 rounded bg-cyan-900/40 text-cyan-300 font-mono border border-cyan-800/40">Hook</div>
+                    <div class="text-[9px] px-1.5 py-0.5 rounded bg-blue-900/40 text-blue-300 font-mono border border-blue-800/40">React</div>
                 </div>
 
-                <!-- API Client Card -->
-                <div onclick="selectNode('api-client')" id="card-api-client" class="node-card absolute left-[800px] top-[120px] w-[220px] h-[70px] glass-panel rounded-xl px-4 py-3 cursor-pointer flex items-center gap-3 select-none" style="z-index: 10;">
-                    <div class="w-10 h-10 rounded-lg bg-emerald-600/20 text-emerald-400 flex items-center justify-center text-lg">🌐</div>
+                <!-- Skill & Config Panel -->
+                <div onclick="selectNode('skill-panel')" id="card-skill-panel" class="node-card absolute left-[35px] top-[350px] w-[210px] h-[70px] glass-panel border-blue-500/30 rounded-xl px-4 py-3 cursor-pointer flex items-center gap-3 select-none" style="z-index: 10;">
+                    <div class="w-10 h-10 rounded-lg bg-blue-600/20 text-blue-400 flex items-center justify-center text-lg">⚡</div>
                     <div class="flex-1 min-w-0">
-                        <div class="text-xs font-semibold text-gray-200 truncate">API Client</div>
-                        <div class="text-[10px] text-emerald-400 truncate">api.js</div>
+                        <div class="text-xs font-semibold text-gray-200 truncate">Skill &amp; Config Panel</div>
+                        <div class="text-[10px] text-blue-400 truncate">SkillPanel.jsx</div>
                     </div>
-                    <div class="text-[9px] px-1.5 py-0.5 rounded bg-emerald-900/40 text-emerald-300 font-mono border border-emerald-800/40">Axios</div>
+                    <div class="text-[9px] px-1.5 py-0.5 rounded bg-blue-900/40 text-blue-300 font-mono border border-blue-800/40">React</div>
                 </div>
 
-
-                <!-- LAYER 2: GATEWAY & COMMUNICATION LAYER -->
-                <div class="absolute text-[10px] font-bold uppercase tracking-widest text-teal-400/60 left-[4px] top-[230px]">Layer 2: Gateway & Comm Layer</div>
-                <div class="absolute w-[1140px] border-b border-dashed border-teal-950/60 left-0 top-[245px]"></div>
-
-                <!-- Connection Manager Card -->
-                <div onclick="selectNode('ws-manager')" id="card-ws-manager" class="node-card absolute left-[100px] top-[260px] w-[220px] h-[70px] glass-panel rounded-xl px-4 py-3 cursor-pointer flex items-center gap-3 select-none" style="z-index: 10;">
-                    <div class="w-10 h-10 rounded-lg bg-cyan-600/20 text-cyan-400 flex items-center justify-center text-lg">🔀</div>
+                <!-- Permission Modal Card -->
+                <div onclick="selectNode('permission-modal')" id="card-permission-modal" class="node-card absolute left-[35px] top-[480px] w-[210px] h-[70px] glass-panel border-purple-500/30 rounded-xl px-4 py-3 cursor-pointer flex items-center gap-3 select-none" style="z-index: 10;">
+                    <div class="w-10 h-10 rounded-lg bg-purple-600/20 text-purple-400 flex items-center justify-center text-lg">🛡️</div>
                     <div class="flex-1 min-w-0">
-                        <div class="text-xs font-semibold text-gray-200 truncate">Connection Manager</div>
-                        <div class="text-[10px] text-cyan-400 truncate">ws_manager.py</div>
+                        <div class="text-xs font-semibold text-gray-200 truncate">HIL Permission Modal</div>
+                        <div class="text-[10px] text-purple-400 truncate">PermissionRequestModal.jsx</div>
                     </div>
-                    <div class="text-[9px] px-1.5 py-0.5 rounded bg-cyan-900/40 text-cyan-300 font-mono border border-cyan-800/40">WS</div>
+                    <div class="text-[9px] px-1.5 py-0.5 rounded bg-purple-900/40 text-purple-300 font-mono border border-purple-800/40">Modal</div>
                 </div>
 
-                <!-- WebSocket Server Card -->
-                <div onclick="selectNode('ws-server')" id="card-ws-server" class="node-card absolute left-[450px] top-[260px] w-[220px] h-[70px] glass-panel rounded-xl px-4 py-3 cursor-pointer flex items-center gap-3 select-none hover:border-cyan-500/50" style="z-index: 10;">
-                    <div class="w-10 h-10 rounded-lg bg-cyan-600/20 text-cyan-400 flex items-center justify-center text-lg">📡</div>
+                <!-- UNIMPLEMENTED UI FEATURE: Granularity Menu -->
+                <div onclick="selectNode('unimpl-granularity-menu')" id="card-unimpl-granularity-menu" class="node-card unimplemented-card absolute left-[35px] top-[585px] w-[210px] h-[70px] glass-panel rounded-xl px-4 py-3 cursor-pointer flex items-center gap-3 select-none" style="z-index: 10;">
+                    <div class="w-10 h-10 rounded-lg bg-amber-600/20 text-amber-500 flex items-center justify-center text-lg">🔘</div>
                     <div class="flex-1 min-w-0">
-                        <div class="text-xs font-semibold text-gray-200 truncate">WebSocket Server</div>
-                        <div class="text-[10px] text-cyan-400 truncate">main.py (WS Handler)</div>
+                        <div class="text-xs font-semibold text-gray-200 flex items-center gap-1.5 truncate">
+                            Granularity Menu
+                            <span class="w-2 h-2 rounded-full bg-amber-500 animate-ping"></span>
+                        </div>
+                        <div class="text-[10px] text-amber-500 truncate">Decay subcommands (gsd-2)</div>
                     </div>
-                    <div class="text-[9px] px-1.5 py-0.5 rounded bg-teal-900/40 text-teal-300 font-mono border border-teal-800/40">FastAPI</div>
-                </div>
-
-                <!-- HTTP API Router Card -->
-                <div onclick="selectNode('http-router')" id="card-http-router" class="node-card absolute left-[800px] top-[260px] w-[220px] h-[70px] glass-panel rounded-xl px-4 py-3 cursor-pointer flex items-center gap-3 select-none" style="z-index: 10;">
-                    <div class="w-10 h-10 rounded-lg bg-emerald-600/20 text-emerald-400 flex items-center justify-center text-lg">🛣️</div>
-                    <div class="flex-1 min-w-0">
-                        <div class="text-xs font-semibold text-gray-200 truncate">HTTP API Router</div>
-                        <div class="text-[10px] text-emerald-400 truncate">*_routes.py</div>
-                    </div>
-                    <div class="text-[9px] px-1.5 py-0.5 rounded bg-teal-900/40 text-teal-300 font-mono border border-teal-800/40">FastAPI</div>
+                    <div class="text-[9px] px-1.5 py-0.5 rounded bg-amber-900/40 text-amber-300 font-mono border border-amber-800/40 font-bold">Planned</div>
                 </div>
 
 
-                <!-- LAYER 3: CORE ORCHESTRATION LAYER -->
-                <div class="absolute text-[10px] font-bold uppercase tracking-widest text-purple-400/60 left-[4px] top-[370px]">Layer 3: Core Orchestration Layer</div>
-                <div class="absolute w-[1140px] border-b border-dashed border-purple-950/60 left-0 top-[385px]"></div>
+                <!-- PROCESS CONTAINER 2: SUPERVISOR PROCESS -->
+                <div class="absolute text-[10px] font-bold uppercase tracking-wider text-purple-400/60 left-[310px] top-[95px]">2. Supervisor Process (主控进程)</div>
+                <div class="absolute w-[240px] h-[690px] border border-purple-500/10 bg-purple-500/5 rounded-2xl left-[310px] top-[110px]" style="z-index: 1;"></div>
 
-                <!-- Role Router Card -->
-                <div onclick="selectNode('role-router')" id="card-role-router" class="node-card absolute left-[100px] top-[400px] w-[220px] h-[70px] glass-panel rounded-xl px-4 py-3 cursor-pointer flex items-center gap-3 select-none" style="z-index: 10;">
-                    <div class="w-10 h-10 rounded-lg bg-purple-600/20 text-purple-400 flex items-center justify-center text-lg">🗂️</div>
+                <!-- FastAPI HTTP & WS Router Card -->
+                <div onclick="selectNode('ws-router')" id="card-ws-router" class="node-card absolute left-[325px] top-[140px] w-[210px] h-[70px] glass-panel border-purple-500/30 rounded-xl px-4 py-3 cursor-pointer flex items-center gap-3 select-none" style="z-index: 10;">
+                    <div class="w-10 h-10 rounded-lg bg-purple-600/20 text-purple-400 flex items-center justify-center text-lg">📡</div>
                     <div class="flex-1 min-w-0">
-                        <div class="text-xs font-semibold text-gray-200 truncate">Role Router</div>
-                        <div class="text-[10px] text-purple-400 truncate">role_router.py</div>
+                        <div class="text-xs font-semibold text-gray-200 truncate">Web / WSRPC Server</div>
+                        <div class="text-[10px] text-purple-400 truncate">main.py · ws_manager.py</div>
                     </div>
-                    <div class="text-[9px] px-1.5 py-0.5 rounded bg-purple-900/40 text-purple-300 font-mono border border-purple-800/40">Core</div>
+                    <div class="text-[9px] px-1.5 py-0.5 rounded bg-purple-900/40 text-purple-300 font-mono border border-purple-800/40">Gateway</div>
                 </div>
 
-                <!-- BotOrchestrator Card (Pulse Glow / Heart of Backend) -->
-                <div onclick="selectNode('bot-orchestrator')" id="card-bot-orchestrator" class="node-card pulse-card absolute left-[450px] top-[400px] w-[220px] h-[70px] glass-panel border-indigo-500/40 rounded-xl px-4 py-3 cursor-pointer flex items-center gap-3 select-none" style="z-index: 10;">
+                <!-- Supervisor Process Manager -->
+                <div onclick="selectNode('supervisor-manager')" id="card-supervisor-manager" class="node-card absolute left-[325px] top-[280px] w-[210px] h-[70px] glass-panel border-purple-500/30 rounded-xl px-4 py-3 cursor-pointer flex items-center gap-3 select-none" style="z-index: 10;">
+                    <div class="w-10 h-10 rounded-lg bg-purple-600/20 text-purple-400 flex items-center justify-center text-lg">⚙️</div>
+                    <div class="flex-1 min-w-0">
+                        <div class="text-xs font-semibold text-gray-200 truncate">Supervisor Core</div>
+                        <div class="text-[10px] text-purple-400 truncate">supervisor.py (IPC Cache)</div>
+                    </div>
+                    <div class="text-[9px] px-1.5 py-0.5 rounded bg-purple-900/40 text-purple-300 font-mono border border-purple-800/40">Main</div>
+                </div>
+
+                <!-- Tracing and Metrics Aggregator -->
+                <div onclick="selectNode('supervisor-metrics')" id="card-supervisor-metrics" class="node-card absolute left-[325px] top-[420px] w-[210px] h-[70px] glass-panel border-purple-500/30 rounded-xl px-4 py-3 cursor-pointer flex items-center gap-3 select-none" style="z-index: 10;">
+                    <div class="w-10 h-10 rounded-lg bg-purple-600/20 text-purple-400 flex items-center justify-center text-lg">📊</div>
+                    <div class="flex-1 min-w-0">
+                        <div class="text-xs font-semibold text-gray-200 truncate">Metrics &amp; Trace Center</div>
+                        <div class="text-[10px] text-purple-400 truncate">metrics.py · tracing.py</div>
+                    </div>
+                    <div class="text-[9px] px-1.5 py-0.5 rounded bg-purple-900/40 text-purple-300 font-mono border border-purple-800/40">Monitor</div>
+                </div>
+
+                <!-- UNIMPLEMENTED PLAN: Decision Rewriting Hook -->
+                <div onclick="selectNode('unimpl-rewriting-hook')" id="card-unimpl-rewriting-hook" class="node-card unimplemented-card absolute left-[325px] top-[585px] w-[210px] h-[70px] glass-panel rounded-xl px-4 py-3 cursor-pointer flex items-center gap-3 select-none" style="z-index: 10;">
+                    <div class="w-10 h-10 rounded-lg bg-amber-600/20 text-amber-500 flex items-center justify-center text-lg">✍️</div>
+                    <div class="flex-1 min-w-0">
+                        <div class="text-xs font-semibold text-gray-200 flex items-center gap-1.5 truncate">
+                            Input Rewriting Hook
+                            <span class="w-2 h-2 rounded-full bg-amber-500 animate-ping"></span>
+                        </div>
+                        <div class="text-[10px] text-amber-500 truncate">Rewrite inputs on the fly (gsd-2)</div>
+                    </div>
+                    <div class="text-[9px] px-1.5 py-0.5 rounded bg-amber-900/40 text-amber-300 font-mono border border-amber-800/40 font-bold">Planned</div>
+                </div>
+
+
+                <!-- PROCESS CONTAINER 3: WORKER PROCESSES -->
+                <div class="absolute text-[10px] font-bold uppercase tracking-wider text-pink-400/60 left-[600px] top-[55px]">3. Worker Processes (分片执行子进程 × N)</div>
+                <div class="absolute w-[250px] h-[690px] border border-pink-500/10 bg-pink-500/5 rounded-2xl left-[600px] top-[70px]" style="z-index: 1;"></div>
+
+                <!-- Lifecycle & Shard Lock Card -->
+                <div onclick="selectNode('lifecycle-manager')" id="card-lifecycle-manager" class="node-card absolute left-[620px] top-[80px] w-[210px] h-[70px] glass-panel border-pink-500/30 rounded-xl px-4 py-3 cursor-pointer flex items-center gap-3 select-none" style="z-index: 10;">
+                    <div class="w-10 h-10 rounded-lg bg-pink-600/20 text-pink-400 flex items-center justify-center text-lg">🔒</div>
+                    <div class="flex-1 min-w-0">
+                        <div class="text-xs font-semibold text-gray-200 truncate">Lifecycle &amp; GroupLock</div>
+                        <div class="text-[10px] text-pink-400 truncate">lifecycle.py (flock)</div>
+                    </div>
+                    <div class="text-[9px] px-1.5 py-0.5 rounded bg-pink-900/40 text-pink-300 font-mono border border-pink-800/40">Core</div>
+                </div>
+
+                <!-- Orchestrator & Dispatcher Card -->
+                <div onclick="selectNode('worker-orchestrator')" id="card-worker-orchestrator" class="node-card pulse-card absolute left-[620px] top-[175px] w-[210px] h-[70px] glass-panel rounded-xl px-4 py-3 cursor-pointer flex items-center gap-3 select-none border-pink-500/40" style="z-index: 10;">
                     <div class="w-10 h-10 rounded-lg bg-indigo-600/20 text-indigo-400 flex items-center justify-center text-lg">🧠</div>
                     <div class="flex-1 min-w-0">
-                        <div class="text-xs font-semibold text-gray-200 truncate">BotOrchestrator</div>
-                        <div class="text-[10px] text-indigo-400 truncate">bot_orchestrator.py</div>
+                        <div class="text-xs font-semibold text-gray-200 truncate">Orchestration &amp; Dispatch</div>
+                        <div class="text-[10px] text-indigo-400 truncate">dispatch.py (HELO reg)</div>
                     </div>
-                    <div class="text-[9px] px-1.5 py-0.5 rounded bg-indigo-900/40 text-indigo-300 font-mono border border-indigo-800/40 text-indigo-200">Core</div>
+                    <div class="text-[9px] px-1.5 py-0.5 rounded bg-indigo-900/40 text-indigo-300 font-mono border border-indigo-800/40">Heart</div>
                 </div>
 
-                <!-- Workflow Engine Card -->
-                <div onclick="selectNode('workflow-engine')" id="card-workflow-engine" class="node-card absolute left-[800px] top-[400px] w-[220px] h-[70px] glass-panel rounded-xl px-4 py-3 cursor-pointer flex items-center gap-3 select-none" style="z-index: 10;">
-                    <div class="w-10 h-10 rounded-lg bg-fuchsia-600/20 text-fuchsia-400 flex items-center justify-center text-lg">🏁</div>
-                    <div class="flex-1 min-w-0">
-                        <div class="text-xs font-semibold text-gray-200 truncate">Workflow Engine</div>
-                        <div class="text-[10px] text-fuchsia-400 truncate">workflow.py</div>
-                    </div>
-                    <div class="text-[9px] px-1.5 py-0.5 rounded bg-fuchsia-900/40 text-fuchsia-300 font-mono border border-fuchsia-800/40">State</div>
-                </div>
-
-
-                <!-- LAYER 4: SANDBOX EXECUTION LAYER -->
-                <div class="absolute text-[10px] font-bold uppercase tracking-widest text-pink-400/60 left-[4px] top-[510px]">Layer 4: Execution & Sandboxed Plugins</div>
-                <div class="absolute w-[1140px] border-b border-dashed border-pink-950/60 left-0 top-[525px]"></div>
-
-                <!-- BotExecutor Base Card -->
-                <div onclick="selectNode('bot-executor')" id="card-bot-executor" class="node-card absolute left-[100px] top-[540px] w-[220px] h-[70px] glass-panel rounded-xl px-4 py-3 cursor-pointer flex items-center gap-3 select-none" style="z-index: 10;">
-                    <div class="w-10 h-10 rounded-lg bg-rose-600/20 text-rose-400 flex items-center justify-center text-lg">🔌</div>
-                    <div class="flex-1 min-w-0">
-                        <div class="text-xs font-semibold text-gray-200 truncate">BotExecutor Base</div>
-                        <div class="text-[10px] text-rose-400 truncate">base.py (Abstract)</div>
-                    </div>
-                    <div class="text-[9px] px-1.5 py-0.5 rounded bg-rose-900/40 text-rose-300 font-mono border border-rose-800/40">Interface</div>
-                </div>
-
-                <!-- SimpleV1 Card -->
-                <div onclick="selectNode('simple-v1')" id="card-simple-v1" class="node-card absolute left-[450px] top-[540px] w-[220px] h-[70px] glass-panel rounded-xl px-4 py-3 cursor-pointer flex items-center gap-3 select-none" style="z-index: 10;">
-                    <div class="w-10 h-10 rounded-lg bg-pink-600/20 text-pink-400 flex items-center justify-center text-lg">💬</div>
-                    <div class="flex-1 min-w-0">
-                        <div class="text-xs font-semibold text-gray-200 truncate">SimpleV1 Plugin</div>
-                        <div class="text-[10px] text-pink-400 truncate">simple_v1.py</div>
-                    </div>
-                    <div class="text-[9px] px-1.5 py-0.5 rounded bg-pink-900/40 text-pink-300 font-mono border border-pink-800/40">Plugin</div>
-                </div>
-
-                <!-- ToolLoopV1 Card -->
-                <div onclick="selectNode('tool-loop-v1')" id="card-tool-loop-v1" class="node-card absolute left-[800px] top-[540px] w-[220px] h-[70px] glass-panel rounded-xl px-4 py-3 cursor-pointer flex items-center gap-3 select-none" style="z-index: 10;">
+                <!-- ToolLoopV1 ReAct Engine Card -->
+                <div onclick="selectNode('tool-loop-v1')" id="card-tool-loop-v1" class="node-card absolute left-[620px] top-[270px] w-[210px] h-[70px] glass-panel border-pink-500/30 rounded-xl px-4 py-3 cursor-pointer flex items-center gap-3 select-none" style="z-index: 10;">
                     <div class="w-10 h-10 rounded-lg bg-pink-600/20 text-pink-400 flex items-center justify-center text-lg">🔁</div>
                     <div class="flex-1 min-w-0">
-                        <div class="text-xs font-semibold text-gray-200 truncate">ToolLoopV1 Plugin</div>
-                        <div class="text-[10px] text-pink-400 truncate">tool_loop_v1.py</div>
+                        <div class="text-xs font-semibold text-gray-200 truncate">ToolLoopV1 Executor</div>
+                        <div class="text-[10px] text-pink-400 truncate">tool_loop_v1.py (Budget)</div>
                     </div>
                     <div class="text-[9px] px-1.5 py-0.5 rounded bg-pink-900/40 text-pink-300 font-mono border border-pink-800/40">ReAct</div>
                 </div>
 
-                <!-- Workspace Tools Card -->
-                <div onclick="selectNode('workspace-tools')" id="card-workspace-tools" class="node-card absolute left-[800px] top-[660px] w-[220px] h-[70px] glass-panel rounded-xl px-4 py-3 cursor-pointer flex items-center gap-3 select-none" style="z-index: 10;">
-                    <div class="w-10 h-10 rounded-lg bg-red-600/20 text-red-400 flex items-center justify-center text-lg">🔨</div>
+                <!-- Tool Executor Card -->
+                <div onclick="selectNode('tool-executor')" id="card-tool-executor" class="node-card absolute left-[620px] top-[365px] w-[210px] h-[70px] glass-panel border-pink-500/30 rounded-xl px-4 py-3 cursor-pointer flex items-center gap-3 select-none" style="z-index: 10;">
+                    <div class="w-10 h-10 rounded-lg bg-pink-600/20 text-pink-400 flex items-center justify-center text-lg">🔌</div>
                     <div class="flex-1 min-w-0">
-                        <div class="text-xs font-semibold text-gray-200 truncate">Workspace Tools</div>
-                        <div class="text-[10px] text-red-400 truncate">workspace.py (Sandbox API)</div>
+                        <div class="text-xs font-semibold text-gray-200 truncate">Tool Executor</div>
+                        <div class="text-[10px] text-pink-400 truncate">tool_executor.py (Validate)</div>
                     </div>
-                    <div class="text-[9px] px-1.5 py-0.5 rounded bg-red-900/40 text-red-300 font-mono border border-red-800/40">Tools</div>
+                    <div class="text-[9px] px-1.5 py-0.5 rounded bg-pink-900/40 text-pink-300 font-mono border border-pink-800/40">Exec</div>
+                </div>
+
+                <!-- Security Guard & Redactor Card -->
+                <div onclick="selectNode('security-engine')" id="card-security-engine" class="node-card absolute left-[620px] top-[460px] w-[210px] h-[70px] glass-panel border-pink-500/30 rounded-xl px-4 py-3 cursor-pointer flex items-center gap-3 select-none" style="z-index: 10;">
+                    <div class="w-10 h-10 rounded-lg bg-red-600/20 text-red-400 flex items-center justify-center text-lg">🛡️</div>
+                    <div class="flex-1 min-w-0">
+                        <div class="text-xs font-semibold text-gray-200 truncate">Guard &amp; Redaction</div>
+                        <div class="text-[10px] text-red-400 truncate">engine.py · redaction.py</div>
+                    </div>
+                    <div class="text-[9px] px-1.5 py-0.5 rounded bg-red-900/40 text-red-300 font-mono border border-red-800/40">Security</div>
+                </div>
+
+                <!-- Workspace tools & redirection Card -->
+                <div onclick="selectNode('workspace-tools')" id="card-workspace-tools" class="node-card absolute left-[620px] top-[555px] w-[210px] h-[70px] glass-panel border-pink-500/30 rounded-xl px-4 py-3 cursor-pointer flex items-center gap-3 select-none" style="z-index: 10;">
+                    <div class="w-10 h-10 rounded-lg bg-emerald-600/20 text-emerald-400 flex items-center justify-center text-lg">📁</div>
+                    <div class="flex-1 min-w-0">
+                        <div class="text-xs font-semibold text-gray-200 truncate">Workspace Redir &amp; Tools</div>
+                        <div class="text-[10px] text-emerald-400 truncate">workspace/__init__.py</div>
+                    </div>
+                    <div class="text-[9px] px-1.5 py-0.5 rounded bg-emerald-900/40 text-emerald-300 font-mono border border-emerald-800/40">VFS</div>
+                </div>
+
+                <!-- MCP Proxy Provider Card -->
+                <div onclick="selectNode('mcp-proxy')" id="card-mcp-proxy" class="node-card absolute left-[620px] top-[650px] w-[210px] h-[70px] glass-panel border-pink-500/30 rounded-xl px-4 py-3 cursor-pointer flex items-center gap-3 select-none" style="z-index: 10;">
+                    <div class="w-10 h-10 rounded-lg bg-cyan-600/20 text-cyan-400 flex items-center justify-center text-lg">🔗</div>
+                    <div class="flex-1 min-w-0">
+                        <div class="text-xs font-semibold text-gray-200 truncate">MCP Proxy Provider</div>
+                        <div class="text-[10px] text-cyan-400 truncate">mcp_proxy.py · mcp_bridge.py</div>
+                    </div>
+                    <div class="text-[9px] px-1.5 py-0.5 rounded bg-cyan-900/40 text-cyan-300 font-mono border border-cyan-800/40">Proxy</div>
                 </div>
 
 
-                <!-- LAYER 5: STORAGE, MEMORY & LLM CLIENT TIER -->
-                <div class="absolute text-[10px] font-bold uppercase tracking-widest text-indigo-400/60 left-[4px] top-[750px]">Layer 5: Memory, Storage & AI Gateways</div>
-                <div class="absolute w-[1140px] border-b border-dashed border-indigo-950/60 left-0 top-[765px]"></div>
+                <!-- PROCESS CONTAINER 4: MCP COLLECTOR -->
+                <div class="absolute text-[10px] font-bold uppercase tracking-wider text-teal-400/60 left-[600px] top-[750px]">4. MCP Collector Process (MCP 独占连接进程)</div>
+                <div class="absolute w-[250px] h-[110px] border border-teal-500/10 bg-teal-500/5 rounded-2xl left-[600px] top-[765px]" style="z-index: 1;"></div>
 
-                <!-- SQLite DB Card -->
-                <div onclick="selectNode('sqlite-db')" id="card-sqlite-db" class="node-card absolute left-[60px] top-[780px] w-[180px] h-[70px] glass-panel rounded-xl px-4 py-3 cursor-pointer flex items-center gap-3 select-none" style="z-index: 10;">
-                    <div class="w-10 h-10 rounded-lg bg-indigo-600/20 text-indigo-400 flex items-center justify-center text-lg">🗄️</div>
+                <!-- MCP Collector Engine -->
+                <div onclick="selectNode('mcp-collector')" id="card-mcp-collector" class="node-card absolute left-[620px] top-[785px] w-[210px] h-[70px] glass-panel border-teal-500/30 rounded-xl px-4 py-3 cursor-pointer flex items-center gap-3 select-none" style="z-index: 10;">
+                    <div class="w-10 h-10 rounded-lg bg-teal-600/20 text-teal-400 flex items-center justify-center text-lg">⚡</div>
                     <div class="flex-1 min-w-0">
-                        <div class="text-xs font-semibold text-gray-200 truncate">SQLite DB</div>
-                        <div class="text-[10px] text-indigo-400 truncate">chat.db (database.py)</div>
+                        <div class="text-xs font-semibold text-gray-200 truncate">MCP Collector Core</div>
+                        <div class="text-[10px] text-teal-400 truncate">mcp_collector.py (OAuth)</div>
                     </div>
-                    <div class="text-[9px] px-1.5 py-0.5 rounded bg-indigo-900/40 text-indigo-300 font-mono border border-indigo-800/40">SQL</div>
+                    <div class="text-[9px] px-1.5 py-0.5 rounded bg-teal-900/40 text-teal-300 font-mono border border-teal-800/40">Sole</div>
                 </div>
 
-                <!-- ChromaDB Card -->
-                <div onclick="selectNode('chromadb')" id="card-chromadb" class="node-card absolute left-[270px] top-[780px] w-[180px] h-[70px] glass-panel rounded-xl px-4 py-3 cursor-pointer flex items-center gap-3 select-none" style="z-index: 10;">
-                    <div class="w-10 h-10 rounded-lg bg-indigo-600/20 text-indigo-400 flex items-center justify-center text-lg">🔍</div>
-                    <div class="flex-1 min-w-0">
-                        <div class="text-xs font-semibold text-gray-200 truncate">ChromaDB</div>
-                        <div class="text-[10px] text-indigo-400 truncate">chroma_db/</div>
-                    </div>
-                    <div class="text-[9px] px-1.5 py-0.5 rounded bg-indigo-900/40 text-indigo-300 font-mono border border-indigo-800/40">Vector</div>
-                </div>
 
-                <!-- Memory Manager Card -->
-                <div onclick="selectNode('memory-manager')" id="card-memory-manager" class="node-card absolute left-[480px] top-[780px] w-[200px] h-[70px] glass-panel rounded-xl px-4 py-3 cursor-pointer flex items-center gap-3 select-none" style="z-index: 10;">
-                    <div class="w-10 h-10 rounded-lg bg-indigo-600/20 text-indigo-400 flex items-center justify-center text-lg">🧠</div>
-                    <div class="flex-1 min-w-0">
-                        <div class="text-xs font-semibold text-gray-200 truncate">Memory Manager</div>
-                        <div class="text-[10px] text-indigo-400 truncate">memory.py</div>
-                    </div>
-                    <div class="text-[9px] px-1.5 py-0.5 rounded bg-indigo-900/40 text-indigo-300 font-mono border border-indigo-800/40">Recall</div>
-                </div>
+                <!-- EXTERNAL INFRA & SYSTEM RESOURCES (RIGHT TIER) -->
+                <div class="absolute text-[10px] font-bold uppercase tracking-wider text-indigo-400/60 left-[920px] top-[35px]">5. Storage &amp; External Systems</div>
+                <div class="absolute w-[260px] h-[830px] border border-indigo-500/10 bg-indigo-500/5 rounded-2xl left-[920px] top-[50px]" style="z-index: 1;"></div>
 
-                <!-- LLM Client Gateway Card -->
-                <div onclick="selectNode('llm-gateway')" id="card-llm-gateway" class="node-card absolute left-[800px] top-[780px] w-[220px] h-[70px] glass-panel rounded-xl px-4 py-3 cursor-pointer flex items-center gap-3 select-none border-amber-500/20" style="z-index: 10;">
+                <!-- LLM Gateways (Claude, DeepSeek, OpenAI) -->
+                <div onclick="selectNode('llm-gateways')" id="card-llm-gateways" class="node-card absolute left-[945px] top-[80px] w-[210px] h-[70px] glass-panel border-amber-500/20 rounded-xl px-4 py-3 cursor-pointer flex items-center gap-3 select-none" style="z-index: 10;">
                     <div class="w-10 h-10 rounded-lg bg-amber-600/20 text-amber-400 flex items-center justify-center text-lg">🤖</div>
                     <div class="flex-1 min-w-0">
-                        <div class="text-xs font-semibold text-gray-200 truncate">LLM Client Gateway</div>
-                        <div class="text-[10px] text-amber-400 truncate">ai_client.py</div>
+                        <div class="text-xs font-semibold text-gray-200 truncate">LLM Providers</div>
+                        <div class="text-[10px] text-amber-400 truncate">ai_client.py (DeepSeek/Claude)</div>
                     </div>
-                    <div class="text-[9px] px-1.5 py-0.5 rounded bg-amber-900/40 text-amber-300 font-mono border border-amber-800/40">Client</div>
+                    <div class="text-[9px] px-1.5 py-0.5 rounded bg-amber-900/40 text-amber-300 font-mono border border-amber-800/40">API</div>
+                </div>
+
+                <!-- Datastores (SQLite, ChromaDB) -->
+                <div onclick="selectNode('datastores')" id="card-datastores" class="node-card absolute left-[945px] top-[175px] w-[210px] h-[70px] glass-panel border-indigo-500/30 rounded-xl px-4 py-3 cursor-pointer flex items-center gap-3 select-none" style="z-index: 10;">
+                    <div class="w-10 h-10 rounded-lg bg-indigo-600/20 text-indigo-400 flex items-center justify-center text-lg">🗄️</div>
+                    <div class="flex-1 min-w-0">
+                        <div class="text-xs font-semibold text-gray-200 truncate">Datastores (SQLite / Chroma)</div>
+                        <div class="text-[10px] text-indigo-400 truncate">chat.db · chroma_db/</div>
+                    </div>
+                    <div class="text-[9px] px-1.5 py-0.5 rounded bg-indigo-900/40 text-indigo-300 font-mono border border-indigo-800/40">Disk</div>
+                </div>
+
+                <!-- VFS Workspaces on disk -->
+                <div onclick="selectNode('vfs-disk')" id="card-vfs-disk" class="node-card absolute left-[945px] top-[280px] w-[210px] h-[70px] glass-panel border-emerald-500/30 rounded-xl px-4 py-3 cursor-pointer flex items-center gap-3 select-none" style="z-index: 10;">
+                    <div class="w-10 h-10 rounded-lg bg-emerald-600/20 text-emerald-400 flex items-center justify-center text-lg">📂</div>
+                    <div class="flex-1 min-w-0">
+                        <div class="text-xs font-semibold text-gray-200 truncate">VFS Workspaces Folder</div>
+                        <div class="text-[10px] text-emerald-400 truncate">workspaces/ (Group/Bot lock)</div>
+                    </div>
+                    <div class="text-[9px] px-1.5 py-0.5 rounded bg-emerald-900/40 text-emerald-300 font-mono border border-emerald-800/40">VFS</div>
+                </div>
+
+                <!-- Local OS Shell -->
+                <div onclick="selectNode('os-shell')" id="card-os-shell" class="node-card absolute left-[945px] top-[385px] w-[210px] h-[70px] glass-panel border-rose-500/20 rounded-xl px-4 py-3 cursor-pointer flex items-center gap-3 select-none" style="z-index: 10;">
+                    <div class="w-10 h-10 rounded-lg bg-rose-600/20 text-rose-400 flex items-center justify-center text-lg">💻</div>
+                    <div class="flex-1 min-w-0">
+                        <div class="text-xs font-semibold text-gray-200 truncate">Local Host OS Shell</div>
+                        <div class="text-[10px] text-rose-400 truncate">shlex tokenized raw exec</div>
+                    </div>
+                    <div class="text-[9px] px-1.5 py-0.5 rounded bg-rose-900/40 text-rose-300 font-mono border border-rose-800/40">Raw</div>
+                </div>
+
+                <!-- UNIMPLEMENTED PLAN: Docker Sandbox Container -->
+                <div onclick="selectNode('unimpl-docker-sandbox')" id="card-unimpl-docker-sandbox" class="node-card unimplemented-card absolute left-[945px] top-[490px] w-[210px] h-[70px] glass-panel rounded-xl px-4 py-3 cursor-pointer flex items-center gap-3 select-none" style="z-index: 10;">
+                    <div class="w-10 h-10 rounded-lg bg-amber-600/20 text-amber-500 flex items-center justify-center text-lg">🐳</div>
+                    <div class="flex-1 min-w-0">
+                        <div class="text-xs font-semibold text-gray-200 flex items-center gap-1.5 truncate">
+                            Docker Sandbox
+                            <span class="w-2 h-2 rounded-full bg-amber-500 animate-ping"></span>
+                        </div>
+                        <div class="text-[10px] text-amber-500 truncate">Containerized isolation (openclaw)</div>
+                    </div>
+                    <div class="text-[9px] px-1.5 py-0.5 rounded bg-amber-900/40 text-amber-300 font-mono border border-amber-800/40 font-bold">Planned</div>
+                </div>
+
+                <!-- UNIMPLEMENTED PLAN: BASH Classifier checking -->
+                <div onclick="selectNode('unimpl-bash-classifier')" id="card-unimpl-bash-classifier" class="node-card unimplemented-card absolute left-[945px] top-[595px] w-[210px] h-[70px] glass-panel rounded-xl px-4 py-3 cursor-pointer flex items-center gap-3 select-none" style="z-index: 10;">
+                    <div class="w-10 h-10 rounded-lg bg-amber-600/20 text-amber-500 flex items-center justify-center text-lg">🤖</div>
+                    <div class="flex-1 min-w-0">
+                        <div class="text-xs font-semibold text-gray-200 flex items-center gap-1.5 truncate">
+                            BASH Classifier
+                            <span class="w-2 h-2 rounded-full bg-amber-500 animate-ping"></span>
+                        </div>
+                        <div class="text-[10px] text-amber-500 truncate">LLM intent guard (Claude Code)</div>
+                    </div>
+                    <div class="text-[9px] px-1.5 py-0.5 rounded bg-amber-900/40 text-amber-300 font-mono border border-amber-800/40 font-bold">Planned</div>
+                </div>
+
+                <!-- External MCP Server Hosts -->
+                <div onclick="selectNode('mcp-servers')" id="card-mcp-servers" class="node-card absolute left-[945px] top-[785px] w-[210px] h-[70px] glass-panel border-teal-500/20 rounded-xl px-4 py-3 cursor-pointer flex items-center gap-3 select-none" style="z-index: 10;">
+                    <div class="w-10 h-10 rounded-lg bg-teal-600/20 text-teal-400 flex items-center justify-center text-lg">🔌</div>
+                    <div class="flex-1 min-w-0">
+                        <div class="text-xs font-semibold text-gray-200 truncate">External MCP Servers</div>
+                        <div class="text-[10px] text-teal-400 truncate">Stdio / SSE Transports</div>
+                    </div>
+                    <div class="text-[9px] px-1.5 py-0.5 rounded bg-teal-900/40 text-teal-300 font-mono border border-teal-800/40">Remote</div>
                 </div>
 
             </div>
         </div>
+
+        <!-- Tab 2: Directory Hierarchy & Components -->
+        <div id="tab-tree" class="hidden xl:col-span-3 glass-panel rounded-2xl p-6 shadow-2xl relative overflow-y-auto min-h-[85vh] max-h-[85vh]">
+            <h2 class="text-lg font-bold text-gray-100 mb-6 flex items-center gap-2">
+                <span>📁</span> Project Hierarchy &amp; Code Component Mapping
+            </h2>
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-8 items-start">
+                <!-- Directory Tree View -->
+                <div class="space-y-4 border-r border-slate-800/60 pr-6">
+                    <h3 class="text-xs font-bold text-indigo-400 uppercase tracking-widest mb-3">Directory Structure (Click to Inspect)</h3>
+                    
+                    <div class="font-mono text-sm space-y-1">
+                        <!-- Root Node -->
+                        <div class="flex items-center gap-2 text-gray-400"><span class="text-lg">📁</span> <strong>nuke-ai-collaborator /</strong></div>
+                        
+                        <!-- Backend -->
+                        <div class="pl-4">
+                            <div class="flex items-center gap-2 text-gray-300"><span class="text-indigo-400">📁</span> <strong>backend/</strong></div>
+                            <div class="pl-4 border-l border-slate-800 space-y-0.5">
+                                <div onclick="selectNode('ws-router')" class="tree-item flex items-center justify-between p-1 rounded cursor-pointer text-gray-400 hover:text-indigo-300">
+                                    <span>📄 main.py</span> <span class="text-[10px] px-1.5 py-0.5 rounded bg-purple-950 text-purple-400">FastAPI/WSRPC Entrypoint</span>
+                                </div>
+                                <div onclick="selectNode('ws-router')" class="tree-item flex items-center justify-between p-1 rounded cursor-pointer text-gray-400 hover:text-indigo-300">
+                                    <span>📄 ws_manager.py</span> <span class="text-[10px] px-1.5 py-0.5 rounded bg-purple-950 text-purple-400">WebSocket Connections &amp; Broadcast</span>
+                                </div>
+                                <!-- backend/runtime -->
+                                <div class="pl-2">
+                                    <div class="flex items-center gap-2 text-gray-300"><span>📁</span> <strong>runtime/</strong></div>
+                                    <div class="pl-4 border-l border-slate-800 space-y-0.5">
+                                        <div onclick="selectNode('supervisor-manager')" class="tree-item flex items-center justify-between p-1 rounded cursor-pointer text-gray-400 hover:text-indigo-300">
+                                            <span>📄 supervisor.py</span> <span class="text-[10px] px-1.5 py-0.5 rounded bg-purple-950 text-purple-400">Supervisor Manager</span>
+                                        </div>
+                                        <div onclick="selectNode('worker-orchestrator')" class="tree-item flex items-center justify-between p-1 rounded cursor-pointer text-gray-400 hover:text-indigo-300">
+                                            <span>📄 worker.py</span> <span class="text-[10px] px-1.5 py-0.5 rounded bg-pink-950 text-pink-400">Worker Subprocess Daemon</span>
+                                        </div>
+                                        <div onclick="selectNode('mcp-collector')" class="tree-item flex items-center justify-between p-1 rounded cursor-pointer text-gray-400 hover:text-indigo-300">
+                                            <span>📄 mcp_collector.py</span> <span class="text-[10px] px-1.5 py-0.5 rounded bg-teal-950 text-teal-400">MCP Collector Daemon</span>
+                                        </div>
+                                        <div onclick="selectNode('lifecycle-manager')" class="tree-item flex items-center justify-between p-1 rounded cursor-pointer text-gray-400 hover:text-indigo-300">
+                                            <span>📄 lifecycle.py</span> <span class="text-[10px] px-1.5 py-0.5 rounded bg-pink-950 text-pink-400">VFS Hydration &amp; Locks</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <!-- backend/executors -->
+                                <div class="pl-2">
+                                    <div class="flex items-center gap-2 text-gray-300"><span>📁</span> <strong>executors/</strong></div>
+                                    <div class="pl-4 border-l border-slate-800 space-y-0.5">
+                                        <div onclick="selectNode('tool-executor')" class="tree-item flex items-center justify-between p-1 rounded cursor-pointer text-gray-400 hover:text-indigo-300">
+                                            <span>📄 tool_executor.py</span> <span class="text-[10px] px-1.5 py-0.5 rounded bg-pink-950 text-pink-400">Schema Validation &amp; Execution</span>
+                                        </div>
+                                        <div onclick="selectNode('security-engine')" class="tree-item flex items-center justify-between p-1 rounded cursor-pointer text-gray-400 hover:text-indigo-300">
+                                            <span>📄 redaction.py</span> <span class="text-[10px] px-1.5 py-0.5 rounded bg-red-950 text-red-400">Secret Token Redaction</span>
+                                        </div>
+                                        <div class="pl-2">
+                                            <div class="flex items-center gap-2 text-gray-400"><span>📁</span> plugins/</div>
+                                            <div class="pl-4 border-l border-slate-800">
+                                                <div onclick="selectNode('tool-loop-v1')" class="tree-item flex items-center justify-between p-1 rounded cursor-pointer text-gray-400 hover:text-indigo-300">
+                                                    <span>📄 tool_loop_v1.py</span> <span class="text-[10px] px-1.5 py-0.5 rounded bg-pink-950 text-pink-400">ReAct Reasoning Loop</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <!-- backend/permissions -->
+                                <div class="pl-2">
+                                    <div class="flex items-center gap-2 text-gray-300"><span>📁</span> <strong>permissions/</strong></div>
+                                    <div class="pl-4 border-l border-slate-800 space-y-0.5">
+                                        <div onclick="selectNode('security-engine')" class="tree-item flex items-center justify-between p-1 rounded cursor-pointer text-gray-400 hover:text-indigo-300">
+                                            <span>📄 engine.py</span> <span class="text-[10px] px-1.5 py-0.5 rounded bg-red-950 text-red-400">HIL Gate &amp; Decay Engine</span>
+                                        </div>
+                                        <div onclick="selectNode('security-engine')" class="tree-item flex items-center justify-between p-1 rounded cursor-pointer text-gray-400 hover:text-indigo-300">
+                                            <span>📄 patterns.py</span> <span class="text-[10px] px-1.5 py-0.5 rounded bg-red-950 text-red-400">Command Pattern Synthesizer</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Frontend -->
+                        <div class="pl-4">
+                            <div class="flex items-center gap-2 text-gray-300"><span class="text-indigo-400">📁</span> <strong>frontend/</strong></div>
+                            <div class="pl-4 border-l border-slate-800 space-y-0.5">
+                                <div class="pl-2">
+                                    <div class="flex items-center gap-2 text-gray-300"><span>📁</span> src/</div>
+                                    <div class="pl-4 border-l border-slate-800 space-y-0.5">
+                                        <div class="pl-2">
+                                            <div class="flex items-center gap-2 text-gray-300"><span>📁</span> components/</div>
+                                            <div class="pl-4 border-l border-slate-800 space-y-0.5">
+                                                <div onclick="selectNode('chat-window')" class="tree-item flex items-center justify-between p-1 rounded cursor-pointer text-gray-400 hover:text-indigo-300">
+                                                    <span>📄 ChatWindow.jsx</span> <span class="text-[10px] px-1.5 py-0.5 rounded bg-blue-950 text-blue-400">Collaboration Panel</span>
+                                                </div>
+                                                <div onclick="selectNode('workspace-panel')" class="tree-item flex items-center justify-between p-1 rounded cursor-pointer text-gray-400 hover:text-indigo-300">
+                                                    <span>📄 WorkspacePanel.jsx</span> <span class="text-[10px] px-1.5 py-0.5 rounded bg-blue-950 text-blue-400">File Explorer &amp; Editor</span>
+                                                </div>
+                                                <div onclick="selectNode('permission-modal')" class="tree-item flex items-center justify-between p-1 rounded cursor-pointer text-gray-400 hover:text-indigo-300">
+                                                    <span>📄 PermissionRequestModal.jsx</span> <span class="text-[10px] px-1.5 py-0.5 rounded bg-blue-950 text-blue-400">HIL Overlay Dialog</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Workspaces -->
+                        <div class="pl-4">
+                            <div class="flex items-center gap-2 text-gray-300"><span class="text-indigo-400">📁</span> <strong>workspaces/</strong></div>
+                            <div class="pl-4 border-l border-slate-800 space-y-0.5">
+                                <div onclick="selectNode('vfs-disk')" class="tree-item flex items-center justify-between p-1 rounded cursor-pointer text-gray-400 hover:text-indigo-300">
+                                    <span>📁 group_{id}/</span> <span class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-400">Shared VFS Layer (M2)</span>
+                                </div>
+                                <div onclick="selectNode('vfs-disk')" class="tree-item flex items-center justify-between p-1 rounded cursor-pointer text-gray-400 hover:text-indigo-300">
+                                    <span>📁 bot_{id}/</span> <span class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-400">Private Soul &amp; Logs</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Core Architectural Component Mapping details -->
+                <div class="space-y-6">
+                    <h3 class="text-xs font-bold text-indigo-400 uppercase tracking-widest mb-3">Core Architectural Principles</h3>
+                    
+                    <div class="space-y-4">
+                        <div class="bg-slate-950/40 border border-slate-800/60 p-4 rounded-xl">
+                            <h4 class="text-sm font-semibold text-gray-200 flex items-center gap-2">
+                                <span class="w-2 h-2 rounded-full bg-purple-500"></span>
+                                Supervisor/Worker Multi-Process Sharding
+                            </h4>
+                            <p class="text-xs text-gray-400 mt-2 leading-relaxed">
+                                To prevent Python's event loop from blocking during heavy LLM inference loops and continuous file edits, the system decouples WebSocket connections from calculation sandboxes. The Supervisor routes client frames, while isolated Worker sub-processes execute the ReAct loops, exclusively holding database locks to prevent multi-write SQLite operational conflicts.
+                            </p>
+                        </div>
+
+                        <div class="bg-slate-950/40 border border-slate-800/60 p-4 rounded-xl">
+                            <h4 class="text-sm font-semibold text-gray-200 flex items-center gap-2">
+                                <span class="w-2 h-2 rounded-full bg-red-500"></span>
+                                Adaptive Security Barriers
+                            </h4>
+                            <p class="text-xs text-gray-400 mt-2 leading-relaxed">
+                                High-standard safety mechanisms protect the host filesystem. Dynamic shlex tokenized command checkers evaluate command structures, output redactors mask PEM keys or JWT tokens, subagent spawn gates decay authorization limits, and loop-level port interception prevents overlapping runtime server collisions.
+                            </p>
+                        </div>
+
+                        <div class="bg-slate-950/40 border border-slate-800/60 p-4 rounded-xl">
+                            <h4 class="text-sm font-semibold text-gray-200 flex items-center gap-2">
+                                <span class="w-2 h-2 rounded-full bg-teal-500"></span>
+                                Single-Process MCP Collector Proxy
+                            </h4>
+                            <p class="text-xs text-gray-400 mt-2 leading-relaxed">
+                                Adhering to the anyio cancel-scope process boundary rule, all standard I/O and remote HTTP/SSE Model Context Protocol connections are managed by a centralized daemon collector. Workers invoke thin proxy providers that route calls over the internal IPC bus, ensuring reliable reconnection states and secure PKCE OAuth authentications.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tab 3: Backlog & Planned Features -->
+        <div id="tab-backlog" class="hidden xl:col-span-3 glass-panel rounded-2xl p-6 shadow-2xl relative overflow-y-auto min-h-[85vh] max-h-[85vh]">
+            <div class="flex items-center justify-between border-b border-slate-800 pb-4 mb-6">
+                <div>
+                    <h2 class="text-lg font-bold text-gray-100 flex items-center gap-2">
+                        <span class="text-amber-500">🚀</span> Planned High-Level Architecture Features
+                    </h2>
+                    <p class="text-xs text-gray-400 mt-1">Integrating features from state-of-the-art frameworks to introduce robust security and execution controls.</p>
+                </div>
+                <span class="text-xs px-2 py-1 rounded bg-amber-950/60 text-amber-400 border border-amber-900 font-mono font-bold animate-pulse">UNDER DEVELOPMENT</span>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <!-- Backlog Feature Card 1 -->
+                <div class="bg-slate-950/40 border border-amber-900/30 p-5 rounded-xl flex flex-col justify-between">
+                    <div>
+                        <div class="flex items-center justify-between">
+                            <h3 class="text-sm font-bold text-gray-200 flex items-center gap-2">
+                                <span class="text-amber-500">🤖</span> LLM BASH Intent Classifier (BASH_CLASSIFIER)
+                            </h3>
+                            <span class="text-[9px] px-2 py-0.5 rounded bg-indigo-950/40 text-indigo-300 font-mono border border-indigo-900/40">Ref: Claude Code</span>
+                        </div>
+                        <p class="text-xs text-gray-400 mt-3 leading-relaxed">
+                            <strong>Current Implementation:</strong> Applies regex rules and shlex parsing denylists to filter destructive commands before execution.<br>
+                            <strong>Limitations:</strong> Static patterns cannot prevent inlined evaluations (e.g. Python scripts executing dangerous operations) or runtime variable redirections.<br>
+                            <strong>Proposed Improvement:</strong> Integrate a quick semantic classifier model to check command intents. Safely whitelist read-only commands (e.g. git log, cat) to run silently, while enforcing human-in-the-loop (HIL) overlays for state-modifying tasks.
+                        </p>
+                    </div>
+                    <button onclick="highlightPlanned('unimpl-bash-classifier')" class="mt-4 text-xs font-semibold text-amber-500 hover:text-amber-400 flex items-center gap-1">
+                        🎯 Locate on Topology Diagram &rarr;
+                    </button>
+                </div>
+
+                <!-- Backlog Feature Card 2 -->
+                <div class="bg-slate-950/40 border border-amber-900/30 p-5 rounded-xl flex flex-col justify-between">
+                    <div>
+                        <div class="flex items-center justify-between">
+                            <h3 class="text-sm font-bold text-gray-200 flex items-center gap-2">
+                                <span class="text-amber-500">🐳</span> Docker Container Sandbox Execution (Container Sandbox)
+                            </h3>
+                            <span class="text-[9px] px-2 py-0.5 rounded bg-indigo-950/40 text-indigo-300 font-mono border border-indigo-900/40">Ref: Openclaw</span>
+                        </div>
+                        <p class="text-xs text-gray-400 mt-3 leading-relaxed">
+                            <strong>Current Implementation:</strong> executes shell commands directly on the host operating system via Python subprocess pipelines.<br>
+                            <strong>Limitations:</strong> Even with HIL checks, mistakes or malicious patterns (e.g. rm -rf) still present a risk of data loss or filesystem damage.<br>
+                            <strong>Proposed Improvement:</strong> Leverage local Docker daemons to execute commands inside ephemeral container environments (e.g., Alpine or Ubuntu). Bind only the shared group folder to the container, protecting the host system configuration.
+                        </p>
+                    </div>
+                    <button onclick="highlightPlanned('unimpl-docker-sandbox')" class="mt-4 text-xs font-semibold text-amber-500 hover:text-amber-400 flex items-center gap-1">
+                        🎯 Locate on Topology Diagram &rarr;
+                    </button>
+                </div>
+
+                <!-- Backlog Feature Card 3 -->
+                <div class="bg-slate-950/40 border border-amber-900/30 p-5 rounded-xl flex flex-col justify-between">
+                    <div>
+                        <div class="flex items-center justify-between">
+                            <h3 class="text-sm font-bold text-gray-200 flex items-center gap-2">
+                                <span class="text-amber-500">🔘</span> Granular Authorization Options Menu (Granularity Menu)
+                            </h3>
+                            <span class="text-[9px] px-2 py-0.5 rounded bg-indigo-950/40 text-indigo-300 font-mono border border-indigo-900/40">Ref: Gsd-2</span>
+                        </div>
+                        <p class="text-xs text-gray-400 mt-3 leading-relaxed">
+                            <strong>Current Implementation:</strong> When clicking "Always Allow" in the authorization modal, the system defaults to general tool permission approvals, bypassing safety granularities.<br>
+                            <strong>Proposed Improvement:</strong> Enhance `PermissionRequestModal.jsx` to show granular options (e.g., allow all git commands, allow only git push, or allow only this exact command) and persist rules via arguments glob pattern synthesis.
+                        </p>
+                    </div>
+                    <button onclick="highlightPlanned('unimpl-granularity-menu')" class="mt-4 text-xs font-semibold text-amber-500 hover:text-amber-400 flex items-center gap-1">
+                        🎯 Locate on Topology Diagram &rarr;
+                    </button>
+                </div>
+
+                <!-- Backlog Feature Card 4 -->
+                <div class="bg-slate-950/40 border border-amber-900/30 p-5 rounded-xl flex flex-col justify-between">
+                    <div>
+                        <div class="flex items-center justify-between">
+                            <h3 class="text-sm font-bold text-gray-200 flex items-center gap-2">
+                                <span class="text-amber-500">✍️</span> Input Parameters Rewriting Hook (Input Rewriting)
+                            </h3>
+                            <span class="text-[9px] px-2 py-0.5 rounded bg-indigo-950/40 text-indigo-300 font-mono border border-indigo-900/40">Ref: Gsd-2</span>
+                        </div>
+                        <p class="text-xs text-gray-400 mt-3 leading-relaxed">
+                            <strong>Current Implementation:</strong> The execution hook only returns binary values (block or allow) when verifying arguments.<br>
+                            <strong>Proposed Improvement:</strong> Extend before-hook contracts to support argument correction. For example, if the LLM attempts to write to an absolute host path (e.g., /etc/hosts), the hook can rewrite the path to the private relative VFS folder automatically instead of blocking.
+                        </p>
+                    </div>
+                    <button onclick="highlightPlanned('unimpl-rewriting-hook')" class="mt-4 text-xs font-semibold text-amber-500 hover:text-amber-400 flex items-center gap-1">
+                        🎯 Locate on Topology Diagram &rarr;
+                    </button>
+                </div>
+            </div>
+        </div>
         
         <!-- Diagnostic Inspector Panel (Sidebar) -->
-        <div class="glass-panel rounded-2xl p-6 shadow-2xl flex flex-col justify-between h-[85vh]">
+        <div class="glass-panel rounded-2xl p-6 shadow-2xl flex flex-col justify-between h-[85vh] overflow-hidden">
             <div class="space-y-6 overflow-y-auto pr-1 flex-1">
-                <div class="flex items-center justify-between border-b border-slate-800 pb-4">
-                    <h2 class="text-md font-bold text-gray-200 flex items-center gap-2">
-                        <span class="text-indigo-400">⚡</span> 架构智能诊断仪
+                <div class="flex items-center justify-between border-b border-slate-800/80 pb-4">
+                    <h2 class="text-sm font-bold text-gray-200 flex items-center gap-2">
+                        <span class="text-indigo-400">⚡</span> Architecture Inspector
                     </h2>
-                    <span class="text-[10px] px-2 py-0.5 rounded bg-slate-900 text-indigo-400 border border-indigo-900 font-mono">INSPECTOR</span>
+                    <span class="text-[10px] px-2 py-0.5 rounded bg-indigo-950/40 text-indigo-400 border border-indigo-900 font-mono font-bold">INSPECTOR</span>
                 </div>
                 
                 <!-- Idle state message -->
                 <div id="inspector-idle" class="flex flex-col items-center justify-center text-center py-16 px-4 space-y-4">
                     <div class="text-5xl animate-bounce">💡</div>
                     <div>
-                        <h3 class="text-sm font-semibold text-gray-400">点击架构卡片进行诊断</h3>
-                        <p class="text-xs text-gray-500 mt-1.5 leading-relaxed">选择左侧任意组件，这里将自动读取文件路径并展示已被修复的 **Bug 对应关系** 与核心设计原理。</p>
+                        <h3 class="text-sm font-semibold text-gray-400">Click an architecture node to inspect</h3>
+                        <p class="text-xs text-gray-500 mt-1.5 leading-relaxed">Select any component from the topology diagram to load its associated files, architectural responsibilities, and defect history.</p>
                     </div>
                 </div>
 
@@ -393,26 +766,26 @@
                 <div id="inspector-active" class="hidden space-y-5">
                     <div>
                         <span id="inspect-layer" class="text-[10px] px-2 py-0.5 rounded bg-blue-900/40 text-blue-300 font-semibold border border-blue-800/40 uppercase tracking-wider">CLIENT LAYER</span>
-                        <h3 id="inspect-title" class="text-lg font-bold text-gray-100 mt-2">UI Components</h3>
+                        <h3 id="inspect-title" class="text-base font-bold text-gray-100 mt-2">UI Components</h3>
                     </div>
 
                     <div class="space-y-1.5">
-                        <h4 class="text-xs font-semibold text-gray-400">📄 关联文件 (支持浏览器直链跳转)</h4>
+                        <h4 class="text-xs font-semibold text-gray-400">📄 Associated Modules &amp; Code Files</h4>
                         <div id="inspect-files" class="space-y-1">
                             <!-- Populated dynamically -->
                         </div>
                     </div>
 
                     <div class="space-y-1.5">
-                        <h4 class="text-xs font-semibold text-gray-400">💡 模块设计职责</h4>
-                        <p id="inspect-desc" class="text-xs text-gray-400 leading-relaxed bg-slate-950/40 border border-slate-900 p-3 rounded-lg">
-                            模块职责描述...
+                        <h4 class="text-xs font-semibold text-gray-400">💡 Component Architectural Responsibility</h4>
+                        <p id="inspect-desc" class="text-xs text-gray-400 leading-relaxed bg-slate-950/50 border border-slate-900/60 p-3 rounded-lg">
+                            Component responsibilities...
                         </p>
                     </div>
 
                     <div class="space-y-1.5">
-                        <h4 class="text-xs font-semibold text-red-400 flex items-center gap-1">
-                            <span>🛠️</span> 关联修复缺陷 (Defect History)
+                        <h4 class="text-xs font-semibold text-emerald-400 flex items-center gap-1" id="inspect-defect-heading">
+                            <span>🛠️</span> Defect Fix History
                         </h4>
                         <div id="inspect-defects" class="space-y-1.5">
                             <!-- Populated dynamically -->
@@ -423,225 +796,341 @@
             
             <div class="border-t border-slate-800 pt-4 flex items-center justify-between text-[11px] text-gray-500 font-mono">
                 <span>STATUS: STABLE</span>
-                <span>FIXED BUGS: 16/16</span>
+                <span>AUDITED DFT: 22/22</span>
             </div>
         </div>
     </div>
 
     <!-- Footer -->
-    <footer class="w-full py-4 text-center text-xs text-gray-500 border-t border-gray-950 bg-slate-950/20 mt-auto">
-        Nuke AI Collaborator · Advanced Agentic Coding Workspace System Design
+    <footer class="w-full py-4 text-center text-xs text-gray-500 border-t border-slate-950 bg-slate-950/20 mt-auto">
+        Nuke AI Collaborator · Advanced Agentic Coding Workspace System Design · Generated 2026-06-12
     </footer>
 
     <script>
         // High-fidelity Component Data Mapping
         const nodeData = {
-            'ui-components': {
-                title: 'UI Components',
-                layer: '客户端表现层 (React + Vite)',
+            'chat-window': {
+                title: 'Chat Window UI',
+                layer: 'Client Layer (React 19 + Vite)',
                 files: [
                     'frontend/src/components/ChatWindow.jsx',
-                    'frontend/src/components/MessageInput.jsx',
-                    'frontend/src/components/MessageBubble.jsx'
+                    'frontend/src/components/MessageBubble.jsx',
+                    'frontend/src/components/MessageInput.jsx'
                 ],
-                desc: '前端核心 UI 组件层次。`ChatWindow.jsx` 组织主体交互、工作流进度；`MessageInput.jsx` 管理输入状态与多群组草稿机制；`MessageBubble.jsx` 负责流式渲染 Markdown 输出、代码高亮折叠以及 reaction 表情添加。',
+                desc: 'The primary chat interface. ChatWindow.jsx renders message lists and streaming chunks. MessageBubble.jsx formats Markdown output and adds action badges. MessageInput.jsx manages message states and WebSocket transmissions.',
                 defects: [
-                    { id: 'DFT-001', name: '切换群组时 Effect 依赖为空导致草稿保存清理失效', severity: 'High' },
-                    { id: 'DFT-014', name: '表情 Picker 的 click-outside 与触发按钮自身 mousedown 发生冲突导致无法收起', severity: 'Low' }
+                    { id: 'DFT-001', name: 'Effect dependencies not reset when switching groups, causing message draft conflicts', severity: 'High' },
+                    { id: 'DFT-014', name: 'Emoji picker click-outside handler conflicts with mousedown on toggle button', severity: 'Low' }
                 ]
             },
-            'use-websocket': {
-                title: 'useWebSocket Hook',
-                layer: '客户端表现层 (React + Vite)',
+            'workspace-panel': {
+                title: 'VFS Workspace Panel',
+                layer: 'Client Layer (React 19 + Vite)',
                 files: [
-                    'frontend/src/hooks/useWebSocket.js'
+                    'frontend/src/components/WorkspacePanel.jsx'
                 ],
-                desc: '前端实时 WebSocket 底层封装钩子。控制建立连接、心跳探活、网络异常时定时器自动重连以及群组广播消息的分发。',
+                desc: 'Virtual workspace file browser. Renders folder hierarchies and allows editing BOARD.md, SPEC.md, and deliverables directly from the browser, syncing real-time back to the VFS.',
                 defects: [
-                    { id: 'DFT-002', name: '旧连接 ws.close() 时再次激活 onclose 重连导致并行连接泄漏', severity: 'High' }
+                    { id: 'DFT-ERR', name: '🔴 Backend NameError crash in workspace/__init__.py blocking Workspace Panel load or file save (fixed in runtime)', severity: 'Critical' }
                 ]
             },
-            'api-client': {
-                title: 'API Client',
-                layer: '客户端表现层 (React + Vite)',
+            'skill-panel': {
+                title: 'Skill Panel',
+                layer: 'Client Layer (React 19 + Vite)',
                 files: [
-                    'frontend/src/api.js'
+                    'frontend/src/components/SkillPanel.jsx'
                 ],
-                desc: '前端 API 网络请求封装层。统一管理 axios 交互，包括群组消息加载、群成员信息拉取、大模型 API Key 本地保存及 Bot 配置修改。',
-                defects: [
-                    { id: 'DFT-005', name: '新建 Bot 时未向接口传表单的高级字段 (Done 关键词、温度、插件类型)', severity: 'High' }
-                ]
+                desc: 'Bot skills panel displaying loaded skills (e.g. code_review, deploy) for each Bot, allowing manual triggers and configurations.',
+                defects: []
             },
-            'ws-manager': {
-                title: 'Connection Manager',
-                layer: '网关与实时通信层 (FastAPI)',
+            'permission-modal': {
+                title: 'HIL Permission Request Modal',
+                layer: 'Security &amp; Validation Layer',
                 files: [
+                    'frontend/src/components/PermissionRequestModal.jsx'
+                ],
+                desc: 'Human-in-the-loop (HIL) gate overlay. Prompts user approval when a Worker process encounters a write or shell action, presenting [Allow Once] or [Always Allow] choices.',
+                defects: []
+            },
+            'ws-router': {
+                title: 'WSRPC Server Gateway',
+                layer: 'Gateway Layer (FastAPI)',
+                files: [
+                    'backend/main.py',
                     'backend/ws_manager.py'
                 ],
-                desc: '后端连接状态管理器。维护每个群组活跃的 WebSocket 连接句柄，处理事件的多播广播，检测并剔除断连死链接（Dead Connections）。',
+                desc: 'WebSocket connection gateway. ws_manager.py manages active client connections, broadcasts downstream events concurrently, and handles connection timeouts.',
                 defects: [
-                    { id: 'DFT-009', name: '连接被判定断开断网时，漏了向群组广播 presence 离线状态通知', severity: 'High' },
-                    { id: 'DFT-015', name: '遍历广播 send_json 协程调度时，并发操作 connections 列表触发 RuntimeError', severity: 'Medium' }
+                    { id: 'DFT-015', name: 'Concurrent ws broadcasts mutating connections list across coroutines throws RuntimeError', severity: 'High' },
+                    { id: 'DFT-047', name: 'Fixed lockless race condition in WebSocket broadcasts causing intermittent message drop', severity: 'Medium' }
                 ]
             },
-            'ws-server': {
-                title: 'WebSocket Server Endpoint',
-                layer: '网关与实时通信层 (FastAPI)',
+            'supervisor-manager': {
+                title: 'Supervisor Routing Core',
+                layer: 'Main Process (Process Supervisor)',
                 files: [
-                    'backend/main.py'
+                    'backend/runtime/supervisor.py'
                 ],
-                desc: '核心长连接接入网关。FastAPI 路由下的 `/ws/{group_id}/{member_id}` 端点，处理新客户握手升级、绑定连接管理器，并处理接收到的上行指令。',
+                desc: 'Launches and monitors child Worker processes. Routes incoming WebSocket traffic to the assigned Worker process via Unix Domain Sockets (UDS) / IPC and manages worker handoffs.',
+                defects: [
+                    { id: 'DFT-033', name: 'Created process-level shared httpx.AsyncClient pool to eliminate socket leakage and TLS handshake overhead', severity: 'High' }
+                ]
+            },
+            'supervisor-metrics': {
+                title: 'Metrics &amp; Tracing Center',
+                layer: 'Observability Layer',
+                files: [
+                    'backend/runtime/metrics.py',
+                    'backend/runtime/tracing.py'
+                ],
+                desc: 'Monitors performance and costs across process boundaries using trace_id tracking. Aggregates token costs, processing times, and system load.',
+                defects: [
+                    { id: 'DFT-048', name: 'Missing token cost accounting for loser bots in competitive prompt race conditions', severity: 'Medium' }
+                ]
+            },
+            'lifecycle-manager': {
+                title: 'Lifecycle Manager &amp; GroupLock',
+                layer: 'Worker Process Core',
+                files: [
+                    'backend/runtime/lifecycle.py'
+                ],
+                desc: 'Controls workspace state transitions. Automatically hydrates SQLite DBs and VFS folders when messages arrive, using flock locks to prevent split-brain issues.',
                 defects: []
             },
-            'http-router': {
-                title: 'HTTP API Router',
-                layer: '网关与实时通信层 (FastAPI)',
+            'worker-orchestrator': {
+                title: 'Worker Orchestrator',
+                layer: 'Worker Process Core',
                 files: [
-                    'backend/group_routes.py',
-                    'backend/message_routes.py',
-                    'backend/workspace_routes.py',
-                    'backend/template_routes.py'
+                    'backend/runtime/worker.py',
+                    'backend/runtime/dispatch.py'
                 ],
-                desc: '后端 REST API 路由管理器。主要包含群组增删、成员加入、历史消息分页查询、关键词搜索，以及沙箱工作区目录的文件列表、读写服务。',
+                desc: 'Runs the event loop inside the Worker process. Dispatches incoming prompts to assigned AI Bots, listens to local event buses, and pushes results back to Supervisor.',
                 defects: [
-                    { id: 'DFT-005', name: 'Pydantic 创建成员 Form 字段不全导致高级设置丢失', severity: 'High' },
-                    { id: 'DFT-010', name: 'SQLite 默认返回不带 Z 后缀的 UTC 时间字符串，导致前端显示慢了 8 小时', severity: 'Medium' }
+                    { id: 'DFT-039', name: 'Aligned scheduler to UTC and added 1-hour misfire grace period to prevent scheduled job losses on restart', severity: 'Medium' }
                 ]
-            },
-            'role-router': {
-                title: 'Role Router',
-                layer: '核心编排层 (Orchestrator)',
-                files: [
-                    'backend/role_router.py'
-                ],
-                desc: '智能角色语义分配器。根据最新一条发言中是否含有特定角色的专业词汇（例如需求、开发、测试）或者 @ 提及，匹配出应该做出回答的 Bot 成员，并为它们组装历史消息上下文。',
-                defects: [
-                    { id: 'DFT-011', name: '历史 context build 截取时未排除已落库的最新消息，导致 API 重复发送两次相同用户消息', severity: 'Medium' }
-                ]
-            },
-            'bot-orchestrator': {
-                title: 'BotOrchestrator',
-                layer: '核心编排层 (Orchestrator)',
-                files: [
-                    'backend/bot_orchestrator.py'
-                ],
-                desc: '智能体协作控制中枢。当一条新消息触发 Bot 响应后，负责处理竞速执行（Race）、顺序链条执行（Sequence）、自动回复（Auto-Reply）以及交接处理。',
-                defects: [
-                    { id: 'DFT-013', name: '自动回复配置在 onSaved 中直接变异对象属性导致 React UI 不触发重新渲染', severity: 'Medium' }
-                ]
-            },
-            'workflow-engine': {
-                title: 'Workflow Engine',
-                layer: '核心编排层 (Orchestrator)',
-                files: [
-                    'backend/workflow.py'
-                ],
-                desc: '多阶段开发工作流状态机。管理群组的阶段演进（分析 -> 开发 -> 测试 -> 部署）。解析大模型回复中的 Done 关键词推进状态，并解析大模型输出的任务列表（TICKETS）。',
-                defects: [
-                    { id: 'DFT-006', name: '工作流实时广播流式 chunk 时使用了 chunk 键，而前端只认识 delta，导致打字显示 undefined', severity: 'High' },
-                    { id: 'DFT-016', name: 'TICKETS 提取正则只强行匹配以数字起头的行，无法支持以 - 或 * 的无序列表格式', severity: 'Low' }
-                ]
-            },
-            'bot-executor': {
-                title: 'BotExecutor Base Interface',
-                layer: '执行与沙箱插件层',
-                files: [
-                    'backend/executors/base.py'
-                ],
-                desc: '底层执行逻辑接口契约。规范了 ExecutionContext（执行上下文，含群组设置、全体 Bot 快照及成员状态）与 ExecutionResult（最终输出）。所有具体的 Bot 执行形式（Simple 对话、Tool 沙箱多轮）均继承于此。',
-                defects: []
-            },
-            'simple-v1': {
-                title: 'SimpleV1 Executor',
-                layer: '执行与沙箱插件层',
-                files: [
-                    'backend/executors/plugins/simple_v1.py'
-                ],
-                desc: '普通对话执行引擎。只在单一轮次内拼合系统性格提示词、Chroma 语义相关历史和最近对话发送给 LLM，流式写回数据库并追加日志文件，没有工具调用权限。',
-                defects: []
             },
             'tool-loop-v1': {
-                title: 'ToolLoopV1 Executor (Agentic Loop)',
-                layer: '执行与沙箱插件层',
+                title: 'ToolLoopV1 Executor',
+                layer: 'Agent Execution Loop',
                 files: [
                     'backend/executors/plugins/tool_loop_v1.py'
                 ],
-                desc: '高阶代理执行引擎。引入 ReAct Agent 模型，Bot 将拥有系统配置的 tools 定义并允许在多轮（最多 10 轮）内反复自我推理并调用本地工具，从而可以读写代码、运行编译自检，直达工作目标。',
+                desc: 'Runs ReAct loops allowing Bots to invoke tools, self-correct, and reason. Enforces schema budget limits (max 48) to protect the context window.',
                 defects: [
-                    { id: 'DFT-003', name: '上下文压缩（Compact）截断时未校验配对结构，导致孤立 tool 消息引发 OpenAI 400 报错', severity: 'High' }
+                    { id: 'DFT-003', name: 'Context compaction failed to validate tool/assistant message pairing structure, triggering OpenAI 400 API error', severity: 'High' }
+                ]
+            },
+            'tool-executor': {
+                title: 'Tool Executor',
+                layer: 'Tool Execution Layer',
+                files: [
+                    'backend/executors/tool_executor.py'
+                ],
+                desc: 'Validates arguments against JSON schemas. Returns structured errors on missing parameters or incorrect data types to guide LLM self-correction.',
+                defects: []
+            },
+            'security-engine': {
+                title: 'Security Guard &amp; Output Redactor',
+                layer: 'Security &amp; Isolation Layer',
+                files: [
+                    'backend/permissions/engine.py',
+                    'backend/permissions/patterns.py',
+                    'backend/executors/redaction.py'
+                ],
+                desc: 'Applies shlex tokenized command parsing to check command safety. Derives subagent rulesets to decay permissions and redacts API tokens and PEM keys from tool outputs.',
+                defects: [
+                    { id: 'DFT-044', name: 'Recursive matching bypass in permissions engine parameter matching (fixed safety exploit)', severity: 'Critical' },
+                    { id: 'DFT-RULE', name: 'Always-allow ruleset with empty arguments pattern accidentally allowed all commands, leading to permission escalation (fixed)', severity: 'Critical' }
                 ]
             },
             'workspace-tools': {
-                title: 'Workspace Sandbox Tools',
-                layer: '执行与沙箱插件层',
+                title: 'Workspace Sandboxed Tools',
+                layer: 'Sandboxing &amp; Tools Layer',
                 files: [
-                    'backend/workspace.py'
+                    'backend/workspace/__init__.py',
+                    'backend/executors/plugins/workspace_tools.py'
                 ],
-                desc: '高权限工具函数实现层。包括 read_local_file、write_local_file、run_shell (执行本系统命令行) 及 run_skill (加载预置技能)。',
-                defects: []
-            },
-            'sqlite-db': {
-                title: 'SQLite Database',
-                layer: '记忆与数据存储层',
-                files: [
-                    'backend/database.py'
-                ],
-                desc: 'SQLite 本地数据库层。核心文件 `chat.db` 包含群组、所有成员（含 Bot 高級属性）、消息历史、已读指针、以及工作流阶段任务归档。',
+                desc: 'Provides read/write file, run_shell, and run_skill tools. Performs port interception and allocates random sandbox ports to prevent runtime conflicts.',
                 defects: [
-                    { id: 'DFT-007', name: '摘要表 role_summaries 缺少 group_id 写入导致 sqlite 约束报错静默崩溃', severity: 'High' }
+                    { id: 'DFT-NAME', name: '🔴 NameError in workspace package calling undefined group_ws helper (fixed to group_workspace)', severity: 'Critical' }
                 ]
             },
-            'chromadb': {
-                title: 'ChromaDB Vector Store',
-                layer: '记忆与数据存储层',
+            'mcp-proxy': {
+                title: 'MCP Proxy Provider',
+                layer: 'MCP Routing Layer',
                 files: [
-                    'backend/chroma_db/'
+                    'backend/executors/providers/mcp_proxy.py',
+                    'backend/executors/mcp_bridge.py'
                 ],
-                desc: '高维向量语义数据库。Bot 实时发出的言论会被增量加入 Chroma 集合，使得在后续提问中可以通过 Embedding 余弦相似度找回相关片段作为背景注入（Long-term Recall）。',
+                desc: 'A thin proxy provider forwarding tool lists and execution requests via IPC. Avoids binding anyio cancel scopes in the worker process.',
                 defects: []
             },
-            'memory-manager': {
-                title: 'Memory Manager',
-                layer: '记忆与数据存储层',
+            'mcp-collector': {
+                title: 'MCP Collector Core',
+                layer: 'MCP Connection Layer',
                 files: [
-                    'backend/memory.py'
+                    'backend/runtime/mcp_collector.py',
+                    'backend/executors/providers/mcp_oauth_store.py'
                 ],
-                desc: 'AI 记忆管家。自动判断 Bot 针对特定群组的历史对话字数，决定是否发起自动合并提炼，更新 `role_summaries` 的关联 ID。',
-                defects: [
-                    { id: 'DFT-008', name: '判断待合并历史时在 SQLite 端未做 last_id 过滤，而是把全表拉进 Python 内存过滤，导致巨大 IO 瓶颈', severity: 'Medium' }
-                ]
+                desc: 'Central process hosting actual MCP transports (Stdio/SSE). Runs dynamic PKCE OAuth authentications and re-pushes schemas to Worker processes.',
+                defects: []
             },
-            'llm-gateway': {
-                title: 'LLM Client Gateway',
-                layer: '大模型客户端网关',
+            'llm-gateways': {
+                title: 'LLM Provider Client Gateway',
+                layer: 'AI Gateway Layer',
                 files: [
                     'backend/ai_client.py'
                 ],
-                desc: '大模型请求转发接入网关。统一管理 DeepSeek 官方接口、OpenAI API 规范、Anthropic Claude 对话请求以及 Ollama 本地化微模型服务，提供标准的统一 stream 数据生成器。',
+                desc: 'Normalizes integrations across Anthropic Claude, OpenAI, DeepSeek, and local Ollama APIs, providing unified streaming outputs.',
                 defects: [
-                    { id: 'DFT-004', name: 'Claude API 无法支持连续 user 角色消息及多 tool 响应连发引发 400 校验异常', severity: 'High' }
+                    { id: 'DFT-004', name: 'Claude API failed to support sequential assistant messages and multiple tool replies, causing 400 error', severity: 'High' }
                 ]
+            },
+            'datastores': {
+                title: 'SQLite Database &amp; ChromaDB',
+                layer: 'Storage &amp; Memory Layer',
+                files: [
+                    'backend/database.py',
+                    'backend/memory.py'
+                ],
+                desc: 'Per-group SQLite database shards storing conversation state and metadata. ChromaDB stores embedded memories for semantic long-term recall.',
+                defects: [
+                    { id: 'DFT-007', name: 'SQLite integrity constraint violation in role_summaries table due to missing group_id write', severity: 'High' },
+                    { id: 'DFT-008', name: 'Querying database history retrieved entire table into memory instead of applying DB-level limit, causing IO bottleneck', severity: 'Medium' }
+                ]
+            },
+            'vfs-disk': {
+                title: 'Virtual File System Disk',
+                layer: 'VFS Layer',
+                files: [
+                    'workspaces/'
+                ],
+                desc: 'Physical directories mapping private bot folders (IDENTITY.md, SOUL.md, BOOTSTRAP.md) and shared group folders (BOARD.md, SPEC.md, deliverables/).',
+                defects: []
+            },
+            'os-shell': {
+                title: 'Local OS Shell Subprocess',
+                layer: 'Host OS Interaction Layer',
+                files: [
+                    'backend/executors/plugins/workspace_tools.py'
+                ],
+                desc: 'Executes shell commands directly on the host system via Python subprocess, guarded by shlex tokenization rules and user permissions.',
+                defects: []
+            },
+            'mcp-servers': {
+                title: 'External MCP Servers',
+                layer: 'Tool Expansion Layer',
+                files: [
+                    'backend/mcp_servers.json'
+                ],
+                desc: 'Third-party model context protocol servers (e.g. GitHub, Playwright) providing external capabilities.',
+                defects: []
+            },
+            
+            // UNIMPLEMENTED COMPONENTS
+            'unimpl-bash-classifier': {
+                title: 'BASH Intent Security Classifier',
+                layer: 'Security Layer (Planned)',
+                files: [
+                    'backend/executors/tool_executor.py (New Module)'
+                ],
+                desc: 'Planned LLM-based safety checker. Evaluates shell commands before execution to dynamically allow read-only lookups (e.g., git status) and force HIL approval for state-modifying tasks.',
+                defects: [],
+                planned: true
+            },
+            'unimpl-docker-sandbox': {
+                title: 'Docker Sandbox Container',
+                layer: 'Host OS Interaction Layer (Planned)',
+                files: [
+                    'backend/executors/plugins/workspace_tools.py (Sandbox Refactor)'
+                ],
+                desc: 'Planned container sandbox execution environment. Replaces subprocess shell execution with ephemeral Alpine/Ubuntu Docker containers to protect the host machine.',
+                defects: [],
+                planned: true
+            },
+            'unimpl-granularity-menu': {
+                title: 'Granular Authorization Options Menu',
+                layer: 'Security Layer (Planned)',
+                files: [
+                    'frontend/src/components/PermissionRequestModal.jsx (New UI)',
+                    'backend/permissions/patterns.py'
+                ],
+                desc: 'Planned UI enhancement in the PermissionRequestModal. Allows users to select narrow command pattern scopes (e.g., allow git push instead of git *) when saving persistent allow rules.',
+                defects: [],
+                planned: true
+            },
+            'unimpl-rewriting-hook': {
+                title: 'Input Parameters Rewriting Hook',
+                layer: 'Security Layer (Planned)',
+                files: [
+                    'backend/permissions/engine.py (Extend Hook API)'
+                ],
+                desc: 'Planned parameter-rewriting hook. Allows before-hooks to auto-correct arguments (e.g. rewriting absolute system file paths to relative VFS workspace folders) rather than hard-blocking.',
+                defects: [],
+                planned: true
             }
         };
 
         // Active selected node ID
         let activeNodeId = null;
 
+        // Tab Switcher
+        function switchTab(tabName) {
+            // Hide all tabs
+            document.getElementById('tab-diagram').classList.add('hidden');
+            document.getElementById('tab-tree').classList.add('hidden');
+            document.getElementById('tab-backlog').classList.add('hidden');
+            
+            // Deactivate all tab buttons
+            document.getElementById('tab-btn-diagram').className = "px-4 py-2 text-xs font-semibold rounded-lg text-gray-400 hover:text-white transition-all flex items-center gap-1.5";
+            document.getElementById('tab-btn-tree').className = "px-4 py-2 text-xs font-semibold rounded-lg text-gray-400 hover:text-white transition-all flex items-center gap-1.5";
+            document.getElementById('tab-btn-backlog').className = "px-4 py-2 text-xs font-semibold rounded-lg text-gray-400 hover:text-white transition-all flex items-center gap-1.5";
+            
+            // Show active tab
+            document.getElementById(`tab-${tabName}`).classList.remove('hidden');
+            
+            // Activate tab button
+            const activeBtn = document.getElementById(`tab-btn-${tabName}`);
+            activeBtn.className = "px-4 py-2 text-xs font-semibold rounded-lg bg-indigo-600/90 text-white shadow-md transition-all flex items-center gap-1.5";
+            
+            // Toggle flow-filters visibility
+            const filters = document.getElementById('flow-filters');
+            if (tabName === 'diagram') {
+                filters.classList.remove('hidden');
+                filters.classList.add('flex');
+            } else {
+                filters.classList.remove('flex');
+                filters.classList.add('hidden');
+            }
+        }
+
+        // Initialize Tab view
+        switchTab('diagram');
+
         // Interactive diagnostic function
         function selectNode(id) {
+            // Clear previous highlight
             if (activeNodeId) {
                 const prevCard = document.getElementById(`card-${activeNodeId}`);
                 if (prevCard) {
-                    prevCard.classList.remove('border-indigo-500', 'bg-indigo-950/20', 'ring-2', 'ring-indigo-500/50');
-                    prevCard.classList.add('glass-panel');
+                    if (prevCard.classList.contains('unimplemented-card')) {
+                        prevCard.style.borderColor = 'rgba(245, 158, 11, 0.35)';
+                    } else {
+                        prevCard.classList.remove('border-indigo-500', 'bg-indigo-950/20', 'ring-2', 'ring-indigo-500/50');
+                        prevCard.classList.add('glass-panel');
+                    }
                 }
             }
 
             activeNodeId = id;
             const currentCard = document.getElementById(`card-${id}`);
             if (currentCard) {
-                currentCard.classList.remove('glass-panel');
-                currentCard.classList.add('border-indigo-500', 'bg-indigo-950/20', 'ring-2', 'ring-indigo-500/50');
+                if (currentCard.classList.contains('unimplemented-card')) {
+                    currentCard.style.borderColor = 'rgba(245, 158, 11, 1)';
+                } else {
+                    currentCard.classList.remove('glass-panel');
+                    currentCard.classList.add('border-indigo-500', 'bg-indigo-950/20', 'ring-2', 'ring-indigo-500/50');
+                }
             }
 
             const data = nodeData[id];
@@ -656,6 +1145,19 @@
             document.getElementById('inspect-title').innerText = data.title;
             document.getElementById('inspect-desc').innerText = data.desc;
 
+            // Header color/border adjust if planned
+            const headerBadge = document.getElementById('inspect-layer');
+            const defectHeading = document.getElementById('inspect-defect-heading');
+            if (data.planned) {
+                headerBadge.className = "text-[10px] px-2 py-0.5 rounded bg-amber-950/60 text-amber-400 font-bold border border-amber-900/40 uppercase tracking-wider animate-pulse";
+                defectHeading.className = "text-xs font-semibold text-amber-500 flex items-center gap-1";
+                defectHeading.innerHTML = "<span>🚧</span> Required Changes &amp; Implementation Gaps";
+            } else {
+                headerBadge.className = "text-[10px] px-2 py-0.5 rounded bg-blue-900/40 text-blue-300 font-semibold border border-blue-800/40 uppercase tracking-wider";
+                defectHeading.className = "text-xs font-semibold text-emerald-400 flex items-center gap-1";
+                defectHeading.innerHTML = "<span>🛠️</span> Defect Fix History";
+            }
+
             // Populate files links
             const filesContainer = document.getElementById('inspect-files');
             filesContainer.innerHTML = '';
@@ -663,19 +1165,29 @@
                 const link = document.createElement('a');
                 link.href = `file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/${file}`;
                 link.className = 'block text-[11px] font-mono text-indigo-400 hover:text-indigo-300 bg-slate-900/60 hover:bg-slate-900 border border-slate-800/80 hover:border-indigo-500/30 px-3 py-1.5 rounded-lg transition-all truncate';
-                link.title = `在编辑器中打开 ${file}`;
+                link.title = `Open ${file} in editor`;
                 link.innerText = `📂 ${file.split('/').pop()} (${file})`;
                 filesContainer.appendChild(link);
             });
 
-            // Populate defects list
+            // Populate defects/gap details list
             const defectsContainer = document.getElementById('inspect-defects');
             defectsContainer.innerHTML = '';
-            if (data.defects.length === 0) {
-                defectsContainer.innerHTML = `<div class="text-[11px] text-gray-500 italic py-2 bg-slate-950/20 p-3 rounded-lg border border-slate-900">🛡️ 本模块目前十分稳定，无相关缺陷报告记录。</div>`;
+            
+            if (data.planned) {
+                defectsContainer.innerHTML = `
+                    <div class="p-3 rounded-lg border border-amber-900/30 bg-amber-950/10 flex flex-col gap-1.5">
+                        <div class="flex items-center justify-between">
+                            <span class="text-xs font-mono font-bold text-amber-400">PLANNING ITEM</span>
+                            <span class="text-[9px] px-1.5 py-0.5 rounded border border-amber-900/30 bg-amber-950/40 text-amber-400 font-bold">Planned</span>
+                        </div>
+                        <p class="text-[11px] text-gray-300 leading-relaxed">Requires modifying core backend code, setting up front-to-back IPC communication protocols, or spinning up secure container sandboxes to support this advanced feature.</p>
+                    </div>`;
+            } else if (data.defects.length === 0) {
+                defectsContainer.innerHTML = `<div class="text-[11px] text-gray-500 italic py-2 bg-slate-950/20 p-3 rounded-lg border border-slate-900">🛡️ This module is currently stable with no defect reports.</div>`;
             } else {
                 data.defects.forEach(bug => {
-                    const sevColor = bug.severity === 'High' ? 'bg-red-950/50 text-red-400 border-red-900/40' : 'bg-amber-950/50 text-amber-400 border-amber-900/40';
+                    const sevColor = bug.severity === 'Critical' ? 'bg-red-950/60 text-red-400 border-red-900/40' : (bug.severity === 'High' ? 'bg-orange-950/50 text-orange-400 border-orange-900/40' : 'bg-amber-950/50 text-amber-400 border-amber-900/40');
                     const item = document.createElement('div');
                     item.className = 'p-3 rounded-lg border border-slate-800 bg-slate-950/30 flex flex-col gap-1.5';
                     item.innerHTML = `
@@ -690,43 +1202,144 @@
             }
         }
 
+        // Highlight Planned item from tab 3 and switch back to diagram
+        function highlightPlanned(nodeId) {
+            switchTab('diagram');
+            setTimeout(() => {
+                selectNode(nodeId);
+                // Scroll card into view inside diagram
+                const card = document.getElementById(`card-${nodeId}`);
+                if (card) {
+                    card.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+                }
+            }, 100);
+        }
+
         // Flow-Line filter function
         function setFlowFilter(type) {
             // Update button styles
             document.querySelectorAll('.flow-btn').forEach(btn => {
-                btn.classList.remove('bg-indigo-600/90', 'text-white', 'shadow-md');
-                btn.classList.add('text-gray-400', 'hover:text-white');
+                btn.className = "flow-btn px-2.5 py-1.5 text-[10px] font-semibold rounded text-gray-400 hover:text-white transition-all";
             });
             const activeBtn = document.getElementById(`btn-flow-${type}`);
             if (activeBtn) {
-                activeBtn.classList.remove('text-gray-400', 'hover:text-white');
-                activeBtn.classList.add('bg-indigo-600/90', 'text-white', 'shadow-md');
+                if (type === 'planned') {
+                    activeBtn.className = "flow-btn px-2.5 py-1.5 text-[10px] font-semibold rounded bg-amber-600 text-white transition-all font-bold shadow-md shadow-amber-900/25";
+                } else {
+                    activeBtn.className = "flow-btn px-2.5 py-1.5 text-[10px] font-semibold rounded bg-slate-800 text-white transition-all shadow-md shadow-slate-900/25";
+                }
             }
 
             // Hide/Show SVG Paths with transition
             const lines = document.querySelectorAll('.flow-line');
-            if (type === 'all') {
-                lines.forEach(line => {
-                    line.style.opacity = '1';
-                    line.style.strokeWidth = line.id.includes('ws-server') || line.id.includes('ws-orch') ? '3' : '2';
-                });
-            } else {
-                lines.forEach(line => {
-                    if (line.classList.contains(`${type}-flow`)) {
+            lines.forEach(line => {
+                if (type === 'all') {
+                    line.style.opacity = line.id.includes('unimpl') || line.id.includes('planned') ? '0.25' : '1';
+                    line.style.strokeWidth = line.id.includes('supervisor-worker') ? '3.5' : '2';
+                } else {
+                    const classMatch = `${type}-flow`;
+                    if (line.classList.contains(classMatch)) {
                         line.style.opacity = '1';
                         line.style.strokeWidth = '3.5';
                     } else {
                         line.style.opacity = '0.07';
                         line.style.strokeWidth = '1';
                     }
-                });
-            }
+                }
+            });
         }
+
+        // Initialize line opacity
+        setFlowFilter('all');
+
+        // Particle flow animation along SVG paths
+        const activeParticles = [];
+        const pathColors = {
+            'path-chat-ws': '#3b82f6',
+            'path-workspace-http': '#10b981',
+            'path-skill-http': '#10b981',
+            'path-permission-ws': '#a855f7',
+            'path-granularity-menu': '#fbbf24',
+            'path-ws-supervisor': '#3b82f6',
+            'path-sup-metrics': '#a855f7',
+            'path-sup-worker': '#a855f7',
+            'path-worker-metrics': '#a855f7',
+            'path-orchestrator-lifecycle': '#f43f5e',
+            'path-orchestrator-loop': '#f43f5e',
+            'path-loop-executor': '#f43f5e',
+            'path-executor-guard': '#ec4899',
+            'path-guard-workspace': '#10b981',
+            'path-workspace-mcp': '#06b6d4',
+            'path-lifecycle-db': '#6366f1',
+            'path-lifecycle-vfs': '#10b981',
+            'path-loop-llm': '#f59e0b',
+            'path-workspace-vfs': '#10b981',
+            'path-workspace-shell': '#ec4899',
+            'path-mcp-collector': '#06b6d4',
+            'path-collector-mcp': '#14b8a6',
+            'path-planned-rewrite': '#fbbf24',
+            'path-planned-rewrite-exec': '#fbbf24',
+            'path-planned-docker': '#fbbf24',
+            'path-planned-docker-vfs': '#10b981',
+            'path-planned-classifier': '#fbbf24',
+            'path-planned-classifier-shell': '#f59e0b'
+        };
+
+        function createParticle(pathId, color, speed = 1.8) {
+            const path = document.getElementById(pathId);
+            if (!path || parseFloat(path.style.opacity) < 0.15) return; // skip hidden paths
+            
+            const length = path.getTotalLength();
+            const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+            circle.setAttribute('r', '3.5');
+            circle.setAttribute('fill', color);
+            circle.setAttribute('style', 'filter: drop-shadow(0 0 4px ' + color + ');');
+            document.getElementById('connections-svg').appendChild(circle);
+            
+            const particle = {
+                element: circle,
+                path: path,
+                length: length,
+                progress: 0,
+                speed: speed
+            };
+            activeParticles.push(particle);
+        }
+
+        function updateParticles() {
+            for (let i = activeParticles.length - 1; i >= 0; i--) {
+                const p = activeParticles[i];
+                p.progress += p.speed;
+                if (p.progress >= p.length || parseFloat(p.path.style.opacity) < 0.15) {
+                    p.element.remove();
+                    activeParticles.splice(i, 1);
+                } else {
+                    const pt = p.path.getPointAtLength(p.progress);
+                    p.element.setAttribute('cx', pt.x);
+                    p.element.setAttribute('cy', pt.y);
+                }
+            }
+            requestAnimationFrame(updateParticles);
+        }
+
+        // Start particle update loop
+        requestAnimationFrame(updateParticles);
+
+        // Periodically spawn particles on paths
+        setInterval(() => {
+            const pathIds = Object.keys(pathColors);
+            pathIds.forEach(id => {
+                // 35% chance to spawn particle on each path in every interval to make it look organic
+                if (Math.random() < 0.35) {
+                    createParticle(id, pathColors[id]);
+                }
+            });
+        }, 450);
 
         function toggleFullscreen() {
             if (!document.fullscreenElement) {
                 document.documentElement.requestFullscreen().catch(err => {
-                    alert(`无法进入全屏模式: ${err.message}`);
+                    alert(`Could not enter fullscreen mode: ${err.message}`);
                 });
             } else {
                 document.exitFullscreen();
