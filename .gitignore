@@ -13,6 +13,7 @@ env/
 backend/uploads/
 backend/api/uploads/
 backend/chroma_db/
+chroma_db/
 
 # Logs
 *.log
