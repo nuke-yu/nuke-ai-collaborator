@@ -843,7 +843,7 @@ class ToolLoopRunner:
             if m.get("role") == "tool" and m.get("name")
         ]
         
-        bg.spawn(add_to_chroma(msg_id, self.full_text, self.bot.get("role") or "", self.bot["id"], self.ctx.group_id))
+        bg.spawn(add_to_chroma(msg_id, self.full_text, self.bot.get("role") or "", self.bot["id"], self.ctx.group_id, self.provider, self.model_name))
         bg.spawn(maybe_summarize(self.ctx.group_id, self.bot["id"], self.bot.get("role") or self.bot["name"], [self.bot["id"]]))
         bg.spawn(bus.publish(CompactionTriggered(
             group_id=self.ctx.group_id,

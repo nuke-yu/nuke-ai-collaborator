@@ -141,12 +141,13 @@ class TestMemorySilentFailureLogging(unittest.IsolatedAsyncioTestCase):
 
 class TestChromaMemoryEnhancements(unittest.IsolatedAsyncioTestCase):
 
-    @patch("ai.client.call_ai")
+    @patch("ai.client.call_ai_once", new_callable=AsyncMock)
     @patch("ai.memory._get_collection")
-    async def test_add_to_chroma_includes_group_id_and_timestamp(self, mock_get_col, mock_call_ai):
+    async def test_add_to_chroma_includes_group_id_and_timestamp(self, mock_get_col, mock_call_once):
         mock_col = MagicMock()
         mock_get_col.return_value = mock_col
-        mock_call_ai.return_value = "Hello world memory"
+        # #1: 抽取走 call_ai_once（provider/model 透传），返回结构化 dict
+        mock_call_once.return_value = {"type": "text", "content": "Hello world memory"}
         mock_col.query.return_value = {}
 
         await memory.add_to_chroma(
@@ -154,11 +155,13 @@ class TestChromaMemoryEnhancements(unittest.IsolatedAsyncioTestCase):
             content="Hello world memory",
             role="assistant",
             bot_id=5,
-            group_id=9
+            group_id=9,
+            provider="claude",
+            model="claude-opus-4-8",
         )
         
         await asyncio.sleep(0.1)
-        
+
         mock_col.upsert.assert_called_once()
         kwargs = mock_col.upsert.call_args[1]
         self.assertEqual(kwargs["ids"], ["42_0"])
@@ -167,6 +170,9 @@ class TestChromaMemoryEnhancements(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(kwargs["metadatas"][0]["group_id"], 9)
         self.assertEqual(kwargs["metadatas"][0]["role"], "assistant")
         self.assertIn("timestamp", kwargs["metadatas"][0])
+        # #1: 群组配置的 provider/model 必须透传给 LLM 调用，而非写死 deepseek
+        self.assertEqual(mock_call_once.call_args[0][2], "claude")
+        self.assertEqual(mock_call_once.call_args[0][3], "claude-opus-4-8")
 
     @patch("ai.memory._get_collection")
     async def test_retrieve_relevant_group_id_filter_and_recency_rerank(self, mock_get_col):
@@ -201,19 +207,18 @@ class TestChromaMemoryEnhancements(unittest.IsolatedAsyncioTestCase):
         # Expected order: B, C, A. With top_k=2: [B, C]
         self.assertEqual(results, ["Doc B", "Doc C"])
 
-    @patch("ai.client.call_ai")
+    @patch("ai.client.call_ai_once", new_callable=AsyncMock)
     @patch("ai.memory.retrieve_relevant")
     @patch("ai.memory.get_db")
-    async def test_get_memory_context_query_rewrite(self, mock_get_db, mock_retrieve, mock_call_ai):
+    async def test_get_memory_context_query_rewrite(self, mock_get_db, mock_retrieve, mock_call_once):
         mock_db = MagicMock()
         mock_get_db.return_value.__aenter__.return_value = mock_db
         mock_db.execute.return_value.__aenter__.return_value.fetchall = AsyncMock(return_value=[])
 
-        mock_call_ai.return_value = "rewritten search key"
         mock_retrieve.return_value = ["Relevant memory"]
 
         history = [
-            {"sender_name": "User", "sender_type": "user", "content": "I want to deploy to port 8080"},
+            {"sender_name": "User", "sender_type": "human", "content": "I want to deploy to port 8080"},
             {"sender_name": "Bot", "sender_type": "bot", "content": "Sure, setting port to 8080"}
         ]
 
@@ -225,9 +230,10 @@ class TestChromaMemoryEnhancements(unittest.IsolatedAsyncioTestCase):
             history=history
         )
 
-        mock_call_ai.assert_called_once()
-        self.assertIn("发表你在本轮的观点", mock_call_ai.call_args[0][2])
-        mock_retrieve.assert_called_once_with(5, 9, "rewritten search key")
+        # #2: 模板化 trigger 在本地改写，热路径上不应再触发任何 LLM 调用
+        mock_call_once.assert_not_called()
+        # 改写为最近一条真人消息（真实话题），用它去检索
+        mock_retrieve.assert_called_once_with(5, 9, "I want to deploy to port 8080")
 
     @patch("ai.memory._get_collection")
     async def test_delete_bot_memory(self, mock_get_col):

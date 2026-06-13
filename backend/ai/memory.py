@@ -39,9 +39,6 @@ BATCH_CONFLICT_PROMPT = """你是一个事实冲突检测助手。
 如果没有检测到任何冲突，请直接返回：[]
 请勿输出任何其他解释文字。"""
 
-QUERY_REWRITE_PROMPT = """你是一个搜索查询重写助手。给出一个对话历史和当前指令，请重写为一个简明扼要的搜索关键词查询（不超过15个字），以用于从长短期记忆库中检索出最相关的上下文（技术决策、代码片段或项目细节）。
-直接输出重写后的检索关键词，不要有任何前导字、解释或标点符号。"""
-
 
 # ── Chroma 初始化（与测试 Mock 兼容，首次使用时自动加载 ~80MB embedding 模型）──
 _chroma_client = None
@@ -126,19 +123,25 @@ class FactExtractor:
     """提取发言中的高价值事实，过滤 conversational noise (如“好的”)。"""
     
     @staticmethod
-    async def extract(content: str) -> list[str]:
+    async def extract(content: str, provider: str = "deepseek", model: str = "deepseek-chat") -> list[str]:
         if not content or not content.strip() or len(content.strip()) < 15:
             return []
-            
-        from ai.client import call_ai
+
+        # #1: 用群组实际配置的 provider/model（而非写死 DeepSeek），低温保证抽取确定性。
+        from ai.client import call_ai_once
         try:
-            res = await call_ai(FACT_EXTRACTION_PROMPT, [], content)
-            res = res.strip()
-            if not res or "NO_SALIENT_INFO" in res:
+            res = await call_ai_once(
+                FACT_EXTRACTION_PROMPT,
+                [{"role": "user", "content": content}],
+                provider, model, temperature=0.2, max_tokens=512,
+            )
+            text = (res.get("content") if isinstance(res, dict) and res.get("type") == "text" else "") or ""
+            text = text.strip()
+            if not text or "NO_SALIENT_INFO" in text:
                 return []
             return [
-                line.strip() 
-                for line in res.split("\n") 
+                line.strip()
+                for line in text.split("\n")
                 if line.strip() and not line.strip().startswith("#")
             ]
         except Exception:
@@ -151,12 +154,13 @@ class ConflictResolver:
     """批量比对新事实与相似的历史事实，检测排他性冲突并返回被覆盖/应删除的旧记忆 ID 列表。"""
 
     @staticmethod
-    async def resolve_batch(facts: list[str], bot_id: int, group_id: int | None) -> list[str]:
+    async def resolve_batch(facts: list[str], bot_id: int, group_id: int | None,
+                            provider: str = "deepseek", model: str = "deepseek-chat") -> list[str]:
         if not facts:
             return []
-            
+
         loop = asyncio.get_running_loop()
-        from ai.client import call_ai
+        from ai.client import call_ai_once
 
         # 1. 召回每个新事实的 Top-3 相似历史记录作为候选（解决只看最近邻 1 条的漏检问题）
         candidates = {}  # id -> document
@@ -198,8 +202,13 @@ class ConflictResolver:
                 new_facts_text=new_facts_text,
                 existing_memories_text=existing_memories_text
             )
-            response = await call_ai(prompt, [], "请检测冲突。")
-            response = response.strip()
+            # #1: 用群组配置的 provider/model；零温确保 JSON 判定稳定。
+            res = await call_ai_once(
+                prompt,
+                [{"role": "user", "content": "请检测冲突。"}],
+                provider, model, temperature=0.0, max_tokens=256,
+            )
+            response = ((res.get("content") if isinstance(res, dict) and res.get("type") == "text" else "") or "").strip()
             
             # 解析 JSON 数组并严格过滤非法 ID
             import json
@@ -251,56 +260,63 @@ class TimeDecayRanker:
 
 # ── 6. QueryRewriter ── 对话检索意图改写
 class QueryRewriter:
-    """对于 workflow bot generic trigger，根据上下文历史改写为明确主题的搜索词。"""
+    """workflow bot 的 trigger 是模板话术（"请发表你在本轮的观点"），本身没有可检索的主题。
+
+    #2: 改写在本地完成 —— 从最近的历史消息里取出真实话题作为检索词，
+    不再在热路径上 await 一次 LLM 往返（旧实现每个 generic 轮次都阻塞一次 call_ai）。
+    纯同步、无网络。
+    """
+
+    # 模板化 trigger：完全匹配的短指令
+    _GENERIC_EXACT = {"继续", "下一步", "开始", "发表观点", "开始工作", "请继续"}
+    # 模板化 trigger：workflow 注入句的子串特征
+    _GENERIC_SUBSTR = ("请根据以上讨论内容", "发表你在本轮的观点")
 
     @staticmethod
-    async def rewrite(query: str, history: list[dict] | None) -> str:
-        if not history:
-            return query
-            
-        is_generic = False
-        # 更加精确的 trigger 关键词命中检测，规避 "讨论一下登录bug" 这类带核心成分的普通问句
+    def _is_generic(query: str) -> bool:
+        if any(s in query for s in QueryRewriter._GENERIC_SUBSTR):
+            return True
         if len(query) < 25:
             trimmed = query.strip().strip("。").strip("！")
-            if trimmed in ["继续", "下一步", "开始", "发表观点", "开始工作", "请继续"]:
-                is_generic = True
-                
-        # 匹配特定的 workflow 模版句
-        if "请根据以上讨论内容" in query or "发表你在本轮的观点" in query:
-            is_generic = True
-            
-        if not is_generic:
+            if trimmed in QueryRewriter._GENERIC_EXACT:
+                return True
+        return False
+
+    @staticmethod
+    def rewrite(query: str, history: list[dict] | None) -> str:
+        if not history or not QueryRewriter._is_generic(query):
             return query
-            
-        from ai.client import call_ai
-        try:
-            recent = history[-3:]
-            history_text = "\n".join(
-                f"[{m.get('sender_name', 'User')}]: {str(m.get('content', ''))[:200]}" 
-                for m in recent
-            )
-            user_input = f"对话历史：\n{history_text}\n\n当前指令：{query}"
-            rewritten = await call_ai(QUERY_REWRITE_PROMPT, [], user_input)
-            rewritten = rewritten.strip().strip('"').strip("'")
-            if rewritten and len(rewritten) < 50:
-                log.info("QueryRewriter: rewrote generic query '%s' -> '%s'", query, rewritten)
-                return rewritten
-        except Exception:
-            log.exception("QueryRewriter: rewrite failed")
-            
+
+        # 模板化 trigger：优先用最近一条实质性的真人消息（话题来源）作检索词，
+        # 否则退回最近一条实质性消息；都没有则保留原 query。
+        def _substantive(predicate):
+            for m in reversed(history):
+                if predicate(m):
+                    content = str(m.get("content") or "").strip()
+                    if len(content) >= 10:
+                        return content[:200]
+            return None
+
+        topic = _substantive(lambda m: m.get("sender_type") in ("human", "user"))
+        if topic is None:
+            topic = _substantive(lambda m: True)
+        if topic is not None:
+            log.info("QueryRewriter: generic trigger '%s' -> topic '%s'", query, topic)
+            return topic
         return query
 
 
 # ── 7. Public APIs ── 导出给外部的公共函数接口 (向下兼容)
 
-async def add_to_chroma(message_id: int, content: str, role: str, bot_id: int, group_id: int | None = None):
+async def add_to_chroma(message_id: int, content: str, role: str, bot_id: int, group_id: int | None = None,
+                        provider: str = "deepseek", model: str = "deepseek-chat"):
     # 1. 噪声快筛与事实提取
-    facts = await FactExtractor.extract(content)
+    facts = await FactExtractor.extract(content, provider, model)
     if not facts:
         return
 
     # 2. 批量消解冲突（将 N 次冲突检测合并为 1 次 LLM 调用，防限流）
-    del_ids = await ConflictResolver.resolve_batch(facts, bot_id, group_id)
+    del_ids = await ConflictResolver.resolve_batch(facts, bot_id, group_id, provider, model)
 
     loop = asyncio.get_running_loop()
     
@@ -447,8 +463,8 @@ async def get_memory_context(bot_id: int, role: str, query: str, group_id: int |
     except Exception:
         log.exception("get_memory_context: loading role summaries failed (bot_id=%s)", bot_id)
 
-    # 2. 检索前重写通用/模板化的 trigger 消息，使得检索具备明确主题 (Problem 4)
-    search_query = await QueryRewriter.rewrite(query, history)
+    # 2. 检索前重写通用/模板化的 trigger 消息，使得检索具备明确主题 (#2: 本地启发式，无 LLM)
+    search_query = QueryRewriter.rewrite(query, history)
 
     # 3. 语义检索（Chroma，Bot 个人知识库）
     relevant = await retrieve_relevant(bot_id, group_id, search_query)
