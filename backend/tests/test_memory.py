@@ -630,6 +630,45 @@ class TestMemoryAuditFixes(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(links[0]["document"], "事实A")
         self.assertEqual(links[0]["mem_type"], "fact")
 
+    async def test_memory_db_read_write_symmetric_under_binding(self):
+        """回归：分库 + 群已绑定时，水位线读写必须落在同一个(绑定的群)库。
+
+        旧实现写端写死 central_db_path、读端走 get_db()(contextvar)，二者分叉——
+        写进中央库、读自群库 → 往返失败。此测试在 bind_db 下真实往返来锁住对称性。
+        """
+        import tempfile, os as _os
+        from db.context import bind_db
+        from db.schema_split import init_group_db
+        from db.migrations import run_migrations
+        import db as _db
+
+        d = tempfile.mkdtemp()
+        gpath = _os.path.join(d, "chat.db")
+        await init_group_db(gpath)
+        async with _db.connect(gpath) as c:
+            await run_migrations(c)
+
+        memory._table_presence_cache.clear()  # 让其在绑定下重新探测
+        try:
+            with bind_db(gpath):
+                await memory._set_reflection_watermark(5, 1, 123.5)
+                got = await memory._get_reflection_watermark(5, 1)
+            self.assertEqual(got, 123.5)  # 写入即可读回（同库）
+            # 且确实落在绑定的群库
+            async with _db.connect(gpath) as c:
+                async with c.execute(
+                    "SELECT covered_through_ts FROM reflection_state WHERE bot_id=5 AND group_id=1"
+                ) as cur:
+                    row = await cur.fetchone()
+            self.assertIsNotNone(row)
+            self.assertEqual(row[0], 123.5)
+        finally:
+            memory._table_presence_cache.clear()
+            try:
+                _os.remove(gpath); _os.rmdir(d)
+            except Exception:
+                pass
+
 
 if __name__ == "__main__":
     unittest.main()
