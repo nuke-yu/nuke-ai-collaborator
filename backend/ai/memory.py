@@ -493,56 +493,127 @@ async def get_memory_context(bot_id: int, role: str, query: str, group_id: int |
 
 # ── 8. Migration Utilities ── 历史遗留数据升级迁移脚本 (向后兼容)
 
-async def backfill_chroma_timestamps():
-    """回填 Chroma 中旧记忆的 timestamp。从 SQLite messages 表读取相应消息的创建时间。"""
-    loop = asyncio.get_running_loop()
-    from datetime import datetime
-    
+def _parse_created_at(created_str: str) -> float | None:
+    """把 SQLite CURRENT_TIMESTAMP（UTC，'%Y-%m-%d %H:%M:%S'）解析为 UTC epoch 秒，
+    与 add_to_chroma 写入的 time.time() 同基准。naive datetime 必须显式按 UTC 处理，
+    否则 .timestamp() 会按本地时区换算导致整体偏移。"""
+    from datetime import datetime, timezone
+    s = (created_str or "").strip().replace("T", " ")
+    for cut in ("Z", "+", "."):
+        if cut in s:
+            s = s.split(cut)[0].strip()
     try:
-        def _get_all_memories_sync():
-            col = ChromaStore.get_collection()
-            return col.get(include=["metadatas"])
-            
-        memories = await loop.run_in_executor(None, _get_all_memories_sync)
-        if not memories or not memories.get("ids"):
-            return
-            
-        ids = memories["ids"]
-        metas = memories["metadatas"]
-        
-        async with get_db() as db:
-            for idx, item_id in enumerate(ids):
-                meta = metas[idx] if idx < len(metas) else {}
-                if meta and "timestamp" in meta:
-                    continue  # 已有时间戳，无需回填
-                    
-                # 尝试从 ID 解析 message_id (形如 "12" 或 "12_0")
-                msg_id_str = item_id.split("_")[0]
-                try:
-                    msg_id = int(msg_id_str)
-                except ValueError:
-                    continue
-                    
-                # 从 SQLite 获取原消息创建时间
-                async with db.execute("SELECT created_at FROM messages WHERE id=?", (msg_id,)) as cur:
-                    row = await cur.fetchone()
-                if not row or not row[0]:
-                    continue
-                    
-                created_str = row[0]
-                try:
-                    dt = datetime.strptime(created_str, "%Y-%m-%d %H:%M:%S")
-                    epoch_time = dt.timestamp()
-                except Exception:
-                    continue
-                    
-                # 更新 Chroma 对应记录的元数据
-                meta["timestamp"] = epoch_time
-                def _update_meta_sync(mid: str, m: dict):
-                    col = ChromaStore.get_collection()
-                    col.update(ids=[mid], metadatas=[m])
-                    
-                await loop.run_in_executor(None, partial(_update_meta_sync, item_id, meta))
-                log.info("backfill_chroma_timestamps: updated ID %s with timestamp %s", item_id, epoch_time)
+        dt = datetime.strptime(s, "%Y-%m-%d %H:%M:%S")
+        return dt.replace(tzinfo=timezone.utc).timestamp()
     except Exception:
-        log.exception("backfill_chroma_timestamps failed")
+        return None
+
+
+async def backfill_chroma_timestamps(dry_run: bool = False) -> dict:
+    """回填 Chroma 中缺失 timestamp 的旧记忆，从各群组的 messages 表读取消息创建时间。
+
+    Chroma 是全局单库，但 messages 表分散在各 group DB 中（CELL-04/05），裸 get_db()
+    只会落到中央库、查不到群消息。因此按记忆的 group_id 元数据分桶，逐组 bind_db 到对应
+    group DB 后批量查询、回填。缺少 group_id 的遗留条目无法定位所属库，跳过并计数。
+
+    返回统计：{"scanned","need","updated","no_group","skipped_no_msg"}。
+    dry_run=True 时只统计与日志、不写回 Chroma。
+    """
+    loop = asyncio.get_running_loop()
+    from contextlib import nullcontext
+    from collections import defaultdict
+    from db import bind_db
+    from runtime.dbpaths import group_db_path
+
+    stats = {"scanned": 0, "need": 0, "updated": 0, "no_group": 0, "skipped_no_msg": 0}
+
+    def _get_all_memories_sync():
+        col = ChromaStore.get_collection()
+        return col.get(include=["metadatas"])
+
+    try:
+        memories = await loop.run_in_executor(None, _get_all_memories_sync)
+    except Exception:
+        log.exception("backfill_chroma_timestamps: failed to read collection")
+        return stats
+
+    if not memories or not memories.get("ids"):
+        return stats
+
+    ids = memories["ids"]
+    metas = memories.get("metadatas") or []
+    stats["scanned"] = len(ids)
+
+    # 仅保留缺 timestamp 的条目，按 group_id 分桶（gid=None：无群标记的遗留条目，
+    # 走当前绑定/中央库做 best-effort 回退查询）
+    by_group: dict[int | None, list[tuple[str, dict]]] = defaultdict(list)
+    for idx, item_id in enumerate(ids):
+        meta = dict(metas[idx]) if idx < len(metas) and metas[idx] else {}
+        if meta.get("timestamp") is not None:
+            continue
+        stats["need"] += 1
+        gid = meta.get("group_id")
+        if gid is None:
+            stats["no_group"] += 1
+            by_group[None].append((item_id, meta))
+        else:
+            by_group[int(gid)].append((item_id, meta))
+
+    for gid, entries in by_group.items():
+        # chroma id 形如 "12" 或 "12_0"；同一 message_id 可对应多条事实
+        by_msg: dict[int, list[tuple[str, dict]]] = defaultdict(list)
+        for item_id, meta in entries:
+            try:
+                msg_id = int(item_id.split("_")[0])
+            except ValueError:
+                continue
+            by_msg[msg_id].append((item_id, meta))
+        if not by_msg:
+            continue
+
+        created: dict[int, str] = {}
+        ctx = bind_db(group_db_path(gid)) if gid is not None else nullcontext()
+        try:
+            with ctx:
+                async with get_db() as db:
+                    ph = ",".join("?" * len(by_msg))
+                    async with db.execute(
+                        f"SELECT id, created_at FROM messages WHERE id IN ({ph})",
+                        list(by_msg.keys()),
+                    ) as cur:
+                        for row in await cur.fetchall():
+                            created[row[0]] = row[1]
+        except Exception:
+            log.exception("backfill_chroma_timestamps: DB read failed for group %s", gid)
+            continue
+
+        upd_ids: list[str] = []
+        upd_metas: list[dict] = []
+        for msg_id, items in by_msg.items():
+            epoch = _parse_created_at(created.get(msg_id))
+            if epoch is None:
+                stats["skipped_no_msg"] += len(items)
+                continue
+            for item_id, meta in items:
+                meta["timestamp"] = epoch
+                upd_ids.append(item_id)
+                upd_metas.append(meta)
+
+        if not upd_ids:
+            continue
+        stats["updated"] += len(upd_ids)
+        if dry_run:
+            log.info("backfill_chroma_timestamps (dry-run): group %s would update %d record(s)", gid, len(upd_ids))
+            continue
+
+        def _update_batch_sync(uids: list[str], umetas: list[dict]):
+            col = ChromaStore.get_collection()
+            col.update(ids=uids, metadatas=umetas)
+
+        try:
+            await loop.run_in_executor(None, partial(_update_batch_sync, upd_ids, upd_metas))
+            log.info("backfill_chroma_timestamps: group %s updated %d record(s)", gid, len(upd_ids))
+        except Exception:
+            log.exception("backfill_chroma_timestamps: update failed for group %s", gid)
+
+    return stats
