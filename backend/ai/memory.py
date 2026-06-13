@@ -498,12 +498,30 @@ async def delete_bot_memory(bot_id: int, group_id: int | None = None):
         log.exception("delete_bot_memory: failed to clear Chroma memory for bot_id=%s, group_id=%s", bot_id, group_id)
 
 
+async def _table_exists_in_default_db(table_name: str) -> bool:
+    async with get_db() as db:
+        async with db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+            (table_name,)
+        ) as cur:
+            row = await cur.fetchone()
+            return row is not None
+
+
 async def maybe_summarize(group_id: int, bot_id: int, role: str, member_ids: list):
     from ai.client import call_ai
+    from runtime.dbpaths import group_db_path
+    from db import connect, DB_PATH as central_db_path
+    from db.writer import write_connect
     if not member_ids:
         return
     try:
-        async with get_db() as db:
+        has_table = await _table_exists_in_default_db("role_summaries")
+        use_group_db = not has_table and group_id is not None
+        gpath = group_db_path(group_id) if use_group_db else None
+        
+        db_ctx = connect(gpath) if gpath else get_db()
+        async with db_ctx as db:
             # Enforce group_id filter to avoid cross-group summary pollution
             async with db.execute(
                 "SELECT covered_through_id FROM role_summaries WHERE bot_id=? AND group_id=? ORDER BY id DESC LIMIT 1",
@@ -532,7 +550,9 @@ async def maybe_summarize(group_id: int, bot_id: int, role: str, member_ids: lis
             text
         )
 
-        async with get_db() as db:
+        write_path = gpath if gpath else central_db_path
+        db_write_ctx = write_connect(write_path)
+        async with db_write_ctx as db:
             await db.execute(
                 "INSERT INTO role_summaries (bot_id, group_id, role, summary, covered_through_id) VALUES (?, ?, ?, ?, ?)",
                 (bot_id, group_id, role, summary, batch[-1][0])
@@ -546,23 +566,18 @@ async def _get_reflection_watermark(bot_id: int, group_id: int | None) -> float:
     """读取 (bot, group) 的反思水位线（已巩固到的最新事实 timestamp）；无记录返回 0。"""
     from runtime.dbpaths import group_db_path
     from db import connect
-    import os
-    gpath = group_db_path(group_id) if group_id is not None else None
     try:
-        if gpath and os.path.exists(gpath):
-            async with connect(gpath) as db:
-                async with db.execute(
-                    "SELECT covered_through_ts FROM reflection_state WHERE bot_id=? AND group_id=?",
-                    (bot_id, group_id)
-                ) as cur:
-                    row = await cur.fetchone()
-        else:
-            async with get_db() as db:
-                async with db.execute(
-                    "SELECT covered_through_ts FROM reflection_state WHERE bot_id=? AND group_id=?",
-                    (bot_id, group_id)
-                ) as cur:
-                    row = await cur.fetchone()
+        has_table = await _table_exists_in_default_db("reflection_state")
+        use_group_db = not has_table and group_id is not None
+        gpath = group_db_path(group_id) if use_group_db else None
+
+        db_ctx = connect(gpath) if gpath else get_db()
+        async with db_ctx as db:
+            async with db.execute(
+                "SELECT covered_through_ts FROM reflection_state WHERE bot_id=? AND group_id=?",
+                (bot_id, group_id)
+            ) as cur:
+                row = await cur.fetchone()
         return float(row[0]) if row and row[0] is not None else 0.0
     except Exception:
         # 表缺失（旧库未迁移）或读取失败：当作 0，让本次反思跑全量，不阻断
@@ -573,23 +588,23 @@ async def _get_reflection_watermark(bot_id: int, group_id: int | None) -> float:
 async def _set_reflection_watermark(bot_id: int, group_id: int | None, ts: float) -> None:
     """推进 (bot, group) 的反思水位线（upsert）。"""
     from runtime.dbpaths import group_db_path
+    from db import DB_PATH as central_db_path
     from db.writer import write_connect
-    import os
-    gpath = group_db_path(group_id) if group_id is not None else None
     sql = (
         "INSERT INTO reflection_state (bot_id, group_id, covered_through_ts, updated_at) "
         "VALUES (?, ?, ?, CURRENT_TIMESTAMP) "
         "ON CONFLICT(bot_id, group_id) DO UPDATE SET "
         "covered_through_ts=excluded.covered_through_ts, updated_at=CURRENT_TIMESTAMP"
     )
-    if gpath and os.path.exists(gpath):
-        async with write_connect(gpath) as db:
-            await db.execute(sql, (bot_id, group_id, ts))
-            await db.commit()
-    else:
-        async with write_connect() as db:
-            await db.execute(sql, (bot_id, group_id, ts))
-            await db.commit()
+    has_table = await _table_exists_in_default_db("reflection_state")
+    use_group_db = not has_table and group_id is not None
+    gpath = group_db_path(group_id) if use_group_db else None
+
+    write_path = gpath if gpath else central_db_path
+    db_ctx = write_connect(write_path)
+    async with db_ctx as db:
+        await db.execute(sql, (bot_id, group_id, ts))
+        await db.commit()
 
 
 
@@ -750,7 +765,15 @@ async def get_memory_context(bot_id: int, role: str, query: str, group_id: int |
 
     # 1. 历史摘要（SQLite，按 Bot 个人）
     try:
-        async with get_db() as db:
+        from runtime.dbpaths import group_db_path
+        from db import connect
+        
+        has_table = await _table_exists_in_default_db("role_summaries")
+        use_group_db = not has_table and group_id is not None
+        gpath = group_db_path(group_id) if use_group_db else None
+        
+        db_ctx = connect(gpath) if gpath else get_db()
+        async with db_ctx as db:
             if group_id is not None:
                 async with db.execute(
                     "SELECT summary FROM role_summaries WHERE bot_id=? AND group_id=? ORDER BY id DESC LIMIT 3",

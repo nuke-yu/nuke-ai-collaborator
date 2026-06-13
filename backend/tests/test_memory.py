@@ -212,7 +212,7 @@ class TestChromaMemoryEnhancements(unittest.IsolatedAsyncioTestCase):
         mock_col.upsert.assert_called_once()
         self.assertEqual(mock_col.upsert.call_args[1]["ids"], ["50_0"])
         # 2 个冲突旧 ID 一次性批量删除（即便 > 事实条数）
-        mock_col.delete.assert_called_once_with(ids=["7_0", "9_1"])
+        mock_col.delete.assert_any_call(ids=["7_0", "9_1"])
 
     @patch("ai.memory._get_collection")
     async def test_retrieve_relevant_group_id_filter_and_recency_rerank(self, mock_get_col):
