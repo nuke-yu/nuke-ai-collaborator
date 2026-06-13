@@ -417,7 +417,7 @@ class ToolLoopRunner:
             self.ruleset = permissions.Ruleset(rules=db_rules, mode=perm_mode)
 
         history, user_msg = build_context_message(self.ctx.user_message, self.ctx.sender["name"], self.ctx.history, is_workflow=self.ctx.is_workflow)
-        memory = await get_memory_context(self.bot["id"], self.bot.get("role") or "", self.ctx.user_message)
+        memory = await get_memory_context(self.bot["id"], self.bot.get("role") or "", self.ctx.user_message, self.ctx.group_id, self.ctx.history)
 
         if self.executor.manifest.workspace.skill_discovery:
             self.system_prompt_base, self.skills_xml, self.skills_snapshot, self.always_skills = await compile_system_prompt(
@@ -843,7 +843,7 @@ class ToolLoopRunner:
             if m.get("role") == "tool" and m.get("name")
         ]
         
-        bg.spawn(add_to_chroma(msg_id, self.full_text, self.bot.get("role") or "", self.bot["id"]))
+        bg.spawn(add_to_chroma(msg_id, self.full_text, self.bot.get("role") or "", self.bot["id"], self.ctx.group_id))
         bg.spawn(maybe_summarize(self.ctx.group_id, self.bot["id"], self.bot.get("role") or self.bot["name"], [self.bot["id"]]))
         bg.spawn(bus.publish(CompactionTriggered(
             group_id=self.ctx.group_id,

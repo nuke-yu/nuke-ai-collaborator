@@ -149,6 +149,9 @@ async def clear_bot_context(db, member_id: int, group_id: int):
     await db.execute("DELETE FROM role_summaries WHERE bot_id=?", (member_id,))
     await db.commit()
 
+    from ai.memory import delete_bot_memory
+    await delete_bot_memory(member_id, group_id)
+
 
 async def update_member_full(db, member_id: int, data: dict):
     executor_config = data.get('executor_config', {})

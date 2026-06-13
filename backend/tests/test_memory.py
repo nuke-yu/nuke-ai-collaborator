@@ -110,6 +110,8 @@ class TestMemorySummarization(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(rows[0]["covered_through_id"], 15)
         self.assertEqual(rows[1]["covered_through_id"], 30)
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
 class TestMemorySilentFailureLogging(unittest.IsolatedAsyncioTestCase):
     """DFT-043: maybe_summarize / get_memory_context 不再 try/except: pass 静默吞错，
     改为记录日志但不阻断主流程。"""
@@ -135,6 +137,147 @@ class TestMemorySilentFailureLogging(unittest.IsolatedAsyncioTestCase):
             any("db-boom-context" in line for line in cm.output),
             f"异常详情应进日志，实际: {cm.output}",
         )
+
+
+class TestChromaMemoryEnhancements(unittest.IsolatedAsyncioTestCase):
+
+    @patch("ai.client.call_ai")
+    @patch("ai.memory._get_collection")
+    async def test_add_to_chroma_includes_group_id_and_timestamp(self, mock_get_col, mock_call_ai):
+        mock_col = MagicMock()
+        mock_get_col.return_value = mock_col
+        mock_call_ai.return_value = "Hello world memory"
+        mock_col.query.return_value = {}
+
+        await memory.add_to_chroma(
+            message_id=42,
+            content="Hello world memory",
+            role="assistant",
+            bot_id=5,
+            group_id=9
+        )
+        
+        await asyncio.sleep(0.1)
+        
+        mock_col.upsert.assert_called_once()
+        kwargs = mock_col.upsert.call_args[1]
+        self.assertEqual(kwargs["ids"], ["42_0"])
+        self.assertEqual(kwargs["documents"], ["Hello world memory"])
+        self.assertEqual(kwargs["metadatas"][0]["bot_id"], 5)
+        self.assertEqual(kwargs["metadatas"][0]["group_id"], 9)
+        self.assertEqual(kwargs["metadatas"][0]["role"], "assistant")
+        self.assertIn("timestamp", kwargs["metadatas"][0])
+
+    @patch("ai.memory._get_collection")
+    async def test_retrieve_relevant_group_id_filter_and_recency_rerank(self, mock_get_col):
+        mock_col = MagicMock()
+        mock_get_col.return_value = mock_col
+        
+        import time
+        t_now = time.time()
+        # Candidate 1: Doc A, dist = 0.1 (similarity = 0.9), timestamp = 10 days ago (old)
+        # Candidate 2: Doc B, dist = 0.2 (similarity = 0.8), timestamp = 0.1 days ago (recent)
+        # Candidate 3: Doc C, dist = 0.15 (similarity = 0.85), timestamp = 2 days ago (mid)
+        mock_col.query.return_value = {
+            "documents": [["Doc A", "Doc B", "Doc C"]],
+            "metadatas": [[
+                {"timestamp": t_now - 10.0 * 86400, "bot_id": 5, "group_id": 9},
+                {"timestamp": t_now - 0.1 * 86400, "bot_id": 5, "group_id": 9},
+                {"timestamp": t_now - 2.0 * 86400, "bot_id": 5, "group_id": 9}
+            ]],
+            "distances": [[0.1, 0.2, 0.15]],
+            "ids": [["1", "2", "3"]]
+        }
+        
+        results = await memory.retrieve_relevant(bot_id=5, group_id=9, query="test query", top_k=2)
+        
+        mock_col.query.assert_called_once()
+        where_clause = mock_col.query.call_args[1]["where"]
+        self.assertEqual(
+            where_clause,
+            {"$and": [{"bot_id": {"$eq": 5}}, {"group_id": {"$eq": 9}}]}
+        )
+        
+        # Expected order: B, C, A. With top_k=2: [B, C]
+        self.assertEqual(results, ["Doc B", "Doc C"])
+
+    @patch("ai.client.call_ai")
+    @patch("ai.memory.retrieve_relevant")
+    @patch("ai.memory.get_db")
+    async def test_get_memory_context_query_rewrite(self, mock_get_db, mock_retrieve, mock_call_ai):
+        mock_db = MagicMock()
+        mock_get_db.return_value.__aenter__.return_value = mock_db
+        mock_db.execute.return_value.__aenter__.return_value.fetchall = AsyncMock(return_value=[])
+
+        mock_call_ai.return_value = "rewritten search key"
+        mock_retrieve.return_value = ["Relevant memory"]
+
+        history = [
+            {"sender_name": "User", "sender_type": "user", "content": "I want to deploy to port 8080"},
+            {"sender_name": "Bot", "sender_type": "bot", "content": "Sure, setting port to 8080"}
+        ]
+
+        result = await memory.get_memory_context(
+            bot_id=5,
+            role="assistant",
+            query="请发表你的观点",
+            group_id=9,
+            history=history
+        )
+
+        mock_call_ai.assert_called_once()
+        self.assertIn("请发表你的观点", mock_call_ai.call_args[0][2])
+        mock_retrieve.assert_called_once_with(5, 9, "rewritten search key")
+
+    @patch("ai.memory._get_collection")
+    async def test_delete_bot_memory(self, mock_get_col):
+        mock_col = MagicMock()
+        mock_get_col.return_value = mock_col
+        
+        await memory.delete_bot_memory(bot_id=5, group_id=9)
+        await asyncio.sleep(0.1)
+        
+        mock_col.delete.assert_called_once_with(
+            where={"$and": [{"bot_id": {"$eq": 5}}, {"group_id": {"$eq": 9}}]}
+        )
+
+    @patch("ai.memory._get_collection")
+    async def test_clear_bot_context_integration(self, mock_get_col):
+        from db.queries import clear_bot_context
+        mock_col = MagicMock()
+        mock_get_col.return_value = mock_col
+        
+        if os.path.exists(TEST_DB_PATH):
+            os.remove(TEST_DB_PATH)
+        await database.init_db()
+        
+        async with database.get_db() as db:
+            await db.execute("INSERT INTO groups (id, name) VALUES (1, 'Test Group')")
+            await db.execute(
+                "INSERT INTO members (id, group_id, name, type, role, avatar_color) VALUES (2, 1, 'MemoryBot', 'bot', 'Summarizer', '#123456')"
+            )
+            await db.execute(
+                "INSERT INTO role_summaries (bot_id, group_id, role, summary, covered_through_id) VALUES (2, 1, 'Summarizer', 'Summary', 10)"
+            )
+            await db.commit()
+            
+            await clear_bot_context(db, member_id=2, group_id=1)
+            
+            async with db.execute("SELECT COUNT(*) FROM role_summaries WHERE bot_id = 2") as cur:
+                count = (await cur.fetchone())[0]
+            self.assertEqual(count, 0)
+            
+            async with db.execute("SELECT context_cleared_at FROM members WHERE id = 2") as cur:
+                cleared_at = (await cur.fetchone())[0]
+            self.assertIsNotNone(cleared_at)
+            
+        await asyncio.sleep(0.1)
+        mock_col.delete.assert_called_once_with(
+            where={"$and": [{"bot_id": {"$eq": 2}}, {"group_id": {"$eq": 1}}]}
+        )
+        
+        if os.path.exists(TEST_DB_PATH):
+            os.remove(TEST_DB_PATH)
 
 
 if __name__ == "__main__":
