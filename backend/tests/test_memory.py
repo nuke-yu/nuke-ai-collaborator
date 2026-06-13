@@ -824,6 +824,28 @@ class TestMemoryAuditFixes(unittest.IsolatedAsyncioTestCase):
         mock_call_once.assert_called_once()  # 未被长度门挡掉（旧阈值 15 会直接 return）
         self.assertEqual(facts, [("使用React19", 0.9)])
 
+    @patch("ai.memory._get_reflection_watermark", new_callable=AsyncMock)
+    async def test_maybe_reflect_skips_when_already_in_flight(self, mock_wm_get):
+        """同 (bot,group) 已有反思在跑时，重入应立即返回、不做任何工作（防跨轮并发重复反思）。"""
+        memory._reflect_in_flight.add((5, 9))
+        try:
+            await memory.maybe_reflect(group_id=9, bot_id=5, role="dev")
+            mock_wm_get.assert_not_awaited()  # 短路：连水位线都没读
+        finally:
+            memory._reflect_in_flight.discard((5, 9))
+
+    @patch("ai.memory._set_reflection_watermark", new_callable=AsyncMock)
+    @patch("ai.memory._get_reflection_watermark", new_callable=AsyncMock)
+    @patch("ai.memory._get_collection")
+    async def test_maybe_reflect_clears_in_flight_after_run(self, mock_get_col, mock_wm_get, mock_wm_set):
+        """正常跑完后必须从 in-flight 集合移除，否则该 (bot,group) 再不会反思。"""
+        mock_wm_get.return_value = 0.0
+        mock_col = MagicMock()
+        mock_get_col.return_value = mock_col
+        mock_col.get.return_value = {"ids": [], "documents": [], "metadatas": []}
+        await memory.maybe_reflect(group_id=9, bot_id=5, role="dev")
+        self.assertNotIn((5, 9), memory._reflect_in_flight)  # finally 已清理
+
 
 if __name__ == "__main__":
     unittest.main()

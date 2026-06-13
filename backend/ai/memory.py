@@ -653,6 +653,12 @@ async def _set_reflection_watermark(bot_id: int, group_id: int | None, ts: float
 
 
 
+# 同一 (bot, group) 正在进行的反思集合：防跨轮并发重入。maybe_reflect 每轮都被 bg.spawn，
+# 上一轮(含 LLM 调用)未结束时下一轮又起，会读到同一水位线、归纳重叠事实、重复推进水位线
+# (浪费 LLM、轻度水位线竞争)。check+add 之间无 await，单线程事件循环上是原子的。
+_reflect_in_flight: set[tuple[int, int | None]] = set()
+
+
 async def maybe_reflect(group_id: int, bot_id: int, role: str,
                         provider: str = "deepseek", model: str = "deepseek-chat") -> None:
     """巩固层：把自上次反思以来积累的零散事实周期性归纳为高层语义洞察。
@@ -664,6 +670,10 @@ async def maybe_reflect(group_id: int, bot_id: int, role: str,
     多层(P3, REFLECT_MULTILEVEL=1)：允许把未到顶(level < REFLECT_MAX_LEVEL)的反思一并纳入
     再归纳，形成反思树；新反思 level = 已消费记忆的最大 level + 1（封顶）。
     """
+    key = (bot_id, group_id)
+    if key in _reflect_in_flight:
+        return  # 同 (bot,group) 已有反思在跑：跳过重入，避免跨轮并发重复反思
+    _reflect_in_flight.add(key)
     try:
         loop = asyncio.get_running_loop()
         watermark = await _get_reflection_watermark(bot_id, group_id)
@@ -780,6 +790,8 @@ async def maybe_reflect(group_id: int, bot_id: int, role: str,
         )
     except Exception:
         log.exception("maybe_reflect failed (bot_id=%s, group_id=%s)", bot_id, group_id)
+    finally:
+        _reflect_in_flight.discard(key)
 
 
 async def get_memory_links(memory_id: str) -> list[dict]:
