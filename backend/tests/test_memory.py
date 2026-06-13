@@ -465,32 +465,6 @@ class TestMemoryAuditFixes(unittest.IsolatedAsyncioTestCase):
         results = ranker.rank(docs, metas, dists, top_k=2, query="find port 8080 settings")
         self.assertEqual(results[0], "database connection pool config on port 8080")
 
-    @patch("ai.memory._get_collection")
-    async def test_lru_access_stats_update(self, mock_get_col):
-        """测试 retrieve_relevant 在召回成功后异步触发 access_count 与 last_accessed 的 LRU 状态更新。"""
-        mock_col = MagicMock()
-        mock_get_col.return_value = mock_col
-        
-        mock_col.query.return_value = {
-            "documents": [["Test Memory Doc"]],
-            "metadatas": [[{"bot_id": 5, "timestamp": self.time.time(), "importance": 0.8}]],
-            "distances": [[0.1]],
-            "ids": [["123_0"]]
-        }
-        
-        results = await memory.retrieve_relevant(bot_id=5, group_id=9, query="test query", top_k=1)
-        self.assertEqual(len(results), 1)
-        
-        await asyncio.sleep(0.1)  # 等待 loop.run_in_executor 中的异步更新执行
-        
-        # 确认 update 被调用以更新 access 统计信息
-        mock_col.update.assert_called_once()
-        update_kwargs = mock_col.update.call_args[1]
-        self.assertEqual(update_kwargs["ids"], ["123_0"])
-        meta = update_kwargs["metadatas"][0]
-        self.assertEqual(meta["access_count"], 1)
-        self.assertGreater(meta["last_accessed"], 0)
-
 
 if __name__ == "__main__":
     unittest.main()

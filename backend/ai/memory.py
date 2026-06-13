@@ -108,21 +108,6 @@ class ChromaStore:
         col.delete(where=where)
 
     @classmethod
-    def update_access_stats_sync(cls, ids: list[str], metas: list[dict]):
-        """异步更新检索到的记忆的访问频率和时间，以支持 LRU 淘汰机制。"""
-        if not ids:
-            return
-        col = cls.get_collection()
-        try:
-            for idx, item_id in enumerate(ids):
-                meta = metas[idx] if idx < len(metas) else {}
-                meta["access_count"] = meta.get("access_count", 0) + 1
-                meta["last_accessed"] = time.time()
-                col.update(ids=[item_id], metadatas=[meta])
-        except Exception:
-            log.warning("ChromaStore: failed to update access stats for %s", ids)
-
-    @classmethod
     def delete_ids_sync(cls, ids: list[str]):
         """按 ID 批量删除（用于一次性清除被新事实覆盖失效的旧记忆）。"""
         if not ids:
@@ -385,9 +370,7 @@ async def add_to_chroma(message_id: int, content: str, role: str, bot_id: int, g
             "bot_id": bot_id,
             "role": role or "",
             "timestamp": time.time(),
-            "importance": score,       # 存入重要性分数 (Problem 2)
-            "access_count": 0,         # 写入初始访问次数 (支持 LRU 淘汰)
-            "last_accessed": time.time()
+            "importance": score,       # 存入重要性分数，供检索三因子加权 (Problem 2)
         }
         if group_id is not None:
             metadata["group_id"] = group_id
@@ -444,16 +427,6 @@ async def retrieve_relevant(bot_id: int, group_id: int | None, query: str, top_k
             "Memory RAG Retrieval: query='%s', bot_id=%s, group_id=%s, fetched=%d, returned=%d",
             query, bot_id, group_id, len(docs), len(relevant)
         )
-        
-        # 异步更新检索到的记忆的访问频率和时间，以支持 LRU 淘汰机制
-        if results.get("ids") and results["ids"][0]:
-            retrieved_ids = results["ids"][0][:len(relevant)]
-            retrieved_metas = results["metadatas"][0][:len(relevant)]
-            loop.run_in_executor(
-                None,
-                partial(ChromaStore.update_access_stats_sync, retrieved_ids, retrieved_metas)
-            )
-            
         return relevant
     except Exception:
         log.exception("retrieve_relevant: failed to fetch similar memories")
