@@ -64,6 +64,11 @@ REFLECT_TTL_DAYS = float(os.environ.get("NUKE_REFLECT_TTL_DAYS") or 540.0)
 # 检索时给反思洞察的加性 bonus，使沉淀的高层知识更易浮现 (P2)。
 REFLECT_RETRIEVAL_BONUS = float(os.environ.get("NUKE_REFLECT_RETRIEVAL_BONUS") or 0.1)
 
+# 多层反思 (P3)：默认关闭（单层，只反思原子事实，防误差放大）。开启后允许对既有反思
+# 再归纳，形成反思树；REFLECT_MAX_LEVEL 封顶层数，到顶的反思不再被纳入下一层归纳。
+REFLECT_MULTILEVEL = (os.environ.get("NUKE_REFLECT_MULTILEVEL") or "0") not in ("0", "", "false", "False")
+REFLECT_MAX_LEVEL = int(os.environ.get("NUKE_REFLECT_MAX_LEVEL") or 2)
+
 # --- Environment overrides ---
 if os.environ.get("NUKE_DEBUG"):
     DOOM_LOOP_THRESHOLD = 100

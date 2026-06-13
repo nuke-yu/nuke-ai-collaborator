@@ -165,6 +165,14 @@ class ChromaStore:
         where = conds[0] if len(conds) == 1 else {"$and": conds}
         return col.get(where=where, include=["documents", "metadatas"])
 
+    @classmethod
+    def get_by_ids_sync(cls, ids: list[str]) -> dict:
+        """按 id 取记忆（A-MEM provenance 链接遍历用）。"""
+        if not ids:
+            return {}
+        col = cls.get_collection()
+        return col.get(ids=ids, include=["documents", "metadatas"])
+
 
 # ── 3. FactExtractor ── 关键事实与噪音快筛
 class FactExtractor:
@@ -566,11 +574,14 @@ async def _set_reflection_watermark(bot_id: int, group_id: int | None, ts: float
 
 async def maybe_reflect(group_id: int, bot_id: int, role: str,
                         provider: str = "deepseek", model: str = "deepseek-chat") -> None:
-    """巩固层 (P1)：把自上次反思以来积累的零散事实周期性归纳为高层语义洞察。
+    """巩固层：把自上次反思以来积累的零散事实周期性归纳为高层语义洞察。
 
-    重要性累积触发；单层（只反思 mem_type=fact，排除既有反思，防误差放大）；
-    产出的洞察作为 mem_type=reflection 写回 Chroma，靠高 importance 在三因子检索中自然浮起。
-    后台运行，任何失败只记日志、绝不冒泡。
+    重要性累积触发；产出的洞察作为 mem_type=reflection 写回 Chroma，靠高 importance +
+    bonus 在三因子检索中浮起。后台运行，任何失败只记日志、绝不冒泡。
+
+    单层(默认)：只反思 mem_type=fact，排除既有反思，防误差放大。
+    多层(P3, REFLECT_MULTILEVEL=1)：允许把未到顶(level < REFLECT_MAX_LEVEL)的反思一并纳入
+    再归纳，形成反思树；新反思 level = 已消费记忆的最大 level + 1（封顶）。
     """
     try:
         loop = asyncio.get_running_loop()
@@ -586,24 +597,32 @@ async def maybe_reflect(group_id: int, bot_id: int, role: str,
         if not ids:
             return
 
-        # 单层：只对原子事实归纳，排除既有反思（避免“反思的反思”放大错误）
-        facts = []  # (doc, ts)
+        # 候选筛选：单层排除所有反思；多层纳入 level<MAX 的反思（顶层不再被归纳）。
+        facts = []           # (doc, importance, ts)
+        consumed_ids = []    # 实际进入归纳的记忆 id —— 作为新反思的 provenance 边
         max_ts = watermark
+        max_level = 0        # 已消费记忆的最大 level（fact 视作 0）
         for i, item_id in enumerate(ids):
             meta = metas[i] if i < len(metas) else {}
+            lvl = int(meta.get("level", 0))
             if meta.get("mem_type") == "reflection":
-                continue
+                if not config.REFLECT_MULTILEVEL or lvl >= config.REFLECT_MAX_LEVEL:
+                    continue
             doc = docs[i] if i < len(docs) else ""
             if not doc:
                 continue
             facts.append((doc, float(meta.get("importance", 0.5)), float(meta.get("timestamp", 0.0))))
+            consumed_ids.append(item_id)
             max_ts = max(max_ts, float(meta.get("timestamp", 0.0)))
+            max_level = max(max_level, lvl)
 
         # 2. 触发闸门：条数 + 重要性累积都要够
         if len(facts) < config.REFLECT_MIN_FACTS:
             return
         if sum(f[1] for f in facts) < config.REFLECT_IMPORTANCE_THRESHOLD:
             return
+
+        new_level = min(max_level + 1, config.REFLECT_MAX_LEVEL)
 
         # 3. 一次 LLM 归纳（用群组配置的 provider/model）
         from ai.client import call_ai_once
@@ -639,7 +658,8 @@ async def maybe_reflect(group_id: int, bot_id: int, role: str,
             del_ids = await ConflictResolver.resolve_batch(
                 [t for t, _ in insights], bot_id, group_id, provider, model
             )
-            source_ids = ",".join(str(i) for i in ids)
+            # provenance 边：只记实际被归纳的记忆 id（多层时即指向下层反思，构成 A-MEM 链）
+            source_ids = ",".join(str(i) for i in consumed_ids)
             now = time.time()
             for idx, (insight, score) in enumerate(insights):
                 metadata = {
@@ -648,7 +668,8 @@ async def maybe_reflect(group_id: int, bot_id: int, role: str,
                     "timestamp": now,
                     "importance": score,
                     "mem_type": "reflection",
-                    "source_ids": source_ids,   # provenance：本轮消费的事实 id（A-MEM 链接预留）
+                    "level": new_level,         # 反思层级 (P3)，封顶后不再被归纳
+                    "source_ids": source_ids,   # A-MEM 链接：本反思由哪些记忆提炼而来
                 }
                 if group_id is not None:
                     metadata["group_id"] = group_id
@@ -666,6 +687,41 @@ async def maybe_reflect(group_id: int, bot_id: int, role: str,
         )
     except Exception:
         log.exception("maybe_reflect failed (bot_id=%s, group_id=%s)", bot_id, group_id)
+
+
+async def get_memory_links(memory_id: str) -> list[dict]:
+    """A-MEM provenance 遍历 (P3)：返回某条记忆（通常是反思）由哪些下层记忆提炼而来。
+
+    沿 `source_ids` 走一跳，返回 [{id, document, mem_type, level}]，用于可解释性
+    （“这条洞察基于哪些事实”）与反思树导航。多层时一条 level-2 反思的来源即 level-1
+    反思，逐跳调用即可向下展开整条链。
+    """
+    loop = asyncio.get_running_loop()
+    try:
+        res = await loop.run_in_executor(None, partial(ChromaStore.get_by_ids_sync, [memory_id]))
+        metas = (res or {}).get("metadatas") or []
+        if not metas or not metas[0]:
+            return []
+        src_ids = [s for s in (metas[0].get("source_ids") or "").split(",") if s]
+        if not src_ids:
+            return []
+        srcs = await loop.run_in_executor(None, partial(ChromaStore.get_by_ids_sync, src_ids))
+        s_ids = (srcs or {}).get("ids") or []
+        s_docs = (srcs or {}).get("documents") or []
+        s_metas = (srcs or {}).get("metadatas") or []
+        out = []
+        for i, sid in enumerate(s_ids):
+            m = s_metas[i] if i < len(s_metas) and s_metas[i] else {}
+            out.append({
+                "id": sid,
+                "document": s_docs[i] if i < len(s_docs) else "",
+                "mem_type": m.get("mem_type", "fact"),
+                "level": int(m.get("level", 0)),
+            })
+        return out
+    except Exception:
+        log.exception("get_memory_links failed for %s", memory_id)
+        return []
 
 
 async def get_memory_context(bot_id: int, role: str, query: str, group_id: int | None = None, history: list | None = None) -> str:

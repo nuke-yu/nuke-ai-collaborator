@@ -577,6 +577,59 @@ class TestMemoryAuditFixes(unittest.IsolatedAsyncioTestCase):
 
         mock_call_once.assert_not_called()
 
+    @patch("core.config.REFLECT_MULTILEVEL", True)
+    @patch("ai.memory._set_reflection_watermark", new_callable=AsyncMock)
+    @patch("ai.memory._get_reflection_watermark", new_callable=AsyncMock)
+    @patch("ai.client.call_ai_once", new_callable=AsyncMock)
+    @patch("ai.memory._get_collection")
+    async def test_maybe_reflect_multilevel_includes_reflections(self, mock_get_col, mock_call_once, mock_wm_get, mock_wm_set):
+        """P3 多层开启：纳入未到顶的 level-1 反思，新反思 level=2，provenance 指向它。"""
+        import time as _t
+        mock_col = MagicMock()
+        mock_get_col.return_value = mock_col
+        mock_wm_get.return_value = 0.0
+        t_now = _t.time()
+        # 4 条 level-0 事实 + 1 条 level-1 反思 = 5 条消费；多层下反思被纳入
+        metas = [{"mem_type": "fact", "importance": 0.7, "timestamp": t_now} for _ in range(4)]
+        metas.append({"mem_type": "reflection", "level": 1, "importance": 0.9, "timestamp": t_now})
+        mock_col.get.return_value = {
+            "ids": [f"{i}_0" for i in range(4)] + ["refl_5_9_1_0"],
+            "documents": [f"事实{i}" for i in range(4)] + ["一层洞察"],
+            "metadatas": metas,
+        }
+        mock_col.query.return_value = {}
+        mock_call_once.return_value = {"type": "text", "content": "更高层的元洞察|0.95"}
+
+        await memory.maybe_reflect(group_id=9, bot_id=5, role="dev", provider="claude", model="x")
+        await asyncio.sleep(0.1)
+
+        mock_call_once.assert_called_once()
+        mock_col.upsert.assert_called_once()
+        meta = mock_col.upsert.call_args[1]["metadatas"][0]
+        self.assertEqual(meta["level"], 2)            # max(consumed level=1)+1
+        self.assertIn("refl_5_9_1_0", meta["source_ids"])  # 链接指向下层反思
+
+    @patch("ai.memory._get_collection")
+    async def test_get_memory_links_traverses_provenance(self, mock_get_col):
+        """P3: get_memory_links 沿 source_ids 走一跳取回来源记忆。"""
+        mock_col = MagicMock()
+        mock_get_col.return_value = mock_col
+
+        def _get(ids=None, include=None, where=None):
+            if ids == ["refl_x"]:
+                return {"ids": ["refl_x"], "documents": ["洞察"],
+                        "metadatas": [{"mem_type": "reflection", "source_ids": "1_0,2_0"}]}
+            if ids == ["1_0", "2_0"]:
+                return {"ids": ["1_0", "2_0"], "documents": ["事实A", "事实B"],
+                        "metadatas": [{"mem_type": "fact"}, {"mem_type": "fact"}]}
+            return {}
+        mock_col.get.side_effect = _get
+
+        links = await memory.get_memory_links("refl_x")
+        self.assertEqual([l["id"] for l in links], ["1_0", "2_0"])
+        self.assertEqual(links[0]["document"], "事实A")
+        self.assertEqual(links[0]["mem_type"], "fact")
+
 
 if __name__ == "__main__":
     unittest.main()
