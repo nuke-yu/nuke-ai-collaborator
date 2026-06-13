@@ -375,9 +375,16 @@ _WS_IGNORE_DIRS = {
 _WS_MAX_ENTRIES = 500
 
 
-def _walk_visible(root: Path, max_entries: int = _WS_MAX_ENTRIES) -> tuple[list[Path], bool]:
-    """遍历 root，剪枝隐藏目录与重型依赖/构建目录（绝不进入 node_modules 等）。
-    返回 (排序后的路径列表, 是否因超过 max_entries 被截断)。"""
+def walk_visible(root: Path, max_entries: int = _WS_MAX_ENTRIES,
+                 skip_hidden: bool = True) -> tuple[list[Path], bool]:
+    """遍历 root，剪枝重型依赖/构建目录（绝不进入 node_modules/.git 等），并对总数封顶。
+
+    重型/已知噪声目录（_WS_IGNORE_DIRS，含 .git/.history）**始终**剪枝；
+    skip_hidden 额外决定是否过滤其它 dotfile/dotdir：
+      - True（默认，LLM 上下文/工具输出）：隐藏所有 dotfile，避免把 .env 等密钥注入上下文；
+      - False（UI 文件树）：保留 .gitignore 等给人看，但 node_modules/.git 仍被剪。
+    返回 (排序后的路径列表, 是否因超过 max_entries 被截断)。
+    """
     import os
     if not root.exists():
         return [], False
@@ -385,14 +392,16 @@ def _walk_visible(root: Path, max_entries: int = _WS_MAX_ENTRIES) -> tuple[list[
     truncated = False
     for dirpath, dirnames, filenames in os.walk(root):
         # 原地剪枝 + 排序：os.walk 的物理顺序依赖文件系统(inode)、非确定；先排序保证
-        # 遍历顺序稳定，这样在超大工作区因 max_entries 截断时，每次收集到的前缀一致，
-        # 不会让 UI 文件树随刷新抖动。
-        dirnames[:] = sorted(d for d in dirnames if not d.startswith(".") and d not in _WS_IGNORE_DIRS)
+        # 遍历顺序稳定，这样在超大工作区因 max_entries 截断时每次前缀一致，UI 树不抖动。
+        dirnames[:] = sorted(
+            d for d in dirnames
+            if d not in _WS_IGNORE_DIRS and (not skip_hidden or not d.startswith("."))
+        )
         base = Path(dirpath)
         for name in dirnames:
             paths.append(base / name)
         for name in sorted(filenames):
-            if name.startswith("."):
+            if skip_hidden and name.startswith("."):
                 continue
             paths.append(base / name)
         if len(paths) >= max_entries:
@@ -404,7 +413,7 @@ def _walk_visible(root: Path, max_entries: int = _WS_MAX_ENTRIES) -> tuple[list[
 async def list_workspace(bot_id: int, group_id: int | None = None) -> str:
     def _tree(root: Path, skip_hidden: bool = True) -> list[str]:
         lines = []
-        paths, truncated = _walk_visible(root)
+        paths, truncated = walk_visible(root)  # LLM 工具输出：隐藏 dotfile
         for p in paths:
             rel = p.relative_to(root)
             indent = "  " * (len(rel.parts) - 1)
@@ -459,7 +468,7 @@ async def load_group_context(group_id: int) -> str:
 
         # 1. 目录树（剪枝重型目录，避免 rglob 急切枚举 node_modules 等导致卡顿/爆 token）
         tree_lines: list[str] = []
-        shared_paths, truncated = _walk_visible(shared)
+        shared_paths, truncated = walk_visible(shared)  # 注入 LLM 上下文：隐藏 dotfile
         for p in shared_paths:
             rel = p.relative_to(shared)
             indent = "  " * (len(rel.parts) - 1)
@@ -591,8 +600,8 @@ def list_workspace_tree(bot_id: int, group_id: int | None = None) -> list[dict]:
     """Return file tree as list of {path, name, is_dir} for UI."""
     ws = bot_workspace(bot_id, group_id)
     result = []
-    # 剪枝重型/隐藏目录（含 .history），避免 UI 树枚举 node_modules 等而卡顿
-    paths, _ = _walk_visible(ws, max_entries=2000)
+    # UI 文件树：剪枝重型目录(node_modules/.git/.history)防卡顿，但保留 .gitignore 等 dotfile 给人看
+    paths, _ = walk_visible(ws, max_entries=2000, skip_hidden=False)
     for p in paths:
         rel = str(p.relative_to(ws)).replace("\\", "/")
         result.append({"path": rel, "name": p.name, "is_dir": p.is_dir()})

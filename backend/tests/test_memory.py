@@ -642,32 +642,29 @@ class TestMemoryAuditFixes(unittest.IsolatedAsyncioTestCase):
         from db.migrations import run_migrations
         import db as _db
 
-        d = tempfile.mkdtemp()
-        gpath = _os.path.join(d, "chat.db")
-        await init_group_db(gpath)
-        async with _db.connect(gpath) as c:
-            await run_migrations(c)
-
-        memory._table_presence_cache.clear()  # 让其在绑定下重新探测
-        try:
-            with bind_db(gpath):
-                await memory._set_reflection_watermark(5, 1, 123.5)
-                got = await memory._get_reflection_watermark(5, 1)
-            self.assertEqual(got, 123.5)  # 写入即可读回（同库）
-            # 且确实落在绑定的群库
+        # TemporaryDirectory 递归清理（连 SQLite 的 -wal/-shm 一起），且初始化也在保护内
+        with tempfile.TemporaryDirectory() as d:
+            gpath = _os.path.join(d, "chat.db")
+            await init_group_db(gpath)
             async with _db.connect(gpath) as c:
-                async with c.execute(
-                    "SELECT covered_through_ts FROM reflection_state WHERE bot_id=5 AND group_id=1"
-                ) as cur:
-                    row = await cur.fetchone()
-            self.assertIsNotNone(row)
-            self.assertEqual(row[0], 123.5)
-        finally:
-            memory._table_presence_cache.clear()
+                await run_migrations(c)
+
+            memory._table_presence_cache.clear()  # 让其在绑定下重新探测
             try:
-                _os.remove(gpath); _os.rmdir(d)
-            except Exception:
-                pass
+                with bind_db(gpath):
+                    await memory._set_reflection_watermark(5, 1, 123.5)
+                    got = await memory._get_reflection_watermark(5, 1)
+                self.assertEqual(got, 123.5)  # 写入即可读回（同库）
+                # 且确实落在绑定的群库
+                async with _db.connect(gpath) as c:
+                    async with c.execute(
+                        "SELECT covered_through_ts FROM reflection_state WHERE bot_id=5 AND group_id=1"
+                    ) as cur:
+                        row = await cur.fetchone()
+                self.assertIsNotNone(row)
+                self.assertEqual(row[0], 123.5)
+            finally:
+                memory._table_presence_cache.clear()
 
     def test_keyword_boost_alnum_only_for_mixed_query(self):
         """#1: 关键字增强只认英数。中文混合查询中的端口号 8080 仍应给含它的文档加分。"""
@@ -721,35 +718,30 @@ class TestMemoryAuditFixes(unittest.IsolatedAsyncioTestCase):
         from db.migrations import run_migrations
 
         N = 1100
-        d = tempfile.mkdtemp(); gp = _os.path.join(d, "chat.db")
-        await init_group_db(gp)
-        async with _db.connect(gp) as c:
-            await run_migrations(c)
-            for i in range(1, N + 1):
-                await c.execute(
-                    "INSERT INTO messages (id, group_id, member_id, content, created_at) "
-                    "VALUES (?, 7, 1, ?, '2026-06-12 12:00:00')",
-                    (i, f"m{i}"),
-                )
-            await c.commit()
+        with tempfile.TemporaryDirectory() as d:
+            gp = _os.path.join(d, "chat.db")
+            await init_group_db(gp)
+            async with _db.connect(gp) as c:
+                await run_migrations(c)
+                for i in range(1, N + 1):
+                    await c.execute(
+                        "INSERT INTO messages (id, group_id, member_id, content, created_at) "
+                        "VALUES (?, 7, 1, ?, '2026-06-12 12:00:00')",
+                        (i, f"m{i}"),
+                    )
+                await c.commit()
 
-        mock_col = MagicMock()
-        mock_get_col.return_value = mock_col
-        # 1100 条无 timestamp、带 group_id 的记忆 → 全部需要回填
-        mock_col.get.return_value = {
-            "ids": [str(i) for i in range(1, N + 1)],
-            "metadatas": [{"bot_id": 1, "group_id": 7} for _ in range(N)],
-        }
-        try:
+            mock_col = MagicMock()
+            mock_get_col.return_value = mock_col
+            # 1100 条无 timestamp、带 group_id 的记忆 → 全部需要回填
+            mock_col.get.return_value = {
+                "ids": [str(i) for i in range(1, N + 1)],
+                "metadatas": [{"bot_id": 1, "group_id": 7} for _ in range(N)],
+            }
             with _patch("runtime.dbpaths.group_db_path", return_value=gp):
                 stats = await memory.backfill_chroma_timestamps(dry_run=False)
             self.assertEqual(stats["updated"], N)   # 全部回填，未因 IN 占位符超限崩溃
             mock_col.update.assert_called()
-        finally:
-            try:
-                _os.remove(gp); _os.rmdir(d)
-            except Exception:
-                pass
 
     def test_rank_tolerates_bad_timestamp_and_importance(self):
         """#1: 旧数据里 timestamp/importance 是字符串或缺失时，rank 不得抛 TypeError。"""

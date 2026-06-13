@@ -4,7 +4,7 @@ from pathlib import Path
 from db import get_db, get_member
 from workspace import (
     list_workspace_tree, read_file, write_file, make_dir, delete_path, bot_workspace, init_bot_workspace,
-    list_file_history, read_file_history_version, group_workspace,
+    list_file_history, read_file_history_version, group_workspace, walk_visible,
 )
 from skills import (
     list_skills_all, update_skill_status, approve_draft_skill, reject_draft_skill,
@@ -218,11 +218,13 @@ async def get_shared_workspace_tree(group_id: int):
     """Return shared group workspace tree (workspace/<project>/*, docs/, prs/, BOARD.md, etc.)."""
     def _list():
         ws = group_workspace(group_id)
-        result = []
-        for p in ws.rglob("*"):
-            if p.is_relative_to(ws) and not str(p).startswith(str(ws / ".history")):
-                rel = str(p.relative_to(ws)).replace("\\", "/")
-                result.append({"path": rel, "name": p.name, "is_dir": p.is_dir()})
-        return result
+        # 用剪枝遍历替代 rglob("*")：共享区常含代码仓库/node_modules，急切全树枚举会让该接口
+        # 极慢并返回巨大 JSON。walk_visible 跳过 node_modules/.git/.history 等并封顶；
+        # UI 面向，skip_hidden=False 保留 .gitignore 等 dotfile 给人看。
+        paths, _ = walk_visible(ws, max_entries=5000, skip_hidden=False)
+        return [
+            {"path": str(p.relative_to(ws)).replace("\\", "/"), "name": p.name, "is_dir": p.is_dir()}
+            for p in paths
+        ]
     return await asyncio.to_thread(_list)
 
