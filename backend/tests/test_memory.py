@@ -751,6 +751,48 @@ class TestMemoryAuditFixes(unittest.IsolatedAsyncioTestCase):
             except Exception:
                 pass
 
+    def test_rank_tolerates_bad_timestamp_and_importance(self):
+        """#1: 旧数据里 timestamp/importance 是字符串或缺失时，rank 不得抛 TypeError。"""
+        from ai.memory import TimeDecayRanker
+        ranker = TimeDecayRanker(similarity_floor=0.0)
+        docs = ["a", "b"]
+        metas = [
+            {"timestamp": "2026-06-01T00:00:00", "importance": "high"},  # ISO 字符串 + 非数字
+            {},                                                          # 全缺失
+        ]
+        dists = [0.1, 0.2]
+        results = ranker.rank(docs, metas, dists, top_k=2, query="")  # 不应抛异常
+        self.assertEqual(len(results), 2)
+
+    @patch("ai.client.call_ai_once", new_callable=AsyncMock)
+    @patch("ai.memory._get_collection")
+    async def test_resolve_batch_uses_single_query(self, mock_get_col, mock_call_once):
+        """#2: 多条新事实只做一次批量 col.query，而非逐条串行。"""
+        mock_col = MagicMock()
+        mock_get_col.return_value = mock_col
+        mock_col.query.return_value = {  # 两条 query 各一个近邻冲突候选
+            "documents": [["旧事实A"], ["旧事实B"]],
+            "ids": [["10_0"], ["20_0"]],
+            "distances": [[0.1], [0.2]],
+        }
+        mock_call_once.return_value = {"type": "text", "content": '["10_0", "20_0"]'}
+
+        del_ids = await memory.ConflictResolver.resolve_batch(
+            ["新事实1", "新事实2"], bot_id=5, group_id=9, provider="claude", model="x"
+        )
+        mock_col.query.assert_called_once()  # 单次批量，不再 N 次
+        self.assertEqual(mock_col.query.call_args[1]["query_texts"], ["新事实1", "新事实2"])
+        self.assertIn("10_0", del_ids)
+        self.assertIn("20_0", del_ids)
+
+    @patch("ai.client.call_ai_once", new_callable=AsyncMock)
+    async def test_extract_keeps_short_config_facts(self, mock_call_once):
+        """#3: 极短但关键的配置/技术决策（如 使用React19）不应被长度门静默丢弃。"""
+        mock_call_once.return_value = {"type": "text", "content": "使用React19|0.9"}
+        facts = await memory.FactExtractor.extract("使用React19", provider="claude", model="x")
+        mock_call_once.assert_called_once()  # 未被长度门挡掉（旧阈值 15 会直接 return）
+        self.assertEqual(facts, [("使用React19", 0.9)])
+
 
 if __name__ == "__main__":
     unittest.main()

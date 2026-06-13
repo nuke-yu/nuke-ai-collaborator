@@ -113,6 +113,19 @@ class ChromaStore:
         )
 
     @classmethod
+    def query_many_similar_sync(cls, queries: list[str], where: dict, limit: int = 3) -> dict:
+        """一次查询多条文本（ChromaDB 原生支持 query_texts 批量）。结果各字段为 list-of-list，
+        第 i 个子列表对应 queries[i]。用于冲突检测：单次往返替代 N 次串行查询，且不引入
+        对同一 collection 的并发（避免线程安全问题）。"""
+        col = cls.get_collection()
+        return col.query(
+            query_texts=queries,
+            n_results=limit,
+            where=where,
+            include=["documents", "distances", "metadatas"]
+        )
+
+    @classmethod
     def delete_sync(cls, where: dict):
         col = cls.get_collection()
         col.delete(where=where)
@@ -180,7 +193,9 @@ class FactExtractor:
     
     @staticmethod
     async def extract(content: str, provider: str = "deepseek", model: str = "deepseek-chat") -> list[tuple[str, float]]:
-        if not content or not content.strip() or len(content.strip()) < 15:
+        # 长度门只挡极短的纯客套/确认（"好的"/"收到"/"ok"），避免无谓的 LLM 抽取调用；
+        # 阈值不宜过高，否则像 "使用React19"、"env=prod" 这类极短但关键的配置/技术决策会被静默丢弃。
+        if not content or not content.strip() or len(content.strip()) < 8:
             return []
 
         # #1: 用群组实际配置的 provider/model（而非写死 DeepSeek），低温保证抽取确定性。
@@ -239,22 +254,26 @@ class ConflictResolver:
             else:
                 where = {"bot_id": {"$eq": bot_id}}
 
-            for fact in facts:
-                results = await loop.run_in_executor(
-                    None, 
-                    partial(ChromaStore.query_similar_sync, fact, where, 3)
-                )
-                if results and results.get("documents") and results["documents"][0]:
-                    docs = results["documents"][0]
-                    ids = results["ids"][0] if results.get("ids") else []
-                    dists = results["distances"][0] if results.get("distances") else []
-                    
-                    for idx, doc in enumerate(docs):
-                        item_id = ids[idx]
-                        dist = dists[idx] if idx < len(dists) else 1.0
-                        # 仅将语义距离在 0.25 (即相似度 > 0.75) 以内的记录纳入审查
-                        if dist < 0.25:
-                            candidates[item_id] = doc
+            # 单次批量查询（query_texts 一次传入全部新事实），替代逐条串行查询
+            results = await loop.run_in_executor(
+                None,
+                partial(ChromaStore.query_many_similar_sync, facts, where, 3)
+            )
+            docs_per = (results or {}).get("documents") or []
+            ids_per = (results or {}).get("ids") or []
+            dists_per = (results or {}).get("distances") or []
+            for qi in range(len(facts)):
+                docs = docs_per[qi] if qi < len(docs_per) else []
+                ids = ids_per[qi] if qi < len(ids_per) else []
+                dists = dists_per[qi] if qi < len(dists_per) else []
+                for idx, doc in enumerate(docs):
+                    item_id = ids[idx] if idx < len(ids) else None
+                    if item_id is None:
+                        continue
+                    dist = dists[idx] if idx < len(dists) else 1.0
+                    # 仅将语义距离在 0.25 (即相似度 > 0.75) 以内的记录纳入审查
+                    if dist < 0.25:
+                        candidates[item_id] = doc
         except Exception:
             log.exception("ConflictResolver: failed to fetch candidates for conflict check")
             return []
@@ -327,12 +346,18 @@ class TimeDecayRanker:
                 continue
                 
             meta = metas[idx] if idx < len(metas) else {}
-            importance = meta.get("importance", 0.5)  # 获取写入时存进 metadata 的重要性分值
-            
-            t_val = meta.get("timestamp")
-            if t_val is None:
-                t_val = t_now - 30.0 * 86400.0
-                
+            # 防御性 float 化：旧数据/异常 schema 里 importance、timestamp 可能是字符串或缺失，
+            # 直接参与算术会 TypeError 冒泡，使整个 retrieve_relevant 失败、返回空上下文。
+            try:
+                importance = float(meta.get("importance", 0.5))
+            except (TypeError, ValueError):
+                importance = 0.5
+
+            try:
+                t_val = float(meta.get("timestamp"))
+            except (TypeError, ValueError):
+                t_val = t_now - 30.0 * 86400.0  # 无/非法 timestamp：当作 30 天前的旧数据
+
             delta_t = max(0.0, t_now - t_val)
             recency = math.exp(-self.decay_const * delta_t)
             

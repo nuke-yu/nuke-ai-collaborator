@@ -364,16 +364,52 @@ async def edit_file(bot_id: int, path: str, old_string: str, new_string: str, re
         return await _commit_text(ws, p, rel, path, updated, bot_id, "edit")
 
 
+# 遍历工作区时剪枝掉的重型目录（依赖/构建产物）。rglob("*") 会急切枚举整棵树——
+# 一旦工作区里有 node_modules/venv 等，会卡住目录列举并撑爆上下文 token；用 os.walk
+# 原地剪枝 dirnames 才能真正“不进入”这些目录。
+_WS_IGNORE_DIRS = {
+    "node_modules", "venv", ".venv", "env", "__pycache__", "dist", "build",
+    "target", ".git", ".next", ".nuxt", ".cache", ".pytest_cache", ".mypy_cache",
+    ".ruff_cache", "site-packages", "vendor", ".gradle", ".idea", ".history",
+}
+_WS_MAX_ENTRIES = 500
+
+
+def _walk_visible(root: Path, max_entries: int = _WS_MAX_ENTRIES) -> tuple[list[Path], bool]:
+    """遍历 root，剪枝隐藏目录与重型依赖/构建目录（绝不进入 node_modules 等）。
+    返回 (排序后的路径列表, 是否因超过 max_entries 被截断)。"""
+    import os
+    if not root.exists():
+        return [], False
+    paths: list[Path] = []
+    truncated = False
+    for dirpath, dirnames, filenames in os.walk(root):
+        # 原地剪枝：os.walk 不会再下降到被移除的目录
+        dirnames[:] = [d for d in dirnames if not d.startswith(".") and d not in _WS_IGNORE_DIRS]
+        base = Path(dirpath)
+        for name in dirnames:
+            paths.append(base / name)
+        for name in filenames:
+            if name.startswith("."):
+                continue
+            paths.append(base / name)
+        if len(paths) >= max_entries:
+            truncated = True
+            break
+    return sorted(paths)[:max_entries], truncated
+
+
 async def list_workspace(bot_id: int, group_id: int | None = None) -> str:
     def _tree(root: Path, skip_hidden: bool = True) -> list[str]:
         lines = []
-        for p in sorted(root.rglob("*")):
-            if skip_hidden and any(part.startswith(".") for part in p.relative_to(root).parts):
-                continue
+        paths, truncated = _walk_visible(root)
+        for p in paths:
             rel = p.relative_to(root)
             indent = "  " * (len(rel.parts) - 1)
             icon = "📁" if p.is_dir() else "📄"
             lines.append(f"{indent}{icon} {p.name}")
+        if truncated:
+            lines.append(f"  …（已截断，仅显示前 {_WS_MAX_ENTRIES} 项；已跳过 node_modules/venv 等目录）")
         return lines
 
     sections = []
@@ -419,15 +455,16 @@ async def load_group_context(group_id: int) -> str:
         shared = group_workspace(group_id)
         parts: list[str] = []
 
-        # 1. 目录树
+        # 1. 目录树（剪枝重型目录，避免 rglob 急切枚举 node_modules 等导致卡顿/爆 token）
         tree_lines: list[str] = []
-        for p in sorted(shared.rglob("*")):
-            if any(part.startswith(".") for part in p.relative_to(shared).parts):
-                continue
+        shared_paths, truncated = _walk_visible(shared)
+        for p in shared_paths:
             rel = p.relative_to(shared)
             indent = "  " * (len(rel.parts) - 1)
             icon = "📁" if p.is_dir() else "📄"
             tree_lines.append(f"{indent}{icon} {p.name}")
+        if truncated:
+            tree_lines.append(f"  …（已截断，仅显示前 {_WS_MAX_ENTRIES} 项；已跳过 node_modules/venv 等目录）")
         header = (
             "【共享工作区目录】"
             "（read_file/write_file 用 workspace/... docs/... prs/... 前缀；"
@@ -552,10 +589,10 @@ def list_workspace_tree(bot_id: int, group_id: int | None = None) -> list[dict]:
     """Return file tree as list of {path, name, is_dir} for UI."""
     ws = bot_workspace(bot_id, group_id)
     result = []
-    for p in sorted(ws.rglob("*")):
+    # 剪枝重型/隐藏目录（含 .history），避免 UI 树枚举 node_modules 等而卡顿
+    paths, _ = _walk_visible(ws, max_entries=2000)
+    for p in paths:
         rel = str(p.relative_to(ws)).replace("\\", "/")
-        if rel.startswith(".history"):
-            continue
         result.append({"path": rel, "name": p.name, "is_dir": p.is_dir()})
     return result
 
