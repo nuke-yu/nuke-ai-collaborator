@@ -61,6 +61,10 @@ REFLECT_MAX_INSIGHTS = int(os.environ.get("NUKE_REFLECT_MAX_INSIGHTS") or 5)
 # 本就该遗忘），避免重要性始终不达阈值时水位线永不推进、每条消息 fetch 无界增长。
 REFLECT_MAX_BACKLOG = int(os.environ.get("NUKE_REFLECT_MAX_BACKLOG") or 50)
 
+# 冲突消解：仅当新事实与旧事实的向量距离小于此值（cosine 空间下 0.25 ≈ 相似度 >0.75）
+# 才纳入排他性冲突审查。换 embedding 模型或度量空间（如 L2）时需相应调整，故可配。
+MEMORY_CONFLICT_MAX_DISTANCE = float(os.environ.get("NUKE_MEMORY_CONFLICT_MAX_DISTANCE") or 0.25)
+
 # 遗忘 TTL（天）：原子事实较短，反思洞察作为沉淀的语义知识保留更久 (P2)。
 MEMORY_TTL_DAYS = float(os.environ.get("NUKE_MEMORY_TTL_DAYS") or 180.0)
 REFLECT_TTL_DAYS = float(os.environ.get("NUKE_REFLECT_TTL_DAYS") or 540.0)

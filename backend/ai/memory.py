@@ -81,14 +81,9 @@ class ChromaStore:
         return _get_collection()
 
     @classmethod
-    def write_fact_sync(cls, f_id: str, f_content: str, metadata: dict, del_id: str | None = None):
+    def write_fact_sync(cls, f_id: str, f_content: str, metadata: dict):
+        # 冲突旧记忆的删除已统一由 delete_ids_sync 批量执行，此处不再接收 del_id。
         col = cls.get_collection()
-        if del_id:
-            try:
-                col.delete(ids=[del_id])
-            except Exception:
-                log.warning("ChromaStore: failed to delete conflicting ID %s", del_id)
-                
         # 隐私与治理：敏感信息脱敏 (PII & Secret Redaction)
         try:
             from executors.redaction import redact_secrets
@@ -271,8 +266,8 @@ class ConflictResolver:
                     if item_id is None:
                         continue
                     dist = dists[idx] if idx < len(dists) else 1.0
-                    # 仅将语义距离在 0.25 (即相似度 > 0.75) 以内的记录纳入审查
-                    if dist < 0.25:
+                    # 仅将语义距离够近的记录纳入排他性冲突审查（阈值可配，换模型/度量空间时调整）
+                    if dist < config.MEMORY_CONFLICT_MAX_DISTANCE:
                         candidates[item_id] = doc
         except Exception:
             log.exception("ConflictResolver: failed to fetch candidates for conflict check")
@@ -709,6 +704,12 @@ async def maybe_reflect(group_id: int, bot_id: int, role: str,
             # 水位线永不推进、fetch 无界增长。超过积压上限时强制推进水位线丢弃这批
             # 低价值事实（avg importance 极低，本就该被遗忘），消除增长。
             if len(facts) > config.REFLECT_MAX_BACKLOG:
+                log.info(
+                    "Memory Reflection: bot_id=%s group_id=%s 积压 %d 条低价值事实(Σimportance=%.2f<%.1f)"
+                    " 超过上限 %d，强制推进水位线丢弃（不归纳）",
+                    bot_id, group_id, len(facts), sum(f[1] for f in facts),
+                    config.REFLECT_IMPORTANCE_THRESHOLD, config.REFLECT_MAX_BACKLOG,
+                )
                 await _set_reflection_watermark(bot_id, group_id, max_ts)
             return
 

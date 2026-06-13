@@ -384,12 +384,14 @@ def _walk_visible(root: Path, max_entries: int = _WS_MAX_ENTRIES) -> tuple[list[
     paths: list[Path] = []
     truncated = False
     for dirpath, dirnames, filenames in os.walk(root):
-        # 原地剪枝：os.walk 不会再下降到被移除的目录
-        dirnames[:] = [d for d in dirnames if not d.startswith(".") and d not in _WS_IGNORE_DIRS]
+        # 原地剪枝 + 排序：os.walk 的物理顺序依赖文件系统(inode)、非确定；先排序保证
+        # 遍历顺序稳定，这样在超大工作区因 max_entries 截断时，每次收集到的前缀一致，
+        # 不会让 UI 文件树随刷新抖动。
+        dirnames[:] = sorted(d for d in dirnames if not d.startswith(".") and d not in _WS_IGNORE_DIRS)
         base = Path(dirpath)
         for name in dirnames:
             paths.append(base / name)
-        for name in filenames:
+        for name in sorted(filenames):
             if name.startswith("."):
                 continue
             paths.append(base / name)
