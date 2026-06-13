@@ -426,6 +426,27 @@ async def migration_019(db):
     await db.commit()
 
 
+async def migration_020(db):
+    """Create reflection_state table: per-(bot, group) consolidation watermark (P1 巩固层).
+
+    Stores the timestamp of the newest fact already reflected over, so reflection
+    only consolidates new facts. Group-DB table; harmless CREATE on the central DB.
+
+    Rollback:
+        DROP TABLE IF EXISTS reflection_state;
+    """
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS reflection_state (
+            bot_id             INTEGER NOT NULL,
+            group_id           INTEGER NOT NULL,
+            covered_through_ts REAL    NOT NULL DEFAULT 0,
+            updated_at         TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (bot_id, group_id)
+        )
+    """)
+    await db.commit()
+
+
 MIGRATIONS: list = [
     migration_001,
     migration_002,
@@ -446,6 +467,7 @@ MIGRATIONS: list = [
     migration_017,
     migration_018,
     migration_019,
+    migration_020,
 ]
 
 

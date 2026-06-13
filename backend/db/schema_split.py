@@ -30,7 +30,7 @@ CENTRAL_TABLES = frozenset({
 GROUP_TABLES = frozenset({
     "messages", "role_summaries", "message_embeddings", "member_read",
     "message_reactions", "pinned_messages", "agent_sessions", "session_events",
-    "workflow_state", "group_locks", "tickets",
+    "workflow_state", "group_locks", "tickets", "reflection_state",
 })
 
 # ── CENTRAL DDL (final shape; central-internal FKs kept) ──────────────────
@@ -153,6 +153,15 @@ _GROUP_DDL = [
         covered_through_id INTEGER NOT NULL,
         bot_id             INTEGER DEFAULT NULL,
         created_at         TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )""",
+    # Reflection watermark per (bot, group): timestamp of the newest fact already
+    # consolidated, so consolidation only reflects over NEW facts (P1 巩固层).
+    """CREATE TABLE IF NOT EXISTS reflection_state (
+        bot_id             INTEGER NOT NULL,
+        group_id           INTEGER NOT NULL,
+        covered_through_ts REAL    NOT NULL DEFAULT 0,
+        updated_at         TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (bot_id, group_id)
     )""",
     # within-group FK to messages: kept
     """CREATE TABLE IF NOT EXISTS message_embeddings (

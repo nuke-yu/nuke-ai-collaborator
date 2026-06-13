@@ -465,6 +465,88 @@ class TestMemoryAuditFixes(unittest.IsolatedAsyncioTestCase):
         results = ranker.rank(docs, metas, dists, top_k=2, query="find port 8080 settings")
         self.assertEqual(results[0], "database connection pool config on port 8080")
 
+    # ── 巩固层 reflection (P1) ──────────────────────────────────────────
+    @patch("ai.memory._set_reflection_watermark", new_callable=AsyncMock)
+    @patch("ai.memory._get_reflection_watermark", new_callable=AsyncMock)
+    @patch("ai.client.call_ai_once", new_callable=AsyncMock)
+    @patch("ai.memory._get_collection")
+    async def test_maybe_reflect_generates_insight(self, mock_get_col, mock_call_once, mock_wm_get, mock_wm_set):
+        import time as _t
+        mock_col = MagicMock()
+        mock_get_col.return_value = mock_col
+        mock_wm_get.return_value = 0.0
+        t_now = _t.time()
+        # 5 条事实，importance 0.7 → 数量(5)≥阈值、Σ=3.5≥3.0 → 触发
+        mock_col.get.return_value = {
+            "ids": [f"{i}_0" for i in range(1, 6)],
+            "documents": [f"部署第{i}次因配置失败" for i in range(1, 6)],
+            "metadatas": [{"mem_type": "fact", "importance": 0.7, "timestamp": t_now} for _ in range(5)],
+        }
+        mock_col.query.return_value = {}  # resolve_batch 无冲突候选
+        mock_call_once.return_value = {"type": "text", "content": "项目反复因配置不一致部署失败，配置管理薄弱|0.9"}
+
+        await memory.maybe_reflect(group_id=9, bot_id=5, role="dev", provider="claude", model="claude-opus-4-8")
+        await asyncio.sleep(0.1)
+
+        mock_call_once.assert_called_once()
+        # provider/model 透传
+        self.assertEqual(mock_call_once.call_args[0][2], "claude")
+        # 洞察以 mem_type=reflection 写回，带 importance 与 provenance
+        mock_col.upsert.assert_called_once()
+        meta = mock_col.upsert.call_args[1]["metadatas"][0]
+        self.assertEqual(meta["mem_type"], "reflection")
+        self.assertEqual(meta["importance"], 0.9)
+        self.assertIn("1_0", meta["source_ids"])
+        # 水位线推进到最新事实 ts
+        mock_wm_set.assert_awaited_once()
+        self.assertAlmostEqual(mock_wm_set.await_args[0][2], t_now, places=3)
+
+    @patch("ai.memory._set_reflection_watermark", new_callable=AsyncMock)
+    @patch("ai.memory._get_reflection_watermark", new_callable=AsyncMock)
+    @patch("ai.client.call_ai_once", new_callable=AsyncMock)
+    @patch("ai.memory._get_collection")
+    async def test_maybe_reflect_below_threshold_no_llm(self, mock_get_col, mock_call_once, mock_wm_get, mock_wm_set):
+        import time as _t
+        mock_col = MagicMock()
+        mock_get_col.return_value = mock_col
+        mock_wm_get.return_value = 0.0
+        # 只有 2 条事实 < REFLECT_MIN_FACTS(5) → 不触发
+        mock_col.get.return_value = {
+            "ids": ["1_0", "2_0"],
+            "documents": ["事实一", "事实二"],
+            "metadatas": [{"mem_type": "fact", "importance": 0.9, "timestamp": _t.time()} for _ in range(2)],
+        }
+        await memory.maybe_reflect(group_id=9, bot_id=5, role="dev")
+        await asyncio.sleep(0.05)
+
+        mock_call_once.assert_not_called()
+        mock_col.upsert.assert_not_called()
+        mock_wm_set.assert_not_awaited()
+
+    @patch("ai.memory._set_reflection_watermark", new_callable=AsyncMock)
+    @patch("ai.memory._get_reflection_watermark", new_callable=AsyncMock)
+    @patch("ai.client.call_ai_once", new_callable=AsyncMock)
+    @patch("ai.memory._get_collection")
+    async def test_maybe_reflect_excludes_existing_reflections(self, mock_get_col, mock_call_once, mock_wm_get, mock_wm_set):
+        """单层防失控：候选里的 mem_type=reflection 不计入事实，避免反思的反思。"""
+        import time as _t
+        mock_col = MagicMock()
+        mock_get_col.return_value = mock_col
+        mock_wm_get.return_value = 0.0
+        t_now = _t.time()
+        # 4 条事实 + 1 条已有反思；排除反思后只剩 4 < 5 → 不触发
+        metas = [{"mem_type": "fact", "importance": 0.9, "timestamp": t_now} for _ in range(4)]
+        metas.append({"mem_type": "reflection", "importance": 0.9, "timestamp": t_now})
+        mock_col.get.return_value = {
+            "ids": [f"{i}_0" for i in range(4)] + ["refl_5_9_1_0"],
+            "documents": [f"事实{i}" for i in range(4)] + ["既有洞察"],
+            "metadatas": metas,
+        }
+        await memory.maybe_reflect(group_id=9, bot_id=5, role="dev")
+        await asyncio.sleep(0.05)
+
+        mock_call_once.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

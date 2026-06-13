@@ -40,6 +40,16 @@ BATCH_CONFLICT_PROMPT = """你是一个事实冲突检测助手。
 如果没有检测到任何冲突，请直接返回：[]
 请勿输出任何其他解释文字。"""
 
+REFLECTION_PROMPT = """你是一个项目记忆巩固助手。下面是某个智能体近期积累的若干零散事实/经历。
+请跨这些事实归纳出更高层、可泛化的洞察、规律或项目级结论（例如反复出现的问题、用户的稳定偏好、技术决策背后的模式），而不是简单复述单条事实。
+只输出真正有概括价值的洞察；若这些事实之间没有可归纳的规律，请直接返回 NO_INSIGHT。
+每行一条洞察，格式为：洞察内容|重要性分数（0.0-1.0，越高代表对后续决策越关键），不要带序号、前缀或其它标点，例如：
+项目多次因环境配置不一致导致部署失败，配置管理是薄弱环节|0.9
+用户稳定偏好简洁、可维护的方案而非堆砌特性|0.8
+
+事实列表：
+"""
+
 
 # ── Chroma 初始化（与测试 Mock 兼容，首次使用时自动加载 ~80MB embedding 模型）──
 _chroma_client = None
@@ -128,6 +138,17 @@ class ChromaStore:
             log.info("ChromaStore: pruned memories older than %d seconds", max_age_seconds)
         except Exception:
             log.exception("ChromaStore: failed to prune expired memories")
+
+    @classmethod
+    def get_memories_since_sync(cls, bot_id: int, group_id: int | None, since_ts: float) -> dict:
+        """取某 bot 在某群、timestamp 晚于水位线的全部记忆（用 get 而非相似度 query）。
+        反思巩固用：拿增量事实做归纳，不需要语义相似度。"""
+        col = cls.get_collection()
+        conds = [{"bot_id": {"$eq": bot_id}}, {"timestamp": {"$gt": since_ts}}]
+        if group_id is not None:
+            conds.append({"group_id": {"$eq": group_id}})
+        where = conds[0] if len(conds) == 1 else {"$and": conds}
+        return col.get(where=where, include=["documents", "metadatas"])
 
 
 # ── 3. FactExtractor ── 关键事实与噪音快筛
@@ -372,6 +393,7 @@ async def add_to_chroma(message_id: int, content: str, role: str, bot_id: int, g
             "role": role or "",
             "timestamp": time.time(),
             "importance": score,       # 存入重要性分数，供检索三因子加权 (Problem 2)
+            "mem_type": "fact",        # 区分情景/原子事实 vs 反思洞察 (P1 巩固层)
         }
         if group_id is not None:
             metadata["group_id"] = group_id
@@ -489,6 +511,140 @@ async def maybe_summarize(group_id: int, bot_id: int, role: str, member_ids: lis
             await db.commit()
     except Exception:
         log.exception("maybe_summarize failed (bot_id=%s, group_id=%s)", bot_id, group_id)
+
+
+async def _get_reflection_watermark(bot_id: int, group_id: int | None) -> float:
+    """读取 (bot, group) 的反思水位线（已巩固到的最新事实 timestamp）；无记录返回 0。"""
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT covered_through_ts FROM reflection_state WHERE bot_id=? AND group_id=?",
+                (bot_id, group_id)
+            ) as cur:
+                row = await cur.fetchone()
+        return float(row[0]) if row and row[0] is not None else 0.0
+    except Exception:
+        # 表缺失（旧库未迁移）或读取失败：当作 0，让本次反思跑全量，不阻断
+        log.warning("reflection: watermark read failed (bot_id=%s, group_id=%s)", bot_id, group_id)
+        return 0.0
+
+
+async def _set_reflection_watermark(bot_id: int, group_id: int | None, ts: float) -> None:
+    """推进 (bot, group) 的反思水位线（upsert）。"""
+    from db.writer import write_connect
+    async with write_connect() as db:
+        await db.execute(
+            "INSERT INTO reflection_state (bot_id, group_id, covered_through_ts, updated_at) "
+            "VALUES (?, ?, ?, CURRENT_TIMESTAMP) "
+            "ON CONFLICT(bot_id, group_id) DO UPDATE SET "
+            "covered_through_ts=excluded.covered_through_ts, updated_at=CURRENT_TIMESTAMP",
+            (bot_id, group_id, ts)
+        )
+        await db.commit()
+
+
+async def maybe_reflect(group_id: int, bot_id: int, role: str,
+                        provider: str = "deepseek", model: str = "deepseek-chat") -> None:
+    """巩固层 (P1)：把自上次反思以来积累的零散事实周期性归纳为高层语义洞察。
+
+    重要性累积触发；单层（只反思 mem_type=fact，排除既有反思，防误差放大）；
+    产出的洞察作为 mem_type=reflection 写回 Chroma，靠高 importance 在三因子检索中自然浮起。
+    后台运行，任何失败只记日志、绝不冒泡。
+    """
+    try:
+        loop = asyncio.get_running_loop()
+        watermark = await _get_reflection_watermark(bot_id, group_id)
+
+        # 1. 取水位线之后的增量记忆
+        res = await loop.run_in_executor(
+            None, partial(ChromaStore.get_memories_since_sync, bot_id, group_id, watermark)
+        )
+        ids = (res or {}).get("ids") or []
+        docs = (res or {}).get("documents") or []
+        metas = (res or {}).get("metadatas") or []
+        if not ids:
+            return
+
+        # 单层：只对原子事实归纳，排除既有反思（避免“反思的反思”放大错误）
+        facts = []  # (doc, ts)
+        max_ts = watermark
+        for i, item_id in enumerate(ids):
+            meta = metas[i] if i < len(metas) else {}
+            if meta.get("mem_type") == "reflection":
+                continue
+            doc = docs[i] if i < len(docs) else ""
+            if not doc:
+                continue
+            facts.append((doc, float(meta.get("importance", 0.5)), float(meta.get("timestamp", 0.0))))
+            max_ts = max(max_ts, float(meta.get("timestamp", 0.0)))
+
+        # 2. 触发闸门：条数 + 重要性累积都要够
+        if len(facts) < config.REFLECT_MIN_FACTS:
+            return
+        if sum(f[1] for f in facts) < config.REFLECT_IMPORTANCE_THRESHOLD:
+            return
+
+        # 3. 一次 LLM 归纳（用群组配置的 provider/model）
+        from ai.client import call_ai_once
+        fact_lines = "\n".join(f"- {doc}" for doc, _, _ in facts)
+        res_llm = await call_ai_once(
+            REFLECTION_PROMPT + fact_lines,
+            [{"role": "user", "content": "请归纳洞察。"}],
+            provider, model, temperature=0.3, max_tokens=512,
+        )
+        text = ((res_llm.get("content") if isinstance(res_llm, dict) and res_llm.get("type") == "text" else "") or "").strip()
+
+        insights: list[tuple[str, float]] = []
+        if text and "NO_INSIGHT" not in text:
+            for line in text.split("\n"):
+                line = line.strip().lstrip("-").strip()
+                if not line or line.startswith("#"):
+                    continue
+                if "|" in line:
+                    txt, _, sc = line.rpartition("|")
+                    txt = txt.strip()
+                    try:
+                        score = max(0.0, min(1.0, float(sc.strip())))
+                    except ValueError:
+                        txt, score = line, 0.7
+                else:
+                    txt, score = line, 0.7
+                if txt:
+                    insights.append((txt[:500], score))
+            insights = insights[: config.REFLECT_MAX_INSIGHTS]
+
+        # 4. 写回洞察（即使本轮无洞察，也照样推进水位线，避免反复空跑同一批事实）
+        if insights:
+            del_ids = await ConflictResolver.resolve_batch(
+                [t for t, _ in insights], bot_id, group_id, provider, model
+            )
+            source_ids = ",".join(str(i) for i in ids)
+            now = time.time()
+            for idx, (insight, score) in enumerate(insights):
+                metadata = {
+                    "bot_id": bot_id,
+                    "role": role or "",
+                    "timestamp": now,
+                    "importance": score,
+                    "mem_type": "reflection",
+                    "source_ids": source_ids,   # provenance：本轮消费的事实 id（A-MEM 链接预留）
+                }
+                if group_id is not None:
+                    metadata["group_id"] = group_id
+                refl_id = f"refl_{bot_id}_{group_id}_{int(now * 1000)}_{idx}"
+                await loop.run_in_executor(
+                    None, partial(ChromaStore.write_fact_sync, refl_id, insight, metadata)
+                )
+            if del_ids:
+                await loop.run_in_executor(None, partial(ChromaStore.delete_ids_sync, del_ids))
+
+        await _set_reflection_watermark(bot_id, group_id, max_ts)
+        log.info(
+            "Memory Reflection: bot_id=%s, group_id=%s, facts_consumed=%d, insights=%d",
+            bot_id, group_id, len(facts), len(insights),
+        )
+    except Exception:
+        log.exception("maybe_reflect failed (bot_id=%s, group_id=%s)", bot_id, group_id)
 
 
 async def get_memory_context(bot_id: int, role: str, query: str, group_id: int | None = None, history: list | None = None) -> str:

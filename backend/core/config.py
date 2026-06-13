@@ -49,6 +49,15 @@ EMBEDDING_ENDPOINT = os.environ.get("NUKE_EMBEDDING_ENDPOINT") or None  # overri
 # need a lower value.
 MEMORY_SIMILARITY_FLOOR = float(os.environ.get("NUKE_MEMORY_SIMILARITY_FLOOR") or 0.65)
 
+# --- Memory Consolidation / Reflection (P1, 巩固层) ---
+# 反思把零散事实周期性提炼成高层语义洞察。重要性累积触发：自上次反思以来新事实的
+# salience 之和 ≥ REFLECT_IMPORTANCE_THRESHOLD 且条数 ≥ REFLECT_MIN_FACTS 才触发，
+# 单次最多产出 REFLECT_MAX_INSIGHTS 条洞察。仿 Generative Agents（其阈值 150 基于
+# 1-10 评分；本系统 salience 为 0-1，故阈值相应缩小）。
+REFLECT_IMPORTANCE_THRESHOLD = float(os.environ.get("NUKE_REFLECT_IMPORTANCE_THRESHOLD") or 3.0)
+REFLECT_MIN_FACTS = int(os.environ.get("NUKE_REFLECT_MIN_FACTS") or 5)
+REFLECT_MAX_INSIGHTS = int(os.environ.get("NUKE_REFLECT_MAX_INSIGHTS") or 5)
+
 # --- Environment overrides ---
 if os.environ.get("NUKE_DEBUG"):
     DOOM_LOOP_THRESHOLD = 100

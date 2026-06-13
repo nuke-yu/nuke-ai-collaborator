@@ -21,7 +21,7 @@ from executors.plugins.rd_tools import RD_TOOLS, register_rd_tools
 from db import get_db
 import permissions
 from ai.client import call_ai_once, call_ai_stream_messages, AIError, AIContextOverflowError
-from ai.memory import get_memory_context, add_to_chroma, maybe_summarize
+from ai.memory import get_memory_context, add_to_chroma, maybe_summarize, maybe_reflect
 from core.role_router import build_context_message, build_image_content
 from workspace import load_context_files, format_context_blocks, append_log, archive_run
 import workspace as _ws
@@ -845,6 +845,7 @@ class ToolLoopRunner:
         
         bg.spawn(add_to_chroma(msg_id, self.full_text, self.bot.get("role") or "", self.bot["id"], self.ctx.group_id, self.provider, self.model_name))
         bg.spawn(maybe_summarize(self.ctx.group_id, self.bot["id"], self.bot.get("role") or self.bot["name"], [self.bot["id"]]))
+        bg.spawn(maybe_reflect(self.ctx.group_id, self.bot["id"], self.bot.get("role") or self.bot["name"], self.provider, self.model_name))
         bg.spawn(bus.publish(CompactionTriggered(
             group_id=self.ctx.group_id,
             bot_id=self.bot["id"],
