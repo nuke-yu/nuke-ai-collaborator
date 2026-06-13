@@ -344,6 +344,13 @@ cd frontend
 npm update
 ```
 
+### Data Migrations
+
+Schema changes apply automatically on startup (`db/migrations.py`). Some upgrades
+also ship **one-time data-migration scripts** that must be run manually (stop the
+app first). See [`DEPLOYMENT-MIGRATIONS.md`](DEPLOYMENT-MIGRATIONS.md) for the full
+list — e.g. Chroma timestamp backfill, workspace layout migration, embedding reindex.
+
 ---
 
 ## Uninstallation
