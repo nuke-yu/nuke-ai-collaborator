@@ -1,5 +1,8 @@
 import json
+import logging
 from db.models import _row_to_member, _row_to_msg, _MSG_SQL
+
+log = logging.getLogger(__name__)
 
 # Explicit column list in _row_to_member's positional order. The central
 # (schema_split) members table has an extra `user_id` column that the legacy
@@ -148,30 +151,37 @@ async def clear_bot_context(db, member_id: int, group_id: int):
     await db.execute("UPDATE members SET context_cleared_at=? WHERE id=?", (now, member_id))
     await db.commit()
 
-    # Check if role_summaries table exists in the current connection (single-db mode or test db)
-    async with db.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='role_summaries'"
-    ) as cur:
-        has_table = await cur.fetchone()
+    # Delete role_summaries (a GROUP table). Best-effort: a failure here must not
+    # 500 the request after context_cleared_at is already committed — log and
+    # continue, matching delete_bot_memory's graceful degradation below.
+    try:
+        # Single-db / test mode: the table lives on the current (central) connection.
+        async with db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='role_summaries'"
+        ) as cur:
+            has_table = await cur.fetchone()
 
-    if has_table:
-        await db.execute("DELETE FROM role_summaries WHERE bot_id=? AND group_id=?", (member_id, group_id))
-        await db.commit()
-    else:
-        # Split DB mode: delete from the group's private DB
-        from runtime.dbpaths import group_db_path
-        from db.writer import write_connect
-        import os
-        gpath = group_db_path(group_id)
-        if os.path.exists(gpath):
-            async with write_connect(gpath) as gdb:
-                await gdb.execute("DELETE FROM role_summaries WHERE bot_id=? AND group_id=?", (member_id, group_id))
-                await gdb.commit()
+        if has_table:
+            await db.execute("DELETE FROM role_summaries WHERE bot_id=? AND group_id=?", (member_id, group_id))
+            await db.commit()
+        else:
+            # Split DB mode: the central connection has no role_summaries; delete
+            # from the group's private DB.
+            from runtime.dbpaths import group_db_path
+            from db.writer import write_connect
+            import os
+            gpath = group_db_path(group_id)
+            if os.path.exists(gpath):
+                async with write_connect(gpath) as gdb:
+                    await gdb.execute("DELETE FROM role_summaries WHERE bot_id=? AND group_id=?", (member_id, group_id))
+                    await gdb.commit()
+    except Exception:
+        log.exception(
+            "clear_bot_context: failed to delete role_summaries (bot_id=%s, group_id=%s)", member_id, group_id
+        )
 
     from ai.memory import delete_bot_memory
     await delete_bot_memory(member_id, group_id)
-
-
 
 
 async def update_member_full(db, member_id: int, data: dict):
