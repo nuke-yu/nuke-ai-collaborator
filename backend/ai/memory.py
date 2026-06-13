@@ -3,6 +3,7 @@ import asyncio
 import logging
 import math
 import time
+import re
 from functools import partial
 import chromadb
 from db import get_db
@@ -24,13 +25,19 @@ FACT_EXTRACTION_PROMPT = """你是一个记忆过滤与事实提取助手。你�
 发言内容：
 """
 
-CONFLICT_DETECTION_PROMPT = """你是一个事实冲突检测助手。
-新事实：'{new_fact}'
-旧事实：'{old_fact}'
-它们是否描述了同一个属性、配置、路径、偏好或状态，但新事实更新或覆盖了旧事实的值（即两者存在排他性的冲突，新事实使旧事实失效）？
-例如：“将服务端口修改为8080” 与 “将服务端口修改为3000” 存在排他性冲突（返回 YES）。
-而 “项目已切换到React 19版本” 与 “用户偏好使用Python” 不存在冲突（返回 NO）。
-请直接回答 YES 或 NO，不要有任何解释。"""
+BATCH_CONFLICT_PROMPT = """你是一个事实冲突检测助手。
+下面是新提取的若干事实（New Facts）：
+{new_facts_text}
+
+下面是从既有记忆库中检索出来的可能存在冲突的已有事实（Existing Memories）：
+{existing_memories_text}
+
+请逐一比对新事实与已有事实。如果发现某个新事实与某个已有事实描述了相同的属性、配置、路径、偏好或状态，但新事实更新或覆盖了旧事实的值（即存在排他性冲突，新事实使旧事实失效），请将发生冲突的已有事实 ID 记录下来。
+
+请直接返回一个 JSON 数组，包含所有存在冲突且被覆盖的已有事实 ID，格式如下：
+["id1", "id2", ...]
+如果没有检测到任何冲突，请直接返回：[]
+请勿输出任何其他解释文字。"""
 
 QUERY_REWRITE_PROMPT = """你是一个搜索查询重写助手。给出一个对话历史和当前指令，请重写为一个简明扼要的搜索关键词查询（不超过15个字），以用于从长短期记忆库中检索出最相关的上下文（技术决策、代码片段或项目细节）。
 直接输出重写后的检索关键词，不要有任何前导字、解释或标点符号。"""
@@ -139,43 +146,75 @@ class FactExtractor:
             return []
 
 
-# ── 4. ConflictResolver ── 语义冲突消解
+# ── 4. ConflictResolver ── 批量语义冲突消解 (优化 LLM 调用扇出)
 class ConflictResolver:
-    """检测新事实与既有向量库的排他性冲突（如端口改变），并返回应失效的旧ID。"""
+    """批量比对新事实与相似的历史事实，检测排他性冲突并返回被覆盖/应删除的旧记忆 ID 列表。"""
 
     @staticmethod
-    async def resolve(fact: str, bot_id: int, group_id: int | None) -> str | None:
-        from ai.client import call_ai
+    async def resolve_batch(facts: list[str], bot_id: int, group_id: int | None) -> list[str]:
+        if not facts:
+            return []
+            
         loop = asyncio.get_running_loop()
-        
+        from ai.client import call_ai
+
+        # 1. 召回每个新事实的 Top-3 相似历史记录作为候选（解决只看最近邻 1 条的漏检问题）
+        candidates = {}  # id -> document
         try:
             if group_id is not None:
                 where = {"$and": [{"bot_id": {"$eq": bot_id}}, {"group_id": {"$eq": group_id}}]}
             else:
                 where = {"bot_id": {"$eq": bot_id}}
-                
-            results = await loop.run_in_executor(
-                None, 
-                partial(ChromaStore.query_similar_sync, fact, where, 1)
-            )
-            
-            if not results or not results.get("documents") or not results["documents"][0]:
-                return None
-                
-            old_fact = results["documents"][0][0]
-            old_id = results["ids"][0][0]
-            dist = results["distances"][0][0] if results.get("distances") else 1.0
-            
-            # 语义距离在 0.25 (即相似度 > 0.75) 以内，检查新老属性冲突
-            if dist < 0.25:
-                user_input = f"新事实：'{fact}'\n旧事实：'{old_fact}'"
-                conflict_res = await call_ai(CONFLICT_DETECTION_PROMPT, [], user_input)
-                if "YES" in conflict_res.upper():
-                    return old_id
+
+            for fact in facts:
+                results = await loop.run_in_executor(
+                    None, 
+                    partial(ChromaStore.query_similar_sync, fact, where, 3)
+                )
+                if results and results.get("documents") and results["documents"][0]:
+                    docs = results["documents"][0]
+                    ids = results["ids"][0] if results.get("ids") else []
+                    dists = results["distances"][0] if results.get("distances") else []
+                    
+                    for idx, doc in enumerate(docs):
+                        item_id = ids[idx]
+                        dist = dists[idx] if idx < len(dists) else 1.0
+                        # 仅将语义距离在 0.25 (即相似度 > 0.75) 以内的记录纳入审查
+                        if dist < 0.25:
+                            candidates[item_id] = doc
         except Exception:
-            log.exception("ConflictResolver: error during conflict check")
+            log.exception("ConflictResolver: failed to fetch candidates for conflict check")
+            return []
+
+        if not candidates:
+            return []
+
+        # 2. 将所有新事实与召回的冲突候选合并，打包执行 1 次 LLM 进行批量判断（大幅缩减 LLM 调用成本）
+        new_facts_text = "\n".join(f"- {fact}" for fact in facts)
+        existing_memories_text = "\n".join(f"- [ID: {item_id}] {doc}" for item_id, doc in candidates.items())
+
+        try:
+            prompt = BATCH_CONFLICT_PROMPT.format(
+                new_facts_text=new_facts_text,
+                existing_memories_text=existing_memories_text
+            )
+            response = await call_ai(prompt, [], "请检测冲突。")
+            response = response.strip()
             
-        return None
+            # 解析 JSON 数组并严格过滤非法 ID
+            import json
+            json_match = re.search(r"\[.*\]", response, re.DOTALL)
+            if json_match:
+                response = json_match.group(0)
+                
+            ids_to_delete = json.loads(response)
+            if isinstance(ids_to_delete, list):
+                # 校验 ID 是否确实在召回的候选池中，防止 LLM 幻觉产生误删
+                return [str(item_id) for item_id in ids_to_delete if str(item_id) in candidates]
+        except Exception:
+            log.exception("ConflictResolver: failed to resolve conflicts via batch LLM")
+            
+        return []
 
 
 # ── 5. TimeDecayRanker ── 绝对指数衰减排序
@@ -183,16 +222,14 @@ class TimeDecayRanker:
     """基于物理时间差应用绝对指数衰减的排序器（半衰期默认7天）。"""
 
     def __init__(self, half_life_days: float = 7.0):
-        # 衰减常数 lambda = ln(2) / 半衰期秒数
         self.decay_const = 0.693147 / (half_life_days * 86400.0)
 
-    def rank(self, docs: list[str], metas: list[dict], dists: list[float], ids: list[str], top_k: int) -> list[str]:
+    def rank(self, docs: list[str], metas: list[dict], dists: list[float], top_k: int) -> list[str]:
         t_now = time.time()
         scored = []
         
         for idx in range(len(docs)):
             dist = dists[idx] if idx < len(dists) else 1.0
-            # 相似度：cosine similarity = 1.0 - distance
             sim = max(0.0, min(1.0, 1.0 - dist))
             
             meta = metas[idx] if idx < len(metas) else {}
@@ -222,11 +259,16 @@ class QueryRewriter:
             return query
             
         is_generic = False
-        if len(query) < 50:
-            generic_keywords = ["开始", "观点", "讨论", "继续", "完成", "下一步", "发表", "请根据", "本轮", "以上", "总结"]
-            if any(kw in query for kw in generic_keywords):
+        # 更加精确的 trigger 关键词命中检测，规避 "讨论一下登录bug" 这类带核心成分的普通问句
+        if len(query) < 25:
+            trimmed = query.strip().strip("。").strip("！")
+            if trimmed in ["继续", "下一步", "开始", "发表观点", "开始工作", "请继续"]:
                 is_generic = True
                 
+        # 匹配特定的 workflow 模版句
+        if "请根据以上讨论内容" in query or "发表你在本轮的观点" in query:
+            is_generic = True
+            
         if not is_generic:
             return query
             
@@ -257,12 +299,13 @@ async def add_to_chroma(message_id: int, content: str, role: str, bot_id: int, g
     if not facts:
         return
 
+    # 2. 批量消解冲突（将 N 次冲突检测合并为 1 次 LLM 调用，防限流）
+    del_ids = await ConflictResolver.resolve_batch(facts, bot_id, group_id)
+
     loop = asyncio.get_running_loop()
     
-    # 2. 对每个事实执行冲突检测，写入时传入当前物理时间戳
+    # 3. 对每个事实执行写入，并清除对应冲突 ID
     for idx, fact in enumerate(facts):
-        del_id = await ConflictResolver.resolve(fact, bot_id, group_id)
-        
         metadata = {
             "bot_id": bot_id,
             "role": role or "",
@@ -272,17 +315,18 @@ async def add_to_chroma(message_id: int, content: str, role: str, bot_id: int, g
             metadata["group_id"] = group_id
             
         fact_id = f"{message_id}_{idx}"
+        
+        # 如果有该新事实对应的失效旧记忆，将其删除
+        del_id = del_ids[idx] if idx < len(del_ids) else None
         await loop.run_in_executor(
             None,
             partial(ChromaStore.write_fact_sync, fact_id, fact, metadata, del_id)
         )
 
-    # 3. 遗忘机制：写入时有 10% 的概率被动在后台运行过期记忆的 TTL 清理，防爆库
+    # 4. 遗忘机制：写入时有 10% 的概率被动在后台运行过期记忆的 TTL 清理，防爆库
     import random
     if random.random() < 0.1:
-        bg_run = loop.run_in_executor(None, ChromaStore.prune_expired_memories_sync)
-        # Avoid blocking, let it run in background
-        asyncio.create_task(bg_run)
+        loop.run_in_executor(None, ChromaStore.prune_expired_memories_sync)
 
 
 async def retrieve_relevant(bot_id: int, group_id: int | None, query: str, top_k: int = 3) -> list:
@@ -306,11 +350,10 @@ async def retrieve_relevant(bot_id: int, group_id: int | None, query: str, top_k
         docs = results["documents"][0]
         metas = results["metadatas"][0] if results.get("metadatas") else []
         dists = results["distances"][0] if results.get("distances") else []
-        ids = results["ids"][0] if results.get("ids") else []
         
         # 绝对指数衰减打分与精排
         ranker = TimeDecayRanker()
-        relevant = ranker.rank(docs, metas, dists, ids, top_k)
+        relevant = ranker.rank(docs, metas, dists, top_k)
         
         # 可观测性评估：记录命中与排序指标
         log.info(
@@ -324,12 +367,16 @@ async def retrieve_relevant(bot_id: int, group_id: int | None, query: str, top_k
 
 
 async def delete_bot_memory(bot_id: int, group_id: int | None = None):
+    """清除 Bot 的向量记忆。异常时优雅降级并记录日志，防止阻断 SQLite 的清除事务。"""
     loop = asyncio.get_running_loop()
     if group_id is not None:
         where = {"$and": [{"bot_id": {"$eq": bot_id}}, {"group_id": {"$eq": group_id}}]}
     else:
         where = {"bot_id": {"$eq": bot_id}}
-    await loop.run_in_executor(None, partial(ChromaStore.delete_sync, where))
+    try:
+        await loop.run_in_executor(None, partial(ChromaStore.delete_sync, where))
+    except Exception:
+        log.exception("delete_bot_memory: failed to clear Chroma memory for bot_id=%s, group_id=%s", bot_id, group_id)
 
 
 async def maybe_summarize(group_id: int, bot_id: int, role: str, member_ids: list):
@@ -409,3 +456,60 @@ async def get_memory_context(bot_id: int, role: str, query: str, group_id: int |
         parts.append("【相关历史记录】\n" + "\n---\n".join(relevant))
 
     return "\n\n".join(parts)
+
+
+# ── 8. Migration Utilities ── 历史遗留数据升级迁移脚本 (向后兼容)
+
+async def backfill_chroma_timestamps():
+    """回填 Chroma 中旧记忆的 timestamp。从 SQLite messages 表读取相应消息的创建时间。"""
+    loop = asyncio.get_running_loop()
+    from datetime import datetime
+    
+    try:
+        def _get_all_memories_sync():
+            col = ChromaStore.get_collection()
+            return col.get(include=["metadatas"])
+            
+        memories = await loop.run_in_executor(None, _get_all_memories_sync)
+        if not memories or not memories.get("ids"):
+            return
+            
+        ids = memories["ids"]
+        metas = memories["metadatas"]
+        
+        async with get_db() as db:
+            for idx, item_id in enumerate(ids):
+                meta = metas[idx] if idx < len(metas) else {}
+                if meta and "timestamp" in meta:
+                    continue  # 已有时间戳，无需回填
+                    
+                # 尝试从 ID 解析 message_id (形如 "12" 或 "12_0")
+                msg_id_str = item_id.split("_")[0]
+                try:
+                    msg_id = int(msg_id_str)
+                except ValueError:
+                    continue
+                    
+                # 从 SQLite 获取原消息创建时间
+                async with db.execute("SELECT created_at FROM messages WHERE id=?", (msg_id,)) as cur:
+                    row = await cur.fetchone()
+                if not row or not row[0]:
+                    continue
+                    
+                created_str = row[0]
+                try:
+                    dt = datetime.strptime(created_str, "%Y-%m-%d %H:%M:%S")
+                    epoch_time = dt.timestamp()
+                except Exception:
+                    continue
+                    
+                # 更新 Chroma 对应记录的元数据
+                meta["timestamp"] = epoch_time
+                def _update_meta_sync(mid: str, m: dict):
+                    col = ChromaStore.get_collection()
+                    col.update(ids=[mid], metadatas=[m])
+                    
+                await loop.run_in_executor(None, partial(_update_meta_sync, item_id, meta))
+                log.info("backfill_chroma_timestamps: updated ID %s with timestamp %s", item_id, epoch_time)
+    except Exception:
+        log.exception("backfill_chroma_timestamps failed")

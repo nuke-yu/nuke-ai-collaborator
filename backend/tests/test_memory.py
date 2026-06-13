@@ -220,13 +220,13 @@ class TestChromaMemoryEnhancements(unittest.IsolatedAsyncioTestCase):
         result = await memory.get_memory_context(
             bot_id=5,
             role="assistant",
-            query="请发表你的观点",
+            query="发表你在本轮的观点",
             group_id=9,
             history=history
         )
 
         mock_call_ai.assert_called_once()
-        self.assertIn("请发表你的观点", mock_call_ai.call_args[0][2])
+        self.assertIn("发表你在本轮的观点", mock_call_ai.call_args[0][2])
         mock_retrieve.assert_called_once_with(5, 9, "rewritten search key")
 
     @patch("ai.memory._get_collection")
@@ -306,6 +306,42 @@ class TestChromaMemoryEnhancements(unittest.IsolatedAsyncioTestCase):
         kwargs = mock_col.delete.call_args[1]
         self.assertIn("timestamp", kwargs["where"])
         self.assertIn("$lt", kwargs["where"]["timestamp"])
+
+    @patch("ai.memory._get_collection")
+    async def test_backfill_chroma_timestamps(self, mock_get_col):
+        mock_col = MagicMock()
+        mock_get_col.return_value = mock_col
+        
+        mock_col.get.return_value = {
+            "ids": ["12_0"],
+            "metadatas": [{"bot_id": 5}]
+        }
+        
+        if os.path.exists(TEST_DB_PATH):
+            os.remove(TEST_DB_PATH)
+        await database.init_db()
+        
+        async with database.get_db() as db:
+            await db.execute("INSERT INTO groups (id, name) VALUES (1, 'Test Group')")
+            await db.execute(
+                "INSERT INTO members (id, group_id, name, type, role, avatar_color) VALUES (5, 1, 'Bot', 'bot', 'r', '#123')"
+            )
+            await db.execute(
+                "INSERT INTO messages (id, group_id, member_id, content, created_at) VALUES (12, 1, 5, 'Msg 12', '2026-06-12 12:00:00')"
+            )
+            await db.commit()
+            
+            await memory.backfill_chroma_timestamps()
+            
+        await asyncio.sleep(0.1)
+        mock_col.update.assert_called_once()
+        kwargs = mock_col.update.call_args[1]
+        self.assertEqual(kwargs["ids"], ["12_0"])
+        self.assertIn("timestamp", kwargs["metadatas"][0])
+        self.assertGreater(kwargs["metadatas"][0]["timestamp"], 0)
+        
+        if os.path.exists(TEST_DB_PATH):
+            os.remove(TEST_DB_PATH)
 
 
 if __name__ == "__main__":
