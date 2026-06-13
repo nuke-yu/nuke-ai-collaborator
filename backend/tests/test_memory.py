@@ -345,13 +345,28 @@ class TestChromaMemoryEnhancements(unittest.IsolatedAsyncioTestCase):
     async def test_prune_expired_memories(self, mock_get_col):
         mock_col = MagicMock()
         mock_get_col.return_value = mock_col
-        
-        memory.ChromaStore.prune_expired_memories_sync(max_age_seconds=1000)
-        
-        mock_col.delete.assert_called_once()
-        kwargs = mock_col.delete.call_args[1]
-        self.assertIn("timestamp", kwargs["where"])
-        self.assertIn("$lt", kwargs["where"]["timestamp"])
+
+        # P2: 差异化 TTL —— 事实清理排除反思($ne)，反思单独按更长 TTL 清理
+        memory.ChromaStore.prune_expired_memories_sync(
+            fact_max_age_seconds=1000, reflection_max_age_seconds=5000
+        )
+
+        self.assertEqual(mock_col.delete.call_count, 2)
+        wheres = [c.kwargs["where"] for c in mock_col.delete.call_args_list]
+        # 第一删：事实 + $ne reflection（绝不误删反思）
+        fact_clauses = wheres[0]["$and"]
+        self.assertIn({"mem_type": {"$ne": "reflection"}}, fact_clauses)
+        # 第二删：仅 reflection
+        refl_clauses = wheres[1]["$and"]
+        self.assertIn({"mem_type": {"$eq": "reflection"}}, refl_clauses)
+
+    @patch("ai.memory._get_collection")
+    async def test_prune_uses_config_defaults(self, mock_get_col):
+        """无参调用（add_to_chroma 的后台触发路径）应回退到 config 的 TTL。"""
+        mock_col = MagicMock()
+        mock_get_col.return_value = mock_col
+        memory.ChromaStore.prune_expired_memories_sync()
+        self.assertEqual(mock_col.delete.call_count, 2)
 
     @patch("ai.memory._get_collection")
     async def test_backfill_chroma_timestamps(self, mock_get_col):
@@ -464,6 +479,21 @@ class TestMemoryAuditFixes(unittest.IsolatedAsyncioTestCase):
         
         results = ranker.rank(docs, metas, dists, top_k=2, query="find port 8080 settings")
         self.assertEqual(results[0], "database connection pool config on port 8080")
+
+    def test_reflection_retrieval_bonus(self):
+        """P2: 同等相似度/新近度/重要性下，反思洞察因 bonus 排在事实之前。"""
+        from ai.memory import TimeDecayRanker
+        import time as _t
+        ranker = TimeDecayRanker(similarity_floor=0.0, reflection_bonus=0.1)
+        t_now = _t.time()
+        docs = ["普通事实记录", "高层反思洞察"]
+        metas = [
+            {"timestamp": t_now, "importance": 0.5, "mem_type": "fact"},
+            {"timestamp": t_now, "importance": 0.5, "mem_type": "reflection"},
+        ]
+        dists = [0.3, 0.3]  # 相似度相同
+        results = ranker.rank(docs, metas, dists, top_k=2)
+        self.assertEqual(results[0], "高层反思洞察")
 
     # ── 巩固层 reflection (P1) ──────────────────────────────────────────
     @patch("ai.memory._set_reflection_watermark", new_callable=AsyncMock)

@@ -129,13 +129,28 @@ class ChromaStore:
             log.exception("ChromaStore: failed to delete conflicting IDs %s", ids)
 
     @classmethod
-    def prune_expired_memories_sync(cls, max_age_seconds: float = 180 * 86400):
-        """物理清除过期的旧记忆 (遗忘机制：TTL)"""
+    def prune_expired_memories_sync(cls, fact_max_age_seconds: float | None = None,
+                                    reflection_max_age_seconds: float | None = None):
+        """物理清除过期记忆 (遗忘机制：TTL)，反思洞察用更长 TTL (P2)。
+
+        分两次删，按 mem_type 区隔：
+          - 事实/遗留无类型：超过 fact TTL 删；用 $ne reflection 确保**绝不误删反思**；
+          - 反思：仅超过更长的 reflection TTL 才删。
+        """
         col = cls.get_collection()
-        t_threshold = time.time() - max_age_seconds
+        now = time.time()
+        fact_age = config.MEMORY_TTL_DAYS * 86400 if fact_max_age_seconds is None else fact_max_age_seconds
+        refl_age = config.REFLECT_TTL_DAYS * 86400 if reflection_max_age_seconds is None else reflection_max_age_seconds
         try:
-            col.delete(where={"timestamp": {"$lt": t_threshold}})
-            log.info("ChromaStore: pruned memories older than %d seconds", max_age_seconds)
+            col.delete(where={"$and": [
+                {"timestamp": {"$lt": now - fact_age}},
+                {"mem_type": {"$ne": "reflection"}},
+            ]})
+            col.delete(where={"$and": [
+                {"timestamp": {"$lt": now - refl_age}},
+                {"mem_type": {"$eq": "reflection"}},
+            ]})
+            log.info("ChromaStore: pruned facts>%ds, reflections>%ds", fact_age, refl_age)
         except Exception:
             log.exception("ChromaStore: failed to prune expired memories")
 
@@ -276,10 +291,13 @@ class ConflictResolver:
 class TimeDecayRanker:
     """基于物理时间差应用绝对指数衰减的排序器（半衰期默认7天），融合重要性和关键字增强并设绝对相似度下限。"""
 
-    def __init__(self, half_life_days: float = 7.0, similarity_floor: float | None = None):
+    def __init__(self, half_life_days: float = 7.0, similarity_floor: float | None = None,
+                 reflection_bonus: float | None = None):
         self.decay_const = 0.693147 / (half_life_days * 86400.0)
         # None → 用配置项（可经 NUKE_MEMORY_SIMILARITY_FLOOR 覆盖）；显式传值用于测试。
         self.similarity_floor = config.MEMORY_SIMILARITY_FLOOR if similarity_floor is None else similarity_floor
+        # 反思洞察的加性检索 bonus (P2)，让沉淀的高层语义知识更易浮现。
+        self.reflection_bonus = config.REFLECT_RETRIEVAL_BONUS if reflection_bonus is None else reflection_bonus
 
     def rank(self, docs: list[str], metas: list[dict], dists: list[float], top_k: int, query: str = "") -> list[str]:
         t_now = time.time()
@@ -318,6 +336,9 @@ class TimeDecayRanker:
             
             # 🟡 完整三因子加权公式：0.5 * 语义相似度 + 0.3 * 时间衰减 + 0.2 * 重要性 + keyword_boost
             score = 0.5 * sim + 0.3 * recency + 0.2 * importance + keyword_boost
+            # 🟢 反思洞察加性 bonus（沉淀的语义知识，P2）
+            if meta.get("mem_type") == "reflection":
+                score += self.reflection_bonus
             scored.append((score, docs[idx]))
             
         scored.sort(key=lambda x: x[0], reverse=True)
