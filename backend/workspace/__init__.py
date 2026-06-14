@@ -391,6 +391,59 @@ async def edit_file(bot_id: int, path: str, old_string: str | None = None, new_s
         return f"{result}{suffix}" if suffix else result
 
 
+async def read_anchored(bot_id: int, path: str, group_id: int | None = None) -> str:
+    """带行哈希锚的只读视图：每行前缀 L<n>#<hash>，供 edit_anchored 按锚精准定位。"""
+    ws, path = _get_effective_ws(bot_id, path, group_id)
+    p = _safe_path(ws, path)
+    if p is None:
+        return f"[错误] 非法路径: {path}"
+    if not p.exists():
+        return f"[文件不存在] {path}"
+    try:
+        raw = await asyncio.to_thread(p.read_text, encoding="utf-8")
+    except Exception as e:
+        return f"[读取错误] {e}"
+    import editing
+    _, body = editing.strip_bom(raw)
+    return editing.annotate(editing.to_lf(body))
+
+
+async def edit_anchored(bot_id: int, path: str, edits: list, group_id: int | None = None) -> str:
+    """按行哈希锚编辑：edits=[{anchor, op(replace/delete/insert_after), text}]。
+    锚用内容哈希定位，行位移也有效；原子（任一锚失效/冲突即整体不落盘）。"""
+    ws, path = _get_effective_ws(bot_id, path, group_id)
+    p = _safe_path(ws, path)
+    if p is None:
+        return f"[错误] 非法路径: {path}"
+    if p.name in _WRITE_PROTECTED:
+        return f"[受保护] {p.name} 是永久记忆文件，Bot 无法编辑。如需修改记录，请通过工作区面板手动编辑。"
+    if not p.exists():
+        return f"[文件不存在] {path}"
+
+    rel = str(p.relative_to(ws)).replace("\\", "/")
+    lock = _get_path_lock(p)
+    async with lock:
+        try:
+            raw = await asyncio.to_thread(p.read_text, encoding="utf-8")
+        except Exception as e:
+            return f"[读取错误] {e}"
+        import editing
+        bom, body = editing.strip_bom(raw)
+        eol = editing.detect_eol(body)
+        current = editing.to_lf(body)
+        norm = [{**e, "text": editing.to_lf(e.get("text", ""))} for e in (edits or [])]
+        try:
+            updated = editing.apply_anchored_edits(current, norm)
+        except editing.HashlineError as e:
+            return f"[锚点编辑失败] {e}"
+
+        if updated == current:
+            return "[无改动] 替换前后内容一致"
+
+        out = bom + editing.restore_eol(updated, eol)
+        return await _commit_text(ws, p, rel, path, out, bot_id, "edit")
+
+
 # 遍历工作区时剪枝掉的重型目录（依赖/构建产物）。rglob("*") 会急切枚举整棵树——
 # 一旦工作区里有 node_modules/venv 等，会卡住目录列举并撑爆上下文 token；用 os.walk
 # 原地剪枝 dirnames 才能真正“不进入”这些目录。

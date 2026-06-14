@@ -36,6 +36,23 @@ class TestEditFileHandler(unittest.TestCase):
         out = _run(wt._handle_edit_file("a.py", context={"bot_id": 1}))
         self.assertIn("参数错误", out)
 
+    def test_read_anchored_delegates(self):
+        with patch.object(wt._ws, "read_anchored", new=AsyncMock(return_value="L1#abc│ x")) as e:
+            out = _run(wt._handle_read_anchored("a.py", context={"bot_id": 1}))
+        self.assertEqual(out, "L1#abc│ x")
+        e.assert_awaited_once_with(1, "a.py", group_id=None)
+
+    def test_edit_anchored_delegates(self):
+        edits = [{"anchor": "L1#abc", "text": "y"}]
+        with patch.object(wt._ws, "edit_anchored", new=AsyncMock(return_value="锚点完成")) as e:
+            out = _run(wt._handle_edit_anchored("a.py", edits=edits, context={"bot_id": 1}))
+        self.assertEqual(out, "锚点完成")
+        e.assert_awaited_once_with(1, "a.py", edits, group_id=None)
+
+    def test_edit_anchored_requires_edits(self):
+        out = _run(wt._handle_edit_anchored("a.py", context={"bot_id": 1}))
+        self.assertIn("参数错误", out)
+
     def test_edit_file_missing_bot_id(self):
         out = _run(wt._handle_edit_file("a.py", "a", "b", context={}))
         self.assertIn("缺少 bot_id", out)

@@ -11,9 +11,11 @@ from editing.edit import apply_replacement, apply_batch, EditError
 from editing.truncation import build_completion_hint
 from editing.eol import strip_bom, detect_eol, to_lf, restore_eol
 from editing.recovery import idempotent_skip, mismatch_hint
+from editing.hashline import annotate, apply_anchored_edits, HashlineError
 
 __all__ = [
     "apply_replacement", "apply_batch", "EditError", "build_completion_hint",
     "strip_bom", "detect_eol", "to_lf", "restore_eol",
     "idempotent_skip", "mismatch_hint",
+    "annotate", "apply_anchored_edits", "HashlineError",
 ]

@@ -95,6 +95,46 @@ _WORKSPACE_TOOLS = [
         },
     ),
     ToolDef(
+        name="read_anchored",
+        description=(
+            "读取文件并给每行打行哈希锚（L<行号>#<hash>）。配合 edit_anchored 按锚精准改单行/"
+            "少数行——锚用内容哈希定位，行位移也有效。大文件里改个别行优于重抄整段 old_string。"
+        ),
+        parameters={
+            "type": "object",
+            "properties": {"path": {"type": "string", "description": "相对于工作区根目录的路径"}},
+            "required": ["path"],
+        },
+        concurrency_safe=True,
+    ),
+    ToolDef(
+        name="edit_anchored",
+        description=(
+            "按行哈希锚编辑文件（先用 read_anchored 取锚）。edits 顺序应用、原子（任一锚失效/"
+            "冲突则整体不落盘）。每项 {anchor, op, text}，op ∈ replace/delete/insert_after。"
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "相对于工作区根目录的路径"},
+                "edits": {
+                    "type": "array",
+                    "description": "锚点编辑列表",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "anchor": {"type": "string", "description": "read_anchored 给出的锚，如 L12#a3f0c1d"},
+                            "op": {"type": "string", "description": "replace（默认）/ delete / insert_after"},
+                            "text": {"type": "string", "description": "replace/insert_after 的新文本；delete 可省"},
+                        },
+                        "required": ["anchor"],
+                    },
+                },
+            },
+            "required": ["path", "edits"],
+        },
+    ),
+    ToolDef(
         name="list_workspace",
         description="列出 Bot 工作区的目录结构",
         parameters={"type": "object", "properties": {}},
@@ -787,6 +827,23 @@ async def _handle_edit_file(path: str, old_string: str = None, new_string: str =
                                replace_all=replace_all, group_id=ctx.get("group_id"), edits=edits)
 
 
+async def _handle_read_anchored(path: str, context: dict = None, **kwargs) -> str:
+    bot_id = (context or {}).get("bot_id")
+    if not bot_id:
+        return "[错误] 缺少 bot_id"
+    return await _ws.read_anchored(bot_id, path, group_id=(context or {}).get("group_id"))
+
+
+async def _handle_edit_anchored(path: str, edits: list = None, context: dict = None, **kwargs) -> str:
+    ctx = context or {}
+    bot_id = ctx.get("bot_id")
+    if not bot_id:
+        return "[错误] 缺少 bot_id"
+    if not edits:
+        return "[参数错误] 需提供 edits 数组（每项 {anchor, op, text}）"
+    return await _ws.edit_anchored(bot_id, path, edits, group_id=ctx.get("group_id"))
+
+
 async def _handle_list_workspace(context: dict = None) -> str:
     ctx = context or {}
     bot_id = ctx.get("bot_id")
@@ -1036,6 +1093,8 @@ def register_workspace_tools() -> None:
         "read_file":        _handle_read_file,
         "write_file":       _handle_write_file,
         "edit_file":        _handle_edit_file,
+        "read_anchored":    _handle_read_anchored,
+        "edit_anchored":    _handle_edit_anchored,
         "list_workspace":   _handle_list_workspace,
         "run_skill":        _handle_run_skill,
         "run_shell":        _handle_run_shell,

@@ -213,7 +213,9 @@ replacer + §6 引号风格保留**全部落地**；仅 astEdit / Rust Myers / h
 | MultiOccurrence | ✅(等价覆盖) | `replace_all` + 等价类，无需独立 replacer |
 | **§6 引号风格保留** | ✅ | `_preserve_quote_style`：char 命中弯引号时把风格回施到 new_string |
 | **L2 工效** | ✅ | 幂等恢复、失配 hint、batch edits |
-| **L3 范式** | ⬜ 架构外 | hashline 行锚点 / tree-sitter astEdit / Rust Myers——范式级，独立工具按需另起 |
+| **L3 hashline 行锚点** | ✅ | `hashline.py` + `read_anchored` / `edit_anchored` 工具：行内容哈希锚，**行位移也有效**；replace/delete/insert_after，原子 |
+| tree-sitter astEdit | ⬜ 架构外 | 需 tree-sitter 绑定 + 各语言 grammar（重依赖），违背「零依赖」 |
+| Rust Myers | — 不适用 | gsd 用它**生成 diff 展示**，非匹配；我们匹配靠 replacer ladder，不需要 |
 
 完整 ladder（严格→宽容，9 层）：`simple → char → escape → indentation_flexible → line_trimmed →
 trimmed_boundary → whitespace_normalized → context_aware → block_anchor`。
@@ -221,8 +223,9 @@ trimmed_boundary → whitespace_normalized → context_aware → block_anchor`�
 落地代码：`backend/editing/{normalize,edit,replacers,eol,recovery}.py` + `workspace.edit_file` +
 `executors/plugins/workspace_tools.py`。测试：`editing/tests/{test_edit,test_normalize}.py`。
 
-> 现状能力 = opencode / Claude Code / gsd-2 / openclaw 四家**文本层并集**，且在「等价类唯一性」
-> 「原字节零损映射（含改长度归一）」两项上为**超集**；仅范式级（AST/Myers/行哈希）留作架构外。
+> 现状能力 = opencode / Claude Code / gsd-2 / openclaw 四家**全部并集**（文本层 9 重 ladder + 工效
+> 层 + gsd 的 hashline 行锚点），且在「等价类唯一性」「原字节零损映射（含改长度归一）」两项上为
+> **超集**；仅 tree-sitter astEdit（需重依赖）留作架构外，Rust Myers 与匹配无关（用于 diff 展示）。
 
 ---
 
