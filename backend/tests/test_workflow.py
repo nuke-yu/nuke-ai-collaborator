@@ -189,14 +189,16 @@ class TestOrchestratorFlow(unittest.TestCase):
         stages = build_rd_pipeline(ba, dev, qa)
         dev_instr = stages[1]["instruction"]
         self.assertIn("write_file", dev_instr)
-        self.assertIn("[[DEV_DONE]]", dev_instr)
+        # R1: 完成信号走结构化工具调用，不再让模型吐 [[DEV_DONE]] 哨兵（done_keyword
+        # 仍保留在 stage 上作为纯代码层 fallback，但指令只驱动工具）。
+        self.assertIn("signal_stage_done", dev_instr)
         # 明确禁止贴源码进聊天
         self.assertIn("聊天", dev_instr)
         self.assertTrue("严禁" in dev_instr or "不要" in dev_instr)
 
     def test_pipeline_qa_stage_has_rework_config(self):
-        """QA 阶段必须带返工配置：fail_keyword / rework_to / fail_gate_label，
-        且指令里告诉 QA 不通过时输出 [[QA_FAIL]]。"""
+        """QA 阶段必须带返工配置（fail_keyword / rework_to / fail_gate_label 作为纯代码层
+        fallback 保留），且指令驱动结构化工具：通过调 signal_stage_done、不通过调 signal_rework。"""
         from core.orchestration.pipeline import build_rd_pipeline
         ba = {"id": 1, "name": "BA", "avatar_color": "#1", "role": "BA"}
         dev = {"id": 2, "name": "Dev", "avatar_color": "#2", "role": "Dev"}
@@ -206,7 +208,9 @@ class TestOrchestratorFlow(unittest.TestCase):
         self.assertEqual(qa_stage["fail_keyword"], "[[QA_FAIL]]")
         self.assertEqual(qa_stage["rework_to"], 1)  # Dev 的下标
         self.assertTrue(qa_stage.get("fail_gate_label"))
-        self.assertIn("[[QA_FAIL]]", qa_stage["instruction"])
+        # R1: 指令驱动工具而非哨兵——通过→signal_stage_done，不通过→signal_rework。
+        self.assertIn("signal_stage_done", qa_stage["instruction"])
+        self.assertIn("signal_rework", qa_stage["instruction"])
 
     def test_qa_fail_bounces_back_to_dev_then_loops_to_done(self):
         """QA 出 [[QA_FAIL]] → 返工确认门（不前进）；人确认 → 回到 Dev（带返工 trigger）。
@@ -278,6 +282,8 @@ class TestOrchestratorFlow(unittest.TestCase):
         # 仍要能澄清/建工单
         self.assertIn("read_file", ba_allowed)
         self.assertIn("create_jira_ticket", ba_allowed)
+        # R1: 控制信号工具必须放行，否则 BA 的确认门只能退回脆弱的哨兵文本匹配。
+        self.assertIn("signal_stage_done", ba_allowed)
 
         # Dev 阶段必须不受限（它的活就是 write_file 落盘）
         self.assertIsNone(stages[1].get("allowed_tools"))

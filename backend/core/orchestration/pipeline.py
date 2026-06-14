@@ -9,9 +9,11 @@
 （门机制见 stages.SingleStage / declarative._raise_gate）。
 
 注意：
-- 完成信号用「哨兵标记」（[[BA_DONE]] / [[DEV_DONE]] / [[QA_DONE]]）而不是中文短语：
-  人格化 bot 几乎必然把长中文句子改写掉，匹配就失败、确认卡片永远弹不出来；带方括号
-  的怪 token 模型倾向一字不差照抄，且 stages._signal_in 做了大小写/空格/全角括号容错。
+- 完成信号优先走结构化工具调用：阶段完成调 signal_stage_done、返工调 signal_rework，
+  observe() 读 tool-call 结果做状态推进（确定性、可审计，不会被人格化 bot 改写）。
+  done_keyword/fail_keyword（[[BA_DONE]] / [[DEV_DONE]] / [[QA_DONE]] / [[QA_FAIL]] 等
+  哨兵）保留为纯代码层 fallback：模型若没调工具而是吐了哨兵文本，stages._signal_in 仍
+  能兜住（大小写/空格/全角括号容错）。提示词只驱动工具，不再要求模型输出哨兵。
 - 澄清需求、确认、拆 Jira 工单都是 BA 一个人的活，合并成单一 BA 阶段（不再拆两段）。
 - 首阶段(BA)由用户驱动：begin 不自动派发，用户开口聊需求即进入；本阶段任务指令
   (instruction) 不经 enter 的 trigger 送达，而是随 system_suffix 一起带给 BA
@@ -26,9 +28,12 @@ PIPELINE_ID = "rd_gate_v1"
 # BA 阶段只澄清需求 + 列工单，不写代码。用工具白名单在工具层物理拿掉一切写/执行
 # 类工具（write_file / write_local_file / run_shell / create_pr / spawn_agent），
 # 只留读取、技能、建/查工单——光靠提示约束挡不住模型在需求阶段直接动手写网页。
+# 例外：放行 signal_stage_done（阶段完成的结构化控制信号），否则 BA 阶段连确认门都
+# 无法用工具驱动，只能退回脆弱的哨兵文本匹配（R1 通电的关键一环）。
 _BA_ALLOWED_TOOLS = [
     "read_file", "read_local_file", "list_workspace",
     "run_skill", "create_jira_ticket", "list_jira_tickets",
+    "signal_stage_done",
 ]
 
 
@@ -67,9 +72,9 @@ def build_rd_pipeline(ba: dict, dev: dict, qa: dict) -> list[dict]:
                 "不要创建项目目录、不要落盘任何实现。开发是确认通过后下一阶段 Dev 的活。"
                 "（系统也已在工具层禁用了你的 write_file / run_shell 等写入能力。）"
                 "需求总结和工单清单都给完后，向用户说明『都就绪了，是否让开发开始？』，"
-                "并在回复的最后一行单独、原样输出标记 [[BA_DONE]]（一字不差，"
-                "不要翻译/改写/加别的字）——系统识别到它才会给用户弹出确认卡片。"
-                "没完全澄清、工单没列完之前，绝对不要输出这个标记。"
+                "并调用工具 signal_stage_done(reason=\"需求已澄清、工单已就绪的简短说明\") "
+                "通知系统——系统识别到这个工具调用才会给用户弹出确认卡片。"
+                "没完全澄清、工单没列完之前，绝对不要调用它。"
             ),
             done_keyword="[[BA_DONE]]",
             gate_label="确认需求已整理清楚、Jira 工单已建好",
@@ -84,7 +89,7 @@ def build_rd_pipeline(ba: dict, dev: dict, qa: dict) -> list[dict]:
                 "- write_file 仅用于新建文件或整文件重写；\n"
                 "- 严禁把完整源码贴进聊天回复，只需说明实现方案与落盘文件。\n"
                 "开发完成后做代码自测，并提供 PR 描述（当前 Git 为替身）。"
-                "确认代码落盘且自测通过后，在回复的最后一行单独、原样输出标记 [[DEV_DONE]]（一字不差，不要改写）；没落盘前绝对不输出它。"
+                "确认代码落盘且自测通过后，调用工具 signal_stage_done(reason=\"已落盘文件清单与自测结论的简短说明\") 通知系统；没落盘前绝对不要调用它。"
             ),
             done_keyword="[[DEV_DONE]]",
             gate_label="确认开发完成、PR 已提",
@@ -94,12 +99,12 @@ def build_rd_pipeline(ba: dict, dev: dict, qa: dict) -> list[dict]:
             instruction=(
                 "按 Jira 工单的验收标准(AC)做冒烟测试：逐条给出通过/不通过及理由，"
                 "最后给出测试结论。"
-                "【收尾规则】只有当所有 AC 全部通过时，才在回复的最后一行单独、原样输出 "
-                "[[QA_DONE]]（一字不差，不要改写）。"
-                "只要有任何一条 AC 不通过，就绝对不要输出 [[QA_DONE]]，"
-                "而是在回复的最后一行单独、原样输出 [[QA_FAIL]]——"
+                "【收尾规则】只有当所有 AC 全部通过时，才调用工具 "
+                "signal_stage_done(reason=\"各 AC 通过情况与测试结论\") 通知系统。"
+                "只要有任何一条 AC 不通过，就绝对不要调用 signal_stage_done，"
+                "而是调用工具 signal_rework(target_stage=\"Dev\", reason=\"未通过的 AC 与 bug 说明\")——"
                 "系统会弹确认卡片，人确认后把问题打回 Dev 修复，修好会再回到你这里重测。"
-                "两个标记互斥，一次只输出其中一个；测试还没做完之前两个都不要输出。"
+                "两个工具互斥，一次只调用其中一个；测试还没做完之前两个都不要调用。"
             ),
             done_keyword="[[QA_DONE]]",
             gate_label="确认测试通过",
