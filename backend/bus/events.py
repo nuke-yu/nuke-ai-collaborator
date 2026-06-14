@@ -9,13 +9,18 @@ from typing import Any
 
 # 中心注册表：type string → 事件类
 _registry: dict[str, type] = {}
+# 关键控制类事件注册表
+_critical_events: set[str] = set()
 
 
-def event(type_name: str):
-    """装饰器：注册事件类，自动附加 .type 类属性。"""
+def event(type_name: str, critical: bool = False):
+    """装饰器：注册事件类，自动附加 .type 类属性，并记录是否是 critical 控制事件。"""
     def decorator(cls):
         cls.type = type_name
+        cls.critical = critical
         _registry[type_name] = cls
+        if critical:
+            _critical_events.add(type_name)
         return dataclass(cls)
     return decorator
 
@@ -251,7 +256,7 @@ class ReactObservation:
 
 # ─── 工作流 ───────────────────────────────────────────────────────────────────
 
-@event("workflow_update")
+@event("workflow_update", critical=True)
 class WorkflowUpdate:
     group_id: int
     active:   bool
@@ -261,7 +266,7 @@ class WorkflowUpdate:
     awaiting_confirm: str | None = None   # gate_id 时表示该群正挂在人确认门上
 
 
-@event("workflow_paused")
+@event("workflow_paused", critical=True)
 class WorkflowPaused:
     group_id: int
     reason:   str  # e.g., 'gate' or 'done' or 'pause'
@@ -277,7 +282,7 @@ class Compaction:
     summary:  str
 
 
-@event("compaction_triggered")
+@event("compaction_triggered", critical=True)
 class CompactionTriggered:
     group_id:    int
     bot_id:      int
@@ -286,7 +291,7 @@ class CompactionTriggered:
     temperature: float
 
 
-@event("compaction_completed")
+@event("compaction_completed", critical=True)
 class CompactionCompleted:
     group_id:      int
     summary_id:    int
@@ -349,7 +354,7 @@ class BeforeFinalizeRejected:
 
 # ─── Permission ──────────────────────────────────────────────────────────────
 
-@event("permission_asked")
+@event("permission_asked", critical=True)
 class PermissionAsked:
     group_id:   int
     request_id: str
@@ -360,7 +365,7 @@ class PermissionAsked:
 
 # ─── R&D Domain Events (研发业务领域事件) ───────────────────────────────────
 
-@event("rd_ticket_created")
+@event("rd_ticket_created", critical=True)
 class TicketCreated:
     """BA Bot 产生了新的 Jira Ticket 或任务。"""
     group_id:    int
@@ -371,7 +376,7 @@ class TicketCreated:
     creator_id:  int | None = None
 
 
-@event("rd_code_committed")
+@event("rd_code_committed", critical=True)
 class CodeCommitted:
     """Dev Bot 完成了代码提交。"""
     group_id:    int
@@ -381,7 +386,7 @@ class CodeCommitted:
     author_id:   int
 
 
-@event("rd_task_failed")
+@event("rd_task_failed", critical=True)
 class TaskFailed:
     """研发环节（开发、测试、部署）中途失败。"""
     group_id:  int

@@ -72,18 +72,30 @@ class EventBus:
         await self._dispatch(p.get("type", ""), p)
 
     async def _dispatch(self, event_type: str, payload: dict) -> None:
-        # DFT-080: Non-blocking dispatch to prevent slow subscribers from stalling the bus.
-        # Uses put_nowait to implement "Drop Newest" strategy when a subscriber's queue is full.
+        # DFT-080: Non-blocking dispatch for UI events to prevent slow subscribers from stalling the bus.
+        # For critical events (control flow), we use await put() to guarantee delivery (backpressure).
+        # We run the put operations concurrently to avoid Head-of-Line blocking across subscribers.
+        from bus.events import _critical_events
+        is_critical = event_type in _critical_events
+        
+        put_tasks = []
+
         for q in list(self._typed.get(event_type, [])):
-            try:
-                q.put_nowait(payload)
-            except asyncio.QueueFull:
-                log.warning("bus: typed queue for %s is full, dropping message", event_type)
+            if is_critical:
+                put_tasks.append(q.put(payload))
+            else:
+                try:
+                    q.put_nowait(payload)
+                except asyncio.QueueFull:
+                    log.warning("bus: typed queue for %s is full, dropping message", event_type)
         for q in list(self._wildcard):
             try:
                 q.put_nowait(payload)
             except asyncio.QueueFull:
                 log.warning("bus: wildcard queue is full, dropping message")
+
+        if put_tasks:
+            await asyncio.gather(*put_tasks)
 
     # ── 订阅 ──────────────────────────────────────────────────────────────────
 

@@ -54,5 +54,29 @@ class TestDFT080BusBackpressure(unittest.IsolatedAsyncioTestCase):
             count += 1
         self.assertEqual(count, 1)
 
+    async def test_critical_event_blocks_on_backpressure(self):
+        from bus.events import WorkflowPaused
+        bus = EventBus()
+        sub = bus.subscribe(WorkflowPaused, maxsize=1)
+        
+        # Publish first critical event (fills queue)
+        await bus.publish(WorkflowPaused(group_id=1, reason="gate"))
+        
+        # Publish second critical event with timeout (should time out due to backpressure)
+        try:
+            await asyncio.wait_for(
+                bus.publish(WorkflowPaused(group_id=1, reason="done")),
+                timeout=0.1
+            )
+            self.fail("Critical event should have blocked and timed out due to queue being full")
+        except asyncio.TimeoutError:
+            pass
+            
+        # Drain one item
+        await sub._queue.get()
+        
+        # Now we should be able to publish without blocking
+        await bus.publish(WorkflowPaused(group_id=1, reason="done"))
+
 if __name__ == "__main__":
     unittest.main()
