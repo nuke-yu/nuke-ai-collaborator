@@ -15,25 +15,38 @@ from executors import tool_executor
 from integrations.jira import get_jira
 from integrations.git import get_git
 
+from pydantic import BaseModel, Field
+from typing import Literal, Optional, List
+
+class CreateJiraTicketParams(BaseModel):
+    title: str = Field(..., description="工单标题")
+    description: str = Field("", description="工单描述/范围")
+    acceptance_criteria: str = Field("", description="验收标准(AC)，可多条")
+    project: str = Field("", description="所属项目名（与 PROJECTS.md 中一致，如 my-app）。填写后 BOARD.md 自动显示项目列，Dev/QA 无需猜测。")
+
+class ListJiraTicketsParams(BaseModel):
+    pass
+
+class UpdateJiraTicketParams(BaseModel):
+    ticket_id: str = Field(..., description="工单号，如 DFT-1")
+    status: Literal["backlog", "in_progress", "done"] = Field(..., description="新状态：backlog / in_progress / done")
+    project: Optional[str] = Field(None, description="（可选）所属项目名。BA 建单时未填、或 Dev 自行命名时在此补写，写入后 BOARD.md 立即可见。")
+
+class CreatePrParams(BaseModel):
+    title: str = Field(..., description="PR 标题")
+    description: str = Field("", description="PR 描述/改动说明")
+    ticket_ids: List[str] = Field(default_factory=list, description="关联的 Jira 工单号，如 ['DFT-1','DFT-2']")
+
 RD_TOOLS = [
     ToolDef(
         name="create_jira_ticket",
         description="创建一个 Jira 工单（含验收标准 AC）。BA 在需求确认后用它建工单。project 字段关联工单到具体项目，BOARD.md 会显示该列方便 Dev/QA 定位。",
-        parameters={
-            "type": "object",
-            "properties": {
-                "title": {"type": "string", "description": "工单标题"},
-                "description": {"type": "string", "description": "工单描述/范围"},
-                "acceptance_criteria": {"type": "string", "description": "验收标准(AC)，可多条"},
-                "project": {"type": "string", "description": "所属项目名（与 PROJECTS.md 中一致，如 my-app）。填写后 BOARD.md 自动显示项目列，Dev/QA 无需猜测。"},
-            },
-            "required": ["title"],
-        },
+        parameters=CreateJiraTicketParams,
     ),
     ToolDef(
         name="list_jira_tickets",
         description="列出本群当前所有 Jira 工单（标题/状态/AC）。Dev/QA 用它查看要做/要测什么。",
-        parameters={"type": "object", "properties": {}},
+        parameters=ListJiraTicketsParams,
         concurrency_safe=True,
     ),
     ToolDef(
@@ -43,38 +56,12 @@ RD_TOOLS = [
             "若 BA 建工单时未填，Dev 根据需求自行命名后在此写入）。BOARD.md 自动更新 Project 列，"
             "QA 即可看到要测哪个项目。"
         ),
-        parameters={
-            "type": "object",
-            "properties": {
-                "ticket_id": {"type": "string", "description": "工单号，如 DFT-1"},
-                "status": {
-                    "type": "string",
-                    "enum": ["backlog", "in_progress", "done"],
-                    "description": "新状态：backlog / in_progress / done",
-                },
-                "project": {
-                    "type": "string",
-                    "description": "（可选）所属项目名。BA 建单时未填、或 Dev 自行命名时在此补写，写入后 BOARD.md 立即可见。",
-                },
-            },
-            "required": ["ticket_id", "status"],
-        },
+        parameters=UpdateJiraTicketParams,
     ),
     ToolDef(
         name="create_pr",
         description="提交一个 PR（替身）。Dev 自测通过后用它提 PR，并关联 Jira 工单号。",
-        parameters={
-            "type": "object",
-            "properties": {
-                "title": {"type": "string", "description": "PR 标题"},
-                "description": {"type": "string", "description": "PR 描述/改动说明"},
-                "ticket_ids": {
-                    "type": "array", "items": {"type": "string"},
-                    "description": "关联的 Jira 工单号，如 ['DFT-1','DFT-2']",
-                },
-            },
-            "required": ["title"],
-        },
+        parameters=CreatePrParams,
     ),
 ]
 

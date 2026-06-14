@@ -1,8 +1,6 @@
-"""IPC 隧道消息 schema（V3 §4）—— 跨平台、依赖纯净。
-
-下行 Supervisor → Worker；上行 Worker → Supervisor。
-每条消息都带 group_id + trace_id 路由/追踪头（§10.2）。
-"""
+import dataclasses
+from dataclasses import dataclass, field
+from typing import Any, Dict, Optional, List
 
 # ── 下行 (Supervisor → Worker) ────────────────────────────────────────────
 USER_MESSAGE = "user_message"            # 用户消息
@@ -30,18 +28,10 @@ LEASE_RELEASED = "lease_released"        # CELL-18: Worker ACK that group is clo
 UPSTREAM = frozenset({BROADCAST, UNREAD_DELTA, STATS_REPORT, LEASE_RELEASED})
 
 # ── MCP collector 总线（跨群组单例进程，经 Supervisor 作 bus 中继）────────────
-# MCP 是跨群组通用能力，跑在独立的 mcp-collector 进程而非每个 worker。
-# 流向：worker ──MCP_CALL──▶ supervisor ──MCP_CALL──▶ collector
-#       worker ◀─MCP_RESULT── supervisor ◀─MCP_RESULT── collector
-# collector 启动/ToolListChanged 时 push MCP_SCHEMAS；supervisor 缓存并下推给各 worker。
-# 按 request_id 关联应答、origin_worker_id 回中继。权限在 worker 侧（call 前已 check），
-# collector 只是总线内侧可信执行器。
 MCP_COLLECTOR_ID = "mcp-collector"       # collector 连接的 well-known worker_id
 MCP_CALL = "mcp_call"                    # worker→sup→collector：执行一个 MCP 工具
 MCP_RESULT = "mcp_result"                # collector→sup→worker：工具结果（按 request_id）
 MCP_SCHEMAS = "mcp_schemas"             # collector→sup→workers：当前 MCP 工具表快照（push）
-# OAuth（McpAuthTool 式）：bot 调 mcp_authenticate → 触发授权 → 返回授权 URL 进聊天；
-# 用户在浏览器授权 → main 的回调路由把 code/state 经 bus 直发 collector 完成握手。
 MCP_AUTH_START = "mcp_auth_start"        # worker→sup→collector：为某 server 启动 OAuth（回 MCP_RESULT 带 URL）
 MCP_OAUTH_CALLBACK = "mcp_oauth_callback"  # main→collector：授权码回调（code/state）
 
@@ -50,11 +40,230 @@ MCP_BUS = frozenset({MCP_CALL, MCP_RESULT, MCP_SCHEMAS, MCP_AUTH_START, MCP_OAUT
 # ── 控制帧（连接握手，不属于业务上/下行集） ────────────────────────────────
 HELLO = "hello"   # Worker / collector → Supervisor 首帧，自报 worker_id 完成注册
 
-# 注：LOG_RECORD 走独立日志通道，**绝不**与业务隧道共用（§10.2 队头阻塞）。
-
-
 PROTOCOL_VERSION = 1
 
-def envelope(msg_type: str, *, group_id: int, trace_id: str | None = None, **fields) -> dict:
+FRAME_TYPES = {}
+
+def register_frame_type(msg_type: str):
+    def decorator(cls):
+        FRAME_TYPES[msg_type] = cls
+        return cls
+    return decorator
+
+@dataclass(eq=False)
+class BaseFrame:
+    type: str
+    group_id: int = 0
+    trace_id: Optional[str] = None
+    v: int = PROTOCOL_VERSION
+    extra: Dict[str, Any] = field(default_factory=dict, init=False)
+
+    def keys(self) -> list:
+        dc_fields = [f.name for f in dataclasses.fields(self) if f.name != 'extra']
+        return dc_fields + list(self.extra.keys())
+
+    def __getitem__(self, key):
+        if key == 'extra':
+            return self.extra
+        if hasattr(self, key) and key != 'extra':
+            return getattr(self, key)
+        if key in self.extra:
+            return self.extra[key]
+        raise KeyError(key)
+
+    def get(self, key, default=None):
+        try:
+            return self[key]
+        except KeyError:
+            return default
+
+    def __contains__(self, key):
+        return (hasattr(self, key) and key != 'extra') or (key in self.extra)
+
+    def __getattr__(self, name):
+        if name == 'extra':
+            raise AttributeError()
+        if name in self.extra:
+            return self.extra[name]
+        raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}'")
+
+    def to_dict(self) -> dict:
+        res = {f.name: getattr(self, f.name) for f in dataclasses.fields(self) if f.name != 'extra'}
+        res.update(self.extra)
+        return res
+
+    def __eq__(self, other):
+        if isinstance(other, dict):
+            for k, v in other.items():
+                try:
+                    if self[k] != v:
+                        return False
+                except KeyError:
+                    return False
+            return True
+        if hasattr(other, 'to_dict'):
+            return self.to_dict() == other.to_dict()
+        return super().__eq__(other)
+
+
+@register_frame_type(HELLO)
+@dataclass(eq=False)
+class HelloFrame(BaseFrame):
+    worker_id: str = ""
+
+@register_frame_type(USER_MESSAGE)
+@dataclass(eq=False)
+class UserMessageFrame(BaseFrame):
+    member_id: int = 0
+    content: str = ""
+    file_url: Optional[str] = None
+    file_name: Optional[str] = None
+    file_size: Optional[int] = None
+    file_type: Optional[str] = None
+    online_ids: List[int] = field(default_factory=list)
+    reply_to_id: Optional[int] = None
+    lang: Optional[str] = None
+
+@register_frame_type(ABORT)
+@dataclass(eq=False)
+class AbortFrame(BaseFrame):
+    pass
+
+@register_frame_type(PERMISSION_RESPONSE)
+@dataclass(eq=False)
+class PermissionResponseFrame(BaseFrame):
+    request_id: str = ""
+    approved: bool = False
+    persistence: str = "once"
+
+@register_frame_type(CONFIRM)
+@dataclass(eq=False)
+class ConfirmFrame(BaseFrame):
+    gate_id: str = ""
+
+@register_frame_type(START_WORKFLOW)
+@dataclass(eq=False)
+class StartWorkflowFrame(BaseFrame):
+    body: Optional[dict] = None
+    lang: Optional[str] = None
+
+@register_frame_type(WORKFLOW_NEXT)
+@dataclass(eq=False)
+class WorkflowNextFrame(BaseFrame):
+    pass
+
+@register_frame_type(WORKFLOW_END)
+@dataclass(eq=False)
+class WorkflowEndFrame(BaseFrame):
+    pass
+
+@register_frame_type(WAKE_TRIGGER)
+@dataclass(eq=False)
+class WakeTriggerFrame(BaseFrame):
+    bot_id: Optional[int] = None
+    content: str = ""
+
+@register_frame_type(RELEASE_LEASE)
+@dataclass(eq=False)
+class ReleaseLeaseFrame(BaseFrame):
+    pass
+
+@register_frame_type(QUERY)
+@dataclass(eq=False)
+class QueryFrame(BaseFrame):
+    req_id: str = ""
+    query: str = ""
+    limit: Optional[int] = None
+    before_id: Optional[int] = None
+    after_id: Optional[int] = None
+    q: Optional[str] = None
+
+@register_frame_type(MUTATE)
+@dataclass(eq=False)
+class MutateFrame(BaseFrame):
+    action: str = ""
+    member_id: int = 0
+    msg_id: int = 0
+    emoji: Optional[str] = None
+    content: Optional[str] = None
+
+@register_frame_type(BROADCAST)
+@dataclass(eq=False)
+class BroadcastFrame(BaseFrame):
+    payload: dict = field(default_factory=dict)
+
+@register_frame_type(UNREAD_DELTA)
+@dataclass(eq=False)
+class UnreadDeltaFrame(BaseFrame):
+    pass
+
+@register_frame_type(STATS_REPORT)
+@dataclass(eq=False)
+class StatsReportFrame(BaseFrame):
+    payload: dict = field(default_factory=dict)
+
+@register_frame_type(LEASE_RELEASED)
+@dataclass(eq=False)
+class LeaseReleasedFrame(BaseFrame):
+    pass
+
+@register_frame_type(MCP_CALL)
+@dataclass(eq=False)
+class McpCallFrame(BaseFrame):
+    request_id: str = ""
+    origin_worker_id: str = ""
+    tool: str = ""
+    arguments: dict = field(default_factory=dict)
+
+@register_frame_type(MCP_RESULT)
+@dataclass(eq=False)
+class McpResultFrame(BaseFrame):
+    request_id: str = ""
+    origin_worker_id: str = ""
+    result: Any = None
+    is_error: bool = False
+
+@register_frame_type(MCP_SCHEMAS)
+@dataclass(eq=False)
+class McpSchemasFrame(BaseFrame):
+    payload: dict = field(default_factory=dict)
+
+@register_frame_type(MCP_AUTH_START)
+@dataclass(eq=False)
+class McpAuthStartFrame(BaseFrame):
+    request_id: str = ""
+    origin_worker_id: str = ""
+    server: str = ""
+
+@register_frame_type(MCP_OAUTH_CALLBACK)
+@dataclass(eq=False)
+class McpOAuthCallbackFrame(BaseFrame):
+    state: str = ""
+    code: str = ""
+
+
+def parse_frame(data: dict) -> BaseFrame:
+    if not isinstance(data, dict):
+        raise TypeError("Frame must be a dictionary")
+    
+    msg_type = data.get("type")
+    cls = FRAME_TYPES.get(msg_type, BaseFrame)
+    
+    field_names = {f.name for f in dataclasses.fields(cls) if f.name != 'extra'}
+    
+    known_args = {}
+    extra_args = {}
+    for k, v in data.items():
+        if k in field_names:
+            known_args[k] = v
+        else:
+            extra_args[k] = v
+            
+    frame = cls(**known_args)
+    frame.extra = extra_args
+    return frame
+
+def envelope(msg_type: str, *, group_id: int, trace_id: str | None = None, **fields) -> BaseFrame:
     """构造带统一路由/追踪头的隧道消息（§10.2）。"""
-    return {"v": PROTOCOL_VERSION, "type": msg_type, "group_id": group_id, "trace_id": trace_id, **fields}
+    return parse_frame({"v": PROTOCOL_VERSION, "type": msg_type, "group_id": group_id, "trace_id": trace_id, **fields})
+

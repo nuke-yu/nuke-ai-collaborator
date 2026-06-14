@@ -4,16 +4,47 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 
+from pydantic import BaseModel
+
 @dataclass
 class ToolDef:
     name: str
     description: str
-    parameters: dict = field(default_factory=lambda: {"type": "object", "properties": {}})
+    _parameters: Any = field(default=None, repr=False)
     concurrency_safe: bool = False  # True = read-only, safe to run in parallel with other safe tools
     # Optional: bind the handler directly to the definition so we don't need
     # two parallel dicts (_defs / _handlers) in tool_executor.  Stays None for
     # ToolDefs that are created declaratively (e.g. in PluginManifest serialisation).
     handler: Callable | None = field(default=None, repr=False, compare=False)
+
+    def __init__(self, name: str, description: str, parameters: Any = None, concurrency_safe: bool = False, handler: Callable | None = None):
+        self.name = name
+        self.description = description
+        self._parameters = parameters
+        self.concurrency_safe = concurrency_safe
+        self.handler = handler
+
+    @property
+    def parameters(self) -> dict:
+        if self._parameters is None:
+            return {"type": "object", "properties": {}}
+        if isinstance(self._parameters, dict):
+            return self._parameters
+        if isinstance(self._parameters, type) and issubclass(self._parameters, BaseModel):
+            schema = self._parameters.model_json_schema()
+            schema = dict(schema)
+            schema.pop("title", None)
+            if "properties" in schema:
+                new_props = {}
+                for k, v in schema["properties"].items():
+                    if isinstance(v, dict):
+                        v = dict(v)
+                        v.pop("title", None)
+                    new_props[k] = v
+                schema["properties"] = new_props
+            return schema
+        return self._parameters
+
 
 
 @dataclass

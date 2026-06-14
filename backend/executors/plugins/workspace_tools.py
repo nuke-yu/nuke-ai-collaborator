@@ -33,35 +33,88 @@ _DEFAULT_SHELL = (
 )
 
 # ---------------------------------------------------------------------------
-# Tool definitions
+# Tool parameter schemas using Pydantic
 # ---------------------------------------------------------------------------
+from pydantic import BaseModel, Field
+from typing import Optional, List
+
+class ReadFileParams(BaseModel):
+    path: str = Field(..., description="相对于工作区根目录的路径")
+    offset: Optional[int] = Field(None, description="读取文件的起始字符偏移量")
+    limit: Optional[int] = Field(None, description="最大读取字符长度")
+
+class WriteFileParams(BaseModel):
+    path: str
+    content: str
+
+class SingleEdit(BaseModel):
+    old_string: str
+    new_string: str
+
+class EditFileParams(BaseModel):
+    path: str = Field(..., description="相对于工作区根目录的路径")
+    old_string: Optional[str] = Field(None, description="单次替换：要被替换的原文（需与文件内容一致，可含多行）")
+    new_string: Optional[str] = Field(None, description="单次替换：替换后的新内容")
+    replace_all: bool = Field(False, description="是否替换所有匹配，默认 false")
+    edits: Optional[List[SingleEdit]] = Field(None, description="批量替换：多处一次提交，顺序应用、原子（任一未命中则整体不落盘）。与 old_string/new_string 二选一。")
+
+class ReadAnchoredParams(BaseModel):
+    path: str = Field(..., description="相对于工作区根目录的路径")
+
+class AnchoredEditItem(BaseModel):
+    anchor: str = Field(..., description="read_anchored 给出的锚，如 L12#a3f0c1d")
+    op: Optional[str] = Field(None, description="replace（默认）/ delete / insert_after")
+    text: Optional[str] = Field(None, description="replace/insert_after 的新文本；delete 可省")
+
+class EditAnchoredParams(BaseModel):
+    path: str = Field(..., description="相对于工作区根目录的路径")
+    edits: List[AnchoredEditItem] = Field(..., description="锚点编辑列表")
+
+class ListWorkspaceParams(BaseModel):
+    pass
+
+class RunSkillParams(BaseModel):
+    name: str = Field(..., description="技能文件名（不含扩展名）")
+    args: str = Field("", description="运行技能脚本的参数，默认为空字串")
+
+class RunShellParams(BaseModel):
+    cmd: str = Field(..., description="要执行的 shell 命令")
+    cwd: Optional[str] = Field(None, description="工作目录（绝对路径），默认为用户 home 目录")
+    timeout: int = Field(30, description="超时秒数，默认 30")
+    background: bool = Field(False, description="后台运行，立即返回 PID")
+
+class ReadLocalFileParams(BaseModel):
+    path: str = Field(..., description="文件的绝对路径")
+
+class WriteLocalFileParams(BaseModel):
+    path: str = Field(..., description="文件的绝对路径")
+    content: str
+
+class SpawnAgentParams(BaseModel):
+    bot_name: str = Field(..., description="目标 Bot 的名称")
+    task: str = Field(..., description="委托给子 Agent 的具体任务描述")
+    background: bool = Field(False, description="后台运行，立即返回不等待结果")
+
+class SignalStageDoneParams(BaseModel):
+    reason: str = Field(..., description="完成当前阶段工作的简短理由、最终结论或交付物说明")
+
+class SignalReworkParams(BaseModel):
+    target_stage: str = Field(..., description="需要返工回到的目标阶段名称或角色（如 'Dev'、'QA' 等）")
+    reason: str = Field(..., description="需要返工的理由、Bug 报告或测试未通过的说明")
+    rework_to_idx: Optional[int] = Field(None, description="（可选）需要返工回到的目标阶段的 0-based 索引")
+
 
 _WORKSPACE_TOOLS = [
     ToolDef(
         name="read_file",
         description="读取 Bot 工作区内的文件内容",
-        parameters={
-            "type": "object",
-            "properties": {
-                "path": {"type": "string", "description": "相对于工作区根目录的路径"},
-                "offset": {"type": "integer", "description": "读取文件的起始字符偏移量"},
-                "limit": {"type": "integer", "description": "最大读取字符长度"}
-            },
-            "required": ["path"],
-        },
+        parameters=ReadFileParams,
         concurrency_safe=True,
     ),
     ToolDef(
         name="write_file",
         description="仅用于新建文件或整文件重写；改已有文件请用 edit_file（只发 diff，避免大文件被输出长度截断）。",
-        parameters={
-            "type": "object",
-            "properties": {
-                "path":    {"type": "string"},
-                "content": {"type": "string"},
-            },
-            "required": ["path", "content"],
-        },
+        parameters=WriteFileParams,
     ),
     ToolDef(
         name="edit_file",
@@ -71,28 +124,7 @@ _WORKSPACE_TOOLS = [
             "（否则报错，请加更多上下文或用 replace_all）。修改已有文件首选本工具。"
             "一次改多处可用 edits 数组（顺序应用、原子、一次提交）。"
         ),
-        parameters={
-            "type": "object",
-            "properties": {
-                "path":        {"type": "string", "description": "相对于工作区根目录的路径"},
-                "old_string":  {"type": "string", "description": "单次替换：要被替换的原文（需与文件内容一致，可含多行）"},
-                "new_string":  {"type": "string", "description": "单次替换：替换后的新内容"},
-                "replace_all": {"type": "boolean", "description": "是否替换所有匹配，默认 false", "default": False},
-                "edits": {
-                    "type": "array",
-                    "description": "批量替换：多处一次提交，顺序应用、原子（任一未命中则整体不落盘）。与 old_string/new_string 二选一。",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "old_string": {"type": "string"},
-                            "new_string": {"type": "string"},
-                        },
-                        "required": ["old_string", "new_string"],
-                    },
-                },
-            },
-            "required": ["path"],
-        },
+        parameters=EditFileParams,
     ),
     ToolDef(
         name="read_anchored",
@@ -100,11 +132,7 @@ _WORKSPACE_TOOLS = [
             "读取文件并给每行打行哈希锚（L<行号>#<hash>）。配合 edit_anchored 按锚精准改单行/"
             "少数行——锚用内容哈希定位，行位移也有效。大文件里改个别行优于重抄整段 old_string。"
         ),
-        parameters={
-            "type": "object",
-            "properties": {"path": {"type": "string", "description": "相对于工作区根目录的路径"}},
-            "required": ["path"],
-        },
+        parameters=ReadAnchoredParams,
         concurrency_safe=True,
     ),
     ToolDef(
@@ -113,118 +141,50 @@ _WORKSPACE_TOOLS = [
             "按行哈希锚编辑文件（先用 read_anchored 取锚）。edits 顺序应用、原子（任一锚失效/"
             "冲突则整体不落盘）。每项 {anchor, op, text}，op ∈ replace/delete/insert_after。"
         ),
-        parameters={
-            "type": "object",
-            "properties": {
-                "path": {"type": "string", "description": "相对于工作区根目录的路径"},
-                "edits": {
-                    "type": "array",
-                    "description": "锚点编辑列表",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "anchor": {"type": "string", "description": "read_anchored 给出的锚，如 L12#a3f0c1d"},
-                            "op": {"type": "string", "description": "replace（默认）/ delete / insert_after"},
-                            "text": {"type": "string", "description": "replace/insert_after 的新文本；delete 可省"},
-                        },
-                        "required": ["anchor"],
-                    },
-                },
-            },
-            "required": ["path", "edits"],
-        },
+        parameters=EditAnchoredParams,
     ),
     ToolDef(
         name="list_workspace",
         description="列出 Bot 工作区的目录结构",
-        parameters={"type": "object", "properties": {}},
+        parameters=ListWorkspaceParams,
         concurrency_safe=True,
     ),
     ToolDef(
         name="run_skill",
         description="执行 skills/ 目录中的技能脚本",
-        parameters={
-            "type": "object",
-            "properties": {
-                "name": {"type": "string", "description": "技能文件名（不含扩展名）"},
-                "args": {"type": "string", "default": ""},
-            },
-            "required": ["name"],
-        },
+        parameters=RunSkillParams,
     ),
     ToolDef(
         name="run_shell",
         description="在本地执行 shell 命令，返回 stdout / stderr / exit_code",
-        parameters={
-            "type": "object",
-            "properties": {
-                "cmd":        {"type": "string",  "description": "要执行的 shell 命令"},
-                "cwd":        {"type": "string",  "description": "工作目录（绝对路径），默认为用户 home 目录"},
-                "timeout":    {"type": "integer", "description": "超时秒数，默认 30", "default": 30},
-                "background": {"type": "boolean", "description": "后台运行，立即返回 PID", "default": False},
-            },
-            "required": ["cmd"],
-        },
+        parameters=RunShellParams,
     ),
     ToolDef(
         name="read_local_file",
         description="读取本地任意路径的文件（工作区外）",
-        parameters={
-            "type": "object",
-            "properties": {"path": {"type": "string", "description": "文件的绝对路径"}},
-            "required": ["path"],
-        },
+        parameters=ReadLocalFileParams,
         concurrency_safe=True,
     ),
     ToolDef(
         name="write_local_file",
         description="写入本地任意路径的文件（自动创建父目录）",
-        parameters={
-            "type": "object",
-            "properties": {
-                "path":    {"type": "string", "description": "文件的绝对路径"},
-                "content": {"type": "string"},
-            },
-            "required": ["path", "content"],
-        },
+        parameters=WriteLocalFileParams,
     ),
     ToolDef(
         name="spawn_agent",
         description="派生子 Agent：将子任务委托给另一个 Bot 执行。background=true 时立即返回，子 Agent 在后台运行，完成后结果自动注回当前对话",
-        parameters={
-            "type": "object",
-            "properties": {
-                "bot_name":   {"type": "string",  "description": "目标 Bot 的名称"},
-                "task":       {"type": "string",  "description": "委托给子 Agent 的具体任务描述"},
-                "background": {"type": "boolean", "description": "后台运行，立即返回不等待结果", "default": False},
-            },
-            "required": ["bot_name", "task"],
-        },
+        parameters=SpawnAgentParams,
     ),
     ToolDef(
         name="signal_stage_done",
         description="当完成当前阶段的任务时，调用此工具以通知系统阶段已完成，并触发进入下一阶段（门）。",
-        parameters={
-            "type": "object",
-            "properties": {
-                "reason": {"type": "string", "description": "完成当前阶段工作的简短理由、最终结论或交付物说明"},
-            },
-            "required": ["reason"],
-        },
+        parameters=SignalStageDoneParams,
         concurrency_safe=True,
     ),
     ToolDef(
         name="signal_rework",
         description="当发现上游阶段的问题需要打回重做（返工）时，调用此工具以将工作流回退到指定阶段。",
-        parameters={
-            "type": "object",
-            "properties": {
-                "target_stage": {"type": "string", "description": "需要返工回到的目标阶段名称或角色（如 'Dev'、'QA' 等）"},
-                "reason": {"type": "string", "description": "需要返工的理由、Bug 报告或测试未通过的说明"},
-                "rework_to_idx": {"type": "integer", "description": "（可选）需要返工回到的目标阶段的 0-based 索引"},
-            },
-            "required": ["target_stage", "reason"],
-        },
+        parameters=SignalReworkParams,
         concurrency_safe=True,
     ),
 ]
@@ -1147,18 +1107,15 @@ def register_workspace_tools() -> None:
     # MCP OAuth trigger (McpAuthTool style). Builtin so it stays on the hooked
     # tool_executor path; bots that should authenticate MCP servers must include
     # "mcp_authenticate" in their allowed_tools to have it surfaced to the LLM.
+    class McpAuthenticateParams(BaseModel):
+        server: str = Field(..., description="mcp_servers.json 中的 server 名")
+
     from executors.base import ToolDef as _ToolDef
     tool_executor.register(
         _ToolDef(
             name="mcp_authenticate",
             description="为需要 OAuth 授权的 remote MCP server 发起授权，返回授权链接交给用户在浏览器打开",
-            parameters={
-                "type": "object",
-                "properties": {
-                    "server": {"type": "string", "description": "mcp_servers.json 中的 server 名"},
-                },
-                "required": ["server"],
-            },
+            parameters=McpAuthenticateParams,
         ),
         _handle_mcp_authenticate,
     )
