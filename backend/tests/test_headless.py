@@ -14,7 +14,7 @@ import pytest
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from backend.headless import (
+from headless import (
     ExitCode,
     Result,
     SessionInfo,
@@ -68,14 +68,14 @@ class TestSessionManagement:
         """Create a temporary directory for sessions."""
         with tempfile.TemporaryDirectory() as tmpdir:
             # Patch SESSIONS_DIR
-            with patch('backend.headless.SESSIONS_DIR', Path(tmpdir)):
+            with patch('headless.SESSIONS_DIR', Path(tmpdir)):
                 yield Path(tmpdir)
 
     def test_ensure_sessions_dir(self, temp_dir):
         """Test that sessions directory is created."""
         # temp_dir is created by tempfile fixture
         # Just verify the function works with existing dir
-        with patch('backend.headless.SESSIONS_DIR', temp_dir):
+        with patch('headless.SESSIONS_DIR', temp_dir):
             ensure_sessions_dir()
 
         assert temp_dir.exists()
@@ -83,7 +83,7 @@ class TestSessionManagement:
 
     def test_save_and_load_session(self, temp_dir):
         """Test saving and loading a session."""
-        with patch('backend.headless.SESSIONS_DIR', temp_dir):
+        with patch('headless.SESSIONS_DIR', temp_dir):
             # Save session
             session = SessionInfo(
                 id="test_session_123",
@@ -107,13 +107,13 @@ class TestSessionManagement:
 
     def test_load_nonexistent_session(self, temp_dir):
         """Test loading a session that doesn't exist."""
-        with patch('backend.headless.SESSIONS_DIR', temp_dir):
+        with patch('headless.SESSIONS_DIR', temp_dir):
             loaded = load_session("nonexistent")
             assert loaded is None
 
     def test_delete_session(self, temp_dir):
         """Test deleting a session."""
-        with patch('backend.headless.SESSIONS_DIR', temp_dir):
+        with patch('headless.SESSIONS_DIR', temp_dir):
             # Save session
             session = SessionInfo(
                 id="to_delete",
@@ -136,7 +136,7 @@ class TestSessionManagement:
 
     def test_list_sessions(self, temp_dir):
         """Test listing all sessions."""
-        with patch('backend.headless.SESSIONS_DIR', temp_dir):
+        with patch('headless.SESSIONS_DIR', temp_dir):
             # Create multiple sessions
             sessions = [
                 SessionInfo(id=f"session_{i}", group_id=1, member_id=1,
@@ -155,7 +155,7 @@ class TestSessionManagement:
 
     def test_list_sessions_filter_by_group(self, temp_dir):
         """Test filtering sessions by group_id."""
-        with patch('backend.headless.SESSIONS_DIR', temp_dir):
+        with patch('headless.SESSIONS_DIR', temp_dir):
             # Create sessions for different groups
             sessions = [
                 SessionInfo(id="g1_s1", group_id=1, member_id=1,
@@ -297,12 +297,12 @@ class TestIntegration:
     def temp_dir(self):
         """Create a temporary directory for sessions."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch('backend.headless.SESSIONS_DIR', Path(tmpdir)):
+            with patch('headless.SESSIONS_DIR', Path(tmpdir)):
                 yield Path(tmpdir)
 
     def test_full_session_lifecycle(self, temp_dir):
         """Test complete session lifecycle."""
-        with patch('backend.headless.SESSIONS_DIR', temp_dir):
+        with patch('headless.SESSIONS_DIR', temp_dir):
             # Create and save session
             session = SessionInfo(
                 id="lifecycle_test",

@@ -4,7 +4,7 @@ import os
 import pytest
 from unittest.mock import patch
 
-from backend.utils.feature_flags import (
+from utils.feature_flags import (
     feature,
     enable_feature,
     disable_feature,
@@ -177,7 +177,7 @@ class TestConditionalImport:
         with patch.dict(os.environ, {"FEATURE_CONDITIONAL_TEST": "true"}):
             result = conditional_import(
                 "CONDITIONAL_TEST",
-                "backend.utils.feature_flags",  # Valid module
+                "utils.feature_flags",  # Valid module
                 None  # No fallback
             )
             # Should return the module
@@ -203,7 +203,7 @@ class TestConditionalImport:
         result = conditional_import(
             "DISABLED_FEATURE",
             "nonexistent.module",
-            "backend.utils.feature_flags"  # Fallback
+            "utils.feature_flags"  # Fallback
         )
         # Should return fallback module
         assert result is not None
