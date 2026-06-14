@@ -195,4 +195,19 @@ gsd 的 `LINE#ID` 行哈希锚点是唯一的「换范式」能力——读文�
 
 ---
 
+## 12. 落地状态（2026-06-14）
+
+| Layer | 状态 | 实际落地 vs 设计的偏差（诚实记录） |
+|---|---|---|
+| **L0** | ✅ 已完成 | 等价类唯一性、char 归一（引号/破折号/unicode 空格，1→1）、EOL/BOM IO 边界、ws 尾换行修复全部落地。**位置映射归一器(§3) 未建**——char 归一是 1→1 长度保持，直接用偏移切回原字节即可，不需要 `src[]` 机器；该抽象只在引入「改长度且需拼回原字节」的归一时才有必要，属 L1+ 的引擎重构，YAGNI 暂缓。 |
+| **L1** | ✅ 已完成 | block-anchor（变长中间）+ 缩进重对齐落地。**indentation_flexible 跳过**——其匹配集是 line_trimmed 子集，边际价值低。 |
+| **L2** | ✅ 已完成 | 幂等恢复、失配 hint、batch edits 全部落地（`editing.apply_batch` + `edit_file` 的 `edits` 数组）。 |
+| **L3** | ⬜ 未做 | hashline 锚点，按需再开。 |
+
+落地代码：`backend/editing/{edit,replacers,eol,recovery}.py` + `workspace.edit_file` + `executors/plugins/workspace_tools.py`。测试：`editing/tests/test_edit.py`（35 用例）。
+
+> 现状能力 = opencode / Claude Code / gsd-2 / openclaw 四家**并集**，且在「等价类唯一性」「原字节零损映射」两项上为**超集**。
+
+---
+
 *设计日期：2026-06-14 · 范围：四框架技术并集 + 超集（唯一性 / 原字节映射）*
