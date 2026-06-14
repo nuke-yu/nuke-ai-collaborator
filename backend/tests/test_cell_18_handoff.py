@@ -76,5 +76,25 @@ class TestCell18Handoff(unittest.IsolatedAsyncioTestCase):
                     # Routing should STILL be updated to avoid being stuck forever
                     self.assertEqual(sup._routing_cache[77][0], "w2")
 
+    async def test_eviction_persistence_barrier(self):
+        from runtime.lifecycle import LifecycleManager
+        mgr = LifecycleManager()
+        
+        mock_orch = AsyncMock()
+        mock_orch.serialize = unittest.mock.MagicMock(return_value={"some_state": 123})
+        
+        with patch("core.workflow._group_orch", {99: "mock_orch_id"}), \
+             patch("core.orchestration.registry.get", return_value=mock_orch), \
+             patch("core.workflow_store.save_state", new_callable=AsyncMock) as mock_save_state, \
+             patch("core.bg.abort_group") as mock_abort, \
+             patch("db.aclose_writer", new_callable=AsyncMock), \
+             patch("workspace.clear_group_locks"):
+             
+            await mgr._do_evict(99)
+            
+            mock_orch.serialize.assert_called_once_with(99)
+            mock_save_state.assert_called_once_with(99, "mock_orch_id", {"some_state": 123})
+            mock_abort.assert_called_once_with(99)
+
 if __name__ == "__main__":
     unittest.main()

@@ -146,6 +146,22 @@ class LifecycleManager:
     async def _do_evict(self, gid: int) -> None:
         log.info("lifecycle: evicting group %d", gid)
         
+        # R5 Handoff Barrier: Force serialize and save orchestrator state before aborting tasks
+        try:
+            from core.orchestration import registry as orch_registry
+            import core.workflow as wf
+            from core import workflow_store
+            
+            orch_id = wf._group_orch.get(gid)
+            if orch_id:
+                orch = orch_registry.get(orch_id)
+                blob = orch.serialize(gid)
+                if blob is not None:
+                    log.info("lifecycle: force saving orchestrator state for group %d before eviction", gid)
+                    await workflow_store.save_state(gid, orch_id, blob)
+        except Exception:
+            log.exception("lifecycle: failed to force save state for group %d during eviction", gid)
+
         # 1. Abort any running tasks
         from core import bg
         bg.abort_group(gid)

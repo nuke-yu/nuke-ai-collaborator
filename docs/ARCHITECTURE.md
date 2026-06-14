@@ -300,7 +300,15 @@ Skill 不需要手动绑定到 Bot，而是采用**“代码即配置 (Configura
 | **工作区看板 (`BOARD.md`)** | 本地文件系统 `${workspace}/BOARD.md` | **Orchestrator & Workspace Tools**<br>物理文件即为 Source of Truth。进程重启后物理文件不受影响，各 Bot 通过 `write_file`/`read_file` 直接读取最新的看板物理状态。 |
 
 
-### 3. 并发控制与性能策略 (Concurrency Strategy)
+### 3. 租约转移与生命周期迁移动态保障 (Handoff & Eviction Barrier)
+在多 Worker 租约转移（Handoff）或本地生命周期 LRU 驱逐（Eviction）时，存在“旧 Worker 内存态 `orchestrator._state` 已更新（如观点压缩已生成）但尚未因步骤完成而自然落盘”的竞态窗口。
+为防止该竞态导致状态丢失或回退，系统实施了以下保障方案：
+*   **同步落盘屏障 (Persistence Barrier)**：在 Worker 物理释放租约（`LEASE_RELEASED`）并中止在飞任务（`bg.abort_group`）之前，**必须同步触发一次强制状态序列化与持久化**（调用 `orch.serialize` 强行写入 `workflow_state` 表）。
+*   **路由切换与接管**：只有在旧 Worker 的落盘屏障与生命周期清理完全结束后，Supervisor 才更新全局路由缓存并放行新 Worker 的 Hydrate 过程，确保新 Worker 能够 100% 还原最新的编排状态。
+*   **在飞任务终止语义**：对于被 eviction 强行中止的在飞执行单元（如 `tool_loop_v1`），恢复时遵从 Chat 交互安全语义——不再自动接续重入，而是由 `sessions.recover_all` 标记为 `failed` 等待用户显式干预。
+
+
+### 4. 并发控制与性能策略 (Concurrency Strategy)
 - **SQLite 优化**：强制开启 WAL 模式 (`PRAGMA journal_mode=WAL;`)，解决顺序执行下的读写冲突。
 - **策略性降级 (Strategic Deprioritization)**：
     - **高并发写入队列**：由于研发团队协作的消息频次较低（分钟级而非秒级），暂不实施复杂的后台写入队列，优先保证 WAL 的稳定性。
