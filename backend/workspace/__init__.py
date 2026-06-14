@@ -348,20 +348,28 @@ async def edit_file(bot_id: int, path: str, old_string: str, new_string: str, re
     lock = _get_path_lock(p)
     async with lock:
         try:
-            current = await asyncio.to_thread(p.read_text, encoding="utf-8")
+            raw = await asyncio.to_thread(p.read_text, encoding="utf-8")
         except Exception as e:
             return f"[读取错误] {e}"
 
         import editing
+        # IO 边界：在「无 BOM 的 LF」平面做匹配，写回时还原原行尾/BOM。
+        # 这样 CRLF 文件能被 LF 的 old_string 命中，又不静默改用户的行尾风格。
+        bom, body = editing.strip_bom(raw)
+        eol = editing.detect_eol(body)
+        current = editing.to_lf(body)
+        old_lf = editing.to_lf(old_string)
+        new_lf = editing.to_lf(new_string)
         try:
-            updated = editing.apply_replacement(current, old_string, new_string, replace_all=replace_all)
+            updated = editing.apply_replacement(current, old_lf, new_lf, replace_all=replace_all)
         except editing.EditError as e:
             return f"[编辑失败] {e}"
 
         if updated == current:
             return "[无改动] 替换前后内容一致"
 
-        return await _commit_text(ws, p, rel, path, updated, bot_id, "edit")
+        out = bom + editing.restore_eol(updated, eol)
+        return await _commit_text(ws, p, rel, path, out, bot_id, "edit")
 
 
 # 遍历工作区时剪枝掉的重型目录（依赖/构建产物）。rglob("*") 会急切枚举整棵树——

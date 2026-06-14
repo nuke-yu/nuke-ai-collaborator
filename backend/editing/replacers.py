@@ -18,6 +18,42 @@ def simple_replacer(content: str, find: str):
         yield find
 
 
+# 长度保持的字符归一表（1 字符 → 1 字符）：弯引号、各类破折号、unicode 空格。
+# 因为 1→1，归一文与原文逐位对应，匹配到的偏移可直接切回原文真实字节。
+# 行尾(CRLF)/BOM 改长度，不在此处——由 IO 层（workspace.edit_file）统一处理。
+_CHAR_CANON = {
+    "‘": "'", "’": "'", "‚": "'", "‛": "'",   # 单弯引号
+    "“": '"', "”": '"', "„": '"', "‟": '"',   # 双弯引号
+    "‐": "-", "‑": "-", "‒": "-", "–": "-",   # 连字符/短破折
+    "—": "-", "―": "-", "−": "-",                   # 长破折/减号
+    " ": " ", " ": " ", " ": " ", " ": " ",   # 各类 unicode 空格
+    " ": " ", " ": " ", " ": " ", "　": " ",
+}
+
+
+def _char_canon(s: str) -> str:
+    return "".join(_CHAR_CANON.get(ch, ch) for ch in s)
+
+
+def char_normalized_replacer(content: str, find: str):
+    """字符归一后子串匹配：把弯引号/unicode 空格/破折号归一成 ASCII 等价物再找。
+    归一是 1→1 长度保持，故偏移不变，yield 的是 content 里的**原始真实子串**（保留
+    文件原本的弯引号等排版）。"""
+    if not find:
+        return
+    nc = _char_canon(content)
+    nf = _char_canon(find)
+    if nc == content and nf == find:
+        return  # 没有可归一字符；精确情形已由 simple_replacer 覆盖
+    start = 0
+    while True:
+        idx = nc.find(nf, start)
+        if idx == -1:
+            break
+        yield content[idx: idx + len(find)]   # len(nf)==len(find)，偏移对齐原文
+        start = idx + 1
+
+
 def line_trimmed_replacer(content: str, find: str):
     """逐行匹配，但忽略每行的首尾空白差异。产出 content 里对应的真实块。"""
     content_lines = content.split("\n")
@@ -49,8 +85,13 @@ def whitespace_normalized_replacer(content: str, find: str):
     target = norm(find)
     if not target:
         return
+    # 与 line_trimmed 一致：算窗口大小前先剥掉 find 尾部空行，否则带尾 \n 的 find
+    # 会让 n 多算一行、窗口对不齐，第三阶段对其几乎永不命中。
+    find_lines = find.split("\n")
+    if find_lines and find_lines[-1] == "":
+        find_lines = find_lines[:-1]
+    n = len(find_lines)
     content_lines = content.split("\n")
-    n = len(find.split("\n"))
     if n <= 0 or n > len(content_lines):
         return
     starts = []
@@ -64,9 +105,11 @@ def whitespace_normalized_replacer(content: str, find: str):
             yield block
 
 
-# 顺序即优先级：严格 → 宽容。
+# 顺序即优先级：严格 → 宽容。char_normalized 紧随精确之后——它只做 1→1 字符替换、
+# 不放宽空白结构，风险低，应优先于行级 trim/折叠。
 REPLACERS = [
     simple_replacer,
+    char_normalized_replacer,
     line_trimmed_replacer,
     whitespace_normalized_replacer,
 ]

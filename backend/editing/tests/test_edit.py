@@ -6,7 +6,10 @@ import unittest
 # 让 `import editing` 在从 backend/ 跑 pytest 时可用
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from editing import apply_replacement, EditError, build_completion_hint
+from editing import (
+    apply_replacement, EditError, build_completion_hint,
+    strip_bom, detect_eol, to_lf, restore_eol,
+)
 
 
 class TestApplyReplacement(unittest.TestCase):
@@ -51,6 +54,83 @@ class TestApplyReplacement(unittest.TestCase):
         content = "a   =    1\n"
         out = apply_replacement(content, "a = 1", "a = 2")
         self.assertEqual(out, "a = 2\n")
+
+
+class TestEquivalenceClassUniqueness(unittest.TestCase):
+    """🔴 缺陷一：唯一性须按「等价类」判，而非精确字节 count。"""
+
+    def test_two_trim_equivalent_blocks_are_not_unique(self):
+        # 两块都在 line-trimmed 等价意义下匹配 find（缩进不同、字节不同），
+        # 旧实现 count(第一块)==1 会静默改第一块；新实现须报「不唯一」。
+        content = "if x:\n    return a\nif x:\n        return a\n"
+        with self.assertRaises(EditError):
+            apply_replacement(content, "if x:\nreturn a", "X")
+
+    def test_replace_all_covers_equivalence_class(self):
+        content = "if x:\n    return a\nif x:\n        return a\n"
+        out = apply_replacement(content, "if x:\nreturn a", "if x:\n    return b",
+                                replace_all=True)
+        self.assertNotIn("return a", out)
+        self.assertEqual(out.count("return b"), 2)
+
+
+class TestWhitespaceNormalizedTrailingNewline(unittest.TestCase):
+    r"""🟠 缺陷二：find 以 \n 结尾时第三阶段不应 miscount 窗口大小。"""
+
+    def test_trailing_newline_still_matches_via_stage3(self):
+        content = "a   =    1\nb = 2\n"
+        out = apply_replacement(content, "a = 1\n", "a = 2")
+        self.assertEqual(out, "a = 2\nb = 2\n")
+
+
+class TestCharNormalization(unittest.TestCase):
+    """P0 字符归一：弯引号 / unicode 空格 / 破折号（长度保持，拼回原字节）。"""
+
+    def test_curly_quotes_match_straight(self):
+        # 文件里是弯双引号，模型给直引号 → 命中，并保留替换文本
+        content = "msg = “hello”\n"
+        out = apply_replacement(content, 'msg = "hello"', 'msg = "bye"')
+        self.assertEqual(out, 'msg = "bye"\n')
+
+    def test_unicode_space_matches_ascii(self):
+        # nbsp 两侧 =，模型给 ascii 空格 → 命中
+        content = "a = 1\n"
+        out = apply_replacement(content, "a = 1", "a = 2")
+        self.assertEqual(out, "a = 2\n")
+
+    def test_unicode_dash_matches_hyphen(self):
+        # en-dash，模型给 ascii 连字符 → 命中
+        content = "x = a – b\n"
+        out = apply_replacement(content, "x = a - b", "x = a + b")
+        self.assertEqual(out, "x = a + b\n")
+
+
+class TestEolBoundary(unittest.TestCase):
+    """P0 IO 边界：行尾/BOM 在 LF 平面匹配、写回还原。"""
+
+    def test_strip_bom(self):
+        self.assertEqual(strip_bom("﻿hi"), ("﻿", "hi"))
+        self.assertEqual(strip_bom("hi"), ("", "hi"))
+
+    def test_detect_eol(self):
+        self.assertEqual(detect_eol("a\r\nb\r\n"), "\r\n")
+        self.assertEqual(detect_eol("a\nb\n"), "\n")
+        self.assertEqual(detect_eol("a\rb\r"), "\r")
+        self.assertEqual(detect_eol("no newline"), "\n")
+
+    def test_to_lf_and_restore_roundtrip(self):
+        self.assertEqual(to_lf("a\r\nb\rc\n"), "a\nb\nc\n")
+        self.assertEqual(restore_eol("a\nb\n", "\r\n"), "a\r\nb\r\n")
+        self.assertEqual(restore_eol("a\nb\n", "\n"), "a\nb\n")
+
+    def test_crlf_file_edited_with_lf_old_string_preserves_crlf(self):
+        # 模拟 edit_file 的 IO 流程：CRLF 文件 + 模型给 LF 的 old_string
+        raw = "﻿x = 1\r\ny = 2\r\n"
+        bom, body = strip_bom(raw)
+        eol = detect_eol(body)
+        updated = apply_replacement(to_lf(body), to_lf("x = 1"), to_lf("x = 99"))
+        out = bom + restore_eol(updated, eol)
+        self.assertEqual(out, "﻿x = 99\r\ny = 2\r\n")   # BOM + CRLF 都保留
 
 
 class TestCompletionHint(unittest.TestCase):

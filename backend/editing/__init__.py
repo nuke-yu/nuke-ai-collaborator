@@ -9,5 +9,9 @@
 """
 from editing.edit import apply_replacement, EditError
 from editing.truncation import build_completion_hint
+from editing.eol import strip_bom, detect_eol, to_lf, restore_eol
 
-__all__ = ["apply_replacement", "EditError", "build_completion_hint"]
+__all__ = [
+    "apply_replacement", "EditError", "build_completion_hint",
+    "strip_bom", "detect_eol", "to_lf", "restore_eol",
+]
