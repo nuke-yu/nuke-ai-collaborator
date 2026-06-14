@@ -201,6 +201,32 @@ _WORKSPACE_TOOLS = [
             "required": ["bot_name", "task"],
         },
     ),
+    ToolDef(
+        name="signal_stage_done",
+        description="当完成当前阶段的任务时，调用此工具以通知系统阶段已完成，并触发进入下一阶段（门）。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "reason": {"type": "string", "description": "完成当前阶段工作的简短理由、最终结论或交付物说明"},
+            },
+            "required": ["reason"],
+        },
+        concurrency_safe=True,
+    ),
+    ToolDef(
+        name="signal_rework",
+        description="当发现上游阶段的问题需要打回重做（返工）时，调用此工具以将工作流回退到指定阶段。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "target_stage": {"type": "string", "description": "需要返工回到的目标阶段名称或角色（如 'Dev'、'QA' 等）"},
+                "reason": {"type": "string", "description": "需要返工的理由、Bug 报告或测试未通过的说明"},
+                "rework_to_idx": {"type": "integer", "description": "（可选）需要返工回到的目标阶段的 0-based 索引"},
+            },
+            "required": ["target_stage", "reason"],
+        },
+        concurrency_safe=True,
+    ),
 ]
 
 # ---------------------------------------------------------------------------
@@ -295,6 +321,17 @@ async def _spawn_agent_handler(bot_name: str, task: str, background: bool = Fals
         return result.full_text or "[子 Agent 未返回内容]"
     except Exception as e:
         return f"[spawn_agent 执行错误] {e}"
+
+
+async def _handle_signal_stage_done(arguments: dict, ctx: dict) -> str:
+    reason = arguments.get("reason", "")
+    return f"[系统] 已记录阶段完成信号。原因: {reason}。正在推进工作流..."
+
+
+async def _handle_signal_rework(arguments: dict, ctx: dict) -> str:
+    target = arguments.get("target_stage", "")
+    reason = arguments.get("reason", "")
+    return f"[系统] 已记录返工信号。目标阶段: {target}，原因: {reason}。工作流即将打回..."
 
 
 # ---------------------------------------------------------------------------
@@ -1100,7 +1137,9 @@ def register_workspace_tools() -> None:
         "run_shell":        _handle_run_shell,
         "read_local_file":  _handle_read_local_file,
         "write_local_file": _handle_write_local_file,
-        "spawn_agent":  _spawn_agent_handler,
+        "spawn_agent":      _spawn_agent_handler,
+        "signal_stage_done": _handle_signal_stage_done,
+        "signal_rework":     _handle_signal_rework,
     }
     for tdef in _WORKSPACE_TOOLS:
         tool_executor.register(tdef, handlers[tdef.name])

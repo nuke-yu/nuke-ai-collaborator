@@ -127,6 +127,7 @@ class ExecutionContext:
 class ExecutionResult:
     full_text: str
     msg_id: int | None
+    signals: list[dict] = None
 
 
 class ToolProvider(ABC):

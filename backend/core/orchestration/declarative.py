@@ -135,10 +135,44 @@ class DeclarativeOrchestrator(Orchestrator):
     def end(self, group_id: int) -> None:
         self._state.pop(group_id, None)
 
-    def observe(self, group_id: int, bot_id: int, response: str) -> OrchestratorStep:
+    def observe(self, group_id: int, bot_id: int, response: str, signals: list[dict] | None = None) -> OrchestratorStep:
         ctx = self._ctx(group_id)
         if ctx is None:
             return OrchestratorStep()
+        
+        # If we have structured tool signals, prioritize them over free-text matches
+        if signals:
+            for sig in signals:
+                if sig["name"] == "signal_stage_done":
+                    if ctx.stage.get("stage_type") == "pool":
+                        done_kw = ctx.stage.get("done_keyword", "完毕")
+                        return stage_handler(ctx.stage).observe(ctx, bot_id, f"\n{done_kw}\n")
+                    
+                    if ctx.stage.get("gate"):
+                        return self._raise_gate(ctx, sig["arguments"].get("reason", response))
+                    return self._advance(ctx.group_id, prev_output=sig["arguments"].get("reason", response))
+                
+                elif sig["name"] == "signal_rework":
+                    target_stage_name = sig["arguments"].get("target_stage")
+                    reason = sig["arguments"].get("reason", response)
+                    rework_to_idx = sig["arguments"].get("rework_to_idx")
+                    
+                    stages = self._state[group_id]["stages"]
+                    target_idx = None
+                    if rework_to_idx is not None and 0 <= rework_to_idx < len(stages):
+                        target_idx = rework_to_idx
+                    elif target_stage_name:
+                        for idx, st in enumerate(stages):
+                            if st.get("name") == target_stage_name or st.get("role") == target_stage_name:
+                                target_idx = idx
+                                break
+                    
+                    if target_idx is None:
+                        target_idx = ctx.stage.get("rework_to")
+                        
+                    if target_idx is not None:
+                        return self._raise_gate(ctx, reason, rework_to=target_idx)
+                        
         return stage_handler(ctx.stage).observe(ctx, bot_id, response)
 
     def advance(self, group_id: int, prev_output: str = "") -> OrchestratorStep:

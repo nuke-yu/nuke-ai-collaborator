@@ -183,7 +183,10 @@ async def run_unit(group_id: int, unit, orch) -> None:
 
     if not result.full_text:
         return
-    step = orch.observe(group_id, unit.bot["id"], result.full_text)
+    try:
+        step = orch.observe(group_id, unit.bot["id"], result.full_text, signals=getattr(result, "signals", None))
+    except TypeError:
+        step = orch.observe(group_id, unit.bot["id"], result.full_text)
     await apply_step(group_id, orch, step)
 
 

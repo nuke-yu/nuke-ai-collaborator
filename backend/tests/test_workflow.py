@@ -1428,5 +1428,64 @@ class TestWorkflowHistoryFiltering(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(mock_call_ai.call_count, 2)
 
 
+class TestControlPlaneSignals(unittest.IsolatedAsyncioTestCase):
+    """验证控制平面工具（signal_stage_done / signal_rework）触发的工作流跳转。"""
+    
+    async def test_signal_stage_done_triggers_advance_or_gate(self):
+        from core.orchestration.declarative import DeclarativeOrchestrator
+        
+        # 1. Test advance (no gate)
+        orch = DeclarativeOrchestrator()
+        spec = [
+            {"id": 1, "name": "Stage1", "stage_type": "single", "role": "Dev"},
+            {"id": 2, "name": "Stage2", "stage_type": "single", "role": "QA"}
+        ]
+        orch.begin(group_id=10, spec=spec)
+        
+        signals = [{"name": "signal_stage_done", "arguments": {"reason": "Completed coding"}}]
+        step = orch.observe(group_id=10, bot_id=1, response="Normal text content", signals=signals)
+        
+        self.assertEqual(orch.get(group_id=10)["current"], 1)
+        self.assertEqual(len(step.next_units), 1)
+        self.assertEqual(step.next_units[0].bot["name"], "Stage2")
+
+    async def test_signal_stage_done_triggers_gate(self):
+        from core.orchestration.declarative import DeclarativeOrchestrator
+        
+        orch = DeclarativeOrchestrator()
+        spec = [
+            {"id": 1, "name": "Stage1", "stage_type": "single", "role": "Dev", "gate": True},
+            {"id": 2, "name": "Stage2", "stage_type": "single", "role": "QA"}
+        ]
+        orch.begin(group_id=11, spec=spec)
+        
+        signals = [{"name": "signal_stage_done", "arguments": {"reason": "Completed coding"}}]
+        step = orch.observe(group_id=11, bot_id=1, response="Normal text content", signals=signals)
+        
+        self.assertEqual(orch.get(group_id=11)["current"], 0)
+        self.assertTrue(orch.is_awaiting_confirm(group_id=11))
+        self.assertIsNotNone(step.confirm_gate)
+        self.assertEqual(step.confirm_gate["gate_id"], "11-0")
+
+    async def test_signal_rework_triggers_rewind(self):
+        from core.orchestration.declarative import DeclarativeOrchestrator
+        
+        orch = DeclarativeOrchestrator()
+        spec = [
+            {"id": 1, "name": "Stage1", "stage_type": "single", "role": "Dev"},
+            {"id": 2, "name": "Stage2", "stage_type": "single", "role": "QA"}
+        ]
+        orch.begin(group_id=12, spec=spec)
+        
+        orch._advance(group_id=12)
+        self.assertEqual(orch.get(group_id=12)["current"], 1)
+        
+        signals = [{"name": "signal_rework", "arguments": {"target_stage": "Dev", "reason": "Bug found"}}]
+        step = orch.observe(group_id=12, bot_id=2, response="Failed test", signals=signals)
+        
+        self.assertTrue(orch.is_awaiting_confirm(group_id=12))
+        pending = orch.get(group_id=12)["awaiting_confirm"]
+        self.assertEqual(pending["rework_to"], 0)
+
 if __name__ == "__main__":
     unittest.main()

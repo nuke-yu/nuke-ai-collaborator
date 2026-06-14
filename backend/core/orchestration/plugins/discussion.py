@@ -111,7 +111,7 @@ class DiscussionOrchestrator(Orchestrator):
         bot = s["bots"][s["idx"]]
         return OrchestratorStep(next_units=[self._unit(group_id, bot, trigger_msg=content)], broadcast_state=True)
 
-    def observe(self, group_id: int, bot_id: int, response: str) -> OrchestratorStep:
+    def observe(self, group_id: int, bot_id: int, response: str, signals: list[dict] | None = None) -> OrchestratorStep:
         s = self._state.get(group_id)
         if not s:
             return OrchestratorStep()

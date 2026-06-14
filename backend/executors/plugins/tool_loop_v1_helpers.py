@@ -426,6 +426,23 @@ async def finalize_reply(runner) -> None:
 
 
 async def cleanup_and_finalize(runner) -> ExecutionResult:
+    # Extract structured signals from tool calls in assistant messages
+    signals = []
+    for msg in runner.messages:
+        if msg.get("role") == "assistant" and msg.get("tool_calls"):
+            for tc in msg["tool_calls"]:
+                func = tc.get("function", {})
+                name = func.get("name")
+                if name in ("signal_stage_done", "signal_rework"):
+                    try:
+                        args = json.loads(func.get("arguments") or "{}") if isinstance(func.get("arguments"), str) else func.get("arguments", {})
+                    except Exception:
+                        args = {}
+                    signals.append({
+                        "name": name,
+                        "arguments": args
+                    })
+
     if runner.ctx.spawn_depth > 0:
         await runner.ctx.interaction.broadcast(runner.ctx.group_id, {
             "type": "stream_end", "temp_id": runner.temp_id, "id": None,
@@ -436,7 +453,7 @@ async def cleanup_and_finalize(runner) -> ExecutionResult:
         runner.messages.append({"role": "assistant", "content": runner.full_text})
         await runner.ctx.interaction.save_session_snapshot(runner.session_id, runner.messages)
         await runner.ctx.interaction.update_session_status(runner.session_id, "completed")
-        return ExecutionResult(full_text=runner.full_text, msg_id=None)
+        return ExecutionResult(full_text=runner.full_text, msg_id=None, signals=signals)
 
     msg_id = await runner.ctx.interaction.save_message(
         runner.ctx.group_id, runner.bot["id"], runner.full_text,
@@ -498,7 +515,7 @@ async def cleanup_and_finalize(runner) -> ExecutionResult:
     runner.messages.append({"role": "assistant", "content": runner.full_text})
     await runner.ctx.interaction.save_session_snapshot(runner.session_id, runner.messages)
     await runner.ctx.interaction.update_session_status(runner.session_id, "completed")
-    return ExecutionResult(full_text=runner.full_text, msg_id=msg_id)
+    return ExecutionResult(full_text=runner.full_text, msg_id=msg_id, signals=signals)
 
 
 async def execute_parallel_tools(runner, calls, iteration=None) -> None:

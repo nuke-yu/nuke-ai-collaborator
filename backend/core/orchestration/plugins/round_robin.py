@@ -80,7 +80,7 @@ class RoundRobinOrchestrator(Orchestrator):
             broadcast_state=True,
         )
 
-    def observe(self, group_id: int, bot_id: int, response: str) -> OrchestratorStep:
+    def observe(self, group_id: int, bot_id: int, response: str, signals: list[dict] | None = None) -> OrchestratorStep:
         s = self._state.get(group_id)
         if not s or s["bots"][s["idx"]].get("id") != bot_id:
             return OrchestratorStep()

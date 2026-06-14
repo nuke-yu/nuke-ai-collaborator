@@ -60,7 +60,7 @@ class Orchestrator(ABC):
         """开始编排，返回第一批工作（首阶段可能由用户驱动，返回空 units）。"""
 
     @abstractmethod
-    def observe(self, group_id: int, bot_id: int, response: str) -> OrchestratorStep:
+    def observe(self, group_id: int, bot_id: int, response: str, signals: list[dict] | None = None) -> OrchestratorStep:
         """某个 bot 跑完一轮，更新内部状态并返回下一步。"""
 
     def confirm(self, group_id: int, gate_id: str | None = None) -> OrchestratorStep:
