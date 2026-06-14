@@ -286,13 +286,19 @@ Skill 不需要手动绑定到 Bot，而是采用**“代码即配置 (Configura
 *   **永久单机方案**：放弃水平扩展（Horizontal Scaling）需求，转向追求单机的**低延迟**、**高吞吐**和**高可靠性**。
 *   **No-Redis 决策**：为了降低部署门槛，不引入 Redis 或 NATS 等外部中间件。所有状态管理由 **Python 内存 + SQLite** 共同承担。
 
-### 2. 状态存储模型 (State Model)
-- **群组级状态 (Group State / The Board)**：
-    - *存储*：`BOARD.md` (人类可读) + SQLite `groups` 表。
-    - *内容*：任务列表、当前谁在认领、项目公告。
-- **任务级状态 (Task State / Execution Context)**：
-    - *存储*：SQLite `session_checkpoint` + 内存队列。
-    - *内容*：Agent 具体的 Tool Loop 进度、已执行的工具结果、中间思考。
+### 2. 状态存储模型与恢复职责 (State Model & Recovery Protocol)
+
+项目中的工作流状态分布在多个层级（内存、SQLite 与本地文件系统），其状态类别、唯一数据源（Source of Truth）以及崩溃恢复协议如下表所示：
+
+| 状态类别 | 唯一 Source of Truth | 崩溃恢复负责方与接续协议 |
+| :--- | :--- | :--- |
+| **群组与历史消息** | SQLite (`groups`, `members`, `messages` 表) | **DB Layer / db.py**<br>属于底座级持久化状态。服务器重启后由只读/可写连接直接按需读取，无额外的内存常驻缓存。 |
+| **工作流编排快照 (Orchestrator Snapshot)** | SQLite `workflow_state` 表中的 JSON Blob | **workflow_store.py**<br>服务器重启时，系统扫描各活跃 Group 的 `workflow_state` 表，读取最新持久化的快照 JSON 并反序列化。 |
+| **工作流内存状态 (`orchestrator._state`)** | 从 SQLite 快照 Blob 中重建的反序列化实例 | **core/workflow.py (`resume_workflows`)**<br>系统启动时执行编排状态的自动接续。从 `workflow_state` 表的快照重建编排器内存实体，恢复阶段标记及当前活跃工作单元的触发链。 |
+| **工具执行断点 (Tool Checkpoint)** | SQLite `sessions` / `session_events` 表 | **ToolLoopRunner / executors.plugins.tool_loop_v1**<br>保存了 Tool Loop 中每轮执行的 Assistant 响应、工具调用及工具返回结果快照。重启后，`recover_all` 流程匹配对应的 `session_id` 恢复执行历史并接续。 |
+| **观点压缩缓存 (Viewpoints Cache)** | 内存字典 `viewpoints_summary` (通过 `orch.get_viewpoints_cache` 获取) | **Compactor / executors.compact (`compress_history`)**<br>作为发言摘要的加速缓存。进程重启后，内存缓存失效；在后续执行中，若历史消息中缺失对应的观点摘要，则由 `compress_history` 触发 Lazy LLM Recap (懒加载重建) 重新填充。 |
+| **工作区看板 (`BOARD.md`)** | 本地文件系统 `${workspace}/BOARD.md` | **Orchestrator & Workspace Tools**<br>物理文件即为 Source of Truth。进程重启后物理文件不受影响，各 Bot 通过 `write_file`/`read_file` 直接读取最新的看板物理状态。 |
+
 
 ### 3. 并发控制与性能策略 (Concurrency Strategy)
 - **SQLite 优化**：强制开启 WAL 模式 (`PRAGMA journal_mode=WAL;`)，解决顺序执行下的读写冲突。

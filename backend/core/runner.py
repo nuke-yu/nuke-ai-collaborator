@@ -19,13 +19,9 @@ from core import bg, workflow_store
 from executors.base import ExecutionContext
 from core.orchestration.interaction import StandardInteraction
 from executors import registry as exec_registry
+from executors.compact import compress_history
 
 log = logging.getLogger(__name__)
-
-# Sentinel: marks a viewpoints_summary slot that is currently being compressed by
-# another concurrent run_unit task. Prevents duplicate AI calls across tasks
-# spawned in the same discussion round.
-_VIEWPOINT_PENDING = object()
 
 
 async def _post_system_msg(group_id: int, sender_bot_id: int, text: str) -> None:
@@ -162,49 +158,7 @@ async def run_unit(group_id: int, unit, orch) -> None:
         viewpoints_summary = orch.get_viewpoints_cache(group_id)
         if viewpoints_summary is not None:
             pc = orch.participant_count(group_id)
-            M = pc if pc else len(all_bots) or 4
-            
-            # If we have more than M + 1 messages (1 trigger + M latest round), compress the older ones
-            if len(recent) > M + 1:
-                for idx in range(1, len(recent) - M):
-                    msg = recent[idx]
-                    msg_id = msg.get("id")
-                    if not msg_id or msg.get("sender_type") != "bot":
-                        continue
-                    
-                    msg_id_str = str(msg_id)
-                    if msg_id_str not in viewpoints_summary:
-                        # Reserve slot before any await so concurrent tasks skip this msg
-                        viewpoints_summary[msg_id_str] = _VIEWPOINT_PENDING
-                        content = msg.get("content") or ""
-                        if content:
-                            try:
-                                from core.recap.generator import _pick_provider_model
-                                from ai.client import call_ai_once
-                                provider, model = _pick_provider_model(members)
-                                system_prompt = (
-                                    "你是一个客观严谨的学术辩论记录员。请将以下发言者的言论高度浓缩为 1-2 句核心观点。\n"
-                                    "要求：必须精确且有逻辑地保留其核心立场、主要论据或条件妥协，删去所有过渡细节、解释和客套话。字数控制在 80 字以内。"
-                                )
-                                user_message = f"发言人是【{msg.get('sender_name')}】，其言论内容如下：\n\n{content}\n\n请直接输出提炼后的核心观点。"
-                                res = await call_ai_once(
-                                    system_prompt=system_prompt,
-                                    messages=[{"role": "user", "content": user_message}],
-                                    provider=provider, model=model, temperature=0.3, max_tokens=128
-                                )
-                                summary = (res.get("content") if isinstance(res, dict) else str(res)) or ""
-                                summary = summary.strip()
-                            except Exception as e:
-                                log.warning("Failed to generate viewpoint summary for msg %s: %r", msg_id, e)
-                                summary = content[:100] + "..."
-                            viewpoints_summary[msg_id_str] = summary
-                        else:
-                            del viewpoints_summary[msg_id_str]
-
-                    cached = viewpoints_summary.get(msg_id_str)
-                    if cached is _VIEWPOINT_PENDING or not cached:
-                        cached = msg.get("content") or ""
-                    msg["content"] = f"【此前发言摘要记录：{cached}】"
+            recent = await compress_history(recent, viewpoints_summary, members, all_bots, pc)
 
     ctx = ExecutionContext(
         bot=unit.bot, group_id=group_id, user_message=unit.trigger_msg,

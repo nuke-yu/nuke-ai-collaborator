@@ -91,3 +91,85 @@ async def compile_system_prompt(
     )
     
     return system_prompt_base, skills_xml, skills_snapshot, always_skills
+
+
+def restrict_schemas(schemas: list, allowed: list | None) -> list:
+    """Keep only tool schemas whose name is in `allowed`. `None`/empty = no restriction."""
+    if not allowed:
+        return schemas
+    allowed_set = set(allowed)
+    return [s for s in schemas if s["function"]["name"] in allowed_set]
+
+
+def filter_mcp_schemas(mcp_schemas: list, allow: list | None, block: list | None) -> list:
+    """Per-bot MCP tool visibility whitelist/blacklist fnmatch filtering."""
+    if not allow and not block:
+        return mcp_schemas
+    import fnmatch
+    out = []
+    for s in mcp_schemas:
+        name = s.get("function", {}).get("name", "")
+        if block and any(fnmatch.fnmatch(name, p) for p in block):
+            continue
+        if allow and not any(fnmatch.fnmatch(name, p) for p in allow):
+            continue
+        out.append(s)
+    return out
+
+
+def apply_external_schema_budget(
+    mcp_schemas: list, max_n: int = 48
+) -> tuple[list, list[str]]:
+    """Keep at most max_n external schemas; return (kept, deferred_tool_names)."""
+    if len(mcp_schemas) <= max_n:
+        return mcp_schemas, []
+    kept = mcp_schemas[:max_n]
+    deferred = [s["function"]["name"] for s in mcp_schemas[max_n:]]
+    return kept, deferred
+
+
+def build_budget_note(deferred_names: list[str]) -> str:
+    shown = ", ".join(deferred_names[:30]) + ("…" if len(deferred_names) > 30 else "")
+    return (
+        f"\n\n[工具预算] 另有 {len(deferred_names)} 个 MCP 工具因数量预算未加载"
+        f"（{shown}）。如需使用，请在 mcp_servers.json 用 allow_list 收窄该服务器，"
+        f"或告知用户调整配置。"
+    )
+
+
+async def get_fresh_context_prefix(
+    bot_id: int,
+    group_id: int | None,
+    startup_files: list,
+    skills_xml: str,
+) -> tuple[str, str]:
+    from workspace import load_context_files, format_context_blocks
+    blocks = await load_context_files(bot_id, group_id, startup_files)
+    text = format_context_blocks(blocks)
+    prefix = ""
+    if text:
+        prefix += f"【工作区文件】\n{text}\n\n"
+    if skills_xml:
+        prefix += f"{skills_xml}\n使用 run_skill(name=\"技能名\") 调用\n\n"
+    return prefix, text
+
+
+async def build_reinject_context(
+    file_tracker: dict,
+    bot_id: int,
+    group_id: int | None,
+    startup_files: list,
+    skills_xml: str,
+) -> str:
+    from skills.constants import bot_ws as _bot_ws
+    import executors.compact as compact
+    fresh_prefix, _ = await get_fresh_context_prefix(
+        bot_id, group_id, startup_files, skills_xml
+    )
+    ft_xml = compact.build_file_tracker_xml(file_tracker)
+    file_contents = compact.build_file_contents_for_reinject(
+        file_tracker, workspace_dir=str(_bot_ws(bot_id, group_id))
+    )
+    parts = [p for p in [fresh_prefix, ft_xml, file_contents] if p]
+    return "\n\n".join(parts)
+
