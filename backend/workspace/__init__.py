@@ -363,7 +363,11 @@ async def edit_file(bot_id: int, path: str, old_string: str, new_string: str, re
         try:
             updated = editing.apply_replacement(current, old_lf, new_lf, replace_all=replace_all)
         except editing.EditError as e:
-            return f"[编辑失败] {e}"
+            # 幂等恢复：目标已存在、old 不在 → 视为已应用，不当失败处理。
+            if editing.idempotent_skip(current, old_lf, new_lf):
+                return "[已是目标状态] new_string 已存在且 old_string 不在文件中，视为已应用，未改动"
+            # 失配 hint：回吐近邻上下文帮模型重锚 old_string。
+            return f"[编辑失败] {e}\n{editing.mismatch_hint(current, old_lf)}"
 
         if updated == current:
             return "[无改动] 替换前后内容一致"

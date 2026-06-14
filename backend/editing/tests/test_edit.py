@@ -9,6 +9,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 from editing import (
     apply_replacement, EditError, build_completion_hint,
     strip_bom, detect_eol, to_lf, restore_eol,
+    idempotent_skip, mismatch_hint,
 )
 
 
@@ -168,6 +169,43 @@ class TestIndentReconciliation(unittest.TestCase):
         content = "    x = 1\n"
         out = apply_replacement(content, "    x = 1", "        x = 2")
         self.assertEqual(out, "        x = 2\n")
+
+
+class TestIdempotentSkip(unittest.TestCase):
+    """L2：目标已存在 → 视为已应用，硬失败降级为幂等跳过。"""
+
+    def test_already_applied_is_skippable(self):
+        content = "x = 2\ny = 3\n"
+        self.assertTrue(idempotent_skip(content, "x = 1", "x = 2"))
+
+    def test_old_still_present_is_not_skippable(self):
+        content = "x = 1\nx = 2\n"        # old 还在 → 不是幂等
+        self.assertFalse(idempotent_skip(content, "x = 1", "x = 2"))
+
+    def test_new_appears_twice_is_not_skippable(self):
+        content = "x = 2\nx = 2\n"        # new 不唯一 → 保守拒绝
+        self.assertFalse(idempotent_skip(content, "x = 1", "x = 2"))
+
+    def test_empty_new_is_not_skippable(self):
+        self.assertFalse(idempotent_skip("anything", "old", "  "))
+
+
+class TestMismatchHint(unittest.TestCase):
+    """L2：失配时回吐近邻上下文。"""
+
+    def test_small_file_echoes_whole_content(self):
+        hint = mismatch_hint("a = 1\nb = 2\n", "z = 9")
+        self.assertIn("a = 1", hint)
+        self.assertIn("b = 2", hint)
+
+    def test_large_file_windows_around_best_line(self):
+        lines = [f"line {i}" for i in range(200)]
+        lines[120] = "target marker here"
+        content = "\n".join(lines)
+        hint = mismatch_hint(content, "target marker", limit=200)
+        self.assertIn("target marker here", hint)
+        self.assertLessEqual(len(hint), 400)        # 窗口而非全文
+        self.assertNotIn("line 5", hint)            # 远处不出现
 
 
 class TestCompletionHint(unittest.TestCase):
