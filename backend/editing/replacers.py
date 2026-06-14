@@ -105,11 +105,40 @@ def whitespace_normalized_replacer(content: str, find: str):
             yield block
 
 
+def block_anchor_replacer(content: str, find: str):
+    """首尾行锚定（find ≥3 行）：只要 find 的首行与尾行（去空白）能在 content 里框定
+    一段块，中间行**不比对、行数也可不同**。接住「长块内部被模型写歪、但首尾对」的情况。
+
+    最宽容、最危险的一层，放在最后；安全完全依赖 L0 的等价类唯一性——首/尾若框定出
+    多段不同块，apply_replacement 会因「不唯一」拒绝，不会乱改。"""
+    find_lines = find.split("\n")
+    if find_lines and find_lines[-1] == "":
+        find_lines = find_lines[:-1]
+    if len(find_lines) < 3:          # 不足 3 行：首尾即全部，交给前面更严格的层
+        return
+    first, last = find_lines[0].strip(), find_lines[-1].strip()
+    if not first or not last:
+        return
+    content_lines = content.split("\n")
+    starts, pos = [], 0
+    for ln in content_lines:
+        starts.append(pos)
+        pos += len(ln) + 1
+    for i in range(len(content_lines)):
+        if content_lines[i].strip() != first:
+            continue
+        for j in range(i + 1, len(content_lines)):   # 最近的尾行锚
+            if content_lines[j].strip() == last:
+                yield content[starts[i]: starts[j] + len(content_lines[j])]
+                break
+
+
 # 顺序即优先级：严格 → 宽容。char_normalized 紧随精确之后——它只做 1→1 字符替换、
-# 不放宽空白结构，风险低，应优先于行级 trim/折叠。
+# 不放宽空白结构，风险低，应优先于行级 trim/折叠。block_anchor 最宽容，垫底。
 REPLACERS = [
     simple_replacer,
     char_normalized_replacer,
     line_trimmed_replacer,
     whitespace_normalized_replacer,
+    block_anchor_replacer,
 ]

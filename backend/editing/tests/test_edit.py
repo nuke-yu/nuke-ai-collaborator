@@ -133,6 +133,43 @@ class TestEolBoundary(unittest.TestCase):
         self.assertEqual(out, "﻿x = 99\r\ny = 2\r\n")   # BOM + CRLF 都保留
 
 
+class TestBlockAnchor(unittest.TestCase):
+    """L1：首尾行锚定、中间模糊（≥3 行）——接住长块内部被模型写歪的情况。"""
+
+    def test_anchor_matches_with_wrong_interior(self):
+        content = "def foo():\n    x = 1\n    y = 2\n    return x\n"
+        # 模型记对了首尾行，中间写歪
+        old = "def foo():\n    # whatever the model approximated\n    return x"
+        new = "def foo():\n    return 42"
+        out = apply_replacement(content, old, new)
+        self.assertEqual(out, "def foo():\n    return 42\n")
+
+    def test_anchor_ambiguous_is_not_unique(self):
+        content = ("def f():\n    a = 1\n    return 1\n"
+                   "def f():\n    b = 2\n    return 1\n")
+        old = "def f():\n    ???\n    return 1"
+        with self.assertRaises(EditError):
+            apply_replacement(content, old, "def f():\n    pass")
+
+
+class TestIndentReconciliation(unittest.TestCase):
+    """L1：经忽略缩进的层命中后，new_string 须按命中块缩进重对齐，修 de-indent 坑。"""
+
+    def test_line_trimmed_multiline_preserves_block_indent(self):
+        # 模型漏了 4 空格体缩进；line_trimmed 命中，但替换须保留缩进，不能拍平
+        content = "if cond:\n    a = 1\n    b = 2\n"
+        old = "a = 1\nb = 2"
+        new = "a = 10\nb = 20"
+        out = apply_replacement(content, old, new)
+        self.assertEqual(out, "if cond:\n    a = 10\n    b = 20\n")
+
+    def test_exact_match_indent_not_reconciled(self):
+        # simple 命中：缩进是模型有意给的，不动
+        content = "    x = 1\n"
+        out = apply_replacement(content, "    x = 1", "        x = 2")
+        self.assertEqual(out, "        x = 2\n")
+
+
 class TestCompletionHint(unittest.TestCase):
     def test_hint_mentions_edit_file_not_replace_file_content(self):
         hint = build_completion_hint("write_file", "calc/index.html", 1234)
