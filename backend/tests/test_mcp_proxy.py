@@ -87,9 +87,13 @@ class TestMcpProxyProvider(unittest.IsolatedAsyncioTestCase):
 
     def setUp(self):
         self._saved = list(global_bridge.schemas)
+        # The collector ALWAYS annotates needs_approval; mirror that here so the
+        # proxy exercises its realistic path (a flagless schema is fail-closed).
         global_bridge.set_schemas([
-            {"function": {"name": "fs__read_file", "description": "read", "parameters": {}}},
-            {"function": {"name": "fs__write_file", "description": "write", "parameters": {}}},
+            {"function": {"name": "fs__read_file", "description": "read", "parameters": {}},
+             "needs_approval": False},
+            {"function": {"name": "fs__write_file", "description": "write", "parameters": {}},
+             "needs_approval": True},
         ])
 
     def tearDown(self):
@@ -140,6 +144,36 @@ class TestMcpProxyProvider(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(is_error)
             self.assertIn("安全拦截", result)
             req.assert_not_awaited()
+
+    async def test_flagless_schema_fails_closed(self):
+        # A namespaced tool whose schema lacks needs_approval (collector hasn't
+        # shipped the flag yet) must be gated, not guessed from the name.
+        global_bridge.set_schemas([{"function": {"name": "fs__read_file", "parameters": {}}}])
+        p = McpProxyProvider()
+        with patch.object(global_bridge, "request", new=AsyncMock()) as req:
+            result, is_error = await p.execute("fs__read_file", {}, {})   # no ruleset
+            self.assertTrue(is_error)
+            self.assertIn("安全拦截", result)
+            req.assert_not_awaited()
+
+    async def test_always_approval_hotpatched_into_ruleset(self):
+        # ③ in-session immediacy: an "always" approval appends the persist_rule to
+        # the live ruleset so the next identical call in the same loop won't re-ask.
+        class _RS:
+            def __init__(self): self.rules = []
+        rs = _RS()
+        rule = object()
+        p = McpProxyProvider()
+        with (
+            patch("permissions.check",
+                  new=AsyncMock(return_value={"action": "allow", "persist_rule": rule})),
+            patch.object(global_bridge, "request",
+                         new=AsyncMock(return_value=("ok", False))) as req,
+        ):
+            result, is_error = await p.execute("fs__write_file", {"path": "/x"}, {"ruleset": rs})
+        self.assertEqual((result, is_error), ("ok", False))
+        self.assertIn(rule, rs.rules)         # rule took effect immediately
+        req.assert_awaited_once()
 
     async def test_per_server_flag_allows_write_named_tool(self):
         # server flagged a write-NAMED tool as NOT needing approval → forwarded

@@ -65,10 +65,14 @@ main.py (FastAPI / WS 入口)
 
 ## 当前已知 Gap（未解决问题）
 
-详见 [`docs/TOOL-LAYER-GAP-ANALYSIS.md`](docs/TOOL-LAYER-GAP-ANALYSIS.md)。优先级最高的未修项：
-- `mcp_bridge.py` 使用 `asyncio.get_event_loop()`（应改 `get_running_loop()`）
-- `mcp_proxy.py` 对无 `__` 命名空间的工具名 HIL 判断静默失效
-- MCP Collector 并发 `MCP_AUTH_START` 无 per-server 锁
+详见 [`docs/TOOL-LAYER-GAP-ANALYSIS.md`](docs/TOOL-LAYER-GAP-ANALYSIS.md)。
+
+> 以下三条原始 gap 均已在 `7ef7793`（fix: address 4 bugs found in code review）处理，保留记录以备审计：
+> - ✅ `mcp_bridge.py` `get_event_loop()` → `get_running_loop()`（已修）
+> - ✅ `mcp_proxy.py` 无 `__` 命名空间工具名 HIL 静默失效 → 改为 fail-safe（`sep` 缺失即走审批/fail-closed，已修）
+> - ⚠️ MCP Collector 并发 `MCP_AUTH_START`：已加 `_auth_inflight` per-server guard，但 full lock 仍是 follow-up（部分修复）
+
+> ✅ MCP 审批默认改 fail-closed（本分支）：未声明审批策略的 server 现在 gate 全部工具，不再用工具名启发式分类（名字是 server 控制的、不可信）。operator 通过 `approval_tools: []` 显式信任整个 server。`_MCP_WRITE_TOOLS` 不再决定 HIL，仅余子 Agent 衰减用途。同时补齐 `mcp_proxy` 的 always 审批会话内即时性（镜像 workspace_tools）。
 
 ---
 

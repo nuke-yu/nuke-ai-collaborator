@@ -41,15 +41,15 @@ class McpProxyProvider(ToolProvider):
             trace_id=context.get("trace_id"),
         )
 
-    def _needs_approval(self, name: str, tool: str) -> bool:
+    def _needs_approval(self, name: str) -> bool:
         """Per-server approval decision shipped by the collector (require_approval_all
-        / approval_tools / write heuristic). Falls back to the write-name heuristic
-        only if the flag is absent (e.g. schema not yet received)."""
+        / approval_tools / fail-closed default). The collector always annotates the
+        flag; if it's absent the schema hasn't arrived yet → fail-closed rather than
+        guess from the (untrusted) tool name."""
         s = bridge.schema_for(name)
         if s is not None and "needs_approval" in s:
             return bool(s["needs_approval"])
-        from executors.providers.mcp_client import _MCP_WRITE_TOOLS
-        return tool in _MCP_WRITE_TOOLS
+        return True
 
     async def _check_permission(self, name: str, arguments: dict, context: dict) -> str | None:
         """Worker-side HIL for MCP tools (collector runs them pre-authorized).
@@ -60,7 +60,7 @@ class McpProxyProvider(ToolProvider):
         # Fail-safe: an un-namespaced name (no '__') can't be classified — require
         # approval rather than silently skipping HIL. (Collector always prefixes,
         # so this is defensive.)
-        if sep and not self._needs_approval(name, tool):
+        if sep and not self._needs_approval(name):
             return None  # no approval required for this tool
         perm_name = f"mcp::{server}::{tool}" if sep else f"mcp::{name}"
         import permissions
@@ -79,4 +79,12 @@ class McpProxyProvider(ToolProvider):
         )
         if result["action"] == "deny":
             return f"[MCP权限拒绝] {result.get('reason', '权限拒绝')}"
+        # Hot-patch the in-memory ruleset so an "always" approval takes effect
+        # immediately within this same tool loop — mirrors workspace_tools. Without
+        # it the next identical MCP call in the loop re-asks before the async DB
+        # write lands. Cross-session persistence is handled universally by the
+        # worker's PERMISSION_RESPONSE handler.
+        persist_rule = result.get("persist_rule")
+        if persist_rule is not None:
+            ruleset.rules.append(persist_rule)
         return None

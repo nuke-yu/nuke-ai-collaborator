@@ -52,8 +52,10 @@ _DEFAULT_CALL_TIMEOUT = 30
 # Minimum seconds between auto-reconnect attempts (avoid hammering a dead server).
 _RECONNECT_COOLDOWN = 5.0
 
-# MCP tool names that mutate state and therefore require HIL approval
-# (mirrors _APPROVAL_REQUIRED_TOOLS in workspace_tools.py).
+# Write-class MCP tool names. NOTE: this no longer governs HIL approval — that is
+# now config-driven and fail-closed (see _needs_approval). The set's ONLY remaining
+# consumer is permissions.engine._covers_high_risk, which uses it to decide whether
+# a blanket MCP allow-rule is high-risk and must be dropped for a sub-agent.
 _MCP_WRITE_TOOLS = frozenset({
     "write_file", "create_file", "delete_file", "move_file", "rename_file",
     "edit_file", "patch_file", "create_directory", "delete_directory",
@@ -205,7 +207,8 @@ class McpClientToolProvider(ToolProvider):
         # HIL policy: which tools require human approval before execution.
         #   require_approval_all=True  → every tool gated (untrusted server)
         #   approval_tools set         → only those server-side names gated
-        #   neither                    → fall back to the write-class name heuristic
+        #                                (empty set = trust the whole server, gate none)
+        #   neither (None)             → fail-closed: gate every tool
         self._require_approval_all = require_approval_all
         self._approval_tools = approval_tools
 
@@ -263,14 +266,21 @@ class McpClientToolProvider(ToolProvider):
     def _needs_approval(self, real_name: str) -> bool:
         """Config-driven HIL decision (don't trust the server's tool naming).
 
-        Priority: require_approval_all > explicit approval_tools list > the
-        write-class name heuristic (last-resort default for unconfigured servers).
+        Priority: require_approval_all > explicit approval_tools list > fail-closed.
+        An operator who added a server but declared NO approval policy gets the safe
+        default: gate everything. They opt OUT explicitly via `approval_tools: []`
+        (trust the whole server) or a narrower `approval_tools` list.
+
+        We deliberately do NOT classify by tool name. Names are server-controlled
+        and untrusted (tool poisoning), so a name heuristic leaks both ways: a write
+        tool named `update_page` slips a write-denylist, and a destructive
+        `get_and_purge` slips a read-allowlist. Config is the only trustworthy signal.
         """
         if self._require_approval_all:
             return True
         if self._approval_tools is not None:
             return real_name in self._approval_tools
-        return real_name in _MCP_WRITE_TOOLS
+        return True
 
     async def _ensure_alive(self) -> bool:
         """True if the session is usable; attempt ONE guarded reconnect if it died.
@@ -610,7 +620,10 @@ class McpClientToolProvider(ToolProvider):
                 allow_list=set(allow_list) if allow_list else None,
                 call_timeout=spec.get("call_timeout", _DEFAULT_CALL_TIMEOUT),
                 require_approval_all=spec.get("require_approval_all", False),
-                approval_tools=set(approval_tools) if approval_tools else None,
+                # Presence matters, not truthiness: `approval_tools: []` is an explicit
+            # "trust the whole server" opt-out (gate nothing), distinct from an
+            # omitted key (None → fail-closed default).
+            approval_tools=set(approval_tools) if approval_tools is not None else None,
                 url=url,
                 transport=spec.get("transport", "stdio" if not url else "http"),
                 headers=spec.get("headers") or {},

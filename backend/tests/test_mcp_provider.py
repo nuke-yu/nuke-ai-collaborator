@@ -71,6 +71,8 @@ async def _make_live_provider(
     call_result_text: str = "mock file content",
     allow_list=None,
     call_timeout: int = 5,
+    approval_tools=frozenset(),
+    require_approval_all: bool = False,
 ):
     """
     Create and initialize a provider backed by a fully mocked session.
@@ -78,6 +80,10 @@ async def _make_live_provider(
     The session_task runs for real (asyncio.create_task), so Queue/Event
     wiring is exercised.  The stdio_client and ClientSession are patched
     to avoid spawning any subprocess.
+
+    approval_tools defaults to an empty set ("trust the whole server, gate
+    nothing") so execution-mechanic tests aren't blocked by the fail-closed
+    default; approval-focused tests pass require_approval_all=True explicitly.
     """
     if tools is None:
         tools = [_make_mock_tool("read_file"), _make_mock_tool("write_file")]
@@ -90,6 +96,8 @@ async def _make_live_provider(
         args=["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
         allow_list=allow_list,
         call_timeout=call_timeout,
+        approval_tools=set(approval_tools) if approval_tools is not None else None,
+        require_approval_all=require_approval_all,
     )
 
     # We patch at module level so the session_task (running as a real task)
@@ -192,7 +200,8 @@ class TestMcpClientToolProvider(unittest.IsolatedAsyncioTestCase):
         mock_session = _make_mock_session(
             [_make_mock_tool("read_file")], call_result_text="reconnected content"
         )
-        p = McpClientToolProvider("filesystem", "npx", [], call_timeout=5)
+        p = McpClientToolProvider("filesystem", "npx", [], call_timeout=5,
+                                  approval_tools=set())   # trusted: isolate reconnect mechanics
         with (
             patch("executors.providers.mcp_client.stdio_client") as mock_stdio,
             patch("executors.providers.mcp_client.ClientSession") as mock_cs,
@@ -348,9 +357,33 @@ class TestMcpClientToolProvider(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("filesystem__write_file", names)
         await p.close()
 
+    def test_unconfigured_server_gates_every_tool(self):
+        """Fail-closed default: a server with no approval policy gates ALL tools —
+        including read-named ones, and write-named ones the old heuristic missed."""
+        p = McpClientToolProvider("filesystem", "npx", [])   # no approval config
+        self.assertTrue(p._needs_approval("read_file"))
+        self.assertTrue(p._needs_approval("write_file"))
+        self.assertTrue(p._needs_approval("update_page"))   # would slip a write-denylist
+
+    def test_empty_approval_tools_trusts_whole_server(self):
+        """approval_tools=set() is the explicit opt-out: gate nothing."""
+        p = McpClientToolProvider("filesystem", "npx", [], approval_tools=set())
+        self.assertFalse(p._needs_approval("write_file"))
+        self.assertFalse(p._needs_approval("delete_file"))
+
+    def test_approval_tools_list_gates_only_listed(self):
+        p = McpClientToolProvider("filesystem", "npx", [], approval_tools={"delete_file"})
+        self.assertTrue(p._needs_approval("delete_file"))
+        self.assertFalse(p._needs_approval("read_file"))
+
+    def test_require_approval_all_gates_everything(self):
+        p = McpClientToolProvider("filesystem", "npx", [], require_approval_all=True)
+        self.assertTrue(p._needs_approval("read_file"))
+        self.assertTrue(p._needs_approval("anything"))
+
     async def test_hil_gate_blocks_write_without_ruleset(self):
-        """Write-class tools must be blocked when no ruleset is present in context."""
-        p = await _make_live_provider()
+        """Gated tools must be blocked when no ruleset is present in context."""
+        p = await _make_live_provider(require_approval_all=True)
         result, is_error = await p.execute(
             "filesystem__write_file", {"path": "/tmp/x", "content": "y"}, {}
         )
@@ -360,9 +393,9 @@ class TestMcpClientToolProvider(unittest.IsolatedAsyncioTestCase):
 
     async def test_pre_authorized_skips_hil(self):
         """Trust boundary: in the collector the worker already ran permission, so
-        a write tool with _pre_authorized executes even without a ruleset
+        a gated tool with _pre_authorized executes even without a ruleset
         (instead of the fail-closed safety block)."""
-        p = await _make_live_provider()
+        p = await _make_live_provider(require_approval_all=True)
         result, is_error = await p.execute(
             "filesystem__write_file", {"path": "/tmp/x", "content": "y"},
             {"_pre_authorized": True},
@@ -372,7 +405,7 @@ class TestMcpClientToolProvider(unittest.IsolatedAsyncioTestCase):
         await p.close()
 
     async def test_write_still_blocked_without_pre_authorized(self):
-        p = await _make_live_provider()
+        p = await _make_live_provider(require_approval_all=True)
         result, is_error = await p.execute(
             "filesystem__write_file", {"path": "/tmp/x", "content": "y"}, {}
         )
@@ -517,6 +550,23 @@ class TestFromConfig(unittest.TestCase):
     def test_missing_config_returns_empty(self):
         providers = McpClientToolProvider.from_config("/nonexistent/path.json")
         self.assertEqual(providers, [])
+
+    def test_approval_tools_presence_distinguishes_trust_from_default(self):
+        """`approval_tools: []` (present, empty) → trust the whole server (set());
+        an omitted key → fail-closed default (None). Truthiness must NOT collapse
+        the empty list into the default."""
+        import tempfile
+        cfg = {"mcpServers": {
+            "trusted": {"command": "npx", "args": [], "approval_tools": [], "enabled": True},
+            "defaulted": {"command": "npx", "args": [], "enabled": True},
+        }}
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(cfg, f)
+            tmp = Path(f.name)
+        by_name = {p._server_name: p for p in McpClientToolProvider.from_config(tmp)}
+        self.assertEqual(by_name["trusted"]._approval_tools, set())   # explicit trust
+        self.assertIsNone(by_name["defaulted"]._approval_tools)       # fail-closed default
+        tmp.unlink()
 
     def test_loads_remote_server(self):
         import tempfile
