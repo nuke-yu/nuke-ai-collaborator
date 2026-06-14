@@ -195,18 +195,34 @@ gsd 的 `LINE#ID` 行哈希锚点是唯一的「换范式」能力——读文�
 
 ---
 
-## 12. 落地状态（2026-06-14）
+## 12. 落地状态（2026-06-14，工业化完整版）
 
-| Layer | 状态 | 实际落地 vs 设计的偏差（诚实记录） |
+目标定为**工业级完整度**（不止满足当前项目），故 L0–L2 + §3 归一器 + opencode 全部文本层
+replacer + §6 引号风格保留**全部落地**；仅 astEdit / Rust Myers / hashline 三个**范式级**项留作架构外。
+
+| Layer / 项 | 状态 | 落地 |
 |---|---|---|
-| **L0** | ✅ 已完成 | 等价类唯一性、char 归一（引号/破折号/unicode 空格，1→1）、EOL/BOM IO 边界、ws 尾换行修复全部落地。**位置映射归一器(§3) 未建**——char 归一是 1→1 长度保持，直接用偏移切回原字节即可，不需要 `src[]` 机器；该抽象只在引入「改长度且需拼回原字节」的归一时才有必要，属 L1+ 的引擎重构，YAGNI 暂缓。 |
-| **L1** | ✅ 已完成 | block-anchor（变长中间）+ 缩进重对齐落地。**indentation_flexible 跳过**——其匹配集是 line_trimmed 子集，边际价值低。 |
-| **L2** | ✅ 已完成 | 幂等恢复、失配 hint、batch edits 全部落地（`editing.apply_batch` + `edit_file` 的 `edits` 数组）。 |
-| **L3** | ⬜ 未做 | hashline 锚点，按需再开。 |
+| **L0 地基** | ✅ | 等价类唯一性、EOL/BOM IO 边界、ws 尾换行修复 |
+| **§3 位置映射归一器** | ✅ | `normalize.py`：`Normalized(text, src)` + `iter_spans`，**改长度的归一也能拼回原字节** |
+| char 归一（引号/破折号/unicode 空格） | ✅ | `char_normalized_replacer`（经归一器） |
+| **EscapeNormalized**（`\n`/`\t`/`\"`） | ✅ | `escape_normalized_replacer`（2→1，靠 src 映射） |
+| **L1 增宽** | ✅ | block-anchor（变长中间）+ 缩进重对齐 |
+| **IndentationFlexible** | ✅ | `indentation_flexible_replacer`（保相对缩进、去公共基线） |
+| **TrimmedBoundary** | ✅ | `trimmed_boundary_replacer`（剥首尾整空行） |
+| **ContextAware（levenshtein）** | ✅ | `context_aware_replacer`（difflib，阈值 0.9，≥2 行，唯一性兜底） |
+| MultiOccurrence | ✅(等价覆盖) | `replace_all` + 等价类，无需独立 replacer |
+| **§6 引号风格保留** | ✅ | `_preserve_quote_style`：char 命中弯引号时把风格回施到 new_string |
+| **L2 工效** | ✅ | 幂等恢复、失配 hint、batch edits |
+| **L3 范式** | ⬜ 架构外 | hashline 行锚点 / tree-sitter astEdit / Rust Myers——范式级，独立工具按需另起 |
 
-落地代码：`backend/editing/{edit,replacers,eol,recovery}.py` + `workspace.edit_file` + `executors/plugins/workspace_tools.py`。测试：`editing/tests/test_edit.py`（35 用例）。
+完整 ladder（严格→宽容，9 层）：`simple → char → escape → indentation_flexible → line_trimmed →
+trimmed_boundary → whitespace_normalized → context_aware → block_anchor`。
 
-> 现状能力 = opencode / Claude Code / gsd-2 / openclaw 四家**并集**，且在「等价类唯一性」「原字节零损映射」两项上为**超集**。
+落地代码：`backend/editing/{normalize,edit,replacers,eol,recovery}.py` + `workspace.edit_file` +
+`executors/plugins/workspace_tools.py`。测试：`editing/tests/{test_edit,test_normalize}.py`。
+
+> 现状能力 = opencode / Claude Code / gsd-2 / openclaw 四家**文本层并集**，且在「等价类唯一性」
+> 「原字节零损映射（含改长度归一）」两项上为**超集**；仅范式级（AST/Myers/行哈希）留作架构外。
 
 ---
 

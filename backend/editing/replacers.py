@@ -1,15 +1,43 @@
 """editing/replacers.py — 在文件内容里定位「待替换文本」的匹配器级联（纯函数）。
 
-模型给的 old_string 常和文件里的实际文本有细微出入（行首尾空白、缩进、内部空白多了
-少了）。每个 replacer 接收 (content, find)，**产出 content 里真实存在的、与 find 等价的
-子串**（candidate）——调用方再用这个 candidate 去做精确替换。
+模型给的 old_string 常和文件里的实际文本有细微出入（行首尾空白、缩进、内部空白、弯引号、
+转义写法…）。每个 replacer 接收 (content, find)，**产出 content 里真实存在的、与 find 等价
+的子串**（candidate）——调用方再用这个 candidate 去做精确替换（改写永远精确，宽容只在定位）。
 
 排在前面的越严格、越优先；越往后越宽容。第一个产出可用 candidate 的 replacer 胜出。
-无任何 IO、无第三方依赖，可单独测试。port 自 opencode 的 edit replacer 思路（精简版）。
+字符/转义层经位置映射归一器（normalize.py）拼回原文真实字节；结构层按行窗口产出真实块。
+port 自 opencode 九重 replacer 思路，并补齐位置映射 + 等价类唯一性（见 edit.py）。
 """
+import difflib
 import re
 
+from editing.normalize import iter_spans, CHAR_TRANSFORMS, ESCAPE_TRANSFORMS
+
 Replacer = "callable(content: str, find: str) -> Iterator[str]"
+
+_CONTEXT_THRESHOLD = 0.9     # context_aware 模糊匹配的最低相似度（保守）
+
+
+def _line_starts(content_lines):
+    """每行在原文中的起始下标（含行间 \\n）。"""
+    starts, pos = [], 0
+    for ln in content_lines:
+        starts.append(pos)
+        pos += len(ln) + 1
+    return starts
+
+
+def _strip_trailing_empty(find_lines):
+    return find_lines[:-1] if find_lines and find_lines[-1] == "" else find_lines
+
+
+def _remove_common_indent(lines):
+    """去掉所有非空行的公共最小前导缩进，保留相对缩进结构。"""
+    widths = [len(ln) - len(ln.lstrip(" \t")) for ln in lines if ln.strip()]
+    if not widths:
+        return list(lines)
+    m = min(widths)
+    return [ln[m:] if ln.strip() else ln for ln in lines]
 
 
 def simple_replacer(content: str, find: str):
@@ -18,65 +46,70 @@ def simple_replacer(content: str, find: str):
         yield find
 
 
-# 长度保持的字符归一表（1 字符 → 1 字符）：弯引号、各类破折号、unicode 空格。
-# 因为 1→1，归一文与原文逐位对应，匹配到的偏移可直接切回原文真实字节。
-# 行尾(CRLF)/BOM 改长度，不在此处——由 IO 层（workspace.edit_file）统一处理。
-_CHAR_CANON = {
-    "‘": "'", "’": "'", "‚": "'", "‛": "'",   # 单弯引号
-    "“": '"', "”": '"', "„": '"', "‟": '"',   # 双弯引号
-    "‐": "-", "‑": "-", "‒": "-", "–": "-",   # 连字符/短破折
-    "—": "-", "―": "-", "−": "-",                   # 长破折/减号
-    " ": " ", " ": " ", " ": " ", " ": " ",   # 各类 unicode 空格
-    " ": " ", " ": " ", " ": " ", "　": " ",
-}
-
-
-def _char_canon(s: str) -> str:
-    return "".join(_CHAR_CANON.get(ch, ch) for ch in s)
-
-
 def char_normalized_replacer(content: str, find: str):
-    """字符归一后子串匹配：把弯引号/unicode 空格/破折号归一成 ASCII 等价物再找。
-    归一是 1→1 长度保持，故偏移不变，yield 的是 content 里的**原始真实子串**（保留
-    文件原本的弯引号等排版）。"""
+    """字符归一后子串匹配：弯引号/unicode 空格/破折号归一成 ASCII 等价物再找。
+    经位置映射归一器拼回 content 里的**原始真实子串**（保留文件原本的弯引号等排版）。"""
     if not find:
         return
-    nc = _char_canon(content)
-    nf = _char_canon(find)
-    if nc == content and nf == find:
-        return  # 没有可归一字符；精确情形已由 simple_replacer 覆盖
-    start = 0
-    while True:
-        idx = nc.find(nf, start)
-        if idx == -1:
-            break
-        yield content[idx: idx + len(find)]   # len(nf)==len(find)，偏移对齐原文
-        start = idx + 1
+    for a, b in iter_spans(content, find, CHAR_TRANSFORMS):
+        yield content[a:b]
+
+
+def escape_normalized_replacer(content: str, find: str):
+    r"""转义归一后子串匹配：把 `\n`/`\t`/`\"` 等反斜杠转义解成实际字符再找——接住模型把
+    多行/特殊字符写成转义串的情形。转义改长度（2→1），靠归一器的 src 映射拼回原字节。"""
+    if not find:
+        return
+    for a, b in iter_spans(content, find, ESCAPE_TRANSFORMS):
+        yield content[a:b]
+
+
+def indentation_flexible_replacer(content: str, find: str):
+    """忽略**公共**基线缩进、但保留**相对**缩进结构的逐行匹配——接住「整块被改了基准缩进
+    层级，但内部相对缩进对」的情形。比 line_trimmed 严格（后者连相对缩进也抹平）。"""
+    find_lines = _strip_trailing_empty(find.split("\n"))
+    if not find_lines:
+        return
+    nf = _remove_common_indent(find_lines)
+    content_lines = content.split("\n")
+    starts = _line_starts(content_lines)
+    n = len(find_lines)
+    for i in range(len(content_lines) - n + 1):
+        if _remove_common_indent(content_lines[i:i + n]) == nf:
+            last = i + n - 1
+            yield content[starts[i]: starts[last] + len(content_lines[last])]
 
 
 def line_trimmed_replacer(content: str, find: str):
     """逐行匹配，但忽略每行的首尾空白差异。产出 content 里对应的真实块。"""
     content_lines = content.split("\n")
-    find_lines = find.split("\n")
-    if find_lines and find_lines[-1] == "":
-        find_lines = find_lines[:-1]
+    find_lines = _strip_trailing_empty(find.split("\n"))
     if not find_lines:
         return
-
-    # 预计算每行在 content 中的起始下标（含行间的 \n）
-    starts = []
-    pos = 0
-    for ln in content_lines:
-        starts.append(pos)
-        pos += len(ln) + 1  # +1 = 换行符
-
+    starts = _line_starts(content_lines)
     n = len(find_lines)
     for i in range(len(content_lines) - n + 1):
         if all(content_lines[i + j].strip() == find_lines[j].strip() for j in range(n)):
-            start = starts[i]
             last = i + n - 1
-            end = starts[last] + len(content_lines[last])
-            yield content[start:end]
+            yield content[starts[i]: starts[last] + len(content_lines[last])]
+
+
+def trimmed_boundary_replacer(content: str, find: str):
+    """剥掉 find **首尾的整空行**后再逐行 trim 匹配——接住模型在块前后多/少了空行的情形。"""
+    find_lines = find.split("\n")
+    while find_lines and not find_lines[-1].strip():
+        find_lines.pop()
+    while find_lines and not find_lines[0].strip():
+        find_lines.pop(0)
+    if not find_lines:
+        return
+    content_lines = content.split("\n")
+    starts = _line_starts(content_lines)
+    n = len(find_lines)
+    for i in range(len(content_lines) - n + 1):
+        if all(content_lines[i + j].strip() == find_lines[j].strip() for j in range(n)):
+            last = i + n - 1
+            yield content[starts[i]: starts[last] + len(content_lines[last])]
 
 
 def whitespace_normalized_replacer(content: str, find: str):
@@ -85,45 +118,48 @@ def whitespace_normalized_replacer(content: str, find: str):
     target = norm(find)
     if not target:
         return
-    # 与 line_trimmed 一致：算窗口大小前先剥掉 find 尾部空行，否则带尾 \n 的 find
-    # 会让 n 多算一行、窗口对不齐，第三阶段对其几乎永不命中。
-    find_lines = find.split("\n")
-    if find_lines and find_lines[-1] == "":
-        find_lines = find_lines[:-1]
+    find_lines = _strip_trailing_empty(find.split("\n"))
     n = len(find_lines)
     content_lines = content.split("\n")
     if n <= 0 or n > len(content_lines):
         return
-    starts = []
-    pos = 0
-    for ln in content_lines:
-        starts.append(pos)
-        pos += len(ln) + 1
     for i in range(len(content_lines) - n + 1):
         block = "\n".join(content_lines[i:i + n])
         if norm(block) == target:
             yield block
 
 
-def block_anchor_replacer(content: str, find: str):
-    """首尾行锚定（find ≥3 行）：只要 find 的首行与尾行（去空白）能在 content 里框定
-    一段块，中间行**不比对、行数也可不同**。接住「长块内部被模型写歪、但首尾对」的情况。
+def context_aware_replacer(content: str, find: str):
+    """模糊匹配（≥2 行）：逐行 trim 后按相似度（difflib）找 ≥阈值 的等行数窗口——接住内部
+    个别行被模型写歪、但整体高度相似的情形。最危险层之一，阈值保守 + 靠等价类唯一性兜底。"""
+    find_lines = _strip_trailing_empty(find.split("\n"))
+    if len(find_lines) < 2:          # 单行不做模糊（收益/风险不划算）
+        return
+    target = "\n".join(ln.strip() for ln in find_lines)
+    content_lines = content.split("\n")
+    starts = _line_starts(content_lines)
+    n = len(find_lines)
+    for i in range(len(content_lines) - n + 1):
+        cand = "\n".join(ln.strip() for ln in content_lines[i:i + n])
+        if difflib.SequenceMatcher(None, target, cand).ratio() >= _CONTEXT_THRESHOLD:
+            last = i + n - 1
+            yield content[starts[i]: starts[last] + len(content_lines[last])]
 
-    最宽容、最危险的一层，放在最后；安全完全依赖 L0 的等价类唯一性——首/尾若框定出
-    多段不同块，apply_replacement 会因「不唯一」拒绝，不会乱改。"""
-    find_lines = find.split("\n")
-    if find_lines and find_lines[-1] == "":
-        find_lines = find_lines[:-1]
+
+def block_anchor_replacer(content: str, find: str):
+    """首尾行锚定（find ≥3 行）：只要 find 的首行与尾行（去空白）能在 content 里框定一段块，
+    中间行**不比对、行数也可不同**。接住「长块内部被模型写歪、但首尾对」的情况。
+
+    最宽容、最危险的一层，放在最后；安全完全依赖等价类唯一性——首/尾若框定出多段不同块，
+    apply_replacement 会因「不唯一」拒绝，不会乱改。"""
+    find_lines = _strip_trailing_empty(find.split("\n"))
     if len(find_lines) < 3:          # 不足 3 行：首尾即全部，交给前面更严格的层
         return
     first, last = find_lines[0].strip(), find_lines[-1].strip()
     if not first or not last:
         return
     content_lines = content.split("\n")
-    starts, pos = [], 0
-    for ln in content_lines:
-        starts.append(pos)
-        pos += len(ln) + 1
+    starts = _line_starts(content_lines)
     for i in range(len(content_lines)):
         if content_lines[i].strip() != first:
             continue
@@ -133,12 +169,16 @@ def block_anchor_replacer(content: str, find: str):
                 break
 
 
-# 顺序即优先级：严格 → 宽容。char_normalized 紧随精确之后——它只做 1→1 字符替换、
-# 不放宽空白结构，风险低，应优先于行级 trim/折叠。block_anchor 最宽容，垫底。
+# 顺序即优先级：严格 → 宽容。字符层（char/escape，结构不变、拼回原字节）紧随精确；
+# 再到保相对缩进 → 抹平缩进 → 剥边缘空行 → 折叠空白 → 模糊相似 → 首尾锚（最宽容垫底）。
 REPLACERS = [
     simple_replacer,
     char_normalized_replacer,
+    escape_normalized_replacer,
+    indentation_flexible_replacer,
     line_trimmed_replacer,
+    trimmed_boundary_replacer,
     whitespace_normalized_replacer,
+    context_aware_replacer,
     block_anchor_replacer,
 ]

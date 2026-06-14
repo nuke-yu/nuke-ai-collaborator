@@ -87,9 +87,15 @@ class TestWhitespaceNormalizedTrailingNewline(unittest.TestCase):
 class TestCharNormalization(unittest.TestCase):
     """P0 字符归一：弯引号 / unicode 空格 / 破折号（长度保持，拼回原字节）。"""
 
-    def test_curly_quotes_match_straight(self):
-        # 文件里是弯双引号，模型给直引号 → 命中，并保留替换文本
+    def test_curly_quotes_match_straight_and_preserve_style(self):
+        # 文件用弯双引号、模型给直引号 → 命中，且把弯引号风格回施到替换文本（§6）
         content = "msg = “hello”\n"
+        out = apply_replacement(content, 'msg = "hello"', 'msg = "bye"')
+        self.assertEqual(out, "msg = “bye”\n")
+
+    def test_no_curly_in_file_leaves_new_string_straight(self):
+        # 文件本就用直引号 → 不触发引号风格保留，new_string 原样
+        content = 'msg = "hello"\n'
         out = apply_replacement(content, 'msg = "hello"', 'msg = "bye"')
         self.assertEqual(out, 'msg = "bye"\n')
 
@@ -239,6 +245,55 @@ class TestApplyBatch(unittest.TestCase):
     def test_empty_edits_raises(self):
         with self.assertRaises(EditError):
             apply_batch("x", [])
+
+
+class TestEscapeNormalized(unittest.TestCase):
+    """模型把多行写成 \\n 转义串 → 解转义后命中实际换行。"""
+
+    def test_escaped_newline_matches_real_newline(self):
+        content = "a = 1\nb = 2\n"
+        out = apply_replacement(content, "a = 1\\nb = 2", "a = 9\nb = 9")
+        self.assertEqual(out, "a = 9\nb = 9\n")
+
+    def test_escaped_tab_matches_real_tab(self):
+        content = "x\ty\n"
+        out = apply_replacement(content, "x\\ty", "x_y")
+        self.assertEqual(out, "x_y\n")
+
+
+class TestIndentationFlexible(unittest.TestCase):
+    """保留相对缩进、只忽略公共基线——比 line_trimmed 严格。"""
+
+    def test_relative_indent_preserved_match(self):
+        # 文件块基准缩进 4，模型给基准 0 但相对结构一致
+        content = "    if x:\n        y = 1\n"
+        out = apply_replacement(content, "if x:\n    y = 1", "if x:\n    y = 2")
+        self.assertEqual(out, "    if x:\n        y = 2\n")
+
+
+class TestTrimmedBoundary(unittest.TestCase):
+    """忽略 find 首尾多余的整空行。"""
+
+    def test_boundary_blank_lines_ignored(self):
+        content = "a = 1\nb = 2\n"
+        out = apply_replacement(content, "\n\na = 1\nb = 2\n\n", "a = 9\nb = 9")
+        self.assertEqual(out, "a = 9\nb = 9\n")
+
+
+class TestContextAware(unittest.TestCase):
+    """内部个别行写歪、整体高度相似 → 模糊命中（保守阈值 + 唯一性兜底）。"""
+
+    def test_minor_interior_drift_matches(self):
+        content = "def f(a, b):\n    total = a + b\n    return total\n"
+        # 中间行少量偏差（变量名/空格），整体相似度高
+        old = "def f(a, b):\n    total = a+b\n    return total"
+        out = apply_replacement(content, old, "def f(a, b):\n    return a + b")
+        self.assertEqual(out, "def f(a, b):\n    return a + b\n")
+
+    def test_too_different_does_not_match(self):
+        content = "def f(a, b):\n    total = a + b\n    return total\n"
+        with self.assertRaises(EditError):
+            apply_replacement(content, "def g(x):\n    pass\n    yield x", "X")
 
 
 class TestCompletionHint(unittest.TestCase):

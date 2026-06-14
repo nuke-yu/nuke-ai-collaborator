@@ -9,6 +9,8 @@ old_string 的细微空白/缩进偏差有容错。
 """
 from editing.replacers import (
     REPLACERS, line_trimmed_replacer, block_anchor_replacer,
+    indentation_flexible_replacer, trimmed_boundary_replacer, context_aware_replacer,
+    char_normalized_replacer,
 )
 from editing.recovery import idempotent_skip
 
@@ -17,10 +19,13 @@ class EditError(Exception):
     """替换无法安全完成（未找到 / 不唯一 / 参数非法）。"""
 
 
-# 经这些层命中时，old_string 丢了缩进信息 → new_string 须按命中块的公共缩进重对齐，
-# 否则多行块会被拍平（de-indent）。精确/字符归一/空白折叠层不重对齐：
-# simple/char_norm 的缩进是模型有意给的；ws_normalized 折叠了内部空白、缩进语义已不清。
-_RECONCILE_INDENT = {line_trimmed_replacer, block_anchor_replacer}
+# 经这些「忽略缩进」的层命中时，old_string 丢了缩进信息 → new_string 须按命中块的公共缩进
+# 重对齐，否则多行块会被拍平（de-indent）。精确/字符归一/空白折叠层不重对齐：simple/char/
+# escape 的缩进是模型有意给的；ws_normalized 折叠了内部空白、缩进语义已不清。
+_RECONCILE_INDENT = {
+    line_trimmed_replacer, block_anchor_replacer,
+    indentation_flexible_replacer, trimmed_boundary_replacer, context_aware_replacer,
+}
 
 
 def _equivalence_class(content: str, old_string: str):
@@ -46,6 +51,28 @@ def _common_indent(s: str) -> int:
     """块内非空行的最小前导缩进宽度（空格/制表各记 1）。"""
     widths = [len(ln) - len(ln.lstrip(" \t")) for ln in s.split("\n") if ln.strip()]
     return min(widths) if widths else 0
+
+
+def _preserve_quote_style(matched: str, new_string: str) -> str:
+    """文件用弯引号、模型给直引号并经 char 归一命中时，把弯引号风格回施到 new_string，
+    让替换不破坏文件原本的排版（对标 Claude Code preserveQuoteStyle）。
+
+    仅当命中块确实含弯引号才动；按「前接空白/起始/开括号 = 开引号」的启发式选开/闭样式。
+    """
+    has_dq = "“" in matched or "”" in matched
+    has_sq = "‘" in matched or "’" in matched
+    if not (has_dq or has_sq):
+        return new_string
+    out = []
+    for k, ch in enumerate(new_string):
+        opening = k == 0 or new_string[k - 1] in " \t\n([{<"
+        if ch == '"' and has_dq:
+            out.append("“" if opening else "”")
+        elif ch == "'" and has_sq:
+            out.append("‘" if opening else "’")
+        else:
+            out.append(ch)
+    return "".join(out)
 
 
 def _reindent(text: str, delta: int) -> str:
@@ -93,11 +120,17 @@ def apply_replacement(content: str, old_string: str, new_string: str,
         )
 
     reconcile = replacer in _RECONCILE_INDENT
+    quote_preserve = replacer is char_normalized_replacer
     old_base = _common_indent(old_string) if reconcile else 0
 
     def _repl_for(match: str) -> str:
-        # 按「命中块比 old_string 多出的公共缩进」平移 new_string，保住块缩进。
-        return _reindent(new_string, _common_indent(match) - old_base) if reconcile else new_string
+        repl = new_string
+        if reconcile:
+            # 按「命中块比 old_string 多出的公共缩进」平移 new_string，保住块缩进。
+            repl = _reindent(repl, _common_indent(match) - old_base)
+        if quote_preserve:
+            repl = _preserve_quote_style(match, repl)
+        return repl
 
     if replace_all:
         out = content

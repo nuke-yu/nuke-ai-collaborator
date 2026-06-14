@@ -102,6 +102,11 @@ if x:
 
 **一句话**：我们缺的不是「更宽」，是「更稳」——先补字符归一（P0）和唯一性（P1），比加六个 replacer 都值。
 
+> **后续（2026-06-14）**：目标升级为**工业级完整度**后，上表「先稳后宽」的取舍被超越——
+> P0–P3 + opencode 全部文本层 replacer（escape / indentation-flexible / trimmed-boundary /
+> context-aware）+ 位置映射归一器 + §6 引号风格保留**已全部落地**。仅 hashline / AST / Rust
+> Myers 三个**范式级**项留作架构外。完整状态见 [`EDIT-PRIMITIVE-UPGRADE-DESIGN.md`](EDIT-PRIMITIVE-UPGRADE-DESIGN.md) §12。
+
 ---
 
 *文档日期：2026-06-14 · 范围：5 项目 edit 原语一手源码对比*
