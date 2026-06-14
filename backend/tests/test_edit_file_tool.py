@@ -21,7 +21,20 @@ class TestEditFileHandler(unittest.TestCase):
         with patch.object(wt._ws, "edit_file", new=AsyncMock(return_value="已修改 a.py")) as e:
             out = _run(wt._handle_edit_file("a.py", "x = 1", "x = 99", context={"bot_id": 1}))
         self.assertEqual(out, "已修改 a.py")
-        e.assert_awaited_once_with(1, "a.py", "x = 1", "x = 99", replace_all=False, group_id=None)
+        e.assert_awaited_once_with(1, "a.py", "x = 1", "x = 99",
+                                   replace_all=False, group_id=None, edits=None)
+
+    def test_edit_file_batch_threads_edits(self):
+        edits = [{"old_string": "a", "new_string": "b"}, {"old_string": "c", "new_string": "d"}]
+        with patch.object(wt._ws, "edit_file", new=AsyncMock(return_value="批量完成")) as e:
+            out = _run(wt._handle_edit_file("a.py", edits=edits, context={"bot_id": 1}))
+        self.assertEqual(out, "批量完成")
+        e.assert_awaited_once_with(1, "a.py", None, None,
+                                   replace_all=False, group_id=None, edits=edits)
+
+    def test_edit_file_requires_old_new_or_edits(self):
+        out = _run(wt._handle_edit_file("a.py", context={"bot_id": 1}))
+        self.assertIn("参数错误", out)
 
     def test_edit_file_missing_bot_id(self):
         out = _run(wt._handle_edit_file("a.py", "a", "b", context={}))

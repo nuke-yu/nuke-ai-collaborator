@@ -334,7 +334,9 @@ def delete_path(bot_id: int, path: str, group_id: int | None = None) -> str:
     return f"已删除 {path}"
 
 
-async def edit_file(bot_id: int, path: str, old_string: str, new_string: str, replace_all: bool = False, group_id: int | None = None) -> str:
+async def edit_file(bot_id: int, path: str, old_string: str | None = None, new_string: str | None = None,
+                    replace_all: bool = False, group_id: int | None = None,
+                    edits: list | None = None) -> str:
     ws, path = _get_effective_ws(bot_id, path, group_id)
     p = _safe_path(ws, path)
     if p is None:
@@ -358,22 +360,35 @@ async def edit_file(bot_id: int, path: str, old_string: str, new_string: str, re
         bom, body = editing.strip_bom(raw)
         eol = editing.detect_eol(body)
         current = editing.to_lf(body)
-        old_lf = editing.to_lf(old_string)
-        new_lf = editing.to_lf(new_string)
-        try:
-            updated = editing.apply_replacement(current, old_lf, new_lf, replace_all=replace_all)
-        except editing.EditError as e:
-            # 幂等恢复：目标已存在、old 不在 → 视为已应用，不当失败处理。
-            if editing.idempotent_skip(current, old_lf, new_lf):
-                return "[已是目标状态] new_string 已存在且 old_string 不在文件中，视为已应用，未改动"
-            # 失配 hint：回吐近邻上下文帮模型重锚 old_string。
-            return f"[编辑失败] {e}\n{editing.mismatch_hint(current, old_lf)}"
+
+        suffix = ""
+        if edits is not None:
+            # 批量：顺序应用、原子（任一失配整体不落盘）、一次提交。
+            norm = [(editing.to_lf(e.get("old_string", "")), editing.to_lf(e.get("new_string", "")))
+                    for e in edits]
+            try:
+                updated, applied, skipped = editing.apply_batch(current, norm)
+            except editing.EditError as e:
+                return f"[编辑失败] {e}"
+            suffix = f"（{applied} 处已改" + (f"，{skipped} 处已是目标态跳过）" if skipped else "）")
+        else:
+            old_lf = editing.to_lf(old_string)
+            new_lf = editing.to_lf(new_string)
+            try:
+                updated = editing.apply_replacement(current, old_lf, new_lf, replace_all=replace_all)
+            except editing.EditError as e:
+                # 幂等恢复：目标已存在、old 不在 → 视为已应用，不当失败处理。
+                if editing.idempotent_skip(current, old_lf, new_lf):
+                    return "[已是目标状态] new_string 已存在且 old_string 不在文件中，视为已应用，未改动"
+                # 失配 hint：回吐近邻上下文帮模型重锚 old_string。
+                return f"[编辑失败] {e}\n{editing.mismatch_hint(current, old_lf)}"
 
         if updated == current:
             return "[无改动] 替换前后内容一致"
 
         out = bom + editing.restore_eol(updated, eol)
-        return await _commit_text(ws, p, rel, path, out, bot_id, "edit")
+        result = await _commit_text(ws, p, rel, path, out, bot_id, "edit")
+        return f"{result}{suffix}" if suffix else result
 
 
 # 遍历工作区时剪枝掉的重型目录（依赖/构建产物）。rglob("*") 会急切枚举整棵树——

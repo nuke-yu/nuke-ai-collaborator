@@ -10,6 +10,7 @@ old_string 的细微空白/缩进偏差有容错。
 from editing.replacers import (
     REPLACERS, line_trimmed_replacer, block_anchor_replacer,
 )
+from editing.recovery import idempotent_skip
 
 
 class EditError(Exception):
@@ -104,3 +105,27 @@ def apply_replacement(content: str, old_string: str, new_string: str,
             out = out.replace(m, _repl_for(m))
         return out
     return content.replace(matches[0], _repl_for(matches[0]), 1)
+
+
+def apply_batch(content: str, edits: list[tuple[str, str]]):
+    """把多条 (old_string, new_string) **顺序**应用到同一缓冲，返回 (新内容, 已改数, 跳过数)。
+
+    - 全程在内存里推进，由调用方一次性写回 → **原子**：任一条真失配即抛 EditError（标明
+      第几条），不产生部分结果。
+    - 每条都用单次 apply_replacement（要求唯一），故第 i 条看到的是前 i-1 条改完的缓冲。
+    - 某条 old 找不到但已是目标态（new 已在、old 不在）→ 幂等**跳过**，不算失败。
+    """
+    if not edits:
+        raise EditError("edits 为空")
+    out = content
+    applied = skipped = 0
+    for i, (old, new) in enumerate(edits):
+        try:
+            out = apply_replacement(out, old, new)
+            applied += 1
+        except EditError as e:
+            if idempotent_skip(out, old, new):
+                skipped += 1
+                continue
+            raise EditError(f"第 {i + 1}/{len(edits)} 个编辑失败：{e}")
+    return out, applied, skipped

@@ -69,16 +69,29 @@ _WORKSPACE_TOOLS = [
             "对工作区已有文件做精确字符串替换（只发改动片段，不必重发整文件）。"
             "把 old_string 替换为 new_string；old_string 必须在文件中唯一"
             "（否则报错，请加更多上下文或用 replace_all）。修改已有文件首选本工具。"
+            "一次改多处可用 edits 数组（顺序应用、原子、一次提交）。"
         ),
         parameters={
             "type": "object",
             "properties": {
                 "path":        {"type": "string", "description": "相对于工作区根目录的路径"},
-                "old_string":  {"type": "string", "description": "要被替换的原文（需与文件内容一致，可含多行）"},
-                "new_string":  {"type": "string", "description": "替换后的新内容"},
+                "old_string":  {"type": "string", "description": "单次替换：要被替换的原文（需与文件内容一致，可含多行）"},
+                "new_string":  {"type": "string", "description": "单次替换：替换后的新内容"},
                 "replace_all": {"type": "boolean", "description": "是否替换所有匹配，默认 false", "default": False},
+                "edits": {
+                    "type": "array",
+                    "description": "批量替换：多处一次提交，顺序应用、原子（任一未命中则整体不落盘）。与 old_string/new_string 二选一。",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "old_string": {"type": "string"},
+                            "new_string": {"type": "string"},
+                        },
+                        "required": ["old_string", "new_string"],
+                    },
+                },
             },
-            "required": ["path", "old_string", "new_string"],
+            "required": ["path"],
         },
     ),
     ToolDef(
@@ -761,13 +774,17 @@ async def _handle_write_file(path: str, content: str, context: dict = None) -> s
     return await _ws.write_file(bot_id, path, content, group_id=ctx.get("group_id")) if bot_id else "[错误] 缺少 bot_id"
 
 
-async def _handle_edit_file(path: str, old_string: str, new_string: str,
-                            replace_all: bool = False, context: dict = None) -> str:
+async def _handle_edit_file(path: str, old_string: str = None, new_string: str = None,
+                            replace_all: bool = False, context: dict = None,
+                            edits: list = None, **kwargs) -> str:
     ctx = context or {}
     bot_id = ctx.get("bot_id")
     if not bot_id:
         return "[错误] 缺少 bot_id"
-    return await _ws.edit_file(bot_id, path, old_string, new_string, replace_all=replace_all, group_id=ctx.get("group_id"))
+    if edits is None and (old_string is None or new_string is None):
+        return "[参数错误] 需提供 old_string+new_string（单次替换），或 edits 数组（批量替换）"
+    return await _ws.edit_file(bot_id, path, old_string, new_string,
+                               replace_all=replace_all, group_id=ctx.get("group_id"), edits=edits)
 
 
 async def _handle_list_workspace(context: dict = None) -> str:

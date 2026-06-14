@@ -7,13 +7,13 @@
 文件系统读写由 workspace/ 负责，工具注册由 executors 负责；本包只做纯字符串变换，
 因此可以脱离 DB/执行器单独跑测试。
 """
-from editing.edit import apply_replacement, EditError
+from editing.edit import apply_replacement, apply_batch, EditError
 from editing.truncation import build_completion_hint
 from editing.eol import strip_bom, detect_eol, to_lf, restore_eol
 from editing.recovery import idempotent_skip, mismatch_hint
 
 __all__ = [
-    "apply_replacement", "EditError", "build_completion_hint",
+    "apply_replacement", "apply_batch", "EditError", "build_completion_hint",
     "strip_bom", "detect_eol", "to_lf", "restore_eol",
     "idempotent_skip", "mismatch_hint",
 ]

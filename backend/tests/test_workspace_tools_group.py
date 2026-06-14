@@ -43,7 +43,7 @@ class TestToolGroupThreading(unittest.TestCase):
     def test_edit_file_threads_group_id(self):
         captured = {}
 
-        async def fake_edit(bot_id, path, old, new, replace_all=False, group_id=None):
+        async def fake_edit(bot_id, path, old, new, replace_all=False, group_id=None, edits=None):
             captured["gid"] = group_id
             return "ok"
 

@@ -80,7 +80,7 @@ def build_rd_pipeline(ba: dict, dev: dict, qa: dict) -> list[dict]:
             instruction=(
                 "按上面的 Jira 工单开发。"
                 "【编辑与开发规范】\n"
-                "- 修改已有文件绝对优先使用 edit_file（只发 diff，避免大文件被单次输出长度截断）；\n"
+                "- 修改已有文件绝对优先使用 edit_file（只发 diff，避免大文件被单次输出长度截断）；同一文件多处改动用 edits 数组一次提交；\n"
                 "- write_file 仅用于新建文件或整文件重写；\n"
                 "- 严禁把完整源码贴进聊天回复，只需说明实现方案与落盘文件。\n"
                 "开发完成后做代码自测，并提供 PR 描述（当前 Git 为替身）。"

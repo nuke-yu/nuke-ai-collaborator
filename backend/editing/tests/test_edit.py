@@ -7,7 +7,7 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from editing import (
-    apply_replacement, EditError, build_completion_hint,
+    apply_replacement, apply_batch, EditError, build_completion_hint,
     strip_bom, detect_eol, to_lf, restore_eol,
     idempotent_skip, mismatch_hint,
 )
@@ -206,6 +206,39 @@ class TestMismatchHint(unittest.TestCase):
         self.assertIn("target marker here", hint)
         self.assertLessEqual(len(hint), 400)        # 窗口而非全文
         self.assertNotIn("line 5", hint)            # 远处不出现
+
+
+class TestApplyBatch(unittest.TestCase):
+    """L2b：多条编辑顺序应用、原子、幂等感知。"""
+
+    def test_multiple_edits_applied_in_order(self):
+        content = "a = 1\nb = 2\nc = 3\n"
+        out, applied, skipped = apply_batch(content, [("a = 1", "a = 10"), ("c = 3", "c = 30")])
+        self.assertEqual(out, "a = 10\nb = 2\nc = 30\n")
+        self.assertEqual((applied, skipped), (2, 0))
+
+    def test_sequential_edit_sees_prior_result(self):
+        # 第二条依赖第一条改完的缓冲
+        out, applied, _ = apply_batch("x = 1\n", [("x = 1", "x = 2"), ("x = 2", "x = 3")])
+        self.assertEqual(out, "x = 3\n")
+        self.assertEqual(applied, 2)
+
+    def test_atomic_fail_fast_with_index(self):
+        # 第二条找不到 → 整批抛错、标明第几条，不产生部分结果
+        with self.assertRaises(EditError) as cm:
+            apply_batch("a = 1\n", [("a = 1", "a = 2"), ("nope", "x")])
+        self.assertIn("第 2/2", str(cm.exception))
+
+    def test_already_applied_edit_is_skipped(self):
+        # 第一条的目标已存在（old 不在）→ 幂等跳过，不致失败
+        content = "a = 2\nb = 1\n"
+        out, applied, skipped = apply_batch(content, [("a = 1", "a = 2"), ("b = 1", "b = 9")])
+        self.assertEqual(out, "a = 2\nb = 9\n")
+        self.assertEqual((applied, skipped), (1, 1))
+
+    def test_empty_edits_raises(self):
+        with self.assertRaises(EditError):
+            apply_batch("x", [])
 
 
 class TestCompletionHint(unittest.TestCase):
