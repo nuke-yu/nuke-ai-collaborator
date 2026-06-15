@@ -171,12 +171,11 @@ async def readiness():
     try:
         async with global_db() as db:
             await db.execute("CREATE TABLE IF NOT EXISTS health_check (id INTEGER PRIMARY KEY, ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
-            await db.execute("INSERT INTO health_check DEFAULT VALUES")
-            await db.execute("DELETE FROM health_check")
+            await db.execute("INSERT OR REPLACE INTO health_check (id) VALUES (1)")
             await db.commit()
     except Exception as e:
         logging.exception("Readiness check failed: DB write failed")
-        raise HTTPException(status_code=500, detail=f"Database not writable: {e}")
+        raise HTTPException(status_code=503, detail=f"Database not writable: {e}")
 
     # 2. Verify Supervisor and Worker fleet status
     sup = sup_mod.supervisor

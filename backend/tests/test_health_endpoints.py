@@ -35,13 +35,13 @@ class TestHealthEndpoints(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(resp.json(), {"status": "ok"})
 
     async def test_readiness_db_failure(self):
-        # Mock global_db to raise an exception, readiness should return 500
+        # Mock global_db to raise an exception, readiness should return 503
         with patch("db.global_db") as mock_db:
             mock_db.side_effect = Exception("DB Disk Full")
             transport = httpx.ASGITransport(app=app)
             async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
                 resp = await client.get("/health/readiness")
-            self.assertEqual(resp.status_code, 500)
+            self.assertEqual(resp.status_code, 503)
             self.assertIn("Database not writable", resp.json()["detail"])
 
     async def test_readiness_no_supervisor(self):
