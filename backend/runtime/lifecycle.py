@@ -69,16 +69,110 @@ class LifecycleManager:
         self._active_groups: OrderedDict[int, float] = OrderedDict()
         self._lock = asyncio.Lock()
         self._locks: dict[int, GroupLock] = {}
+        self._evictor_task: asyncio.Task | None = None
 
     def is_active(self, group_id: int) -> bool:
         """Is this group currently hydrated/owned by this worker? Public predicate
         so callers don't reach into the private _active_groups map."""
         return group_id in self._active_groups
 
+    def touch(self, group_id: int) -> None:
+        """Update last active timestamp for a group."""
+        if group_id in self._active_groups:
+            self._active_groups[group_id] = time.time()
+
+    async def _background_loop(self) -> None:
+        log.info("lifecycle: starting background eviction and pruning loop")
+        last_prune = 0.0
+        while True:
+            try:
+                await asyncio.sleep(60)
+                await self.sweep_inactive_groups()
+                
+                # Run prune once a day (86400 seconds)
+                now = time.time()
+                if now - last_prune > 86400:
+                    await self.prune_resources()
+                    last_prune = now
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                log.exception("lifecycle: error in background loop")
+
+    async def sweep_inactive_groups(self) -> None:
+        """Find groups inactive for GROUP_INACTIVITY_TIMEOUT (default 30 mins) and evict them."""
+        timeout = float(os.environ.get("GROUP_INACTIVITY_TIMEOUT", 1800))
+        now = time.time()
+        
+        # Get active background tasks per group
+        try:
+            from core import bg
+            tasks_by_group = bg._group_tasks
+        except Exception:
+            tasks_by_group = {}
+            
+        to_evict = []
+        async with self._lock:
+            for gid, last_active in list(self._active_groups.items()):
+                # Check if group has active tasks
+                group_tasks = tasks_by_group.get(gid, set())
+                has_active_tasks = any(not t.done() for t in group_tasks)
+                
+                if now - last_active > timeout and not has_active_tasks:
+                    to_evict.append(gid)
+                    
+            for gid in to_evict:
+                # Remove from active groups list first to prevent recursive checks
+                self._active_groups.pop(gid, None)
+                await self._do_evict(gid)
+
+    async def prune_resources(self) -> None:
+        """Prune logs and temporary workspace files older than 14 days."""
+        from pathlib import Path
+        log.info("lifecycle: running resource pruning")
+        now = time.time()
+        fourteen_days_seconds = 14 * 24 * 3600
+        
+        # 1. Prune logs (logs/worker-*.log)
+        try:
+            log_dir = Path("logs")
+            if log_dir.exists():
+                for log_file in log_dir.glob("worker-*.log"):
+                    if log_file.is_file():
+                        mtime = log_file.stat().st_mtime
+                        if now - mtime > fourteen_days_seconds:
+                            log.info("lifecycle: pruning old log file %s", log_file)
+                            log_file.unlink(missing_ok=True)
+        except Exception:
+            log.exception("lifecycle: error pruning logs")
+            
+        # 2. Prune temporary workspace files (workspaces/temp/*)
+        try:
+            from skills.constants import WORKSPACE_ROOT
+            temp_dir = Path(WORKSPACE_ROOT) / "temp"
+            if temp_dir.exists():
+                for root, dirs, files in os.walk(temp_dir, topdown=False):
+                    for name in files:
+                        filepath = Path(root) / name
+                        if filepath.is_file():
+                            mtime = filepath.stat().st_mtime
+                            if now - mtime > fourteen_days_seconds:
+                                log.info("lifecycle: pruning old temp workspace file %s", filepath)
+                                filepath.unlink(missing_ok=True)
+                    for name in dirs:
+                        dirpath = Path(root) / name
+                        if dirpath.is_dir() and not os.listdir(dirpath):
+                            dirpath.rmdir()
+        except Exception:
+            log.exception("lifecycle: error pruning temp workspaces")
+
     async def hydrate(self, group_id: int) -> str:
         """Ensure a group is ready for work. Returns the DB path."""
         path = group_db_path(group_id)
         
+        if self._evictor_task is None or self._evictor_task.done():
+            self._evictor_task = asyncio.create_task(self._background_loop())
+
         async with self._lock:
             if group_id in self._active_groups:
                 self._active_groups.move_to_end(group_id)
@@ -208,6 +302,9 @@ class LifecycleManager:
     async def shutdown(self) -> None:
         """Close all active groups."""
         async with self._lock:
+            if self._evictor_task:
+                self._evictor_task.cancel()
+                self._evictor_task = None
             for gid in list(self._active_groups):
                 await db.aclose_writer(group_db_path(gid))
                 glock = self._locks.pop(gid, None)

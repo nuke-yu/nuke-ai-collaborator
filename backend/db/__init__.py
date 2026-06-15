@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager, contextmanager
 
 from db.context import resolve as _route, bind_db, current_db_path
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "chat.db")
+DB_PATH = os.environ.get("NUKE_DB_PATH") or os.path.join(os.path.dirname(__file__), "chat.db")
 
 
 @asynccontextmanager

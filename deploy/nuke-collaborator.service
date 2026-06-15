@@ -1,0 +1,36 @@
+[Unit]
+Description=Nuke AI Collaborator Supervisor Service
+After=network.target
+
+[Service]
+Type=simple
+User=nuke
+Group=nuke
+WorkingDirectory=/opt/nuke-ai-collaborator/backend
+
+# Environment configuration
+Environment=NUKE_DB_PATH=/var/lib/nuke-ai-collaborator/chat.db
+Environment=NUKE_WORKSPACE_ROOT=/var/lib/nuke-ai-collaborator/workspaces
+Environment=NUKE_WORKERS=4
+Environment=NUKE_ENV=production
+Environment=PORT=8000
+Environment=HOST=0.0.0.0
+
+# Execution
+ExecStart=/opt/nuke-ai-collaborator/backend/venv/bin/python -m uvicorn main:app --host ${HOST} --port ${PORT}
+Restart=always
+RestartSec=5s
+
+# Operational Hardening & Resource Limits
+MemoryMax=4G
+MemoryLimit=4G
+CPUQuota=200%
+LimitNOFILE=65536
+
+# System sandboxing options
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/var/lib/nuke-ai-collaborator /opt/nuke-ai-collaborator/backend/logs /opt/nuke-ai-collaborator/backend/uploads
+
+[Install]
+WantedBy=multi-user.target

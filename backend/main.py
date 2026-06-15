@@ -152,6 +152,61 @@ async def mcp_oauth_callback(code: str = "", state: str = ""):
     return HTMLResponse("<h3>授权回调缺少 code/state 参数。</h3>", status_code=400)
 
 
+@app.get("/health/liveness")
+async def liveness():
+    """Verify that the supervisor is alive and the global DB is writable."""
+    from fastapi import HTTPException
+    import logging
+    from db import global_db
+    try:
+        async with global_db() as db:
+            await db.execute("CREATE TABLE IF NOT EXISTS health_check (id INTEGER PRIMARY KEY, ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+            await db.execute("INSERT INTO health_check DEFAULT VALUES")
+            await db.execute("DELETE FROM health_check")
+            await db.commit()
+    except Exception as e:
+        logging.exception("Liveness check failed: DB write failed")
+        raise HTTPException(status_code=500, detail=f"Database not writable: {e}")
+    return {"status": "ok"}
+
+
+@app.get("/health/readiness")
+async def readiness():
+    """Verify that workers are connected and reporting heartbeats."""
+    from fastapi import HTTPException
+    import time
+    from runtime import supervisor as sup_mod
+    
+    sup = sup_mod.supervisor
+    if sup is None:
+        raise HTTPException(status_code=503, detail="Supervisor not initialized")
+        
+    if sup._num_workers > 0:
+        # Check mcp-collector is connected
+        from runtime.ipc.protocol import MCP_COLLECTOR_ID
+        if MCP_COLLECTOR_ID not in sup._workers:
+            raise HTTPException(status_code=503, detail="mcp-collector is not connected")
+            
+        # Check that all expected workers are connected and have fresh heartbeats
+        for i in range(sup._num_workers):
+            wid = f"w{i}"
+            if wid not in sup._workers:
+                raise HTTPException(status_code=503, detail=f"Worker {wid} is not connected")
+                
+            ts = sup._worker_stats_ts.get(wid)
+            if ts is None:
+                raise HTTPException(status_code=503, detail=f"Worker {wid} heartbeat not yet received")
+                
+            age = time.time() - ts
+            if age > 45.0:
+                raise HTTPException(status_code=503, detail=f"Worker {wid} heartbeat is too old ({age:.1f}s)")
+                
+    return {
+        "status": "ready",
+        "connected_workers": list(sup._workers.keys()),
+    }
+
+
 @app.get("/api/system/status")
 async def system_status():
     """DFT-057: Aggregated metrics from Supervisor and all Workers."""

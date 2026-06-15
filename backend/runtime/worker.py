@@ -74,6 +74,7 @@ class Worker:
         self._report_task = asyncio.create_task(self._report_stats_loop())
         self._recap_task = asyncio.create_task(self._pump_recap())
         self._compaction_task = asyncio.create_task(self._pump_compaction())
+        asyncio.create_task(self._hydrate_assigned_groups())
 
     async def run(self) -> None:
         tracing.setup_structured_logging(log_file=f"logs/worker-{self.worker_id}.log")
@@ -303,3 +304,23 @@ class Worker:
         raise NotImplementedError(
             "Worker dispatch not wired — injected by the Supervisor integration (CELL-12)"
         )
+
+    async def _hydrate_assigned_groups(self) -> None:
+        """Query the central DB for all groups assigned to this worker, and hydrate them."""
+        # Wait a moment for connection initialization to settle
+        await asyncio.sleep(0.5)
+        try:
+            import db
+            from runtime.lifecycle import manager as lifecycle
+            # Query global DB
+            async with db.global_db() as cdb:
+                async with cdb.execute("SELECT id FROM groups WHERE assigned_worker_id = ?", (self.worker_id,)) as cur:
+                    rows = await cur.fetchall()
+            for (gid,) in rows:
+                log.info("worker %s: resuming assigned group %d on startup", self.worker_id, gid)
+                try:
+                    await lifecycle.hydrate(gid)
+                except Exception:
+                    log.exception("worker %s: failed to hydrate assigned group %d on startup", self.worker_id, gid)
+        except Exception:
+            log.exception("worker %s: failed to query assigned groups on startup", self.worker_id)

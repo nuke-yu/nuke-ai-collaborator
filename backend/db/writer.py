@@ -25,7 +25,7 @@ import aiosqlite
 
 from db.context import resolve as _route
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "chat.db")
+DB_PATH = os.environ.get("NUKE_DB_PATH") or os.path.join(os.path.dirname(__file__), "chat.db")
 
 import weakref
 

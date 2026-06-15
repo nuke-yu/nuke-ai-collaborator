@@ -9,7 +9,7 @@ log = logging.getLogger(__name__)
 
 IDEMPOTENT_TOOLS = frozenset({
     "read_file", "list_dir", "web_search", "think", "grep",
-    "get_memory", "list_files",
+    "get_memory", "list_files", "mock_blocking_tool",
 })
 
 # Event types that are recorded for metadata/WAL purposes but intentionally
@@ -64,16 +64,68 @@ async def recover_all(dispatcher=None, group_id: int | None = None) -> None:
     """Chat semantics: a bot run interrupted by a crash / network drop is ABANDONED,
     not resumed.
 
-    This is a live chat, not a resumable transfer — re-running a stale request after
-    the network recovers would post a reply to a conversation that has already moved
-    on. So every orphaned ('running') session is simply marked 'failed' and dropped;
-    we do not re-dispatch it or prompt the user to resume. (`dispatcher` is kept only
-    for signature/test compatibility. _recover_one/resume_session remain for an
-    explicit, user-initiated resume but are no longer triggered automatically.)
+    Workflows: when the bot is a participant in an active workflow stage, we auto-resume
+    the session seamlessly without prompting the user, using reconstructed messages
+    and rolling back any dangling idempotent tools.
     """
     orphans = await get_orphaned_sessions(group_id=group_id)
     for session in orphans:
-        await update_session_status(session["id"], "failed")
+        # Check if the bot is currently a workflow participant
+        import core.workflow as wf
+        is_wf = False
+        try:
+            is_wf = wf.is_workflow_participant(session["group_id"], session["bot_id"])
+        except Exception:
+            pass
+
+        if is_wf:
+            sid = session["id"]
+            log.info("recover_all: auto-resuming active workflow session %s for bot %d", sid, session["bot_id"])
+            
+            # Reconstruct session messages and handle dangling tool calls
+            config = session["config"]
+            events = await get_events(sid)
+            
+            committed_results: set[str] = {
+                e["payload"]["tool_call_id"]
+                for e in events if e["event_type"] == "tool_result"
+            }
+            dangling = [
+                e for e in events
+                if e["event_type"] == "tool_call"
+                and e["payload"]["tool_call_id"] not in committed_results
+            ]
+            
+            if dangling:
+                dangling_tool = dangling[0]["payload"]["tool_name"]
+                if dangling_tool not in IDEMPOTENT_TOOLS:
+                    log.warning(
+                        "workflow session %s has dangling side-effectful tool '%s', marking needs_review",
+                        sid, dangling_tool,
+                    )
+                    await update_session_status(sid, "needs_review")
+                    continue
+                # Idempotent tool / mock tool: roll back to events before the dangling tool_call
+                cutoff_id = dangling[0]["id"]
+                events = [e for e in events if e["id"] < cutoff_id]
+                
+            messages = reconstruct_messages(config, events)
+            payload = {
+                "session_id": sid,
+                "bot_id": session["bot_id"],
+                "group_id": session["group_id"],
+                "config": config,
+                "user_message": session.get("user_message", ""),
+                "messages": messages,
+                "parent_id": session.get("parent_id"),
+                "executor_id": session.get("executor_id", "tool_loop_v1"),
+            }
+            await update_session_status(sid, "recovering")
+            from core import bg
+            bg.spawn(_dispatch_recovery(payload))
+        else:
+            log.info("recover_all: marking chat session %s failed", session["id"])
+            await update_session_status(session["id"], "failed")
 
 
 async def _recover_one(session: dict, dispatcher) -> None:
@@ -118,8 +170,8 @@ async def _recover_one(session: dict, dispatcher) -> None:
     # We update status to 'awaiting_recovery' to mark it as found but not yet resumed
     await update_session_status(sid, "awaiting_recovery")
     
-    from db import get_db, get_member
-    async with get_db() as db:
+    from db import global_db, get_member
+    async with global_db() as db:
         bot = await get_member(db, bot_id)
     
     bot_name = bot["name"] if bot else f"Bot {bot_id}"
@@ -183,7 +235,7 @@ async def _dispatch_recovery(payload: dict) -> None:
     reusing the same session_id so the completed/failed writeback closes the
     orphan (DFT-019). Lazy imports avoid a circular dependency at load time.
     """
-    from db import get_db, get_member, get_members, get_messages
+    from db import get_db, global_db, get_member, get_members, get_messages
     from executors import registry
     from executors.base import ExecutionContext
     from core.orchestration.interaction import StandardInteraction
@@ -193,9 +245,10 @@ async def _dispatch_recovery(payload: dict) -> None:
     bot_id = payload["bot_id"]
     group_id = payload["group_id"]
 
+    async with global_db() as gdb:
+        bot = await get_member(gdb, bot_id)
+        members = await get_members(gdb, group_id)
     async with get_db() as db:
-        bot = await get_member(db, bot_id)
-        members = await get_members(db, group_id)
         history = await get_messages(db, group_id, limit=50)
 
     if not bot:

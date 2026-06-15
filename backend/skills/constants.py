@@ -1,6 +1,7 @@
 from pathlib import Path
 
-WORKSPACE_ROOT = Path(__file__).parent.parent / "workspaces"
+import os
+WORKSPACE_ROOT = Path(os.environ.get("NUKE_WORKSPACE_ROOT") or (Path(__file__).parent.parent / "workspaces"))
 SYSTEM_SKILLS_ROOT = WORKSPACE_ROOT / "system" / "skills"
 TRAITS_ROOT = WORKSPACE_ROOT / "system" / "traits"
 ROLES_ROOT = WORKSPACE_ROOT / "roles"

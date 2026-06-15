@@ -316,11 +316,16 @@ class DeclarativeOrchestrator(Orchestrator):
         ])
 
     def parse_spec(self, body: dict, all_bots: dict[int, dict]) -> dict:
-        stages_cfg = body.get("stages", [])
+        spec = body.get("spec") or body
+        stages_cfg = spec.get("stages", [])
         ordered = []
         for cfg in stages_cfg:
             if "pool" in cfg:
-                pool_bots = [all_bots[b["bot_id"]] for b in cfg["pool"] if b["bot_id"] in all_bots]
+                pool_bots = []
+                for b in cfg["pool"]:
+                    bid = b.get("bot_id") or b.get("id")
+                    if bid in all_bots:
+                        pool_bots.append(all_bots[bid])
                 if pool_bots:
                     ordered.append({
                         "stage_type": "pool", "bots": pool_bots,
@@ -329,8 +334,12 @@ class DeclarativeOrchestrator(Orchestrator):
                         "ticket_queue": [], "idle_bots": [],
                     })
             else:
-                bot = all_bots.get(cfg.get("bot_id"))
+                bot_id = cfg.get("bot_id") or cfg.get("id")
+                bot = all_bots.get(bot_id)
                 if bot:
-                    ordered.append({**bot, "stage_type": "single", "done_keyword": cfg.get("done_keyword", "完毕")})
+                    stage_dict = {**bot, **cfg}
+                    stage_dict["stage_type"] = "single"
+                    stage_dict["done_keyword"] = cfg.get("done_keyword", "完毕")
+                    ordered.append(stage_dict)
         return {"stages": ordered}
 

@@ -269,7 +269,8 @@ class WorkflowUpdate:
 @event("workflow_paused", critical=True)
 class WorkflowPaused:
     group_id: int
-    reason:   str  # e.g., 'gate' or 'done' or 'pause'
+    reason:   str  # e.g., 'gate' or 'done' or 'pause' or 'provider_unavailable'
+    details:  str | None = None
 
 
 

@@ -175,6 +175,16 @@ async def run_unit(group_id: int, unit, orch) -> None:
         result = await exec_registry.get(unit.executor_id).run(ctx)
     except Exception as e:
         log.exception("Workflow execution failed for group %d", group_id)
+        from ai.client import AIError
+        if isinstance(e, AIError) or "AI" in str(e) or "LLM" in str(e):
+            error_msg = f"[AI 服务异常] Bot「{unit.bot.get('name', 'Unknown')}」调用失败: {e}"
+            await _post_system_msg(group_id, unit.bot.get("id", 0), error_msg)
+            await bus.publish(WorkflowPaused(
+                group_id=group_id,
+                reason="provider_unavailable",
+                details=str(e)
+            ))
+            return
         error_msg = f"[工作流系统错误] Bot「{unit.bot.get('name', 'Unknown')}」执行异常: {e}"
         await _post_system_msg(group_id, unit.bot.get("id", 0), error_msg)
         await bus.publish(WorkflowUpdate(group_id=group_id, active=False, done=False))

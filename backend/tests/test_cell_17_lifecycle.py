@@ -3,6 +3,7 @@ import asyncio
 import os
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch, AsyncMock, MagicMock
 
@@ -101,6 +102,80 @@ class TestCell17Lifecycle(unittest.IsolatedAsyncioTestCase):
             
             self.assertNotIn(1, mock_rd._last_tickets)
             mock_perm.cancel_pending_for_group.assert_called_once_with(1)
+
+    async def test_inactivity_eviction_sweeps_inactive_group(self):
+        lm = LifecycleManager()
+        await lm.hydrate(1)
+        
+        # Override GROUP_INACTIVITY_TIMEOUT env and mock last active time
+        with patch.dict(os.environ, {"GROUP_INACTIVITY_TIMEOUT": "0.1"}):
+            # Wait 0.2s to exceed timeout
+            await asyncio.sleep(0.2)
+            
+            # Mock aclose_writer to avoid actual DB close exception during sweep
+            with patch("db.aclose_writer", new_callable=AsyncMock) as mock_close:
+                await lm.sweep_inactive_groups()
+                self.assertNotIn(1, lm._active_groups)
+                mock_close.assert_called_once()
+        await lm.shutdown()
+
+    async def test_inactivity_eviction_skips_group_with_active_tasks(self):
+        lm = LifecycleManager()
+        await lm.hydrate(1)
+        
+        # Mock background task for group 1
+        mock_task = MagicMock()
+        mock_task.done.return_value = False
+        
+        from core import bg
+        bg._group_tasks[1] = {mock_task}
+        
+        try:
+            with patch.dict(os.environ, {"GROUP_INACTIVITY_TIMEOUT": "0.1"}):
+                await asyncio.sleep(0.2)
+                with patch("db.aclose_writer", new_callable=AsyncMock) as mock_close:
+                    await lm.sweep_inactive_groups()
+                    # Should NOT be evicted because of the active task
+                    self.assertIn(1, lm._active_groups)
+                    mock_close.assert_not_called()
+        finally:
+            bg._group_tasks.pop(1, None)
+        await lm.shutdown()
+
+    async def test_prune_resources(self):
+        lm = LifecycleManager()
+        
+        # Setup mock directory structures
+        from pathlib import Path
+        log_dir = Path("logs")
+        log_dir.mkdir(exist_ok=True)
+        old_log = log_dir / "worker-test_prune.log"
+        old_log.touch()
+        
+        from skills.constants import WORKSPACE_ROOT
+        temp_dir = Path(WORKSPACE_ROOT) / "temp"
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        old_temp = temp_dir / "old_file.txt"
+        old_temp.touch()
+        
+        # Modify mtime to be 15 days ago
+        fifteen_days_ago = time.time() - (15 * 24 * 3600)
+        os.utime(old_log, (fifteen_days_ago, fifteen_days_ago))
+        os.utime(old_temp, (fifteen_days_ago, fifteen_days_ago))
+        
+        try:
+            await lm.prune_resources()
+            
+            # Assert files deleted
+            self.assertFalse(old_log.exists())
+            self.assertFalse(old_temp.exists())
+        finally:
+            old_log.unlink(missing_ok=True)
+            old_temp.unlink(missing_ok=True)
+            if temp_dir.exists():
+                try: temp_dir.rmdir()
+                except Exception: pass
+        await lm.shutdown()
 
 if __name__ == "__main__":
     unittest.main()

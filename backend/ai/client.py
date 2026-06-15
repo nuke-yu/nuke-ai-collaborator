@@ -7,6 +7,7 @@ import uuid
 import httpx
 from contextlib import asynccontextmanager
 from config import get_key
+from tenacity import retry, wait_exponential, stop_after_attempt, retry_if_exception_type
 
 logger = logging.getLogger(__name__)
 
@@ -578,6 +579,64 @@ async def _once_claude(api_key: str, model: str, system_prompt: str,
     return {"type": "text", "content": "".join(text_parts), "usage": usage}
 
 
+class LLMTransientError(AIError):
+    pass
+
+
+@retry(
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    stop=stop_after_attempt(3),
+    retry=retry_if_exception_type(LLMTransientError),
+    reraise=True
+)
+async def _dispatch_once_with_retry(
+    provider: str, model: str, keys: dict,
+    system_prompt: str, messages: list,
+    temperature: float, max_tokens: int,
+    tools: list | None, use_cached_microcompact: bool,
+) -> dict:
+    try:
+        return await _dispatch_once(
+            provider, model, keys, system_prompt, messages,
+            temperature, max_tokens, tools, use_cached_microcompact
+        )
+    except AIRateLimitError as e:
+        raise LLMTransientError(f"API 限流: {e}") from e
+    except httpx.TimeoutException as e:
+        raise LLMTransientError("AI 响应超时") from e
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code in (429, 502, 503, 504):
+            raise LLMTransientError(f"AI 服务临时异常 ({e.response.status_code})") from e
+        raise e
+    except httpx.ConnectError as e:
+        raise LLMTransientError("AI 连接失败") from e
+
+
+async def _stream_with_retry(stream_func, *args, **kwargs):
+    max_attempts = 3
+    for attempt in range(max_attempts):
+        try:
+            gen = stream_func(*args, **kwargs)
+            first_chunk = await gen.__anext__()
+            yield first_chunk
+            async for chunk in gen:
+                yield chunk
+            return
+        except (httpx.TimeoutException, httpx.HTTPStatusError, httpx.ConnectError) as e:
+            is_transient = True
+            if isinstance(e, httpx.HTTPStatusError):
+                if e.response.status_code not in (429, 502, 503, 504):
+                    is_transient = False
+            
+            if is_transient and attempt < max_attempts - 1:
+                wait = 2.0 ** attempt
+                await asyncio.sleep(wait)
+                continue
+            raise e
+        except StopAsyncIteration:
+            return
+
+
 async def _dispatch_once(
     provider: str, model: str, keys: dict,
     system_prompt: str, messages: list,
@@ -614,9 +673,9 @@ async def call_ai_once(
     use_cached_microcompact: bool = False,
     fallback_model: str = "",
 ) -> dict:
-    """Single non-streaming AI call with retry on rate limit.
+    """Single non-streaming AI call with retry on rate limit and other transient errors.
 
-    Retries up to _AI_RETRY_MAX times with exponential backoff on HTTP 429.
+    Retries up to _AI_RETRY_MAX times with exponential backoff on transient errors.
     If fallback_model is set, tries it once after main model retries are exhausted.
     """
     keys = _keys()
@@ -626,31 +685,25 @@ async def call_ai_once(
 
     last_error: Exception | None = None
     for try_model in models_to_try:
-        for attempt in range(_AI_RETRY_MAX):
-            try:
-                return await _dispatch_once(
-                    provider, try_model, keys, system_prompt, messages,
-                    temperature, max_tokens, tools, use_cached_microcompact,
-                )
-            except AIRateLimitError as e:
-                last_error = e
-                if attempt < _AI_RETRY_MAX - 1:
-                    wait = max(e.wait_seconds, 2.0 ** attempt)
-                    await asyncio.sleep(wait)
-                # On last attempt: fall through to next model (if any)
-            except AIContextOverflowError:
-                raise
-            except AIError:
-                raise
-            except httpx.TimeoutException:
-                raise AIError("AI 响应超时，请稍后重试")
-            except httpx.HTTPStatusError as e:
-                raise AIError(f"AI 服务异常（{e.response.status_code}）")
-            except Exception as e:
-                logger.error("AI call failed", exc_info=True)
-                raise AIError("AI 调用失败，请稍后重试") from e
+        try:
+            return await _dispatch_once_with_retry(
+                provider, try_model, keys, system_prompt, messages,
+                temperature, max_tokens, tools, use_cached_microcompact
+            )
+        except LLMTransientError as e:
+            last_error = e
+            logger.warning(f"Transient error on model {try_model}: {e}")
+        except AIContextOverflowError:
+            raise
+        except AIError:
+            raise
+        except httpx.HTTPStatusError as e:
+            raise AIError(f"AI 服务异常（{e.response.status_code}）")
+        except Exception as e:
+            logger.error("AI call failed", exc_info=True)
+            raise AIError("AI 调用失败，请稍后重试") from e
 
-    raise AIError(f"API 限流，已重试 {_AI_RETRY_MAX} 次仍失败") from last_error
+    raise AIError(f"AI 服务不可用，已尝试所有备用模型并重试仍失败") from last_error
 
 
 async def call_ai_stream_messages(
@@ -669,16 +722,16 @@ async def call_ai_stream_messages(
             url, _, label = _OPENAI_COMPAT_PROVIDERS[provider]
             api_key = _require_key(keys, provider, label)
             full_msgs = [{"role": "system", "content": system_prompt}] + messages
-            async for chunk in _stream_openai_compat(url, api_key, model, full_msgs, temperature, max_tokens, usage_out=usage_out):
+            async for chunk in _stream_with_retry(_stream_openai_compat, url, api_key, model, full_msgs, temperature, max_tokens, usage_out=usage_out):
                 yield chunk
         elif provider == "claude":
             api_key = _require_key(keys, "anthropic", "Anthropic")
             claude_msgs = _to_claude_messages(messages)
-            async for chunk in _stream_claude(model, system_prompt, claude_msgs, api_key, temperature, max_tokens, usage_out=usage_out):
+            async for chunk in _stream_with_retry(_stream_claude, model, system_prompt, claude_msgs, api_key, temperature, max_tokens, usage_out=usage_out):
                 yield chunk
         elif provider == "ollama":
             full_msgs = [{"role": "system", "content": system_prompt}] + messages
-            async for chunk in _stream_ollama(model, full_msgs, keys["ollama_url"]):
+            async for chunk in _stream_with_retry(_stream_ollama, model, full_msgs, keys["ollama_url"]):
                 yield chunk
         else:
             raise AIError(f"不支持的模型提供商: {provider}")
@@ -721,14 +774,14 @@ async def call_ai_stream(system_prompt: str, history: list, user_message: "str |
             messages = [{"role": "system", "content": system_prompt}]
             messages.extend(history[-10:])
             messages.append({"role": "user", "content": user_content})
-            async for chunk in _stream_openai_compat(url, api_key, model, messages, temperature, max_tokens, usage_out=usage_out):
+            async for chunk in _stream_with_retry(_stream_openai_compat, url, api_key, model, messages, temperature, max_tokens, usage_out=usage_out):
                 yield chunk
 
         elif provider == "ollama":
             messages = [{"role": "system", "content": system_prompt}]
             messages.extend(history[-10:])
             messages.append({"role": "user", "content": _text_only(user_message)})
-            async for chunk in _stream_ollama(model, messages, keys["ollama_url"]):
+            async for chunk in _stream_with_retry(_stream_ollama, model, messages, keys["ollama_url"]):
                 yield chunk
 
         elif provider == "claude":
@@ -736,7 +789,7 @@ async def call_ai_stream(system_prompt: str, history: list, user_message: "str |
             hist = [m for m in history[-10:] if m["role"] in ("user", "assistant")]
             hist.append({"role": "user", "content": user_message})
             claude_msgs = _to_claude_messages(hist)
-            async for chunk in _stream_claude(model, system_prompt, claude_msgs, api_key, temperature, max_tokens, usage_out=usage_out):
+            async for chunk in _stream_with_retry(_stream_claude, model, system_prompt, claude_msgs, api_key, temperature, max_tokens, usage_out=usage_out):
                 yield chunk
 
         else:
