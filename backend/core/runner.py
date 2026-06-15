@@ -176,7 +176,7 @@ async def run_unit(group_id: int, unit, orch) -> None:
     except Exception as e:
         log.exception("Workflow execution failed for group %d", group_id)
         from ai.client import AIError
-        if isinstance(e, AIError) or "AI" in str(e) or "LLM" in str(e):
+        if isinstance(e, AIError):
             error_msg = f"[AI 服务异常] Bot「{unit.bot.get('name', 'Unknown')}」调用失败: {e}"
             await _post_system_msg(group_id, unit.bot.get("id", 0), error_msg)
             await bus.publish(WorkflowPaused(

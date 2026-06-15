@@ -12,3 +12,4 @@ apscheduler>=3.10,<4
 mcp>=1.0.0
 prometheus-client>=0.20
 psutil>=5.9
+tenacity>=8.5.0

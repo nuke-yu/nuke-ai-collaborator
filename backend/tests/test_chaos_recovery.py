@@ -146,6 +146,14 @@ tool_executor.register(
             if os.path.exists(f):
                 os.unlink(f)
 
+        # Set environment variable so child worker processes inherit the idempotent tools list
+        os.environ["NUKE_IDEMPOTENT_TOOLS"] = "mock_blocking_tool"
+
+        # Also monkeypatch the local process for recovery calls running in-process
+        import sessions.recovery
+        self._orig_idempotent_tools = sessions.recovery.IDEMPOTENT_TOOLS
+        sessions.recovery.IDEMPOTENT_TOOLS = sessions.recovery.IDEMPOTENT_TOOLS.union({"mock_blocking_tool"})
+
     async def asyncTearDown(self):
         # 1. Stop HTTP server
         self.http_server.shutdown()
@@ -180,6 +188,11 @@ tool_executor.register(
         else:
             os.environ.pop("NUKE_DB_PATH", None)
             
+        # Restore sessions.recovery.IDEMPOTENT_TOOLS and env var
+        import sessions.recovery
+        sessions.recovery.IDEMPOTENT_TOOLS = self._orig_idempotent_tools
+        os.environ.pop("NUKE_IDEMPOTENT_TOOLS", None)
+
         # 6. Cleanup temp dir
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 

@@ -154,10 +154,20 @@ async def mcp_oauth_callback(code: str = "", state: str = ""):
 
 @app.get("/health/liveness")
 async def liveness():
-    """Verify that the supervisor is alive and the global DB is writable."""
+    """Verify that the supervisor process is running."""
+    return {"status": "ok"}
+
+
+@app.get("/health/readiness")
+async def readiness():
+    """Verify that the global DB is writable and workers are connected."""
     from fastapi import HTTPException
     import logging
+    import time
     from db import global_db
+    from runtime import supervisor as sup_mod
+
+    # 1. Verify Global Database Writability (moved from liveness)
     try:
         async with global_db() as db:
             await db.execute("CREATE TABLE IF NOT EXISTS health_check (id INTEGER PRIMARY KEY, ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
@@ -165,18 +175,10 @@ async def liveness():
             await db.execute("DELETE FROM health_check")
             await db.commit()
     except Exception as e:
-        logging.exception("Liveness check failed: DB write failed")
+        logging.exception("Readiness check failed: DB write failed")
         raise HTTPException(status_code=500, detail=f"Database not writable: {e}")
-    return {"status": "ok"}
 
-
-@app.get("/health/readiness")
-async def readiness():
-    """Verify that workers are connected and reporting heartbeats."""
-    from fastapi import HTTPException
-    import time
-    from runtime import supervisor as sup_mod
-    
+    # 2. Verify Supervisor and Worker fleet status
     sup = sup_mod.supervisor
     if sup is None:
         raise HTTPException(status_code=503, detail="Supervisor not initialized")

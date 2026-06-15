@@ -580,11 +580,22 @@ async def _once_claude(api_key: str, model: str, system_prompt: str,
 
 
 class LLMTransientError(AIError):
-    pass
+    def __init__(self, message: str, wait_seconds: float | None = None):
+        super().__init__(message)
+        self.wait_seconds = wait_seconds
+
+
+def wait_custom_rate_limit(retry_state) -> float:
+    exc = retry_state.outcome.exception()
+    if isinstance(exc, LLMTransientError) and exc.wait_seconds is not None:
+        return exc.wait_seconds
+    attempt = retry_state.attempt_number
+    # Default wait_exponential min=2, max=10
+    return min(10.0, max(2.0, 2.0 ** attempt))
 
 
 @retry(
-    wait=wait_exponential(multiplier=1, min=2, max=10),
+    wait=wait_custom_rate_limit,
     stop=stop_after_attempt(3),
     retry=retry_if_exception_type(LLMTransientError),
     reraise=True
@@ -601,12 +612,20 @@ async def _dispatch_once_with_retry(
             temperature, max_tokens, tools, use_cached_microcompact
         )
     except AIRateLimitError as e:
-        raise LLMTransientError(f"API 限流: {e}") from e
+        raise LLMTransientError(f"API 限流: {e}", wait_seconds=e.wait_seconds) from e
     except httpx.TimeoutException as e:
         raise LLMTransientError("AI 响应超时") from e
     except httpx.HTTPStatusError as e:
         if e.response.status_code in (429, 502, 503, 504):
-            raise LLMTransientError(f"AI 服务临时异常 ({e.response.status_code})") from e
+            wait_sec = None
+            if e.response.status_code == 429:
+                retry_after = e.response.headers.get("Retry-After")
+                if retry_after:
+                    try:
+                        wait_sec = float(retry_after)
+                    except ValueError:
+                        pass
+            raise LLMTransientError(f"AI 服务临时异常 ({e.response.status_code})", wait_seconds=wait_sec) from e
         raise e
     except httpx.ConnectError as e:
         raise LLMTransientError("AI 连接失败") from e
@@ -614,15 +633,21 @@ async def _dispatch_once_with_retry(
 
 async def _stream_with_retry(stream_func, *args, **kwargs):
     max_attempts = 3
+    yielded_any = False
     for attempt in range(max_attempts):
         try:
             gen = stream_func(*args, **kwargs)
             first_chunk = await gen.__anext__()
+            yielded_any = True
             yield first_chunk
             async for chunk in gen:
                 yield chunk
             return
         except (httpx.TimeoutException, httpx.HTTPStatusError, httpx.ConnectError) as e:
+            # If we've already yielded any chunk to the consumer, we cannot retry.
+            if yielded_any:
+                raise e
+                
             is_transient = True
             if isinstance(e, httpx.HTTPStatusError):
                 if e.response.status_code not in (429, 502, 503, 504):

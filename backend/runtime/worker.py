@@ -46,6 +46,7 @@ class Worker:
         self._report_task = None
         self._recap_task = None
         self._compaction_task = None
+        self._hydration_task = None
 
     async def connect(self) -> None:
         self._reader, self._writer = await ipc.connect(self.addr)
@@ -74,7 +75,7 @@ class Worker:
         self._report_task = asyncio.create_task(self._report_stats_loop())
         self._recap_task = asyncio.create_task(self._pump_recap())
         self._compaction_task = asyncio.create_task(self._pump_compaction())
-        asyncio.create_task(self._hydrate_assigned_groups())
+        self._hydration_task = asyncio.create_task(self._hydrate_assigned_groups())
 
     async def run(self) -> None:
         tracing.setup_structured_logging(log_file=f"logs/worker-{self.worker_id}.log")
@@ -132,6 +133,9 @@ class Worker:
         if self._compaction_task:
             self._compaction_task.cancel()
             self._compaction_task = None
+        if self._hydration_task:
+            self._hydration_task.cancel()
+            self._hydration_task = None
         if self._writer:
             self._writer.close()
             self._writer = None
@@ -307,20 +311,40 @@ class Worker:
 
     async def _hydrate_assigned_groups(self) -> None:
         """Query the central DB for all groups assigned to this worker, and hydrate them."""
-        # Wait a moment for connection initialization to settle
-        await asyncio.sleep(0.5)
-        try:
-            import db
-            from runtime.lifecycle import manager as lifecycle
-            # Query global DB
-            async with db.global_db() as cdb:
-                async with cdb.execute("SELECT id FROM groups WHERE assigned_worker_id = ?", (self.worker_id,)) as cur:
-                    rows = await cur.fetchall()
-            for (gid,) in rows:
-                log.info("worker %s: resuming assigned group %d on startup", self.worker_id, gid)
-                try:
-                    await lifecycle.hydrate(gid)
-                except Exception:
-                    log.exception("worker %s: failed to hydrate assigned group %d on startup", self.worker_id, gid)
-        except Exception:
-            log.exception("worker %s: failed to query assigned groups on startup", self.worker_id)
+        import sqlite3
+        import db
+        from runtime.lifecycle import manager as lifecycle
+
+        # Retry loop to dynamically gate on database initialization/readiness
+        backoff = 0.1
+        rows = None
+        for attempt in range(15):
+            try:
+                async with db.global_db() as cdb:
+                    async with cdb.execute("SELECT id FROM groups WHERE assigned_worker_id = ?", (self.worker_id,)) as cur:
+                        rows = await cur.fetchall()
+                break
+            except sqlite3.OperationalError as e:
+                # Retry on transient startup errors (e.g. no such table, database is locked)
+                if "no such table" in str(e) or "locked" in str(e):
+                    log.info("worker %s: central DB not yet initialized or locked (attempt %d/15), retrying in %.2fs...",
+                             self.worker_id, attempt + 1, backoff)
+                    await asyncio.sleep(backoff)
+                    backoff = min(backoff * 2, 2.0)
+                    continue
+                log.exception("worker %s: database operational error during startup hydration", self.worker_id)
+                return
+            except Exception:
+                log.exception("worker %s: unexpected query failure during startup hydration", self.worker_id)
+                return
+
+        if rows is None:
+            log.error("worker %s: failed to query assigned groups after retries (DB schema not ready)", self.worker_id)
+            return
+
+        for (gid,) in rows:
+            log.info("worker %s: resuming assigned group %d on startup", self.worker_id, gid)
+            try:
+                await lifecycle.hydrate(gid)
+            except Exception:
+                log.exception("worker %s: failed to hydrate assigned group %d on startup", self.worker_id, gid)

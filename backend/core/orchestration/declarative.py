@@ -323,7 +323,7 @@ class DeclarativeOrchestrator(Orchestrator):
             if "pool" in cfg:
                 pool_bots = []
                 for b in cfg["pool"]:
-                    bid = b.get("bot_id") or b.get("id")
+                    bid = b.get("bot_id") if b.get("bot_id") is not None else b.get("id")
                     if bid in all_bots:
                         pool_bots.append(all_bots[bid])
                 if pool_bots:
@@ -334,10 +334,15 @@ class DeclarativeOrchestrator(Orchestrator):
                         "ticket_queue": [], "idle_bots": [],
                     })
             else:
-                bot_id = cfg.get("bot_id") or cfg.get("id")
+                bot_id = cfg.get("bot_id") if cfg.get("bot_id") is not None else cfg.get("id")
                 bot = all_bots.get(bot_id)
                 if bot:
-                    stage_dict = {**bot, **cfg}
+                    # DFT-088: Exclude bot member identification keys from cfg overrides
+                    # to prevent overwriting the database bot id or other core properties.
+                    cfg_clean = {k: v for k, v in cfg.items() if k not in ("id", "bot_id")}
+                    stage_dict = {**bot, **cfg_clean}
+                    if "id" in cfg:
+                        stage_dict["stage_id"] = cfg["id"]
                     stage_dict["stage_type"] = "single"
                     stage_dict["done_keyword"] = cfg.get("done_keyword", "完毕")
                     ordered.append(stage_dict)

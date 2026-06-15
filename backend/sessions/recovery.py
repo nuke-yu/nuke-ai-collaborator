@@ -9,8 +9,18 @@ log = logging.getLogger(__name__)
 
 IDEMPOTENT_TOOLS = frozenset({
     "read_file", "list_dir", "web_search", "think", "grep",
-    "get_memory", "list_files", "mock_blocking_tool",
+    "get_memory", "list_files",
 })
+
+def is_idempotent(tool_name: str) -> bool:
+    if tool_name in IDEMPOTENT_TOOLS:
+        return True
+    import os
+    env_val = os.environ.get("NUKE_IDEMPOTENT_TOOLS")
+    if env_val:
+        return tool_name in {t.strip() for t in env_val.split(",") if t.strip()}
+    return False
+
 
 # Event types that are recorded for metadata/WAL purposes but intentionally
 # do NOT contribute a message during reconstruction. Anything seen that is
@@ -98,7 +108,7 @@ async def recover_all(dispatcher=None, group_id: int | None = None) -> None:
             
             if dangling:
                 dangling_tool = dangling[0]["payload"]["tool_name"]
-                if dangling_tool not in IDEMPOTENT_TOOLS:
+                if not is_idempotent(dangling_tool):
                     log.warning(
                         "workflow session %s has dangling side-effectful tool '%s', marking needs_review",
                         sid, dangling_tool,
@@ -155,7 +165,7 @@ async def _recover_one(session: dict, dispatcher) -> None:
 
         if dangling:
             dangling_tool = dangling[0]["payload"]["tool_name"]
-            if dangling_tool not in IDEMPOTENT_TOOLS:
+            if not is_idempotent(dangling_tool):
                 log.warning(
                     "session %s has dangling side-effectful tool '%s', marking needs_review",
                     sid, dangling_tool,
