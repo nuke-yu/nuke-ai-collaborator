@@ -62,10 +62,8 @@ export default function WorkspacePanel({ bot, groupId, onClose }) {
 
   const openFile = async (path) => {
     if (dirty && !confirm(t(K.workspace.unsavedConfirm))) return
-    if (isSharedFile(path)) {
-      alert(t(K.workspace.sharedReadonlyAlert))
-      return
-    }
+    // 共享区文件照常打开查看，只是只读（编辑/保存在下方被禁用）——不要在这里 return，
+    // 否则共享文件根本打不开（用户只能在树里看到却点不开）。
     const res = await fetch(`/api/members/${bot.id}/workspace/file?path=${encodeURIComponent(path)}`)
     if (res.ok) {
       const data = await res.json()
@@ -286,7 +284,10 @@ export default function WorkspacePanel({ bot, groupId, onClose }) {
                       {t(K.workspace.history)}
                     </button>
                   )}
-                  {selected && (
+                  {selected && isSharedFile(selected) && (
+                    <span className="text-xs text-gray-400">{t(K.workspace.sharedZoneReadonly)}</span>
+                  )}
+                  {selected && !isSharedFile(selected) && (
                     <button
                       onClick={saveFile}
                       disabled={saving || !dirty}
@@ -303,8 +304,9 @@ export default function WorkspacePanel({ bot, groupId, onClose }) {
                   <textarea
                     className="w-full h-full bg-gray-900 text-gray-100 text-sm font-mono p-4 resize-none outline-none"
                     value={content}
-                    onChange={e => { setContent(e.target.value); setDirty(true) }}
-                    onKeyDown={e => { if ((e.metaKey || e.ctrlKey) && e.key === 's') { e.preventDefault(); saveFile() } }}
+                    readOnly={isSharedFile(selected)}
+                    onChange={e => { if (isSharedFile(selected)) return; setContent(e.target.value); setDirty(true) }}
+                    onKeyDown={e => { if ((e.metaKey || e.ctrlKey) && e.key === 's') { e.preventDefault(); if (!isSharedFile(selected)) saveFile() } }}
                   />
                 ) : (
                   <div className="flex items-center justify-center h-full text-gray-600 text-sm">
