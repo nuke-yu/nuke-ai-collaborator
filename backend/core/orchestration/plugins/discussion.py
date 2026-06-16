@@ -7,6 +7,7 @@ compiles a comparative pros/cons evaluation of all viewpoints.
 """
 from core.orchestration.base import Orchestrator, OrchestratorStep, WorkUnit
 import datetime
+import uuid
 
 
 class DiscussionOrchestrator(Orchestrator):
@@ -108,6 +109,10 @@ class DiscussionOrchestrator(Orchestrator):
         if not content:
             return OrchestratorStep()
         s["started"] = True
+        # 人给的首条消息即本次讨论的 topic；据此铸一个稳定且唯一的 thread_id，
+        # 作为记忆按 topic 读写的作用域键（同一讨论内不变，不同讨论各不相同）。
+        s["topic"] = content
+        s["thread_id"] = f"disc:{group_id}:{uuid.uuid4().hex[:12]}"
         bot = s["bots"][s["idx"]]
         return OrchestratorStep(next_units=[self._unit(group_id, bot, trigger_msg=content)], broadcast_state=True)
 
@@ -137,6 +142,11 @@ class DiscussionOrchestrator(Orchestrator):
         if s["phase"] == "summary":
             return s["summarizer"]
         return s["bots"][s["idx"]]
+
+    def current_thread_id(self, group_id: int) -> str | None:
+        """当前讨论 topic 的作用域键；topic 尚未给出（或无讨论）时为 None。"""
+        s = self._state.get(group_id)
+        return s.get("thread_id") if s else None
 
     def system_suffix(self, group_id: int) -> str:
         s = self._state.get(group_id)

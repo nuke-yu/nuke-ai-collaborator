@@ -98,6 +98,11 @@ class Orchestrator(ABC):
         """当前活跃阶段的角色标识（无阶段语义则为 None）。"""
         return None
 
+    def current_thread_id(self, group_id: int) -> str | None:
+        """当前讨论 topic 的作用域键（无 topic 语义的编排器恒为 None）。
+        记忆按此键作用域读写摘要：None → 自由聊天，不强制注入历史摘要。"""
+        return None
+
     def is_awaiting_confirm(self, group_id: int) -> bool:
         """当前工作流是否正处于等待人类确认的挂起状态。"""
         return False

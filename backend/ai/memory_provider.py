@@ -29,6 +29,7 @@ class MemoryContext:
     role: str            # 原始 bot role，可能为空串
     query: str
     history: list | None = None
+    thread_id: str | None = None   # 当前讨论 topic 的作用域键；自由聊天为 None
 
 
 @dataclass(frozen=True)
@@ -42,6 +43,7 @@ class MemoryEvent:
     text: str
     provider: str
     model: str
+    thread_id: str | None = None   # 当前讨论 topic 的作用域键；自由聊天为 None
 
 
 @runtime_checkable
@@ -76,7 +78,7 @@ class ChromaMemoryProvider:
     async def recall(self, ctx: MemoryContext) -> str:
         from ai.memory import get_memory_context
         return await get_memory_context(
-            ctx.bot_id, ctx.role or "", ctx.query, ctx.group_id, ctx.history
+            ctx.bot_id, ctx.role or "", ctx.query, ctx.group_id, ctx.history, ctx.thread_id
         )
 
     async def observe(self, ev: MemoryEvent) -> None:
@@ -86,7 +88,7 @@ class ChromaMemoryProvider:
         compact_role = ev.role or ev.bot_name
         results = await asyncio.gather(
             add_to_chroma(ev.message_id, ev.text, ingest_role, ev.bot_id, ev.group_id, ev.provider, ev.model),
-            maybe_summarize(ev.group_id, ev.bot_id, compact_role, [ev.bot_id]),
+            maybe_summarize(ev.group_id, ev.bot_id, compact_role, [ev.bot_id], ev.thread_id),
             maybe_reflect(ev.group_id, ev.bot_id, compact_role, ev.provider, ev.model),
             return_exceptions=True,
         )

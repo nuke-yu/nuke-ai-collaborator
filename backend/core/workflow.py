@@ -50,6 +50,12 @@ def current_pool_bots(group_id: int) -> list[int] | None:
     return _orch_for(group_id).current_pool_bots(group_id)
 
 
+def current_thread_id(group_id: int) -> str | None:
+    """当前讨论 topic 的作用域键（自由聊天/无 topic 编排器为 None）。
+    记忆召回据此把摘要限定在当前 topic，避免串入其它议题。"""
+    return _orch_for(group_id).current_thread_id(group_id)
+
+
 def is_workflow_participant(group_id: int, bot_id: int) -> bool:
     """某 bot 是否是当前工作流阶段的在岗参与者。
 

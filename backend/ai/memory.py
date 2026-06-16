@@ -579,7 +579,8 @@ async def _memory_db(table_name: str, group_id: int | None, *, write: bool):
     return connect(path) if path else get_db()
 
 
-async def maybe_summarize(group_id: int, bot_id: int, role: str, member_ids: list):
+async def maybe_summarize(group_id: int, bot_id: int, role: str, member_ids: list,
+                          thread_id: str | None = None):
     from ai.client import call_ai
     if not member_ids:
         return
@@ -615,8 +616,8 @@ async def maybe_summarize(group_id: int, bot_id: int, role: str, member_ids: lis
 
         async with await _memory_db("role_summaries", group_id, write=True) as db:
             await db.execute(
-                "INSERT INTO role_summaries (bot_id, group_id, role, summary, covered_through_id) VALUES (?, ?, ?, ?, ?)",
-                (bot_id, group_id, role, summary, batch[-1][0])
+                "INSERT INTO role_summaries (bot_id, group_id, role, summary, covered_through_id, thread_id) VALUES (?, ?, ?, ?, ?, ?)",
+                (bot_id, group_id, role, summary, batch[-1][0], thread_id)
             )
             await db.commit()
     except Exception:
@@ -829,29 +830,35 @@ async def get_memory_links(memory_id: str) -> list[dict]:
         return []
 
 
-async def get_memory_context(bot_id: int, role: str, query: str, group_id: int | None = None, history: list | None = None) -> str:
+async def get_memory_context(bot_id: int, role: str, query: str, group_id: int | None = None,
+                             history: list | None = None, thread_id: str | None = None) -> str:
     parts = []
 
-    # 1. 历史摘要（SQLite，按 Bot 个人）
-    try:
-        async with await _memory_db("role_summaries", group_id, write=False) as db:
-            if group_id is not None:
-                async with db.execute(
-                    "SELECT summary FROM role_summaries WHERE bot_id=? AND group_id=? ORDER BY id DESC LIMIT 3",
-                    (bot_id, group_id)
-                ) as cur:
-                    summaries = await cur.fetchall()
-            else:
-                async with db.execute(
-                    "SELECT summary FROM role_summaries WHERE bot_id=? ORDER BY id DESC LIMIT 3",
-                    (bot_id,)
-                ) as cur:
-                    summaries = await cur.fetchall()
-        if summaries:
-            combined = "\n".join(r[0] for r in reversed(summaries))
-            parts.append(f"【我的历史经验摘要】\n{combined}")
-    except Exception:
-        log.exception("get_memory_context: loading role summaries failed (bot_id=%s)", bot_id)
+    # 1. 历史摘要（SQLite，按 Bot 个人）—— 按当前讨论 topic（thread_id）作用域召回。
+    #    摘要是无差别按时间堆积的；若不按 topic 过滤，群里上一场（如选股）讨论的摘要会
+    #    串进一个全新话题（如"吃芒果坏肚子"）的上下文，把 bot 带偏。故：
+    #      - thread_id=None（自由聊天，无人给 topic）→ 完全不注入摘要（按设计要求）；
+    #      - thread_id 有值（讨论中）→ 只取该 topic 自己的最近摘要，绝不串入其它议题。
+    if thread_id is not None:
+        try:
+            async with await _memory_db("role_summaries", group_id, write=False) as db:
+                if group_id is not None:
+                    async with db.execute(
+                        "SELECT summary FROM role_summaries WHERE bot_id=? AND group_id=? AND thread_id=? ORDER BY id DESC LIMIT 3",
+                        (bot_id, group_id, thread_id)
+                    ) as cur:
+                        summaries = await cur.fetchall()
+                else:
+                    async with db.execute(
+                        "SELECT summary FROM role_summaries WHERE bot_id=? AND thread_id=? ORDER BY id DESC LIMIT 3",
+                        (bot_id, thread_id)
+                    ) as cur:
+                        summaries = await cur.fetchall()
+            if summaries:
+                combined = "\n".join(r[0] for r in reversed(summaries))
+                parts.append(f"【我的历史经验摘要】\n{combined}")
+        except Exception:
+            log.exception("get_memory_context: loading role summaries failed (bot_id=%s)", bot_id)
 
     # 2. 检索前重写通用/模板化的 trigger 消息，使得检索具备明确主题 (#2: 本地启发式，无 LLM)
     search_query = QueryRewriter.rewrite(query, history)

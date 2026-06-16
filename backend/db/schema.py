@@ -135,6 +135,7 @@ async def init_db():
                 summary            TEXT    NOT NULL,
                 covered_through_id INTEGER NOT NULL,
                 bot_id             INTEGER DEFAULT NULL,
+                thread_id          TEXT    DEFAULT NULL,
                 created_at         TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)

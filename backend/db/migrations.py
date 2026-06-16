@@ -462,6 +462,21 @@ async def migration_021(db):
     await db.commit()
 
 
+async def migration_022(db):
+    """Scope role summaries to the human-given discussion topic (thread). Summaries
+    written during a discussion are stamped with that discussion's thread_id; recall
+    only injects summaries for the active topic, so an unrelated topic (e.g. a prior
+    stock debate) no longer bleeds into a new discussion. Legacy rows keep thread_id
+    NULL and are treated as un-scoped (never force-injected). Group-DB table; harmless
+    no-op on the central DB (role_summaries absent there → _safe_add_column skips).
+
+    Rollback:
+        ALTER TABLE role_summaries DROP COLUMN thread_id;
+    """
+    await _safe_add_column(db, "ALTER TABLE role_summaries ADD COLUMN thread_id TEXT DEFAULT NULL")
+    await db.commit()
+
+
 MIGRATIONS: list = [
     migration_001,
     migration_002,
@@ -484,6 +499,7 @@ MIGRATIONS: list = [
     migration_019,
     migration_020,
     migration_021,
+    migration_022,
 ]
 
 

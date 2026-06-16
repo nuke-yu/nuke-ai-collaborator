@@ -131,7 +131,8 @@ class TestMemorySilentFailureLogging(unittest.IsolatedAsyncioTestCase):
         with patch("ai.memory.retrieve_relevant", new=AsyncMock(return_value=[])), \
              patch("ai.memory.get_db", side_effect=RuntimeError("db-boom-context")):
             with self.assertLogs("ai.memory", level="ERROR") as cm:
-                result = await memory.get_memory_context(bot_id=2, role="r", query="q")
+                # thread_id 有值才会走摘要加载分支（即出错点）；自由聊天(None)按设计跳过摘要。
+                result = await memory.get_memory_context(bot_id=2, role="r", query="q", thread_id="disc:t1")
         self.assertIsInstance(result, str)
         self.assertTrue(
             any("db-boom-context" in line for line in cm.output),
@@ -845,6 +846,91 @@ class TestMemoryAuditFixes(unittest.IsolatedAsyncioTestCase):
         mock_col.get.return_value = {"ids": [], "documents": [], "metadatas": []}
         await memory.maybe_reflect(group_id=9, bot_id=5, role="dev")
         self.assertNotIn((5, 9), memory._reflect_in_flight)  # finally 已清理
+
+
+class TestMemoryTopicScoping(unittest.IsolatedAsyncioTestCase):
+    """讨论 topic（人给的议题）作为 summary 召回的作用域键：
+    - 自由聊天（无活跃 thread）不强制注入历史摘要；
+    - 讨论中只注入当前 topic 的摘要，不串入其它议题（如股票）。"""
+
+    async def asyncSetUp(self):
+        if os.path.exists(TEST_DB_PATH):
+            os.remove(TEST_DB_PATH)
+        await database.init_db()
+        async with database.get_db() as db:
+            await db.execute("INSERT INTO groups (id, name) VALUES (1, 'Test Group')")
+            await db.execute(
+                "INSERT INTO members (id, group_id, name, type, role, avatar_color) VALUES (2, 1, 'MemoryBot', 'bot', 'Summarizer', '#123456')"
+            )
+            await db.commit()
+
+    async def asyncTearDown(self):
+        if os.path.exists(TEST_DB_PATH):
+            try:
+                os.remove(TEST_DB_PATH)
+            except Exception:
+                pass
+
+    @patch("ai.memory.retrieve_relevant", new_callable=AsyncMock)
+    async def test_free_chat_without_thread_skips_summary_injection(self, mock_retrieve):
+        """无活跃讨论 topic 时（thread_id=None），即便库里有摘要也不注入历史经验摘要。"""
+        mock_retrieve.return_value = []
+        async with database.get_db() as db:
+            await db.execute(
+                "INSERT INTO role_summaries (bot_id, group_id, role, summary, covered_through_id, thread_id) "
+                "VALUES (2, 1, 'Summarizer', 'STOCK_SUMMARY', 10, 'disc:stock')"
+            )
+            await db.commit()
+
+        result = await memory.get_memory_context(
+            bot_id=2, role="Summarizer", query="吃芒果坏肚子", group_id=1, thread_id=None
+        )
+        self.assertNotIn("我的历史经验摘要", result)
+        self.assertNotIn("STOCK_SUMMARY", result)
+
+    @patch("ai.memory.retrieve_relevant", new_callable=AsyncMock)
+    async def test_summary_injection_scoped_to_active_thread(self, mock_retrieve):
+        """讨论中只注入当前 topic 的摘要，其它 topic（股票）的摘要不串入。"""
+        mock_retrieve.return_value = []
+        async with database.get_db() as db:
+            await db.execute(
+                "INSERT INTO role_summaries (bot_id, group_id, role, summary, covered_through_id, thread_id) "
+                "VALUES (2, 1, 'Summarizer', 'MANGO_SUMMARY', 20, 'disc:mango')"
+            )
+            await db.execute(
+                "INSERT INTO role_summaries (bot_id, group_id, role, summary, covered_through_id, thread_id) "
+                "VALUES (2, 1, 'Summarizer', 'STOCK_SUMMARY', 10, 'disc:stock')"
+            )
+            await db.commit()
+
+        result = await memory.get_memory_context(
+            bot_id=2, role="Summarizer", query="吃芒果坏肚子", group_id=1, thread_id="disc:mango"
+        )
+        self.assertIn("MANGO_SUMMARY", result)
+        self.assertNotIn("STOCK_SUMMARY", result)
+
+    @patch("ai.client.call_ai", new=mock_call_ai)
+    async def test_maybe_summarize_stamps_active_thread_id(self):
+        """讨论中产出的摘要要打上当前 thread_id，供按 topic 召回。"""
+        async with database.get_db() as db:
+            for i in range(1, 17):
+                await db.execute(
+                    "INSERT INTO messages (id, group_id, member_id, content) VALUES (?, 1, 2, ?)",
+                    (i, f"Message content {i}")
+                )
+            await db.commit()
+
+        await memory.maybe_summarize(
+            group_id=1, bot_id=2, role="Summarizer", member_ids=[2], thread_id="disc:mango"
+        )
+
+        async with database.get_db() as db:
+            database_row = database.aiosqlite.Row
+            db.row_factory = database_row
+            async with db.execute("SELECT thread_id FROM role_summaries WHERE bot_id = 2") as cur:
+                rows = await cur.fetchall()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["thread_id"], "disc:mango")
 
 
 if __name__ == "__main__":

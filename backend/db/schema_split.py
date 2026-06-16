@@ -152,6 +152,7 @@ _GROUP_DDL = [
         summary            TEXT    NOT NULL,
         covered_through_id INTEGER NOT NULL,
         bot_id             INTEGER DEFAULT NULL,
+        thread_id          TEXT    DEFAULT NULL,
         created_at         TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )""",
     # Reflection watermark per (bot, group): timestamp of the newest fact already

@@ -208,9 +208,12 @@ async def setup_session(runner) -> None:
     history, user_msg = build_context_message(
         runner.ctx.user_message, runner.ctx.sender["name"], runner.ctx.history, is_workflow=runner.ctx.is_workflow
     )
+    import core.workflow as _wf
+    thread_id = _wf.current_thread_id(runner.ctx.group_id)
     memory = await runner.memory.recall(MemoryContext(
         bot_id=runner.bot["id"], group_id=runner.ctx.group_id,
         role=runner.bot.get("role") or "", query=runner.ctx.user_message, history=runner.ctx.history,
+        thread_id=thread_id,
     ))
 
     if runner.executor.manifest.workspace.skill_discovery:
@@ -476,11 +479,13 @@ async def cleanup_and_finalize(runner) -> ExecutionResult:
         if m.get("role") == "tool" and m.get("name")
     ]
     
+    import core.workflow as _wf
     bg.spawn(runner.memory.observe(MemoryEvent(
         bot_id=runner.bot["id"], group_id=runner.ctx.group_id,
         role=runner.bot.get("role") or "", bot_name=runner.bot["name"],
         message_id=msg_id, text=runner.full_text,
         provider=runner.provider, model=runner.model_name,
+        thread_id=_wf.current_thread_id(runner.ctx.group_id),
     )))
     bg.spawn(bus.publish(CompactionTriggered(
         group_id=runner.ctx.group_id,
