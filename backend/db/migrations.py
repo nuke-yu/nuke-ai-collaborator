@@ -447,6 +447,21 @@ async def migration_020(db):
     await db.commit()
 
 
+async def migration_021(db):
+    """Add per-user recap acknowledgment watermark to member_read. When a user
+    dismisses (✕) the away recap, last_recap_ack_id advances to the latest message
+    so that batch never re-shows for THAT user (survives reconnect / group switch),
+    while genuinely new activity past the watermark still surfaces a fresh recap.
+    Per-user; one member's ✕ never clears it for teammates. Group-DB table; harmless
+    no-op on the central DB (member_read absent there → _safe_add_column skips).
+
+    Rollback:
+        ALTER TABLE member_read DROP COLUMN last_recap_ack_id;
+    """
+    await _safe_add_column(db, "ALTER TABLE member_read ADD COLUMN last_recap_ack_id INTEGER NOT NULL DEFAULT 0")
+    await db.commit()
+
+
 MIGRATIONS: list = [
     migration_001,
     migration_002,
@@ -468,6 +483,7 @@ MIGRATIONS: list = [
     migration_018,
     migration_019,
     migration_020,
+    migration_021,
 ]
 
 

@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { K } from '../i18n/keys'
-import { fetchAllGroups, fetchGroupInfo, fetchMessages, fetchUnreadCounts, fetchReactions, toggleReaction, createGroup, deleteGroup, addMember, fetchPins, pinMessage, unpinMessage, resumeSession, cancelSessionRecovery, fetchGroupRecap, dismissGroupRecap, fetchPersonalRecap, fetchAiSuggestions } from '../api'
+import { fetchAllGroups, fetchGroupInfo, fetchMessages, fetchUnreadCounts, fetchReactions, toggleReaction, createGroup, deleteGroup, addMember, fetchPins, pinMessage, unpinMessage, resumeSession, cancelSessionRecovery, fetchGroupRecap, fetchPersonalRecap, ackPersonalRecap, fetchAiSuggestions } from '../api'
 import { useWebSocket } from '../hooks/useWebSocket'
 import { useNotifications } from '../hooks/useNotifications'
 import { useGroupStore } from '../store/groupStore'
@@ -166,11 +166,12 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
   const handleDismissRecap = async () => {
     if (!activeGroupId) return
     setPersonalSummary(null)
-    dismissRecap()   // sets awaySummary=null + recapDismissed=true in one shot
+    dismissRecap()   // 本地立即隐藏（awaySummary=null + recapDismissed=true）
     try {
-      await dismissGroupRecap(activeGroupId)
+      // 持久化「我看过了」：推进个人水位线 → 服务端这批不再返回（重连/切群也不再弹），仅清自己的。
+      if (memberId) await ackPersonalRecap(activeGroupId, memberId)
     } catch (err) {
-      console.error('Failed to dismiss group recap:', err)
+      console.error('Failed to ack personal recap:', err)
     }
   }
 
@@ -638,9 +639,10 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
           </div>
         )}
 
-        {/* 个人「你错过的」优先；没有未读时回退到群级动态摘要 */}
+        {/* 只看每用户的「你错过的」recap：已被服务端水位线 gate —— 点 ✕ 后这批不再显示，
+            重连/切群也不再弹；有全新活动才再弹。群级 away_summary 不再驱动横幅显示。 */}
         <RecapBanner
-          summary={personalSummary || awaySummary}
+          summary={personalSummary}
           loading={loadingRecap}
           onDismiss={handleDismissRecap}
           onRegenerate={handleRegenerateRecap}

@@ -170,9 +170,10 @@ _GROUP_DDL = [
         FOREIGN KEY (message_id) REFERENCES messages(id)
     )""",
     """CREATE TABLE IF NOT EXISTS member_read (
-        member_id    INTEGER NOT NULL,
-        group_id     INTEGER NOT NULL,
-        last_read_id INTEGER NOT NULL DEFAULT 0,
+        member_id         INTEGER NOT NULL,
+        group_id          INTEGER NOT NULL,
+        last_read_id      INTEGER NOT NULL DEFAULT 0,
+        last_recap_ack_id INTEGER NOT NULL DEFAULT 0,
         PRIMARY KEY (member_id, group_id)
     )""",
     """CREATE TABLE IF NOT EXISTS message_reactions (

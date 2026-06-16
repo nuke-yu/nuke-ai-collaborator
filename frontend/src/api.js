@@ -185,9 +185,16 @@ export async function dismissGroupRecap(groupId) {
   return res.json()
 }
 
-// 方案 1：按需 per-user recap —— 概括「我」离开期间错过的消息。
+// 方案 1：按需 per-user recap —— 概括「我」未确认的新活动。
 export async function fetchPersonalRecap(groupId, memberId) {
   const res = await authFetch(`/api/groups/${groupId}/recap/personal/${memberId}`)
+  return res.json()
+}
+
+// 点 ✕：把「我」的 recap 水位线推进到当前最新消息 —— 这批不再对我显示（重连/切群也不再弹），
+// 仅清自己的，不影响其他成员；之后有全新活动仍会再弹一条。
+export async function ackPersonalRecap(groupId, memberId) {
+  const res = await authFetch(`/api/groups/${groupId}/recap/ack/${memberId}`, { method: 'POST' })
   return res.json()
 }
 

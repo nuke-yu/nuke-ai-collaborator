@@ -172,6 +172,49 @@ class TestAwaySummaryRecap(unittest.IsolatedAsyncioTestCase):
         mock_call_ai.assert_not_called()
 
     @patch("core.recap.generator.call_ai_once", new_callable=AsyncMock)
+    async def test_personal_recap_suppressed_after_ack(self, mock_call_ai):
+        """点 ✕ (ack) 后，同一批未读不再生成摘要 —— 即使消息仍未读、用户重连/切群也不再弹。"""
+        from core.recap import ack_personal_recap
+        mock_call_ai.return_value = {"content": "你错过了 Dev 的提交。"}
+        # member 22 尚未确认，消息 100 未读 → 先会出摘要
+        first = await generate_personal_recap(1, 22)
+        self.assertIsNotNone(first["summary"])
+        # 点 ✕：把「该用户」的 recap 水位线推进到当前最新消息
+        await ack_personal_recap(1, 22)
+        # 同一批未读 → 不再出摘要、不再调 LLM
+        mock_call_ai.reset_mock()
+        after = await generate_personal_recap(1, 22)
+        self.assertEqual(after["unread_count"], 0)
+        self.assertIsNone(after["summary"])
+        mock_call_ai.assert_not_called()
+
+    @patch("core.recap.generator.call_ai_once", new_callable=AsyncMock)
+    async def test_personal_recap_reappears_on_new_activity_after_ack(self, mock_call_ai):
+        """ack 之后若有「全新」活动，仍会再弹一条只覆盖新活动的摘要。"""
+        from core.recap import ack_personal_recap
+        mock_call_ai.return_value = {"content": "Dev 又提交了。"}
+        await ack_personal_recap(1, 23)   # 确认到当前最新 (msg 100)
+        async with database.get_db() as db_conn:
+            await db_conn.execute(
+                "INSERT INTO messages (id, group_id, member_id, content, sender_name, sender_type) "
+                "VALUES (110,1,10,'new commit','DevBot','bot')"
+            )
+            await db_conn.commit()
+        res = await generate_personal_recap(1, 23)
+        self.assertEqual(res["unread_count"], 1)
+        self.assertEqual(res["summary"], "Dev 又提交了。")
+
+    @patch("core.recap.generator.call_ai_once", new_callable=AsyncMock)
+    async def test_ack_personal_recap_is_per_user(self, mock_call_ai):
+        """✕ 只清自己的：member 24 确认后，member 25 仍能看到同一批未读的摘要。"""
+        from core.recap import ack_personal_recap
+        mock_call_ai.return_value = {"content": "进度摘要。"}
+        await ack_personal_recap(1, 24)
+        res_other = await generate_personal_recap(1, 25)
+        self.assertEqual(res_other["unread_count"], 1)
+        self.assertIsNotNone(res_other["summary"])
+
+    @patch("core.recap.generator.call_ai_once", new_callable=AsyncMock)
     async def test_force_bypasses_debounce(self, mock_call_ai):
         """force=True 用于用户手动触发：跳过 5s 去抖，必定重算（不被静默跳过）。"""
         mock_call_ai.return_value = {"content": "Forced summary."}
@@ -252,6 +295,16 @@ class TestRecapApi(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(resp.status_code, 200)
             self.assertEqual(resp.json(), {"unread_count": 3, "summary": "你错过了 3 条。"})
             mock_gen.assert_awaited_once_with(1, 20)
+
+    @patch("core.recap.ack_personal_recap", new_callable=AsyncMock)
+    async def test_ack_recap_endpoint(self, mock_ack):
+        """POST .../recap/ack/{member_id} → 记录该成员已看过，返回推进后的水位线。"""
+        mock_ack.return_value = 142
+        async with AsyncClient(app=app, base_url="http://test") as ac:
+            resp = await ac.post("/api/groups/1/recap/ack/20")
+            self.assertEqual(resp.status_code, 200)
+            self.assertEqual(resp.json(), {"ok": True, "acked_through": 142})
+            mock_ack.assert_awaited_once_with(1, 20)
 
     @patch("core.recap.generate_and_cache_recap", new_callable=AsyncMock)
     async def test_trigger_recap_falls_back_to_cache_when_skipped(self, mock_generate_recap):

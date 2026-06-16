@@ -178,13 +178,16 @@ async def generate_personal_recap(group_id: int, member_id: int) -> dict:
         from db import global_db
         async with get_db() as gdb:
             cur = await gdb.execute(
-                "SELECT last_read_id FROM member_read WHERE member_id = ? AND group_id = ?",
+                "SELECT last_read_id, last_recap_ack_id FROM member_read WHERE member_id = ? AND group_id = ?",
                 (member_id, group_id),
             )
             row = await cur.fetchone()
-            last_read = row[0] if row else 0
-            # after_id → 升序取「未读」消息（cap 30，足够 1-3 句摘要的上下文）
-            messages = await get_messages(gdb, group_id, limit=30, after_id=last_read)
+            last_read = (row[0] if row else 0) or 0
+            last_ack = (row[1] if row else 0) or 0
+            # 门槛 = max(已读, 已确认)：未读才弹，但点 ✕ (ack) 能压制这批；
+            # 对从未离开、已读到最新的用户不会误弹。after_id 升序取门槛之后的消息（cap 30）。
+            anchor = max(last_read, last_ack)
+            messages = await get_messages(gdb, group_id, limit=30, after_id=anchor)
 
         if not messages:
             return {"unread_count": 0, "summary": None}
@@ -198,3 +201,36 @@ async def generate_personal_recap(group_id: int, member_id: int) -> dict:
         log.error("Failed to generate personal recap for group %s member %s: %r",
                   group_id, member_id, e, exc_info=True)
         return {"unread_count": 0, "summary": None}
+
+
+async def ack_personal_recap(group_id: int, member_id: int) -> int:
+    """记录某成员「已看过」当前 away recap（点 ✕ 触发）。把该用户的 recap 水位线
+    (member_read.last_recap_ack_id) 推进到当前群内最新消息 id —— 这批活动便不再对他
+    显示（重连/切群也不再弹）；之后若有更新的活动，仍会再生成一条只覆盖新活动的摘要。
+    每用户独立：一个人点 ✕ 不影响其他成员。水位线单调不回退。返回推进后的水位线。
+
+    群库由调用方（API 端点）通过 db.bind_db 绑定；读写都走当前绑定的群 DB，与
+    generate_personal_recap 一致。失败不抛，返回 0。"""
+    try:
+        async with get_db() as gdb:
+            cur = await gdb.execute(
+                "SELECT COALESCE(MAX(id), 0) FROM messages WHERE group_id = ?",
+                (group_id,),
+            )
+            row = await cur.fetchone()
+        up_to_id = (row[0] if row else 0) or 0
+        # 写路径与读路径同源：绑定时 = 当前群库，未绑定（如单库测试）= db.DB_PATH。
+        write_path = db.current_db_path.get() or db.DB_PATH
+        async with write_connect(write_path) as w:
+            await w.execute(
+                "INSERT INTO member_read (member_id, group_id, last_recap_ack_id) VALUES (?,?,?) "
+                "ON CONFLICT(member_id, group_id) DO UPDATE SET "
+                "last_recap_ack_id = MAX(member_read.last_recap_ack_id, excluded.last_recap_ack_id)",
+                (member_id, group_id, up_to_id),
+            )
+            await w.commit()
+        return up_to_id
+    except Exception as e:
+        log.error("Failed to ack personal recap for group %s member %s: %r",
+                  group_id, member_id, e, exc_info=True)
+        return 0
