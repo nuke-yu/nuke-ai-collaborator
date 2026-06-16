@@ -199,6 +199,9 @@ async def generate_personal_recap(group_id: int, member_id: int) -> dict:
         covered_through_id = messages[-1]["id"]
         return {"unread_count": len(messages), "summary": summary, "covered_through_id": covered_through_id}
     except Exception as e:
+        import sqlite3
+        if isinstance(e, sqlite3.OperationalError) and ("no such column" in str(e).lower() or "no such table" in str(e).lower()):
+            raise
         log.error("Failed to generate personal recap for group %s member %s: %r",
                   group_id, member_id, e, exc_info=True)
         return {"unread_count": 0, "summary": None, "covered_through_id": 0}
@@ -235,6 +238,9 @@ async def ack_personal_recap(group_id: int, member_id: int, covered_through_id: 
             await w.commit()
         return up_to_id
     except Exception as e:
+        import sqlite3
+        if isinstance(e, sqlite3.OperationalError) and ("no such column" in str(e).lower() or "no such table" in str(e).lower()):
+            raise
         log.error("Failed to ack personal recap for group %s member %s: %r",
                   group_id, member_id, e, exc_info=True)
         return 0

@@ -629,7 +629,10 @@ async def maybe_summarize(group_id: int, bot_id: int, role: str, member_ids: lis
                 (bot_id, group_id, role, summary, batch[-1][0], thread_id)
             )
             await db.commit()
-    except Exception:
+    except Exception as e:
+        import sqlite3
+        if isinstance(e, sqlite3.OperationalError) and ("no such column" in str(e).lower() or "no such table" in str(e).lower()):
+            raise
         log.exception("maybe_summarize failed (bot_id=%s, group_id=%s)", bot_id, group_id)
 
 

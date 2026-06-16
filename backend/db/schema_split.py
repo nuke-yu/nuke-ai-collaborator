@@ -294,3 +294,15 @@ async def init_group_db(path: str | None = None) -> None:
         await conn.commit()
         await _stamp_version(conn)
         await conn.commit()
+
+
+async def ensure_group_db_ready(path: str) -> None:
+    """Ensure the group DB at path exists, schema is initialized, and migrations are run."""
+    import os
+    import db as _db
+    from db.migrations import run_migrations
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    await init_group_db(path)
+    async with _db.connect(path) as conn:
+        await run_migrations(conn)
+

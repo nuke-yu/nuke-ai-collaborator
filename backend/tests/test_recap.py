@@ -579,5 +579,99 @@ class TestRetrospective(unittest.IsolatedAsyncioTestCase):
             shutil.rmtree(temp_dir)
 
 
+class TestRecapHydrationAndOperationalError(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        import tempfile
+        from pathlib import Path
+        # Create temp dir for WORKSPACE_ROOT
+        self.temp_dir = tempfile.mkdtemp()
+        self.workspace_patchers = [
+            patch("skills.constants.WORKSPACE_ROOT", Path(self.temp_dir)),
+            patch("runtime.dbpaths.WORKSPACE_ROOT", Path(self.temp_dir))
+        ]
+        for p in self.workspace_patchers:
+            p.start()
+
+        # Set up Auth dependency override
+        from core import auth as _auth
+        app.dependency_overrides[_auth.get_current_user] = lambda: {"uid": 1, "sub": "test"}
+
+        # Use test central DB path
+        self.test_central_db = os.path.join(self.temp_dir, "central.db")
+        self._orig_db_path = database.DB_PATH
+        database.DB_PATH = self.test_central_db
+        await database.init_db()
+
+        # Insert a test group in the central DB
+        async with database.get_db() as db_conn:
+            await db_conn.execute("INSERT INTO groups (id, name) VALUES (999, 'Hydration Group')")
+            await db_conn.commit()
+
+    async def asyncTearDown(self):
+        from core import auth as _auth
+        app.dependency_overrides.pop(_auth.get_current_user, None)
+        database.DB_PATH = self._orig_db_path
+        for p in self.workspace_patchers:
+            p.stop()
+        shutil.rmtree(self.temp_dir)
+
+    async def test_endpoint_auto_hydrates_sleeping_group(self):
+        # The database file for group 999 does not exist yet
+        from runtime.dbpaths import group_db_path
+        gdb_path = group_db_path(999)
+        self.assertFalse(os.path.exists(gdb_path))
+
+        # Accessing the recap personal endpoint should auto-hydrate/migrate the database
+        async with AsyncClient(app=app, base_url="http://test") as ac:
+            resp = await ac.get("/api/groups/999/recap/personal/1")
+            self.assertEqual(resp.status_code, 200)
+            data = resp.json()
+            # It succeeds with an empty recap response since there are no messages
+            self.assertEqual(data["unread_count"], 0)
+            self.assertIsNone(data["summary"])
+
+        # Check that the group DB was created, schema initialized, and migrated
+        self.assertTrue(os.path.exists(gdb_path))
+        async with database.connect(gdb_path) as conn:
+            # Check a table exists
+            cur = await conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='member_read'")
+            self.assertIsNotNone(await cur.fetchone())
+            # Check a column from migration exists (last_recap_ack_id)
+            cur = await conn.execute("PRAGMA table_info(member_read)")
+            cols = [row[1] for row in await cur.fetchall()]
+            self.assertIn("last_recap_ack_id", cols)
+
+    async def test_operational_error_propagation(self):
+        import sqlite3
+        from core.recap.generator import generate_personal_recap, ack_personal_recap
+        from ai.memory import maybe_summarize
+
+        # 1. generate_personal_recap raises when there is a schema error
+        with patch("core.recap.generator.get_db") as mock_get_db:
+            mock_conn = AsyncMock()
+            mock_conn.execute.side_effect = sqlite3.OperationalError("no such column: last_recap_ack_id")
+            mock_get_db.return_value.__aenter__.return_value = mock_conn
+            with self.assertRaises(sqlite3.OperationalError):
+                await generate_personal_recap(1, 2)
+
+        # 2. ack_personal_recap raises when there is a schema error
+        with patch("core.recap.generator.write_connect") as mock_write_connect:
+            mock_conn = AsyncMock()
+            mock_conn.execute.side_effect = sqlite3.OperationalError("no such column: last_recap_ack_id")
+            mock_write_connect.return_value.__aenter__.return_value = mock_conn
+            with self.assertRaises(sqlite3.OperationalError):
+                await ack_personal_recap(1, 2, covered_through_id=100)
+
+        # 3. maybe_summarize raises when there is a schema error
+        with patch("ai.memory._memory_db") as mock_memory_db:
+            mock_conn = MagicMock()
+            mock_conn.execute.side_effect = sqlite3.OperationalError("no such column: thread_id")
+            async_cm = AsyncMock()
+            async_cm.__aenter__.return_value = mock_conn
+            mock_memory_db.return_value = async_cm
+            with self.assertRaises(sqlite3.OperationalError):
+                await maybe_summarize(1, 2, "role", [3])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -321,8 +321,10 @@ async def get_personal_recap(group_id: int, member_id: int):
     # 不缓存、不广播；成员频繁切标签的防抖交给前端。读群库 → 先绑定该群私有 DB。
     from core.recap import generate_personal_recap
     from runtime.dbpaths import group_db_path
-    from db import bind_db
-    with bind_db(group_db_path(group_id)):
+    from db import bind_db, ensure_group_db_ready
+    gpath = group_db_path(group_id)
+    await ensure_group_db_ready(gpath)
+    with bind_db(gpath):
         return await generate_personal_recap(group_id, member_id)
 
 
@@ -332,13 +334,15 @@ async def ack_personal_recap_endpoint(group_id: int, member_id: int, payload: di
     # 仅清自己的，不影响其他成员。需读写群库 → 绑定该群私有 DB。
     from core.recap import ack_personal_recap
     from runtime.dbpaths import group_db_path
-    from db import bind_db
+    from db import bind_db, ensure_group_db_ready
     
     cid = covered_through_id
     if cid is None and payload:
         cid = payload.get("covered_through_id")
         
-    with bind_db(group_db_path(group_id)):
+    gpath = group_db_path(group_id)
+    await ensure_group_db_ready(gpath)
+    with bind_db(gpath):
         acked = await ack_personal_recap(group_id, member_id, cid)
     return {"ok": True, "acked_through": acked}
 

@@ -61,6 +61,7 @@ from db.writer import write_connect, aclose_writer  # noqa: E402
 from db.schema import init_db  # noqa: E402
 from db.schema_split import (   # noqa: E402  CELL-05: central + per-group split inits
     init_central_db, init_group_db, CENTRAL_TABLES, GROUP_TABLES,
+    ensure_group_db_ready,
 )
 from db.queries import (       # noqa: E402
     get_group, get_members, get_member,
@@ -77,6 +78,7 @@ __all__ = [
     "DB_PATH", "get_db", "global_db", "connect", "connect_sync", "write_connect", "aclose_writer",
     "bind_db", "current_db_path", "init_db",
     "init_central_db", "init_group_db", "CENTRAL_TABLES", "GROUP_TABLES",
+    "ensure_group_db_ready",
     "get_group", "get_members", "get_member",
     "get_messages", "get_all_messages", "get_member_stats",
     "save_message", "update_member_setting", "clear_bot_context",
