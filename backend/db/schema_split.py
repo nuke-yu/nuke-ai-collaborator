@@ -296,8 +296,18 @@ async def init_group_db(path: str | None = None) -> None:
         await conn.commit()
 
 
+# Per-process cache of group DBs already brought to current schema this process lifetime.
+# Lets ensure_group_db_ready be attached broadly (route-layer dep) without paying a full
+# init+migrate on every request. Cleared on restart, so a deploy that adds migrations
+# re-runs them. Idempotent ops mean a concurrent first-time double-run is harmless.
+_ready_group_dbs: set[str] = set()
+
+
 async def ensure_group_db_ready(path: str) -> None:
-    """Ensure the group DB at path exists, schema is initialized, and migrations are run."""
+    """Ensure the group DB at path exists, schema is initialized, and migrations are run.
+    No-ops after the first successful call for a given path this process (see _ready_group_dbs)."""
+    if path in _ready_group_dbs:
+        return
     import os
     import db as _db
     from db.migrations import run_migrations
@@ -305,4 +315,5 @@ async def ensure_group_db_ready(path: str) -> None:
     await init_group_db(path)
     async with _db.connect(path) as conn:
         await run_migrations(conn)
+    _ready_group_dbs.add(path)
 

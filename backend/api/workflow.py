@@ -1,6 +1,7 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 import db
 from db import get_db, get_members
+from api.deps import ensure_group_ready
 from ws_manager import manager
 import core.workflow as wf
 from core import workflow_store
@@ -12,7 +13,7 @@ from runtime import ipc
 router = APIRouter()
 
 
-@router.get("/api/groups/{group_id}/workflow")
+@router.get("/api/groups/{group_id}/workflow", dependencies=[Depends(ensure_group_ready)])
 async def get_workflow(group_id: int):
     # 编排实际跑在 worker 进程；REST 应用在主进程、其内存编排器恒空，wf._snapshot()
     # 在这里永远报 inactive。改为从 group 私有库读持久化快照（每次阶段/门变化都会

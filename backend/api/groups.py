@@ -4,7 +4,9 @@ import shutil
 import logging
 from datetime import datetime
 from urllib.parse import quote
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
+
+from api.deps import ensure_group_ready
 from fastapi.responses import Response
 from db import (get_db, write_connect, get_group, get_members, get_all_messages, get_member_stats,
                       update_member_setting, update_member_full, clear_bot_context)
@@ -80,7 +82,7 @@ async def get_group_info(group_id: int):
     return {"group": group, "members": members}
 
 
-@router.delete("/api/groups/{group_id}")
+@router.delete("/api/groups/{group_id}", dependencies=[Depends(ensure_group_ready)])
 async def delete_group(group_id: int):
     """Fully purge a group: all members, their DB data, the group DB, and the on-disk workspace."""
     async with get_db() as db:
@@ -178,7 +180,7 @@ async def add_member(group_id: int, req: AddMemberRequest):
         return {"id": bot_id, "name": req.name, "type": req.type}
 
 
-@router.delete("/api/groups/{group_id}/members/{member_id}")
+@router.delete("/api/groups/{group_id}/members/{member_id}", dependencies=[Depends(ensure_group_ready)])
 async def remove_member(group_id: int, member_id: int):
     """Fully purge a member: its row + all DB data + its on-disk workspace.
 
@@ -315,34 +317,31 @@ async def trigger_group_recap(group_id: int):
     return {"ok": True, "away_summary": summary}
 
 
-@router.get("/api/groups/{group_id}/recap/personal/{member_id}")
+@router.get("/api/groups/{group_id}/recap/personal/{member_id}", dependencies=[Depends(ensure_group_ready)])
 async def get_personal_recap(group_id: int, member_id: int):
     # 方案 1：按需 per-user recap —— 概括该成员「未确认」的新活动（门槛见 generator）。
     # 不缓存、不广播；成员频繁切标签的防抖交给前端。读群库 → 先绑定该群私有 DB。
+    # 群库的存在/迁移由 ensure_group_ready 依赖在路由层保证。
     from core.recap import generate_personal_recap
     from runtime.dbpaths import group_db_path
-    from db import bind_db, ensure_group_db_ready
-    gpath = group_db_path(group_id)
-    await ensure_group_db_ready(gpath)
-    with bind_db(gpath):
+    from db import bind_db
+    with bind_db(group_db_path(group_id)):
         return await generate_personal_recap(group_id, member_id)
 
 
-@router.post("/api/groups/{group_id}/recap/ack/{member_id}")
+@router.post("/api/groups/{group_id}/recap/ack/{member_id}", dependencies=[Depends(ensure_group_ready)])
 async def ack_personal_recap_endpoint(group_id: int, member_id: int, payload: dict | None = None, covered_through_id: int | None = None):
     # 点 ✕：记录该成员已看过当前 away recap（每用户水位线），这批不再对他显示；
-    # 仅清自己的，不影响其他成员。需读写群库 → 绑定该群私有 DB。
+    # 仅清自己的，不影响其他成员。需读写群库 → 绑定该群私有 DB（迁移由路由层依赖保证）。
     from core.recap import ack_personal_recap
     from runtime.dbpaths import group_db_path
-    from db import bind_db, ensure_group_db_ready
-    
+    from db import bind_db
+
     cid = covered_through_id
     if cid is None and payload:
         cid = payload.get("covered_through_id")
-        
-    gpath = group_db_path(group_id)
-    await ensure_group_db_ready(gpath)
-    with bind_db(gpath):
+
+    with bind_db(group_db_path(group_id)):
         acked = await ack_personal_recap(group_id, member_id, cid)
     return {"ok": True, "acked_through": acked}
 
