@@ -242,42 +242,38 @@ class TestChromaMemoryEnhancements(unittest.IsolatedAsyncioTestCase):
         
         mock_col.query.assert_called_once()
         where_clause = mock_col.query.call_args[1]["where"]
+        # WHERE 只按 bot/group 过滤，不再按 thread 硬过滤（thread 作用域改为 ranker 软加成）
         self.assertEqual(
             where_clause,
-            {"$and": [{"bot_id": {"$eq": 5}}, {"group_id": {"$eq": 9}}, {"thread_id": {"$eq": ""}}]}
+            {"$and": [{"bot_id": {"$eq": 5}}, {"group_id": {"$eq": 9}}]}
         )
-        
+
         # Expected order: B, C, A. With top_k=2: [B, C]
         self.assertEqual(results, ["Doc B", "Doc C"])
 
     @patch("ai.memory._get_collection")
-    async def test_retrieve_relevant_with_thread_id(self, mock_get_col):
+    async def test_retrieve_relevant_thread_soft_scoping_not_hard_filter(self, mock_get_col):
+        """thread 作用域是软加成而非硬过滤：跨 thread 的相关事实仍可被召回（知识不按话题孤岛化），
+        且 WHERE 不含任何 thread_id 条件。"""
+        import time
         mock_col = MagicMock()
         mock_get_col.return_value = mock_col
         mock_col.query.return_value = {
-            "documents": [["Doc A"]],
-            "metadatas": [[{"timestamp": 12345.6, "bot_id": 5, "group_id": 9, "thread_id": "thread_x"}]],
+            "documents": [["跨话题但相关的事实"]],
+            "metadatas": [[{"timestamp": time.time(), "bot_id": 5, "group_id": 9, "thread_id": "disc:other"}]],
             "distances": [[0.1]],
             "ids": [["1"]]
         }
-        await memory.retrieve_relevant(bot_id=5, group_id=9, query="test", top_k=1, thread_id="thread_x")
+        results = await memory.retrieve_relevant(bot_id=5, group_id=9, query="test", top_k=3, thread_id="disc:current")
         mock_col.query.assert_called_once()
         where_clause = mock_col.query.call_args[1]["where"]
+        # 不再按 thread 硬过滤
         self.assertEqual(
             where_clause,
-            {
-                "$and": [
-                    {"bot_id": {"$eq": 5}},
-                    {"group_id": {"$eq": 9}},
-                    {
-                        "$or": [
-                            {"thread_id": {"$eq": "thread_x"}},
-                            {"thread_id": {"$eq": ""}}
-                        ]
-                    }
-                ]
-            }
+            {"$and": [{"bot_id": {"$eq": 5}}, {"group_id": {"$eq": 9}}]}
         )
+        # 跨 thread 的事实依然被返回（候选未被过滤掉）
+        self.assertEqual(results, ["跨话题但相关的事实"])
 
     @patch("ai.client.call_ai_once", new_callable=AsyncMock)
     @patch("ai.memory.retrieve_relevant")
@@ -531,6 +527,38 @@ class TestMemoryAuditFixes(unittest.IsolatedAsyncioTestCase):
         results = ranker.rank(docs, metas, dists, top_k=2)
         # 高重要度的分高，应该排第一
         self.assertEqual(results[0], "Doc High Importance")
+
+    def test_thread_affinity_bonus(self):
+        """同 thread 的事实获加性 bonus → 其它因子相等时排到跨 thread 事实之前；
+        但跨 thread 事实仍是候选、仍会被返回（软加成，非硬过滤，知识不孤岛化）。"""
+        from ai.memory import TimeDecayRanker
+        import time as _t
+        t_now = _t.time()
+        ranker = TimeDecayRanker(similarity_floor=0.0, reflection_bonus=0.0, thread_affinity_bonus=0.2)
+        docs = ["跨话题事实", "本话题事实"]
+        metas = [
+            {"timestamp": t_now, "importance": 0.5, "thread_id": "disc:other"},
+            {"timestamp": t_now, "importance": 0.5, "thread_id": "disc:current"},
+        ]
+        dists = [0.2, 0.2]  # 相似度相同 → 仅 bonus 区分
+        results = ranker.rank(docs, metas, dists, top_k=2, query="", thread_id="disc:current")
+        self.assertEqual(results[0], "本话题事实")      # 同 thread 上浮
+        self.assertIn("跨话题事实", results)             # 但跨 thread 仍被召回
+
+    def test_thread_affinity_no_bonus_in_free_chat(self):
+        """自由聊天（thread_id=None/空）没有当前话题可偏好 → 不施加 thread bonus，纯按相似度等因子。"""
+        from ai.memory import TimeDecayRanker
+        import time as _t
+        t_now = _t.time()
+        ranker = TimeDecayRanker(similarity_floor=0.0, reflection_bonus=0.0, thread_affinity_bonus=0.2)
+        docs = ["低相似", "高相似"]
+        metas = [
+            {"timestamp": t_now, "importance": 0.5, "thread_id": ""},
+            {"timestamp": t_now, "importance": 0.5, "thread_id": "disc:x"},
+        ]
+        dists = [0.4, 0.1]  # 第二条相似度更高
+        results = ranker.rank(docs, metas, dists, top_k=2, query="", thread_id=None)
+        self.assertEqual(results[0], "高相似")  # 无 thread bonus，相似度更高者排前
 
     def test_keyword_boosting(self):
         """测试混合检索关键字精确匹配加分。"""

@@ -314,14 +314,19 @@ class TimeDecayRanker:
     """基于物理时间差应用绝对指数衰减的排序器（半衰期默认7天），融合重要性和关键字增强并设绝对相似度下限。"""
 
     def __init__(self, half_life_days: float = 7.0, similarity_floor: float | None = None,
-                 reflection_bonus: float | None = None):
+                 reflection_bonus: float | None = None, thread_affinity_bonus: float | None = None):
         self.decay_const = 0.693147 / (half_life_days * 86400.0)
         # None → 用配置项（可经 NUKE_MEMORY_SIMILARITY_FLOOR 覆盖）；显式传值用于测试。
         self.similarity_floor = config.MEMORY_SIMILARITY_FLOOR if similarity_floor is None else similarity_floor
         # 反思洞察的加性检索 bonus (P2)，让沉淀的高层语义知识更易浮现。
         self.reflection_bonus = config.REFLECT_RETRIEVAL_BONUS if reflection_bonus is None else reflection_bonus
+        # 与当前讨论 topic 同 thread 的记忆的加性 bonus（软作用域，不硬过滤跨话题记忆）。
+        self.thread_affinity_bonus = config.MEMORY_THREAD_AFFINITY_BONUS if thread_affinity_bonus is None else thread_affinity_bonus
 
-    def rank(self, docs: list[str], metas: list[dict], dists: list[float], top_k: int, query: str = "") -> list[str]:
+    def rank(self, docs: list[str], metas: list[dict], dists: list[float], top_k: int, query: str = "",
+             thread_id: str | None = None) -> list[str]:
+        # 当前讨论 topic；自由聊天（None/""）无可偏好的话题 → 不施加 thread bonus。
+        target_thread = thread_id or ""
         t_now = time.time()
         scored = []
         
@@ -369,6 +374,9 @@ class TimeDecayRanker:
             # 🟢 反思洞察加性 bonus（沉淀的语义知识，P2）
             if meta.get("mem_type") == "reflection":
                 score += self.reflection_bonus
+            # 🟢 同 thread 软加成：本话题记忆上浮，但跨话题记忆仍是候选（不孤岛化）。
+            if target_thread and meta.get("thread_id", "") == target_thread:
+                score += self.thread_affinity_bonus
             scored.append((score, docs[idx]))
             
         scored.sort(key=lambda x: x[0], reverse=True)
@@ -476,17 +484,12 @@ async def add_to_chroma(message_id: int, content: str, role: str, bot_id: int, g
 async def retrieve_relevant(bot_id: int, group_id: int | None, query: str, top_k: int = 3, thread_id: str | None = None) -> list:
     loop = asyncio.get_running_loop()
     try:
-        target_thread = thread_id or ""
-        if target_thread:
-            thread_filter = {"$or": [{"thread_id": {"$eq": target_thread}}, {"thread_id": {"$eq": ""}}]}
-        else:
-            thread_filter = {"thread_id": {"$eq": ""}}
-
+        # thread 作用域改为 ranker 软加成（见 TimeDecayRanker），WHERE 不再按 thread 硬过滤——
+        # 否则讨论 A 学到的事实在讨论 B / 自由聊天里召不回，长期知识被按话题孤岛化。
         where_conds = [{"bot_id": {"$eq": bot_id}}]
         if group_id is not None:
             where_conds.append({"group_id": {"$eq": group_id}})
-        where_conds.append(thread_filter)
-        where = {"$and": where_conds}
+        where = where_conds[0] if len(where_conds) == 1 else {"$and": where_conds}
             
         candidates_k = max(top_k * 3, 10)
         results = await loop.run_in_executor(
@@ -504,7 +507,7 @@ async def retrieve_relevant(bot_id: int, group_id: int | None, query: str, top_k
         
         # 绝对指数衰减打分与精排，包含重要性与关键字增强
         ranker = TimeDecayRanker()
-        relevant = ranker.rank(docs, metas, dists, top_k, query)
+        relevant = ranker.rank(docs, metas, dists, top_k, query, thread_id=thread_id)
         
         # 可观测性评估：记录命中与排序指标
         log.info(

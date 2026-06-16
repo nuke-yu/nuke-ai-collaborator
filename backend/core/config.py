@@ -70,6 +70,9 @@ MEMORY_TTL_DAYS = float(os.environ.get("NUKE_MEMORY_TTL_DAYS") or 180.0)
 REFLECT_TTL_DAYS = float(os.environ.get("NUKE_REFLECT_TTL_DAYS") or 540.0)
 # 检索时给反思洞察的加性 bonus，使沉淀的高层知识更易浮现 (P2)。
 REFLECT_RETRIEVAL_BONUS = float(os.environ.get("NUKE_REFLECT_RETRIEVAL_BONUS") or 0.1)
+# 检索时给「与当前讨论 topic 同 thread」的记忆的加性 bonus：让本话题记忆上浮，
+# 但**不硬过滤**跨话题记忆（软作用域）——避免按话题孤岛化、保住跨话题的长期知识召回。
+MEMORY_THREAD_AFFINITY_BONUS = float(os.environ.get("NUKE_MEMORY_THREAD_AFFINITY_BONUS") or 0.15)
 
 # 多层反思 (P3)：默认关闭（单层，只反思原子事实，防误差放大）。开启后允许对既有反思
 # 再归纳，形成反思树；REFLECT_MAX_LEVEL 封顶层数，到顶的反思不再被纳入下一层归纳。
