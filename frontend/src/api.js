@@ -191,10 +191,15 @@ export async function fetchPersonalRecap(groupId, memberId) {
   return res.json()
 }
 
-// 点 ✕：把「我」的 recap 水位线推进到当前最新消息 —— 这批不再对我显示（重连/切群也不再弹），
-// 仅清自己的，不影响其他成员；之后有全新活动仍会再弹一条。
-export async function ackPersonalRecap(groupId, memberId) {
-  const res = await authFetch(`/api/groups/${groupId}/recap/ack/${memberId}`, { method: 'POST' })
+// 点 ✕：把「我」的 recap 水位线推进到「这条 recap 实际覆盖到的最新消息 id」（coveredThroughId），
+// 而不是点击时刻的 MAX(id)——否则横幅停留期间到达的新消息会被一并吞掉（TOCTOU）。仅清自己的。
+export async function ackPersonalRecap(groupId, memberId, coveredThroughId) {
+  const opts = { method: 'POST' }
+  if (coveredThroughId != null) {
+    opts.headers = { 'Content-Type': 'application/json' }
+    opts.body = JSON.stringify({ covered_through_id: coveredThroughId })
+  }
+  const res = await authFetch(`/api/groups/${groupId}/recap/ack/${memberId}`, opts)
   return res.json()
 }
 

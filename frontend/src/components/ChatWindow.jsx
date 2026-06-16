@@ -114,6 +114,9 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
   const [suggestionsLoading, setSuggestionsLoading] = useState(false)
 
   const personalRecapAt = useRef({})
+  // 每群「当前这条 personal recap 实际覆盖到的最新消息 id」——点 ✕ ack 时回传，
+  // 让水位线钉在 recap 覆盖点而非点击时刻的 MAX(id)（TOCTOU）。
+  const personalCoveredId = useRef({})
   const { notify } = useNotifications()
   const bottomRef = useRef(null)
 
@@ -158,6 +161,7 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
     try {
       const data = await fetchPersonalRecap(groupId, memberId)
       setPersonalSummary(data?.unread_count > 0 ? (data.summary || null) : null)
+      personalCoveredId.current[groupId] = data?.covered_through_id || 0
     } catch (err) {
       console.error('Failed to fetch personal recap:', err)
     }
@@ -168,8 +172,9 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
     setPersonalSummary(null)
     dismissRecap()   // 本地立即隐藏（awaySummary=null + recapDismissed=true）
     try {
-      // 持久化「我看过了」：推进个人水位线 → 服务端这批不再返回（重连/切群也不再弹），仅清自己的。
-      if (memberId) await ackPersonalRecap(activeGroupId, memberId)
+      // 持久化「我看过了」：推进个人水位线到「这条 recap 覆盖到的消息 id」（非点击时刻 MAX(id)），
+      // 服务端这批不再返回（重连/切群也不再弹），仅清自己的；停留期间到达的新消息仍会再弹。
+      if (memberId) await ackPersonalRecap(activeGroupId, memberId, personalCoveredId.current[activeGroupId])
     } catch (err) {
       console.error('Failed to ack personal recap:', err)
     }
