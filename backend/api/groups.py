@@ -322,6 +322,12 @@ async def get_personal_recap(group_id: int, member_id: int):
     # 方案 1：按需 per-user recap —— 概括该成员「未确认」的新活动（门槛见 generator）。
     # 不缓存、不广播；成员频繁切标签的防抖交给前端。读群库 → 先绑定该群私有 DB。
     # 群库的存在/迁移由 ensure_group_ready 依赖在路由层保证。
+    #
+    # 【已接受的风险 / IDOR】路由整体已挂 Depends(auth.get_current_user)（main.py），即已登录
+    # 才可访问；但此处不校验「调用者 == member_id」。在内部可信工具的定位下这是有意为之：最坏
+    # 仅同群队友互读/互 ✕ 一段离开期摘要（骚扰级，非安全级），而要做调用者==成员的校验需重新
+    # 引入 user↔member 严格绑定——见 DFT-082，该绑定会 brick WS，故不为此单点重加。若将来此工具
+    # 走出内网，应连同 WS 鉴权一并重做该绑定，而非在此打补丁。
     from core.recap import generate_personal_recap
     from runtime.dbpaths import group_db_path
     from db import bind_db
@@ -333,6 +339,7 @@ async def get_personal_recap(group_id: int, member_id: int):
 async def ack_personal_recap_endpoint(group_id: int, member_id: int, payload: dict | None = None, covered_through_id: int | None = None):
     # 点 ✕：记录该成员已看过当前 away recap（每用户水位线），这批不再对他显示；
     # 仅清自己的，不影响其他成员。需读写群库 → 绑定该群私有 DB（迁移由路由层依赖保证）。
+    # 【已接受的风险 / IDOR】同 get_personal_recap：已登录即可，但不校验 调用者==member_id（DFT-082）。
     from core.recap import ack_personal_recap
     from runtime.dbpaths import group_db_path
     from db import bind_db
