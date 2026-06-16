@@ -59,57 +59,69 @@ def _gated_stage(bot: dict, *, instruction: str, done_keyword: str, gate_label: 
     return stage
 
 
+def build_ba_stage(ba: dict) -> dict:
+    return _gated_stage(
+        ba,
+        instruction=(
+            "和用户多轮对话，把需求问清楚：目标、范围、边界、验收标准。"
+            "充分澄清并与用户对齐后，把需求拆成 Jira 工单，每个工单包含："
+            "标题、描述、验收标准(AC)。（当前 Jira 为替身，先用清晰的文字列出工单清单。）"
+            "【本阶段铁律】你是需求分析，不是开发：绝对不要写任何代码或网页文件，"
+            "不要创建项目目录、不要落盘任何实现。开发是确认通过后下一阶段 Dev 的活。"
+            "（系统也已在工具层禁用了你的 write_file / run_shell 等写入能力。）"
+            "需求总结和工单清单都给完后，向用户说明『都就绪了，是否让开发开始？』，"
+            "并调用工具 signal_stage_done(reason=\"需求已澄清、工单已就绪的简短说明\") "
+            "通知系统——系统识别到这个工具调用才会给用户弹出确认卡片。"
+            "没完全澄清、工单没列完之前，绝对不要调用它。"
+        ),
+        done_keyword="[[BA_DONE]]",
+        gate_label="确认需求已整理清楚、Jira 工单已建好",
+        allowed_tools=_BA_ALLOWED_TOOLS,
+    )
+
+
+def build_dev_stage(dev: dict) -> dict:
+    return _gated_stage(
+        dev,
+        instruction=(
+            "按上面的 Jira 工单开发。"
+            "【编辑与开发规范】\n"
+            "- 修改已有文件绝对优先使用 edit_file（只发 diff，避免大文件被单次输出长度截断）；同一文件多处改动用 edits 数组一次提交；\n"
+            "- write_file 仅用于新建文件或整文件重写；\n"
+            "- 严禁把完整源码贴进聊天回复，只需说明实现方案与落盘文件。\n"
+            "开发完成后做代码自测，并提供 PR 描述（当前 Git 为替身）。"
+            "确认代码落盘且自测通过后，调用工具 signal_stage_done(reason=\"已落盘文件清单与自测结论的简短说明\") 通知系统；没落盘前绝对不要调用它。"
+        ),
+        done_keyword="[[DEV_DONE]]",
+        gate_label="确认开发完成、PR 已提",
+    )
+
+
+def build_qa_stage(qa: dict, rework_to: int = 1) -> dict:
+    return _gated_stage(
+        qa,
+        instruction=(
+            "按 Jira 工单的验收标准(AC)做冒烟测试：逐条给出通过/不通过及理由，"
+            "最后给出测试结论。"
+            "【收尾规则】只有当所有 AC 全部通过时，才调用工具 "
+            "signal_stage_done(reason=\"各 AC 通过情况与测试结论\") 通知系统。"
+            "只要有任何一条 AC 不通过，就绝对不要调用 signal_stage_done，"
+            "而是调用工具 signal_rework(target_stage=\"Dev\", reason=\"未通过的 AC 与 bug 说明\")——"
+            "系统会弹确认卡片，人确认后把问题打回 Dev 修复，修好会再回到你这里重测。"
+            "两个工具互斥，一次只调用其中一个；测试还没做完之前两个都不要调用。"
+        ),
+        done_keyword="[[QA_DONE]]",
+        gate_label="确认测试通过",
+        fail_keyword="[[QA_FAIL]]",
+        rework_to=rework_to,
+        fail_gate_label="QA 未通过：是否打回 Dev 修复并重测？",
+    )
+
+
 def build_rd_pipeline(ba: dict, dev: dict, qa: dict) -> list[dict]:
     """用三个角色 bot 拼出 3 道门的 RD 流水线 ordered_stages。"""
     return [
-        _gated_stage(
-            ba,
-            instruction=(
-                "和用户多轮对话，把需求问清楚：目标、范围、边界、验收标准。"
-                "充分澄清并与用户对齐后，把需求拆成 Jira 工单，每个工单包含："
-                "标题、描述、验收标准(AC)。（当前 Jira 为替身，先用清晰的文字列出工单清单。）"
-                "【本阶段铁律】你是需求分析，不是开发：绝对不要写任何代码或网页文件，"
-                "不要创建项目目录、不要落盘任何实现。开发是确认通过后下一阶段 Dev 的活。"
-                "（系统也已在工具层禁用了你的 write_file / run_shell 等写入能力。）"
-                "需求总结和工单清单都给完后，向用户说明『都就绪了，是否让开发开始？』，"
-                "并调用工具 signal_stage_done(reason=\"需求已澄清、工单已就绪的简短说明\") "
-                "通知系统——系统识别到这个工具调用才会给用户弹出确认卡片。"
-                "没完全澄清、工单没列完之前，绝对不要调用它。"
-            ),
-            done_keyword="[[BA_DONE]]",
-            gate_label="确认需求已整理清楚、Jira 工单已建好",
-            allowed_tools=_BA_ALLOWED_TOOLS,
-        ),
-        _gated_stage(
-            dev,
-            instruction=(
-                "按上面的 Jira 工单开发。"
-                "【编辑与开发规范】\n"
-                "- 修改已有文件绝对优先使用 edit_file（只发 diff，避免大文件被单次输出长度截断）；同一文件多处改动用 edits 数组一次提交；\n"
-                "- write_file 仅用于新建文件或整文件重写；\n"
-                "- 严禁把完整源码贴进聊天回复，只需说明实现方案与落盘文件。\n"
-                "开发完成后做代码自测，并提供 PR 描述（当前 Git 为替身）。"
-                "确认代码落盘且自测通过后，调用工具 signal_stage_done(reason=\"已落盘文件清单与自测结论的简短说明\") 通知系统；没落盘前绝对不要调用它。"
-            ),
-            done_keyword="[[DEV_DONE]]",
-            gate_label="确认开发完成、PR 已提",
-        ),
-        _gated_stage(
-            qa,
-            instruction=(
-                "按 Jira 工单的验收标准(AC)做冒烟测试：逐条给出通过/不通过及理由，"
-                "最后给出测试结论。"
-                "【收尾规则】只有当所有 AC 全部通过时，才调用工具 "
-                "signal_stage_done(reason=\"各 AC 通过情况与测试结论\") 通知系统。"
-                "只要有任何一条 AC 不通过，就绝对不要调用 signal_stage_done，"
-                "而是调用工具 signal_rework(target_stage=\"Dev\", reason=\"未通过的 AC 与 bug 说明\")——"
-                "系统会弹确认卡片，人确认后把问题打回 Dev 修复，修好会再回到你这里重测。"
-                "两个工具互斥，一次只调用其中一个；测试还没做完之前两个都不要调用。"
-            ),
-            done_keyword="[[QA_DONE]]",
-            gate_label="确认测试通过",
-            fail_keyword="[[QA_FAIL]]",
-            rework_to=1,  # 打回 Dev（流水线第 2 个阶段，下标 1）
-            fail_gate_label="QA 未通过：是否打回 Dev 修复并重测？",
-        ),
+        build_ba_stage(ba),
+        build_dev_stage(dev),
+        build_qa_stage(qa, rework_to=1),
     ]

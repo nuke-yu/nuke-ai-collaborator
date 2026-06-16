@@ -111,7 +111,39 @@ async def dispatch_start_workflow(msg: dict) -> None:
 
         from core.orchestration import registry as orch_registry
         orch = orch_registry.get(orchestrator_id)
-        spec = orch.parse_spec(body, bots)
+
+        stages_cfg = body.get("stages", [])
+        if orchestrator_id == "workflow_v1" and stages_cfg:
+            from core.role_router import _role_family
+            from core.orchestration.pipeline import build_ba_stage, build_dev_stage, build_qa_stage
+            
+            resolved_bots = []
+            for cfg in stages_cfg:
+                bot_id = cfg.get("bot_id")
+                bot = bots.get(bot_id)
+                if bot:
+                    resolved_bots.append((bot, cfg))
+            
+            stages = []
+            for bot, cfg in resolved_bots:
+                role_fam = _role_family(bot.get("role") or "")
+                if role_fam == "ba":
+                    stage = build_ba_stage(bot)
+                elif role_fam == "dev":
+                    stage = build_dev_stage(bot)
+                elif role_fam == "qa":
+                    dev_idx = next((i for i, s in enumerate(stages) if _role_family(s.get("role") or "") == "dev"), 1)
+                    stage = build_qa_stage(bot, rework_to=dev_idx)
+                else:
+                    stage = {**bot, "stage_type": "single", "gate": True}
+                
+                if "done_keyword" in cfg:
+                    stage["done_keyword"] = cfg["done_keyword"]
+                stages.append(stage)
+                
+            spec = {"stages": stages}
+        else:
+            spec = orch.parse_spec(body, bots)
 
         valid = spec.get("bots") or spec.get("stages")
         if not valid:

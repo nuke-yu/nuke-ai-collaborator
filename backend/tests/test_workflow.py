@@ -1068,6 +1068,105 @@ class TestStartRdPipeline(unittest.IsolatedAsyncioTestCase):
         self.assertIn("[[BA_DONE]]", unit.prompt_suffix)        # 哨兵指令必须随单元下发
         self.assertIn("Jira", unit.prompt_suffix)               # 建工单指令也在
 
+    async def test_dispatch_start_workflow_with_body_reconstructs_pipeline(self):
+        from runtime import dispatch
+        import core.workflow as wf
+        from unittest.mock import patch, AsyncMock, MagicMock
+        gid = 9003
+        wf.end(gid)
+        members = [
+            {"id": 1, "name": "小需", "type": "bot", "role": "需求分析", "avatar_color": "#1"},
+            {"id": 2, "name": "小开", "type": "bot", "role": "后端开发", "avatar_color": "#2"},
+            {"id": 3, "name": "小测", "type": "bot", "role": "测试", "avatar_color": "#3"},
+        ]
+        body = {
+            "orchestrator_id": "workflow_v1",
+            "stages": [
+                {"bot_id": 1, "done_keyword": "完毕"},
+                {"bot_id": 2, "done_keyword": "完毕"},
+                {"bot_id": 3, "done_keyword": "完毕"}
+            ]
+        }
+        bcast = []
+        async def cap(g, p): bcast.append(p)
+        try:
+            with patch.object(dispatch.db, "global_db", return_value=self._cm()), \
+                 patch.object(dispatch.db, "get_members", new=AsyncMock(return_value=members)), \
+                 patch.object(dispatch.bus, "broadcast", new=cap), \
+                 patch("core.workflow.apply", new=AsyncMock()):
+                await dispatch.dispatch_start_workflow({"group_id": gid, "body": body})
+            
+            # The workflow must be registered with the reconstructed stages
+            snap = wf._snapshot(gid)
+            self.assertEqual(len(snap["stages"]), 3)
+            # Check that instructions, allowed_tools, and gate:True are reconstructed correctly
+            state = wf.get(gid)
+            stages = state["stages"]
+            self.assertEqual(stages[0]["id"], 1)
+            self.assertTrue(stages[0]["gate"])
+            self.assertIn("Jira", stages[0]["instruction"])
+            self.assertIn("signal_stage_done", stages[0]["allowed_tools"])
+            self.assertEqual(stages[0]["done_keyword"], "完毕")
+        finally:
+            wf.end(gid)
+
+    async def test_dispatch_start_workflow_generic_auto_reconstruction(self):
+        from runtime import dispatch
+        import core.workflow as wf
+        from unittest.mock import patch, AsyncMock, MagicMock
+        gid = 9004
+        wf.end(gid)
+        members = [
+            {"id": 10, "name": "BA_Bot", "type": "bot", "role": "BA", "avatar_color": "#1"},
+            {"id": 20, "name": "Dev_Bot", "type": "bot", "role": "Dev", "avatar_color": "#2"},
+            {"id": 30, "name": "Arch_Bot", "type": "bot", "role": "Architect", "avatar_color": "#3"},
+            {"id": 40, "name": "QA_Bot", "type": "bot", "role": "QA", "avatar_color": "#4"},
+        ]
+        body = {
+            "orchestrator_id": "workflow_v1",
+            "stages": [
+                {"bot_id": 10, "done_keyword": "ok"},
+                {"bot_id": 20, "done_keyword": "ok"},
+                {"bot_id": 30, "done_keyword": "ok"},
+                {"bot_id": 40, "done_keyword": "ok"}
+            ]
+        }
+        try:
+            with patch.object(dispatch.db, "global_db", return_value=self._cm()), \
+                 patch.object(dispatch.db, "get_members", new=AsyncMock(return_value=members)), \
+                 patch.object(dispatch.bus, "broadcast", new=AsyncMock()), \
+                 patch("core.workflow.apply", new=AsyncMock()):
+                await dispatch.dispatch_start_workflow({"group_id": gid, "body": body})
+            
+            snap = wf._snapshot(gid)
+            self.assertEqual(len(snap["stages"]), 4)
+            
+            state = wf.get(gid)
+            stages = state["stages"]
+            
+            # Stage 0: BA
+            self.assertEqual(stages[0]["id"], 10)
+            self.assertTrue(stages[0]["gate"])
+            self.assertIn("Jira", stages[0]["instruction"])
+            
+            # Stage 1: Dev
+            self.assertEqual(stages[1]["id"], 20)
+            self.assertTrue(stages[1]["gate"])
+            self.assertIn("edit_file", stages[1]["instruction"])
+            
+            # Stage 2: Arch (generic fallback)
+            self.assertEqual(stages[2]["id"], 30)
+            self.assertTrue(stages[2]["gate"])
+            self.assertEqual(stages[2]["stage_type"], "single")
+            
+            # Stage 3: QA (rework_to must dynamically point to Dev at index 1)
+            self.assertEqual(stages[3]["id"], 40)
+            self.assertTrue(stages[3]["gate"])
+            self.assertEqual(stages[3]["rework_to"], 1)
+            self.assertEqual(stages[3]["done_keyword"], "ok")
+        finally:
+            wf.end(gid)
+
 
 class TestSnapshotFromPersistedState(unittest.TestCase):
     """跨进程修复：REST 应用跑在主进程，其编排器内存恒为空。它必须能仅凭持久化的
