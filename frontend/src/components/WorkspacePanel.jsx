@@ -25,7 +25,7 @@ export default function WorkspacePanel({ bot, groupId, onClose }) {
       const sharedRes = await fetch(`/api/groups/${groupId}/workspace`)
       if (sharedRes.ok) {
         const sharedTree = await sharedRes.json()
-        setTree([...botTree, ...sharedTree])
+        setTree(mergeUniqueByPath(botTree, sharedTree))
       } else {
         setTree(botTree)
       }
@@ -41,7 +41,7 @@ export default function WorkspacePanel({ bot, groupId, onClose }) {
         const sharedRes = await fetch(`/api/groups/${groupId}/workspace`)
         if (sharedRes.ok) {
           const sharedTree = await sharedRes.json()
-          if (!cancelled) setTree([...botTree, ...sharedTree])
+          if (!cancelled) setTree(mergeUniqueByPath(botTree, sharedTree))
         } else {
           if (!cancelled) setTree(botTree)
         }
@@ -318,6 +318,23 @@ export default function WorkspacePanel({ bot, groupId, onClose }) {
       </div>
     </div>
   )
+}
+
+// Merge node lists, keeping the first occurrence of each path. The bot workspace
+// endpoint already includes shared workspace/ files, and the group endpoint returns
+// them again — without this dedup the flat list carries duplicate paths, which makes
+// buildTree emit two FileRows with the same React key.
+function mergeUniqueByPath(...lists) {
+  const seen = new Set()
+  const out = []
+  for (const list of lists) {
+    for (const n of list) {
+      if (seen.has(n.path)) continue
+      seen.add(n.path)
+      out.push(n)
+    }
+  }
+  return out
 }
 
 // Build a nested tree, splitting shared workspace into its own root section
