@@ -109,8 +109,9 @@ class DiscussionOrchestrator(Orchestrator):
         if not content:
             return OrchestratorStep()
         s["started"] = True
-        # 人给的首条消息即本次讨论的 topic；据此铸一个稳定且唯一的 thread_id，
-        # 作为记忆按 topic 读写的作用域键（同一讨论内不变，不同讨论各不相同）。
+        # 人给的首条消息即本次讨论的 topic（原文存入 s["topic"]）；另铸一个**随机** thread_id
+        # 作为记忆按 topic 读写的作用域键——同一讨论内不变、不同讨论各不相同。注意它是随机的、
+        # 非内容寻址：同一话题分两场讨论会得到不同 thread_id，记忆不跨场共享（按设计）。
         s["topic"] = content
         s["thread_id"] = f"disc:{group_id}:{uuid.uuid4().hex[:12]}"
         bot = s["bots"][s["idx"]]

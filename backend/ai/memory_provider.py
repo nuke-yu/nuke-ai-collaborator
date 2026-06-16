@@ -92,8 +92,16 @@ class ChromaMemoryProvider:
             maybe_reflect(ev.group_id, ev.bot_id, compact_role, ev.provider, ev.model),
             return_exceptions=True,
         )
+        from db.errors import is_missing_schema_error
         for r in results:
-            if isinstance(r, Exception):
+            if not isinstance(r, Exception):
+                continue
+            # 后台 gather 吞掉子 pipeline 异常，故这里不会 500；但缺列/缺表（迁移缺口）要与
+            # 普通失败区分、显著记日志，否则一个未迁移的群库会静默让记忆停写而无人察觉。
+            if is_missing_schema_error(r):
+                log.error("ChromaMemoryProvider.observe: SCHEMA/migration gap — group DB likely un-migrated (group_id=%s)",
+                          ev.group_id, exc_info=r)
+            else:
                 log.error("ChromaMemoryProvider.observe: sub-pipeline failed", exc_info=r)
 
     async def forget(self, bot_id: int, group_id: int | None) -> None:

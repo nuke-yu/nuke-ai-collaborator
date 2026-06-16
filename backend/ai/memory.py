@@ -652,9 +652,9 @@ async def maybe_summarize(group_id: int, bot_id: int, role: str, member_ids: lis
             )
             await db.commit()
     except Exception as e:
-        import sqlite3
-        if isinstance(e, sqlite3.OperationalError) and ("no such column" in str(e).lower() or "no such table" in str(e).lower()):
-            raise
+        from db.errors import is_missing_schema_error
+        if is_missing_schema_error(e):
+            raise  # 缺列/缺表是迁移缺口，必须响亮上抛而非当成"没数据"咽下
         log.exception("maybe_summarize failed (bot_id=%s, group_id=%s)", bot_id, group_id)
 
 

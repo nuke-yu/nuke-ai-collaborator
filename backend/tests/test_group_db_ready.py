@@ -39,5 +39,15 @@ class TestEnsureGroupReadyDependency(unittest.IsolatedAsyncioTestCase):
         mock_ensure.assert_not_awaited()
 
 
+class TestIsMissingSchemaError(unittest.TestCase):
+    def test_classifies_schema_errors_only(self):
+        import sqlite3
+        from db.errors import is_missing_schema_error
+        self.assertTrue(is_missing_schema_error(sqlite3.OperationalError("no such column: last_recap_ack_id")))
+        self.assertTrue(is_missing_schema_error(sqlite3.OperationalError("no such table: reflection_state")))
+        self.assertFalse(is_missing_schema_error(sqlite3.OperationalError("database is locked")))
+        self.assertFalse(is_missing_schema_error(ValueError("no such column")))
+
+
 if __name__ == "__main__":
     unittest.main()
