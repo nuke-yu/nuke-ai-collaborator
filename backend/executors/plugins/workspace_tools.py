@@ -283,15 +283,12 @@ async def _spawn_agent_handler(bot_name: str, task: str, background: bool = Fals
         return f"[spawn_agent 执行错误] {e}"
 
 
-async def _handle_signal_stage_done(arguments: dict, ctx: dict) -> str:
-    reason = arguments.get("reason", "")
+async def _handle_signal_stage_done(reason: str = "", context: dict = None) -> str:
     return f"[系统] 已记录阶段完成信号。原因: {reason}。正在推进工作流..."
 
 
-async def _handle_signal_rework(arguments: dict, ctx: dict) -> str:
-    target = arguments.get("target_stage", "")
-    reason = arguments.get("reason", "")
-    return f"[系统] 已记录返工信号。目标阶段: {target}，原因: {reason}。工作流即将打回..."
+async def _handle_signal_rework(target_stage: str = "", reason: str = "", context: dict = None) -> str:
+    return f"[系统] 已记录返工信号。目标阶段: {target_stage}，原因: {reason}。工作流即将打回..."
 
 
 # ---------------------------------------------------------------------------
