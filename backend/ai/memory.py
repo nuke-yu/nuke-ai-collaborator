@@ -426,7 +426,8 @@ class QueryRewriter:
 # ── 7. Public APIs ── 导出给外部的公共函数接口 (向下兼容)
 
 async def add_to_chroma(message_id: int, content: str, role: str, bot_id: int, group_id: int | None = None,
-                        provider: str = "deepseek", model: str = "deepseek-chat"):
+                        provider: str = "deepseek", model: str = "deepseek-chat",
+                        thread_id: str | None = None):
     # 1. 噪声快筛与事实提取
     facts = await FactExtractor.extract(content, provider, model)
     if not facts:
@@ -446,6 +447,7 @@ async def add_to_chroma(message_id: int, content: str, role: str, bot_id: int, g
             "importance": score,       # 存入重要性分数，供检索三因子加权 (Problem 2)
             "mem_type": "fact",        # 区分情景/原子事实 vs 反思洞察 (P1 巩固层)
             "scored_by_model": f"{provider}/{model}",  # 打分模型来源，供将来换模型时按刻度归一化重标
+            "thread_id": thread_id or "",  # 当前讨论 topic，供反思按话题分区（自由聊天为 ""；Chroma 不接受 None）
         }
         if group_id is not None:
             metadata["group_id"] = group_id
@@ -690,10 +692,15 @@ async def maybe_reflect(group_id: int, bot_id: int, role: str,
             return
 
         # 候选筛选：单层排除所有反思；多层纳入 level<MAX 的反思（顶层不再被归纳）。
-        facts = []           # (doc, importance, ts)
-        consumed_ids = []    # 实际进入归纳的记忆 id —— 作为新反思的 provenance 边
-        max_ts = watermark
-        max_level = 0        # 已消费记忆的最大 level（fact 视作 0）
+        # 按 thread_id（讨论 topic）分区——杜绝把无关话题的事实揉进同一次归纳产出"桥梁洞察"。
+        # 简单版：共享 batch 级水位线（reflection_state 仍按 (bot,group)）。触发归纳后水位线
+        # 推进到整批最新 ts，同批里未满阈值的低频话题事实被丢弃（可能永不反思）——这是既定
+        # 权衡。升级路径：把 reflection_state 主键扩为 (bot,group,thread)，让各话题独立累积、
+        # 独立推进，低频话题不再被高频话题"带走"。
+        from collections import defaultdict
+        groups: dict[str, list] = defaultdict(list)  # thread_id → [(doc, importance, ts, id, level)]
+        total_kept = 0
+        max_ts = watermark   # 整批最新 ts（含未触发的话题）——触发任一话题后水位线推进到此
         for i, item_id in enumerate(ids):
             meta = metas[i] if i < len(metas) else {}
             lvl = int(meta.get("level", 0))
@@ -703,67 +710,73 @@ async def maybe_reflect(group_id: int, bot_id: int, role: str,
             doc = docs[i] if i < len(docs) else ""
             if not doc:
                 continue
-            facts.append((doc, float(meta.get("importance", 0.5)), float(meta.get("timestamp", 0.0))))
-            consumed_ids.append(item_id)
-            max_ts = max(max_ts, float(meta.get("timestamp", 0.0)))
-            max_level = max(max_level, lvl)
+            ts = float(meta.get("timestamp", 0.0))
+            tid = meta.get("thread_id") or ""
+            groups[tid].append((doc, float(meta.get("importance", 0.5)), ts, item_id, lvl))
+            total_kept += 1
+            max_ts = max(max_ts, ts)
 
-        # 2. 触发闸门：条数 + 重要性累积都要够
-        if len(facts) < config.REFLECT_MIN_FACTS:
-            return
-        if sum(f[1] for f in facts) < config.REFLECT_IMPORTANCE_THRESHOLD:
-            # 重要性不足：正常下几条就越过阈值；但若长期只积累低价值事实始终不触发，
-            # 水位线永不推进、fetch 无界增长。超过积压上限时强制推进水位线丢弃这批
-            # 低价值事实（avg importance 极低，本就该被遗忘），消除增长。
-            if len(facts) > config.REFLECT_MAX_BACKLOG:
+        # 2. 触发闸门按话题各自判定：条数 + 重要性累积都要够。
+        triggered = [
+            (tid, members) for tid, members in groups.items()
+            if len(members) >= config.REFLECT_MIN_FACTS
+            and sum(m[1] for m in members) >= config.REFLECT_IMPORTANCE_THRESHOLD
+        ]
+
+        if not triggered:
+            # 无任一话题满阈值：正常下几条就越过；但若长期只积累低价值事实始终不触发，
+            # 水位线永不推进、fetch 无界增长。整批超过积压上限时强制推进水位线丢弃
+            # （avg importance 极低，本就该被遗忘），消除增长。
+            if total_kept > config.REFLECT_MAX_BACKLOG:
                 log.info(
-                    "Memory Reflection: bot_id=%s group_id=%s 积压 %d 条低价值事实(Σimportance=%.2f<%.1f)"
-                    " 超过上限 %d，强制推进水位线丢弃（不归纳）",
-                    bot_id, group_id, len(facts), sum(f[1] for f in facts),
-                    config.REFLECT_IMPORTANCE_THRESHOLD, config.REFLECT_MAX_BACKLOG,
+                    "Memory Reflection: bot_id=%s group_id=%s 积压 %d 条事实跨 %d 话题均未达阈值，"
+                    "超过上限 %d，强制推进水位线丢弃（不归纳）",
+                    bot_id, group_id, total_kept, len(groups), config.REFLECT_MAX_BACKLOG,
                 )
                 await _set_reflection_watermark(bot_id, group_id, max_ts)
             return
 
-        new_level = min(max_level + 1, config.REFLECT_MAX_LEVEL)
-
-        # 3. 一次 LLM 归纳（用群组配置的 provider/model）
+        # 3. 逐话题各跑一次 LLM 归纳（用群组配置的 provider/model）——话题间永不串味。
         from ai.client import call_ai_once
-        fact_lines = "\n".join(f"- {doc}" for doc, _, _ in facts)
-        res_llm = await call_ai_once(
-            REFLECTION_PROMPT + fact_lines,
-            [{"role": "user", "content": "请归纳洞察。"}],
-            provider, model, temperature=0.3, max_tokens=512,
-        )
-        text = ((res_llm.get("content") if isinstance(res_llm, dict) and res_llm.get("type") == "text" else "") or "").strip()
+        total_insights = 0
+        now = time.time()
+        for gidx, (tid, members) in enumerate(triggered):
+            new_level = min(max(m[4] for m in members) + 1, config.REFLECT_MAX_LEVEL)
+            fact_lines = "\n".join(f"- {m[0]}" for m in members)
+            res_llm = await call_ai_once(
+                REFLECTION_PROMPT + fact_lines,
+                [{"role": "user", "content": "请归纳洞察。"}],
+                provider, model, temperature=0.3, max_tokens=512,
+            )
+            text = ((res_llm.get("content") if isinstance(res_llm, dict) and res_llm.get("type") == "text" else "") or "").strip()
 
-        insights: list[tuple[str, float]] = []
-        if text and "NO_INSIGHT" not in text:
-            for line in text.split("\n"):
-                line = line.strip().lstrip("-").strip()
-                if not line or line.startswith("#"):
-                    continue
-                if "|" in line:
-                    txt, _, sc = line.rpartition("|")
-                    txt = txt.strip()
-                    try:
-                        score = max(0.0, min(1.0, float(sc.strip())))
-                    except ValueError:
+            insights: list[tuple[str, float]] = []
+            if text and "NO_INSIGHT" not in text:
+                for line in text.split("\n"):
+                    line = line.strip().lstrip("-").strip()
+                    if not line or line.startswith("#"):
+                        continue
+                    if "|" in line:
+                        txt, _, sc = line.rpartition("|")
+                        txt = txt.strip()
+                        try:
+                            score = max(0.0, min(1.0, float(sc.strip())))
+                        except ValueError:
+                            txt, score = line, 0.7
+                    else:
                         txt, score = line, 0.7
-                else:
-                    txt, score = line, 0.7
-                if txt:
-                    insights.append((txt[:500], score))
-            insights = insights[: config.REFLECT_MAX_INSIGHTS]
+                    if txt:
+                        insights.append((txt[:500], score))
+                insights = insights[: config.REFLECT_MAX_INSIGHTS]
 
-        # 4. 写回洞察（即使本轮无洞察，也照样推进水位线，避免反复空跑同一批事实）
-        if insights:
+            if not insights:
+                continue
+            total_insights += len(insights)
             del_ids = await ConflictResolver.resolve_batch(
                 [t for t, _ in insights], bot_id, group_id, provider, model
             )
-            # provenance 边：只记实际被归纳的记忆 id（多层时即指向下层反思，构成 A-MEM 链）
-            source_ids = ",".join(str(i) for i in consumed_ids)
-            now = time.time()
+            # provenance 边：只记本话题实际被归纳的记忆 id（多层时即指向下层反思，构成 A-MEM 链）
+            source_ids = ",".join(str(m[3]) for m in members)
             for idx, (insight, score) in enumerate(insights):
                 metadata = {
                     "bot_id": bot_id,
@@ -773,21 +786,24 @@ async def maybe_reflect(group_id: int, bot_id: int, role: str,
                     "mem_type": "reflection",
                     "level": new_level,         # 反思层级 (P3)，封顶后不再被归纳
                     "source_ids": source_ids,   # A-MEM 链接：本反思由哪些记忆提炼而来
+                    "thread_id": tid,           # 反思承袭来源话题，召回时按 topic 归位
                     "scored_by_model": f"{provider}/{model}",  # 打分模型来源，供将来换模型时按刻度归一化重标
                 }
                 if group_id is not None:
                     metadata["group_id"] = group_id
-                refl_id = f"refl_{bot_id}_{group_id}_{int(now * 1000)}_{idx}"
+                # gidx 入 id：同一 now 下多话题各写 idx=0 也不撞 id（否则后者覆盖前者）
+                refl_id = f"refl_{bot_id}_{group_id}_{int(now * 1000)}_{gidx}_{idx}"
                 await loop.run_in_executor(
                     None, partial(ChromaStore.write_fact_sync, refl_id, insight, metadata)
                 )
             if del_ids:
                 await loop.run_in_executor(None, partial(ChromaStore.delete_ids_sync, del_ids))
 
+        # 4. 推进水位线到整批最新 ts（消费整批，含被丢弃的未触发话题）
         await _set_reflection_watermark(bot_id, group_id, max_ts)
         log.info(
-            "Memory Reflection: bot_id=%s, group_id=%s, facts_consumed=%d, insights=%d",
-            bot_id, group_id, len(facts), len(insights),
+            "Memory Reflection: bot_id=%s, group_id=%s, threads_reflected=%d/%d, facts_consumed=%d, insights=%d",
+            bot_id, group_id, len(triggered), len(groups), total_kept, total_insights,
         )
     except Exception:
         log.exception("maybe_reflect failed (bot_id=%s, group_id=%s)", bot_id, group_id)

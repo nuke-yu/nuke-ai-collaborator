@@ -87,7 +87,7 @@ class ChromaMemoryProvider:
         ingest_role = ev.role or ""
         compact_role = ev.role or ev.bot_name
         results = await asyncio.gather(
-            add_to_chroma(ev.message_id, ev.text, ingest_role, ev.bot_id, ev.group_id, ev.provider, ev.model),
+            add_to_chroma(ev.message_id, ev.text, ingest_role, ev.bot_id, ev.group_id, ev.provider, ev.model, ev.thread_id),
             maybe_summarize(ev.group_id, ev.bot_id, compact_role, [ev.bot_id], ev.thread_id),
             maybe_reflect(ev.group_id, ev.bot_id, compact_role, ev.provider, ev.model),
             return_exceptions=True,

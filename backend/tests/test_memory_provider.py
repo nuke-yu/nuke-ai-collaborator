@@ -59,6 +59,8 @@ class TestChromaMemoryProvider(unittest.IsolatedAsyncioTestCase):
         )
         await ChromaMemoryProvider().observe(ev)
         self.assertEqual(mock_sum.await_args[0][4], "disc:9:abc")
+        # ingest 也要带 thread_id，事实落库才能被反思按话题分区
+        self.assertEqual(mock_add.await_args[0][7], "disc:9:abc")
 
     @patch("ai.memory.get_memory_context", new_callable=AsyncMock)
     async def test_recall_empty_role_passes_blank(self, mock_ctx):
@@ -72,7 +74,7 @@ class TestChromaMemoryProvider(unittest.IsolatedAsyncioTestCase):
     @patch("ai.memory.add_to_chroma", new_callable=AsyncMock)
     async def test_observe_fans_out_three_pipelines(self, mock_add, mock_sum, mock_refl):
         await ChromaMemoryProvider().observe(_event(role="dev", bot_name="Bot"))
-        mock_add.assert_awaited_once_with(42, "切到 React 19", "dev", 5, 9, "claude", "claude-opus-4-8")
+        mock_add.assert_awaited_once_with(42, "切到 React 19", "dev", 5, 9, "claude", "claude-opus-4-8", None)
         mock_sum.assert_awaited_once_with(9, 5, "dev", [5], None)
         mock_refl.assert_awaited_once_with(9, 5, "dev", "claude", "claude-opus-4-8")
 

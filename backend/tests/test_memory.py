@@ -649,6 +649,119 @@ class TestMemoryAuditFixes(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(meta["level"], 2)            # max(consumed level=1)+1
         self.assertIn("refl_5_9_1_0", meta["source_ids"])  # 链接指向下层反思
 
+    @patch("ai.client.call_ai_once", new_callable=AsyncMock)
+    @patch("ai.memory._get_collection")
+    async def test_add_to_chroma_stamps_thread_id(self, mock_get_col, mock_call_once):
+        """ingest 必须把当前讨论 topic（thread_id）打进事实 metadata，供反思按话题分区。"""
+        mock_col = MagicMock()
+        mock_get_col.return_value = mock_col
+        mock_call_once.return_value = {"type": "text", "content": "某条事实"}
+        mock_col.query.return_value = {}
+
+        await memory.add_to_chroma(
+            message_id=7, content="某条事实内容很长足够抽取", role="dev",
+            bot_id=5, group_id=9, provider="claude", model="x", thread_id="disc:topicA",
+        )
+        await asyncio.sleep(0.05)
+
+        mock_col.upsert.assert_called_once()
+        self.assertEqual(mock_col.upsert.call_args[1]["metadatas"][0]["thread_id"], "disc:topicA")
+
+    @patch("ai.client.call_ai_once", new_callable=AsyncMock)
+    @patch("ai.memory._get_collection")
+    async def test_add_to_chroma_free_chat_thread_id_empty(self, mock_get_col, mock_call_once):
+        """自由聊天（thread_id=None）落库为空串（Chroma metadata 不接受 None）。"""
+        mock_col = MagicMock()
+        mock_get_col.return_value = mock_col
+        mock_call_once.return_value = {"type": "text", "content": "某条事实"}
+        mock_col.query.return_value = {}
+
+        await memory.add_to_chroma(
+            message_id=8, content="某条事实内容很长足够抽取", role="dev",
+            bot_id=5, group_id=9, provider="claude", model="x",
+        )
+        await asyncio.sleep(0.05)
+
+        self.assertEqual(mock_col.upsert.call_args[1]["metadatas"][0]["thread_id"], "")
+
+    @patch("ai.memory._set_reflection_watermark", new_callable=AsyncMock)
+    @patch("ai.memory._get_reflection_watermark", new_callable=AsyncMock)
+    @patch("ai.client.call_ai_once", new_callable=AsyncMock)
+    @patch("ai.memory._get_collection")
+    async def test_maybe_reflect_partitions_by_thread_no_bridging(
+        self, mock_get_col, mock_call_once, mock_wm_get, mock_wm_set
+    ):
+        """核心修复：两个无关话题各自满阈值时，必须分别反思——绝不把两话题的事实
+        揉进同一次 LLM 归纳（杜绝"桥梁洞察"）；产出的反思按各自 thread_id 落库。"""
+        import time as _t
+        mock_col = MagicMock()
+        mock_get_col.return_value = mock_col
+        mock_wm_get.return_value = 0.0
+        t_now = _t.time()
+        # 话题 A：5 条芒果健康事实；话题 B：5 条选股事实。各自 Σimportance=3.5≥3、条数=5≥5
+        metas, ids, docs = [], [], []
+        for i in range(5):
+            metas.append({"mem_type": "fact", "importance": 0.7, "timestamp": t_now, "thread_id": "disc:mango"})
+            ids.append(f"a{i}_0"); docs.append(f"芒果有益健康事实{i}")
+        for i in range(5):
+            metas.append({"mem_type": "fact", "importance": 0.7, "timestamp": t_now, "thread_id": "disc:stock"})
+            ids.append(f"b{i}_0"); docs.append(f"选股策略事实{i}")
+        mock_col.get.return_value = {"ids": ids, "documents": docs, "metadatas": metas}
+        mock_col.query.return_value = {}
+        mock_call_once.return_value = {"type": "text", "content": "话题内洞察|0.9"}
+
+        await memory.maybe_reflect(group_id=9, bot_id=5, role="dev", provider="claude", model="x")
+        await asyncio.sleep(0.1)
+
+        # 每个话题各一次 LLM 归纳：两次调用，且每次的 prompt 只含单一话题的事实
+        self.assertEqual(mock_call_once.call_count, 2)
+        for call in mock_call_once.call_args_list:
+            prompt = call[0][0]
+            has_mango = "芒果" in prompt
+            has_stock = "选股" in prompt
+            self.assertTrue(has_mango != has_stock, "一次归纳不得同时包含两个话题的事实")
+
+        # 两条反思分别按 thread_id 落库
+        thread_ids = {c.kwargs["metadatas"][0]["thread_id"] for c in mock_col.upsert.call_args_list}
+        self.assertEqual(thread_ids, {"disc:mango", "disc:stock"})
+
+    @patch("ai.memory._set_reflection_watermark", new_callable=AsyncMock)
+    @patch("ai.memory._get_reflection_watermark", new_callable=AsyncMock)
+    @patch("ai.client.call_ai_once", new_callable=AsyncMock)
+    @patch("ai.memory._get_collection")
+    async def test_maybe_reflect_drops_subthreshold_thread_via_shared_watermark(
+        self, mock_get_col, mock_call_once, mock_wm_get, mock_wm_set
+    ):
+        """简单版（batch 级共享水位线）的既定权衡：满阈值话题触发归纳后，水位线推进到
+        整批最新 ts；同批里未满阈值的低频话题事实被丢弃（可能永不反思）。"""
+        import time as _t
+        mock_col = MagicMock()
+        mock_get_col.return_value = mock_col
+        mock_wm_get.return_value = 0.0
+        t_now = _t.time()
+        ids, docs, metas = [], [], []
+        for i in range(5):  # 话题 A 满阈值
+            metas.append({"mem_type": "fact", "importance": 0.7, "timestamp": t_now, "thread_id": "disc:a"})
+            ids.append(f"a{i}_0"); docs.append(f"A话题事实{i}")
+        # 话题 B 只有 1 条（最新 ts），不满阈值
+        t_late = t_now + 10
+        metas.append({"mem_type": "fact", "importance": 0.9, "timestamp": t_late, "thread_id": "disc:b"})
+        ids.append("b0_0"); docs.append("B话题孤立事实")
+        mock_col.get.return_value = {"ids": ids, "documents": docs, "metadatas": metas}
+        mock_col.query.return_value = {}
+        mock_call_once.return_value = {"type": "text", "content": "A话题洞察|0.9"}
+
+        await memory.maybe_reflect(group_id=9, bot_id=5, role="dev", provider="claude", model="x")
+        await asyncio.sleep(0.1)
+
+        # 只反思满阈值的话题 A（一次 LLM），B 不归纳
+        mock_call_once.assert_called_once()
+        self.assertIn("A话题", mock_call_once.call_args[0][0])
+        self.assertNotIn("B话题", mock_call_once.call_args[0][0])
+        # 水位线推进到整批最新 ts（含被丢弃的 B），消费整批
+        mock_wm_set.assert_awaited_once()
+        self.assertAlmostEqual(mock_wm_set.await_args[0][2], t_late, places=3)
+
     @patch("ai.memory._get_collection")
     async def test_get_memory_links_traverses_provenance(self, mock_get_col):
         """P3: get_memory_links 沿 source_ids 走一跳取回来源记忆。"""
