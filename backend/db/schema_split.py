@@ -155,14 +155,15 @@ _GROUP_DDL = [
         thread_id          TEXT    DEFAULT NULL,
         created_at         TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )""",
-    # Reflection watermark per (bot, group): timestamp of the newest fact already
+    # Reflection watermark per (bot, group, thread): timestamp of the newest fact already
     # consolidated, so consolidation only reflects over NEW facts (P1 巩固层).
     """CREATE TABLE IF NOT EXISTS reflection_state (
         bot_id             INTEGER NOT NULL,
         group_id           INTEGER NOT NULL,
+        thread_id          TEXT    NOT NULL DEFAULT '',
         covered_through_ts REAL    NOT NULL DEFAULT 0,
         updated_at         TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        PRIMARY KEY (bot_id, group_id)
+        PRIMARY KEY (bot_id, group_id, thread_id)
     )""",
     # within-group FK to messages: kept
     """CREATE TABLE IF NOT EXISTS message_embeddings (

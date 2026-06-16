@@ -244,11 +244,40 @@ class TestChromaMemoryEnhancements(unittest.IsolatedAsyncioTestCase):
         where_clause = mock_col.query.call_args[1]["where"]
         self.assertEqual(
             where_clause,
-            {"$and": [{"bot_id": {"$eq": 5}}, {"group_id": {"$eq": 9}}]}
+            {"$and": [{"bot_id": {"$eq": 5}}, {"group_id": {"$eq": 9}}, {"thread_id": {"$eq": ""}}]}
         )
         
         # Expected order: B, C, A. With top_k=2: [B, C]
         self.assertEqual(results, ["Doc B", "Doc C"])
+
+    @patch("ai.memory._get_collection")
+    async def test_retrieve_relevant_with_thread_id(self, mock_get_col):
+        mock_col = MagicMock()
+        mock_get_col.return_value = mock_col
+        mock_col.query.return_value = {
+            "documents": [["Doc A"]],
+            "metadatas": [[{"timestamp": 12345.6, "bot_id": 5, "group_id": 9, "thread_id": "thread_x"}]],
+            "distances": [[0.1]],
+            "ids": [["1"]]
+        }
+        await memory.retrieve_relevant(bot_id=5, group_id=9, query="test", top_k=1, thread_id="thread_x")
+        mock_col.query.assert_called_once()
+        where_clause = mock_col.query.call_args[1]["where"]
+        self.assertEqual(
+            where_clause,
+            {
+                "$and": [
+                    {"bot_id": {"$eq": 5}},
+                    {"group_id": {"$eq": 9}},
+                    {
+                        "$or": [
+                            {"thread_id": {"$eq": "thread_x"}},
+                            {"thread_id": {"$eq": ""}}
+                        ]
+                    }
+                ]
+            }
+        )
 
     @patch("ai.client.call_ai_once", new_callable=AsyncMock)
     @patch("ai.memory.retrieve_relevant")
@@ -276,7 +305,7 @@ class TestChromaMemoryEnhancements(unittest.IsolatedAsyncioTestCase):
         # #2: 模板化 trigger 在本地改写，热路径上不应再触发任何 LLM 调用
         mock_call_once.assert_not_called()
         # 改写为最近一条真人消息（真实话题），用它去检索
-        mock_retrieve.assert_called_once_with(5, 9, "I want to deploy to port 8080")
+        mock_retrieve.assert_called_once_with(5, 9, "I want to deploy to port 8080", thread_id=None)
 
     @patch("ai.memory._get_collection")
     async def test_delete_bot_memory(self, mock_get_col):
@@ -537,20 +566,20 @@ class TestMemoryAuditFixes(unittest.IsolatedAsyncioTestCase):
 
     # ── 巩固层 reflection (P1) ──────────────────────────────────────────
     @patch("ai.memory._set_reflection_watermark", new_callable=AsyncMock)
-    @patch("ai.memory._get_reflection_watermark", new_callable=AsyncMock)
+    @patch("ai.memory._get_all_reflection_watermarks", new_callable=AsyncMock)
     @patch("ai.client.call_ai_once", new_callable=AsyncMock)
     @patch("ai.memory._get_collection")
     async def test_maybe_reflect_generates_insight(self, mock_get_col, mock_call_once, mock_wm_get, mock_wm_set):
         import time as _t
         mock_col = MagicMock()
         mock_get_col.return_value = mock_col
-        mock_wm_get.return_value = 0.0
+        mock_wm_get.return_value = {}
         t_now = _t.time()
         # 5 条事实，importance 0.7 → 数量(5)≥阈值、Σ=3.5≥3.0 → 触发
         mock_col.get.return_value = {
             "ids": [f"{i}_0" for i in range(1, 6)],
             "documents": [f"部署第{i}次因配置失败" for i in range(1, 6)],
-            "metadatas": [{"mem_type": "fact", "importance": 0.7, "timestamp": t_now} for _ in range(5)],
+            "metadatas": [{"mem_type": "fact", "importance": 0.7, "timestamp": t_now, "thread_id": "test_thread"} for _ in range(5)],
         }
         mock_col.query.return_value = {}  # resolve_batch 无冲突候选
         mock_call_once.return_value = {"type": "text", "content": "项目反复因配置不一致部署失败，配置管理薄弱|0.9"}
@@ -569,22 +598,23 @@ class TestMemoryAuditFixes(unittest.IsolatedAsyncioTestCase):
         self.assertIn("1_0", meta["source_ids"])
         # 水位线推进到最新事实 ts
         mock_wm_set.assert_awaited_once()
-        self.assertAlmostEqual(mock_wm_set.await_args[0][2], t_now, places=3)
+        self.assertEqual(mock_wm_set.await_args[0][2], "test_thread")
+        self.assertAlmostEqual(mock_wm_set.await_args[0][3], t_now, places=3)
 
     @patch("ai.memory._set_reflection_watermark", new_callable=AsyncMock)
-    @patch("ai.memory._get_reflection_watermark", new_callable=AsyncMock)
+    @patch("ai.memory._get_all_reflection_watermarks", new_callable=AsyncMock)
     @patch("ai.client.call_ai_once", new_callable=AsyncMock)
     @patch("ai.memory._get_collection")
     async def test_maybe_reflect_below_threshold_no_llm(self, mock_get_col, mock_call_once, mock_wm_get, mock_wm_set):
         import time as _t
         mock_col = MagicMock()
         mock_get_col.return_value = mock_col
-        mock_wm_get.return_value = 0.0
+        mock_wm_get.return_value = {}
         # 只有 2 条事实 < REFLECT_MIN_FACTS(5) → 不触发
         mock_col.get.return_value = {
             "ids": ["1_0", "2_0"],
             "documents": ["事实一", "事实二"],
-            "metadatas": [{"mem_type": "fact", "importance": 0.9, "timestamp": _t.time()} for _ in range(2)],
+            "metadatas": [{"mem_type": "fact", "importance": 0.9, "timestamp": _t.time(), "thread_id": "test_thread"} for _ in range(2)],
         }
         await memory.maybe_reflect(group_id=9, bot_id=5, role="dev")
         await asyncio.sleep(0.05)
@@ -594,7 +624,7 @@ class TestMemoryAuditFixes(unittest.IsolatedAsyncioTestCase):
         mock_wm_set.assert_not_awaited()
 
     @patch("ai.memory._set_reflection_watermark", new_callable=AsyncMock)
-    @patch("ai.memory._get_reflection_watermark", new_callable=AsyncMock)
+    @patch("ai.memory._get_all_reflection_watermarks", new_callable=AsyncMock)
     @patch("ai.client.call_ai_once", new_callable=AsyncMock)
     @patch("ai.memory._get_collection")
     async def test_maybe_reflect_excludes_existing_reflections(self, mock_get_col, mock_call_once, mock_wm_get, mock_wm_set):
@@ -602,11 +632,11 @@ class TestMemoryAuditFixes(unittest.IsolatedAsyncioTestCase):
         import time as _t
         mock_col = MagicMock()
         mock_get_col.return_value = mock_col
-        mock_wm_get.return_value = 0.0
+        mock_wm_get.return_value = {}
         t_now = _t.time()
         # 4 条事实 + 1 条已有反思；排除反思后只剩 4 < 5 → 不触发
-        metas = [{"mem_type": "fact", "importance": 0.9, "timestamp": t_now} for _ in range(4)]
-        metas.append({"mem_type": "reflection", "importance": 0.9, "timestamp": t_now})
+        metas = [{"mem_type": "fact", "importance": 0.9, "timestamp": t_now, "thread_id": "test_thread"} for _ in range(4)]
+        metas.append({"mem_type": "reflection", "importance": 0.9, "timestamp": t_now, "thread_id": "test_thread"})
         mock_col.get.return_value = {
             "ids": [f"{i}_0" for i in range(4)] + ["refl_5_9_1_0"],
             "documents": [f"事实{i}" for i in range(4)] + ["既有洞察"],
@@ -619,7 +649,7 @@ class TestMemoryAuditFixes(unittest.IsolatedAsyncioTestCase):
 
     @patch("core.config.REFLECT_MULTILEVEL", True)
     @patch("ai.memory._set_reflection_watermark", new_callable=AsyncMock)
-    @patch("ai.memory._get_reflection_watermark", new_callable=AsyncMock)
+    @patch("ai.memory._get_all_reflection_watermarks", new_callable=AsyncMock)
     @patch("ai.client.call_ai_once", new_callable=AsyncMock)
     @patch("ai.memory._get_collection")
     async def test_maybe_reflect_multilevel_includes_reflections(self, mock_get_col, mock_call_once, mock_wm_get, mock_wm_set):
@@ -627,11 +657,11 @@ class TestMemoryAuditFixes(unittest.IsolatedAsyncioTestCase):
         import time as _t
         mock_col = MagicMock()
         mock_get_col.return_value = mock_col
-        mock_wm_get.return_value = 0.0
+        mock_wm_get.return_value = {}
         t_now = _t.time()
         # 4 条 level-0 事实 + 1 条 level-1 反思 = 5 条消费；多层下反思被纳入
-        metas = [{"mem_type": "fact", "importance": 0.7, "timestamp": t_now} for _ in range(4)]
-        metas.append({"mem_type": "reflection", "level": 1, "importance": 0.9, "timestamp": t_now})
+        metas = [{"mem_type": "fact", "importance": 0.7, "timestamp": t_now, "thread_id": "test_thread"} for _ in range(4)]
+        metas.append({"mem_type": "reflection", "level": 1, "importance": 0.9, "timestamp": t_now, "thread_id": "test_thread"})
         mock_col.get.return_value = {
             "ids": [f"{i}_0" for i in range(4)] + ["refl_5_9_1_0"],
             "documents": [f"事实{i}" for i in range(4)] + ["一层洞察"],
@@ -685,7 +715,7 @@ class TestMemoryAuditFixes(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(mock_col.upsert.call_args[1]["metadatas"][0]["thread_id"], "")
 
     @patch("ai.memory._set_reflection_watermark", new_callable=AsyncMock)
-    @patch("ai.memory._get_reflection_watermark", new_callable=AsyncMock)
+    @patch("ai.memory._get_all_reflection_watermarks", new_callable=AsyncMock)
     @patch("ai.client.call_ai_once", new_callable=AsyncMock)
     @patch("ai.memory._get_collection")
     async def test_maybe_reflect_partitions_by_thread_no_bridging(
@@ -696,7 +726,7 @@ class TestMemoryAuditFixes(unittest.IsolatedAsyncioTestCase):
         import time as _t
         mock_col = MagicMock()
         mock_get_col.return_value = mock_col
-        mock_wm_get.return_value = 0.0
+        mock_wm_get.return_value = {}
         t_now = _t.time()
         # 话题 A：5 条芒果健康事实；话题 B：5 条选股事实。各自 Σimportance=3.5≥3、条数=5≥5
         metas, ids, docs = [], [], []
@@ -726,18 +756,18 @@ class TestMemoryAuditFixes(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(thread_ids, {"disc:mango", "disc:stock"})
 
     @patch("ai.memory._set_reflection_watermark", new_callable=AsyncMock)
-    @patch("ai.memory._get_reflection_watermark", new_callable=AsyncMock)
+    @patch("ai.memory._get_all_reflection_watermarks", new_callable=AsyncMock)
     @patch("ai.client.call_ai_once", new_callable=AsyncMock)
     @patch("ai.memory._get_collection")
-    async def test_maybe_reflect_drops_subthreshold_thread_via_shared_watermark(
+    async def test_maybe_reflect_prevents_starvation_of_subthreshold_thread(
         self, mock_get_col, mock_call_once, mock_wm_get, mock_wm_set
     ):
-        """简单版（batch 级共享水位线）的既定权衡：满阈值话题触发归纳后，水位线推进到
-        整批最新 ts；同批里未满阈值的低频话题事实被丢弃（可能永不反思）。"""
+        """防止饥饿（独立推进水位线）：满阈值话题 A 触发归纳后，其水位线独立推进；
+        未满阈值的话题 B 水位线不推进，事实不被丢弃/永久饥饿。"""
         import time as _t
         mock_col = MagicMock()
         mock_get_col.return_value = mock_col
-        mock_wm_get.return_value = 0.0
+        mock_wm_get.return_value = {}
         t_now = _t.time()
         ids, docs, metas = [], [], []
         for i in range(5):  # 话题 A 满阈值
@@ -758,9 +788,10 @@ class TestMemoryAuditFixes(unittest.IsolatedAsyncioTestCase):
         mock_call_once.assert_called_once()
         self.assertIn("A话题", mock_call_once.call_args[0][0])
         self.assertNotIn("B话题", mock_call_once.call_args[0][0])
-        # 水位线推进到整批最新 ts（含被丢弃的 B），消费整批
+        # A 的水位线独立推进，B 的水位线不推进（mock_wm_set 仅被调用 1 次，且为 disc:a）
         mock_wm_set.assert_awaited_once()
-        self.assertAlmostEqual(mock_wm_set.await_args[0][2], t_late, places=3)
+        self.assertEqual(mock_wm_set.await_args[0][2], "disc:a")
+        self.assertAlmostEqual(mock_wm_set.await_args[0][3], t_now, places=3)
 
     @patch("ai.memory._get_collection")
     async def test_get_memory_links_traverses_provenance(self, mock_get_col):
@@ -805,13 +836,13 @@ class TestMemoryAuditFixes(unittest.IsolatedAsyncioTestCase):
             memory._table_presence_cache.clear()  # 让其在绑定下重新探测
             try:
                 with bind_db(gpath):
-                    await memory._set_reflection_watermark(5, 1, 123.5)
-                    got = await memory._get_reflection_watermark(5, 1)
+                    await memory._set_reflection_watermark(5, 1, "test_thread", 123.5)
+                    got = await memory._get_reflection_watermark(5, 1, "test_thread")
                 self.assertEqual(got, 123.5)  # 写入即可读回（同库）
                 # 且确实落在绑定的群库
                 async with _db.connect(gpath) as c:
                     async with c.execute(
-                        "SELECT covered_through_ts FROM reflection_state WHERE bot_id=5 AND group_id=1"
+                        "SELECT covered_through_ts FROM reflection_state WHERE bot_id=5 AND group_id=1 AND thread_id='test_thread'"
                     ) as cur:
                         row = await cur.fetchone()
                 self.assertIsNotNone(row)
@@ -835,7 +866,7 @@ class TestMemoryAuditFixes(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(results[0], "将服务端口改为8080")
 
     @patch("ai.memory._set_reflection_watermark", new_callable=AsyncMock)
-    @patch("ai.memory._get_reflection_watermark", new_callable=AsyncMock)
+    @patch("ai.memory._get_all_reflection_watermarks", new_callable=AsyncMock)
     @patch("ai.client.call_ai_once", new_callable=AsyncMock)
     @patch("ai.memory._get_collection")
     @patch("core.config.REFLECT_MAX_BACKLOG", 4)
@@ -846,20 +877,21 @@ class TestMemoryAuditFixes(unittest.IsolatedAsyncioTestCase):
         import time as _t
         mock_col = MagicMock()
         mock_get_col.return_value = mock_col
-        mock_wm_get.return_value = 0.0
+        mock_wm_get.return_value = {}
         t_now = _t.time()
         # 6 条 importance=0.1 的事实：数量≥MIN(5)、Σ=0.6<3.0、且 >MAX_BACKLOG(4)
         mock_col.get.return_value = {
             "ids": [f"{i}_0" for i in range(6)],
             "documents": [f"琐碎事实{i}" for i in range(6)],
-            "metadatas": [{"mem_type": "fact", "importance": 0.1, "timestamp": t_now} for _ in range(6)],
+            "metadatas": [{"mem_type": "fact", "importance": 0.1, "timestamp": t_now, "thread_id": "test_thread"} for _ in range(6)],
         }
         await memory.maybe_reflect(group_id=9, bot_id=5, role="dev")
         await asyncio.sleep(0.05)
 
         mock_call_once.assert_not_called()        # 未触发归纳
         mock_wm_set.assert_awaited_once()         # 但水位线被强制推进
-        self.assertAlmostEqual(mock_wm_set.await_args[0][2], t_now, places=3)
+        self.assertEqual(mock_wm_set.await_args[0][2], "test_thread")
+        self.assertAlmostEqual(mock_wm_set.await_args[0][3], t_now, places=3)
 
     @patch("ai.memory._get_collection")
     async def test_backfill_chunks_large_in_clause(self, mock_get_col):
@@ -938,7 +970,7 @@ class TestMemoryAuditFixes(unittest.IsolatedAsyncioTestCase):
         mock_call_once.assert_called_once()  # 未被长度门挡掉（旧阈值 15 会直接 return）
         self.assertEqual(facts, [("使用React19", 0.9)])
 
-    @patch("ai.memory._get_reflection_watermark", new_callable=AsyncMock)
+    @patch("ai.memory._get_all_reflection_watermarks", new_callable=AsyncMock)
     async def test_maybe_reflect_skips_when_already_in_flight(self, mock_wm_get):
         """同 (bot,group) 已有反思在跑时，重入应立即返回、不做任何工作（防跨轮并发重复反思）。"""
         memory._reflect_in_flight.add((5, 9))
@@ -949,11 +981,11 @@ class TestMemoryAuditFixes(unittest.IsolatedAsyncioTestCase):
             memory._reflect_in_flight.discard((5, 9))
 
     @patch("ai.memory._set_reflection_watermark", new_callable=AsyncMock)
-    @patch("ai.memory._get_reflection_watermark", new_callable=AsyncMock)
+    @patch("ai.memory._get_all_reflection_watermarks", new_callable=AsyncMock)
     @patch("ai.memory._get_collection")
     async def test_maybe_reflect_clears_in_flight_after_run(self, mock_get_col, mock_wm_get, mock_wm_set):
         """正常跑完后必须从 in-flight 集合移除，否则该 (bot,group) 再不会反思。"""
-        mock_wm_get.return_value = 0.0
+        mock_wm_get.return_value = {}
         mock_col = MagicMock()
         mock_get_col.return_value = mock_col
         mock_col.get.return_value = {"ids": [], "documents": [], "metadatas": []}

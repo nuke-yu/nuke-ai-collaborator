@@ -477,6 +477,46 @@ async def migration_022(db):
     await db.commit()
 
 
+async def migration_023(db):
+    """Upgrade reflection_state table to include thread_id in primary key.
+    Allows per-thread reflection watermarks to prevent starvation across threads.
+    """
+    # Check if thread_id column already exists to make this idempotent
+    cur = await db.execute("PRAGMA table_info(reflection_state)")
+    columns = [row[1] for row in await cur.fetchall()]
+    
+    if columns and "thread_id" not in columns:
+        # SQLite doesn't support changing primary keys, so we must recreate
+        # Rename old table
+        try:
+            await db.execute("ALTER TABLE reflection_state RENAME TO reflection_state_old")
+        except sqlite3.OperationalError:
+            # Table reflection_state might not exist in this domain DB, ignore
+            return
+
+        # Create new table with thread_id as primary key
+        await db.execute("""
+            CREATE TABLE reflection_state (
+                bot_id             INTEGER NOT NULL,
+                group_id           INTEGER NOT NULL,
+                thread_id          TEXT    NOT NULL DEFAULT '',
+                covered_through_ts REAL    NOT NULL DEFAULT 0,
+                updated_at         TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (bot_id, group_id, thread_id)
+            )
+        """)
+
+        # Migrate old watermarks to thread_id = ''
+        await db.execute("""
+            INSERT INTO reflection_state (bot_id, group_id, thread_id, covered_through_ts, updated_at)
+            SELECT bot_id, group_id, '', covered_through_ts, updated_at FROM reflection_state_old
+        """)
+
+        # Drop old table
+        await db.execute("DROP TABLE IF EXISTS reflection_state_old")
+        await db.commit()
+
+
 MIGRATIONS: list = [
     migration_001,
     migration_002,
@@ -500,6 +540,7 @@ MIGRATIONS: list = [
     migration_020,
     migration_021,
     migration_022,
+    migration_023,
 ]
 
 

@@ -473,13 +473,20 @@ async def add_to_chroma(message_id: int, content: str, role: str, bot_id: int, g
         loop.run_in_executor(None, ChromaStore.prune_expired_memories_sync)
 
 
-async def retrieve_relevant(bot_id: int, group_id: int | None, query: str, top_k: int = 3) -> list:
+async def retrieve_relevant(bot_id: int, group_id: int | None, query: str, top_k: int = 3, thread_id: str | None = None) -> list:
     loop = asyncio.get_running_loop()
     try:
-        if group_id is not None:
-            where = {"$and": [{"bot_id": {"$eq": bot_id}}, {"group_id": {"$eq": group_id}}]}
+        target_thread = thread_id or ""
+        if target_thread:
+            thread_filter = {"$or": [{"thread_id": {"$eq": target_thread}}, {"thread_id": {"$eq": ""}}]}
         else:
-            where = {"bot_id": {"$eq": bot_id}}
+            thread_filter = {"thread_id": {"$eq": ""}}
+
+        where_conds = [{"bot_id": {"$eq": bot_id}}]
+        if group_id is not None:
+            where_conds.append({"group_id": {"$eq": group_id}})
+        where_conds.append(thread_filter)
+        where = {"$and": where_conds}
             
         candidates_k = max(top_k * 3, 10)
         results = await loop.run_in_executor(
@@ -626,33 +633,50 @@ async def maybe_summarize(group_id: int, bot_id: int, role: str, member_ids: lis
         log.exception("maybe_summarize failed (bot_id=%s, group_id=%s)", bot_id, group_id)
 
 
-async def _get_reflection_watermark(bot_id: int, group_id: int | None) -> float:
-    """读取 (bot, group) 的反思水位线（已巩固到的最新事实 timestamp）；无记录返回 0。"""
+async def _get_reflection_watermark(bot_id: int, group_id: int | None, thread_id: str | None = None) -> float:
+    """读取 (bot, group, thread) 的反思水位线（已巩固到的最新事实 timestamp）；无记录返回 0。"""
+    tid = thread_id or ""
     try:
         async with await _memory_db("reflection_state", group_id, write=False) as db:
             async with db.execute(
-                "SELECT covered_through_ts FROM reflection_state WHERE bot_id=? AND group_id=?",
-                (bot_id, group_id)
+                "SELECT covered_through_ts FROM reflection_state WHERE bot_id=? AND group_id=? AND thread_id=?",
+                (bot_id, group_id, tid)
             ) as cur:
                 row = await cur.fetchone()
         return float(row[0]) if row and row[0] is not None else 0.0
     except Exception:
         # 表缺失（旧库未迁移）或读取失败：当作 0，让本次反思跑全量，不阻断
-        log.warning("reflection: watermark read failed (bot_id=%s, group_id=%s)", bot_id, group_id)
+        log.warning("reflection: watermark read failed (bot_id=%s, group_id=%s, thread_id=%s)", bot_id, group_id, tid)
         return 0.0
 
 
-async def _set_reflection_watermark(bot_id: int, group_id: int | None, ts: float) -> None:
-    """推进 (bot, group) 的反思水位线（upsert）。"""
+async def _set_reflection_watermark(bot_id: int, group_id: int | None, thread_id: str | None, ts: float) -> None:
+    """推进 (bot, group, thread) 的反思水位线（upsert）。"""
+    tid = thread_id or ""
     sql = (
-        "INSERT INTO reflection_state (bot_id, group_id, covered_through_ts, updated_at) "
-        "VALUES (?, ?, ?, CURRENT_TIMESTAMP) "
-        "ON CONFLICT(bot_id, group_id) DO UPDATE SET "
+        "INSERT INTO reflection_state (bot_id, group_id, thread_id, covered_through_ts, updated_at) "
+        "VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP) "
+        "ON CONFLICT(bot_id, group_id, thread_id) DO UPDATE SET "
         "covered_through_ts=excluded.covered_through_ts, updated_at=CURRENT_TIMESTAMP"
     )
     async with await _memory_db("reflection_state", group_id, write=True) as db:
-        await db.execute(sql, (bot_id, group_id, ts))
+        await db.execute(sql, (bot_id, group_id, tid, ts))
         await db.commit()
+
+
+async def _get_all_reflection_watermarks(bot_id: int, group_id: int | None) -> dict[str, float]:
+    """读取某 (bot, group) 下所有 topic/thread 的反思水位线。"""
+    try:
+        async with await _memory_db("reflection_state", group_id, write=False) as db:
+            async with db.execute(
+                "SELECT thread_id, covered_through_ts FROM reflection_state WHERE bot_id=? AND group_id=?",
+                (bot_id, group_id)
+            ) as cur:
+                rows = await cur.fetchall()
+        return {row[0]: float(row[1]) for row in rows if row[0] is not None}
+    except Exception:
+        log.warning("reflection: get_all_reflection_watermarks failed (bot_id=%s, group_id=%s)", bot_id, group_id)
+        return {}
 
 
 
@@ -679,11 +703,14 @@ async def maybe_reflect(group_id: int, bot_id: int, role: str,
     _reflect_in_flight.add(key)
     try:
         loop = asyncio.get_running_loop()
-        watermark = await _get_reflection_watermark(bot_id, group_id)
+        
+        # 1. 获取所有 thread_id 的水位线并求出最小水位线以提取增量记忆 (P1)
+        watermarks = await _get_all_reflection_watermarks(bot_id, group_id)
+        min_watermark = min(watermarks.values()) if watermarks else 0.0
 
-        # 1. 取水位线之后的增量记忆
+        # 取最小水位线之后的增量记忆
         res = await loop.run_in_executor(
-            None, partial(ChromaStore.get_memories_since_sync, bot_id, group_id, watermark)
+            None, partial(ChromaStore.get_memories_since_sync, bot_id, group_id, min_watermark)
         )
         ids = (res or {}).get("ids") or []
         docs = (res or {}).get("documents") or []
@@ -691,18 +718,22 @@ async def maybe_reflect(group_id: int, bot_id: int, role: str,
         if not ids:
             return
 
-        # 候选筛选：单层排除所有反思；多层纳入 level<MAX 的反思（顶层不再被归纳）。
-        # 按 thread_id（讨论 topic）分区——杜绝把无关话题的事实揉进同一次归纳产出"桥梁洞察"。
-        # 简单版：共享 batch 级水位线（reflection_state 仍按 (bot,group)）。触发归纳后水位线
-        # 推进到整批最新 ts，同批里未满阈值的低频话题事实被丢弃（可能永不反思）——这是既定
-        # 权衡。升级路径：把 reflection_state 主键扩为 (bot,group,thread)，让各话题独立累积、
-        # 独立推进，低频话题不再被高频话题"带走"。
+        # 候选筛选与按 thread_id 分区 (P0 & P1)
         from collections import defaultdict
         groups: dict[str, list] = defaultdict(list)  # thread_id → [(doc, importance, ts, id, level)]
         total_kept = 0
-        max_ts = watermark   # 整批最新 ts（含未触发的话题）——触发任一话题后水位线推进到此
         for i, item_id in enumerate(ids):
             meta = metas[i] if i < len(metas) else {}
+            tid = meta.get("thread_id") or ""
+            if not tid:  # P0: 丢弃 thread_id 为空 (自由聊天) 或缺失的记忆，不参与反思归纳
+                continue
+
+            ts = float(meta.get("timestamp", 0.0))
+            # P1: 过滤掉已经过该 thread 水位线的记忆
+            thread_watermark = watermarks.get(tid, 0.0)
+            if ts <= thread_watermark:
+                continue
+
             lvl = int(meta.get("level", 0))
             if meta.get("mem_type") == "reflection":
                 if not config.REFLECT_MULTILEVEL or lvl >= config.REFLECT_MAX_LEVEL:
@@ -710,44 +741,58 @@ async def maybe_reflect(group_id: int, bot_id: int, role: str,
             doc = docs[i] if i < len(docs) else ""
             if not doc:
                 continue
-            ts = float(meta.get("timestamp", 0.0))
-            tid = meta.get("thread_id") or ""
+
             groups[tid].append((doc, float(meta.get("importance", 0.5)), ts, item_id, lvl))
             total_kept += 1
-            max_ts = max(max_ts, ts)
 
-        # 2. 触发闸门按话题各自判定：条数 + 重要性累积都要够。
-        triggered = [
-            (tid, members) for tid, members in groups.items()
-            if len(members) >= config.REFLECT_MIN_FACTS
-            and sum(m[1] for m in members) >= config.REFLECT_IMPORTANCE_THRESHOLD
-        ]
-
-        if not triggered:
-            # 无任一话题满阈值：正常下几条就越过；但若长期只积累低价值事实始终不触发，
-            # 水位线永不推进、fetch 无界增长。整批超过积压上限时强制推进水位线丢弃
-            # （avg importance 极低，本就该被遗忘），消除增长。
-            if total_kept > config.REFLECT_MAX_BACKLOG:
-                log.info(
-                    "Memory Reflection: bot_id=%s group_id=%s 积压 %d 条事实跨 %d 话题均未达阈值，"
-                    "超过上限 %d，强制推进水位线丢弃（不归纳）",
-                    bot_id, group_id, total_kept, len(groups), config.REFLECT_MAX_BACKLOG,
-                )
-                await _set_reflection_watermark(bot_id, group_id, max_ts)
+        if not groups:
             return
 
-        # 3. 逐话题各跑一次 LLM 归纳（用群组配置的 provider/model）——话题间永不串味。
+        # 2. 闸门按话题各自判定：条数 + 重要性累积都要够。
+        # 同时，在此处执行 per-thread 积压清理以防饥饿。
+        triggered = []
+        for tid, members in groups.items():
+            # 排序成员 timestamp 从小到大以确保操作有序
+            members.sort(key=lambda m: m[2])
+            total_importance = sum(m[1] for m in members)
+            if len(members) >= config.REFLECT_MIN_FACTS and total_importance >= config.REFLECT_IMPORTANCE_THRESHOLD:
+                triggered.append((tid, members))
+            elif len(members) > config.REFLECT_MAX_BACKLOG:
+                # 积压过多，但没有达到触发条件（如全是低价值的闲聊），强制推进该 thread 的水位线丢弃，防止该 thread 永远不涨
+                max_thread_ts = max(m[2] for m in members)
+                log.info(
+                    "Memory Reflection: bot_id=%s group_id=%s thread_id=%s 积压 %d 条未达阈值，"
+                    "超过上限 %d，强制推进 thread 水位线丢弃（不归纳）",
+                    bot_id, group_id, tid, len(members), config.REFLECT_MAX_BACKLOG
+                )
+                await _set_reflection_watermark(bot_id, group_id, tid, max_thread_ts)
+
+        if not triggered:
+            return
+
+        # 3. 逐话题并发执行 LLM 归纳 (P3)
         from ai.client import call_ai_once
-        total_insights = 0
-        now = time.time()
-        for gidx, (tid, members) in enumerate(triggered):
-            new_level = min(max(m[4] for m in members) + 1, config.REFLECT_MAX_LEVEL)
+        tasks = []
+        for tid, members in triggered:
             fact_lines = "\n".join(f"- {m[0]}" for m in members)
-            res_llm = await call_ai_once(
-                REFLECTION_PROMPT + fact_lines,
-                [{"role": "user", "content": "请归纳洞察。"}],
-                provider, model, temperature=0.3, max_tokens=512,
+            tasks.append(
+                call_ai_once(
+                    REFLECTION_PROMPT + fact_lines,
+                    [{"role": "user", "content": "请归纳洞察。"}],
+                    provider, model, temperature=0.3, max_tokens=512,
+                )
             )
+
+        llm_responses = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # 4. 处理结果并写入 Chroma
+        total_insights = 0
+        for idx_triggered, (tid, members) in enumerate(triggered):
+            res_llm = llm_responses[idx_triggered]
+            if isinstance(res_llm, Exception):
+                log.error("maybe_reflect: LLM reflection call failed for thread_id=%s: %s", tid, res_llm)
+                continue
+
             text = ((res_llm.get("content") if isinstance(res_llm, dict) and res_llm.get("type") == "text" else "") or "").strip()
 
             insights: list[tuple[str, float]] = []
@@ -769,38 +814,50 @@ async def maybe_reflect(group_id: int, bot_id: int, role: str,
                         insights.append((txt[:500], score))
                 insights = insights[: config.REFLECT_MAX_INSIGHTS]
 
+            max_thread_ts = max(m[2] for m in members)
+
             if not insights:
+                # 即使 LLM 认为无洞察，也必须推进该 thread 水位线，避免下一轮重复尝试
+                await _set_reflection_watermark(bot_id, group_id, tid, max_thread_ts)
                 continue
+
             total_insights += len(insights)
             del_ids = await ConflictResolver.resolve_batch(
                 [t for t, _ in insights], bot_id, group_id, provider, model
             )
-            # provenance 边：只记本话题实际被归纳的记忆 id（多层时即指向下层反思，构成 A-MEM 链）
+
+            # provenance 边：只记本话题实际被归纳的记忆 id
             source_ids = ",".join(str(m[3]) for m in members)
+            new_level = min(max(m[4] for m in members) + 1, config.REFLECT_MAX_LEVEL)
+            
+            # 使用 last fact ts + offset 作为新反思的 timestamp 杜绝冲突并支撑多层反思 (P3)
             for idx, (insight, score) in enumerate(insights):
+                refl_ts = max_thread_ts + (idx + 1) * 0.001
                 metadata = {
                     "bot_id": bot_id,
                     "role": role or "",
-                    "timestamp": now,
+                    "timestamp": refl_ts,
                     "importance": score,
                     "mem_type": "reflection",
                     "level": new_level,         # 反思层级 (P3)，封顶后不再被归纳
                     "source_ids": source_ids,   # A-MEM 链接：本反思由哪些记忆提炼而来
                     "thread_id": tid,           # 反思承袭来源话题，召回时按 topic 归位
-                    "scored_by_model": f"{provider}/{model}",  # 打分模型来源，供将来换模型时按刻度归一化重标
+                    "scored_by_model": f"{provider}/{model}",
                 }
                 if group_id is not None:
                     metadata["group_id"] = group_id
-                # gidx 入 id：同一 now 下多话题各写 idx=0 也不撞 id（否则后者覆盖前者）
-                refl_id = f"refl_{bot_id}_{group_id}_{int(now * 1000)}_{gidx}_{idx}"
+                
+                refl_id = f"refl_{bot_id}_{group_id}_{int(refl_ts * 1000)}_{idx_triggered}_{idx}"
                 await loop.run_in_executor(
                     None, partial(ChromaStore.write_fact_sync, refl_id, insight, metadata)
                 )
+
             if del_ids:
                 await loop.run_in_executor(None, partial(ChromaStore.delete_ids_sync, del_ids))
 
-        # 4. 推进水位线到整批最新 ts（消费整批，含被丢弃的未触发话题）
-        await _set_reflection_watermark(bot_id, group_id, max_ts)
+            # 推进该 thread 水位线
+            await _set_reflection_watermark(bot_id, group_id, tid, max_thread_ts)
+
         log.info(
             "Memory Reflection: bot_id=%s, group_id=%s, threads_reflected=%d/%d, facts_consumed=%d, insights=%d",
             bot_id, group_id, len(triggered), len(groups), total_kept, total_insights,
@@ -880,7 +937,7 @@ async def get_memory_context(bot_id: int, role: str, query: str, group_id: int |
     search_query = QueryRewriter.rewrite(query, history)
 
     # 3. 语义检索（Chroma，Bot 个人知识库）
-    relevant = await retrieve_relevant(bot_id, group_id, search_query)
+    relevant = await retrieve_relevant(bot_id, group_id, search_query, thread_id=thread_id)
     if relevant:
         parts.append("【相关历史记录】\n" + "\n---\n".join(relevant))
 
