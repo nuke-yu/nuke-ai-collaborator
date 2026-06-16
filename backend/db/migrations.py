@@ -478,23 +478,54 @@ async def migration_022(db):
 
 
 async def migration_023(db):
-    """Upgrade reflection_state table to include thread_id in primary key.
-    Allows per-thread reflection watermarks to prevent starvation across threads.
-    """
-    # Check if thread_id column already exists to make this idempotent
-    cur = await db.execute("PRAGMA table_info(reflection_state)")
-    columns = [row[1] for row in await cur.fetchall()]
-    
-    if columns and "thread_id" not in columns:
-        # SQLite doesn't support changing primary keys, so we must recreate
-        # Rename old table
-        try:
-            await db.execute("ALTER TABLE reflection_state RENAME TO reflection_state_old")
-        except sqlite3.OperationalError:
-            # Table reflection_state might not exist in this domain DB, ignore
-            return
+    """Upgrade reflection_state's PRIMARY KEY to (bot_id, group_id, thread_id) for
+    per-thread reflection watermarks. SQLite can't ALTER a primary key, so the table
+    is rebuilt (RENAME → CREATE → COPY → DROP).
 
-        # Create new table with thread_id as primary key
+    The rebuild runs inside ONE explicit transaction so an interrupted run rolls back
+    atomically — under aiosqlite's legacy isolation each bare DDL would otherwise
+    auto-commit, leaving a half-migrated DB (e.g. orphan reflection_state_old, missing
+    reflection_state). The guards are also recovery-aware: if a prior (non-atomic) run
+    crashed mid-way and left reflection_state_old behind, it is used as the data source
+    rather than mistaken for "nothing to do".
+
+    Rollback:
+        recreate reflection_state with PRIMARY KEY (bot_id, group_id), drop thread_id.
+    """
+    async def _has(name: str) -> bool:
+        cur = await db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,))
+        return (await cur.fetchone()) is not None
+
+    async def _is_upgraded() -> bool:
+        cur = await db.execute("PRAGMA table_info(reflection_state)")
+        return "thread_id" in [row[1] for row in await cur.fetchall()]
+
+    has_new = await _has("reflection_state")
+    has_old = await _has("reflection_state_old")
+
+    if not has_new and not has_old:
+        return  # central/legacy DB without this table → nothing to migrate
+    if has_new and not has_old and await _is_upgraded():
+        return  # already upgraded and clean → idempotent no-op
+
+    # Close any stray transaction so the explicit BEGIN below can't fail with
+    # "cannot start a transaction within a transaction", then rebuild atomically.
+    await db.commit()
+    try:
+        await db.execute("BEGIN")
+        if has_new and await _is_upgraded():
+            # Crashed after CREATE, before DROP: new table is good, only a stale leftover remains.
+            await db.execute("DROP TABLE reflection_state_old")
+            await db.execute("COMMIT")
+            return
+        if has_new:
+            # reflection_state is the pre-upgrade table → set it aside as the data source,
+            # discarding any stale leftover first so the RENAME can't collide.
+            if has_old:
+                await db.execute("DROP TABLE reflection_state_old")
+            await db.execute("ALTER TABLE reflection_state RENAME TO reflection_state_old")
+        # else: only reflection_state_old exists (crash after RENAME) → it already holds the source.
+
         await db.execute("""
             CREATE TABLE reflection_state (
                 bot_id             INTEGER NOT NULL,
@@ -505,16 +536,15 @@ async def migration_023(db):
                 PRIMARY KEY (bot_id, group_id, thread_id)
             )
         """)
-
-        # Migrate old watermarks to thread_id = ''
         await db.execute("""
             INSERT INTO reflection_state (bot_id, group_id, thread_id, covered_through_ts, updated_at)
             SELECT bot_id, group_id, '', covered_through_ts, updated_at FROM reflection_state_old
         """)
-
-        # Drop old table
-        await db.execute("DROP TABLE IF EXISTS reflection_state_old")
-        await db.commit()
+        await db.execute("DROP TABLE reflection_state_old")
+        await db.execute("COMMIT")
+    except Exception:
+        await db.execute("ROLLBACK")
+        raise
 
 
 MIGRATIONS: list = [

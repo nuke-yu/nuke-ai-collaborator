@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import db as database
 from db.migrations import (
-    run_migrations, migration_001, migration_002, MIGRATIONS, _safe_add_column,
+    run_migrations, migration_001, migration_002, migration_023, MIGRATIONS, _safe_add_column,
 )
 from db.schema import init_db
 
@@ -495,6 +495,130 @@ class TestMigrationErrorPropagation(MigrationTestCase):
                 )
             finally:
                 _mig.MIGRATIONS[:] = orig
+
+
+async def _pk_columns(conn, table: str) -> set[str]:
+    cur = await conn.execute(f"PRAGMA table_info({table})")
+    return {row[1] for row in await cur.fetchall() if row[5] > 0}
+
+
+_RS_OLD = """
+    CREATE TABLE reflection_state (
+        bot_id             INTEGER NOT NULL,
+        group_id           INTEGER NOT NULL,
+        covered_through_ts REAL    NOT NULL DEFAULT 0,
+        updated_at         TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (bot_id, group_id)
+    )
+"""
+
+_RS_NEW = """
+    CREATE TABLE reflection_state (
+        bot_id             INTEGER NOT NULL,
+        group_id           INTEGER NOT NULL,
+        thread_id          TEXT    NOT NULL DEFAULT '',
+        covered_through_ts REAL    NOT NULL DEFAULT 0,
+        updated_at         TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (bot_id, group_id, thread_id)
+    )
+"""
+
+
+class _FailOn:
+    """Delegates to a real aiosqlite conn, but raises when a statement matches `needle`
+    —— 用于注入"重建中途失败"，验证整段 RENAME/CREATE/COPY/DROP 原子回滚。"""
+    def __init__(self, conn, needle):
+        self._c, self._n = conn, needle
+
+    def execute(self, sql, *a, **k):
+        if self._n in sql:
+            raise aiosqlite.OperationalError("injected failure")
+        return self._c.execute(sql, *a, **k)
+
+    def commit(self):
+        return self._c.commit()
+
+
+class TestMigration023(MigrationTestCase):
+    """#4: reflection_state 主键升级到 (bot,group,thread)——原子、幂等、可从崩溃半成品恢复。"""
+
+    async def test_rolls_back_on_failure_mid_rebuild(self):
+        """重建中途（DROP 旧表前）失败 → 整段事务回滚，原表与数据完好、无半成品残留。"""
+        async with self._connect() as conn:
+            await conn.executescript(_RS_OLD)
+            await conn.execute("INSERT INTO reflection_state (bot_id, group_id, covered_through_ts) VALUES (5, 9, 123.5)")
+            await conn.commit()
+
+            with self.assertRaises(aiosqlite.OperationalError):
+                await migration_023(_FailOn(conn, "DROP TABLE reflection_state_old"))
+
+            # 回滚后：仍是旧 schema、数据完好、无残留
+            self.assertEqual(await _pk_columns(conn, "reflection_state"), {"bot_id", "group_id"})
+            cur = await conn.execute("SELECT bot_id, group_id, covered_through_ts FROM reflection_state")
+            self.assertEqual(await cur.fetchall(), [(5, 9, 123.5)])
+            self.assertFalse(await _has_table(conn, "reflection_state_old"))
+
+            # 再次运行（无注入）应正常升级
+            await migration_023(conn)
+            self.assertEqual(await _pk_columns(conn, "reflection_state"), {"bot_id", "group_id", "thread_id"})
+
+    async def test_upgrades_old_schema_and_preserves_rows(self):
+        async with self._connect() as conn:
+            await conn.executescript(_RS_OLD)
+            await conn.execute("INSERT INTO reflection_state (bot_id, group_id, covered_through_ts) VALUES (5, 9, 123.5)")
+            await conn.commit()
+
+            await migration_023(conn)
+
+            self.assertEqual(await _pk_columns(conn, "reflection_state"), {"bot_id", "group_id", "thread_id"})
+            cur = await conn.execute("SELECT bot_id, group_id, thread_id, covered_through_ts FROM reflection_state")
+            self.assertEqual(await cur.fetchall(), [(5, 9, "", 123.5)])
+            self.assertFalse(await _has_table(conn, "reflection_state_old"))
+
+    async def test_idempotent_when_already_upgraded(self):
+        async with self._connect() as conn:
+            await conn.executescript(_RS_NEW)
+            await conn.execute("INSERT INTO reflection_state (bot_id, group_id, thread_id, covered_through_ts) VALUES (5, 9, 'disc:a', 7.0)")
+            await conn.commit()
+
+            await migration_023(conn)  # 不应报错、不应动数据
+            cur = await conn.execute("SELECT bot_id, group_id, thread_id, covered_through_ts FROM reflection_state")
+            self.assertEqual(await cur.fetchall(), [(5, 9, "disc:a", 7.0)])
+
+    async def test_absent_table_is_noop(self):
+        async with self._connect() as conn:
+            await migration_023(conn)  # 中央/遗留库无此表 → 安全跳过
+            self.assertFalse(await _has_table(conn, "reflection_state"))
+
+    async def test_recovers_from_orphan_old_table(self):
+        """模拟"RENAME 后、CREATE 前"崩溃：reflection_state 没了、reflection_state_old 残留。"""
+        async with self._connect() as conn:
+            await conn.executescript(_RS_OLD.replace("reflection_state", "reflection_state_old"))
+            await conn.execute("INSERT INTO reflection_state_old (bot_id, group_id, covered_through_ts) VALUES (1, 2, 9.0)")
+            await conn.commit()
+
+            await migration_023(conn)  # 应从 _old 重建 reflection_state
+
+            self.assertTrue(await _has_table(conn, "reflection_state"))
+            self.assertEqual(await _pk_columns(conn, "reflection_state"), {"bot_id", "group_id", "thread_id"})
+            cur = await conn.execute("SELECT bot_id, group_id, thread_id, covered_through_ts FROM reflection_state")
+            self.assertEqual(await cur.fetchall(), [(1, 2, "", 9.0)])
+            self.assertFalse(await _has_table(conn, "reflection_state_old"))
+
+    async def test_recovers_from_leftover_after_create(self):
+        """模拟"CREATE 后、DROP 前"崩溃：新表已建好，reflection_state_old 残留 → 只需清残留。"""
+        async with self._connect() as conn:
+            await conn.executescript(_RS_NEW)
+            await conn.execute("INSERT INTO reflection_state (bot_id, group_id, thread_id, covered_through_ts) VALUES (5, 9, '', 123.5)")
+            await conn.executescript(_RS_OLD.replace("reflection_state", "reflection_state_old"))
+            await conn.execute("INSERT INTO reflection_state_old (bot_id, group_id, covered_through_ts) VALUES (5, 9, 123.5)")
+            await conn.commit()
+
+            await migration_023(conn)
+
+            self.assertFalse(await _has_table(conn, "reflection_state_old"))
+            cur = await conn.execute("SELECT bot_id, group_id, thread_id, covered_through_ts FROM reflection_state")
+            self.assertEqual(await cur.fetchall(), [(5, 9, "", 123.5)])
 
 
 if __name__ == "__main__":
