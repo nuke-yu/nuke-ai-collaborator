@@ -180,11 +180,6 @@ export async function fetchGroupRecap(groupId) {
   return res.json()
 }
 
-export async function dismissGroupRecap(groupId) {
-  const res = await authFetch(`/api/groups/${groupId}/recap`, { method: 'DELETE' })
-  return res.json()
-}
-
 // 方案 1：按需 per-user recap —— 概括「我」未确认的新活动。
 export async function fetchPersonalRecap(groupId, memberId) {
   const res = await authFetch(`/api/groups/${groupId}/recap/personal/${memberId}`)

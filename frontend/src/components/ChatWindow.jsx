@@ -169,6 +169,7 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
 
   const handleDismissRecap = async () => {
     if (!activeGroupId) return
+    const prevSummary = personalSummary   // ack 失败时回滚用
     setPersonalSummary(null)
     dismissRecap()   // 本地立即隐藏（awaySummary=null + recapDismissed=true）
     try {
@@ -177,6 +178,8 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
       if (memberId) await ackPersonalRecap(activeGroupId, memberId, personalCoveredId.current[activeGroupId])
     } catch (err) {
       console.error('Failed to ack personal recap:', err)
+      // ack 没落库就别假装已读：恢复横幅，避免"看似已读、刷新又回来"的错觉。
+      setPersonalSummary(prevSummary)
     }
   }
 
