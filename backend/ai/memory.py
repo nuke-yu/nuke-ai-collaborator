@@ -163,13 +163,31 @@ class ChromaStore:
             log.exception("ChromaStore: failed to prune expired memories")
 
     @classmethod
-    def get_memories_since_sync(cls, bot_id: int, group_id: int | None, since_ts: float) -> dict:
-        """取某 bot 在某群、timestamp 晚于水位线的全部记忆（用 get 而非相似度 query）。
-        反思巩固用：拿增量事实做归纳，不需要语义相似度。"""
+    def get_unconsolidated_memories_sync(cls, bot_id: int, group_id: int | None,
+                                         watermarks: dict[str, float]) -> dict:
+        """取尚未巩固的记忆，按各 thread 自己的水位线精确取增量：
+          - 已知 thread（在 watermarks 里）→ 只取其 covered_through_ts 之后的事实；
+          - 未知 thread（无水位线）→ 取其全部事实；
+          - 自由聊天（thread_id=""）→ 整体排除（不参与反思）。
+
+        相比"取 min(所有水位线) 之后再 Python 丢弃"，这里避免被某个曾反思、之后沉寂的
+        thread 的低水位线钉住而每轮重抓已消费事实、抓取窗口无界膨胀（P1/#3）。"""
         col = cls.get_collection()
-        conds = [{"bot_id": {"$eq": bot_id}}, {"timestamp": {"$gt": since_ts}}]
+        conds = [{"bot_id": {"$eq": bot_id}}]
         if group_id is not None:
             conds.append({"group_id": {"$eq": group_id}})
+
+        known = list(watermarks.keys())
+        or_clauses = [
+            {"$and": [{"thread_id": {"$eq": tid}}, {"timestamp": {"$gt": wm}}]}
+            for tid, wm in watermarks.items()
+        ]
+        # 未见过的 thread 取全部其事实；自由聊天 "" 始终排除（已知里不会有 ""，故显式并入）。
+        or_clauses.append(
+            {"thread_id": {"$nin": known + [""]}} if known else {"thread_id": {"$ne": ""}}
+        )
+        conds.append(or_clauses[0] if len(or_clauses) == 1 else {"$or": or_clauses})
+
         where = conds[0] if len(conds) == 1 else {"$and": conds}
         return col.get(where=where, include=["documents", "metadatas"])
 
@@ -710,13 +728,11 @@ async def maybe_reflect(group_id: int, bot_id: int, role: str,
     try:
         loop = asyncio.get_running_loop()
         
-        # 1. 获取所有 thread_id 的水位线并求出最小水位线以提取增量记忆 (P1)
+        # 1. 取各 thread 自己水位线之后的未巩固增量记忆 (P1/#3)。
+        #    按 thread 精确取，避免被某个沉寂 thread 的低水位线钉住、每轮重抓已消费事实。
         watermarks = await _get_all_reflection_watermarks(bot_id, group_id)
-        min_watermark = min(watermarks.values()) if watermarks else 0.0
-
-        # 取最小水位线之后的增量记忆
         res = await loop.run_in_executor(
-            None, partial(ChromaStore.get_memories_since_sync, bot_id, group_id, min_watermark)
+            None, partial(ChromaStore.get_unconsolidated_memories_sync, bot_id, group_id, watermarks)
         )
         ids = (res or {}).get("ids") or []
         docs = (res or {}).get("documents") or []

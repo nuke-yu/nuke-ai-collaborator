@@ -560,6 +560,37 @@ class TestMemoryAuditFixes(unittest.IsolatedAsyncioTestCase):
         results = ranker.rank(docs, metas, dists, top_k=2, query="", thread_id=None)
         self.assertEqual(results[0], "高相似")  # 无 thread bonus，相似度更高者排前
 
+    @patch("ai.memory._get_collection")
+    def test_get_unconsolidated_memories_per_thread_precise_fetch(self, mock_get_col):
+        """#3: 反思抓取按各 thread 自己的水位线精确取增量——已知 thread 只取其水位线之后、
+        未知 thread 取全部、自由聊天('')整体排除。杜绝被某沉寂 thread 的低水位线钉住、
+        每轮重抓已消费事实致抓取窗口膨胀。"""
+        mock_col = MagicMock()
+        mock_get_col.return_value = mock_col
+        mock_col.get.return_value = {"ids": [], "documents": [], "metadatas": []}
+        memory.ChromaStore.get_unconsolidated_memories_sync(5, 9, {"disc:a": 100.0, "disc:b": 200.0})
+        where = mock_col.get.call_args[1]["where"]
+        conds = where["$and"]
+        self.assertIn({"bot_id": {"$eq": 5}}, conds)
+        self.assertIn({"group_id": {"$eq": 9}}, conds)
+        or_clause = next(c for c in conds if "$or" in c)["$or"]
+        # 每个已知 thread 只取其水位线之后
+        self.assertIn({"$and": [{"thread_id": {"$eq": "disc:a"}}, {"timestamp": {"$gt": 100.0}}]}, or_clause)
+        self.assertIn({"$and": [{"thread_id": {"$eq": "disc:b"}}, {"timestamp": {"$gt": 200.0}}]}, or_clause)
+        # 未知 thread 取全部，且自由聊天 "" 一并排除
+        nin = next(c for c in or_clause if "$nin" in c.get("thread_id", {}))
+        self.assertEqual(sorted(nin["thread_id"]["$nin"]), ["", "disc:a", "disc:b"])
+
+    @patch("ai.memory._get_collection")
+    def test_get_unconsolidated_memories_cold_start_excludes_free_chat(self, mock_get_col):
+        """无任何水位线（冷启动）：取全部非自由聊天事实。"""
+        mock_col = MagicMock()
+        mock_get_col.return_value = mock_col
+        mock_col.get.return_value = {"ids": [], "documents": [], "metadatas": []}
+        memory.ChromaStore.get_unconsolidated_memories_sync(5, 9, {})
+        conds = mock_col.get.call_args[1]["where"]["$and"]
+        self.assertIn({"thread_id": {"$ne": ""}}, conds)
+
     def test_keyword_boosting(self):
         """测试混合检索关键字精确匹配加分。"""
         from ai.memory import TimeDecayRanker
