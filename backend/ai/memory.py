@@ -59,15 +59,30 @@ def _get_collection():
     global _chroma_client, _chroma_collection
     if _chroma_collection is None:
         from ai import embeddings  # DFT-035: config-driven embedding backend
-        _chroma_client = chromadb.PersistentClient(path="./chroma_db")
-        sig = embeddings.embedding_signature()
-        col = _chroma_client.get_or_create_collection(
-            name="messages",
-            embedding_function=embeddings.get_embedding_function(),
-            metadata={"hnsw:space": "cosine", "emb_sig": sig},
-        )
-        embeddings.verify_signature((col.metadata or {}).get("emb_sig"), sig)
-        _chroma_collection = col
+        try:
+            _chroma_client = chromadb.PersistentClient(path="./chroma_db")
+            sig = embeddings.embedding_signature()
+            col = _chroma_client.get_or_create_collection(
+                name="messages",
+                embedding_function=embeddings.get_embedding_function(),
+                metadata={"hnsw:space": "cosine", "emb_sig": sig},
+            )
+            embeddings.verify_signature((col.metadata or {}).get("emb_sig"), sig)
+            _chroma_collection = col
+        except BaseException as e:
+            # chromadb 的 Rust 绑定打不开/读不了 DB 时抛 pyo3_runtime.PanicException——它是
+            # BaseException 子类，普通 except Exception 接不住，会一路冒泡把整轮 bot 干掉
+            # （memory.recall 在 setup_session 里，召回失败 = bot 不回话）。在这唯一入口把
+            # 这类「非 Exception 的库级崩溃」转成普通 RuntimeError，使下游所有 except Exception
+            # 的 fail-soft（召回返回 []、写入忽略）按设计降级。真正的控制流异常（中断/取消/退出）
+            # 仍原样抛出，不吞。
+            _chroma_client = None
+            _chroma_collection = None
+            if isinstance(e, (KeyboardInterrupt, SystemExit)) or type(e).__name__ == "CancelledError":
+                raise
+            raise RuntimeError(
+                f"chroma collection unavailable: {type(e).__module__}.{type(e).__name__}: {e}"
+            ) from e
     return _chroma_collection
 
 
