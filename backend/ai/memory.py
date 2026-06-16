@@ -647,7 +647,8 @@ async def maybe_summarize(group_id: int, bot_id: int, role: str, member_ids: lis
         async with await _memory_db("role_summaries", group_id, write=True) as db:
             await db.execute(
                 "INSERT INTO role_summaries (bot_id, group_id, role, summary, covered_through_id, thread_id) VALUES (?, ?, ?, ?, ?, ?)",
-                (bot_id, group_id, role, summary, batch[-1][0], thread_id)
+                # "无 topic"(自由聊天)统一落 ''，与事实/反思的空 thread 表示一致，且不与遗留 NULL 行混淆。
+                (bot_id, group_id, role, summary, batch[-1][0], thread_id or "")
             )
             await db.commit()
     except Exception as e:
@@ -931,25 +932,19 @@ async def get_memory_context(bot_id: int, role: str, query: str, group_id: int |
 
     # 1. 历史摘要（SQLite，按 Bot 个人）—— 按当前讨论 topic（thread_id）作用域召回。
     #    摘要是无差别按时间堆积的；若不按 topic 过滤，群里上一场（如选股）讨论的摘要会
-    #    串进一个全新话题（如"吃芒果坏肚子"）的上下文，把 bot 带偏。故：
-    #      - thread_id=None（自由聊天，无人给 topic）→ 只取无 thread_id (IS NULL) 的自由聊天最近摘要，防止失忆；
-    #      - thread_id 有值（讨论中）→ 只取该 topic 自己的最近摘要，绝不串入其它议题。
+    #    串进一个全新话题（如"吃芒果坏肚子"）的上下文，把 bot 带偏。故按 thread_id 精确匹配：
+    #      - 讨论中 → 取该 topic 自己的最近摘要；
+    #      - 自由聊天（thread_id=None）→ 统一作 ''，只取自由聊天自己的摘要。
+    #    "无 topic" 统一用 ''（与事实/反思一致）；遗留未作用域行是 NULL，永不匹配 '' → 不串入。
+    target_thread = thread_id or ""
     try:
         async with await _memory_db("role_summaries", group_id, write=False) as db:
-            if thread_id is not None:
-                if group_id is not None:
-                    sql = "SELECT summary FROM role_summaries WHERE bot_id=? AND group_id=? AND thread_id=? ORDER BY id DESC LIMIT 3"
-                    params = (bot_id, group_id, thread_id)
-                else:
-                    sql = "SELECT summary FROM role_summaries WHERE bot_id=? AND thread_id=? ORDER BY id DESC LIMIT 3"
-                    params = (bot_id, thread_id)
+            if group_id is not None:
+                sql = "SELECT summary FROM role_summaries WHERE bot_id=? AND group_id=? AND thread_id=? ORDER BY id DESC LIMIT 3"
+                params = (bot_id, group_id, target_thread)
             else:
-                if group_id is not None:
-                    sql = "SELECT summary FROM role_summaries WHERE bot_id=? AND group_id=? AND thread_id IS NULL ORDER BY id DESC LIMIT 3"
-                    params = (bot_id, group_id)
-                else:
-                    sql = "SELECT summary FROM role_summaries WHERE bot_id=? AND thread_id IS NULL ORDER BY id DESC LIMIT 3"
-                    params = (bot_id,)
+                sql = "SELECT summary FROM role_summaries WHERE bot_id=? AND thread_id=? ORDER BY id DESC LIMIT 3"
+                params = (bot_id, target_thread)
             async with db.execute(sql, params) as cur:
                 summaries = await cur.fetchall()
         if summaries:

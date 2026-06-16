@@ -1076,8 +1076,9 @@ class TestMemoryTopicScoping(unittest.IsolatedAsyncioTestCase):
                 pass
 
     @patch("ai.memory.retrieve_relevant", new_callable=AsyncMock)
-    async def test_free_chat_only_injects_null_thread_summaries(self, mock_retrieve):
-        """无活跃讨论 topic 时（thread_id=None），不注入带讨论ID的摘要，但注入自由聊天（NULL thread_id）的摘要。"""
+    async def test_free_chat_injects_empty_thread_summaries_excludes_legacy_null(self, mock_retrieve):
+        """自由聊天（thread_id=None）注入 thread_id='' 的自由聊天摘要；不注入讨论摘要，
+        也不注入遗留未作用域（NULL）摘要——"无 topic" 统一用 ''，杜绝旧话题摘要串入自由聊天。"""
         mock_retrieve.return_value = []
         async with database.get_db() as db:
             await db.execute(
@@ -1086,7 +1087,11 @@ class TestMemoryTopicScoping(unittest.IsolatedAsyncioTestCase):
             )
             await db.execute(
                 "INSERT INTO role_summaries (bot_id, group_id, role, summary, covered_through_id, thread_id) "
-                "VALUES (2, 1, 'Summarizer', 'FREE_CHAT_SUMMARY', 11, NULL)"
+                "VALUES (2, 1, 'Summarizer', 'FREE_CHAT_SUMMARY', 11, '')"
+            )
+            await db.execute(
+                "INSERT INTO role_summaries (bot_id, group_id, role, summary, covered_through_id, thread_id) "
+                "VALUES (2, 1, 'Summarizer', 'LEGACY_SUMMARY', 12, NULL)"
             )
             await db.commit()
 
@@ -1096,6 +1101,7 @@ class TestMemoryTopicScoping(unittest.IsolatedAsyncioTestCase):
         self.assertIn("我的历史经验摘要", result)
         self.assertIn("FREE_CHAT_SUMMARY", result)
         self.assertNotIn("STOCK_SUMMARY", result)
+        self.assertNotIn("LEGACY_SUMMARY", result)  # 遗留 NULL 不再串入自由聊天
 
     @patch("ai.memory.retrieve_relevant", new_callable=AsyncMock)
     async def test_summary_injection_scoped_to_active_thread(self, mock_retrieve):
@@ -1140,6 +1146,29 @@ class TestMemoryTopicScoping(unittest.IsolatedAsyncioTestCase):
                 rows = await cur.fetchall()
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["thread_id"], "disc:mango")
+
+    @patch("ai.client.call_ai", new=mock_call_ai)
+    async def test_maybe_summarize_free_chat_stamps_empty_thread(self):
+        """自由聊天（thread_id=None）产出的摘要落库为 ''（与事实/反思的空 thread 表示统一，
+        不与遗留 NULL 行混淆）。"""
+        async with database.get_db() as db:
+            for i in range(1, 17):
+                await db.execute(
+                    "INSERT INTO messages (id, group_id, member_id, content) VALUES (?, 1, 2, ?)",
+                    (i, f"Message content {i}")
+                )
+            await db.commit()
+
+        await memory.maybe_summarize(
+            group_id=1, bot_id=2, role="Summarizer", member_ids=[2], thread_id=None
+        )
+
+        async with database.get_db() as db:
+            db.row_factory = database.aiosqlite.Row
+            async with db.execute("SELECT thread_id FROM role_summaries WHERE bot_id = 2") as cur:
+                rows = await cur.fetchall()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["thread_id"], "")
 
 
 if __name__ == "__main__":
