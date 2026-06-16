@@ -114,12 +114,21 @@ class TestGroupIdThreading(unittest.TestCase):
         # 绝不在私有区凭空造出 bot_0 目录
         self.assertFalse((layout.group_dir(3) / "bots" / "bot_0").exists())
 
-    def test_make_dir_accepts_group_id_nested_private(self):
+    def test_make_dir_bare_path_defaults_to_shared(self):
+        # 共享优先：无前缀目录默认落群组 shared，不再静默进私有
         import workspace
         from workspace import layout
         r = workspace.make_dir(7, "newdir", group_id=3)
         self.assertIn("已创建", r)
-        self.assertTrue((layout.bot_dir(3, 7) / "newdir").is_dir())
+        self.assertTrue((layout.group_shared_dir(3) / "newdir").is_dir())
+
+    def test_make_dir_private_namespace_stays_private(self):
+        # 私有命名空间前缀仍落 bot 私有区
+        import workspace
+        from workspace import layout
+        r = workspace.make_dir(7, "skills/learned/draft", group_id=3)
+        self.assertIn("已创建", r)
+        self.assertTrue((layout.bot_dir(3, 7) / "skills" / "learned" / "draft").is_dir())
 
 
 if __name__ == "__main__":

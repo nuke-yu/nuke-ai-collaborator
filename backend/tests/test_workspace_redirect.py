@@ -1,11 +1,10 @@
 """
-工作区共享重定向（_get_effective_ws）。
+工作区路由（_get_effective_ws）—— 共享优先。
 
-Phase 2 改造后：
 - group_id 由调用方显式传入，路径解析不再查 DB（删除 SELECT group_id FROM members）。
-- 共享文件名 + 共享前缀（workspace/ docs/ prs/）→ 群组 shared 区。
-- 私有路径 → 嵌套 group_{gid}/bots/bot_{id}。
-- deliverables/ 不再特殊（落私有区）。
+- 默认共享：有 group_id 且路径不在私有命名空间 → 群组 shared 区（含无前缀的项目/文档路径）。
+- 私有命名空间（skills/ logs/ 前缀，或 bot 身份/记忆文件）→ 嵌套 group_{gid}/bots/bot_{id}。
+- group_id=None（无群组上下文）→ 一律落 bot 私有（扁平）。
 """
 import unittest
 import tempfile
@@ -33,14 +32,26 @@ class TestWorkspaceRedirect(unittest.TestCase):
                 r, _ = _get_effective_ws(7, shared, group_id=3)
                 self.assertEqual(r.resolve(), layout.group_shared_dir(3).resolve())
 
-    def test_private_path_stays_private_nested(self):
-        r, _ = _get_effective_ws(7, "notes.md", group_id=3)
-        self.assertEqual(r.resolve(), layout.bot_dir(3, 7).resolve())
+    def test_bare_path_defaults_to_shared(self):
+        # 默认共享：无前缀的项目/文档路径不再静默落私有，落群组 shared
+        for p in ["notes.md", "pacman/index.html", "deliverables/app.py", "src/main.py"]:
+            with self.subTest(path=p):
+                r, _ = _get_effective_ws(7, p, group_id=3)
+                self.assertEqual(r.resolve(), layout.group_shared_dir(3).resolve())
 
-    def test_deliverables_no_longer_special(self):
-        # deliverables/ 不再重定向到共享区，落私有
-        r, _ = _get_effective_ws(7, "deliverables/app.py", group_id=3)
-        self.assertEqual(r.resolve(), layout.bot_dir(3, 7).resolve())
+    def test_private_namespace_stays_private(self):
+        # bot 身份/记忆/私有技能/日志 必须留私有区（群组隔离不变量 + startup 读自身文件）
+        cases = ["IDENTITY.md", "SOUL.md", "BOOTSTRAP.md", "AGENT.md", "MEMORY.md",
+                 "skills/learned/draft/x.md", "logs/2026-06-16.md"]
+        for p in cases:
+            with self.subTest(path=p):
+                r, _ = _get_effective_ws(7, p, group_id=3)
+                self.assertEqual(r.resolve(), layout.bot_dir(3, 7).resolve())
+
+    def test_no_group_context_stays_private(self):
+        # 无群组上下文 → 私有（扁平），不查 DB
+        r, _ = _get_effective_ws(7, "pacman/index.html", group_id=None)
+        self.assertEqual(r.resolve(), layout.bot_dir(None, 7).resolve())
 
     def test_no_db_query_when_group_id_given(self):
         # group_id 显式给出 → 绝不查 DB（connect_sync 被调用即失败）

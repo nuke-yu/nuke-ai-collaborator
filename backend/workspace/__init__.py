@@ -79,10 +79,13 @@ def _safe_path(workspace: Path, relative: str) -> Path | None:
     return None
 
 
-_SHARED_FILES = {"BOARD.md", "SPEC.md", "API_CONTRACT.md", "RETRO_LATEST.md"}
-# 共享前缀：落群组 shared 区。代码进 workspace/<repo>/，跨 repo 文档进 docs/，PR 记录进 prs/。
-# 注意不含 skills/——私有技能在 bots/bot_{id}/skills/，群组技能由 group 层单独管理。
-_SHARED_PREFIXES = ("workspace/", "docs/", "prs/")
+# 路由默认「共享优先」：有群组上下文时，写入默认落群组 shared 区——代码/文档/PR 等协作物
+# 不再依赖 bot 记得加 workspace/ 前缀（少加前缀只会落到共享区里，不会再静默退回私有）。
+# 仅以下「私有命名空间」留在 bot 私有区：bot 身份/记忆文件 + 私有技能 + 日志。
+# 它们既是写入落点也是读取落点（startup 读 AGENT.md/MEMORY.md 等），必须按 bot 隔离
+# （见 CLAUDE.md 群组隔离）；把它们漏出共享会同时破坏隔离与「读不到自己的身份文件」。
+_PRIVATE_PREFIXES = ("skills/", "logs/")
+_PRIVATE_FILES = {"IDENTITY.md", "SOUL.md", "BOOTSTRAP.md", "AGENT.md", "MEMORY.md"}
 
 def _normalize_vfs_path(path_str: str, bot_id: int, group_id: int | None) -> str:
     """Strip absolute filesystem prefixes that bots sometimes leak into VFS calls.
@@ -116,17 +119,18 @@ def _normalize_vfs_path(path_str: str, bot_id: int, group_id: int | None) -> str
 
 
 def _get_effective_ws(bot_id: int, path_str: str, group_id: int | None = None) -> tuple[Path, str]:
-    """群组文件重定向（全程不查 DB —— group_id 由调用方在边界显式解析后传入）。
+    """群组文件路由（全程不查 DB —— group_id 由调用方在边界显式解析后传入）。
 
-    - 共享文件名 / 共享前缀（workspace/ docs/ prs/）+ 已知 group → 群组 shared 区。
-    - 其余 → bot 私有区，嵌套 group_{gid}/bots/bot_{id}。
+    - 默认共享：已知 group 且路径不在私有命名空间 → 群组 shared 区。
+    - 私有命名空间（skills/ logs/ 前缀，或 bot 身份/记忆文件）→ bot 私有区，
+      嵌套 group_{gid}/bots/bot_{id}。
     - group_id 为 None（无群组上下文）→ 一律落 bot 私有（扁平），不再反查 DB。
 
     Returns (workspace_root, normalized_path_str).
     """
     path_str = _normalize_vfs_path(path_str, bot_id, group_id)
-    is_shared = path_str in _SHARED_FILES or path_str.startswith(_SHARED_PREFIXES)
-    if is_shared and group_id is not None:
+    is_private = path_str in _PRIVATE_FILES or path_str.startswith(_PRIVATE_PREFIXES)
+    if group_id is not None and not is_private:
         return group_workspace(group_id), path_str
     return bot_workspace(bot_id, group_id), path_str
 
@@ -277,8 +281,8 @@ async def _commit_text(ws: Path, p: Path, rel: str, path: str, new_text: str, bo
 
 
 async def write_file(bot_id: int, path: str, content: str, group_id: int | None = None) -> str:
-    # group_id 显式贯穿：交给 _get_effective_ws 统一路由（共享文件名/前缀 → 群组 shared，
-    # 其余 → bot 私有）。bot_id=0 的系统写（BOARD.md / prs/）天然走共享分支，不会落私有。
+    # group_id 显式贯穿：交给 _get_effective_ws 统一路由（默认群组 shared，仅私有命名空间
+    # skills//logs//身份记忆文件落 bot 私有）。bot_id=0 的系统写（BOARD.md / prs/）走共享分支。
     ws, path = _get_effective_ws(bot_id, path, group_id)
     p = _safe_path(ws, path)
     if p is None:

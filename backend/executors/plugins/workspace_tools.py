@@ -79,7 +79,7 @@ class RunSkillParams(BaseModel):
 
 class RunShellParams(BaseModel):
     cmd: str = Field(..., description="要执行的 shell 命令")
-    cwd: Optional[str] = Field(None, description="工作目录（绝对路径），默认为用户 home 目录")
+    cwd: Optional[str] = Field(None, description="工作目录：默认=群组共享工作区根（相对路径如 workspace/<repo> 落共享区）；私有区用 skills/ 或 logs/ 前缀；也可传绝对路径（须在本群组工作区内）")
     timeout: int = Field(30, description="超时秒数，默认 30")
     background: bool = Field(False, description="后台运行，立即返回 PID")
 
@@ -632,27 +632,29 @@ def _sandbox_env() -> dict:
 def _resolve_shell_cwd(cwd: str, bot_id, group_id: int | None = None) -> tuple[Path | None, str]:
     """Confine the shell working directory to the bot's workspace.
 
-    放行两个根：bot 私有区 group_{gid}/bots/bot_{id}，以及本群组共享区
-    group_{gid}/shared（Dev/QA 在 shared/workspace/<repo> 共享工作树上 build/跑测/git）。
+    放行两个根：本群组共享区 group_{gid}/shared（Dev/QA 在 shared/workspace/<repo> 共享工作树上
+    build/跑测/git），以及 bot 私有区 group_{gid}/bots/bot_{id}。
 
-    相对 cwd 的落点与 VFS 重定向一致：以共享前缀（workspace/ docs/ prs/）开头 → 共享区，
-    否则 → 私有区。空 cwd 默认私有根。任何越出这两个根的目标（绝对路径越界 / '..' 穿越）拒绝。
+    落点与 VFS 路由一致「共享优先」：空 cwd / 普通相对 cwd → 共享区根（这样 `mkdir -p workspace/pacman`
+    不带 cwd 也落 shared/workspace/pacman，不再静默进私有）。私有命名空间前缀（skills/ logs/）→ 私有区。
+    无群组上下文（group_id=None）→ 回落私有根。任何越出这两个根的目标（绝对路径越界 / '..' 穿越）拒绝。
     """
     if bot_id is None:
         return None, "缺少 bot_id，无法确定工作区"
     private_root = _ws.bot_workspace(bot_id, group_id).resolve()
     shared_root = _ws.group_workspace(group_id).resolve() if group_id is not None else None
+    default_root = shared_root if shared_root is not None else private_root
 
     candidate = (cwd or "").strip()
     if not candidate:
-        return private_root, ""
+        return default_root, ""
 
     p = Path(candidate)
     if p.is_absolute():
         target = p
     else:
         first = candidate.replace("\\", "/").split("/", 1)[0] + "/"
-        base = shared_root if (shared_root is not None and first in _ws._SHARED_PREFIXES) else private_root
+        base = private_root if first in _ws._PRIVATE_PREFIXES else default_root
         target = base / p
 
     try:
