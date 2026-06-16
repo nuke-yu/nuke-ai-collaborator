@@ -327,14 +327,19 @@ async def get_personal_recap(group_id: int, member_id: int):
 
 
 @router.post("/api/groups/{group_id}/recap/ack/{member_id}")
-async def ack_personal_recap_endpoint(group_id: int, member_id: int):
+async def ack_personal_recap_endpoint(group_id: int, member_id: int, payload: dict | None = None, covered_through_id: int | None = None):
     # 点 ✕：记录该成员已看过当前 away recap（每用户水位线），这批不再对他显示；
     # 仅清自己的，不影响其他成员。需读写群库 → 绑定该群私有 DB。
     from core.recap import ack_personal_recap
     from runtime.dbpaths import group_db_path
     from db import bind_db
+    
+    cid = covered_through_id
+    if cid is None and payload:
+        cid = payload.get("covered_through_id")
+        
     with bind_db(group_db_path(group_id)):
-        acked = await ack_personal_recap(group_id, member_id)
+        acked = await ack_personal_recap(group_id, member_id, cid)
     return {"ok": True, "acked_through": acked}
 
 

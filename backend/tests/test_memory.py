@@ -1017,20 +1017,25 @@ class TestMemoryTopicScoping(unittest.IsolatedAsyncioTestCase):
                 pass
 
     @patch("ai.memory.retrieve_relevant", new_callable=AsyncMock)
-    async def test_free_chat_without_thread_skips_summary_injection(self, mock_retrieve):
-        """无活跃讨论 topic 时（thread_id=None），即便库里有摘要也不注入历史经验摘要。"""
+    async def test_free_chat_only_injects_null_thread_summaries(self, mock_retrieve):
+        """无活跃讨论 topic 时（thread_id=None），不注入带讨论ID的摘要，但注入自由聊天（NULL thread_id）的摘要。"""
         mock_retrieve.return_value = []
         async with database.get_db() as db:
             await db.execute(
                 "INSERT INTO role_summaries (bot_id, group_id, role, summary, covered_through_id, thread_id) "
                 "VALUES (2, 1, 'Summarizer', 'STOCK_SUMMARY', 10, 'disc:stock')"
             )
+            await db.execute(
+                "INSERT INTO role_summaries (bot_id, group_id, role, summary, covered_through_id, thread_id) "
+                "VALUES (2, 1, 'Summarizer', 'FREE_CHAT_SUMMARY', 11, NULL)"
+            )
             await db.commit()
 
         result = await memory.get_memory_context(
-            bot_id=2, role="Summarizer", query="吃芒果坏肚子", group_id=1, thread_id=None
+            bot_id=2, role="Summarizer", query="任意自由聊天查询", group_id=1, thread_id=None
         )
-        self.assertNotIn("我的历史经验摘要", result)
+        self.assertIn("我的历史经验摘要", result)
+        self.assertIn("FREE_CHAT_SUMMARY", result)
         self.assertNotIn("STOCK_SUMMARY", result)
 
     @patch("ai.memory.retrieve_relevant", new_callable=AsyncMock)

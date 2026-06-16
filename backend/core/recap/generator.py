@@ -171,7 +171,7 @@ async def clear_recap(group_id: int) -> None:
 async def generate_personal_recap(group_id: int, member_id: int) -> dict:
     """方案 1：按需、不缓存的 per-user recap。概括该成员 last_read_id 之后「错过」的消息。
 
-    返回 {"unread_count": int, "summary": str | None}。无未读 → summary=None、不调用 LLM。
+    返回 {"unread_count": int, "summary": str | None, "covered_through_id": int}。无未读 → summary=None、不调用 LLM。
     成员/消息分属 central/group 库，分别用 global_db()/get_db() 读。
     """
     try:
@@ -190,35 +190,39 @@ async def generate_personal_recap(group_id: int, member_id: int) -> dict:
             messages = await get_messages(gdb, group_id, limit=30, after_id=anchor)
 
         if not messages:
-            return {"unread_count": 0, "summary": None}
+            return {"unread_count": 0, "summary": None, "covered_through_id": 0}
 
         async with global_db() as cdb:
             members = await get_members(cdb, group_id)
 
         summary = await _summarize(messages, members, personal=True)
-        return {"unread_count": len(messages), "summary": summary}
+        covered_through_id = messages[-1]["id"]
+        return {"unread_count": len(messages), "summary": summary, "covered_through_id": covered_through_id}
     except Exception as e:
         log.error("Failed to generate personal recap for group %s member %s: %r",
                   group_id, member_id, e, exc_info=True)
-        return {"unread_count": 0, "summary": None}
+        return {"unread_count": 0, "summary": None, "covered_through_id": 0}
 
 
-async def ack_personal_recap(group_id: int, member_id: int) -> int:
+async def ack_personal_recap(group_id: int, member_id: int, covered_through_id: int | None = None) -> int:
     """记录某成员「已看过」当前 away recap（点 ✕ 触发）。把该用户的 recap 水位线
-    (member_read.last_recap_ack_id) 推进到当前群内最新消息 id —— 这批活动便不再对他
+    (member_read.last_recap_ack_id) 推进到该 recap 实际覆盖的最新消息 id —— 这批活动便不再对他
     显示（重连/切群也不再弹）；之后若有更新的活动，仍会再生成一条只覆盖新活动的摘要。
     每用户独立：一个人点 ✕ 不影响其他成员。水位线单调不回退。返回推进后的水位线。
 
     群库由调用方（API 端点）通过 db.bind_db 绑定；读写都走当前绑定的群 DB，与
     generate_personal_recap 一致。失败不抛，返回 0。"""
     try:
-        async with get_db() as gdb:
-            cur = await gdb.execute(
-                "SELECT COALESCE(MAX(id), 0) FROM messages WHERE group_id = ?",
-                (group_id,),
-            )
-            row = await cur.fetchone()
-        up_to_id = (row[0] if row else 0) or 0
+        if covered_through_id is not None:
+            up_to_id = covered_through_id
+        else:
+            async with get_db() as gdb:
+                cur = await gdb.execute(
+                    "SELECT COALESCE(MAX(id), 0) FROM messages WHERE group_id = ?",
+                    (group_id,),
+                )
+                row = await cur.fetchone()
+            up_to_id = (row[0] if row else 0) or 0
         # 写路径与读路径同源：绑定时 = 当前群库，未绑定（如单库测试）= db.DB_PATH。
         write_path = db.current_db_path.get() or db.DB_PATH
         async with write_connect(write_path) as w:

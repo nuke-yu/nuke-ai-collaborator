@@ -168,7 +168,7 @@ class TestAwaySummaryRecap(unittest.IsolatedAsyncioTestCase):
             await db_conn.execute("INSERT INTO member_read (member_id, group_id, last_read_id) VALUES (21, 1, 100)")
             await db_conn.commit()
         res = await generate_personal_recap(1, 21)
-        self.assertEqual(res, {"unread_count": 0, "summary": None})
+        self.assertEqual(res, {"unread_count": 0, "summary": None, "covered_through_id": 0})
         mock_call_ai.assert_not_called()
 
     @patch("core.recap.generator.call_ai_once", new_callable=AsyncMock)
@@ -203,6 +203,34 @@ class TestAwaySummaryRecap(unittest.IsolatedAsyncioTestCase):
         res = await generate_personal_recap(1, 23)
         self.assertEqual(res["unread_count"], 1)
         self.assertEqual(res["summary"], "Dev 又提交了。")
+
+    @patch("core.recap.generator.call_ai_once", new_callable=AsyncMock)
+    async def test_ack_personal_recap_prevents_toctou(self, mock_call_ai):
+        """防止 TOCTOU (P1): ✕ 只确认横幅生成时的消息，在生成横幅到点击 ✕ 之间来的新消息不应被确认。"""
+        from core.recap import ack_personal_recap
+        mock_call_ai.return_value = {"content": "这是 100 以前的摘要"}
+        
+        # 1. 生成 recap，此时只包含到 ID 100 消息
+        res = await generate_personal_recap(1, 23)
+        self.assertEqual(res["covered_through_id"], 100)
+        
+        # 2. 模拟 TOCTOU 窗口：在点击 ✕ 之前，队友发了新消息 105
+        async with database.get_db() as db_conn:
+            await db_conn.execute(
+                "INSERT INTO messages (id, group_id, member_id, content, sender_name, sender_type) "
+                "VALUES (105, 1, 10, 'TOCTOU message', 'UserB', 'human')"
+            )
+            await db_conn.commit()
+            
+        # 3. 点击 ✕，回传当时横幅对应的 covered_through_id = 100
+        await ack_personal_recap(1, 23, res["covered_through_id"])
+        
+        # 4. 再次获取 recap，新来的消息 105 必须再次弹 recap 汇总，不能被吞掉
+        mock_call_ai.reset_mock()
+        mock_call_ai.return_value = {"content": "这是 105 的新摘要"}
+        after = await generate_personal_recap(1, 23)
+        self.assertEqual(after["unread_count"], 1)
+        self.assertEqual(after["summary"], "这是 105 的新摘要")
 
     @patch("core.recap.generator.call_ai_once", new_callable=AsyncMock)
     async def test_ack_personal_recap_is_per_user(self, mock_call_ai):
@@ -304,7 +332,7 @@ class TestRecapApi(unittest.IsolatedAsyncioTestCase):
             resp = await ac.post("/api/groups/1/recap/ack/20")
             self.assertEqual(resp.status_code, 200)
             self.assertEqual(resp.json(), {"ok": True, "acked_through": 142})
-            mock_ack.assert_awaited_once_with(1, 20)
+            mock_ack.assert_awaited_once_with(1, 20, None)
 
     @patch("core.recap.generate_and_cache_recap", new_callable=AsyncMock)
     async def test_trigger_recap_falls_back_to_cache_when_skipped(self, mock_generate_recap):
