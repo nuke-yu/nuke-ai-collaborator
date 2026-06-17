@@ -1412,6 +1412,63 @@ class TestWorkflowHistoryFiltering(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(history[0]["id"], 4)
         self.assertEqual(history[1]["id"], 5)
 
+    async def test_pre_start_human_dropped_when_current_topic_exists(self):
+        """当本场讨论已有 post-start 真人话题消息时，pre-start 真人消息（上一场话题）
+        必须被丢弃，不能串味——否则昨天的话题会被带进今天的新讨论。"""
+        from core import runner
+        from core.orchestration.base import WorkUnit
+
+        class MockOrch:
+            def start_time(self, gid):
+                return "2026-06-17 10:00:00"
+            def get_viewpoints_cache(self, gid):
+                return None
+            def participant_count(self, gid):
+                return None
+            def observe(self, gid, bid, res):
+                return MagicMock(done=True, next_units=[], confirm_gate=None, announcements=[])
+            def snapshot(self, gid):
+                return {}
+
+        unit = WorkUnit(bot={"id": 1, "name": "BotA"}, executor_id="mock_exec")
+
+        # Chronological (oldest first). id=1 is yesterday's topic; id=2 is today's
+        # actual discussion topic (post-start human); id=3 is a post-start bot reply.
+        recent_msgs = [
+            {"id": 1, "sender_type": "human", "content": "吃芒果坏肚子", "created_at": "2026-06-16 20:00:00"},
+            {"id": 2, "sender_type": "human", "content": "token ecosystem 怎么设计", "created_at": "2026-06-17 10:01:00"},
+            {"id": 3, "sender_type": "bot", "content": "New Bot Chat", "created_at": "2026-06-17 10:02:00"},
+        ]
+
+        fake_db = MagicMock()
+        fake_db_cm = MagicMock()
+        fake_db_cm.__aenter__ = AsyncMock(return_value=fake_db)
+        fake_db_cm.__aexit__ = AsyncMock(return_value=False)
+
+        mock_executor = MagicMock()
+        intercepted_ctx = None
+        async def fake_executor_run(ctx):
+            nonlocal intercepted_ctx
+            intercepted_ctx = ctx
+            return MagicMock(full_text="Done")
+        mock_executor.run = AsyncMock(side_effect=fake_executor_run)
+
+        with patch("core.runner.global_db", return_value=fake_db_cm), \
+             patch("core.runner.get_db", return_value=fake_db_cm), \
+             patch("core.runner.get_members", new=AsyncMock(return_value=[{"id": 1, "type": "bot"}])), \
+             patch("core.runner.get_messages", new=AsyncMock(return_value=recent_msgs)), \
+             patch("core.runner.exec_registry.get", return_value=mock_executor), \
+             patch("core.runner.apply_step", new=AsyncMock()):
+
+            await runner.run_unit(group_id=1, unit=unit, orch=MockOrch())
+
+        self.assertIsNotNone(intercepted_ctx)
+        history = intercepted_ctx.history
+        ids = [m["id"] for m in history]
+        # Yesterday's pre-start human topic (id=1) must NOT bleed in.
+        self.assertNotIn(1, ids)
+        self.assertEqual(ids, [2, 3])
+
     async def test_workflow_history_compression(self):
         from core.role_router import build_context_message
         

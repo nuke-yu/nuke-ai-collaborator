@@ -142,14 +142,24 @@ async def run_unit(group_id: int, unit, orch) -> None:
         normalized_start = norm(start_time_str)
         filtered = []
         pre_start_human_added = False
+        post_start_human_seen = False
+        # reversed(recent) walks newest→oldest, so all post-start messages are
+        # visited before any pre-start one.
         for msg in reversed(recent):
             created_at = msg.get("created_at") or ""
             if norm(created_at) >= normalized_start:
+                if msg.get("sender_type") == "human":
+                    post_start_human_seen = True
                 filtered.append(msg)
-            elif msg.get("sender_type") == "human" and not pre_start_human_added:
-                # Keep only the single most-recent pre-start human message as
-                # minimal context; older human messages (prior discussion topics)
-                # must not bleed into the new workflow.
+            elif (msg.get("sender_type") == "human"
+                  and not pre_start_human_added
+                  and not post_start_human_seen):
+                # Cold-start only: when the discussion has no post-start human
+                # message yet (workflow kicked off without a fresh human prompt),
+                # keep the single most-recent pre-start human message as minimal
+                # context. Once the current topic already has a human message,
+                # the stale pre-start line is redundant and must not bleed in —
+                # otherwise yesterday's discussion topic leaks into today's.
                 filtered.append(msg)
                 pre_start_human_added = True
         recent = list(reversed(filtered))
