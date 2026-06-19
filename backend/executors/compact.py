@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Optional
 
 from core import config
-from ai.client import call_ai_once
+from ai.client import call_ai_once, AIContextOverflowError
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +91,33 @@ def _content_chars(content) -> int:
         return len(content)
     # list/multimodal or other non-string content — rare and small
     return len(str(content))
+
+
+def clean_multimodal_content(content) -> str:
+    """Extract clean text from multimodal content, replacing image blocks with a placeholder."""
+    if not content:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if not isinstance(block, dict):
+                parts.append(str(block))
+                continue
+            btype = block.get("type")
+            if btype == "text":
+                parts.append(block.get("text") or "")
+            elif btype in ("image", "image_url"):
+                parts.append("[图片数据]")
+            elif btype == "document":
+                parts.append("[文档数据]")
+            elif btype == "tool_result" and isinstance(block.get("content"), list):
+                parts.append(clean_multimodal_content(block["content"]))
+            else:
+                parts.append(f"[{btype or '未知数据类型'}]")
+        return " ".join(p for p in parts if p.strip())
+    return str(content)
 
 
 def _msg_verifier(m: dict) -> str:
@@ -399,8 +426,7 @@ async def _try_session_memory_compact(
     for m in recent:
         role = m.get("role", "")
         mc = m.get("content") or ""
-        if isinstance(mc, list):
-            mc = str(mc)
+        mc = clean_multimodal_content(mc)
         if role == "tool":
             lines.append(f"[工具结果 {m.get('name', '')}]: {mc[:500]}")
         else:
@@ -503,6 +529,48 @@ def format_compact_summary(raw: str) -> str:
     return cleaned  # fallback: return full text if tags absent
 
 
+# PROMPT_TOO_LONG retry: if the rendered history is *itself* too long for the
+# model (many messages, even after per-message truncation), the compaction call
+# would 400/413. Rather than give up, drop the oldest rounds and retry. Bounded
+# iteration (never recursion) so a persistently-overflowing payload can't loop.
+_PTL_MAX_RETRIES   = 3      # extra attempts after the first, each strictly shorter
+_PTL_DROP_FRACTION = 0.3    # fraction of the oldest messages to drop per retry
+
+
+def _render_history(messages: list[dict]) -> str:
+    """Flatten messages to the truncated plain-text history the summariser sees."""
+    lines = []
+    for m in messages:
+        role = m.get("role", "")
+        mc = clean_multimodal_content(m.get("content") or "")
+        if role == "tool":
+            lines.append(f"[工具结果 {m.get('name', '')}]: {mc[:1000]}")
+        else:
+            lines.append(f"[{role}]: {mc[:2000]}")
+    return "\n".join(lines)
+
+
+def _drop_oldest_rounds(messages: list[dict], fraction: float = _PTL_DROP_FRACTION) -> list[dict]:
+    """Drop the oldest `fraction` of messages for a PROMPT_TOO_LONG retry.
+
+    The history is flattened into a single text block before the model sees it,
+    so there is no tool_call/tool_result pairing to keep intact here — a plain
+    slice is safe. Leading tool messages in the new head are skipped only so the
+    surviving window doesn't open on a dangling "[工具结果 ...]" line.
+    Returns a strictly shorter list, or the input unchanged when it can't shrink
+    (len <= 1) — the caller treats "no shrink" as the signal to stop retrying.
+    """
+    n = len(messages)
+    if n <= 1:
+        return messages
+    head = max(1, int(n * fraction))
+    while head < n and messages[head].get("role") == "tool":
+        head += 1
+    if head >= n:                      # everything left is one tool group → keep last
+        head = n - 1
+    return messages[head:]
+
+
 async def _ai_compact(
     messages: list[dict],
     system_prompt: str,
@@ -512,34 +580,43 @@ async def _ai_compact(
 ) -> Optional[list[dict]]:
     """Run full AI compaction using the 9-section structured prompt.
 
+    Resilient to PROMPT_TOO_LONG: on an overflow error the oldest rounds are
+    dropped and the call is retried (bounded by _PTL_MAX_RETRIES).
     Returns a single-element list with the summary message, or None on failure.
     """
-    lines = []
-    for m in messages:
-        role = m.get("role", "")
-        mc = m.get("content") or ""
-        if isinstance(mc, list):
-            mc = str(mc)
-        if role == "tool":
-            lines.append(f"[工具结果 {m.get('name', '')}]: {mc[:1000]}")
-        else:
-            lines.append(f"[{role}]: {mc[:2000]}")
-    history_text = "\n".join(lines)
+    working = messages
+    dropped = 0
 
-    user_msg = (
-        f"系统提示（前500字）：{system_prompt[:500]}\n\n"
-        f"请总结以下对话历史：\n\n{history_text}"
-    )
-    try:
-        result = await call_ai_once(
-            _COMPACT_SYSTEM_PROMPT,
-            [{"role": "user", "content": user_msg}],
-            provider, model_name, temperature,
-            MAX_OUTPUT_TOKENS_FOR_SUMMARY,
+    for _attempt in range(_PTL_MAX_RETRIES + 1):
+        prefix = f"（更早的 {dropped} 条历史因超长已省略）\n\n" if dropped else ""
+        user_msg = (
+            f"系统提示（前500字）：{system_prompt[:500]}\n\n"
+            f"请总结以下对话历史：\n\n{prefix}{_render_history(working)}"
         )
-        raw = result["content"] if result["type"] == "text" else ""
-    except Exception as exc:
-        logger.warning("AI compaction call failed: %s", exc)
+        try:
+            result = await call_ai_once(
+                _COMPACT_SYSTEM_PROMPT,
+                [{"role": "user", "content": user_msg}],
+                provider, model_name, temperature,
+                MAX_OUTPUT_TOKENS_FOR_SUMMARY,
+            )
+            raw = result["content"] if result["type"] == "text" else ""
+            break
+        except AIContextOverflowError as exc:
+            shorter = _drop_oldest_rounds(working)
+            if len(shorter) >= len(working):     # can't shrink further → give up
+                logger.warning("AI compaction overflow, cannot shrink further: %s", exc)
+                return None
+            dropped += len(working) - len(shorter)
+            working = shorter
+            logger.info(
+                "AI compaction PROMPT_TOO_LONG; dropped oldest, %d msgs left", len(working)
+            )
+        except Exception as exc:
+            logger.warning("AI compaction call failed: %s", exc)
+            return None
+    else:
+        logger.warning("AI compaction still overflowing after %d retries", _PTL_MAX_RETRIES)
         return None
 
     if not raw:

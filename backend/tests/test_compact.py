@@ -746,6 +746,78 @@ class TestAiCompact(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(captured_kwargs["max_tokens"], compact.MAX_OUTPUT_TOKENS_FOR_SUMMARY)
 
+    async def test_ptl_retry_drops_oldest_then_succeeds(self):
+        """On PROMPT_TOO_LONG, drop oldest rounds and retry; a shorter payload succeeds."""
+        from ai.client import AIContextOverflowError
+
+        msgs = _make_pairs(10)               # 20 messages
+        sent_lengths = []
+
+        async def flaky(system, messages, provider, model, temperature, max_tokens):
+            # First call overflows; record what reached the model each time.
+            sent_lengths.append(len(messages[0]["content"]))
+            if len(sent_lengths) == 1:
+                raise AIContextOverflowError("prompt is too long")
+            return {"type": "text", "content": "<summary>ok</summary>"}
+
+        with patch("executors.compact.call_ai_once", new=flaky):
+            result = await compact._ai_compact(msgs, "sp", "deepseek", "deepseek-chat", 0.7)
+
+        self.assertIsNotNone(result)
+        self.assertIn("ok", result[0]["content"])
+        self.assertEqual(len(sent_lengths), 2)            # one retry
+        self.assertLess(sent_lengths[1], sent_lengths[0])  # retry payload is shorter
+
+    async def test_ptl_retry_notes_dropped_history(self):
+        """The retried prompt carries a note that older history was dropped."""
+        from ai.client import AIContextOverflowError
+
+        msgs = _make_pairs(10)
+        seen = []
+
+        async def flaky(system, messages, provider, model, temperature, max_tokens):
+            seen.append(messages[0]["content"])
+            if len(seen) == 1:
+                raise AIContextOverflowError("context_length_exceeded")
+            return {"type": "text", "content": "<summary>ok</summary>"}
+
+        with patch("executors.compact.call_ai_once", new=flaky):
+            await compact._ai_compact(msgs, "sp", "deepseek", "deepseek-chat", 0.7)
+
+        self.assertNotIn("已省略", seen[0])   # first attempt: full history, no note
+        self.assertIn("已省略", seen[1])      # retry: note added
+
+    async def test_ptl_persistent_overflow_gives_up_returns_none(self):
+        """If every attempt overflows, return None instead of looping forever."""
+        from ai.client import AIContextOverflowError
+
+        msgs = _make_pairs(10)
+        calls = 0
+
+        async def always_overflow(system, messages, provider, model, temperature, max_tokens):
+            nonlocal calls
+            calls += 1
+            raise AIContextOverflowError("prompt is too long")
+
+        with patch("executors.compact.call_ai_once", new=always_overflow):
+            result = await compact._ai_compact(msgs, "sp", "deepseek", "deepseek-chat", 0.7)
+
+        self.assertIsNone(result)
+        # Bounded: at most the initial attempt + _PTL_MAX_RETRIES, and stops early
+        # once _drop_oldest_rounds can no longer shrink the list.
+        self.assertLessEqual(calls, compact._PTL_MAX_RETRIES + 1)
+        self.assertGreaterEqual(calls, 2)
+
+    def test_drop_oldest_rounds_shrinks(self):
+        msgs = _make_pairs(5)                 # 10 messages
+        shorter = compact._drop_oldest_rounds(msgs)
+        self.assertLess(len(shorter), len(msgs))
+        self.assertEqual(shorter, msgs[len(msgs) - len(shorter):])  # tail preserved
+
+    def test_drop_oldest_rounds_cannot_shrink_singleton(self):
+        one = [_user("only")]
+        self.assertEqual(compact._drop_oldest_rounds(one), one)
+
 
 # ---------------------------------------------------------------------------
 # 9. Orchestrator: auto_compact_if_needed
