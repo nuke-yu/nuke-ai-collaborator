@@ -84,6 +84,13 @@ class TestContainerManager(unittest.IsolatedAsyncioTestCase):
         mgr._docker = AsyncMock(return_value=(1, "", "Cannot connect"))
         self.assertFalse(await mgr.available())
 
+    async def test_available_false_when_rc0_but_empty(self):
+        # `docker info --format` exits 0 even with the daemon down (empty render);
+        # rc==0 alone must NOT count as healthy, else 'auto' never falls back.
+        mgr = cs.ContainerManager()
+        mgr._docker = AsyncMock(return_value=(0, "\n", "Cannot connect to the Docker daemon"))
+        self.assertFalse(await mgr.available())
+
     async def test_ensure_starts_when_not_running(self):
         mgr = cs.ContainerManager()
         calls = []

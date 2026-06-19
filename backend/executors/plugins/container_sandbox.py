@@ -111,8 +111,12 @@ class ContainerManager:
         return proc.returncode, out.decode(errors="replace"), err.decode(errors="replace")
 
     async def available(self) -> bool:
-        rc, _, _ = await self._docker(["docker", "info", "--format", "{{.ServerVersion}}"], timeout=10)
-        return rc == 0
+        # NB: `docker info --format ...` exits 0 even when the daemon is down
+        # (it just renders an empty ServerVersion). So require non-empty output,
+        # not just rc==0 — otherwise 'auto' mode false-positives and never falls
+        # back to local.
+        rc, out, _ = await self._docker(["docker", "info", "--format", "{{.ServerVersion}}"], timeout=10)
+        return rc == 0 and bool(out.strip())
 
     async def _is_running(self, group_id: int) -> bool:
         rc, out, _ = await self._docker(
