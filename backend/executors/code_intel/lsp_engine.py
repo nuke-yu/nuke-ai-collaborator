@@ -4,20 +4,20 @@ Like jedi, the language server does *static analysis* (it does not execute the
 project's code), so it runs in the worker scoped to the project root — same
 trust level as jedi_engine, NOT coupled to the Docker sandbox.
 
-Structure:
-- StdioLspClient: spawns the server, frames JSON-RPC over stdio, correlates
-  responses by id. The only piece that needs a live server.
-- LspEngine: implements CodeIntelEngine by orchestrating the LSP handshake +
-  request for each operation. Takes a client_factory so tests inject a fake
-  client (the real server isn't needed to test the engine's logic).
-
-Per-call spawn (start → initialize → didOpen → request → close) is simple and
-correct; a persistent per-root warm server is a perf follow-up.
+Warm-server design (lazy + reused, mirrors OpenCode's lazy-spawn-by-root):
+- one persistent StdioLspClient per project root, initialized once and reused
+  across calls (the initialize handshake + server warm-up is the expensive bit);
+- each query first syncs the target file (didOpen on first touch, else didChange
+  with the current on-disk text, so the server sees the bot's latest edits);
+- idle roots are evicted by a reaper; a crashed server is respawned on next use.
+- StdioLspClient is the only piece needing a live server; LspEngine takes a
+  client_factory so tests inject a fake.
 """
 from __future__ import annotations
 
 import asyncio
 import shutil
+import time
 from pathlib import Path
 
 from core import config
@@ -45,6 +45,9 @@ class StdioLspClient:
         self._pending: dict[int, asyncio.Future] = {}
         self._next_id = 0
 
+    def alive(self) -> bool:
+        return self._proc is not None and self._proc.returncode is None
+
     async def start(self) -> None:
         self._proc = await asyncio.create_subprocess_exec(
             *self._cmd,
@@ -71,6 +74,9 @@ class StdioLspClient:
             raise
         except Exception:
             pass
+        finally:
+            # server gone → don't let in-flight requests hang until timeout
+            self._fail_pending(ConnectionError("lsp server closed"))
 
     def _dispatch(self, msg: dict) -> None:
         mid = msg.get("id")
@@ -78,7 +84,13 @@ class StdioLspClient:
             fut = self._pending.pop(mid)
             if not fut.done():
                 fut.set_result(msg.get("result"))
-        # server-initiated requests / notifications are ignored (we send {} caps)
+        # server-initiated requests / notifications ignored (we send {} caps)
+
+    def _fail_pending(self, exc: Exception) -> None:
+        for fut in self._pending.values():
+            if not fut.done():
+                fut.set_exception(exc)
+        self._pending.clear()
 
     def _send(self, message: dict) -> None:
         assert self._proc and self._proc.stdin
@@ -100,7 +112,7 @@ class StdioLspClient:
 
     async def close(self) -> None:
         try:
-            if self._proc and self._proc.returncode is None:
+            if self.alive():
                 await self.notify("exit", {})
         except Exception:
             pass
@@ -121,10 +133,23 @@ def _default_factory(cmd: list[str], cwd: str) -> StdioLspClient:
     return StdioLspClient(cmd, cwd=cwd)
 
 
+class _Session:
+    """A warm server for one project root."""
+    def __init__(self, client):
+        self.client = client
+        self.initialized = False
+        self.init_lock = asyncio.Lock()
+        self.versions: dict[str, int] = {}     # file → last version synced
+        self.last_used = time.monotonic()
+
+
 class LspEngine:
     def __init__(self, server_cmd: list[str] | None = None, client_factory=None):
         self._cmd = server_cmd or [config.TS_LANGUAGE_SERVER, "--stdio"]
         self._factory = client_factory or _default_factory
+        self._sessions: dict[str, _Session] = {}
+        self._pool_lock = asyncio.Lock()
+        self._reaper_task: asyncio.Task | None = None
 
     def available(self) -> bool:
         return shutil.which(self._cmd[0]) is not None
@@ -133,27 +158,92 @@ class LspEngine:
     def _language_id(file: Path) -> str:
         return _LANGUAGE_ID.get(file.suffix.lower(), "javascript")
 
-    async def _session(self, file: Path, root: Path):
-        """Start a client, run the initialize handshake, didOpen the file.
-        Returns the live client; caller must close() it."""
-        client = self._factory(self._cmd, str(root))
-        await client.start()
-        await client.request("initialize", P.initialize_params(str(root)))
-        await client.notify("initialized", {})
+    # --- warm session pool --------------------------------------------------
+
+    async def _get_session(self, root: str) -> _Session:
+        async with self._pool_lock:
+            sess = self._sessions.get(root)
+            if sess is not None and sess.initialized and not sess.client.alive():
+                sess = None                        # server crashed → respawn
+            if sess is None:
+                sess = _Session(self._factory(self._cmd, root))
+                self._sessions[root] = sess
+        async with sess.init_lock:                 # one initialize per session
+            if not sess.initialized:
+                await sess.client.start()
+                await sess.client.request("initialize", P.initialize_params(root))
+                await sess.client.notify("initialized", {})
+                sess.initialized = True
+        sess.last_used = time.monotonic()
+        self._start_reaper()
+        return sess
+
+    async def _sync_doc(self, sess: _Session, file: Path) -> None:
         text = file.read_text(encoding="utf-8", errors="replace")
-        await client.notify(
-            "textDocument/didOpen",
-            P.did_open_params(str(file), text, self._language_id(file)),
-        )
-        return client
+        fstr = str(file)
+        if fstr not in sess.versions:
+            sess.versions[fstr] = 1
+            await sess.client.notify(
+                "textDocument/didOpen",
+                P.did_open_params(fstr, text, self._language_id(file)),
+            )
+        else:
+            sess.versions[fstr] += 1               # re-sync latest on-disk edits
+            await sess.client.notify(
+                "textDocument/didChange",
+                P.did_change_params(fstr, text, sess.versions[fstr]),
+            )
 
     async def _run(self, file, root, method, params, parse):
-        client = await self._session(file, root)
-        try:
-            result = await client.request(method, params)
-            return parse(result)
-        finally:
-            await client.close()
+        sess = await self._get_session(str(root))
+        await self._sync_doc(sess, Path(file))
+        sess.last_used = time.monotonic()
+        result = await sess.client.request(method, params)
+        return parse(result)
+
+    # --- idle eviction ------------------------------------------------------
+
+    def idle_roots(self, now: float, idle_timeout: float | None = None) -> list[str]:
+        idle_timeout = config.LSP_IDLE_TIMEOUT_S if idle_timeout is None else idle_timeout
+        return [r for r, s in self._sessions.items() if now - s.last_used > idle_timeout]
+
+    async def reap_once(self, now: float | None = None) -> list[str]:
+        now = time.monotonic() if now is None else now
+        roots = self.idle_roots(now)
+        for root in roots:
+            sess = self._sessions.pop(root, None)
+            if sess:
+                await sess.client.close()
+        return roots
+
+    def _start_reaper(self) -> None:
+        if self._reaper_task is None or self._reaper_task.done():
+            self._reaper_task = asyncio.create_task(self._reaper_loop())
+
+    async def _reaper_loop(self) -> None:
+        tick = max(60, min(int(config.LSP_IDLE_TIMEOUT_S), 300))
+        while True:
+            await asyncio.sleep(tick)
+            try:
+                await self.reap_once()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                pass
+
+    async def close(self) -> None:
+        if self._reaper_task is not None:
+            self._reaper_task.cancel()
+            try:
+                await self._reaper_task
+            except (asyncio.CancelledError, Exception):
+                pass
+            self._reaper_task = None
+        for sess in list(self._sessions.values()):
+            await sess.client.close()
+        self._sessions.clear()
+
+    # --- CodeIntelEngine ops ------------------------------------------------
 
     async def definition(self, file, line, character, root) -> list[Location]:
         return await self._run(

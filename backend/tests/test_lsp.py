@@ -5,6 +5,7 @@ injected fake client (a real typescript-language-server isn't needed).
 """
 import os
 import sys
+import time
 import asyncio
 import tempfile
 import unittest
@@ -92,6 +93,9 @@ class _FakeClient:
         self.requests, self.notifications = [], []
         self.started = self.closed = False
 
+    def alive(self):
+        return self.started and not self.closed
+
     async def start(self):
         self.started = True
 
@@ -108,11 +112,13 @@ class _FakeClient:
 
 class TestLspEngine(unittest.IsolatedAsyncioTestCase):
     def _engine(self, responses):
-        created = {}
+        created = {"clients": []}
 
         def factory(cmd, cwd):
-            created["client"] = _FakeClient(cmd, cwd, responses)
-            return created["client"]
+            c = _FakeClient(cmd, cwd, responses)
+            created["clients"].append(c)
+            created["client"] = c
+            return c
 
         return LspEngine(server_cmd=["fake-ls", "--stdio"], client_factory=factory), created
 
@@ -142,7 +148,6 @@ class TestLspEngine(unittest.IsolatedAsyncioTestCase):
         locs = await eng.definition(f, line=2, character=7, root=root)
         self.assertEqual((locs[0].line, locs[0].character), (1, 5))
         client = created["client"]
-        # handshake happened: initialize request + initialized/didOpen notifications
         self.assertIn("initialize", [m for m, _ in client.requests])
         notes = [m for m, _ in client.notifications]
         self.assertIn("initialized", notes)
@@ -150,6 +155,24 @@ class TestLspEngine(unittest.IsolatedAsyncioTestCase):
         # position was converted 1-based → 0-based
         defreq = next(p for m, p in client.requests if m == "textDocument/definition")
         self.assertEqual(defreq["position"], {"line": 1, "character": 6})
+        # warm: NOT closed after a single call
+        self.assertFalse(client.closed)
+        await eng.close()
+
+    async def test_session_reused_initialize_once_then_didchange(self):
+        resp = {"textDocument/definition": [
+            {"uri": "file:///proj/a.ts", "range": {"start": {"line": 0, "character": 0}}}]}
+        eng, created = self._engine(resp)
+        f, root = await self._file()
+        await eng.definition(f, 1, 1, root)
+        await eng.definition(f, 2, 1, root)          # same file+root → reuse
+        client = created["client"]
+        self.assertEqual(len(created["clients"]), 1)  # one server total
+        self.assertEqual([m for m, _ in client.requests].count("initialize"), 1)
+        notes = [m for m, _ in client.notifications]
+        self.assertEqual(notes.count("textDocument/didOpen"), 1)     # opened once
+        self.assertGreaterEqual(notes.count("textDocument/didChange"), 1)  # re-synced
+        await eng.close()
         self.assertTrue(client.closed)
 
     async def test_references(self):
@@ -161,11 +184,33 @@ class TestLspEngine(unittest.IsolatedAsyncioTestCase):
         f, root = await self._file()
         locs = await eng.references(f, 1, 1, root)
         self.assertEqual({Path(l.file).name for l in locs}, {"a.ts", "b.ts"})
+        await eng.close()
 
     async def test_hover(self):
         eng, _ = self._engine({"textDocument/hover": {"contents": {"value": "foo(): void"}}})
         f, root = await self._file()
         self.assertEqual(await eng.hover(f, 1, 1, root), "foo(): void")
+        await eng.close()
+
+    async def test_idle_reap_closes_session(self):
+        eng, created = self._engine({"textDocument/hover": {"contents": "x"}})
+        f, root = await self._file()
+        await eng.hover(f, 1, 1, root)
+        eng._sessions[str(root)].last_used = time.monotonic() - 99999   # force idle
+        reaped = await eng.reap_once()
+        self.assertEqual(reaped, [str(root)])
+        self.assertTrue(created["client"].closed)
+        self.assertNotIn(str(root), eng._sessions)
+        await eng.close()
+
+    async def test_crashed_server_respawns(self):
+        eng, created = self._engine({"textDocument/hover": {"contents": "x"}})
+        f, root = await self._file()
+        await eng.hover(f, 1, 1, root)
+        created["clients"][0].closed = True          # simulate crash → alive() False
+        await eng.hover(f, 1, 1, root)
+        self.assertEqual(len(created["clients"]), 2)  # respawned a fresh server
+        await eng.close()
 
 
 # --- router routing ---------------------------------------------------------

@@ -37,6 +37,8 @@ SANDBOX_IDLE_TIMEOUT_S = int(os.environ.get("NUKE_SANDBOX_IDLE_TIMEOUT_S") or 18
 # Static analysis (does not execute project code), so it runs in the worker like
 # jedi. Absent binary → engine reports unavailable → tool falls back to `search`.
 TS_LANGUAGE_SERVER = os.environ.get("NUKE_TS_LANGUAGE_SERVER") or "typescript-language-server"
+# Keep a warm LSP server per project root; evict after this much idle.
+LSP_IDLE_TIMEOUT_S = int(os.environ.get("NUKE_LSP_IDLE_TIMEOUT_S") or 600)
 
 # --- Context Management (AutoCompact) ---
 AUTOCOMPACT_BUFFER_TOKENS = 13_000

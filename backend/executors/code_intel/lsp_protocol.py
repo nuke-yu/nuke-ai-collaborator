@@ -91,6 +91,15 @@ def did_open_params(file: str, text: str, language_id: str) -> dict:
     }}
 
 
+def did_change_params(file: str, text: str, version: int) -> dict:
+    """Full-document sync — re-send the whole text so a warm server sees the
+    bot's latest on-disk edits before a query."""
+    return {
+        "textDocument": {"uri": path_to_uri(file), "version": version},
+        "contentChanges": [{"text": text}],
+    }
+
+
 def position_params(file: str, line: int, character: int) -> dict:
     # 1-based (our boundary) → 0-based (LSP)
     return {
