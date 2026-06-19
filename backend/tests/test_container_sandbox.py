@@ -6,6 +6,7 @@ end-to-end against a daemon is a separate manual step.
 """
 import os
 import sys
+import time
 import asyncio
 import unittest
 from pathlib import Path
@@ -106,6 +107,8 @@ class TestContainerManager(unittest.IsolatedAsyncioTestCase):
         mgr._docker = fake_docker
         await mgr.ensure(7, "/ws/group_7")
         self.assertTrue(any(a[1] == "run" for a in calls))
+        self.assertIn(7, mgr._last_used)          # activity recorded
+        await mgr.close()                          # cancel the reaper it started
 
     async def test_ensure_skips_when_already_running(self):
         mgr = cs.ContainerManager()
@@ -120,6 +123,7 @@ class TestContainerManager(unittest.IsolatedAsyncioTestCase):
         mgr._docker = fake_docker
         await mgr.ensure(7, "/ws/group_7")
         self.assertFalse(any(a[1] == "run" for a in calls))
+        await mgr.close()
 
     async def test_exec_foreground_timeout_maps_124(self):
         mgr = cs.ContainerManager()
@@ -137,6 +141,48 @@ class TestContainerManager(unittest.IsolatedAsyncioTestCase):
             1, cmd="echo hello", cwd="/ws", env={}, timeout=5
         )
         self.assertEqual((rc, out, timed_out), (0, "hello", False))
+
+
+class TestReaper(unittest.IsolatedAsyncioTestCase):
+    async def test_idle_groups_pure(self):
+        mgr = cs.ContainerManager()
+        now = 10_000.0
+        mgr._last_used = {1: now - 9999, 2: now - 10}     # 1 idle, 2 fresh
+        self.assertEqual(mgr.idle_groups(now, idle_timeout=100), [1])
+
+    async def test_reap_once_stops_idle_keeps_fresh(self):
+        from unittest.mock import AsyncMock
+        mgr = cs.ContainerManager()
+        mgr.stop = AsyncMock()
+        now = time.monotonic()
+        mgr._last_used = {1: now - 9999, 2: now}          # group 1 idle (>1800s default)
+        reaped = await mgr.reap_once()
+        self.assertEqual(reaped, [1])
+        mgr.stop.assert_awaited_once_with(1)
+        self.assertNotIn(1, mgr._last_used)               # forgotten after reap
+        self.assertIn(2, mgr._last_used)                  # fresh kept
+
+    async def test_reap_once_noop_when_all_fresh(self):
+        from unittest.mock import AsyncMock
+        mgr = cs.ContainerManager()
+        mgr.stop = AsyncMock()
+        mgr._last_used = {1: time.monotonic(), 2: time.monotonic()}
+        self.assertEqual(await mgr.reap_once(), [])
+        mgr.stop.assert_not_awaited()
+
+    async def test_touch_updates_last_used(self):
+        mgr = cs.ContainerManager()
+        mgr._touch(5)
+        self.assertIn(5, mgr._last_used)
+
+    async def test_start_reaper_idempotent(self):
+        mgr = cs.ContainerManager()
+        mgr.start_reaper()
+        first = mgr._reaper_task
+        mgr.start_reaper()
+        self.assertIs(mgr._reaper_task, first)            # not replaced
+        await mgr.close()
+        self.assertIsNone(mgr._reaper_task)
 
 
 class _FakeManager:

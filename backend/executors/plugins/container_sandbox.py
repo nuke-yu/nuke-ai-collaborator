@@ -17,9 +17,13 @@ Design notes:
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
+import time
 
 from core import config
+
+log = logging.getLogger(__name__)
 
 _CONTAINER_PREFIX = "nuke-sbx-"
 _SHELL = "/bin/sh"
@@ -89,6 +93,11 @@ class ContainerManager:
 
     def __init__(self):
         self._lock = asyncio.Lock()
+        self._last_used: dict[int, float] = {}     # group_id → monotonic ts
+        self._reaper_task: asyncio.Task | None = None
+
+    def _touch(self, group_id: int) -> None:
+        self._last_used[group_id] = time.monotonic()
 
     async def _docker(self, argv: list[str], timeout: float | None = None) -> tuple[int, str, str]:
         """Run a docker CLI command → (returncode, stdout, stderr). Isolated seam."""
@@ -127,6 +136,8 @@ class ContainerManager:
 
     async def ensure(self, group_id: int, workspace_dir) -> None:
         """Idempotently start the group's sandbox container."""
+        self._touch(group_id)        # activity → resets the idle clock
+        self.start_reaper()
         async with self._lock:
             if await self._is_running(group_id):
                 return
@@ -146,6 +157,7 @@ class ContainerManager:
         self, group_id: int, *, cmd: str, cwd: str, env: dict, timeout: int
     ) -> tuple[int | None, str, str, bool]:
         """→ (exit_code, stdout, stderr, timed_out)."""
+        self._touch(group_id)
         argv = build_exec_argv(group_id, cwd=cwd, env=env, cmd=cmd, timeout=timeout)
         # outer wait is a backstop; in-container `timeout` is the primary guard
         rc, out, err = await self._docker(argv, timeout=timeout + 10)
@@ -157,6 +169,7 @@ class ContainerManager:
         self, group_id: int, *, cmd: str, cwd: str, env: dict
     ) -> str:
         """Detached exec; returns a short identifier note (docker exec -d gives no pid)."""
+        self._touch(group_id)
         argv = build_exec_argv(group_id, cwd=cwd, env=env, cmd=cmd, detach=True)
         rc, out, err = await self._docker(argv, timeout=30)
         if rc != 0:
@@ -165,3 +178,56 @@ class ContainerManager:
 
     async def stop(self, group_id: int) -> None:
         await self._docker(["docker", "stop", container_name(group_id)], timeout=30)
+
+    # --- idle eviction (reaper) -------------------------------------------
+    # Stop a group's sandbox once it has been idle past SANDBOX_IDLE_TIMEOUT_S,
+    # mirroring the worker's group hydration/eviction. The container is `--rm`,
+    # so stop removes it; the bind-mounted workspace is untouched and a later
+    # ensure() restarts it. Reaping is in-memory/last_used based: this manager
+    # only reaps groups it has touched (so it never stops another shard's
+    # container). Trade-off: on worker restart, pre-existing containers for
+    # groups that never reactivate linger until adopted — acceptable, noted.
+
+    def idle_groups(self, now: float, idle_timeout: float) -> list[int]:
+        """Pure: groups whose last activity is older than idle_timeout."""
+        return [g for g, t in self._last_used.items() if now - t > idle_timeout]
+
+    async def reap_once(self, now: float | None = None) -> list[int]:
+        """Stop every idle group's container; returns the groups reaped."""
+        now = time.monotonic() if now is None else now
+        idle = self.idle_groups(now, float(config.SANDBOX_IDLE_TIMEOUT_S))
+        for group_id in idle:
+            try:
+                await self.stop(group_id)
+            except Exception:
+                log.exception("sandbox reaper: failed to stop group %s", group_id)
+            self._last_used.pop(group_id, None)
+        if idle:
+            log.info("sandbox reaper: stopped idle groups %s", idle)
+        return idle
+
+    def start_reaper(self) -> None:
+        """Idempotently spawn the background reaper loop (needs a running loop)."""
+        if self._reaper_task is None or self._reaper_task.done():
+            self._reaper_task = asyncio.create_task(self._reaper_loop())
+
+    async def _reaper_loop(self) -> None:
+        tick = max(60, min(int(config.SANDBOX_IDLE_TIMEOUT_S), 300))
+        while True:
+            await asyncio.sleep(tick)
+            try:
+                await self.reap_once()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                log.exception("sandbox reaper tick failed")
+
+    async def close(self) -> None:
+        """Cancel the reaper (call on worker shutdown). Does not stop containers."""
+        if self._reaper_task is not None:
+            self._reaper_task.cancel()
+            try:
+                await self._reaper_task
+            except (asyncio.CancelledError, Exception):
+                pass
+            self._reaper_task = None
