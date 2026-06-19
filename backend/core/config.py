@@ -24,6 +24,15 @@ SHELL_MEMORY_LIMIT_BYTES = 512 * 1024 * 1024  # 512 MB
 # Production should set NUKE_SHELL_EXEC_BACKEND=container so isolation is mandatory.
 SHELL_EXEC_BACKEND = (os.environ.get("NUKE_SHELL_EXEC_BACKEND") or "local").lower()
 
+# Per-group execution sandbox (container backend). One long-lived container per
+# active group; only that group's workspace is bind-mounted in → group isolation
+# is a mount fact. See deploy/sandbox/Dockerfile.
+SANDBOX_IMAGE = os.environ.get("NUKE_SANDBOX_IMAGE") or "nuke-sandbox:latest"
+SANDBOX_MEMORY = os.environ.get("NUKE_SANDBOX_MEMORY") or "512m"
+SANDBOX_CPUS = os.environ.get("NUKE_SANDBOX_CPUS") or "2"
+SANDBOX_NETWORK = os.environ.get("NUKE_SANDBOX_NETWORK") or "bridge"  # "none" to cut egress
+SANDBOX_IDLE_TIMEOUT_S = int(os.environ.get("NUKE_SANDBOX_IDLE_TIMEOUT_S") or 1800)
+
 # --- Context Management (AutoCompact) ---
 AUTOCOMPACT_BUFFER_TOKENS = 13_000
 PRE_RUN_TOKEN_THRESHOLD = 20_000
