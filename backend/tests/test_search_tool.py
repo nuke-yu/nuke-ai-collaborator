@@ -44,6 +44,20 @@ class TestSearchArgv(unittest.TestCase):
         argv = _search_argv("-foo", None, ["src/a.py"])
         self.assertEqual(argv[-3:], ["--", "-foo", "src/a.py"])
 
+    def test_modifiers_map_to_rg_flags(self):
+        argv = _search_argv("foo", None, ["."], case_insensitive=True,
+                            whole_word=True, literal=True, context_lines=2)
+        self.assertIn("--ignore-case", argv)
+        self.assertIn("--word-regexp", argv)
+        self.assertIn("--fixed-strings", argv)
+        self.assertIn("--context=2", argv)
+
+    def test_no_modifiers_by_default(self):
+        argv = _search_argv("foo", None, ["."])
+        for flag in ("--ignore-case", "--word-regexp", "--fixed-strings"):
+            self.assertNotIn(flag, argv)
+        self.assertFalse(any(a.startswith("--context") for a in argv))
+
 
 class TestParseRgJson(unittest.TestCase):
     def test_parses_match_events_only(self):
@@ -58,9 +72,18 @@ class TestParseRgJson(unittest.TestCase):
         ])
         out = _parse_rg_json(stream)
         self.assertEqual(len(out), 2)
-        self.assertEqual(out[0], {"path": "src/a.py", "line": 2, "text": "x = foo()"})
+        self.assertEqual(out[0], {"path": "src/a.py", "line": 2, "text": "x = foo()", "match": True})
         # leading "./" is cleaned (mirror OpenCode clean())
-        self.assertEqual(out[1], {"path": "src/a.py", "line": 9, "text": "foo_again"})
+        self.assertEqual(out[1], {"path": "src/a.py", "line": 9, "text": "foo_again", "match": True})
+
+    def test_parses_context_events(self):
+        stream = "\n".join([
+            '{"type":"context","data":{"path":{"text":"a.py"},"lines":{"text":"before\\n"},"line_number":1}}',
+            '{"type":"match","data":{"path":{"text":"a.py"},"lines":{"text":"hit\\n"},"line_number":2}}',
+            '{"type":"context","data":{"path":{"text":"a.py"},"lines":{"text":"after\\n"},"line_number":3}}',
+        ])
+        out = _parse_rg_json(stream)
+        self.assertEqual([(it["line"], it["match"]) for it in out], [(1, False), (2, True), (3, False)])
 
 
 class TestFormatMatches(unittest.TestCase):
@@ -76,8 +99,8 @@ class TestFormatMatches(unittest.TestCase):
             os.utime(root / "old.py", (1_000_000, 1_000_000))
             os.utime(root / "new.py", (2_000_000, 2_000_000))
             matches = [
-                {"path": "old.py", "line": 1, "text": "x"},
-                {"path": "new.py", "line": 1, "text": "y"},
+                {"path": "old.py", "line": 1, "text": "x", "match": True},
+                {"path": "new.py", "line": 1, "text": "y", "match": True},
             ]
             out = _format_matches(matches, root)
             self.assertTrue(out.startswith("Found 2 matches\n"))
@@ -89,7 +112,8 @@ class TestFormatMatches(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
             (root / "f.py").write_text("z\n")
-            matches = [{"path": "f.py", "line": i, "text": "z"} for i in range(_RESULT_LIMIT + 25)]
+            matches = [{"path": "f.py", "line": i, "text": "z", "match": True}
+                       for i in range(_RESULT_LIMIT + 25)]
             out = _format_matches(matches, root)
             self.assertIn(f"Found {_RESULT_LIMIT + 25} matches (showing first {_RESULT_LIMIT})", out)
             self.assertIn(f"showing {_RESULT_LIMIT} of {_RESULT_LIMIT + 25} matches (25 hidden)", out)
@@ -99,10 +123,25 @@ class TestFormatMatches(unittest.TestCase):
             root = Path(d)
             (root / "f.py").write_text("z\n")
             long_text = "a" * (_MAX_LINE_LENGTH + 500)
-            out = _format_matches([{"path": "f.py", "line": 1, "text": long_text}], root)
+            out = _format_matches([{"path": "f.py", "line": 1, "text": long_text, "match": True}], root)
             self.assertIn("a" * 50, out)
             self.assertIn("...", out)
             self.assertNotIn("a" * (_MAX_LINE_LENGTH + 1), out)
+
+    def test_context_lines_rendered_without_label(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / "f.py").write_text("a\n")
+            items = [
+                {"path": "f.py", "line": 1, "text": "before", "match": False},
+                {"path": "f.py", "line": 2, "text": "hit", "match": True},
+                {"path": "f.py", "line": 3, "text": "after", "match": False},
+            ]
+            out = _format_matches(items, root)
+            self.assertIn("Found 1 matches", out)        # context not counted as match
+            self.assertIn("  Line 2: hit", out)          # match line labelled
+            self.assertIn("  1: before", out)            # context line, no 'Line'
+            self.assertIn("  3: after", out)
 
 
 @unittest.skipIf(shutil.which("rg") is None, "ripgrep not installed")
@@ -132,6 +171,26 @@ class TestRunSearchIntegration(unittest.IsolatedAsyncioTestCase):
             out = await _run_search("target", root, "*.py")
             self.assertIn("a.py:", out)
             self.assertNotIn("a.js:", out)
+
+    async def test_literal_matches_regex_special_chars(self):
+        # `list.size(` is invalid regex (unbalanced paren) → regex mode errors;
+        # literal=True must find it.
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / "a.js").write_text("const n = list.size();\n")
+            regex_out = await _run_search("list.size(", root, None)
+            self.assertIn("[搜索错误]", regex_out)            # unbalanced ( → rg error
+            literal_out = await _run_search("list.size(", root, None, literal=True)
+            self.assertIn("a.js:", literal_out)
+            self.assertIn("Line 1:", literal_out)
+
+    async def test_context_lines(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / "a.py").write_text("def f():\n    if cond:\n        return False\n")
+            out = await _run_search("return False", root, None, context_lines=1)
+            self.assertIn("  Line 3: ", out)                 # the match
+            self.assertIn("if cond", out)                    # context line above
 
 
 if __name__ == "__main__":

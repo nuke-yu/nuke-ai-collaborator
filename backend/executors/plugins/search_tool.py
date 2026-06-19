@@ -34,10 +34,11 @@ from executors.plugins.workspace_tools import _resolve_shell_cwd, _sandbox_env
 _MAX_LINE_LENGTH = 2000       # OpenCode MAX_LINE_LENGTH
 _RESULT_LIMIT = 100           # OpenCode `limit`
 _SEARCH_TIMEOUT_S = 30
+_MAX_CONTEXT = 5              # cap context lines so output stays bounded
 
 
 class SearchParams(BaseModel):
-    pattern: str = Field(..., description="The regex pattern to search for in file contents")
+    pattern: str = Field(..., description="搜索模式；默认按正则解析（literal=true 时按字面字符串）")
     path: Optional[str] = Field(
         None,
         description="搜索目录，相对工作区（默认=群组共享工作区根）；可缩小到子目录或单个文件",
@@ -45,24 +46,47 @@ class SearchParams(BaseModel):
     include: Optional[str] = Field(
         None, description='File pattern to include in the search (e.g. "*.js", "*.{ts,tsx}")'
     )
+    case_insensitive: bool = Field(False, description="忽略大小写")
+    whole_word: bool = Field(False, description="全字匹配（只匹配独立单词，不匹配子串）")
+    literal: bool = Field(
+        False,
+        description="把 pattern 当字面字符串而非正则——搜含括号/点等特殊字符的代码（如 list.size()、func(a, b)）时用，避免转义或正则语法报错",
+    )
+    context_lines: int = Field(
+        0, description="每个匹配前后额外输出的上下文行数（0–5，类似 rg -C），省去再调 read_file 看上下文",
+    )
 
 
 SEARCH_TOOL_DEF = ToolDef(
     name="search",
     description=(
-        "快速内容搜索（ripgrep），适配任意规模代码库。按正则匹配文件内容（支持完整正则，"
-        "如 log.*Error、function\\s+\\w+）；用 include 按文件名过滤（如 *.js、*.{ts,tsx}）。"
-        "返回含匹配的 path:line，按修改时间排序。优先用本工具而不是 run_shell 里的 grep。"
-        "需要某符号的真实定义/引用而非文本匹配时，先用本工具定位候选位置。"
+        "快速内容搜索（ripgrep），适配任意规模代码库。默认按正则匹配文件内容（如 log.*Error）；"
+        "搜含特殊字符的字面代码用 literal=true。用 include 按文件名过滤（如 *.js、*.{ts,tsx}），"
+        "case_insensitive/whole_word 调整匹配，context_lines 带出上下文。返回含匹配的 path:line，"
+        "按修改时间排序。优先用本工具而不是 run_shell 里的 grep。需要某符号的真实定义/引用而非"
+        "文本匹配时，先用本工具定位候选位置（再用 code_intel）。"
     ),
     parameters=SearchParams,
     concurrency_safe=True,
 )
 
 
-def _search_argv(pattern: str, include: Optional[str], targets: list[str]) -> list[str]:
-    """Pure: build the rg argv. Mirrors OpenCode searchArgs()."""
+def _search_argv(
+    pattern: str, include: Optional[str], targets: list[str], *,
+    case_insensitive: bool = False, whole_word: bool = False,
+    literal: bool = False, context_lines: int = 0,
+) -> list[str]:
+    """Pure: build the rg argv. Base flags mirror OpenCode searchArgs(); the
+    modifiers (-i/-w/-F/-C) are our additions."""
     args = ["rg", "--no-config", "--json", "--hidden", "--glob=!.git/*", "--no-messages"]
+    if case_insensitive:
+        args.append("--ignore-case")
+    if whole_word:
+        args.append("--word-regexp")
+    if literal:
+        args.append("--fixed-strings")        # treat pattern as a literal string
+    if context_lines > 0:
+        args.append(f"--context={context_lines}")
     if include:
         args.append(f"--glob={include}")
     args += ["--", pattern, *targets]
@@ -77,8 +101,9 @@ def _clean_path(p: str) -> str:
 
 
 def _parse_rg_json(stdout: str) -> list[dict]:
-    """Pure: parse rg --json stream → [{path, line, text}]. Mirrors grep.ts."""
-    matches: list[dict] = []
+    """Pure: parse rg --json stream → [{path, line, text, match}]. `match` is
+    False for context lines (type 'context', present only when -C is used)."""
+    items: list[dict] = []
     for line in stdout.splitlines():
         if not line.strip():
             continue
@@ -86,7 +111,8 @@ def _parse_rg_json(stdout: str) -> list[dict]:
             ev = json.loads(line)
         except ValueError:
             continue
-        if ev.get("type") != "match":
+        etype = ev.get("type")
+        if etype not in ("match", "context"):
             continue
         data = ev.get("data", {})
         path_text = (data.get("path") or {}).get("text")
@@ -94,17 +120,21 @@ def _parse_rg_json(stdout: str) -> list[dict]:
         text = (data.get("lines") or {}).get("text", "")
         if path_text is None or line_no is None:
             continue
-        matches.append({
+        items.append({
             "path": _clean_path(path_text),
             "line": line_no,
             "text": text.rstrip("\n"),
+            "match": etype == "match",
         })
-    return matches
+    return items
 
 
-def _format_matches(matches: list[dict], cwd: Path, limit: int = _RESULT_LIMIT) -> str:
-    """Pure-ish: sort by mtime desc, group by file, cap + truncate. Mirrors grep.ts."""
-    if not matches:
+def _format_matches(items: list[dict], cwd: Path, limit: int = _RESULT_LIMIT) -> str:
+    """Pure-ish: group by file (mtime desc), cap by MATCH count, render. Match
+    lines show 'Line N:'; context lines show 'N:' (no 'Line'). With no context
+    (the default), output is identical to the OpenCode-ported format."""
+    total = sum(1 for it in items if it["match"])
+    if total == 0:
         return "No files found"
 
     def _mtime(rel: str) -> float:
@@ -113,25 +143,39 @@ def _format_matches(matches: list[dict], cwd: Path, limit: int = _RESULT_LIMIT) 
         except OSError:
             return 0.0
 
-    times = {p: _mtime(p) for p in {m["path"] for m in matches}}
-    matches.sort(key=lambda m: times.get(m["path"], 0.0), reverse=True)
+    by_file: dict[str, list[dict]] = {}
+    for it in items:
+        by_file.setdefault(it["path"], []).append(it)     # preserves rg line order
+    order = sorted(by_file, key=_mtime, reverse=True)
 
-    total = len(matches)
     truncated = total > limit
-    final = matches[:limit] if truncated else matches
-
     out = [f"Found {total} matches" + (f" (showing first {limit})" if truncated else "")]
-    current = None
-    for m in final:
-        if current != m["path"]:
-            if current is not None:
-                out.append("")
-            current = m["path"]
-            out.append(f"{m['path']}:")
-        text = m["text"]
-        if len(text) > _MAX_LINE_LENGTH:
-            text = text[:_MAX_LINE_LENGTH] + "..."
-        out.append(f"  Line {m['line']}: {text}")
+    shown = 0
+    first = True
+    for path in order:
+        if shown >= limit:
+            break
+        block, had_match = [], False
+        for it in by_file[path]:
+            if it["match"]:
+                if shown >= limit:
+                    break
+                shown += 1
+                had_match = True
+                prefix = f"  Line {it['line']}: "
+            else:
+                prefix = f"  {it['line']}: "               # context line
+            text = it["text"]
+            if len(text) > _MAX_LINE_LENGTH:
+                text = text[:_MAX_LINE_LENGTH] + "..."
+            block.append(prefix + text)
+        if not had_match:
+            continue
+        if not first:
+            out.append("")
+        first = False
+        out.append(f"{path}:")
+        out.extend(block)
 
     if truncated:
         out.append("")
@@ -142,7 +186,11 @@ def _format_matches(matches: list[dict], cwd: Path, limit: int = _RESULT_LIMIT) 
     return "\n".join(out)
 
 
-async def _run_search(pattern: str, root: Path, include: Optional[str]) -> str:
+async def _run_search(
+    pattern: str, root: Path, include: Optional[str], *,
+    case_insensitive: bool = False, whole_word: bool = False,
+    literal: bool = False, context_lines: int = 0,
+) -> str:
     """Run rg inside the confined root and format like OpenCode's grep tool."""
     # dir → search '.'; single file → search just that file (mirror grep.ts)
     if root.is_file():
@@ -150,7 +198,11 @@ async def _run_search(pattern: str, root: Path, include: Optional[str]) -> str:
     else:
         cwd, targets = root, ["."]
 
-    argv = _search_argv(pattern, include, targets)
+    argv = _search_argv(
+        pattern, include, targets,
+        case_insensitive=case_insensitive, whole_word=whole_word,
+        literal=literal, context_lines=context_lines,
+    )
     try:
         proc = await asyncio.create_subprocess_exec(
             *argv,
@@ -183,7 +235,11 @@ async def _handle_search(
     pattern: str,
     path: Optional[str] = None,
     include: Optional[str] = None,
-    context: dict = None,
+    case_insensitive: bool = False,
+    whole_word: bool = False,
+    literal: bool = False,
+    context_lines: int = 0,
+    context: dict = None,     # NB: tool execution context (bot_id/group_id), not search context lines
 ) -> str:
     ctx = context or {}
     if not pattern:
@@ -195,4 +251,8 @@ async def _handle_search(
     root, err = _resolve_shell_cwd(path or "", ctx.get("bot_id"), ctx.get("group_id"))
     if err:
         return f"[安全拒绝] {err}"
-    return await _run_search(pattern, root, include)
+    return await _run_search(
+        pattern, root, include,
+        case_insensitive=bool(case_insensitive), whole_word=bool(whole_word),
+        literal=bool(literal), context_lines=max(0, min(int(context_lines or 0), _MAX_CONTEXT)),
+    )
