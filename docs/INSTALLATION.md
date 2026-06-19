@@ -8,6 +8,7 @@ This guide covers the complete installation and startup process for Nuke AI Coll
 
 - **Python 3.11+** - Check with `python --version`
 - **Node.js 18+** - Check with `node --version`
+- **ripgrep (`rg`)** - required by the `search` code-search tool (the bots' first-class search). System binary, not a pip package. Check with `rg --version`. macOS: `brew install ripgrep`; Linux: `sudo apt install ripgrep`. Without it `search` returns a "ripgrep not found" error.
 - **8GB+ RAM** recommended (4GB minimum)
 - **Visual C++ Build Tools** (Windows only) - Required for `chromadb` and other packages with native extensions
 
@@ -252,6 +253,13 @@ python3 --version
 pip3 --version
 ```
 
+#### Install ripgrep (required by the `search` tool)
+
+```bash
+brew install ripgrep
+rg --version
+```
+
 ---
 
 ### Linux (Ubuntu/Debian)
@@ -264,6 +272,10 @@ sudo apt install python3.11 python3.11-venv python3-pip
 # Install Node.js 18+
 curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
 sudo apt-get install -y nodejs
+
+# Install ripgrep (required by the `search` tool)
+sudo apt install -y ripgrep
+rg --version
 ```
 
 ---

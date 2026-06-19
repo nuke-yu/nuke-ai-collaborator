@@ -30,6 +30,13 @@ if ! command -v node &> /dev/null; then
 fi
 
 echo "[OK] Python and Node.js are installed."
+
+# ripgrep powers the `search` code tool. Non-fatal: the tool degrades to a clear
+# "ripgrep not found" error, the rest of the app runs fine.
+if ! command -v rg &> /dev/null; then
+    echo "[WARN] ripgrep (rg) not found — the bots' 'search' tool will be unavailable."
+    echo "       macOS: brew install ripgrep   |   Linux: sudo apt install ripgrep"
+fi
 echo ""
 
 # Setup Backend
