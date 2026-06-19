@@ -1,0 +1,21 @@
+# Keep the build context small and never bake local state / secrets into the image.
+**/node_modules
+**/__pycache__
+**/*.pyc
+backend/venv
+backend/.venv
+frontend/dist
+.git
+.gitignore
+
+# secrets & runtime state — provide via env / mounted volumes, not the image
+backend/app_config.json
+**/*.db
+backend/logs
+backend/uploads
+
+# docs / dev cruft
+*.md
+docs
+.vscode
+.idea

@@ -415,3 +415,30 @@ async def websocket_endpoint(websocket: WebSocket, group_id: int, member_id: int
                 await _handle_incoming_message(payload, group_id, member_id, tid)
     except WebSocketDisconnect:
         await _handle_websocket_disconnect(websocket, group_id)
+
+
+# --- Single-container deploy: serve the built frontend SPA if present ---------
+# No-op unless NUKE_FRONTEND_DIST points at a built frontend dir (frontend/dist),
+# so dev (Vite serving the frontend separately) is unaffected. Registered LAST,
+# after every API / WS / health / metrics route, so it never shadows them.
+_FRONTEND_DIST = os.environ.get("NUKE_FRONTEND_DIST")
+if _FRONTEND_DIST and os.path.isdir(_FRONTEND_DIST):
+    from pathlib import Path as _Path
+    from fastapi import HTTPException
+    from fastapi.responses import FileResponse
+
+    _DIST = _Path(_FRONTEND_DIST).resolve()
+    _NON_SPA_PREFIXES = ("api/", "ws/", "health", "metrics", "uploads", "mcp/")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def _serve_spa(full_path: str):
+        # Unknown API-ish paths 404 (don't masquerade as the SPA shell)
+        if full_path.startswith(_NON_SPA_PREFIXES):
+            raise HTTPException(status_code=404)
+        # Serve a real built asset if it exists (guard against path traversal),
+        # otherwise fall back to index.html so client-side routing / deep links work.
+        if full_path:
+            target = (_DIST / full_path).resolve()
+            if target.is_file() and (target == _DIST or _DIST in target.parents):
+                return FileResponse(str(target))
+        return FileResponse(str(_DIST / "index.html"))
