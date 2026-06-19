@@ -162,6 +162,66 @@ class TestOnceRules:
 
 
 # ---------------------------------------------------------------------------
+# force_ask — destructive git must reach a human regardless of standing grants
+# ---------------------------------------------------------------------------
+
+class TestForceAsk:
+    def setup_method(self):
+        engine._once_grants.clear()
+        engine._pending.clear()
+
+    def _asked(self, rs, *, workspace_confined=False, spawn_depth=0):
+        """Run check(force_ask=True); return ('asked'|decision). 'asked' means it
+        reached the prompt (broadcast a request) instead of short-circuiting."""
+        broadcaster = _MockBroadcaster()
+
+        async def run():
+            fut = asyncio.ensure_future(engine.check(
+                "run_shell", {"cmd": "git reset --hard"}, rs, 7, broadcaster, 1,
+                spawn_depth=spawn_depth, workspace_confined=workspace_confined,
+                force_ask=True,
+            ))
+            await asyncio.sleep(0)
+            if broadcaster.sent:
+                engine.resolve(broadcaster.sent[0]["request_id"], approved=False)
+                await fut
+                return "asked"
+            return (await fut)["action"]
+
+        return _run(run())
+
+    def test_confined_does_not_auto_allow_under_force_ask(self):
+        # Without force_ask a confined run_shell auto-allows; with it, must ask.
+        rs = Ruleset(mode="default")
+        assert self._asked(rs, workspace_confined=True) == "asked"
+
+    def test_confined_still_auto_allows_without_force_ask(self):
+        # Regression: the confined fast-path is intact for non-destructive cmds.
+        rs = Ruleset(mode="default")
+        r = _run(engine.check("run_shell", {"cmd": "ls"}, rs, 7, None, 1,
+                              workspace_confined=True))
+        assert r["action"] == "allow"
+
+    def test_scoped_allow_rule_does_not_pre_clear_force_ask(self):
+        # A `git reset *` grant (synthesized from approving a benign reset) must
+        # not silently allow `git reset --hard`.
+        rs = Ruleset(mode="default", rules=[
+            Rule(tool_pattern="run_shell", args_pattern="git reset *", action="allow"),
+        ])
+        assert self._asked(rs) == "asked"
+
+    def test_deny_rule_still_wins_under_force_ask(self):
+        rs = Ruleset(mode="default", rules=[
+            Rule(tool_pattern="run_shell", action="deny"),
+        ])
+        assert self._asked(rs, workspace_confined=True) == "deny"
+
+    def test_subagent_force_ask_denied(self):
+        rs = Ruleset(mode="default")
+        assert self._asked(rs, workspace_confined=True, spawn_depth=1) == "deny"
+
+
+# ---------------------------------------------------------------------------
 # Ruleset — persist_rule path
 # ---------------------------------------------------------------------------
 

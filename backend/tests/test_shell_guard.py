@@ -12,7 +12,11 @@ Validates:
 import asyncio
 import unittest
 
-from executors.plugins.workspace_tools import _check_shell_command, _default_shell_guard
+from executors.plugins.workspace_tools import (
+    _check_shell_command,
+    _default_shell_guard,
+    _is_destructive_git,
+)
 
 
 class TestCheckShellCommand(unittest.TestCase):
@@ -284,6 +288,105 @@ class TestDefaultShellGuard(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIsNotNone(result)
         self.assertTrue(result["block"])
+
+
+class TestDestructiveGit(unittest.TestCase):
+    """_is_destructive_git: the subset routed to HIL approval (not hard-block).
+
+    Destructive = destroys content git never stored (untracked/uncommitted) or
+    rewrites the shared remote / closes the recovery window. Recoverable git ops
+    must NOT trip it (false positives = prompt fatigue).
+    """
+
+    def _yes(self, cmd):
+        hit, reason = _is_destructive_git(cmd)
+        self.assertTrue(hit, f"expected destructive: {cmd!r}")
+        self.assertTrue(reason)
+
+    def _no(self, cmd):
+        hit, _ = _is_destructive_git(cmd)
+        self.assertFalse(hit, f"expected NOT destructive: {cmd!r}")
+
+    # --- destructive (must reach HIL) ---
+    def test_reset_hard(self):
+        self._yes("git reset --hard")
+        self._yes("git reset --hard HEAD~3")
+
+    def test_clean_force_variants(self):
+        self._yes("git clean -f")
+        self._yes("git clean -fd")
+        self._yes("git clean -fdx")
+        self._yes("git clean --force")
+
+    def test_checkout_discard(self):
+        self._yes("git checkout .")
+        self._yes("git checkout -f")
+        self._yes("git checkout -- src/app.py")
+
+    def test_restore_discard(self):
+        self._yes("git restore .")
+        self._yes("git restore --force foo.py")
+
+    def test_push_force(self):
+        self._yes("git push --force")
+        self._yes("git push -f origin main")
+        self._yes("git push --force-with-lease")
+        self._yes("git push --delete origin feature")
+        self._yes("git push origin +main")
+
+    def test_gc_prune_and_reflog_expire(self):
+        self._yes("git gc --prune=now")
+        self._yes("git reflog expire --expire=now --all")
+
+    def test_branch_force_delete(self):
+        self._yes("git branch -D feature")
+        self._yes("git branch --delete --force feature")
+
+    def test_stash_clear_drop(self):
+        self._yes("git stash clear")
+        self._yes("git stash drop")
+
+    def test_history_rewrite_and_ref_delete(self):
+        self._yes("git filter-branch --tree-filter x HEAD")
+        self._yes("git update-ref -d refs/heads/x")
+
+    # --- global options before the subcommand ---
+    def test_git_C_and_c_global_opts(self):
+        self._yes("git -C repo reset --hard")
+        self._yes("git -c user.name=x push --force")
+        self._yes("git --git-dir=/r/.git clean -fd")
+
+    # --- evasion: wrappers, chains, bash -c ---
+    def test_wrapped_and_chained(self):
+        self._yes("sudo git reset --hard")
+        self._yes("cd repo && git clean -fd")
+        self._yes("git status && git reset --hard")
+        self._yes('bash -c "git push --force"')
+
+    # --- recoverable / benign git: must NOT trip ---
+    def test_benign_not_flagged(self):
+        self._no("git status")
+        self._no("git reset")                 # soft/mixed — recoverable
+        self._no("git reset --soft HEAD~1")
+        self._no("git checkout main")         # switch branch
+        self._no("git checkout -b feature")
+        self._no("git commit -m x")
+        self._no("git rm tracked.py")         # committed file — recoverable
+        self._no("git branch -d merged")      # lowercase -d, safe delete
+        self._no("git push")
+        self._no("git push origin main")
+        self._no("git pull")
+        self._no("git restore --staged foo.py")  # only unstages
+        self._no("git gc")
+        self._no("git gc --prune=never")
+        self._no("git stash")
+        self._no("git stash pop")
+
+    # --- not git at all ---
+    def test_non_git_not_flagged(self):
+        self._no("rm -rf build")
+        self._no("npm run build")
+        self._no("echo git reset --hard")     # echo, not git
 
 
 if __name__ == "__main__":

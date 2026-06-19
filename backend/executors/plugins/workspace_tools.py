@@ -22,6 +22,9 @@ from skills import run_skill
 import executors.compact as compact
 import permissions
 from executors.plugins import win_sandbox
+from executors.plugins.shell_backend import (
+    ShellExecRequest, ShellExecResult, ShellBackgroundHandle, ShellExecBackend,
+)
 
 # ---------------------------------------------------------------------------
 # Platform detection
@@ -606,6 +609,111 @@ def _check_shell_command(cmd: str) -> tuple[bool, str]:
     return _check_tokenized(cmd)
 
 
+# --- destructive git detection: route to HIL approval, NOT hard-block ------
+# These git invocations destroy state git itself cannot recover — untracked /
+# uncommitted working-tree content (`reset --hard`, `clean -f`, `checkout .`) —
+# or rewrite shared remote history (`push --force`), or close git's own recovery
+# window (`gc --prune=now`, `reflog expire`). Workspace-path confinement does NOT
+# bound their blast radius: the lost content was never in git's object store, and
+# a force-push escapes the local repo entirely. So unlike _DANGEROUS_PATTERNS
+# (hard-blocked), these are legitimate in context and are routed to human
+# approval (HIL) — see _permission_check_hook / engine.check(force_ask=...).
+#
+# Recoverable git ops are intentionally absent: plain `git rm` of a committed
+# file, `commit`, ordinary `reset` (soft/mixed), `branch -d` of a merged branch.
+# git keeps their objects, so a human can recover them — gating these would only
+# breed prompt-fatigue that trains humans to rubber-stamp.
+
+# git's own global options that take a separate value, skipped to reach the real
+# subcommand: `git -C <dir> reset --hard`, `git -c user.x=y push --force`.
+_GIT_GLOBAL_OPTS_WITH_VALUE = frozenset({
+    "-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path",
+})
+
+
+def _git_subcommand(rest: list[str]) -> tuple[str | None, list[str]]:
+    """From the args following `git`, skip global options and return
+    (subcommand, its_remaining_args). (None, []) if no subcommand is present."""
+    i = 0
+    while i < len(rest):
+        tok = rest[i]
+        if tok in _GIT_GLOBAL_OPTS_WITH_VALUE:
+            i += 2
+            continue
+        if tok.startswith("-"):          # other global flag, e.g. --no-pager
+            i += 1
+            continue
+        return tok, rest[i + 1:]
+    return None, []
+
+
+def _destructive_git_reason(rest: list[str]) -> str | None:
+    """Reason string if the git args (after `git`) are destructive, else None."""
+    sub, args = _git_subcommand(rest)
+    if sub is None:
+        return None
+    aset = set(args)
+
+    def has(*flags: str) -> bool:
+        return any(f in aset for f in flags)
+
+    if sub == "reset" and has("--hard"):
+        return "git reset --hard 会丢弃已跟踪文件的未提交改动（不可恢复）"
+    if sub == "clean" and (has("--force") or any(
+            a.startswith("-") and not a.startswith("--") and "f" in a for a in args)):
+        return "git clean -f 会删除未跟踪文件（git 从未存过，不可恢复）"
+    if sub == "checkout" and (has("-f", "--force") or "." in args or "--" in args):
+        return "git checkout 会丢弃工作树未提交改动"
+    if sub == "restore" and "--staged" not in aset and (
+            has("-f", "--force") or "." in args):
+        return "git restore 会丢弃工作树未提交改动"
+    if sub == "push" and (
+            has("--force", "-f", "--force-with-lease", "--mirror", "--delete", "-d")
+            or any(a.startswith("+") for a in args)):
+        return "git push --force 会重写远端历史（影响每个克隆）"
+    if sub == "gc" and any(
+            a.startswith("--prune=") and a != "--prune=never" for a in args):
+        return "git gc --prune 立即回收悬空对象，关闭恢复窗口"
+    if sub == "reflog" and "expire" in args:
+        return "git reflog expire 清空 reflog，关闭恢复窗口"
+    if sub == "branch" and (has("-D") or (has("--delete") and has("--force"))):
+        return "git branch -D 强制删除分支"
+    if sub == "stash" and ("clear" in args or "drop" in args):
+        return "git stash clear/drop 丢弃暂存内容"
+    if sub == "filter-branch":
+        return "git filter-branch 重写历史"
+    if sub == "update-ref" and has("-d", "--delete"):
+        return "git update-ref -d 删除引用"
+    return None
+
+
+def _is_destructive_git(cmd: str) -> tuple[bool, str]:
+    """(True, reason) if cmd contains a git invocation that destroys
+    unrecoverable state or rewrites remote history; else (False, "").
+
+    Reuses the same shlex tokenization as the danger guard, so wrappers
+    (`sudo git …`), env-assignments, command chains (`cd repo && git …`) and
+    `bash -c "git …"` payloads resolve to the real git invocation."""
+    commands = _iter_simple_commands(cmd)
+    if commands is None:
+        return False, ""
+    for argv in commands:
+        base, rest = _resolved_argv0(argv)
+        if base is None:
+            continue
+        if base in _SHELL_INTERPRETERS:
+            for j, a in enumerate(rest):
+                if a == "-c" and j + 1 < len(rest):
+                    inner, reason = _is_destructive_git(rest[j + 1])
+                    if inner:
+                        return True, reason
+        if base == "git":
+            reason = _destructive_git_reason(rest)
+            if reason:
+                return True, reason
+    return False, ""
+
+
 # --- run_shell sandbox tier 1: env allowlist + cwd confinement -------------
 
 # Only these env vars (and LC_* locale vars) are passed to spawned shells.
@@ -749,11 +857,19 @@ async def _permission_check_hook(name: str, arguments: dict, context: dict) -> d
     # run_shell confined to the group workspace is auto-allowed: the sandbox
     # (_resolve_shell_cwd) already enforces path boundaries, and the danger guard
     # (_default_shell_guard) blocks destructive patterns.  Deny rules still win.
+    #
+    # EXCEPTION — destructive git (force_ask): path confinement does NOT bound the
+    # blast radius of `reset --hard` / `clean -f` / `push --force` (they destroy
+    # content git never stored, or rewrite the shared remote). Those skip both the
+    # confined auto-allow and any scoped/blanket allow rule, and always reach human
+    # approval — deny rules still win, sub-agents still can't prompt (→ denied).
     workspace_confined = False
+    force_ask = False
     if name == "run_shell":
         cwd = (arguments.get("cwd") or "").strip()
         _, err = _resolve_shell_cwd(cwd, context.get("bot_id"), context.get("group_id"))
         workspace_confined = (err is None)
+        force_ask, _ = _is_destructive_git((arguments.get("cmd") or "").strip())
 
     result = await permissions.check(
         tool_name=name,
@@ -764,6 +880,7 @@ async def _permission_check_hook(name: str, arguments: dict, context: dict) -> d
         group_id=context.get("group_id"),
         spawn_depth=context.get("spawn_depth", 0),
         workspace_confined=workspace_confined,
+        force_ask=force_ask,
     )
 
     if result["action"] == "deny":
@@ -953,6 +1070,119 @@ async def _maybe_lock(lock):
             yield
 
 
+# ---------------------------------------------------------------------------
+# run_shell execution backends — see executors/plugins/shell_backend.py.
+# The orchestrator (_handle_run_shell) builds a ShellExecRequest and dispatches
+# to the selected backend; isolation strength = which backend is selected.
+# ---------------------------------------------------------------------------
+
+def _safe_kill(proc) -> None:
+    try:
+        proc.kill()
+    except Exception:
+        pass
+
+
+class LocalShellBackend:
+    """Host subprocess — current behavior, moved verbatim. NO cross-group
+    isolation; the mem-limit ulimit wrap (a local-only mechanism) lives here."""
+
+    async def ensure_ready(self, group_id) -> None:
+        return
+
+    async def healthy(self) -> bool:
+        return True
+
+    async def run_foreground(self, req: ShellExecRequest) -> ShellExecResult:
+        safe_cmd = _wrap_command_with_limits(req.cmd, req.mem_limit_bytes)
+        proc = await asyncio.create_subprocess_exec(
+            *_DEFAULT_SHELL, safe_cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=str(req.work_dir),
+            env=req.env,
+        )
+        if _IS_WINDOWS:
+            win_sandbox.apply_memory_limit(proc.pid, req.mem_limit_bytes)
+        try:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=req.timeout_s)
+        except asyncio.TimeoutError:
+            _safe_kill(proc)
+            return ShellExecResult(None, "", "", timed_out=True)
+        except asyncio.CancelledError:
+            _safe_kill(proc)
+            raise
+        return ShellExecResult(
+            proc.returncode,
+            stdout.decode(errors="replace").strip(),
+            stderr.decode(errors="replace").strip(),
+        )
+
+    async def start_background(self, req: ShellExecRequest) -> ShellBackgroundHandle:
+        safe_cmd = _wrap_command_with_limits(req.cmd, req.mem_limit_bytes)
+        proc = await asyncio.create_subprocess_exec(
+            *_DEFAULT_SHELL, safe_cmd,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+            cwd=str(req.work_dir),
+            env=req.env,
+            start_new_session=True if not _IS_WINDOWS else False,
+        )
+        if _IS_WINDOWS:
+            win_sandbox.apply_memory_limit(proc.pid, req.mem_limit_bytes)
+        return ShellBackgroundHandle(identifier=str(proc.pid))
+
+
+class ContainerShellBackend:
+    """per-group sandbox container (bind-mounts ONLY that group's workspace).
+    Skeleton — filled when the Docker substrate lands. Methods fail loud so a
+    premature `container` mode never silently runs un-isolated."""
+
+    def __init__(self):
+        self._containers: dict = {}            # group_id -> container id
+
+    async def ensure_ready(self, group_id) -> None:
+        raise NotImplementedError("ContainerShellBackend pending Docker substrate")
+
+    async def healthy(self) -> bool:
+        return False                            # → 'auto' falls back to local
+
+    async def run_foreground(self, req: ShellExecRequest) -> ShellExecResult:
+        raise NotImplementedError("ContainerShellBackend pending Docker substrate")
+
+    async def start_background(self, req: ShellExecRequest) -> ShellBackgroundHandle:
+        raise NotImplementedError("ContainerShellBackend pending Docker substrate")
+
+
+_SHELL_BACKEND: ShellExecBackend | None = None
+
+
+async def get_shell_backend() -> ShellExecBackend:
+    """Select (and cache) the run_shell backend per config.SHELL_EXEC_BACKEND.
+
+    'container' is mandatory isolation — if it can't run, run_shell fails closed
+    rather than silently falling back to local (group isolation is inviolable).
+    'auto' is best-effort for dev: container if healthy, else local."""
+    global _SHELL_BACKEND
+    if _SHELL_BACKEND is not None:
+        return _SHELL_BACKEND
+    mode = getattr(config, "SHELL_EXEC_BACKEND", "local")
+    if mode == "container":
+        _SHELL_BACKEND = ContainerShellBackend()
+    elif mode == "auto":
+        candidate = ContainerShellBackend()
+        _SHELL_BACKEND = candidate if await candidate.healthy() else LocalShellBackend()
+    else:
+        _SHELL_BACKEND = LocalShellBackend()
+    return _SHELL_BACKEND
+
+
+def set_shell_backend_for_test(backend: ShellExecBackend | None) -> None:
+    """Override / reset the cached backend (tests only)."""
+    global _SHELL_BACKEND
+    _SHELL_BACKEND = backend
+
+
 async def _handle_run_shell(
     cmd: str, cwd: str = "", timeout: int = 30,
     background: bool = False, context: dict = None,
@@ -967,70 +1197,47 @@ async def _handle_run_shell(
     if restricted_err:
         return f"[安全拒绝] {restricted_err}"
     
-    _max_timeout = min(timeout, 300)
+    timeout_s = min(timeout, 300)
     sandbox_env = _sandbox_env()
-    
+
     cmd, intercepted_port, allocated_port = _intercept_command_ports(cmd, sandbox_env)
-    safe_cmd = _wrap_command_with_limits(cmd, config.SHELL_MEMORY_LIMIT_BYTES)
-    
+    req = ShellExecRequest(
+        cmd=cmd, work_dir=work_dir, env=sandbox_env,
+        group_id=ctx.get("group_id"), bot_id=bot_id,
+        mem_limit_bytes=config.SHELL_MEMORY_LIMIT_BYTES, timeout_s=timeout_s,
+    )
+
+    backend = await get_shell_backend()
     try:
+        await backend.ensure_ready(ctx.get("group_id"))
+
         if background:
-            proc = await asyncio.create_subprocess_exec(
-                *_DEFAULT_SHELL, safe_cmd,
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.DEVNULL,
-                cwd=str(work_dir),
-                env=sandbox_env,
-                start_new_session=True if not _IS_WINDOWS else False
-            )
-            if _IS_WINDOWS:
-                win_sandbox.apply_memory_limit(proc.pid, config.SHELL_MEMORY_LIMIT_BYTES)
-            
-            msg = f"已在后台启动（PID: {proc.pid}），命令：{cmd}"
+            handle = await backend.start_background(req)
+            msg = f"已在后台启动（PID: {handle.identifier}），命令：{cmd}"
             if allocated_port:
                 msg += f"\n[端口分配] 系统已自动分配可用端口: {allocated_port} (注入为环境变量 PORT / APP_PORT)"
             return msg
-            
+
         # 前台执行：若 cwd 落在本群组共享工作树，串行化以防并发撞 .git/index。
         # 后台进程是长驻服务（不持锁），故仅前台分支加锁。
         async with _maybe_lock(_worktree_lock_for(work_dir, ctx.get("group_id"))):
-            proc = await asyncio.create_subprocess_exec(
-                *_DEFAULT_SHELL, safe_cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=str(work_dir),
-                env=sandbox_env,
-            )
-            if _IS_WINDOWS:
-                win_sandbox.apply_memory_limit(proc.pid, config.SHELL_MEMORY_LIMIT_BYTES)
+            result = await backend.run_foreground(req)
 
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=_max_timeout)
+        if result.timed_out:
+            return f"[安全拦截] 命令执行超时（超过 {timeout_s} 秒已被强行终止）"
 
-        out = stdout.decode(errors="replace").strip()
-        err = stderr.decode(errors="replace").strip()
         parts = []
         if intercepted_port:
             parts.append(f"[安全拦截] 已将硬编码端口 {intercepted_port} 替换为动态端口 {allocated_port}")
-
-        parts.append(f"exit_code: {proc.returncode}")
-        if out:
-            parts.append(f"stdout:\n{out}")
-        if err:
-            parts.append(f"stderr:\n{err}")
+        parts.append(f"exit_code: {result.exit_code}")
+        if result.stdout:
+            parts.append(f"stdout:\n{result.stdout}")
+        if result.stderr:
+            parts.append(f"stderr:\n{result.stderr}")
         return "\n".join(parts)
-        
+
     except asyncio.CancelledError:
-        try:
-            proc.kill()
-        except Exception:
-            pass
         raise
-    except asyncio.TimeoutError:
-        try:
-            proc.kill()
-        except Exception:
-            pass
-        return f"[安全拦截] 命令执行超时（超过 {_max_timeout} 秒已被强行终止）"
     except Exception as e:
         return f"[系统错误] {e}"
 

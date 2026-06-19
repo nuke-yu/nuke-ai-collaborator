@@ -163,6 +163,7 @@ async def check(
     group_id: int,
     spawn_depth: int = 0,
     workspace_confined: bool = False,
+    force_ask: bool = False,
 ) -> dict:
     """
     Returns one of:
@@ -174,6 +175,12 @@ async def check(
     operates entirely within the group workspace sandbox.  Deny rules still
     take priority; allow rules still override; but if nothing has decided by
     step 3.5 we skip the ask prompt and auto-allow.
+
+    force_ask: when True this specific call must reach a human (e.g. destructive
+    git, whose blast radius confinement cannot bound). It bypasses persistent
+    allow rules (step 3) and the confined auto-allow (step 3.5), so no standing
+    grant can silently pre-clear it. Deny rules (step 2) still win, an exact
+    once-grant (step 4) is honored, and a sub-agent that cannot prompt is denied.
     """
     # 1. bypassPermissions → allow everything
     if ruleset.mode == "bypassPermissions":
@@ -184,14 +191,18 @@ async def check(
         if rule.action == "deny" and _matches(rule, tool_name, arguments):
             return {"action": "deny", "reason": f"规则拒绝: {rule.tool_pattern}"}
 
-    # 3. persistent allow rules
-    for rule in ruleset.rules:
-        if rule.action == "allow" and _matches(rule, tool_name, arguments):
-            return {"action": "allow"}
+    # 3. persistent allow rules (skipped for force_ask: a standing/scoped grant —
+    #    e.g. a `git reset *` synthesized from approving a benign `git reset` —
+    #    must not silently pre-clear a destructive variant like `git reset --hard`).
+    if not force_ask:
+        for rule in ruleset.rules:
+            if rule.action == "allow" and _matches(rule, tool_name, arguments):
+                return {"action": "allow"}
 
     # 3.5. workspace-confined auto-allow: sandbox already restricts the blast
-    # radius to the group workspace; no human prompt needed.
-    if workspace_confined:
+    # radius to the group workspace; no human prompt needed. force_ask opts out —
+    # confinement does not bound a destructive-git blast radius.
+    if workspace_confined and not force_ask:
         return {"action": "allow"}
 
     # 4. once-grant for this exact (bot, group, tool, args) — consumed on use

@@ -17,6 +17,13 @@ AI_RETRY_MAX = 3
 TOOL_RESULT_MAX_CHARS = 20_000
 SHELL_MEMORY_LIMIT_BYTES = 512 * 1024 * 1024  # 512 MB
 
+# run_shell execution backend (group isolation is enforced by the backend):
+#   "local"     — host subprocess, NO cross-group isolation (dev / Docker not ready)
+#   "container" — per-group sandbox container; unhealthy backend fails closed
+#   "auto"      — container if healthy, else fall back to local (best-effort, dev)
+# Production should set NUKE_SHELL_EXEC_BACKEND=container so isolation is mandatory.
+SHELL_EXEC_BACKEND = (os.environ.get("NUKE_SHELL_EXEC_BACKEND") or "local").lower()
+
 # --- Context Management (AutoCompact) ---
 AUTOCOMPACT_BUFFER_TOKENS = 13_000
 PRE_RUN_TOKEN_THRESHOLD = 20_000
