@@ -1310,10 +1310,12 @@ def register_workspace_tools() -> None:
     for tdef in _WORKSPACE_TOOLS:
         tool_executor.register(tdef, handlers[tdef.name])
 
-    # search (ripgrep) — lazy import breaks the cycle (search_tool imports our
-    # _resolve_shell_cwd / _sandbox_env at its module top).
+    # search (ripgrep) / code_intel (jedi) — lazy imports break the cycle (both
+    # import our _resolve_shell_cwd / _sandbox_env at their module top).
     from executors.plugins import search_tool
     tool_executor.register(search_tool.SEARCH_TOOL_DEF, search_tool._handle_search)
+    from executors.plugins import code_intel_tool
+    tool_executor.register(code_intel_tool.CODE_INTEL_TOOL_DEF, code_intel_tool._handle_code_intel)
 
     # MCP OAuth trigger (McpAuthTool style). Builtin so it stays on the hooked
     # tool_executor path; bots that should authenticate MCP servers must include
