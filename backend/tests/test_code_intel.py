@@ -69,8 +69,11 @@ class TestRouter(unittest.TestCase):
         self.assertIsNotNone(router.get_engine(".pyi"))
 
     def test_unsupported_lang_is_none(self):
-        self.assertIsNone(router.get_engine(".js"))
+        # extensions not in the router at all (.js IS supported now — it routes
+        # to the LSP engine; whether it resolves depends on ts-ls availability,
+        # which is environment-dependent, so don't assert on it here)
         self.assertIsNone(router.get_engine(".txt"))
+        self.assertIsNone(router.get_engine(".go"))
         self.assertIsNone(router.get_engine(""))
 
     def test_supported_extensions(self):
