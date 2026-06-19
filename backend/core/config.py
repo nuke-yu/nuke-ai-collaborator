@@ -33,6 +33,11 @@ SANDBOX_CPUS = os.environ.get("NUKE_SANDBOX_CPUS") or "2"
 SANDBOX_NETWORK = os.environ.get("NUKE_SANDBOX_NETWORK") or "bridge"  # "none" to cut egress
 SANDBOX_IDLE_TIMEOUT_S = int(os.environ.get("NUKE_SANDBOX_IDLE_TIMEOUT_S") or 1800)
 
+# JS/TS code intelligence (code_intel) — typescript-language-server over LSP.
+# Static analysis (does not execute project code), so it runs in the worker like
+# jedi. Absent binary → engine reports unavailable → tool falls back to `search`.
+TS_LANGUAGE_SERVER = os.environ.get("NUKE_TS_LANGUAGE_SERVER") or "typescript-language-server"
+
 # --- Context Management (AutoCompact) ---
 AUTOCOMPACT_BUFFER_TOKENS = 13_000
 PRE_RUN_TOKEN_THRESHOLD = 20_000

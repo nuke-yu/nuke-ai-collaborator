@@ -43,7 +43,8 @@ class CodeIntelParams(BaseModel):
 CODE_INTEL_TOOL_DEF = ToolDef(
     name="code_intel",
     description=(
-        "代码语义解析（目前仅 Python，基于 jedi）。在 file 的 (line, character) 位置上：\n"
+        "代码语义解析（Python 用 jedi；JS/TS 用 typescript-language-server）。"
+        "在 file 的 (line, character) 位置上：\n"
         "- definition: 跳到符号定义处\n"
         "- references: 找该符号的所有真实引用（跨文件、消歧，rename/重构前用，胜过文本匹配）\n"
         "- hover: 该符号的类型/签名/文档\n"
@@ -106,9 +107,14 @@ async def _handle_code_intel(
 
     engine = router.get_engine(abs_file.suffix)
     if engine is None:
+        if abs_file.suffix.lower() in router.supported_extensions():
+            return (
+                f"[引擎未就绪] {abs_file.suffix} 的语义引擎不可用"
+                "（JS/TS 需安装 typescript-language-server）。请用 search 工具按符号名检索。"
+            )
         return (
-            f"[暂不支持] code_intel 目前仅支持 Python（{', '.join(router.supported_extensions())}）。"
-            "其他语言请用 search 工具按符号名检索。"
+            f"[暂不支持] code_intel 不支持 {abs_file.suffix or '该文件类型'}。"
+            f"支持：{', '.join(router.supported_extensions())}。其他类型用 search 工具。"
         )
 
     ws_root, _ = _resolve_shell_cwd("", bot_id, group_id)   # group workspace root

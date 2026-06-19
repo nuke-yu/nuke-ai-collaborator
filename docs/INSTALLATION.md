@@ -9,6 +9,7 @@ This guide covers the complete installation and startup process for Nuke AI Coll
 - **Python 3.11+** - Check with `python --version`
 - **Node.js 18+** - Check with `node --version`
 - **ripgrep (`rg`)** - required by the `search` code-search tool (the bots' first-class search). System binary, not a pip package. Check with `rg --version`. macOS: `brew install ripgrep`; Linux: `sudo apt install ripgrep`. Without it `search` returns a "ripgrep not found" error.
+- **(Optional) typescript-language-server** - enables the `code_intel` tool's JS/TS support (Python works out-of-the-box via the bundled `jedi`). Install: `npm install -g typescript-language-server typescript`. Without it, JS/TS `code_intel` degrades to a hint to use `search`.
 - **8GB+ RAM** recommended (4GB minimum)
 - **Visual C++ Build Tools** (Windows only) - Required for `chromadb` and other packages with native extensions
 
