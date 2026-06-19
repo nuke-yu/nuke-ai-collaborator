@@ -860,7 +860,7 @@ def truncate_tool_result(
     hint = (
         f"\n\n[系统提示] 该工具「{tool_name}」输出超长（{len(tool_result):,} 字符），已被自动截断。\n"
         f"完整输出已保存至当前工作区路径：{rel_path}\n"
-        f"你可以使用 run_shell 结合 grep、head、tail 等命令，或者 read_file 工具并设置 offset/limit 参数局部读取该文件，"
+        f"你可以使用 search 工具按关键词检索该文件，或 read_file 工具并设置 offset/limit 参数局部读取（需要 head/tail 时再用 run_shell），"
         f"请勿尝试直接读取整份日志以节省上下文空间。"
     )
 
@@ -915,7 +915,7 @@ def truncate_user_message(
     hint = (
         f"\n\n[系统提示] 该用户消息内容超长（{len(content):,} 字符），已自动截断以保护上下文。\n"
         f"完整内容已保存至当前工作区路径：{rel_path}\n"
-        f"你可以使用 run_shell 结合 grep 等命令，或者 read_file 工具并设置 offset/limit 参数局部读取该文件。"
+        f"你可以使用 search 工具按关键词检索该文件，或 read_file 工具并设置 offset/limit 参数局部读取该文件。"
     )
 
     preview = f"{head}\n\n[... 已自动截断 {truncated_chars:,} 字符 ...]\n\n{tail}{hint}"

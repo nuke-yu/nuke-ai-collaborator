@@ -8,7 +8,7 @@ from sessions.store import (
 log = logging.getLogger(__name__)
 
 IDEMPOTENT_TOOLS = frozenset({
-    "read_file", "list_dir", "web_search", "think", "grep",
+    "read_file", "list_dir", "web_search", "think", "search",
     "get_memory", "list_files",
 })
 
