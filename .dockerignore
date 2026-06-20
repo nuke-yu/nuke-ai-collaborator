@@ -10,6 +10,9 @@ frontend/dist
 
 # secrets & runtime state — provide via env / mounted volumes, not the image
 backend/app_config.json
+**/.env
+**/.env.*
+!**/.env.example
 **/*.db
 backend/logs
 backend/uploads
