@@ -2,11 +2,11 @@
 # Source of truth is requirements.txt; this is the resolved transitive closure.
 #
 # Regenerate after changing requirements.txt (run from repo root):
-#   docker run --rm -v "$PWD/backend:/b" -w /b python:3.11-slim sh -c \
+#   docker run --rm -v "$PWD/backend:/b" -w /b python:3.13-slim sh -c \
 #     'pip install -q -r requirements.txt && pip freeze --all' \
 #     | grep -viE "^(pip|setuptools|wheel)==" > backend/requirements.lock
 #
-# Must be generated inside linux/python:3.11-slim (the build base) — freezing on
+# Must be generated inside linux/python:3.13-slim (the build base) — freezing on
 # macOS resolves different versions.
 aiohappyeyeballs==2.6.2
 aiohttp==3.14.1

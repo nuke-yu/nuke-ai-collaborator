@@ -32,7 +32,9 @@ RUN --mount=type=cache,target=/root/.npm \
     npm install -g --prefix /opt/node-tools typescript-language-server typescript
 
 # --- stage 2: backend + the served frontend ----------------------------------
-FROM python:3.11-slim
+# Must match the dev Python (3.13): the codebase uses PEP 701 f-strings
+# (backslashes inside f-string expressions) which are a SyntaxError on <3.12.
+FROM python:3.13-slim
 ENV DEBIAN_FRONTEND=noninteractive \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PYTHONUNBUFFERED=1

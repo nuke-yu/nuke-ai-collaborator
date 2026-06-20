@@ -12,9 +12,9 @@
 - `requirements.txt` 是人编辑的源（松散直接依赖）；`requirements.lock` 是全 pin 的传递闭包，**Docker 只读 lock**。
 - **改完 `requirements.txt` 必须重新生成 `requirements.lock`**，否则镜像装的还是旧依赖。从仓库根目录跑（lock 文件头部也有这条命令）：
   ```
-  docker run --rm -v "$PWD/backend:/b" -w /b python:3.11-slim sh -c \
+  docker run --rm -v "$PWD/backend:/b" -w /b python:3.13-slim sh -c \
     'pip install -q -r requirements.txt && pip freeze --all' \
     | grep -viE "^(pip|setuptools|wheel)==" > backend/requirements.lock
   ```
-- lock 必须在 `linux/python:3.11-slim`（构建基础镜像）里生成——在 macOS 上 freeze 会解析出不同版本。
+- lock 必须在 `linux/python:3.13-slim`（构建基础镜像）里生成——在 macOS 上 freeze 会解析出不同版本。
 - 两个文件一起提交。
