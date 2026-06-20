@@ -68,7 +68,7 @@ export default function ToolProgressBlock({ tempId, toolName, args, iteration, d
         <span className="text-gray-500 text-[10px]">iteration {iteration}</span>
 
         {durationSec !== undefined && (
-          <span className="ml-auto text-[10px] text-gray-400">
+          <span className="ml-auto text-[10px] text-gray-200">
             ⏱️ {formatDuration(durationSec)}
           </span>
         )}
