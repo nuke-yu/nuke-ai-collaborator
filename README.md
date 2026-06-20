@@ -118,6 +118,16 @@ Maximum file size: **10 MB**. Images are displayed inline; other files show as d
 Single container (backend + served frontend SPA); per-group execution sandboxes
 are separate containers the app spawns at runtime via the mounted docker socket.
 
+**Fastest path — prebuilt images (no checkout/build):**
+```bash
+sudo mkdir -p /var/lib/nuke-ai-collaborator/workspaces
+sudo chown -R "$(id -u):$(id -g)" /var/lib/nuke-ai-collaborator
+docker compose -f docker-compose.ghcr.yml up -d        # pulls amd64/arm64 from GHCR
+# open http://localhost:8000 → set model API keys via the 🔑 button
+```
+Images are published to GHCR by the `Publish images` workflow on each `v*` tag.
+Build them yourself instead with the steps below.
+
 **Prerequisites (once):**
 ```bash
 # 1. Build the per-group sandbox image (the app spawns it; compose does not)

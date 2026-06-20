@@ -1,0 +1,44 @@
+# Run from PREBUILT images on GHCR — no source checkout / build needed.
+# This is the one-command path for end users.
+#
+#   # 1. data dir (chat.db + workspaces persist here, on the HOST)
+#   sudo mkdir -p /var/lib/nuke-ai-collaborator/workspaces
+#   sudo chown -R "$(id -u):$(id -g)" /var/lib/nuke-ai-collaborator
+#
+#   # 2. pull + run
+#   docker compose -f docker-compose.ghcr.yml up -d
+#   docker compose -f docker-compose.ghcr.yml logs -f app
+#
+#   # 3. open http://localhost:8000  →  set model API keys via the 🔑 button
+#
+# The per-group sandbox image is pulled automatically by the app the first time it
+# spawns a sandbox (it's referenced by its full ghcr.io path below). The default
+# group + BA/Dev/QA bots are seeded on first boot. Keys live in the UI — never bake
+# them into this file; if you must inject via env, uncomment the lines below.
+services:
+  app:
+    image: ghcr.io/nuke-yu/nuke-ai-collaborator:latest
+    container_name: nuke-app
+    pull_policy: always          # always grab the newest :latest on `up`
+    ports:
+      - "8000:8000"
+    environment:
+      NUKE_ENV: production
+      NUKE_DB_PATH: /var/lib/nuke-ai-collaborator/chat.db
+      NUKE_WORKSPACE_ROOT: /var/lib/nuke-ai-collaborator/workspaces
+      # per-group container sandbox (default "local" = no isolation)
+      NUKE_SHELL_EXEC_BACKEND: container
+      NUKE_SANDBOX_IMAGE: ghcr.io/nuke-yu/nuke-sandbox:latest
+      # Optional: inject keys via env (bootstrap_from_env imports them once into
+      # app_config.json). Prefer configuring in the UI instead.
+      # DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      # OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      # ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    volumes:
+      # docker.sock: lets the app dispatch sandbox containers (≈ host root — in
+      # production front it with a socket-proxy allowing only run/exec/stop).
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Same path inside and out: sibling sandbox containers' bind mounts are
+      # resolved by the HOST daemon, so the paths must line up.
+      - /var/lib/nuke-ai-collaborator:/var/lib/nuke-ai-collaborator
+    restart: unless-stopped
