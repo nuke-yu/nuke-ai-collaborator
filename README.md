@@ -113,13 +113,62 @@ Maximum file size: **10 MB**. Images are displayed inline; other files show as d
 
 ---
 
+### Run with Docker
+
+Single container (backend + served frontend SPA); per-group execution sandboxes
+are separate containers the app spawns at runtime via the mounted docker socket.
+
+**Prerequisites (once):**
+```bash
+# 1. Build the per-group sandbox image (the app spawns it; compose does not)
+docker build -t nuke-sandbox:latest deploy/sandbox
+
+# 2. Create the host data dir (chat.db + workspaces persist here)
+sudo mkdir -p /var/lib/nuke-ai-collaborator/workspaces
+sudo chown -R "$(id -u):$(id -g)" /var/lib/nuke-ai-collaborator
+```
+
+**Production (code baked into the image):**
+```bash
+docker compose up -d --build
+docker compose logs -f app          # watch startup
+# open http://localhost:8000  → set model API keys via the 🔑 button
+```
+The default group + 3 bots (BA / Dev / QA) are seeded automatically on first boot.
+
+**Development (live source, no rebuild on each change):**
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+```
+`docker-compose.dev.yml` bind-mounts `./backend` and `./frontend/dist` over the
+image, so edits sync into the container without rebuilding. Per change:
+
+| Changed | Sync command | Rebuild? |
+|---------|--------------|----------|
+| Backend code | `docker compose restart` | No |
+| Frontend (fast, HMR) | `npm --prefix frontend run dev` → open `http://localhost:5173` (vite proxies to :8000) | No |
+| Frontend (in-container) | `npm --prefix frontend run build`, refresh `http://localhost:8000` | No |
+| `requirements.txt` / `package.json` | regenerate `backend/requirements.lock` (see [backend/CLAUDE.md](backend/CLAUDE.md)), then `up -d --build` | Yes |
+
+> Backend uses `restart`, not `uvicorn --reload`: the AI loop / tools / workflow
+> run in worker **subprocesses** the app spawns, which `--reload` would leave on
+> stale code. `restart` re-execs the whole supervisor → worker → collector tree.
+
+The dev file is **explicit** (not an auto-merged `override.yml`), so a plain
+`docker compose up -d` stays pure production and never bind-mounts host source.
+
+---
+
 ### Requirements
 
 | Requirement | Minimum | Recommended |
 |-------------|---------|-------------|
-| Python | 3.11+ | 3.12+ |
+| Python | 3.12+ | 3.13 (Docker image base) |
 | Node.js | 18+ | 20+ LTS |
 | RAM | 4GB | 8GB+ (for local AI models) |
+
+> Python 3.12+ is required (the codebase uses PEP 701 f-strings; 3.11 raises a
+> `SyntaxError` at import).
 
 ---
 
