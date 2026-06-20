@@ -1,0 +1,21 @@
+# Dev overlay — bind-mounts source so code changes don't need an image rebuild.
+# Use EXPLICITLY (not auto-merged, so prod `docker compose up` stays unaffected):
+#
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+#
+# Then per change:
+#   - backend  → docker compose restart        (respawns supervisor+workers w/ new code)
+#   - frontend → npm --prefix frontend run build   (or run `npm run dev` on host, HMR)
+#
+# Why restart (not uvicorn --reload): the AI loop / tools / workflow run in worker
+# SUBPROCESSES the app spawns (runtime.entry); --reload only reloads the main proc,
+# leaving workers on stale code. `restart` re-execs everything off the mounted source.
+services:
+  app:
+    volumes:
+      # Live source — overlays the code baked into the image (deps stay in
+      # site-packages, untouched). Edit locally → `docker compose restart`.
+      - ./backend:/app/backend
+      # Served SPA: container reads host's built dist. Run `npm run build` after
+      # frontend edits, or prefer `npm run dev` on the host (vite proxies → :8000).
+      - ./frontend/dist:/app/frontend/dist
