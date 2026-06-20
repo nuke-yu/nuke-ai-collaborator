@@ -14,26 +14,43 @@ RUN npm ci
 COPY frontend/ ./
 RUN npm run build
 
+# Install the JS/TS language server here, into a self-contained prefix, so the
+# backend stage can reuse node + this without pulling Debian's npm package
+# (which drags in webpack + hundreds of node-* deps and dominates the build).
+RUN npm install -g --prefix /opt/node-tools typescript-language-server typescript
+
 # --- stage 2: backend + the served frontend ----------------------------------
 FROM python:3.11-slim
 ENV DEBIAN_FRONTEND=noninteractive \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PYTHONUNBUFFERED=1
 
-# System deps:
-#   ripgrep    — the `search` tool (runs in the worker)
-#   git        — repo operations
-#   nodejs/npm — runtime for typescript-language-server (JS/TS code_intel)
-#   docker.io  — docker CLI to dispatch per-group sandbox containers (talks to
-#                the mounted /var/run/docker.sock; daemon itself is NOT run here)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        ripgrep git nodejs npm docker.io ca-certificates \
-    && npm install -g typescript-language-server typescript \
-    && rm -rf /var/lib/apt/lists/*
+# System deps (kept minimal — node + the docker CLI are COPYed from images below
+# instead of apt-installed, which is what used to make this layer take ~6min):
+#   ripgrep      — the `search` tool (runs in the worker)
+#   git          — repo operations
+#   libstdc++6   — required by the copied node binary
+#   ca-certificates — TLS roots
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
+        ripgrep git libstdc++6 ca-certificates
+
+# node runtime + the JS/TS language server, reused from the frontend stage.
+COPY --from=frontend /usr/local/bin/node /usr/local/bin/node
+COPY --from=frontend /opt/node-tools /opt/node-tools
+ENV PATH="/opt/node-tools/bin:${PATH}"
+
+# docker CLI only (no daemon) — to dispatch per-group sandbox containers via the
+# mounted /var/run/docker.sock.
+COPY --from=docker:27-cli /usr/local/bin/docker /usr/local/bin/docker
 
 WORKDIR /app/backend
-COPY backend/requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt   # includes jedi
+# Install from the fully-pinned lock (reproducible + no index resolution at build
+# time). requirements.txt stays the human-edited source; regen lock per its header.
+COPY backend/requirements.lock ./
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --no-deps -r requirements.lock   # jedi, chromadb, etc.
 
 COPY backend/ /app/backend/
 COPY --from=frontend /app/frontend/dist /app/frontend/dist
