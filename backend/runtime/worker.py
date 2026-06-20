@@ -280,7 +280,9 @@ class Worker:
                     await self._dispatch(msg)
                 elif t == ipc.protocol.CONFIRM:
                     import core.workflow as wf
-                    await wf.confirm(gid, msg.get("gate_id"))
+                    await wf.confirm(gid, msg.get("gate_id"),
+                                     revise=bool(msg.get("revise", False)),
+                                     note=(msg.get("note") or ""))
                 elif t == ipc.protocol.START_WORKFLOW:
                     from runtime.dispatch import dispatch_start_workflow
                     await dispatch_start_workflow(msg)

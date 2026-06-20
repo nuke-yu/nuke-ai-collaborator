@@ -179,6 +179,64 @@ class TestOrchestratorFlow(unittest.TestCase):
         self.assertTrue(s.done)
         self.assertIsNone(self.orch.get(1))
 
+    def _rd_to_qa_fail_gate(self):
+        """Helper: 走到 QA 失败的 rework 门挂起处，返回 (ba,dev,qa)。"""
+        from core.orchestration.pipeline import build_rd_pipeline
+        ba = {"id": 1, "name": "BA", "avatar_color": "#1", "role": "BA"}
+        dev = {"id": 2, "name": "Dev", "avatar_color": "#2", "role": "Dev"}
+        qa = {"id": 3, "name": "QA", "avatar_color": "#3", "role": "QA"}
+        self.orch.begin(1, build_rd_pipeline(ba, dev, qa))
+        self.orch.observe(1, 1, "需求\n[[BA_DONE]]"); self.orch.confirm(1)   # → Dev
+        self.orch.observe(1, 2, "实现\n[[DEV_DONE]]"); self.orch.confirm(1)  # → QA
+        s = self.orch.observe(1, 3, "AC2 不通过\n[[QA_FAIL]]")               # QA 失败 → rework 门
+        self.assertTrue(s.confirm_gate["gate_id"].endswith("-rework"))
+        return ba, dev, qa
+
+    def test_rework_gate_plain_confirm_rewinds_to_dev(self):
+        """回归：rework 门点「确认」→ 打回 Dev（current=1），无人工意见。"""
+        self._rd_to_qa_fail_gate()
+        s = self.orch.confirm(1)
+        self.assertEqual(s.next_units[0].bot["id"], 2)          # Dev
+        self.assertEqual(self.orch.get(1)["current"], 1)
+        self.assertIn("返工", s.next_units[0].trigger_msg)
+        self.assertNotIn("人工修改意见", s.next_units[0].trigger_msg)
+
+    def test_rework_gate_revise_injects_note_into_dev(self):
+        """rework 门点「修改」并填意见 → 打回 Dev 且 trigger 带【人工修改意见】。"""
+        self._rd_to_qa_fail_gate()
+        s = self.orch.confirm(1, revise=True, note="优先修复登录接口的空指针")
+        self.assertEqual(s.next_units[0].bot["id"], 2)          # 仍打回 Dev
+        self.assertEqual(self.orch.get(1)["current"], 1)
+        self.assertIn("人工修改意见", s.next_units[0].trigger_msg)
+        self.assertIn("空指针", s.next_units[0].trigger_msg)
+
+    def test_completion_gate_revise_redoes_current_stage(self):
+        """完成门点「修改」→ 不推进，原地重做当前阶段并带人工意见。"""
+        from core.orchestration.pipeline import build_rd_pipeline
+        ba = {"id": 1, "name": "BA", "avatar_color": "#1", "role": "BA"}
+        dev = {"id": 2, "name": "Dev", "avatar_color": "#2", "role": "Dev"}
+        qa = {"id": 3, "name": "QA", "avatar_color": "#3", "role": "QA"}
+        self.orch.begin(1, build_rd_pipeline(ba, dev, qa))
+        self.orch.observe(1, 1, "需求\n[[BA_DONE]]"); self.orch.confirm(1)  # → Dev(current=1)
+        self.orch.observe(1, 2, "初版实现\n[[DEV_DONE]]")                    # Dev 完成门
+        s = self.orch.confirm(1, revise=True, note="再补一个单元测试")
+        self.assertEqual(self.orch.get(1)["current"], 1)        # 没推进，仍在 Dev
+        self.assertEqual(s.next_units[0].bot["id"], 2)          # 还是 Dev 自己重做
+        self.assertIn("人工修改意见", s.next_units[0].trigger_msg)
+        self.assertIn("单元测试", s.next_units[0].trigger_msg)
+
+    def test_completion_gate_plain_confirm_still_advances(self):
+        """回归：完成门点「确认」（非修改）仍正常推进到下一阶段。"""
+        from core.orchestration.pipeline import build_rd_pipeline
+        ba = {"id": 1, "name": "BA", "avatar_color": "#1", "role": "BA"}
+        dev = {"id": 2, "name": "Dev", "avatar_color": "#2", "role": "Dev"}
+        qa = {"id": 3, "name": "QA", "avatar_color": "#3", "role": "QA"}
+        self.orch.begin(1, build_rd_pipeline(ba, dev, qa))
+        self.orch.observe(1, 1, "需求\n[[BA_DONE]]")
+        s = self.orch.confirm(1)                                # 普通确认
+        self.assertEqual(s.next_units[0].bot["id"], 2)          # → Dev
+        self.assertEqual(self.orch.get(1)["current"], 1)
+
     def test_dev_stage_instruction_requires_write_file(self):
         """Dev 阶段指令必须强制用 write_file 落盘、禁止把完整源码贴进聊天——否则
         deepseek 倾向把代码灌进消息、工作区里永远没有文件。"""

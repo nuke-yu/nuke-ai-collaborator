@@ -169,6 +169,10 @@
     "readBy": "已读",
     "needsConfirm": "需确认",
     "gateRevising": "已选择修改 —— 直接发消息调整即可",
+    "gateRevised": "已提交修改意见，正在重新执行",
+    "gateRevisePlaceholder": "填写修改意见，将随这一步一起打回给对应 Bot（⌘/Ctrl+Enter 提交）",
+    "gateReviseSubmit": "提交修改",
+    "gateReviseCancel": "取消",
     "fileAttachment": "[文件附件]",
     "workflow": {
       "confirm": "确认",

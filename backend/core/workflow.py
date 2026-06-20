@@ -110,13 +110,17 @@ async def check_and_advance(group_id: int, response: str, bot_id: int = None) ->
     return step.done
 
 
-async def confirm(group_id: int, gate_id: str = None) -> bool:
-    """人在确认门点了「确认」：让编排器推进过门，并施加副作用（交棒给下一个 bot）。"""
+async def confirm(group_id: int, gate_id: str = None, revise: bool = False, note: str = "") -> bool:
+    """人在确认门点了「确认」或「修改」：让编排器过门并施加副作用（交棒给下一个 bot）。
+
+    revise=True 时携带人工 note：rework 门 → 打回 Dev 时附上意见；完成门 → 不推进，
+    打回当前阶段重做并附上意见。
+    """
     from core.recap import clear_recap
     await clear_recap(group_id)
 
     orch = _orch_for(group_id)
-    step = orch.confirm(group_id, gate_id)
+    step = orch.confirm(group_id, gate_id, note=note, revise=revise)
     await apply_step(group_id, orch, step)
     # 把确认门卡片标记为 confirmed（best-effort，逻辑收在 runner，紧挨建卡片处）
     await mark_gate_confirmed(group_id, gate_id)

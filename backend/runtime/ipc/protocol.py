@@ -140,6 +140,11 @@ class PermissionResponseFrame(BaseFrame):
 @dataclass(eq=False)
 class ConfirmFrame(BaseFrame):
     gate_id: str = ""
+    # revise=True → human chose 「修改」 (not plain 确认): carry an optional note
+    # that gets injected into the dispatched stage's trigger. For a rework gate
+    # this augments the rework; for a completion gate it redoes the current stage.
+    revise: bool = False
+    note: str = ""
 
 @register_frame_type(START_WORKFLOW)
 @dataclass(eq=False)

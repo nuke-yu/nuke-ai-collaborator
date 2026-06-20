@@ -23,6 +23,7 @@ export default function MessageList({
   onPin,
   onUnpin,
   onConfirmGate,
+  onReviseGate,
 }) {
   const messages = useChatStore((s) => s.messages)
   const typing = useChatStore((s) => s.typing)
@@ -138,6 +139,7 @@ export default function MessageList({
                 onUnpin={(id) => onUnpin(id)}
                 highlighted={msg.id === highlightedId}
                 onConfirmGate={onConfirmGate}
+                onReviseGate={onReviseGate}
               />
             </div>
           </Fragment>

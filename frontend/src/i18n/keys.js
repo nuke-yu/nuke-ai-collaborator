@@ -169,6 +169,10 @@ export const K = {
     readBy: 'message.readBy',
     needsConfirm: 'message.needsConfirm',
     gateRevising: 'message.gateRevising',
+    gateRevised: 'message.gateRevised',
+    gateRevisePlaceholder: 'message.gateRevisePlaceholder',
+    gateReviseSubmit: 'message.gateReviseSubmit',
+    gateReviseCancel: 'message.gateReviseCancel',
     fileAttachment: 'message.fileAttachment',
     workflow: {
       confirm: 'message.workflow.confirm',

@@ -169,6 +169,10 @@
     "readBy": "Read by",
     "needsConfirm": "Needs confirmation",
     "gateRevising": "Chose to modify — just send a message to adjust",
+    "gateRevised": "Revision note submitted, re-running",
+    "gateRevisePlaceholder": "Describe the change; it's sent back to the relevant bot with this step (Cmd/Ctrl+Enter to submit)",
+    "gateReviseSubmit": "Submit revision",
+    "gateReviseCancel": "Cancel",
     "fileAttachment": "[File attachment]",
     "workflow": {
       "confirm": "Confirm",

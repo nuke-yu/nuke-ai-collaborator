@@ -394,6 +394,7 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
   const isStreaming = messages.some(m => m.streaming)
   const handleAbort = () => sendRaw({ type: 'abort', group_id: activeGroupId })
   const handleConfirmGate = (gateId) => sendRaw({ type: 'confirm', group_id: activeGroupId, gate_id: gateId })
+  const handleReviseGate = (gateId, note) => sendRaw({ type: 'confirm', group_id: activeGroupId, gate_id: gateId, revise: true, note: note || '' })
   const handlePermResponse = (requestId, approved, persistence) => {
     sendRaw({ type: 'permission_response', request_id: requestId, approved, persistence })
     setPermRequest(null)
@@ -736,6 +737,7 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
           onPin={(id) => pinMessage(activeGroupId, id)}
           onUnpin={(id) => unpinMessage(activeGroupId, id)}
           onConfirmGate={handleConfirmGate}
+          onReviseGate={handleReviseGate}
         />
         {isStreaming && (
           <div className="px-4 py-1 flex justify-center">

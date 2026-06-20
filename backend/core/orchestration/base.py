@@ -63,9 +63,12 @@ class Orchestrator(ABC):
     def observe(self, group_id: int, bot_id: int, response: str, signals: list[dict] | None = None) -> OrchestratorStep:
         """某个 bot 跑完一轮，更新内部状态并返回下一步。"""
 
-    def confirm(self, group_id: int, gate_id: str | None = None) -> OrchestratorStep:
-        """人在确认门点了「确认」。若当前正挂在该门上则推进到下一步，否则空步。
-        默认无门语义，返回空步。"""
+    def confirm(self, group_id: int, gate_id: str | None = None,
+                note: str = "", revise: bool = False) -> OrchestratorStep:
+        """人在确认门点了「确认」或「修改」。若当前正挂在该门上则过门，否则空步。
+
+        revise=True 携带 note：rework 门 → 打回目标阶段并附人工意见；完成门 → 不推进，
+        打回当前阶段重做并附人工意见。默认无门语义，返回空步。"""
         return OrchestratorStep()
 
     def end(self, group_id: int) -> None:

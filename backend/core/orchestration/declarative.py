@@ -193,9 +193,11 @@ class DeclarativeOrchestrator(Orchestrator):
         ctx = self._ctx(group_id)
         return stage_handler(ctx.stage).enter(ctx, prev_output)
 
-    def _rewind(self, group_id: int, target_idx: int, prev_output: str = "") -> OrchestratorStep:
+    def _rewind(self, group_id: int, target_idx: int, prev_output: str = "",
+                note: str = "") -> OrchestratorStep:
         """返工：把当前阶段回退到 target_idx（如 QA → Dev）并重新进入。给被回退到的
-        bot 的 trigger 前面加一句【返工】说明，让它知道是按上游报告修复而非从头开发。"""
+        bot 的 trigger 前面加一句【返工】说明，让它知道是按上游报告修复而非从头开发。
+        note 非空 → 人在「修改」门补充了意见，一并拼进 trigger。"""
         s = self._state.get(group_id)
         if not s:
             return OrchestratorStep()
@@ -205,10 +207,32 @@ class DeclarativeOrchestrator(Orchestrator):
         if ctx is None:
             return OrchestratorStep()
         step = stage_handler(ctx.stage).enter(ctx, prev_output)
+        note_block = f"\n\n【人工修改意见】{note.strip()}" if note and note.strip() else ""
         for u in step.next_units:
             u.trigger_msg = (
                 "【返工】QA 测试未通过。请根据上面 QA 的测试报告逐条修复问题，"
-                "完成后重新自测，并按原要求在最后一行输出完成标记。\n\n" + u.trigger_msg
+                "完成后重新自测，并按原要求在最后一行输出完成标记。"
+                + note_block + "\n\n" + u.trigger_msg
+            )
+        return step
+
+    def _redo(self, group_id: int, prev_output: str = "", note: str = "") -> OrchestratorStep:
+        """完成门上人点了「修改」：不推进，原地重做当前阶段，把人工意见拼进 trigger，
+        让在岗 bot 按反馈修订自己的产出（而非交棒下一阶段）。"""
+        s = self._state.get(group_id)
+        if not s:
+            return OrchestratorStep()
+        s.pop("awaiting_confirm", None)  # 离开门但 current 不变
+        ctx = self._ctx(group_id)
+        if ctx is None:
+            return OrchestratorStep()
+        step = stage_handler(ctx.stage).enter(ctx, prev_output)
+        note_block = f"\n\n【人工修改意见】{note.strip()}" if note and note.strip() else ""
+        for u in step.next_units:
+            u.trigger_msg = (
+                "【修订】用户对你这一步的产出有修改要求，请据此修订，"
+                "完成后按原要求在最后一行输出完成标记。"
+                + note_block + "\n\n" + u.trigger_msg
             )
         return step
 
@@ -239,7 +263,8 @@ class DeclarativeOrchestrator(Orchestrator):
             },
         )
 
-    def confirm(self, group_id: int, gate_id: str | None = None) -> OrchestratorStep:
+    def confirm(self, group_id: int, gate_id: str | None = None,
+                note: str = "", revise: bool = False) -> OrchestratorStep:
         s = self._state.get(group_id)
         if not s:
             return OrchestratorStep()
@@ -249,10 +274,15 @@ class DeclarativeOrchestrator(Orchestrator):
         # 防重复 / 防过期：带了 gate_id 就必须对得上当前挂起的门。
         if gate_id is not None and gate_id != pending["gate_id"]:
             return OrchestratorStep()
+        prev_output = pending.get("prev_output", "")
         rework_to = pending.get("rework_to")
+        # rework 门：确认或修改都打回目标阶段；修改额外把人工意见拼进 trigger。
         if rework_to is not None:
-            return self._rewind(group_id, rework_to, prev_output=pending.get("prev_output", ""))
-        return self._advance(group_id, prev_output=pending.get("prev_output", ""))
+            return self._rewind(group_id, rework_to, prev_output=prev_output, note=note)
+        # 完成门：「修改」不推进，原地重做当前阶段并附人工意见；「确认」正常推进。
+        if revise:
+            return self._redo(group_id, prev_output=prev_output, note=note)
+        return self._advance(group_id, prev_output=prev_output)
 
     async def dispatch(self, group_id: int, message: dict, members: list, recent: list) -> OrchestratorStep:
         """DFT-071: Unified dispatch entry point for both workflow and free-form chat."""

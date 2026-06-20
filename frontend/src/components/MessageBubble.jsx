@@ -208,13 +208,14 @@ const stripSentinels = (text) =>
     ? text.replace(/[\[【]{1,2}\s*[A-Za-z_]*_DONE\s*[\]】]{1,2}/g, '').replace(/\n{3,}/g, '\n\n').trim()
     : text
 
-function MessageBubble({ msg, isTyping, currentMemberId, members = [], readMap = {}, onReply, reactions = {}, onReact, isPinned, onPin, onUnpin, highlighted = false, onConfirmGate }) {
+function MessageBubble({ msg, isTyping, currentMemberId, members = [], readMap = {}, onReply, reactions = {}, onReact, isPinned, onPin, onUnpin, highlighted = false, onConfirmGate, onReviseGate }) {
   const { t, i18n } = useTranslation()
   const [editing, setEditing] = useState(false)
   const [editText, setEditText] = useState(msg.content)
   const [lightboxSrc, setLightboxSrc] = useState(null)
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
-  const [gateState, setGateState] = useState(null)  // null | 'confirmed' | 'revising'
+  const [gateState, setGateState] = useState(null)  // null | 'confirmed' | 'revising' | 'revised'
+  const [reviseNote, setReviseNote] = useState('')
   const editRef = useRef(null)
   const isOwn = msg.member_id === currentMemberId
   const closeEmojiPicker = useCallback(() => setShowEmojiPicker(false), [])
@@ -286,8 +287,36 @@ function MessageBubble({ msg, isTyping, currentMemberId, members = [], readMap =
             <div className="text-sm text-gray-200 mb-2">{msg.content}</div>
             {status === 'confirmed' ? (
               <div className="text-sm text-green-400">✅ {t(K.message.workflow.confirm)}</div>
+            ) : status === 'revised' ? (
+              <div className="text-sm text-amber-400">✏️ {t(K.message.gateRevised)}</div>
             ) : status === 'revising' ? (
-              <div className="text-sm text-gray-400">✏️ {t(K.message.gateRevising)}</div>
+              <div className="flex flex-col gap-2">
+                <textarea
+                  autoFocus
+                  value={reviseNote}
+                  onChange={e => setReviseNote(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && reviseNote.trim()) {
+                      onReviseGate?.(msg.meta.gate_id, reviseNote.trim()); setGateState('revised')
+                    }
+                    if (e.key === 'Escape') { setGateState(null); setReviseNote('') }
+                  }}
+                  placeholder={t(K.message.gateRevisePlaceholder)}
+                  rows={3}
+                  className="w-72 max-w-full text-sm rounded-lg bg-gray-900/70 border border-gray-600 text-gray-200 px-2 py-1.5 focus:outline-none focus:border-indigo-500 resize-y"
+                />
+                <div className="flex items-center gap-2">
+                  <button
+                    disabled={!reviseNote.trim()}
+                    onClick={() => { onReviseGate?.(msg.meta.gate_id, reviseNote.trim()); setGateState('revised') }}
+                    className="px-3 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors"
+                  >➤ {t(K.message.gateReviseSubmit)}</button>
+                  <button
+                    onClick={() => { setGateState(null); setReviseNote('') }}
+                    className="px-3 py-1 rounded-lg border border-gray-600 text-gray-300 hover:bg-gray-700 text-sm transition-colors"
+                  >{t(K.message.gateReviseCancel)}</button>
+                </div>
+              </div>
             ) : (
               <div className="flex items-center gap-2">
                 <button
