@@ -76,4 +76,8 @@ ENV NUKE_FRONTEND_DIST=/app/frontend/dist \
     PORT=8000
 EXPOSE 8000
 
-CMD ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Seed the default group on first boot (idempotent: skips if any group exists),
+# then hand off to uvicorn as PID 1. Seed is best-effort so a seed hiccup can't
+# brick startup. Without this a fresh DB has no group and login 500s on the
+# hardcoded POST /api/groups/1/members.
+CMD ["sh", "-c", "python -m seed || echo '[entrypoint] seed skipped/failed'; exec python -m uvicorn main:app --host 0.0.0.0 --port 8000"]
