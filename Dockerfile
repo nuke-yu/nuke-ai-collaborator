@@ -9,15 +9,27 @@
 # --- stage 1: build the frontend → /app/frontend/dist ------------------------
 FROM node:20-slim AS frontend
 WORKDIR /app/frontend
+
+# Harden npm against flaky networks (ERR_SOCKET_TIMEOUT etc.): more retries with
+# longer backoff and a generous socket timeout. Set a registry env override knob
+# too — pass --build-arg NPM_REGISTRY=<mirror> on slow/proxied hosts.
+ARG NPM_REGISTRY=https://registry.npmjs.org/
+RUN npm config set registry "$NPM_REGISTRY" \
+    && npm config set fetch-retries 5 \
+    && npm config set fetch-retry-mintimeout 20000 \
+    && npm config set fetch-retry-maxtimeout 120000 \
+    && npm config set fetch-timeout 600000
+
 COPY frontend/package.json frontend/package-lock.json ./
-RUN npm ci
+RUN --mount=type=cache,target=/root/.npm npm ci
 COPY frontend/ ./
 RUN npm run build
 
 # Install the JS/TS language server here, into a self-contained prefix, so the
 # backend stage can reuse node + this without pulling Debian's npm package
 # (which drags in webpack + hundreds of node-* deps and dominates the build).
-RUN npm install -g --prefix /opt/node-tools typescript-language-server typescript
+RUN --mount=type=cache,target=/root/.npm \
+    npm install -g --prefix /opt/node-tools typescript-language-server typescript
 
 # --- stage 2: backend + the served frontend ----------------------------------
 FROM python:3.11-slim
