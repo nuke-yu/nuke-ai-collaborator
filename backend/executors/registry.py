@@ -1,5 +1,6 @@
 import importlib.util
 import logging
+import sys
 from pathlib import Path
 
 from executors.base import BotExecutor
@@ -14,9 +15,15 @@ PLUGIN_DIR = Path(__file__).parent / "plugins"
 def _load_file(path: Path):
     spec = importlib.util.spec_from_file_location(path.stem, path)
     module = importlib.util.module_from_spec(spec)
+    # Register in sys.modules BEFORE exec so module-level introspection that
+    # resolves `cls.__module__` works — notably @dataclass's KW_ONLY check does
+    # `sys.modules.get(cls.__module__).__dict__`, which crashes if the module
+    # isn't registered (esp. with `from __future__ import annotations`).
+    sys.modules[spec.name] = module
     try:
         spec.loader.exec_module(module)
     except Exception as e:
+        sys.modules.pop(spec.name, None)
         _failures[path.name] = f"{type(e).__name__}: {e}"
         logger.error(f"Plugin load failed [{path.name}]: {e}", exc_info=True)
         return
