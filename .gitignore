@@ -25,6 +25,9 @@ backend/test_workspaces/
 backend/test_ws_*/
 
 # API Keys & config
+.env
+.env.*
+!.env.example
 backend/.env
 backend/app_config.json
 
