@@ -284,6 +284,22 @@ export default function WorkspacePanel({ bot, groupId, onClose }) {
                       {t(K.workspace.history)}
                     </button>
                   )}
+                  {/* Open a shared HTML file rendered in a new browser tab. Preview
+                      self-auths via the JWT in the URL path (new tabs can't send
+                      Authorization headers); relative assets resolve under the same
+                      token-prefixed path. */}
+                  {selected && isSharedFile(selected) && selected.toLowerCase().endsWith('.html') && (
+                    <button
+                      onClick={() => {
+                        const token = localStorage.getItem('token') || ''
+                        window.open(`/api/groups/${groupId}/workspace/preview/${token}/${encodeURI(selected)}`, '_blank')
+                      }}
+                      className="text-xs px-2 py-1 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white transition-colors"
+                      title="在浏览器新标签打开渲染后的页面"
+                    >
+                      🌐 在浏览器打开
+                    </button>
+                  )}
                   {selected && isSharedFile(selected) && (
                     <span className="text-xs text-gray-400">{t(K.workspace.sharedZoneReadonly)}</span>
                   )}

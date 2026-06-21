@@ -1,6 +1,8 @@
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import FileResponse
 import asyncio
 from pathlib import Path
+from core.auth import verify_token
 from db import get_db, get_member
 from workspace import (
     list_workspace_tree, read_file, write_file, make_dir, delete_path, bot_workspace, init_bot_workspace,
@@ -14,6 +16,10 @@ from skills import (
 from ai.client import call_ai_once, AIError
 
 router = APIRouter()
+# Preview is a SEPARATE router with NO router-level auth dependency: a new browser
+# tab can't send an Authorization header, so this endpoint self-authenticates via
+# the JWT carried in the URL path. main.py includes it without get_current_user.
+preview_router = APIRouter()
 
 
 @router.get("/api/members/{member_id}/workspace")
@@ -211,6 +217,35 @@ async def reject_skill(member_id: int, skill_name: str):
     if result.startswith("["):
         raise HTTPException(404, result)
     return {"ok": True, "message": result}
+
+
+def _resolve_preview_path(group_id: int, file_path: str) -> Path | None:
+    """Resolve a preview request to a real file inside the group's shared
+    workspace, or None if it escapes (path-traversal guard)."""
+    root = group_workspace(group_id).resolve()
+    target = (root / file_path).resolve()
+    if not target.is_relative_to(root):
+        return None
+    return target
+
+
+@preview_router.get("/api/groups/{group_id}/workspace/preview/{token}/{file_path:path}")
+async def preview_workspace_file(group_id: int, token: str, file_path: str):
+    """Serve a workspace file rendered in the browser (real Content-Type), so an
+    HTML project can be opened/played directly. Auth is the JWT carried in the
+    path prefix (a new browser tab can't send an Authorization header, and a
+    path-prefix token survives the page's relative asset requests, e.g.
+    ./style.css → preview/<token>/.../style.css). Path is sandboxed to the
+    group's shared workspace. Per DFT-082 we only check token validity, not a
+    strict per-user membership match."""
+    if not verify_token(token):
+        raise HTTPException(401, "invalid or expired token")
+    target = await asyncio.to_thread(_resolve_preview_path, group_id, file_path)
+    if target is None:
+        raise HTTPException(403, "path escapes workspace")
+    if not target.is_file():
+        raise HTTPException(404, "file not found")
+    return FileResponse(str(target))  # media type inferred from extension
 
 
 @router.get("/api/groups/{group_id}/workspace")

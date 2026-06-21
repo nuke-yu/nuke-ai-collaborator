@@ -27,7 +27,7 @@ from api.messages import router as message_router, UPLOAD_DIR
 from api.groups import router as group_router
 from api.templates import router as template_router
 from api.workflow import router as workflow_router
-from api.workspace import router as workspace_router
+from api.workspace import router as workspace_router, preview_router as workspace_preview_router
 from api.sessions import router as sessions_router
 from api.auth import router as auth_router
 from api.config import router as config_router
@@ -115,6 +115,9 @@ app.include_router(group_router, dependencies=[Depends(auth.get_current_user)])
 app.include_router(template_router, dependencies=[Depends(auth.get_current_user)])
 app.include_router(workflow_router, dependencies=[Depends(auth.get_current_user)])
 app.include_router(workspace_router, dependencies=[Depends(auth.get_current_user)])
+# Preview self-authenticates via the JWT in its URL path (no header), so it must
+# NOT carry the router-level get_current_user dependency.
+app.include_router(workspace_preview_router)
 app.include_router(sessions_router, dependencies=[Depends(auth.get_current_user)])
 app.include_router(permissions_router, dependencies=[Depends(auth.get_current_user)])
 app.include_router(config_router, dependencies=[Depends(auth.get_current_user)])
