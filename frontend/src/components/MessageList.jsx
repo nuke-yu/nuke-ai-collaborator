@@ -110,6 +110,8 @@ export default function MessageList({
             {msg.thought_id && thoughtBlocks[msg.thought_id] && (
               <ThinkingSection blocks={thoughtBlocks[msg.thought_id]} streaming={msg.streaming} />
             )}
+            {/* 暂时隐藏聊天窗里的 run 工具调用命令 + iteration 显示（仅保留上方 Thinking）。
+                代码保留备用，需要恢复时删除本注释包裹即可。
             {msg.temp_id && toolProgressBlocks && Object.entries(toolProgressBlocks)
               .filter(([key]) => key.startsWith(`${msg.temp_id}-`))
               .map(([key, tool]) => (
@@ -125,6 +127,7 @@ export default function MessageList({
                   />
                 </div>
               ))}
+            */}
             <div data-msg-id={msg.id}>
               <MessageBubble
                 msg={msg}
