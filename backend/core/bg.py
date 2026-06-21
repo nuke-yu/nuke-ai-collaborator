@@ -19,6 +19,21 @@ _bg_tasks: set[asyncio.Task] = set()
 # group_id -> 该群下可被 abort 取消的 task 集合（DFT-027）
 _group_tasks: dict[int, set[asyncio.Task]] = {}
 
+# group_id -> 该群的"单 run 串行锁"。每个群组被 pin 在单一 worker 进程里，所以进程内
+# 一把 per-group asyncio.Lock 就足以让同群的 bot run 串行（FIFO），避免连发消息时
+# 多个 run 并发互踩、输出交错、回复丢失。不同群组各自一把锁，互不阻塞。
+_group_run_locks: dict[int, asyncio.Lock] = {}
+
+
+def group_run_lock(group_id: int) -> asyncio.Lock:
+    """返回某个群组的串行锁（按需懒创建）。run_unit 在执行前 `async with` 它，
+    使同群的 run 一次只跑一个；排队的 run 轮到自己时再加载最新历史。"""
+    lock = _group_run_locks.get(group_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _group_run_locks[group_id] = lock
+    return lock
+
 
 def _log_exception(task: asyncio.Task) -> None:
     if task.cancelled():

@@ -26,6 +26,23 @@ _SYSTEM_SENDER = {"id": 0, "name": "系统调度器", "type": "system", "avatar_
 _MESSAGE_FIELDS = {f.name for f in dataclasses.fields(Message)}
 
 
+def _coalesce_should_abort(sender: dict, next_units: list) -> bool:
+    """Coalesce-latest (B): should a new message abort the group's in-progress run?
+
+    Yes only when a HUMAN sends a free-form message — so a rapid follow-up makes
+    the bot answer the latest intent instead of stacking replies. We never tear
+    down an active workflow stage (is_workflow units) and never let bot/system
+    messages interrupt a run.
+    """
+    if not next_units:
+        return False
+    if (sender or {}).get("type") != "human":
+        return False
+    if any(getattr(u, "is_workflow", False) for u in next_units):
+        return False
+    return True
+
+
 async def dispatch_user_message(msg: dict) -> None:
     gid = msg["group_id"]
     sender_id = msg.get("member_id")
@@ -93,6 +110,13 @@ async def dispatch_user_message(msg: dict) -> None:
             unit.prompt_suffix = (unit.prompt_suffix or "") + lang_hint
 
     if step.next_units:
+        # B (coalesce-latest): a human free-form follow-up aborts the group's
+        # in-progress run first, so the bot answers the LATEST message instead of
+        # running overlapping/stacked replies. The per-group run lock (A) then
+        # sequences the clean handoff: the cancelled run releases the lock before
+        # the new run acquires it and reloads fresh history (incl. this message).
+        if _coalesce_should_abort(sender, step.next_units):
+            bg.abort_group(gid)
         # Side-effects (broadcast typing, AI run, etc.) are handled by the runner
         bg.spawn_group(gid, wf.apply(gid, step))
 

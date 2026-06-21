@@ -119,6 +119,17 @@ async def apply_step(group_id: int, orch, step) -> None:
 
 
 async def run_unit(group_id: int, unit, orch) -> None:
+    """同群 run 串行入口：每群一把锁，一次只跑一个 run，避免连发消息时多个 run
+    并发互踩、输出交错、回复丢失。排队的 run 轮到自己时，_run_unit_body 会重新
+    加载最新历史（含上一个 run 的产出）。不同群组各自一把锁，互不阻塞。
+
+    apply_step → spawn_group(run_unit) 的工作流链不会死锁：spawn_group 是
+    fire-and-forget，外层 run 在派发下一单元后即退出释放锁，下一个 run 再获取。"""
+    async with bg.group_run_lock(group_id):
+        await _run_unit_body(group_id, unit, orch)
+
+
+async def _run_unit_body(group_id: int, unit, orch) -> None:
     """跑一个工作单元：通过 executor 执行，再把产出交回编排层。"""
     await asyncio.sleep(0.5)
     # CELL-04: members live in the CENTRAL db; messages live in the bound GROUP db.
