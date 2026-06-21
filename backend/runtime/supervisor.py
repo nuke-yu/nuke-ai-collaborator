@@ -303,6 +303,13 @@ class Supervisor:
             return False
 
 
+    def _default_worker_for(self, group_id: int) -> str:
+        """Deterministic, stateless spread for an unassigned group. Same group_id
+        always maps to the same worker, so no DB write is needed and it survives
+        restarts. num_workers≤0 (unconfigured/single-worker) collapses to w0."""
+        n = self._num_workers if self._num_workers and self._num_workers > 0 else 1
+        return f"w{group_id % n}"
+
     async def _default_route(self, group_id: int) -> str:
         import time
         cached = self._routing_cache.get(group_id)
@@ -310,10 +317,14 @@ class Supervisor:
             wid, expire_at = cached
             if time.time() < expire_at:
                 return wid
-        
+
         async with db.global_db() as cdb:
             wid = await queries.get_group_assigned_worker(cdb, group_id)
-        
+
+        # Unassigned (NULL / no row) → spread by modulo instead of piling on w0.
+        if not wid:
+            wid = self._default_worker_for(group_id)
+
         # M-6: Cache for 60 seconds to allow for external DB updates
         self._routing_cache[group_id] = (wid, time.time() + 60.0)
         return wid

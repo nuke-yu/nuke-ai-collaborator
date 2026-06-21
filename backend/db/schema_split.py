@@ -48,7 +48,11 @@ _CENTRAL_DDL = [
         name         TEXT NOT NULL,
         announcement TEXT DEFAULT NULL,
         created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        assigned_worker_id TEXT DEFAULT 'w0',
+        -- NULL = unassigned → routed by deterministic modulo spread (group_id %
+        -- num_workers). A non-NULL value is an explicit pin (reassign_group /
+        -- create-time assignment). Default must NOT be 'w0' or every new group
+        -- would pile onto worker w0 (the hotspot bug).
+        assigned_worker_id TEXT DEFAULT NULL,
         away_summary TEXT DEFAULT NULL
     )""",
     """CREATE TABLE IF NOT EXISTS members (

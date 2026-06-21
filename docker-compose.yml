@@ -25,11 +25,16 @@ services:
     image: nuke-ai-collaborator:latest
     container_name: nuke-app
     ports:
-      - "8000:8000"
+      # Host 8080 → container 8000. Kept off 8000 so the Docker deploy stack stays
+      # physically separate from a local dev backend (uvicorn on 127.0.0.1:8000).
+      - "8080:8000"
     environment:
       NUKE_ENV: production
       NUKE_DB_PATH: /var/lib/nuke-ai-collaborator/chat.db
       NUKE_WORKSPACE_ROOT: /var/lib/nuke-ai-collaborator/workspaces
+      # Worker processes serving group shards. Default 4. Set ≈ host CPU cores.
+      # NOTE: only helps if groups are spread across workers (see group routing).
+      NUKE_WORKERS: 6
       # enable the per-group container sandbox (default is "local" = no isolation)
       NUKE_SHELL_EXEC_BACKEND: container
       NUKE_SANDBOX_IMAGE: nuke-sandbox:latest

@@ -65,7 +65,12 @@ async def get_all_groups():
 @router.post("/api/groups")
 async def create_group(req: CreateGroupRequest):
     async with write_connect() as db:
-        async with db.execute("INSERT INTO groups (name) VALUES (?)", (req.name,)) as cur:
+        # Explicit NULL assigned_worker_id (don't inherit the legacy DEFAULT 'w0'
+        # on older DBs) so the Supervisor spreads the group by modulo instead of
+        # piling every new group onto worker w0.
+        async with db.execute(
+            "INSERT INTO groups (name, assigned_worker_id) VALUES (?, NULL)", (req.name,)
+        ) as cur:
             group_id = cur.lastrowid
         await db.commit()
     await init_group_workspace(group_id, req.name)

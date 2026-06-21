@@ -336,10 +336,13 @@ async def get_pinned_messages(db, group_id: int):
     return [_row_to_msg(r) for r in rows]
 
 
-async def get_group_assigned_worker(db, group_id: int) -> str:
+async def get_group_assigned_worker(db, group_id: int) -> str | None:
+    """Explicit worker pin for a group, or None if unassigned (NULL / no row).
+    None lets the caller (Supervisor._default_route) pick a worker by modulo
+    spread instead of hardcoding w0."""
     async with db.execute("SELECT assigned_worker_id FROM groups WHERE id = ?", (group_id,)) as cur:
         row = await cur.fetchone()
-        return row[0] if row else 'w0'
+        return row[0] if row else None
 
 
 async def increment_unread(db, group_id: int, member_id: int, delta: int = 1):

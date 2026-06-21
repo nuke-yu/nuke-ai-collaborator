@@ -26,6 +26,9 @@ services:
       NUKE_ENV: production
       NUKE_DB_PATH: /var/lib/nuke-ai-collaborator/chat.db
       NUKE_WORKSPACE_ROOT: /var/lib/nuke-ai-collaborator/workspaces
+      # Worker processes serving group shards. Default 4. Set ≈ host CPU cores.
+      # NOTE: only helps if groups are spread across workers (see group routing).
+      NUKE_WORKERS: 6
       # per-group container sandbox (default "local" = no isolation)
       NUKE_SHELL_EXEC_BACKEND: container
       NUKE_SANDBOX_IMAGE: ghcr.io/nuke-yu/nuke-sandbox:latest

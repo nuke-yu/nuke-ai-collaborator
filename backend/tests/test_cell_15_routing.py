@@ -72,9 +72,33 @@ class TestCell15Routing(unittest.IsolatedAsyncioTestCase):
 
     async def test_route_fallback_to_w0(self):
         sup = Supervisor("dummy_addr")
-        # Non-existent group should fallback to w0
+        # Non-existent group should fallback to w0 (num_workers unset → single worker)
         wid = await sup._default_route(999)
         self.assertEqual(wid, "w0")
+
+    async def test_unassigned_group_spreads_across_workers(self):
+        # A group with NULL assigned_worker_id must be spread deterministically by
+        # id across the configured workers, NOT pile onto w0 (the hotspot bug).
+        async with db.write_connect() as c:
+            await c.execute("INSERT INTO groups (id, name) VALUES (?, ?)", (10, "G10"))
+            await c.execute("INSERT INTO groups (id, name) VALUES (?, ?)", (11, "G11"))
+            await c.execute("INSERT INTO groups (id, name) VALUES (?, ?)", (12, "G12"))
+            await c.commit()
+        sup = Supervisor("dummy_addr", num_workers=4)
+        self.assertEqual(await sup._default_route(10), "w2")   # 10 % 4
+        self.assertEqual(await sup._default_route(11), "w3")   # 11 % 4
+        self.assertEqual(await sup._default_route(12), "w0")   # 12 % 4
+
+    async def test_unassigned_nonexistent_group_spreads_too(self):
+        # Even a group with no DB row should spread by id (not hardcoded w0).
+        sup = Supervisor("dummy_addr", num_workers=4)
+        self.assertEqual(await sup._default_route(13), "w1")   # 13 % 4
+
+    async def test_explicit_assignment_overrides_modulo(self):
+        # An explicit assigned_worker_id always wins over the modulo fallback.
+        sup = Supervisor("dummy_addr", num_workers=4)
+        wid = await sup._default_route(7)   # group 7 → "w_seven" from setUp
+        self.assertEqual(wid, "w_seven")
 
     async def test_send_to_worker_integration(self):
         # Test that send_to_worker correctly uses the async route
