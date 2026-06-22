@@ -4,6 +4,63 @@ from skills import list_skills_all, load_always_skills, filter_skills_by_context
 from skills.traits import load_traits
 from executors.base import build_group_section
 
+I18N_PROMPTS = {
+    "zh": {
+        "default_personality": "你是{name}，{role}。",
+        "group_info_header": "【群组信息】",
+        "env_header": "【运行环境】",
+        "path_sep_header": "路径分隔符",
+        "shell_syntax_rule": "使用 run_shell 执行命令时请使用适合当前 OS 的语法。",
+        "skills_rules_header": "【自学技能规则】",
+        "skills_rules_body": "当你发现可复用规律或用户说「记住这个做法」时，用 write_file 将技能写入 `skills/learned/draft/<skill-name>.md`，系统会自动请求用户审批。禁止直接写入 `skills/learned/active/`。",
+    },
+    "en": {
+        "default_personality": "You are {name}, {role}.",
+        "group_info_header": "[Group Information]",
+        "env_header": "[Execution Environment]",
+        "path_sep_header": "Path Separator",
+        "shell_syntax_rule": "When executing commands using run_shell, please use syntax suitable for the current OS.",
+        "skills_rules_header": "[Self-Learned Skill Rules]",
+        "skills_rules_body": "When you find a reusable pattern or the user says 'remember this practice', use write_file to write the skill into `skills/learned/draft/<skill-name>.md`. The system will automatically request user approval. Direct writes to `skills/learned/active/` are forbidden.",
+        "lang_hint": "\n\n[LANGUAGE: The user's interface language is English. Please think and respond ENTIRELY in English. Do not use Chinese.]"
+    }
+}
+
+
+def build_system_prompt_base(
+    bot: dict,
+    ctx,
+    memory: str,
+    always_section: str,
+    lang: str
+) -> str:
+    """Builds the base system prompt with localized strings and structure based on language."""
+    L = I18N_PROMPTS.get(lang, I18N_PROMPTS["zh"])
+    
+    base = _with_personality(
+        bot["system_prompt"] or L["default_personality"].format(name=bot['name'], role=bot.get('role', '')), bot
+    )
+    group_section = build_group_section(ctx)
+    bot_traits = bot.get("traits", [])
+    traits_section = load_traits(bot_traits)
+    
+    os_info = "Windows (PowerShell)" if _IS_WINDOWS else f"{sys.platform} (shell: /bin/sh)"
+    
+    system_prompt_base = (
+        base
+        + (f"\n\n{memory}" if memory else "")
+        + traits_section
+        + (f"\n\n{L['group_info_header']}\n{group_section}" if group_section else "")
+        + always_section
+        + f"\n\n{L['env_header']}\nOS: {os_info}\n{L['path_sep_header']}: {'\\' if _IS_WINDOWS else '/'}\n{L['shell_syntax_rule']}"
+        + f"\n\n{L['skills_rules_header']}\n{L['skills_rules_body']}"
+        + ctx.workflow_suffix
+    )
+    if lang == "en":
+        system_prompt_base += L["lang_hint"]
+    return system_prompt_base
+
+
 async def compile_system_prompt(
     bot: dict,
     ctx,
@@ -22,15 +79,6 @@ async def compile_system_prompt(
     from workspace.layout import get_group_language
     lang = get_group_language(ctx.group_id)
 
-    if lang == "en":
-        base = _with_personality(
-            bot["system_prompt"] or f"You are {bot['name']}, {bot.get('role', '')}.", bot
-        )
-    else:
-        base = _with_personality(
-            bot["system_prompt"] or f"你是{bot['name']}，{bot.get('role', '')}。", bot
-        )
-    
     skills_xml = ""
     skills_snapshot = []
     always_skills = []
@@ -84,37 +132,7 @@ async def compile_system_prompt(
         else:
             always_section = "\n\n【常驻技能 · 始终激活】\n" + "\n\n".join(parts)
 
-    group_section = build_group_section(ctx)
-    bot_traits = bot.get("traits", [])
-    traits_section = load_traits(bot_traits)
-    
-    os_info = "Windows (PowerShell)" if _IS_WINDOWS else f"{sys.platform} (shell: /bin/sh)"
-    
-    if lang == "en":
-        lang_hint = ("\n\n[LANGUAGE: The user's interface language is English. "
-                     "Please think and respond ENTIRELY in English. Do not use Chinese.]")
-        system_prompt_base = (
-            base
-            + (f"\n\n{memory}" if memory else "")
-            + traits_section
-            + (f"\n\n[Group Information]\n{group_section}" if group_section else "")
-            + always_section
-            + f"\n\n[Execution Environment]\nOS: {os_info}\nPath Separator: {'\\' if _IS_WINDOWS else '/'}\nWhen executing commands using run_shell, please use syntax suitable for the current OS."
-            + "\n\n[Self-Learned Skill Rules]\nWhen you find a reusable pattern or the user says 'remember this practice', use write_file to write the skill into `skills/learned/draft/<skill-name>.md`. The system will automatically request user approval. Direct writes to `skills/learned/active/` are forbidden."
-            + ctx.workflow_suffix
-            + lang_hint
-        )
-    else:
-        system_prompt_base = (
-            base
-            + (f"\n\n{memory}" if memory else "")
-            + traits_section
-            + (f"\n\n【群组信息】\n{group_section}" if group_section else "")
-            + always_section
-            + f"\n\n【运行环境】\nOS: {os_info}\n路径分隔符: {'\\' if _IS_WINDOWS else '/'}\n使用 run_shell 执行命令时请使用适合当前 OS 的语法。"
-            + "\n\n【自学技能规则】\n当你发现可复用规律或用户说「记住这个做法」时，用 write_file 将技能写入 `skills/learned/draft/<skill-name>.md`，系统会自动请求用户审批。禁止直接写入 `skills/learned/active/`。"
-            + ctx.workflow_suffix
-        )
+    system_prompt_base = build_system_prompt_base(bot, ctx, memory, always_section, lang)
     
     return system_prompt_base, skills_xml, skills_snapshot, always_skills
 

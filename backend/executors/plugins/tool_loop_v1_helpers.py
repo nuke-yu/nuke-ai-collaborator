@@ -221,50 +221,11 @@ async def setup_session(runner) -> None:
             runner.bot, runner.ctx, runner.model_name, memory
         )
     else:
-        from executors.plugins.workspace_tools import _with_personality
         from workspace.layout import get_group_language
         lang = get_group_language(runner.ctx.group_id)
-        
-        if lang == "en":
-            base = _with_personality(
-                runner.bot["system_prompt"] or f"You are {runner.bot['name']}, {runner.bot.get('role', '')}.", runner.bot
-            )
-            group_section = build_group_section(runner.ctx)
-            bot_traits = runner.bot.get("traits", [])
-            traits_section = load_traits(bot_traits)
-            os_info = f"Windows (PowerShell)" if _IS_WINDOWS else f"{sys.platform} (shell: /bin/sh)"
-
-            lang_hint = ("\n\n[LANGUAGE: The user's interface language is English. "
-                         "Please think and respond ENTIRELY in English. Do not use Chinese.]")
-
-            runner.system_prompt_base = (
-                base
-                + (f"\n\n{memory}" if memory else "")
-                + traits_section
-                + (f"\n\n[Group Information]\n{group_section}" if group_section else "")
-                + f"\n\n[Execution Environment]\nOS: {os_info}\nPath Separator: {'\\' if _IS_WINDOWS else '/'}\nWhen executing commands using run_shell, please use syntax suitable for the current OS."
-                + "\n\n[Self-Learned Skill Rules]\nWhen you find a reusable pattern or the user says 'remember this practice', use write_file to write the skill into `skills/learned/draft/<skill-name>.md`. The system will automatically request user approval. Direct writes to `skills/learned/active/` are forbidden."
-                + runner.ctx.workflow_suffix
-                + lang_hint
-            )
-        else:
-            base = _with_personality(
-                runner.bot["system_prompt"] or f"你是{runner.bot['name']}，{runner.bot.get('role', '')}。", runner.bot
-            )
-            group_section = build_group_section(runner.ctx)
-            bot_traits = runner.bot.get("traits", [])
-            traits_section = load_traits(bot_traits)
-            os_info = f"Windows (PowerShell)" if _IS_WINDOWS else f"{sys.platform} (shell: /bin/sh)"
-
-            runner.system_prompt_base = (
-                base
-                + (f"\n\n{memory}" if memory else "")
-                + traits_section
-                + (f"\n\n【群组信息】\n{group_section}" if group_section else "")
-                + f"\n\n【运行环境】\nOS: {os_info}\n路径分隔符: {'\\' if _IS_WINDOWS else '/'}\n使用 run_shell 执行命令时请使用适合当前 OS 的语法。"
-                + "\n\n【自学技能规则】\n当你发现可复用规律或用户说「记住这个做法」时，用 write_file 将技能写入 `skills/learned/draft/<skill-name>.md`，系统会自动请求用户审批。禁止直接写入 `skills/learned/active/`。"
-                + runner.ctx.workflow_suffix
-            )
+        runner.system_prompt_base = prompt_builder.build_system_prompt_base(
+            runner.bot, runner.ctx, memory, always_section="", lang=lang
+        )
 
     # Group workspace context: unconditionally injected for all group bots.
     if runner.ctx.group_id is not None:
@@ -691,30 +652,9 @@ async def execute_serial_tools(runner, calls, iteration=None) -> None:
         })
 
 
-def generate_thinking_preview(runner, iter_count: int) -> str:
-    from workspace.layout import get_group_language
-    lang = get_group_language(runner.ctx.group_id)
-    
-    if lang == "en":
-        thinking_templates = [
-            "Analyzing user requirements and current task status...",
-            "Checking previous execution history...",
-            "Evaluating available tools and methods...",
-            "Formulating next step plan...",
-            "Confirming tool call parameters and expected results...",
-            "Verifying previous execution results...",
-            "Formatting final response content...",
-        ]
-        tool_names = [rec["name"] for rec in runner.tool_records[-3:]] if runner.tool_records else []
-
-        if iter_count == 1:
-            return f"iteration {iter_count}: {thinking_templates[0]}"
-        elif iter_count == 2:
-            return f"iteration {iter_count}: Previous step completed {', '.join(tool_names[:2]) if tool_names else 'initial analysis'}, continuing..."
-        else:
-            return f"iteration {iter_count}: Continuing with remaining tasks, consolidating results..."
-    else:
-        thinking_templates = [
+THINKING_I18N = {
+    "zh": {
+        "templates": [
             "分析用户需求和当前任务状态...",
             "检查之前的执行记录...",
             "评估可用的工具和方法...",
@@ -722,37 +662,55 @@ def generate_thinking_preview(runner, iter_count: int) -> str:
             "确认工具调用的参数和预期结果...",
             "验证上一步的执行结果...",
             "整理最终回复内容...",
-        ]
-        tool_names = [rec["name"] for rec in runner.tool_records[-3:]] if runner.tool_records else []
+        ],
+        "iter_1": "iteration {iter_count}: {template_0}",
+        "iter_2": "iteration {iter_count}: 上一步完成了 {completed}，需要继续...",
+        "iter_2_fallback": "初步分析",
+        "iter_other": "iteration {iter_count}: 继续执行剩余任务，整合结果..."
+    },
+    "en": {
+        "templates": [
+            "Analyzing user requirements and current task status...",
+            "Checking previous execution history...",
+            "Evaluating available tools and methods...",
+            "Formulating next step plan...",
+            "Confirming tool call parameters and expected results...",
+            "Verifying previous execution results...",
+            "Formatting final response content...",
+        ],
+        "iter_1": "iteration {iter_count}: {template_0}",
+        "iter_2": "iteration {iter_count}: Previous step completed {completed}, continuing...",
+        "iter_2_fallback": "initial analysis",
+        "iter_other": "iteration {iter_count}: Continuing with remaining tasks, consolidating results..."
+    }
+}
 
-        if iter_count == 1:
-            return f"iteration {iter_count}: {thinking_templates[0]}"
-        elif iter_count == 2:
-            return f"iteration {iter_count}: 上一步完成了 {', '.join(tool_names[:2]) if tool_names else '初步分析'}，需要继续..."
-        else:
-            return f"iteration {iter_count}: 继续执行剩余任务，整合结果..."
+
+def generate_thinking_preview(runner, iter_count: int) -> str:
+    from workspace.layout import get_group_language
+    lang = get_group_language(runner.ctx.group_id)
+    L = THINKING_I18N.get(lang, THINKING_I18N["zh"])
+    
+    tool_names = [rec["name"] for rec in runner.tool_records[-3:]] if runner.tool_records else []
+    
+    if iter_count == 1:
+        return L["iter_1"].format(iter_count=iter_count, template_0=L["templates"][0])
+    elif iter_count == 2:
+        completed = ', '.join(tool_names[:2]) if tool_names else L["iter_2_fallback"]
+        return L["iter_2"].format(iter_count=iter_count, completed=completed)
+    else:
+        return L["iter_other"].format(iter_count=iter_count)
+
 
 
 async def get_fresh_context_prefix(runner) -> tuple[str, str]:
-    import executors.plugins.tool_loop_v1 as tool_loop_v1
-    blocks = await tool_loop_v1.load_context_files(
-        runner.bot["id"], runner.ctx.group_id, runner.executor.manifest.workspace.startup_files
+    from core.orchestration import prompt_builder
+    return await prompt_builder.get_fresh_context_prefix(
+        runner.bot["id"],
+        runner.ctx.group_id,
+        runner.executor.manifest.workspace.startup_files,
+        runner.skills_xml
     )
-    text = tool_loop_v1.format_context_blocks(blocks)
-    prefix = ""
-    from workspace.layout import get_group_language
-    lang = get_group_language(runner.ctx.group_id)
-    if lang == "en":
-        if text:
-            prefix += f"[Workspace Files]\n{text}\n\n"
-        if runner.skills_xml:
-            prefix += f"{runner.skills_xml}\nUse run_skill(name=\"skill_name\") to invoke\n\n"
-    else:
-        if text:
-            prefix += f"【工作区文件】\n{text}\n\n"
-        if runner.skills_xml:
-            prefix += f"{runner.skills_xml}\n使用 run_skill(name=\"技能名\") 调用\n\n"
-    return prefix, text
 
 
 async def build_reinject(runner) -> str:

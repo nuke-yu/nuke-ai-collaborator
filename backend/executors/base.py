@@ -230,19 +230,45 @@ class BotExecutor(ABC):
         }
 
 
+GROUP_I18N = {
+    "zh": {
+        "group": "群组：",
+        "announcement": "公告：",
+        "human_members": "人类成员：",
+        "ai_members": "AI 成员：",
+        "role_format": "{name}（{role}）"
+    },
+    "en": {
+        "group": "Group: ",
+        "announcement": "Announcement: ",
+        "human_members": "Human Members: ",
+        "ai_members": "AI Members: ",
+        "role_format": "{name} ({role})"
+    }
+}
+
+
 def build_group_section(ctx: "ExecutionContext") -> str:
     """Build a group context string for injection into system prompt."""
+    from workspace.layout import get_group_language
+    lang = get_group_language(ctx.group_id)
+    L = GROUP_I18N.get(lang, GROUP_I18N["zh"])
+
     lines = []
     if ctx.group_name:
-        lines.append(f"群组：{ctx.group_name}")
+        lines.append(f"{L['group']}{ctx.group_name}")
     if ctx.group_announcement:
-        lines.append(f"公告：{ctx.group_announcement}")
+        lines.append(f"{L['announcement']}{ctx.group_announcement}")
     members = ctx.all_members
     if members:
         humans = [m["name"] for m in members if m["type"] == "human"]
-        bots = [f"{m['name']}（{m.get('role') or 'Bot'}）" for m in members if m["type"] == "bot"]
+        bots = [
+            L["role_format"].format(name=m["name"], role=m.get("role") or "Bot")
+            for m in members if m["type"] == "bot"
+        ]
         if humans:
-            lines.append(f"人类成员：{', '.join(humans)}")
+            lines.append(f"{L['human_members']}{', '.join(humans)}")
         if bots:
-            lines.append(f"AI 成员：{', '.join(bots)}")
+            lines.append(f"{L['ai_members']}{', '.join(bots)}")
     return "\n".join(lines)
+

@@ -51,19 +51,32 @@ def bot_dir(gid: int | None, bot_id: int) -> Path:
     return group_dir(gid) / "bots" / f"bot_{bot_id}"
 
 
+# In-memory cache to avoid exists() / read_text() on hot paths
+_GROUP_LANG_CACHE: dict[int, str] = {}
+
+
 def get_group_language(group_id: int | None) -> str:
     if group_id is None:
         return "zh"
+    if group_id in _GROUP_LANG_CACHE:
+        return _GROUP_LANG_CACHE[group_id]
     lang_file = group_dir(group_id) / "lang.txt"
     if lang_file.exists():
         try:
-            return lang_file.read_text(encoding="utf-8").strip()
+            lang = lang_file.read_text(encoding="utf-8").strip()
+            _GROUP_LANG_CACHE[group_id] = lang
+            return lang
         except Exception:
             pass
+    _GROUP_LANG_CACHE[group_id] = "zh"
     return "zh"
 
 
 def set_group_language(group_id: int, lang: str):
+    current = get_group_language(group_id)
+    if current == lang:
+        return
+    _GROUP_LANG_CACHE[group_id] = lang
     lang_file = group_dir(group_id) / "lang.txt"
     try:
         lang_file.parent.mkdir(parents=True, exist_ok=True)

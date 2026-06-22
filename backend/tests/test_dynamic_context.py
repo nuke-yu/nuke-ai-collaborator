@@ -96,10 +96,10 @@ class TestDynamicContext(unittest.IsolatedAsyncioTestCase):
             return {"type": "text", "content": "done", "usage": {}}
 
         m = "executors.plugins.tool_loop_v1."
-        with patch(m + "load_context_files", new=mock_load), \
+        with patch("workspace.load_context_files", new=mock_load), \
              patch("core.orchestration.ai_service.call_ai_once", new=AsyncMock(side_effect=mock_call_ai)), \
              patch("ai.memory.get_memory_context", new=AsyncMock(return_value="")), \
-             patch(m + "list_skills_all", new=AsyncMock(return_value=[])), \
+             patch("workspace.layout.get_group_language", return_value="zh"), \
              patch(m + "load_always_skills", new=AsyncMock(return_value=[])), \
              patch(m + "append_log", new=AsyncMock()), \
              patch(m + "archive_run", new=AsyncMock()), \
