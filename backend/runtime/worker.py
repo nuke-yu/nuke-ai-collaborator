@@ -232,6 +232,10 @@ class Worker:
         gid = msg.get("group_id")
         tid = msg.get("trace_id")
         
+        if gid is not None and msg.get("lang"):
+            from workspace.layout import set_group_language
+            set_group_language(gid, msg.get("lang"))
+            
         with tracing.trace_context(trace_id=tid, group_id=gid):
             if t == ipc.protocol.ABORT:
                 if self._on_abort:

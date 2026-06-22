@@ -328,7 +328,8 @@ async def _handle_incoming_message(payload: dict, group_id: int, member_id: int,
 
     if t == "abort":
         await sup_mod.supervisor.send_to_worker(group_id, ipc.protocol.envelope(
-            ipc.protocol.ABORT, group_id=group_id, trace_id=trace_id
+            ipc.protocol.ABORT, group_id=group_id, trace_id=trace_id,
+            lang=payload.get("lang")
         ))
         return
 
@@ -338,12 +339,14 @@ async def _handle_incoming_message(payload: dict, group_id: int, member_id: int,
             gate_id=payload.get("gate_id"),
             revise=bool(payload.get("revise", False)),
             note=(payload.get("note") or ""),
+            lang=payload.get("lang")
         ))
         return
 
     if t == "start_workflow":
         await sup_mod.supervisor.send_to_worker(group_id, ipc.protocol.envelope(
-            ipc.protocol.START_WORKFLOW, group_id=group_id, trace_id=trace_id
+            ipc.protocol.START_WORKFLOW, group_id=group_id, trace_id=trace_id,
+            lang=payload.get("lang")
         ))
         return
 

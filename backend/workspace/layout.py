@@ -49,3 +49,24 @@ def bot_dir(gid: int | None, bot_id: int) -> Path:
     if gid is None:
         return _root() / f"bot_{bot_id}"
     return group_dir(gid) / "bots" / f"bot_{bot_id}"
+
+
+def get_group_language(group_id: int | None) -> str:
+    if group_id is None:
+        return "zh"
+    lang_file = group_dir(group_id) / "lang.txt"
+    if lang_file.exists():
+        try:
+            return lang_file.read_text(encoding="utf-8").strip()
+        except Exception:
+            pass
+    return "zh"
+
+
+def set_group_language(group_id: int, lang: str):
+    lang_file = group_dir(group_id) / "lang.txt"
+    try:
+        lang_file.parent.mkdir(parents=True, exist_ok=True)
+        lang_file.write_text(lang, encoding="utf-8")
+    except Exception:
+        pass

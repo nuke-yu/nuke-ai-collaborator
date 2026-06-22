@@ -19,9 +19,17 @@ async def compile_system_prompt(
         skills_snapshot: Loaded skills snapshot metadata for logging/WS
         always_skills: Loaded always-active skills content
     """
-    base = _with_personality(
-        bot["system_prompt"] or f"你是{bot['name']}，{bot.get('role', '')}。", bot
-    )
+    from workspace.layout import get_group_language
+    lang = get_group_language(ctx.group_id)
+
+    if lang == "en":
+        base = _with_personality(
+            bot["system_prompt"] or f"You are {bot['name']}, {bot.get('role', '')}.", bot
+        )
+    else:
+        base = _with_personality(
+            bot["system_prompt"] or f"你是{bot['name']}，{bot.get('role', '')}。", bot
+        )
     
     skills_xml = ""
     skills_snapshot = []
@@ -71,7 +79,10 @@ async def compile_system_prompt(
     always_section = ""
     if always_skills:
         parts = [f"=== {s['name']} ===\n{s['content']}" for s in always_skills]
-        always_section = "\n\n【常驻技能 · 始终激活】\n" + "\n\n".join(parts)
+        if lang == "en":
+            always_section = "\n\n[Always Active Skills - Always Enabled]\n" + "\n\n".join(parts)
+        else:
+            always_section = "\n\n【常驻技能 · 始终激活】\n" + "\n\n".join(parts)
 
     group_section = build_group_section(ctx)
     bot_traits = bot.get("traits", [])
@@ -79,16 +90,31 @@ async def compile_system_prompt(
     
     os_info = "Windows (PowerShell)" if _IS_WINDOWS else f"{sys.platform} (shell: /bin/sh)"
     
-    system_prompt_base = (
-        base
-        + (f"\n\n{memory}" if memory else "")
-        + traits_section
-        + (f"\n\n【群组信息】\n{group_section}" if group_section else "")
-        + always_section
-        + f"\n\n【运行环境】\nOS: {os_info}\n路径分隔符: {'\\' if _IS_WINDOWS else '/'}\n使用 run_shell 执行命令时请使用适合当前 OS 的语法。"
-        + "\n\n【自学技能规则】\n当你发现可复用规律或用户说「记住这个做法」时，用 write_file 将技能写入 `skills/learned/draft/<skill-name>.md`，系统会自动请求用户审批。禁止直接写入 `skills/learned/active/`。"
-        + ctx.workflow_suffix
-    )
+    if lang == "en":
+        lang_hint = ("\n\n[LANGUAGE: The user's interface language is English. "
+                     "Please think and respond ENTIRELY in English. Do not use Chinese.]")
+        system_prompt_base = (
+            base
+            + (f"\n\n{memory}" if memory else "")
+            + traits_section
+            + (f"\n\n[Group Information]\n{group_section}" if group_section else "")
+            + always_section
+            + f"\n\n[Execution Environment]\nOS: {os_info}\nPath Separator: {'\\' if _IS_WINDOWS else '/'}\nWhen executing commands using run_shell, please use syntax suitable for the current OS."
+            + "\n\n[Self-Learned Skill Rules]\nWhen you find a reusable pattern or the user says 'remember this practice', use write_file to write the skill into `skills/learned/draft/<skill-name>.md`. The system will automatically request user approval. Direct writes to `skills/learned/active/` are forbidden."
+            + ctx.workflow_suffix
+            + lang_hint
+        )
+    else:
+        system_prompt_base = (
+            base
+            + (f"\n\n{memory}" if memory else "")
+            + traits_section
+            + (f"\n\n【群组信息】\n{group_section}" if group_section else "")
+            + always_section
+            + f"\n\n【运行环境】\nOS: {os_info}\n路径分隔符: {'\\' if _IS_WINDOWS else '/'}\n使用 run_shell 执行命令时请使用适合当前 OS 的语法。"
+            + "\n\n【自学技能规则】\n当你发现可复用规律或用户说「记住这个做法」时，用 write_file 将技能写入 `skills/learned/draft/<skill-name>.md`，系统会自动请求用户审批。禁止直接写入 `skills/learned/active/`。"
+            + ctx.workflow_suffix
+        )
     
     return system_prompt_base, skills_xml, skills_snapshot, always_skills
 
@@ -128,8 +154,16 @@ def apply_external_schema_budget(
     return kept, deferred
 
 
-def build_budget_note(deferred_names: list[str]) -> str:
+def build_budget_note(deferred_names: list[str], group_id: int | None = None) -> str:
+    from workspace.layout import get_group_language
+    lang = get_group_language(group_id)
     shown = ", ".join(deferred_names[:30]) + ("…" if len(deferred_names) > 30 else "")
+    if lang == "en":
+        return (
+            f"\n\n[Tool Budget] Another {len(deferred_names)} MCP tools were not loaded due to quantity budget"
+            f" ({shown}). To use them, please narrow down the server using allow_list in mcp_servers.json,"
+            f" or ask the user to adjust the config."
+        )
     return (
         f"\n\n[工具预算] 另有 {len(deferred_names)} 个 MCP 工具因数量预算未加载"
         f"（{shown}）。如需使用，请在 mcp_servers.json 用 allow_list 收窄该服务器，"
@@ -147,10 +181,18 @@ async def get_fresh_context_prefix(
     blocks = await load_context_files(bot_id, group_id, startup_files)
     text = format_context_blocks(blocks)
     prefix = ""
-    if text:
-        prefix += f"【工作区文件】\n{text}\n\n"
-    if skills_xml:
-        prefix += f"{skills_xml}\n使用 run_skill(name=\"技能名\") 调用\n\n"
+    from workspace.layout import get_group_language
+    lang = get_group_language(group_id)
+    if lang == "en":
+        if text:
+            prefix += f"[Workspace Files]\n{text}\n\n"
+        if skills_xml:
+            prefix += f"{skills_xml}\nUse run_skill(name=\"skill_name\") to invoke\n\n"
+    else:
+        if text:
+            prefix += f"【工作区文件】\n{text}\n\n"
+        if skills_xml:
+            prefix += f"{skills_xml}\n使用 run_skill(name=\"技能名\") 调用\n\n"
     return prefix, text
 
 
