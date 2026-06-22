@@ -13,6 +13,7 @@ I18N_PROMPTS = {
         "shell_syntax_rule": "使用 run_shell 执行命令时请使用适合当前 OS 的语法。",
         "skills_rules_header": "【自学技能规则】",
         "skills_rules_body": "当你发现可复用规律或用户说「记住这个做法」时，用 write_file 将技能写入 `skills/learned/draft/<skill-name>.md`，系统会自动请求用户审批。禁止直接写入 `skills/learned/active/`。",
+        "always_skills_header": "\n\n【常驻技能 · 始终激活】\n",
     },
     "en": {
         "default_personality": "You are {name}, {role}.",
@@ -22,7 +23,8 @@ I18N_PROMPTS = {
         "shell_syntax_rule": "When executing commands using run_shell, please use syntax suitable for the current OS.",
         "skills_rules_header": "[Self-Learned Skill Rules]",
         "skills_rules_body": "When you find a reusable pattern or the user says 'remember this practice', use write_file to write the skill into `skills/learned/draft/<skill-name>.md`. The system will automatically request user approval. Direct writes to `skills/learned/active/` are forbidden.",
-        "lang_hint": "\n\n[LANGUAGE: The user's interface language is English. Please think and respond ENTIRELY in English. Do not use Chinese.]"
+        "lang_hint": "\n\n[LANGUAGE: The user's interface language is English. Please think and respond ENTIRELY in English. Do not use Chinese.]",
+        "always_skills_header": "\n\n[Always Active Skills - Always Enabled]\n",
     }
 }
 
@@ -126,11 +128,9 @@ async def compile_system_prompt(
         
     always_section = ""
     if always_skills:
+        L = I18N_PROMPTS.get(lang, I18N_PROMPTS["zh"])
         parts = [f"=== {s['name']} ===\n{s['content']}" for s in always_skills]
-        if lang == "en":
-            always_section = "\n\n[Always Active Skills - Always Enabled]\n" + "\n\n".join(parts)
-        else:
-            always_section = "\n\n【常驻技能 · 始终激活】\n" + "\n\n".join(parts)
+        always_section = L["always_skills_header"] + "\n\n".join(parts)
 
     system_prompt_base = build_system_prompt_base(bot, ctx, memory, always_section, lang)
     

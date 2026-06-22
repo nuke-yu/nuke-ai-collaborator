@@ -51,7 +51,11 @@ def bot_dir(gid: int | None, bot_id: int) -> Path:
     return group_dir(gid) / "bots" / f"bot_{bot_id}"
 
 
-# In-memory cache to avoid exists() / read_text() on hot paths
+# In-memory cache to avoid exists() / read_text() on hot paths.
+# WARNING: This cache is process-local and does not automatically sync across processes.
+# It relies on the architectural constraint that each group's session (reads and writes)
+# is pinned to the same worker process. If set_group_language is called from another process
+# (e.g., supervisor), other workers' caches will not be invalidated.
 _GROUP_LANG_CACHE: dict[int, str] = {}
 
 

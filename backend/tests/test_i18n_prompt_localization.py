@@ -111,10 +111,24 @@ class TestI18nPromptLocalization(unittest.IsolatedAsyncioTestCase):
         preview_zh_2 = generate_thinking_preview(runner, 2)
         self.assertIn("上一步完成了 初步分析", preview_zh_2)
 
+        # Iteration >= 3
+        preview_zh_3 = generate_thinking_preview(runner, 3)
+        self.assertIn("继续执行剩余任务，整合结果", preview_zh_3)
+
+        # Non-empty tool records
+        runner.tool_records = [{"name": "run_shell"}, {"name": "read_file"}]
+        preview_zh_2_tools = generate_thinking_preview(runner, 2)
+        self.assertIn("上一步完成了 run_shell, read_file", preview_zh_2_tools)
+
         # Test English Thinking Preview
         set_group_language(self.group_id, "en")
         preview_en_1 = generate_thinking_preview(runner, 1)
         self.assertIn("Analyzing user requirements and current task status", preview_en_1)
         
+        # Test tool_records representation in English
         preview_en_2 = generate_thinking_preview(runner, 2)
-        self.assertIn("Previous step completed initial analysis", preview_en_2)
+        self.assertIn("Previous step completed run_shell, read_file", preview_en_2)
+
+        # Iteration >= 3
+        preview_en_3 = generate_thinking_preview(runner, 3)
+        self.assertIn("Continuing with remaining tasks, consolidating results", preview_en_3)
