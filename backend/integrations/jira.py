@@ -100,9 +100,12 @@ class LocalJiraClient(JiraClient):
         if status == "done":
             # Defer promotion if we are currently running inside a worktree sandbox for this group
             from workspace.layout import current_workspace_path
+            from core import bg
             overrides = current_workspace_path.get()
-            if overrides and group_id in overrides:
-                log.info(f"Deferring worktree promotion for task {ticket_id} since execution is active in sandbox.")
+            is_active_run = (overrides and group_id in overrides) or bg.group_run_lock(group_id).locked()
+            
+            if is_active_run:
+                log.info(f"Deferring worktree promotion for task {ticket_id} since execution is active in group.")
             else:
                 try:
                     from workspace.git_worktree import promote_worktree

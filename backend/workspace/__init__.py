@@ -701,6 +701,15 @@ async def init_group_workspace(group_id: int, group_name: str = ""):
     (ws / "prs").mkdir(exist_ok=True)         # PR 记录（固定协调件目录）
     (ws.parent / "runs").mkdir(exist_ok=True)  # workspaces/group_{id}/runs/
 
+    # Clean up stale worktrees on group startup/hydration
+    import shutil
+    wt_dir = ws.parent / "worktrees"
+    if wt_dir.exists():
+        try:
+            shutil.rmtree(wt_dir)
+        except Exception:
+            pass
+
     # 创建 PROJECTS.md 项目清单（空模板，由 Bot 按实际项目填充）
     projects_md = ws / "workspace" / "PROJECTS.md"
     if not projects_md.exists():

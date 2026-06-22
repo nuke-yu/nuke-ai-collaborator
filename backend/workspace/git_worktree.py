@@ -24,7 +24,12 @@ _FALLBACK_GUARD = threading.Lock()
 
 
 def get_worktree_lock(group_id: int) -> asyncio.Lock:
-    """Retrieve the per-group git lock to serialize git operations."""
+    """Retrieve the per-group git lock to serialize git operations.
+
+    Note on lock safety: Import success of workspace_tools is deterministic per
+    Python process, guaranteeing that all call sites resolve to the same lock registry
+    and prevents separate locks from being initialized for the same group.
+    """
     try:
         from executors.plugins.workspace_tools import _get_worktree_lock
         return _get_worktree_lock(group_id)
@@ -195,6 +200,13 @@ async def create_worktree(group_id: int, task_id: str, base_ref: str = "main") -
 
         # 1. Ensure shared repo is initialized and committed to have a real baseline
         await _ensure_shared_repo_clean_and_committed(shared_workspace)
+
+        # Resolve base_ref dynamically if it is the default "main" to prevent failures on "master" or other branches
+        if base_ref == "main" and (shared_workspace / ".git").exists():
+            try:
+                base_ref = await _run_git_cmd(shared_workspace, "rev-parse", "--abbrev-ref", "HEAD")
+            except Exception:
+                pass
 
         worktree_dir = group_dir / "worktrees" / f"task_{task_id}"
         worktree_workspace = worktree_dir / "workspace"
