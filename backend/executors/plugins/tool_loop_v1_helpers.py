@@ -254,6 +254,8 @@ async def setup_session(runner) -> None:
         runner.messages = list(history) + [{"role": "user", "content": user_content}]
 
     tool_names = [t.name for t in runner.executor.manifest.tools]
+    if not runner.executor.manifest.workspace.skill_discovery:
+        tool_names = [name for name in tool_names if name != "run_skill"]
     from executors.tool_router import router as _tool_router
     if _tool_router.has_providers():
         from executors import tool_executor
