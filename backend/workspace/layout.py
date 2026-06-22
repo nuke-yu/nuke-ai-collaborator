@@ -9,9 +9,13 @@ WORKSPACE_ROOT 每次调用时从 skills.constants **实时读取**（不在 imp
 Phase 1：bot_dir 返回当前扁平路径（workspaces/bot_{id}），零行为变化。
 Phase 2：bot_dir(gid, bot_id) → 嵌套 group_{gid}/bots/bot_{id}；gid=None 走过渡垫片。
 """
+import contextvars
 from pathlib import Path
 
 import skills.constants as _const
+
+# ContextVar to override the shared workspace directory path.
+current_workspace_path = contextvars.ContextVar("nuke_current_workspace_path", default=None)
 
 
 def _root() -> Path:
@@ -24,7 +28,11 @@ def group_dir(gid: int) -> Path:
 
 
 def group_shared_dir(gid: int) -> Path:
+    override = current_workspace_path.get()
+    if override is not None:
+        return Path(override)
     return group_dir(gid) / "shared"
+
 
 
 def group_runs_dir(gid: int) -> Path:

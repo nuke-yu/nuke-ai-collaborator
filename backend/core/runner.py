@@ -181,19 +181,28 @@ async def _run_unit_body(group_id: int, unit, orch) -> None:
             pc = orch.participant_count(group_id)
             recent = await compress_history(recent, viewpoints_summary, members, all_bots, pc)
 
+    ticket_id = unit.tag.get("ticket_id") if isinstance(unit.tag, dict) else None
+
     ctx = ExecutionContext(
         bot=unit.bot, group_id=group_id, user_message=unit.trigger_msg,
         sender={"name": "系统"}, history=recent,
         all_bots=all_bots, all_members=members,
         workflow_suffix=unit.prompt_suffix,
         is_workflow=unit.is_workflow,
+        active_ticket_id=ticket_id,
         # Side-effect dispatcher: broadcasts via the bus + persists via the writer.
         # (Executors default this themselves when None, but wiring it here makes the
         # workflow path explicit and testable.)
         interaction=StandardInteraction(),
     )
     try:
-        result = await exec_registry.get(unit.executor_id).run(ctx)
+        if ticket_id:
+            from workspace.git_worktree import create_worktree, use_worktree
+            worktree_path = await create_worktree(group_id, ticket_id)
+            with use_worktree(worktree_path):
+                result = await exec_registry.get(unit.executor_id).run(ctx)
+        else:
+            result = await exec_registry.get(unit.executor_id).run(ctx)
     except Exception as e:
         log.exception("Workflow execution failed for group %d", group_id)
         from ai.client import AIError

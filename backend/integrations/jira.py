@@ -5,9 +5,12 @@ acceptance_criteria 存在 metadata_json 里。真 Jira 接入时实现一个调
 JiraClient 子类并 set_jira() 即可，rd_tools 调用方不变。
 """
 import json
+import logging
 from abc import ABC, abstractmethod
 
 from db import write_connect, get_db
+
+log = logging.getLogger(__name__)
 
 
 _VALID_STATUSES = frozenset({"backlog", "in_progress", "done"})
@@ -94,6 +97,12 @@ class LocalJiraClient(JiraClient):
             await db.commit()
         if cur.rowcount == 0:
             raise ValueError(f"工单 {ticket_id} 不存在或不属于本群组")
+        if status == "done":
+            try:
+                from workspace.git_worktree import promote_worktree
+                await promote_worktree(group_id, ticket_id)
+            except Exception as e:
+                log.warning(f"Failed to promote git worktree for task {ticket_id}: {e}", exc_info=True)
         # Read back the final project value (may have been set previously)
         async with get_db() as db:
             async with db.execute(
