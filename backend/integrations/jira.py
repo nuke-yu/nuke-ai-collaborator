@@ -98,11 +98,24 @@ class LocalJiraClient(JiraClient):
         if cur.rowcount == 0:
             raise ValueError(f"工单 {ticket_id} 不存在或不属于本群组")
         if status == "done":
-            try:
-                from workspace.git_worktree import promote_worktree
-                await promote_worktree(group_id, ticket_id)
-            except Exception as e:
-                log.warning(f"Failed to promote git worktree for task {ticket_id}: {e}", exc_info=True)
+            # Defer promotion if we are currently running inside a worktree sandbox for this group
+            from workspace.layout import current_workspace_path
+            overrides = current_workspace_path.get()
+            if overrides and group_id in overrides:
+                log.info(f"Deferring worktree promotion for task {ticket_id} since execution is active in sandbox.")
+            else:
+                try:
+                    from workspace.git_worktree import promote_worktree
+                    await promote_worktree(group_id, ticket_id)
+                except Exception as e:
+                    log.error(f"Failed to promote git worktree for task {ticket_id}: {e}", exc_info=True)
+                    # Broadcast system message on failure to prevent silent errors
+                    try:
+                        from core.runner import _post_system_msg
+                        await _post_system_msg(group_id, 0, f"⚠️ [工作流系统错误] 工单 {ticket_id} 自动合并失败: {e}。请手动处理冲突。")
+                    except Exception:
+                        pass
+                    raise e
         # Read back the final project value (may have been set previously)
         async with get_db() as db:
             async with db.execute(

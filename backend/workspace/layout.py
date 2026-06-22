@@ -28,9 +28,9 @@ def group_dir(gid: int) -> Path:
 
 
 def group_shared_dir(gid: int) -> Path:
-    override = current_workspace_path.get()
-    if override is not None:
-        return Path(override)
+    overrides = current_workspace_path.get()
+    if overrides and gid in overrides:
+        return Path(overrides[gid])
     return group_dir(gid) / "shared"
 
 

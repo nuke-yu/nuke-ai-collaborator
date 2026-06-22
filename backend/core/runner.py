@@ -199,8 +199,24 @@ async def _run_unit_body(group_id: int, unit, orch) -> None:
         if ticket_id:
             from workspace.git_worktree import create_worktree, use_worktree
             worktree_path = await create_worktree(group_id, ticket_id)
-            with use_worktree(worktree_path):
+            with use_worktree(group_id, worktree_path):
                 result = await exec_registry.get(unit.executor_id).run(ctx)
+            
+            # Post-execution check for deferred promotion
+            from integrations.jira import get_jira
+            try:
+                tickets = await get_jira().list_tickets(group_id)
+                ticket = next((t for t in tickets if t["ticket_id"] == ticket_id), None)
+                if ticket and ticket["status"] == "done":
+                    log.info(f"Executing deferred promotion for task {ticket_id}")
+                    from workspace.git_worktree import promote_worktree
+                    await promote_worktree(group_id, ticket_id)
+            except Exception as pe:
+                log.exception(f"Failed to execute deferred promotion for task {ticket_id}: {pe}")
+                try:
+                    await _post_system_msg(group_id, 0, f"⚠️ [工作流系统错误] 工单 {ticket_id} 自动合并失败: {pe}。请手动处理冲突。")
+                except Exception:
+                    pass
         else:
             result = await exec_registry.get(unit.executor_id).run(ctx)
     except Exception as e:

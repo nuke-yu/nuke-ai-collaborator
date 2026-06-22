@@ -2,13 +2,16 @@ import unittest
 import tempfile
 import shutil
 import os
+import asyncio
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 import skills.constants as _const
 from workspace import init_group_workspace, write_file, read_file, layout
-from workspace.git_worktree import create_worktree, remove_worktree, promote_worktree, use_worktree
+from workspace.git_worktree import create_worktree, remove_worktree, promote_worktree, use_worktree, _run_git_cmd
 from integrations.jira import get_jira
+from core.runner import run_unit
+from core.orchestration.base import WorkUnit
 
 
 class TestGitWorktreeSandbox(unittest.IsolatedAsyncioTestCase):
@@ -81,7 +84,7 @@ class TestGitWorktreeSandbox(unittest.IsolatedAsyncioTestCase):
         self.assertIn("已写入", res1)
         
         # 2. Write file inside worktree using use_worktree context manager
-        with use_worktree(worktree_dir):
+        with use_worktree(self.group_id, worktree_dir):
             res2 = await write_file(bot_id=1, path="workspace/src/foo.py", content="sandboxed content", group_id=self.group_id)
             self.assertIn("已写入", res2)
             
@@ -101,7 +104,7 @@ class TestGitWorktreeSandbox(unittest.IsolatedAsyncioTestCase):
         worktree_dir = await create_worktree(self.group_id, self.task_id)
         
         # Write files inside worktree
-        with use_worktree(worktree_dir):
+        with use_worktree(self.group_id, worktree_dir):
             await write_file(bot_id=1, path="workspace/src/feature.py", content="print('new feature')", group_id=self.group_id)
             
         # Promote changes (merge back to main)
@@ -115,24 +118,129 @@ class TestGitWorktreeSandbox(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(shared_workspace_file.exists())
         self.assertEqual(shared_workspace_file.read_text(encoding="utf-8"), "print('new feature')")
 
-    async def test_jira_done_trigger_promotion(self):
-        # Create a Jira ticket mock
+    async def test_git_worktree_baseline_preserves_changes(self):
+        """🔴 #1 & 🟠 #6: Verify pre-existing uncommitted files in shared workspace are committed as baseline before check out."""
+        shared_workspace = layout.group_shared_dir(self.group_id) / "workspace"
+        shared_workspace.mkdir(parents=True, exist_ok=True)
+        
+        # Create an existing project file before git init or create_worktree is called
+        pre_existing_file = shared_workspace / "existing_code.py"
+        pre_existing_file.write_text("print('pre-existing')", encoding="utf-8")
+        
+        # Create worktree
+        worktree_dir = await create_worktree(self.group_id, self.task_id)
+        worktree_workspace = worktree_dir / "workspace"
+        
+        # Verify that pre-existing file exists in the worktree sandbox workspace
+        worktree_file = worktree_workspace / "existing_code.py"
+        self.assertTrue(worktree_file.exists())
+        self.assertEqual(worktree_file.read_text(encoding="utf-8"), "print('pre-existing')")
+        
+        # Clean up
+        await remove_worktree(self.group_id, self.task_id)
+
+    async def test_promote_worktree_fails_on_conflict_aborts_cleanly(self):
+        """🔴 #4: Verify merge conflict aborts cleanly and keeps main untainted."""
+        # 1. Create a worktree
+        worktree_dir = await create_worktree(self.group_id, self.task_id)
+        
+        # 2. Write file inside worktree
+        with use_worktree(self.group_id, worktree_dir):
+            await write_file(bot_id=1, path="workspace/conflict.py", content="content A", group_id=self.group_id)
+            
+        # 3. Create a conflict by writing the same file differently on main
+        await write_file(bot_id=1, path="workspace/conflict.py", content="content B", group_id=self.group_id)
+        
+        # 4. Promote and assert conflict error is raised
+        with self.assertRaises(RuntimeError) as context:
+            await promote_worktree(self.group_id, self.task_id, target_branch="main")
+        self.assertIn("merge conflict", str(context.exception).lower())
+        
+        # 5. Check that main workspace git is clean (merge aborted) and no conflicted files remain
+        shared_workspace = layout.group_shared_dir(self.group_id) / "workspace"
+        status = await _run_git_cmd(shared_workspace, "status", "--porcelain")
+        self.assertEqual(status.strip(), "")
+        
+        # Clean up
+        await remove_worktree(self.group_id, self.task_id)
+
+    async def test_self_promotion_mid_run_deferred(self):
+        """🔴 #3: Verify self-promotion inside bot run is deferred and does not delete directory mid-run."""
+        # Setup Jira mock ticket
         jira = get_jira()
-        ticket = await jira.create_ticket(self.group_id, title="Implement Feature X")
+        ticket = await jira.create_ticket(self.group_id, title="Test Ticket")
         ticket_id = ticket["ticket_id"]
         
-        # Create worktree for this ticket
+        # Create worktree
         worktree_dir = await create_worktree(self.group_id, ticket_id)
         
-        # Write file inside worktree
-        with use_worktree(worktree_dir):
-            await write_file(bot_id=1, path="workspace/src/jira_feature.py", content="jira content", group_id=self.group_id)
+        # Mock executor to simulate update_ticket(status="done") mid-run
+        async def mock_run(ctx):
+            # Check directory exists
+            self.assertTrue(worktree_dir.exists())
+            # Perform update ticket status to done mid-run
+            await jira.update_ticket(self.group_id, ticket_id, status="done")
+            # Verify directory STILL exists (promotion deferred)
+            self.assertTrue(worktree_dir.exists())
             
-        # Update Jira ticket to "done" which should trigger promote_worktree automatically
-        await jira.update_ticket(self.group_id, ticket_id, status="done")
+            # Write a dummy file to verify files can still be written safely
+            await write_file(bot_id=1, path="workspace/some_code.py", content="some content", group_id=self.group_id)
+            
+            # Mock return ExecutionResult
+            from executors.base import ExecutionResult
+            return ExecutionResult(full_text="done", msg_id=None)
+
+        # Wire up a mock unit execution
+        mock_executor = MagicMock()
+        mock_executor.run = mock_run
         
-        # Verify worktree is removed and files are merged
+        # Temporary patch of executors registry
+        from executors import registry as exec_registry
+        exec_registry._registry["mock_tool_loop"] = mock_executor
+        
+        unit = WorkUnit(bot={"id": 1, "name": "Dev"}, executor_id="mock_tool_loop", tag={"ticket_id": ticket_id})
+        
+        try:
+            orch = MagicMock()
+            orch.start_time.return_value = None
+            from core.orchestration.base import OrchestratorStep
+            orch.observe.return_value = OrchestratorStep(confirm_gate=None, done=False, announcements=[], next_units=[])
+            # Run unit
+            await run_unit(self.group_id, unit, orch)
+        finally:
+            exec_registry._registry.pop("mock_tool_loop", None)
+        
+        # Verify that promotion was executed AFTER the run completed and directories were removed
         self.assertFalse(worktree_dir.exists())
-        shared_file = layout.group_shared_dir(self.group_id) / "workspace" / "src" / "jira_feature.py"
+        
+        # Verify files were merged successfully
+        shared_file = layout.group_shared_dir(self.group_id) / "workspace" / "some_code.py"
         self.assertTrue(shared_file.exists())
-        self.assertEqual(shared_file.read_text(encoding="utf-8"), "jira content")
+        self.assertEqual(shared_file.read_text(encoding="utf-8"), "some content")
+
+    async def test_silent_failure_surface_error(self):
+        """🔴 #2 & 🟡 #9: Verify that promotion errors are surfaced and do not fail silently."""
+        jira = get_jira()
+        ticket = await jira.create_ticket(self.group_id, title="Failing Ticket")
+        ticket_id = ticket["ticket_id"]
+        
+        # Create worktree
+        worktree_dir = await create_worktree(self.group_id, ticket_id)
+        
+        # 1. Modify worktree file
+        with use_worktree(self.group_id, worktree_dir):
+            await write_file(bot_id=1, path="workspace/fail.py", content="content X", group_id=self.group_id)
+            
+        # 2. Modify same file on main to guarantee a conflict
+        await write_file(bot_id=1, path="workspace/fail.py", content="content Y", group_id=self.group_id)
+        
+        # 3. Trigger promotion via jira update_ticket and assert it raises RuntimeError (not swallowed silently)
+        with patch("core.runner._post_system_msg") as mock_post:
+            with self.assertRaises(RuntimeError):
+                await jira.update_ticket(self.group_id, ticket_id, status="done")
+            # Verify system warning was posted to chat
+            mock_post.assert_called_once()
+            self.assertIn("自动合并失败", mock_post.call_args[0][2])
+            
+        # Clean up
+        await remove_worktree(self.group_id, ticket_id)
