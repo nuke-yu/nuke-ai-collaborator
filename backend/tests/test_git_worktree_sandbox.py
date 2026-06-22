@@ -244,3 +244,92 @@ class TestGitWorktreeSandbox(unittest.IsolatedAsyncioTestCase):
             
         # Clean up
         await remove_worktree(self.group_id, ticket_id)
+
+    async def test_cross_ticket_deferred_promotion_drain(self):
+        """Verify that a deferred promotion of ticket Y is successfully drained
+        when the run for ticket X completes.
+        """
+        jira = get_jira()
+        
+        # 1. Create tickets X and Y
+        ticket_x = await jira.create_ticket(self.group_id, title="Ticket X")
+        ticket_y = await jira.create_ticket(self.group_id, title="Ticket Y")
+        tx_id = ticket_x["ticket_id"]
+        ty_id = ticket_y["ticket_id"]
+        
+        # 2. Create worktrees for X and Y
+        wt_x = await create_worktree(self.group_id, tx_id)
+        wt_y = await create_worktree(self.group_id, ty_id)
+        
+        # Write some change in Y's worktree
+        with use_worktree(self.group_id, wt_y):
+            await write_file(bot_id=1, path="workspace/y_code.py", content="y value", group_id=self.group_id)
+            
+        # 3. Simulate bot run lock being held for X
+        from core import bg
+        async with bg.group_run_lock(self.group_id):
+            # Under the lock, mark Y done (simulating out-of-band/human update)
+            await jira.update_ticket(self.group_id, ty_id, status="done")
+            # Verify Y's worktree still exists (promotion deferred)
+            self.assertTrue(wt_y.exists())
+
+        # 4. Now run unit for X. When it finishes, its post-execution drain should promote Y.
+        async def mock_run(ctx):
+            from executors.base import ExecutionResult
+            return ExecutionResult(full_text="run x completed", msg_id=None)
+
+        mock_executor = MagicMock()
+        mock_executor.run = mock_run
+        
+        from executors import registry as exec_registry
+        exec_registry._registry["mock_tool_loop"] = mock_executor
+        unit = WorkUnit(bot={"id": 1, "name": "Dev"}, executor_id="mock_tool_loop", tag={"ticket_id": tx_id})
+        
+        try:
+            orch = MagicMock()
+            orch.start_time.return_value = None
+            from core.orchestration.base import OrchestratorStep
+            orch.observe.return_value = OrchestratorStep(confirm_gate=None, done=False, announcements=[], next_units=[])
+            
+            await run_unit(self.group_id, unit, orch)
+        finally:
+            exec_registry._registry.pop("mock_tool_loop", None)
+            
+        # 5. Verify Y is promoted (its worktree is removed, and its changes are merged to main)
+        self.assertFalse(wt_y.exists())
+        shared_y_file = layout.group_shared_dir(self.group_id) / "workspace" / "y_code.py"
+        self.assertTrue(shared_y_file.exists())
+        self.assertEqual(shared_y_file.read_text(encoding="utf-8"), "y value")
+        
+        # Clean up X's worktree
+        await remove_worktree(self.group_id, tx_id)
+
+    async def test_hydration_time_worktree_pruning(self):
+        """Verify that hydration-time worktree sweep cleans up stale worktrees and branches,
+        and allows successful recreation of the worktrees afterwards.
+        """
+        jira = get_jira()
+        ticket_z = await jira.create_ticket(self.group_id, title="Ticket Z")
+        tz_id = ticket_z["ticket_id"]
+        
+        # 1. Create worktree for Z
+        wt_z = await create_worktree(self.group_id, tz_id)
+        self.assertTrue(wt_z.exists())
+        
+        # Write some file
+        with use_worktree(self.group_id, wt_z):
+            await write_file(bot_id=1, path="workspace/z_code.py", content="z value", group_id=self.group_id)
+            
+        # 2. Simulate hydration sweep by calling prune_group_worktrees directly
+        from workspace.git_worktree import prune_group_worktrees
+        await prune_group_worktrees(self.group_id)
+        
+        # Verify Z's worktree dir was cleaned up
+        self.assertFalse(wt_z.exists())
+        
+        # 3. Verify Z's worktree can be recreated successfully (no git registration conflicts)
+        new_wt_z = await create_worktree(self.group_id, tz_id)
+        self.assertTrue(new_wt_z.exists())
+        
+        # Clean up
+        await remove_worktree(self.group_id, tz_id)

@@ -296,7 +296,13 @@ async def promote_worktree(group_id: int, task_id: str, target_branch: str = "ma
     async with lock:
         group_dir = layout.group_dir(group_id)
         shared_workspace = group_dir / "shared" / "workspace"
-        worktree_workspace = group_dir / "worktrees" / f"task_{task_id}" / "workspace"
+        
+        worktree_dir = group_dir / "worktrees" / f"task_{task_id}"
+        if not worktree_dir.exists():
+            log.info(f"Worktree directory for task {task_id} does not exist. Skipping promotion.")
+            return
+
+        worktree_workspace = worktree_dir / "workspace"
         branch_name = f"task_{task_id}"
 
         if not (shared_workspace / ".git").exists():
@@ -350,3 +356,33 @@ async def promote_worktree(group_id: int, task_id: str, target_branch: str = "ma
 
         # 3. Clean up the worktree directory and git branch (only reached if merge succeeds)
         await _remove_worktree_nolock(group_id, task_id)
+
+
+async def prune_group_worktrees(group_id: int):
+    """Prune and clean up all stale worktrees and their branches for a group on hydration."""
+    lock = get_worktree_lock(group_id)
+    async with lock:
+        group_dir = layout.group_dir(group_id)
+        shared_workspace = group_dir / "shared" / "workspace"
+        worktrees_dir = group_dir / "worktrees"
+        
+        if not worktrees_dir.exists():
+            return
+        
+        log.info(f"Pruning stale worktrees for group {group_id}")
+        
+        # Prune using git's built-in pruning command first to clear dead administrative links
+        if (shared_workspace / ".git").exists():
+            try:
+                await _run_git_cmd(shared_workspace, "worktree", "prune")
+            except Exception as e:
+                log.warning(f"git worktree prune failed during startup: {e}")
+        
+        # Iterate through all worktree folders and cleanly remove them and their branches
+        try:
+            for item in list(worktrees_dir.iterdir()):
+                if item.is_dir() and item.name.startswith("task_"):
+                    task_id = item.name[5:]
+                    await _remove_worktree_nolock(group_id, task_id)
+        except Exception as e:
+            log.warning(f"Error sweeping worktrees directory for group {group_id}: {e}", exc_info=True)

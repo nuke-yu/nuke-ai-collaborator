@@ -200,6 +200,12 @@ class LifecycleManager:
                 from db.migrations import run_migrations
                 await run_migrations(conn)
             
+            # Sweep stale worktrees and branches on hydration
+            try:
+                from workspace.git_worktree import prune_group_worktrees
+                await prune_group_worktrees(group_id)
+            except Exception:
+                log.exception("lifecycle: failed to prune stale worktrees for group %d on hydration", group_id)
             
             # Steps 3 & 4 read/write GROUP-private tables (tickets / workflow_state /
             # agent_sessions). Bind the group DB so their connect()/get_db() resolve
