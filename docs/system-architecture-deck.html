@@ -1,0 +1,1487 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nuke AI Collaborator — System Architecture</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+/* ===========================================================================
+   NUKE AI COLLABORATOR — SYSTEM ARCHITECTURE DECK
+   Style: "Blueprint Terminal" — GitHub-dark canvas, monospace everything,
+   syntax-highlight accents, terminal windows & tree diagrams.
+   Self-contained: all CSS/JS inline, zero dependencies.
+   To re-theme: edit the :root color tokens below.
+   =========================================================================== */
+*{margin:0;padding:0;box-sizing:border-box}
+
+:root{
+  /* --- THEME TOKENS (edit these to retheme) --- */
+  --bg:#0d1117; --panel:#161b22; --panel2:#1c2230; --line:#21262d;
+  --green:#39d353; --cyan:#58a6ff; --magenta:#ff7b72; --amber:#e3b341; --purple:#bc8cff;
+  --fg:#e6edf3; --mod:#adbac7; --dim:#7d8590; --dimmer:#484f58;
+  --font:'JetBrains Mono',ui-monospace,monospace;
+
+  /* --- TYPOGRAPHY (clamp = viewport-fit) --- */
+  --h1:clamp(2rem,6.5vw,5rem);
+  --h2:clamp(1.4rem,3.8vw,2.9rem);
+  --h3:clamp(1rem,2vw,1.5rem);
+  --body:clamp(.78rem,1.45vw,1.08rem);
+  --small:clamp(.62rem,1.15vw,.86rem);
+  --code:clamp(.6rem,1.15vw,.92rem);
+
+  --pad:clamp(1.4rem,4.5vw,4.5rem);
+  --gap:clamp(.6rem,1.8vw,1.6rem);
+  --ease:cubic-bezier(.16,1,.3,1);
+}
+
+/* ---- PASTE: viewport-base.css (viewport-fitting invariants) ---- */
+html,body{height:100%;overflow-x:hidden}
+html{scroll-snap-type:y mandatory;scroll-behavior:smooth}
+.slide{width:100vw;height:100vh;height:100dvh;overflow:hidden;scroll-snap-align:start;
+  display:flex;flex-direction:column;position:relative}
+img,.image-container{max-width:100%;max-height:min(50vh,400px);object-fit:contain}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.01ms!important;transition-duration:.2s!important}
+  html{scroll-behavior:auto}
+}
+/* ---- end viewport-base.css ---- */
+
+body{
+  font-family:var(--font);background:var(--bg);color:var(--fg);
+  font-size:var(--body);line-height:1.55;-webkit-font-smoothing:antialiased;
+  /* global blueprint grid */
+  background-image:
+    linear-gradient(var(--line) 1px,transparent 1px),
+    linear-gradient(90deg,var(--line) 1px,transparent 1px);
+  background-size:40px 40px;
+}
+/* faint scanline sheen on every slide */
+.slide::after{content:"";position:absolute;inset:0;pointer-events:none;z-index:5;
+  background:repeating-linear-gradient(0deg,rgba(255,255,255,.012) 0 2px,transparent 2px 4px)}
+
+.wrap{width:100%;max-width:1180px;margin:0 auto;padding:var(--pad);position:relative;z-index:2}
+
+/* ====== SHARED TEXT COMPONENTS ====== */
+.kick{font-size:var(--small);letter-spacing:.26em;color:var(--green);text-transform:uppercase;
+  margin-bottom:.9rem;display:flex;align-items:center;gap:.5rem}
+.kick::before{content:"›";color:var(--dimmer);font-size:1.2em}
+h2{font-size:var(--h2);font-weight:800;line-height:1.02;letter-spacing:-.015em;margin-bottom:.4rem}
+h2 .hl{color:var(--green)}
+.lead{font-size:var(--body);color:var(--dim);max-width:62ch;margin-top:.5rem}
+.lead b{color:var(--cyan);font-weight:600}
+.foot{position:absolute;left:var(--pad);bottom:clamp(.7rem,2vh,1.6rem);font-size:var(--small);
+  color:var(--dimmer);letter-spacing:.1em;z-index:2}
+.foot b{color:var(--dim)}
+
+/* syntax colors */
+.k{color:var(--magenta)}.c{color:var(--cyan)}.gn{color:var(--green)}
+.d{color:var(--dim)}.a{color:var(--amber)}.p{color:var(--purple)}.w{color:var(--fg)}
+
+/* ====== TERMINAL WINDOW ====== */
+.term{background:rgba(22,27,34,.92);border:1px solid var(--line);border-radius:10px;
+  box-shadow:0 26px 60px -24px rgba(0,0,0,.8);overflow:hidden}
+.term .bar{display:flex;align-items:center;gap:.5rem;padding:.55rem .85rem;border-bottom:1px solid var(--line)}
+.dot{width:11px;height:11px;border-radius:50%}
+.dot.r{background:#ff5f56}.dot.y{background:#ffbd2e}.dot.g{background:#27c93f}
+.term .bar span{margin-left:.55rem;color:var(--dim);font-size:var(--small)}
+.term pre{padding:.85rem 1.1rem;font-size:var(--code);line-height:1.62;white-space:pre;overflow:hidden}
+
+/* ====== PANELS / CARDS ====== */
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+  padding:clamp(.8rem,1.6vw,1.4rem);position:relative}
+.panel h3{font-size:var(--h3);font-weight:700;margin-bottom:.35rem;display:flex;align-items:center;gap:.5rem}
+.panel h3 .tagn{font-size:.62em;color:var(--bg);background:var(--green);border-radius:4px;
+  padding:.05em .45em;font-weight:800}
+.panel p{font-size:var(--small);color:var(--dim);line-height:1.5}
+.panel.cyan{border-color:rgba(88,166,255,.4)} .panel.cyan h3{color:var(--cyan)}
+.panel.mag{border-color:rgba(255,123,114,.4)} .panel.mag h3{color:var(--magenta)}
+.panel.amber{border-color:rgba(227,179,65,.4)} .panel.amber h3{color:var(--amber)}
+.panel.purple{border-color:rgba(188,140,255,.4)} .panel.purple h3{color:var(--purple)}
+.panel.green{border-color:rgba(57,211,83,.4)} .panel.green h3{color:var(--green)}
+
+.grid2{display:grid;grid-template-columns:repeat(2,1fr);gap:var(--gap)}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--gap)}
+.grid2.lean{grid-template-columns:1.1fr .9fr;align-items:center}
+@media (max-width:760px){.grid2,.grid3,.grid2.lean{grid-template-columns:1fr}}
+
+/* bullet list */
+.blist{list-style:none;display:flex;flex-direction:column;gap:clamp(.4rem,1vh,.85rem);margin-top:.4rem}
+.blist li{font-size:var(--body);color:var(--fg);padding-left:1.5rem;position:relative;line-height:1.45}
+.blist li::before{content:"▹";position:absolute;left:0;color:var(--green)}
+.blist li b{color:var(--cyan);font-weight:600}
+.blist li .d{color:var(--dim)}
+.blist.tight li{font-size:var(--small)}
+
+/* flow / pipeline (vertical) */
+.flow{display:flex;flex-direction:column;gap:.35rem;margin-top:.3rem}
+.step{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--green);
+  border-radius:7px;padding:.55rem .9rem;font-size:var(--small)}
+.step b{color:var(--fg);font-weight:700}.step span{color:var(--dim)}
+.step.warn{border-left-color:var(--magenta)} .step.warn b{color:var(--magenta)}
+.step.ok{border-left-color:var(--cyan)} .step.ok b{color:var(--cyan)}
+.arr{color:var(--dimmer);text-align:center;font-size:.8em;line-height:1}
+
+/* metric strip */
+.metrics{display:flex;flex-wrap:wrap;gap:clamp(1rem,4vw,3.4rem);margin-top:1.2rem}
+.metrics div .n{display:block;font-size:clamp(1.2rem,3vw,2.4rem);font-weight:800;color:var(--green);line-height:1}
+.metrics div .t{font-size:var(--small);color:var(--dim);letter-spacing:.12em}
+
+/* table */
+table{width:100%;border-collapse:collapse;font-size:var(--small);margin-top:.4rem}
+th,td{text-align:left;padding:.5rem .7rem;border-bottom:1px solid var(--line)}
+th{color:var(--green);font-weight:700;letter-spacing:.08em;text-transform:uppercase;font-size:.82em}
+td{color:var(--dim)} td b{color:var(--fg);font-weight:600} td .c{color:var(--cyan)}
+tr:last-child td{border-bottom:none}
+
+/* ====== SECTION DIVIDER ====== */
+.divider .wrap{display:flex;flex-direction:column;justify-content:center;height:100%}
+.divider .bignum{font-size:clamp(5rem,22vw,18rem);font-weight:800;line-height:.8;
+  color:transparent;-webkit-text-stroke:2px var(--line);letter-spacing:-.02em}
+.divider h2{font-size:clamp(1.8rem,6vw,4.2rem);margin-top:.2rem}
+.divider .kick{margin-bottom:1.4rem}
+.divider .sub{color:var(--dim);font-size:var(--body);margin-top:.8rem;max-width:60ch}
+
+/* ====== TITLE SLIDE ====== */
+.title .wrap{display:flex;flex-direction:column;justify-content:center;height:100%}
+.title h1{font-size:var(--h1);font-weight:800;line-height:.98;letter-spacing:-.02em}
+.title h1 .ai{color:var(--green)}
+.cursor{display:inline-block;width:.55ch;height:.95em;background:var(--green);
+  margin-left:.12em;vertical-align:-.05em;animation:blink 1.1s steps(1) infinite}
+.title .sub{font-size:clamp(.9rem,2vw,1.5rem);color:var(--cyan);margin-top:.9rem;font-weight:500}
+@keyframes blink{50%{opacity:0}}
+
+/* ====== ENTRANCE ANIMATIONS (intersection-observer driven) ====== */
+.reveal{opacity:0;transform:translateY(26px);
+  transition:opacity .6s var(--ease),transform .6s var(--ease)}
+.slide.visible .reveal{opacity:1;transform:none}
+.slide.visible .reveal:nth-child(1){transition-delay:.05s}
+.slide.visible .reveal:nth-child(2){transition-delay:.14s}
+.slide.visible .reveal:nth-child(3){transition-delay:.23s}
+.slide.visible .reveal:nth-child(4){transition-delay:.32s}
+.slide.visible .reveal:nth-child(5){transition-delay:.41s}
+.slide.visible .reveal:nth-child(6){transition-delay:.5s}
+
+/* ====== DIAGRAMS (inline SVG + CSS tier-stack) ====== */
+.diagram{width:100%;display:flex;justify-content:center;margin-top:clamp(.7rem,2vh,1.2rem)}
+.diagram svg{width:100%;height:auto;max-height:min(56vh,520px)}
+svg.dg text{font-family:var(--font)}
+svg.dg .t{fill:var(--fg);font-weight:700;font-size:16px}
+svg.dg .s{fill:var(--dim);font-size:12px}
+svg.dg .b{fill:#161b22;stroke:#21262d;stroke-width:1.5}
+svg.dg .b.green{stroke:var(--green)} svg.dg .b.cyan{stroke:var(--cyan)}
+svg.dg .b.amber{stroke:var(--amber)} svg.dg .b.purple{stroke:var(--purple)}
+svg.dg .b.mag{stroke:var(--magenta)}
+svg.dg .edge{stroke:#484f58;stroke-width:1.6;fill:none}
+svg.dg .edge.flow{stroke:var(--green);stroke-dasharray:7 7;animation:dash 1.1s linear infinite}
+svg.dg .edge.flowc{stroke:var(--cyan);stroke-dasharray:7 7;animation:dash 1.1s linear infinite}
+svg.dg .elab{fill:var(--dim);font-size:11.5px}
+/* sequence-diagram bits */
+svg.dg .ll{stroke:#30363d;stroke-width:1.4;stroke-dasharray:4 6}
+svg.dg .ret{stroke:#6b7280;stroke-width:1.8;stroke-dasharray:6 5;fill:none}
+svg.dg .nb{fill:#0f141b;stroke:#30363d;stroke-width:1.2}
+svg.dg .seqlab{fill:var(--mod);font-size:13px}
+svg.dg .seclab{fill:var(--magenta);font-size:13px;font-weight:700}
+svg.dg .hl-t{font-weight:800;font-size:15px} svg.dg .hl-s{fill:var(--dim);font-size:11.5px}
+@keyframes dash{to{stroke-dashoffset:-14}}
+@media (prefers-reduced-motion:reduce){svg.dg .edge.flow,svg.dg .edge.flowc{animation:none}}
+
+/* CSS tier-stack (system overview) */
+.tiers{display:flex;flex-direction:column;gap:clamp(.22rem,.8vh,.5rem);margin-top:clamp(.5rem,1.5vh,1rem)}
+.tier{display:grid;grid-template-columns:clamp(74px,10vw,116px) 1fr;align-items:stretch;
+  border:1px solid var(--line);border-radius:8px;background:var(--panel);overflow:hidden}
+.tier .tl{font-size:clamp(.56rem,1vw,.78rem);font-weight:800;letter-spacing:.08em;
+  padding:.4rem .55rem;border-right:1px solid var(--line);display:flex;align-items:center}
+.tier.green{border-color:rgba(57,211,83,.32)} .tier.green .tl{color:var(--green)}
+.tier.cyan{border-color:rgba(88,166,255,.32)} .tier.cyan .tl{color:var(--cyan)}
+.tier.amber{border-color:rgba(227,179,65,.32)} .tier.amber .tl{color:var(--amber)}
+.tier.purple{border-color:rgba(188,140,255,.32)} .tier.purple .tl{color:var(--purple)}
+.tier.dim .tl{color:var(--dim)}
+.chips{display:flex;flex-wrap:wrap;gap:.3rem;padding:.4rem .55rem;align-items:center;align-content:center}
+.chips i{font-style:normal;font-size:clamp(.55rem,.98vw,.78rem);color:var(--dim);
+  border:1px solid var(--line);border-radius:5px;padding:.1em .5em;background:var(--bg);white-space:nowrap}
+.wgroups{display:flex;flex-direction:column;gap:.28rem;padding:.4rem .55rem}
+.wg{display:flex;flex-wrap:wrap;align-items:center;gap:.32rem}
+.wg b{font-size:clamp(.56rem,.95vw,.76rem);color:var(--fg);min-width:max-content}
+.tarr{text-align:center;color:var(--dimmer);font-size:var(--small);line-height:1;margin:.05rem 0}
+.duo{display:grid;grid-template-columns:1fr 1fr;gap:clamp(.22rem,.8vh,.5rem)}
+@media (max-width:760px){.duo{grid-template-columns:1fr}}
+
+/* ====== CHROME: progress bar + nav dots + hint ====== */
+.progress-bar{position:fixed;top:0;left:0;height:3px;width:0;background:var(--green);
+  z-index:100;box-shadow:0 0 10px var(--green);transition:width .15s linear}
+.nav-dots{position:fixed;right:clamp(.7rem,1.6vw,1.5rem);top:50%;transform:translateY(-50%);
+  display:flex;flex-direction:column;gap:.6rem;z-index:100}
+.nav-dots button{width:8px;height:8px;border-radius:50%;border:1px solid var(--dim);
+  background:transparent;cursor:pointer;padding:0;transition:all .25s}
+.nav-dots button.active{background:var(--green);border-color:var(--green);box-shadow:0 0 8px var(--green);transform:scale(1.3)}
+.hint{position:fixed;left:50%;bottom:.7rem;transform:translateX(-50%);font-size:var(--small);
+  color:var(--dimmer);z-index:100;letter-spacing:.1em}
+.hint kbd{color:var(--dim);border:1px solid var(--line);border-radius:4px;padding:.05em .4em;font-family:inherit}
+@media (max-height:600px){.nav-dots,.hint{display:none}}
+</style>
+</head>
+<body>
+<div class="progress-bar"></div>
+<nav class="nav-dots" aria-label="slide navigation"></nav>
+<div class="hint"><kbd>↑</kbd> <kbd>↓</kbd> / <kbd>Space</kbd> to navigate</div>
+
+<!-- ===== 01 · TITLE ===== -->
+<section class="slide title">
+  <div class="wrap">
+    <div class="kick reveal">system architecture · 2026</div>
+    <h1 class="reveal">Nuke <span class="ai">AI</span><br>Collaborator<span class="cursor"></span></h1>
+    <p class="sub reveal">A group-native platform where humans &amp; role-bots ship together.</p>
+    <div class="term reveal" style="margin-top:clamp(1.2rem,3vh,2.2rem);max-width:720px">
+      <div class="bar"><i class="dot r"></i><i class="dot y"></i><i class="dot g"></i><span>~/runtime — process topology</span></div>
+<pre><span class="d">$</span> <span class="gn">ps</span> --by-role
+<span class="k">supervisor</span>   <span class="d">FastAPI + WebSocket gateway · the bus</span>
+ <span class="d">├──</span> <span class="c">worker</span> ×N      <span class="d"># AI tool-loop · groups sharded across workers</span>
+ <span class="d">└──</span> <span class="a">mcp_collector</span>   <span class="d"># sole owner of every MCP connection</span></pre>
+    </div>
+  </div>
+  <div class="foot">nuke-ai-collaborator <b>·</b> 01 / 27</div>
+</section>
+
+<!-- ===== 02 · MENTAL MODEL ===== -->
+<section class="slide">
+  <div class="wrap">
+    <div class="kick reveal">the mental model</div>
+    <h2 class="reveal">Think <span class="hl">Slack</span>, but some members can<br>code, run tools &amp; remember.</h2>
+    <p class="lead reveal">One group ≈ one project. Inside: 1–2 humans + a roster of role-bots; <code>@</code> or a plain message triggers them.</p>
+    <div class="diagram reveal" style="margin-top:.5rem">
+      <svg class="dg" viewBox="0 0 1180 360" role="img" aria-label="The group room" style="max-height:min(58vh,460px)">
+        <defs><marker id="ar11" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+          <path d="M0,0 L7,3 L0,6 Z" fill="#6b7280"/></marker></defs>
+        <!-- group container -->
+        <rect class="b cyan" x="28" y="44" width="804" height="296" rx="14" style="fill:rgba(88,166,255,.04)"/>
+        <text class="t" x="52" y="78" style="fill:var(--cyan);font-size:15px">GROUP · one project / team</text>
+        <!-- humans -->
+        <rect class="b purple" x="66" y="108" width="150" height="60" rx="9"/>
+        <text class="t" x="141" y="144" text-anchor="middle" style="fill:var(--purple);font-size:14px">HUMAN</text>
+        <rect class="b purple" x="66" y="196" width="150" height="60" rx="9"/>
+        <text class="t" x="141" y="232" text-anchor="middle" style="fill:var(--purple);font-size:14px">HUMAN</text>
+        <text class="s" x="141" y="282" text-anchor="middle" style="font-size:11.5px">1–2 per group</text>
+        <!-- role bots -->
+        <rect class="b" x="324" y="100" width="138" height="54" rx="9"/><text class="t" x="393" y="132" text-anchor="middle" style="fill:var(--cyan);font-size:14px">BA</text>
+        <rect class="b" x="324" y="172" width="138" height="54" rx="9"/><text class="t" x="393" y="204" text-anchor="middle" style="fill:var(--cyan);font-size:14px">Dev</text>
+        <rect class="b" x="484" y="100" width="138" height="54" rx="9"/><text class="t" x="553" y="132" text-anchor="middle" style="fill:var(--cyan);font-size:14px">QA</text>
+        <rect class="b" x="484" y="172" width="138" height="54" rx="9"/><text class="t" x="553" y="204" text-anchor="middle" style="fill:var(--cyan);font-size:14px">PM</text>
+        <text class="s" x="473" y="258" text-anchor="middle" style="font-size:11.5px">role-bots · know the project best</text>
+        <!-- sub agents -->
+        <rect class="b amber" x="668" y="130" width="148" height="64" rx="9"/>
+        <text class="t" x="742" y="158" text-anchor="middle" style="fill:var(--amber);font-size:13.5px">sub-agents ×N</text>
+        <text class="s" x="742" y="180" text-anchor="middle" style="font-size:11.5px">attenuated perms</text>
+        <!-- edges -->
+        <line class="edge flow" x1="216" y1="134" x2="320" y2="124" marker-end="url(#ar11)"/>
+        <text class="elab" x="222" y="116" style="font-size:11.5px">@ / msg</text>
+        <line class="edge flow" x1="216" y1="224" x2="320" y2="200" marker-end="url(#ar11)"/>
+        <line class="edge" x1="462" y1="127" x2="484" y2="127" marker-end="url(#ar11)"/>
+        <text class="elab" x="455" y="150" text-anchor="middle" style="font-size:11px">collaborate</text>
+        <line class="edge" x1="622" y1="180" x2="664" y2="166" marker-end="url(#ar11)"/>
+        <text class="elab" x="628" y="214" style="font-size:11px">spawn</text>
+      </svg>
+    </div>
+  </div>
+  <div class="foot">mental model <b>·</b> 02 / 27</div>
+</section>
+
+<!-- ===== 03 · GROUP ISOLATION ===== -->
+<section class="slide">
+  <div class="wrap">
+    <div class="kick reveal">the inviolable rule</div>
+    <h2 class="reveal">Groups are <span class="hl">fully isolated</span>.</h2>
+    <p class="lead reveal">A bot belongs to exactly one group — never shared or reachable across groups, at any layer.</p>
+    <div class="diagram reveal" style="margin-top:.5rem">
+      <svg class="dg" viewBox="0 0 1180 504" role="img" aria-label="Group isolation by layer" style="max-height:min(66vh,560px)">
+        <!-- central db: the one shared thing -->
+        <rect class="b" x="300" y="6" width="580" height="46" rx="9"/>
+        <text class="t" x="590" y="29" text-anchor="middle" style="fill:var(--fg);font-size:14px">CENTRAL DB</text>
+        <text class="s" x="590" y="46" text-anchor="middle" style="font-size:11.5px">users · groups · members — the only shared state</text>
+
+        <!-- group column backgrounds + headers -->
+        <rect x="240" y="70" width="296" height="416" rx="12" fill="rgba(88,166,255,.05)" stroke="var(--cyan)" stroke-width="1.5"/>
+        <text class="t" x="388" y="102" text-anchor="middle" style="fill:var(--cyan);font-size:15px">GROUP A</text>
+        <rect x="548" y="70" width="296" height="416" rx="12" fill="rgba(57,211,83,.05)" stroke="var(--green)" stroke-width="1.5"/>
+        <text class="t" x="696" y="102" text-anchor="middle" style="fill:var(--green);font-size:15px">GROUP B</text>
+        <rect x="856" y="70" width="296" height="416" rx="12" fill="rgba(227,179,65,.05)" stroke="var(--amber)" stroke-width="1.5"/>
+        <text class="t" x="1004" y="102" text-anchor="middle" style="fill:var(--amber);font-size:15px">GROUP C</text>
+
+        <!-- isolation walls running through every layer -->
+        <line class="ll" x1="542" y1="118" x2="542" y2="480"/>
+        <line class="ll" x1="850" y1="118" x2="850" y2="480"/>
+        <text class="seclab" x="542" y="306" text-anchor="middle" style="font-size:17px">✗</text>
+        <text class="seclab" x="850" y="306" text-anchor="middle" style="font-size:17px">✗</text>
+
+        <!-- LAYER 1 · collaboration -->
+        <text class="t" x="28" y="158" style="fill:var(--fg);font-size:13.5px">COLLABORATION</text>
+        <text class="s" x="28" y="176" style="font-size:11px;fill:var(--dim)">who's talking</text>
+        <rect class="bx" x="256" y="124" width="264" height="62" rx="8"/><text class="s" x="388" y="160" text-anchor="middle" style="font-size:12.5px;fill:var(--mod)">bots · conversation history</text>
+        <rect class="bx" x="564" y="124" width="264" height="62" rx="8"/><text class="s" x="696" y="160" text-anchor="middle" style="font-size:12.5px;fill:var(--mod)">bots · conversation history</text>
+        <rect class="bx" x="872" y="124" width="264" height="62" rx="8"/><text class="s" x="1004" y="160" text-anchor="middle" style="font-size:12.5px;fill:var(--mod)">bots · conversation history</text>
+
+        <!-- LAYER 2 · memory -->
+        <text class="t" x="28" y="244" style="fill:var(--fg);font-size:13.5px">MEMORY</text>
+        <text class="s" x="28" y="262" style="font-size:11px;fill:var(--dim)">what it knows</text>
+        <rect class="bx" x="256" y="210" width="264" height="62" rx="8"/><text class="s" x="388" y="246" text-anchor="middle" style="font-size:12.5px;fill:var(--mod)">Chroma vectors · salience facts</text>
+        <rect class="bx" x="564" y="210" width="264" height="62" rx="8"/><text class="s" x="696" y="246" text-anchor="middle" style="font-size:12.5px;fill:var(--mod)">Chroma vectors · salience facts</text>
+        <rect class="bx" x="872" y="210" width="264" height="62" rx="8"/><text class="s" x="1004" y="246" text-anchor="middle" style="font-size:12.5px;fill:var(--mod)">Chroma vectors · salience facts</text>
+
+        <!-- LAYER 3 · data -->
+        <text class="t" x="28" y="330" style="fill:var(--fg);font-size:13.5px">DATA</text>
+        <text class="s" x="28" y="348" style="font-size:11px;fill:var(--dim)">private store</text>
+        <rect class="bx" x="256" y="296" width="264" height="62" rx="8"/><text class="s" x="388" y="324" text-anchor="middle" style="font-size:12.5px;fill:var(--mod)">group_A.db (WAL)</text><text class="s" x="388" y="342" text-anchor="middle" style="font-size:11px;fill:var(--dim)">permission rules</text>
+        <rect class="bx" x="564" y="296" width="264" height="62" rx="8"/><text class="s" x="696" y="324" text-anchor="middle" style="font-size:12.5px;fill:var(--mod)">group_B.db (WAL)</text><text class="s" x="696" y="342" text-anchor="middle" style="font-size:11px;fill:var(--dim)">permission rules</text>
+        <rect class="bx" x="872" y="296" width="264" height="62" rx="8"/><text class="s" x="1004" y="324" text-anchor="middle" style="font-size:12.5px;fill:var(--mod)">group_C.db (WAL)</text><text class="s" x="1004" y="342" text-anchor="middle" style="font-size:11px;fill:var(--dim)">permission rules</text>
+
+        <!-- LAYER 4 · execution -->
+        <text class="t" x="28" y="416" style="fill:var(--fg);font-size:13.5px">EXECUTION</text>
+        <text class="s" x="28" y="434" style="font-size:11px;fill:var(--dim)">where it runs</text>
+        <rect class="bx" x="256" y="382" width="264" height="62" rx="8"/><text class="s" x="388" y="410" text-anchor="middle" style="font-size:12.5px;fill:var(--mod)">workspace</text><text class="s" x="388" y="428" text-anchor="middle" style="font-size:11px;fill:var(--dim)">sandbox · mount-isolated</text>
+        <rect class="bx" x="564" y="382" width="264" height="62" rx="8"/><text class="s" x="696" y="410" text-anchor="middle" style="font-size:12.5px;fill:var(--mod)">workspace</text><text class="s" x="696" y="428" text-anchor="middle" style="font-size:11px;fill:var(--dim)">sandbox · mount-isolated</text>
+        <rect class="bx" x="872" y="382" width="264" height="62" rx="8"/><text class="s" x="1004" y="410" text-anchor="middle" style="font-size:12.5px;fill:var(--mod)">workspace</text><text class="s" x="1004" y="428" text-anchor="middle" style="font-size:11px;fill:var(--dim)">sandbox · mount-isolated</text>
+
+        <text class="elab" x="590" y="498" text-anchor="middle" style="font-size:12px;fill:var(--dim)">no cross-group recall · access · mount — isolation runs through every layer</text>
+      </svg>
+    </div>
+  </div>
+  <div class="foot">isolation <b>·</b> 03 / 27</div>
+</section>
+
+<!-- ===== 03b · CAPABILITY PANORAMA (the map) ===== -->
+<section class="slide">
+  <div class="wrap">
+    <div class="kick reveal">capability panorama</div>
+    <h2 class="reveal">Everything Nuke does — <span class="hl">one map</span>.</h2>
+    <div class="diagram reveal" style="margin-top:.4rem">
+      <svg class="dg" viewBox="0 0 1180 560" role="img" aria-label="Capability panorama" style="max-height:min(60vh,520px)">
+        <defs><marker id="ar5" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+          <path d="M0,0 L6,3 L0,6 Z" fill="#484f58"/></marker></defs>
+        <!-- spokes (drawn first, behind) -->
+        <line class="edge" x1="590" y1="308" x2="520" y2="284"/>
+        <line class="edge" x1="590" y1="308" x2="660" y2="284"/>
+        <line class="edge" x1="590" y1="308" x2="520" y2="324"/>
+        <line class="edge" x1="590" y1="308" x2="660" y2="324"/>
+
+        <!-- P1 Collaboration (TL) -->
+        <rect class="b cyan" x="24" y="64" width="500" height="220" rx="10"/>
+        <text class="t" x="44" y="98" style="fill:var(--cyan);font-size:16px">GROUP-NATIVE COLLABORATION</text>
+        <text class="s" x="44" y="138" style="font-size:13.5px">▹ Multi-human + role-bots</text>
+        <text class="s" x="284" y="138" style="font-size:13.5px">▹ Group isolation</text>
+        <text class="s" x="44" y="174" style="font-size:13.5px">▹ Role auto-routing</text>
+        <text class="s" x="284" y="174" style="font-size:13.5px">▹ Orchestration pipelines</text>
+        <text class="s" x="44" y="210" style="font-size:13.5px">▹ Serialized runs</text>
+        <text class="s" x="284" y="210" style="font-size:13.5px">▹ Human-interruptible</text>
+        <text class="s" x="44" y="246" style="font-size:13.5px">▹ Real-time tool/permission stream</text>
+
+        <!-- P2 Runtime (TR) -->
+        <rect class="b green" x="656" y="64" width="500" height="220" rx="10"/>
+        <text class="t" x="676" y="98" style="fill:var(--green);font-size:16px">SHARDED RUNTIME &amp; BUS</text>
+        <text class="s" x="676" y="138" style="font-size:13.5px">▹ 3-process model</text>
+        <text class="s" x="916" y="138" style="font-size:13.5px">▹ Supervisor bus</text>
+        <text class="s" x="676" y="174" style="font-size:13.5px">▹ Worker sharding + pin</text>
+        <text class="s" x="916" y="174" style="font-size:13.5px">▹ IPC (UDS / pipes)</text>
+        <text class="s" x="676" y="210" style="font-size:13.5px">▹ Single-owner MCP</text>
+        <text class="s" x="916" y="210" style="font-size:13.5px">▹ Lease handoff</text>
+        <text class="s" x="676" y="246" style="font-size:13.5px">▹ Group-DB ownership (QUERY / MUTATE)</text>
+
+        <!-- center hub -->
+        <rect class="b" x="528" y="276" width="124" height="64" rx="10" style="stroke:var(--fg)"/>
+        <text class="t" x="590" y="304" text-anchor="middle" style="fill:var(--green);font-size:14px">NUKE AI</text>
+        <text class="s" x="590" y="324" text-anchor="middle" style="font-size:11px">the platform</text>
+
+        <!-- P3 Security (BL) -->
+        <rect class="b mag" x="24" y="320" width="500" height="220" rx="10"/>
+        <text class="t" x="44" y="354" style="fill:var(--magenta);font-size:16px">DEFENSE-IN-DEPTH SECURITY</text>
+        <text class="s" x="44" y="394" style="font-size:13.5px">▹ HIL approval gate</text>
+        <text class="s" x="284" y="394" style="font-size:13.5px">▹ 2-layer shell guard</text>
+        <text class="s" x="44" y="430" style="font-size:13.5px">▹ Secret redaction</text>
+        <text class="s" x="284" y="430" style="font-size:13.5px">▹ Sub-agent attenuation</text>
+        <text class="s" x="44" y="466" style="font-size:13.5px">▹ MCP trust boundary</text>
+        <text class="s" x="284" y="466" style="font-size:13.5px">▹ Mount-isolated sandbox</text>
+        <text class="s" x="44" y="502" style="font-size:13.5px">▹ Fail-closed by default</text>
+
+        <!-- P4 Agent Engine (BR) -->
+        <rect class="b amber" x="656" y="320" width="500" height="220" rx="10"/>
+        <text class="t" x="676" y="354" style="fill:var(--amber);font-size:16px">ENGINEERED AGENT ENGINE</text>
+        <text class="s" x="676" y="394" style="font-size:13.5px">▹ First-match tool router</text>
+        <text class="s" x="916" y="394" style="font-size:13.5px">▹ 9-tier edit engine</text>
+        <text class="s" x="676" y="430" style="font-size:13.5px">▹ Vector memory</text>
+        <text class="s" x="916" y="430" style="font-size:13.5px">▹ Salience extraction</text>
+        <text class="s" x="676" y="466" style="font-size:13.5px">▹ 5-strategy autocompact</text>
+        <text class="s" x="916" y="466" style="font-size:13.5px">▹ Code intelligence</text>
+        <text class="s" x="676" y="502" style="font-size:13.5px">▹ Multi-provider AI client</text>
+      </svg>
+    </div>
+  </div>
+  <div class="foot">panorama <b>·</b> 04 / 30</div>
+</section>
+
+<!-- ===== 03c · FEATURE COLLECTIONS (four pillars) ===== -->
+<section class="slide">
+  <div class="wrap">
+    <div class="kick reveal">feature collections</div>
+    <h2 class="reveal">Four pillars, <span class="hl">not a feature pile</span>.</h2>
+    <p class="lead reveal">Every capability rolls up into one of four deliberate pillars — each expanded in the sections that follow.</p>
+    <div class="grid2 reveal" style="margin-top:1rem">
+      <div class="panel cyan">
+        <h3>01 · Group-Native Collaboration</h3>
+        <p>A group is the unit. Humans and role-bots share one isolated room, and the runtime keeps their turns coherent.</p>
+        <div class="chips" style="padding:.4rem 0 0"><i>isolation</i><i>role auto-routing</i><i>serialized + interruptible</i></div>
+      </div>
+      <div class="panel green">
+        <h3>02 · Sharded Runtime &amp; Bus</h3>
+        <p>Three cooperating processes scale the AI loop while one bus keeps I/O off the hot path.</p>
+        <div class="chips" style="padding:.4rem 0 0"><i>supervisor bus</i><i>worker sharding</i><i>single-owner MCP</i></div>
+      </div>
+      <div class="panel mag">
+        <h3>03 · Defense-in-Depth Security</h3>
+        <p>Every tool call passes one fail-closed gate; secrets and untrusted output never leak across the swarm.</p>
+        <div class="chips" style="padding:.4rem 0 0"><i>HIL gate</i><i>shell guard</i><i>redaction</i><i>sandbox</i></div>
+      </div>
+      <div class="panel amber">
+        <h3>04 · Engineered Agent Engine</h3>
+        <p>The parts that make bots effective: resilient edits, durable memory, bounded context, real code intel.</p>
+        <div class="chips" style="padding:.4rem 0 0"><i>9-tier edit</i><i>vector memory</i><i>autocompact</i><i>code-intel</i></div>
+      </div>
+    </div>
+  </div>
+  <div class="foot">four pillars <b>·</b> 05 / 30</div>
+</section>
+
+<!-- ===== 04 · DIVIDER: RUNTIME TOPOLOGY ===== -->
+<section class="slide divider">
+  <div class="wrap">
+    <div class="kick reveal">part 01</div>
+    <div class="bignum reveal">01</div>
+    <h2 class="reveal">Runtime Topology</h2>
+    <p class="sub reveal">Three process roles, one bus, sharded compute.</p>
+  </div>
+  <div class="foot">part 01 <b>·</b> 04 / 27</div>
+</section>
+
+<!-- ===== 04b · SYSTEM OVERVIEW (tier stack) ===== -->
+<section class="slide">
+  <div class="wrap">
+    <div class="kick reveal">the whole machine</div>
+    <h2 class="reveal">One picture, top to bottom.</h2>
+    <div class="tiers reveal">
+      <div class="tier purple"><span class="tl">CLIENT</span>
+        <div class="chips"><i>Web Chat UI</i><i>VFS Explorer</i><i>Metrics Dashboard</i><i>WS Client</i></div></div>
+      <div class="tarr">↓ &nbsp;WSRPC over WebSocket</div>
+      <div class="tier green"><span class="tl">SUPERVISOR</span>
+        <div class="chips"><i>WS Router</i><i>Browser Registry</i><i>Routing Cache</i><i>Subprocess Ctrl</i><i>Scheduler</i></div></div>
+      <div class="tarr">↓ &nbsp;IPC bus (UDS / pipes)</div>
+      <div class="tier cyan"><span class="tl">WORKER ×N</span>
+        <div class="wgroups">
+          <div class="wg"><b>Agent Orchestrator</b><div class="chips"><i>Swarm</i><i>Traits</i><i>Skills</i><i>RoleRouter</i><i>AutoCompact</i></div></div>
+          <div class="wg"><b>Tool &amp; Security</b><div class="chips"><i>ToolRouter</i><i>Permission/HIL</i><i>ShellGuard</i><i>Redaction</i><i>McpProxy</i><i>CodeIntel</i></div></div>
+          <div class="wg"><b>Engine</b><div class="chips"><i>9-tier Edit Ladder</i><i>hashline</i><i>Chroma Memory</i><i>AI Client</i></div></div>
+        </div></div>
+      <div class="tarr">↕ &nbsp;MCP_CALL / RESULT / SCHEMAS</div>
+      <div class="tier amber"><span class="tl">COLLECTOR</span>
+        <div class="chips"><i>McpClients ×N</i><i>OAuth Store</i><i>Descendant Sweeper</i></div></div>
+      <div class="duo">
+        <div class="tier dim"><span class="tl">STORAGE</span>
+          <div class="chips"><i>group_N.db (WAL)</i><i>central.db</i><i>workspace</i><i>Chroma</i><i>container</i></div></div>
+        <div class="tier dim"><span class="tl">EXTERNAL</span>
+          <div class="chips"><i>LLM APIs</i><i>MCP servers</i><i>Git / Jira</i></div></div>
+      </div>
+    </div>
+  </div>
+  <div class="foot">overview <b>·</b> 05 / 28</div>
+</section>
+
+<!-- ===== 05 · 3-PROCESS MODEL ===== -->
+<section class="slide">
+  <div class="wrap">
+    <div class="kick reveal">process topology</div>
+    <h2 class="reveal">Three roles — not two.</h2>
+    <div class="diagram reveal">
+      <svg class="dg" viewBox="0 0 920 500" role="img" aria-label="Process topology diagram">
+        <defs><marker id="ar1" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+          <path d="M0,0 L7,3 L0,6 Z" fill="#7d8590"/></marker></defs>
+        <!-- clients -->
+        <rect class="b purple" x="350" y="12" width="220" height="46" rx="8"/>
+        <text class="t" x="460" y="34" text-anchor="middle" style="fill:var(--purple)">BROWSERS</text>
+        <text class="s" x="460" y="50" text-anchor="middle">React Web UI · WSRPC</text>
+        <!-- supervisor -->
+        <rect class="b green" x="190" y="104" width="540" height="70" rx="8"/>
+        <text class="t" x="460" y="134" text-anchor="middle" style="fill:var(--green)">SUPERVISOR — the bus</text>
+        <text class="s" x="460" y="156" text-anchor="middle">FastAPI · WS router · MCP relay · lifecycle · sole unread writer</text>
+        <!-- worker -->
+        <rect class="b cyan" x="60" y="250" width="370" height="120" rx="8"/>
+        <text class="t" x="245" y="282" text-anchor="middle" style="fill:var(--cyan)">WORKER ×N</text>
+        <text class="s" x="245" y="308" text-anchor="middle">tool_loop_v1 · AI inference</text>
+        <text class="s" x="245" y="330" text-anchor="middle">groups pinned · group_id % N</text>
+        <text class="s" x="245" y="352" text-anchor="middle">McpProxyProvider → bus</text>
+        <!-- collector -->
+        <rect class="b amber" x="500" y="250" width="360" height="120" rx="8"/>
+        <text class="t" x="680" y="282" text-anchor="middle" style="fill:var(--amber)">MCP COLLECTOR ×1</text>
+        <text class="s" x="680" y="308" text-anchor="middle">sole owner of MCP connections</text>
+        <text class="s" x="680" y="330" text-anchor="middle">pre-authorized calls only</text>
+        <text class="s" x="680" y="352" text-anchor="middle">schema push → all workers</text>
+        <!-- storage -->
+        <rect class="b" x="60" y="420" width="370" height="62" rx="8"/>
+        <text class="t" x="245" y="448" text-anchor="middle">PER-GROUP STORAGE</text>
+        <text class="s" x="245" y="468" text-anchor="middle">SQLite (WAL) · workspace · Chroma</text>
+        <!-- mcp servers -->
+        <rect class="b" x="500" y="420" width="360" height="62" rx="8"/>
+        <text class="t" x="680" y="448" text-anchor="middle">MCP SERVERS</text>
+        <text class="s" x="680" y="468" text-anchor="middle">stdio / remote</text>
+        <!-- edges -->
+        <path class="edge" d="M460,58 L460,100" marker-end="url(#ar1)"/>
+        <text class="elab" x="470" y="86">WSRPC / WebSocket</text>
+        <path class="edge flow" d="M320,174 L255,246" marker-end="url(#ar1)"/>
+        <text class="elab" x="92" y="214">IPC · UDS / pipes</text>
+        <path class="edge flow" d="M600,174 L672,246" marker-end="url(#ar1)"/>
+        <text class="elab" x="566" y="214">MCP_CALL / RESULT</text>
+        <path class="edge" d="M245,370 L245,416" marker-end="url(#ar1)"/>
+        <path class="edge" d="M680,370 L680,416" marker-end="url(#ar1)"/>
+      </svg>
+    </div>
+    <p class="lead reveal" style="margin-top:.6rem">The Supervisor is the bus: MCP becomes a <b>shared capability</b> instead of being re-spawned inside every worker.</p>
+  </div>
+  <div class="foot">topology <b>·</b> 05 / 27</div>
+</section>
+
+<!-- ===== 06 · SUPERVISOR ===== -->
+<section class="slide">
+  <div class="wrap">
+    <div class="kick reveal">role: supervisor</div>
+    <h2 class="reveal">The gateway that does <span class="hl">no AI work</span>.</h2>
+    <p class="lead reveal">A pure packet shunt — all inference stays out of process.</p>
+    <div class="diagram reveal" style="margin-top:.5rem">
+      <svg class="dg" viewBox="0 0 1180 372" role="img" aria-label="Supervisor planes" style="max-height:min(58vh,460px)">
+        <defs>
+          <marker id="ar13" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#6b7280"/></marker>
+        </defs>
+        <!-- browsers -->
+        <rect class="b purple" x="470" y="16" width="240" height="50" rx="9"/>
+        <text class="t" x="590" y="47" text-anchor="middle" style="fill:var(--purple);font-size:14px">BROWSERS</text>
+        <line class="edge" x1="590" y1="66" x2="590" y2="120" marker-end="url(#ar13)"/>
+        <text class="elab" x="600" y="98">WSRPC · fan-out</text>
+        <!-- supervisor -->
+        <rect class="b green" x="350" y="124" width="480" height="86" rx="10"/>
+        <text class="t" x="590" y="156" text-anchor="middle" style="fill:var(--green);font-size:16px">SUPERVISOR · pure I/O router</text>
+        <text class="s" x="590" y="180" text-anchor="middle" style="font-size:12.5px">routes WS · relays MCP · spawns workers · sole unread writer</text>
+        <text class="seclab" x="590" y="200" text-anchor="middle" style="font-size:12px;fill:var(--magenta)">NO AI compute here</text>
+        <!-- children -->
+        <rect class="b cyan" x="120" y="296" width="360" height="62" rx="10"/>
+        <text class="t" x="300" y="324" text-anchor="middle" style="fill:var(--cyan);font-size:14px">WORKER ×N</text>
+        <text class="s" x="300" y="345" text-anchor="middle" style="font-size:12px">the AI tool-loop lives here</text>
+        <rect class="b amber" x="700" y="296" width="360" height="62" rx="10"/>
+        <text class="t" x="880" y="324" text-anchor="middle" style="fill:var(--amber);font-size:14px">MCP COLLECTOR ×1</text>
+        <text class="s" x="880" y="345" text-anchor="middle" style="font-size:12px">MCP connections live here</text>
+        <!-- control plane (spawn, dotted) — OUTER side -->
+        <line class="ll" x1="400" y1="212" x2="272" y2="292" marker-end="url(#ar13)"/>
+        <text class="elab" x="196" y="250" style="font-size:11px;fill:var(--dim)">spawn (1×)</text>
+        <line class="ll" x1="780" y1="212" x2="908" y2="292" marker-end="url(#ar13)"/>
+        <text class="elab" x="916" y="250" text-anchor="end" style="font-size:11px;fill:var(--dim)">spawn (1×)</text>
+        <!-- data plane (IPC, green dashed, child connects back) — INNER side -->
+        <line class="edge flow" x1="352" y1="292" x2="480" y2="212" marker-end="url(#ar13)"/>
+        <text class="elab" x="432" y="284" style="font-size:11px">IPC · HELLO ↑</text>
+        <line class="edge flow" x1="828" y1="292" x2="700" y2="212" marker-end="url(#ar13)"/>
+        <text class="elab" x="664" y="284" style="font-size:11px">IPC · HELLO ↑</text>
+        <!-- legend -->
+        <line class="ll" x1="120" y1="30" x2="160" y2="30"/><text class="elab" x="168" y="34" style="font-size:11px">control · spawn</text>
+        <line class="edge flow" x1="120" y1="50" x2="160" y2="50"/><text class="elab" x="168" y="54" style="font-size:11px">data · IPC (connect back)</text>
+      </svg>
+    </div>
+  </div>
+  <div class="foot">supervisor <b>·</b> 06 / 27</div>
+</section>
+
+<!-- ===== 07 · WORKER SHARDS + ROUTING ===== -->
+<section class="slide">
+  <div class="wrap">
+    <div class="kick reveal">role: worker · CELL-15</div>
+    <h2 class="reveal">Groups are <span class="hl">balanced</span> across workers.</h2>
+    <p class="lead reveal">There are <code>NUKE_WORKERS</code> long-lived workers (default 4 ≈ host cores). Each active group is <b>pinned to exactly one</b> — many groups per worker, but a group only ever runs in a single worker.</p>
+    <div class="diagram reveal" style="margin-top:.5rem">
+      <svg class="dg" viewBox="0 0 1180 356" role="img" aria-label="Group to worker routing" style="max-height:min(56vh,440px)">
+        <defs><marker id="ar14" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+          <path d="M0,0 L7,3 L0,6 Z" fill="#6b7280"/></marker></defs>
+        <rect class="b cyan" x="30" y="146" width="170" height="64" rx="10"/>
+        <text class="t" x="115" y="174" text-anchor="middle" style="fill:var(--cyan);font-size:14px">new group</text>
+        <text class="s" x="115" y="196" text-anchor="middle" style="font-size:12px">group_id</text>
+        <rect class="b green" x="246" y="134" width="320" height="90" rx="10"/>
+        <text class="t" x="406" y="164" text-anchor="middle" style="fill:var(--green);font-size:15px">route(group_id)</text>
+        <text class="s" x="406" y="188" text-anchor="middle" style="font-size:12.5px">assigned_worker_id? (persisted)</text>
+        <text class="s" x="406" y="208" text-anchor="middle" style="font-size:12.5px;fill:var(--amber)">else → w{group_id % N}</text>
+        <line class="edge flow" x1="200" y1="178" x2="242" y2="178" marker-end="url(#ar14)"/>
+        <!-- workers -->
+        <rect class="b" x="650" y="20" width="500" height="62" rx="10"/><text class="t" x="678" y="50" style="fill:var(--fg);font-size:14px">w0</text><text class="s" x="730" y="50" style="font-size:13px">← g4 · g8 · g12</text>
+        <rect class="b" x="650" y="98" width="500" height="62" rx="10"/><text class="t" x="678" y="128" style="fill:var(--fg);font-size:14px">w1</text><text class="s" x="730" y="128" style="font-size:13px">← g1 · g5 · g9</text>
+        <rect class="b" x="650" y="176" width="500" height="62" rx="10"/><text class="t" x="678" y="206" style="fill:var(--fg);font-size:14px">w2</text><text class="s" x="730" y="206" style="font-size:13px">← g2 · g6 · g10</text>
+        <rect class="b" x="650" y="254" width="500" height="62" rx="10"/><text class="t" x="678" y="284" style="fill:var(--fg);font-size:14px">w3</text><text class="s" x="730" y="284" style="font-size:13px">← g3 · g7 · g11</text>
+        <line class="edge" x1="566" y1="168" x2="646" y2="51" marker-end="url(#ar14)"/>
+        <line class="edge" x1="566" y1="172" x2="646" y2="129" marker-end="url(#ar14)"/>
+        <line class="edge" x1="566" y1="184" x2="646" y2="207" marker-end="url(#ar14)"/>
+        <line class="edge" x1="566" y1="190" x2="646" y2="285" marker-end="url(#ar14)"/>
+        <text class="elab" x="115" y="296" style="font-size:12px;fill:var(--dim)">NUKE_WORKERS (default 4) · pinned, so one group → one worker</text>
+        <text class="elab" x="115" y="316" style="font-size:12px;fill:var(--dim)">old default 'w0' stacked everything — NULL now spreads them</text>
+      </svg>
+    </div>
+  </div>
+  <div class="foot">routing <b>·</b> 07 / 27</div>
+</section>
+
+<!-- ===== 08 · PER-GROUP SERIALIZATION ===== -->
+<section class="slide">
+  <div class="wrap">
+    <div class="kick reveal">concurrency · core/bg.py</div>
+    <h2 class="reveal">One run per group, <span class="hl">interruptible</span>.</h2>
+    <p class="lead reveal">A process-local <code>group_run_lock</code> serializes a group's runs — no overlapping, interleaved, or dropped replies.</p>
+    <div class="diagram reveal" style="margin-top:.5rem">
+      <svg class="dg" viewBox="0 0 1180 340" role="img" aria-label="Per-group run serialization" style="max-height:min(56vh,430px)">
+        <defs><marker id="ar15" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+          <path d="M0,0 L7,3 L0,6 Z" fill="#6b7280"/></marker></defs>
+        <text class="elab" x="40" y="40" style="fill:var(--green)">group_run_lock · FIFO — one run at a time</text>
+        <!-- messages row -->
+        <text class="s" x="150" y="80" text-anchor="middle" style="font-size:12px;fill:var(--dim)">msg A</text>
+        <text class="s" x="470" y="80" text-anchor="middle" style="font-size:12px;fill:var(--dim)">msg B (arrives during A)</text>
+        <text class="s" x="880" y="80" text-anchor="middle" style="font-size:12px;fill:var(--magenta)">human follow-up</text>
+        <line class="edge" x1="150" y1="86" x2="150" y2="116" marker-end="url(#ar15)"/>
+        <line class="edge" x1="470" y1="86" x2="470" y2="116" marker-end="url(#ar15)"/>
+        <line class="edge" x1="880" y1="86" x2="880" y2="116" marker-end="url(#ar15)"/>
+        <!-- runs row -->
+        <rect class="b green" x="60" y="122" width="200" height="66" rx="9"/>
+        <text class="t" x="160" y="150" text-anchor="middle" style="fill:var(--green);font-size:14px">RUN A</text>
+        <text class="s" x="160" y="172" text-anchor="middle" style="font-size:11.5px">running · holds lock</text>
+        <rect class="b cyan" x="300" y="122" width="240" height="66" rx="9" stroke-dasharray="6 5"/>
+        <text class="t" x="420" y="150" text-anchor="middle" style="fill:var(--cyan);font-size:14px">RUN B · queued</text>
+        <text class="s" x="420" y="172" text-anchor="middle" style="font-size:11.5px">waits lock → reloads latest history</text>
+        <text class="seclab" x="610" y="162" text-anchor="middle" style="font-size:22px">✗</text>
+        <text class="elab" x="610" y="200" text-anchor="middle" style="font-size:11px;fill:var(--magenta)">abort_group</text>
+        <rect class="b amber" x="660" y="122" width="240" height="66" rx="9"/>
+        <text class="t" x="780" y="150" text-anchor="middle" style="fill:var(--amber);font-size:14px">RUN · restart</text>
+        <text class="s" x="780" y="172" text-anchor="middle" style="font-size:11.5px">on the newest message</text>
+        <line class="edge flow" x1="260" y1="155" x2="296" y2="155" marker-end="url(#ar15)"/>
+        <line class="edge" x1="540" y1="155" x2="592" y2="155" marker-end="url(#ar15)"/>
+        <line class="edge" x1="630" y1="155" x2="656" y2="155" marker-end="url(#ar15)"/>
+        <!-- time axis -->
+        <line class="ll" x1="40" y1="230" x2="1000" y2="230" marker-end="url(#ar15)"/>
+        <text class="elab" x="1004" y="234" style="font-size:11px;fill:var(--dim)">time</text>
+        <text class="elab" x="40" y="270" style="font-size:12px;fill:var(--dim)">workflow-stage / non-human sends don't interrupt · other groups → own locks → run concurrently</text>
+      </svg>
+    </div>
+  </div>
+  <div class="foot">serialization <b>·</b> 08 / 27</div>
+</section>
+
+<!-- ===== 09 · IPC & BUS ===== -->
+<section class="slide">
+  <div class="wrap">
+    <div class="kick reveal">runtime/ipc · bus</div>
+    <h2 class="reveal">Length-framed JSON over <span class="hl">UDS / pipes</span>.</h2>
+    <p class="lead reveal">~0.1 ms round-trip. One wire format, three logical planes.</p>
+    <div class="diagram reveal" style="margin-top:.5rem">
+      <svg class="dg" viewBox="0 0 1180 372" role="img" aria-label="IPC wire format and planes" style="max-height:min(58vh,460px)">
+        <defs><marker id="ar16" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+          <path d="M0,0 L7,3 L0,6 Z" fill="#6b7280"/></marker></defs>
+        <!-- wire frame -->
+        <text class="elab" x="60" y="24" style="fill:var(--green)">WIRE FRAME</text>
+        <rect class="b amber" x="60" y="34" width="220" height="50" rx="8"/>
+        <text class="s" x="170" y="64" text-anchor="middle" style="font-size:12.5px;fill:var(--amber)">4-byte BE length</text>
+        <rect class="b" x="284" y="34" width="836" height="50" rx="8"/>
+        <text class="s" x="702" y="64" text-anchor="middle" style="font-size:12.5px;fill:var(--fg)">JSON body — { type, group_id, … }</text>
+        <!-- planes -->
+        <rect class="b green" x="60" y="116" width="1060" height="62" rx="10"/>
+        <text class="t" x="84" y="142" style="fill:var(--green);font-size:13px">DOWNSTREAM</text>
+        <text class="elab" x="84" y="162" style="font-size:11.5px;fill:var(--dim)">Sup → Worker  →</text>
+        <text class="s" x="300" y="152" style="font-size:12.5px">USER_MESSAGE · ABORT · PERMISSION_RESPONSE · CONFIRM · WORKFLOW_* · WAKE_TRIGGER · QUERY/MUTATE · RELEASE_LEASE</text>
+        <rect class="b cyan" x="60" y="190" width="1060" height="62" rx="10"/>
+        <text class="t" x="84" y="216" style="fill:var(--cyan);font-size:13px">UPSTREAM</text>
+        <text class="elab" x="84" y="236" style="font-size:11.5px;fill:var(--dim)">Worker → Sup  ←</text>
+        <text class="s" x="300" y="226" style="font-size:12.5px">HELLO (register) · BROADCAST (wraps any bus event) · UNREAD_DELTA · STATS_REPORT · LEASE_RELEASED</text>
+        <rect class="b amber" x="60" y="264" width="1060" height="62" rx="10"/>
+        <text class="t" x="84" y="290" style="fill:var(--amber);font-size:13px">MCP BUS</text>
+        <text class="elab" x="84" y="310" style="font-size:11.5px;fill:var(--dim)">Sup ↔ Collector  ↔</text>
+        <text class="s" x="300" y="300" style="font-size:12.5px">MCP_CALL / RESULT / SCHEMAS · MCP_AUTH_START · MCP_OAUTH_CALLBACK</text>
+        <text class="elab" x="60" y="352" style="font-size:11.5px;fill:var(--dim)">permission request rides UPSTREAM inside a BROADCAST — only the response is a downstream frame</text>
+      </svg>
+    </div>
+  </div>
+  <div class="foot">ipc &amp; bus <b>·</b> 09 / 27</div>
+</section>
+
+<!-- ===== 10 · GROUP DB OWNERSHIP ===== -->
+<section class="slide">
+  <div class="wrap">
+    <div class="kick reveal">data plane · CELL-18</div>
+    <h2 class="reveal">The worker <span class="hl">owns</span> the group DB.</h2>
+    <p class="lead reveal">A group's SQLite DB is opened only by the worker holding its lease — the Supervisor never touches it directly.</p>
+    <div class="grid2 reveal" style="margin-top:1.2rem">
+      <div class="panel cyan"><h3>QUERY / MUTATE proxy</h3><p>Group-domain reads (history, reactions) &amp; writes (reactions / pins / edits / deletes) go downstream; the owning worker hits the DB and replies via a correlated <code>query_result</code> bus event. Only central data stays supervisor-side.</p></div>
+      <div class="panel amber"><h3>Lease handoff</h3><p>To move a group between workers (the routing rebalance), the Supervisor sends <code>RELEASE_LEASE</code>, waits for the <code>LEASE_RELEASED</code> ACK (state flushed + lock released), then re-routes — no split-brain on <code>group.lock</code>.</p></div>
+    </div>
+  </div>
+  <div class="foot">data plane <b>·</b> 10 / 27</div>
+</section>
+
+<!-- ===== 11 · DIVIDER: TOOLS & SECURITY ===== -->
+<section class="slide divider">
+  <div class="wrap">
+    <div class="kick reveal">part 02</div>
+    <div class="bignum reveal">02</div>
+    <h2 class="reveal">Tools &amp; Security</h2>
+    <p class="sub reveal">One funnel. One interception point. Fail-closed by default.</p>
+  </div>
+  <div class="foot">part 02 <b>·</b> 11 / 27</div>
+</section>
+
+<!-- ===== 12 · TOOL ROUTER ===== -->
+<section class="slide">
+  <div class="wrap">
+    <div class="kick reveal">executors/tool_router.py</div>
+    <h2 class="reveal">ToolRouter is <span class="hl">first-match</span>.</h2>
+    <p class="lead reveal">Every tool call funnels through one path so the global before/after hooks — the <b>single</b> interception point — always fire.</p>
+    <ul class="blist reveal" style="margin-top:1.1rem">
+      <li><b>builtin / skill / shell</b> <span class="d">→ stay on <code>tool_executor.execute()</code> so permission + shell-guard + redaction necessarily run.</span></li>
+      <li><b>mcp:*</b> <span class="d">→ not in the registry; route to <code>McpProxyProvider</code> → bus → collector.</span></li>
+      <li><b>ShellToolProvider left unregistered</b> <span class="d">— registering it would let run_shell match a hook-bypassing path (a fail-open regression).</span></li>
+    </ul>
+    <p class="lead reveal" style="margin-top:.9rem"><span class="d">The router does <i>not</i> add a second hook layer and does <i>not</i> replace tool_executor.</span></p>
+  </div>
+  <div class="foot">tool router <b>·</b> 12 / 27</div>
+</section>
+
+<!-- ===== 13 · SECURITY PIPELINE ===== -->
+<section class="slide">
+  <div class="wrap">
+    <div class="kick reveal">the funnel</div>
+    <h2 class="reveal">Every tool call, one pipeline.</h2>
+    <div class="diagram reveal">
+      <svg class="dg" viewBox="0 0 920 460" role="img" aria-label="Tool execution pipeline">
+        <defs><marker id="ar2" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+          <path d="M0,0 L7,3 L0,6 Z" fill="#7d8590"/></marker></defs>
+        <!-- top: proposal → router -->
+        <rect class="b purple" x="330" y="10" width="260" height="42" rx="8"/>
+        <text class="t" x="460" y="36" text-anchor="middle" style="fill:var(--purple)">Bot proposes tool call</text>
+        <rect class="b green" x="350" y="86" width="220" height="42" rx="8"/>
+        <text class="t" x="460" y="112" text-anchor="middle" style="fill:var(--green)">ToolRouter · first-match</text>
+        <path class="edge" d="M460,52 L460,82" marker-end="url(#ar2)"/>
+        <!-- split labels -->
+        <path class="edge" d="M350,118 C230,140 220,150 220,164" marker-end="url(#ar2)"/>
+        <text class="elab" x="120" y="150">builtin / skill / shell</text>
+        <path class="edge" d="M570,118 C690,140 700,150 700,164" marker-end="url(#ar2)"/>
+        <text class="elab" x="612" y="150">mcp:* — not in registry</text>
+        <!-- LEFT lane -->
+        <rect class="b" x="70" y="166" width="300" height="38" rx="7"/>
+        <text class="s" x="220" y="190" text-anchor="middle" style="fill:var(--fg)">tool_executor before-hooks</text>
+        <rect class="b green" x="70" y="216" width="300" height="38" rx="7"/>
+        <text class="s" x="220" y="240" text-anchor="middle" style="fill:var(--green)">Permission engine (allow · deny · ask)</text>
+        <rect class="b mag" x="70" y="266" width="300" height="38" rx="7"/>
+        <text class="s" x="220" y="290" text-anchor="middle" style="fill:var(--magenta)">run_shell guard · regex + shlex</text>
+        <rect class="b cyan" x="70" y="316" width="300" height="38" rx="7"/>
+        <text class="s" x="220" y="340" text-anchor="middle" style="fill:var(--cyan)">Execute handler</text>
+        <path class="edge" d="M220,204 L220,212" marker-end="url(#ar2)"/>
+        <path class="edge" d="M220,254 L220,262" marker-end="url(#ar2)"/>
+        <path class="edge" d="M220,304 L220,312" marker-end="url(#ar2)"/>
+        <!-- RIGHT lane -->
+        <rect class="b amber" x="550" y="166" width="300" height="38" rx="7"/>
+        <text class="s" x="700" y="190" text-anchor="middle" style="fill:var(--amber)">McpProxyProvider</text>
+        <rect class="b" x="550" y="216" width="300" height="38" rx="7"/>
+        <text class="s" x="700" y="240" text-anchor="middle" style="fill:var(--fg)">MCP bridge → bus</text>
+        <rect class="b amber" x="550" y="266" width="300" height="54" rx="7"/>
+        <text class="s" x="700" y="288" text-anchor="middle" style="fill:var(--amber)">Collector: pre-authorized call</text>
+        <text class="s" x="700" y="306" text-anchor="middle">+ untrusted fence + redaction</text>
+        <path class="edge" d="M700,204 L700,212" marker-end="url(#ar2)"/>
+        <path class="edge" d="M700,254 L700,262" marker-end="url(#ar2)"/>
+        <!-- converge to after-hook -->
+        <rect class="b green" x="310" y="384" width="300" height="46" rx="8"/>
+        <text class="t" x="460" y="404" text-anchor="middle" style="fill:var(--green)">after-hook · redact_secrets()</text>
+        <text class="s" x="460" y="421" text-anchor="middle">→ enters shared context · re-broadcast</text>
+        <path class="edge flow" d="M220,354 C220,380 320,384 356,388" marker-end="url(#ar2)"/>
+        <path class="edge flow" d="M700,320 C700,378 600,384 564,388" marker-end="url(#ar2)"/>
+      </svg>
+    </div>
+  </div>
+  <div class="foot">security pipeline <b>·</b> 13 / 27</div>
+</section>
+
+<!-- ===== 14 · PERMISSION / HIL ===== -->
+<section class="slide">
+  <div class="wrap">
+    <div class="kick reveal">permissions/engine.py</div>
+    <h2 class="reveal">HIL gate — <span class="hl">human in the loop</span>.</h2>
+    <p class="lead reveal">Write-class tools require approval. The pipeline resolves top-down — first match wins.</p>
+    <div class="diagram reveal" style="margin-top:.4rem">
+      <svg class="dg" viewBox="0 0 1180 430" role="img" aria-label="Permission resolution pipeline" style="max-height:min(60vh,500px)">
+        <defs><marker id="ar17" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+          <path d="M0,0 L7,3 L0,6 Z" fill="#6b7280"/></marker></defs>
+        <!-- spine of 7 checks with outcome chips -->
+        <!-- 1 -->
+        <rect class="b" x="80" y="16" width="560" height="42" rx="8"/><text class="s" x="100" y="42" style="fill:var(--fg);font-size:13px">① bypassPermissions mode?</text>
+        <rect class="b green" x="700" y="16" width="380" height="42" rx="8"/><text class="s" x="720" y="42" style="fill:var(--green);font-size:13px">yes → ALLOW</text>
+        <!-- 2 -->
+        <rect class="b" x="80" y="72" width="560" height="42" rx="8"/><text class="s" x="100" y="98" style="fill:var(--fg);font-size:13px">② deny rule matches?</text>
+        <rect class="b mag" x="700" y="72" width="380" height="42" rx="8"/><text class="s" x="720" y="98" style="fill:var(--magenta);font-size:13px">yes → DENY</text>
+        <!-- 3 -->
+        <rect class="b" x="80" y="128" width="560" height="42" rx="8"/><text class="s" x="100" y="154" style="fill:var(--fg);font-size:13px">③ allow rule matches?</text>
+        <rect class="b green" x="700" y="128" width="380" height="42" rx="8"/><text class="s" x="720" y="154" style="fill:var(--green);font-size:13px">yes → ALLOW</text>
+        <!-- 4 -->
+        <rect class="b" x="80" y="184" width="560" height="42" rx="8"/><text class="s" x="100" y="210" style="fill:var(--fg);font-size:13px">④ dontAsk mode?</text>
+        <rect class="b mag" x="700" y="184" width="380" height="42" rx="8"/><text class="s" x="720" y="210" style="fill:var(--magenta);font-size:13px">yes → DENY</text>
+        <!-- 5 -->
+        <rect class="b" x="80" y="240" width="560" height="42" rx="8"/><text class="s" x="100" y="266" style="fill:var(--fg);font-size:13px">⑤ sub-agent (spawn_depth &gt; 0)?</text>
+        <rect class="b mag" x="700" y="240" width="380" height="42" rx="8"/><text class="s" x="720" y="266" style="fill:var(--magenta);font-size:13px">yes → DENY · can't show UI</text>
+        <!-- 6 -->
+        <rect class="b" x="80" y="296" width="560" height="42" rx="8"/><text class="s" x="100" y="322" style="fill:var(--fg);font-size:13px">⑥ ask rule?</text>
+        <rect class="b amber" x="700" y="296" width="380" height="42" rx="8"/><text class="s" x="720" y="322" style="fill:var(--amber);font-size:13px">⏸ suspend + broadcast permission_request</text>
+        <!-- 7 -->
+        <rect class="b" x="80" y="352" width="560" height="42" rx="8"/><text class="s" x="100" y="378" style="fill:var(--fg);font-size:13px">⑦ default fallthrough</text>
+        <rect class="b green" x="700" y="352" width="380" height="42" rx="8"/><text class="s" x="720" y="378" style="fill:var(--green);font-size:13px">→ ALLOW</text>
+        <!-- no arrows + yes connectors -->
+        <line class="edge" x1="110" y1="58" x2="110" y2="72" marker-end="url(#ar17)"/>
+        <line class="edge" x1="110" y1="114" x2="110" y2="128" marker-end="url(#ar17)"/>
+        <line class="edge" x1="110" y1="170" x2="110" y2="184" marker-end="url(#ar17)"/>
+        <line class="edge" x1="110" y1="226" x2="110" y2="240" marker-end="url(#ar17)"/>
+        <line class="edge" x1="110" y1="282" x2="110" y2="296" marker-end="url(#ar17)"/>
+        <line class="edge" x1="110" y1="338" x2="110" y2="352" marker-end="url(#ar17)"/>
+        <text class="elab" x="122" y="70" style="font-size:10.5px;fill:var(--dim)">no</text>
+        <line class="edge" x1="640" y1="37" x2="696" y2="37" marker-end="url(#ar17)"/>
+        <line class="edge" x1="640" y1="93" x2="696" y2="93" marker-end="url(#ar17)"/>
+        <line class="edge" x1="640" y1="149" x2="696" y2="149" marker-end="url(#ar17)"/>
+        <line class="edge" x1="640" y1="205" x2="696" y2="205" marker-end="url(#ar17)"/>
+        <line class="edge" x1="640" y1="261" x2="696" y2="261" marker-end="url(#ar17)"/>
+        <line class="edge" x1="640" y1="317" x2="696" y2="317" marker-end="url(#ar17)"/>
+        <line class="edge" x1="640" y1="373" x2="696" y2="373" marker-end="url(#ar17)"/>
+        <text class="elab" x="80" y="418" style="font-size:11.5px;fill:var(--dim)">unanswered ask → default-deny after ASK_TIMEOUT · "once" grant auto-allows exactly one matching call (bot_id, group_id)</text>
+      </svg>
+    </div>
+  </div>
+  <div class="foot">permissions / HIL <b>·</b> 14 / 27</div>
+</section>
+
+<!-- ===== 15 · RUN_SHELL GUARD ===== -->
+<section class="slide">
+  <div class="wrap">
+    <div class="kick reveal">workspace_tools.py</div>
+    <h2 class="reveal">run_shell guard — <span class="hl">two layers</span>.</h2>
+    <p class="lead reveal">Two gates, then a sensitive-dir check — anything dangerous is blocked before it runs.</p>
+    <div class="diagram reveal" style="margin-top:.5rem">
+      <svg class="dg" viewBox="0 0 1180 360" role="img" aria-label="run_shell two-layer guard" style="max-height:min(58vh,450px)">
+        <defs><marker id="ar18" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+          <path d="M0,0 L7,3 L0,6 Z" fill="#6b7280"/></marker></defs>
+        <rect class="b" x="20" y="118" width="150" height="64" rx="9"/>
+        <text class="t" x="95" y="146" text-anchor="middle" style="fill:var(--fg);font-size:13px">run_shell</text>
+        <text class="s" x="95" y="167" text-anchor="middle" style="font-size:12px">cmd</text>
+        <rect class="b mag" x="196" y="106" width="252" height="88" rx="10"/>
+        <text class="t" x="322" y="134" text-anchor="middle" style="fill:var(--magenta);font-size:14px">LAYER 1 · regex</text>
+        <text class="s" x="322" y="158" text-anchor="middle" style="font-size:11.5px">base64 -d · curl|wget…|bash</text>
+        <text class="s" x="322" y="176" text-anchor="middle" style="font-size:11.5px">eval $(…) / backticks</text>
+        <rect class="b mag" x="476" y="106" width="280" height="88" rx="10"/>
+        <text class="t" x="616" y="134" text-anchor="middle" style="fill:var(--magenta);font-size:14px">LAYER 2 · shlex tokenized</text>
+        <text class="s" x="616" y="158" text-anchor="middle" style="font-size:11.5px">resolve the real binary</text>
+        <text class="s" x="616" y="176" text-anchor="middle" style="font-size:11.5px">recurse into -c payload</text>
+        <rect class="b" x="784" y="106" width="240" height="88" rx="10"/>
+        <text class="t" x="904" y="134" text-anchor="middle" style="fill:var(--fg);font-size:14px">sensitive-dir check</text>
+        <text class="s" x="904" y="158" text-anchor="middle" style="font-size:11px">.ssh · .aws · .docker</text>
+        <text class="s" x="904" y="175" text-anchor="middle" style="font-size:11px">.gnupg · .kube · .password-store</text>
+        <rect class="b green" x="1052" y="118" width="106" height="64" rx="9"/>
+        <text class="t" x="1105" y="154" text-anchor="middle" style="fill:var(--green);font-size:13px">exec</text>
+        <!-- flow -->
+        <line class="edge flow" x1="170" y1="150" x2="192" y2="150" marker-end="url(#ar18)"/>
+        <line class="edge flow" x1="448" y1="150" x2="472" y2="150" marker-end="url(#ar18)"/>
+        <line class="edge flow" x1="756" y1="150" x2="780" y2="150" marker-end="url(#ar18)"/>
+        <line class="edge flow" x1="1024" y1="150" x2="1048" y2="150" marker-end="url(#ar18)"/>
+        <!-- blocked -->
+        <rect class="b mag" x="430" y="278" width="320" height="56" rx="10" style="fill:rgba(255,123,114,.06)"/>
+        <text class="t" x="590" y="312" text-anchor="middle" style="fill:var(--magenta);font-size:14px">✗ BLOCKED</text>
+        <path class="edge" d="M322,194 C322,250 470,260 510,276" marker-end="url(#ar18)"/>
+        <path class="edge" d="M616,194 L606,274" marker-end="url(#ar18)"/>
+        <path class="edge" d="M904,194 C904,250 760,262 700,276" marker-end="url(#ar18)"/>
+        <text class="elab" x="430" y="232" style="font-size:11px;fill:var(--magenta)">blocked at any gate</text>
+      </svg>
+    </div>
+  </div>
+  <div class="foot">shell guard <b>·</b> 15 / 27</div>
+</section>
+
+<!-- ===== 16 · REDACTION ===== -->
+<section class="slide">
+  <div class="wrap">
+    <div class="kick reveal">executors/redaction.py</div>
+    <h2 class="reveal">Multi-agent context is a <span class="hl">leak amplifier</span>.</h2>
+    <p class="lead reveal">One result fans out to every bot — so secrets are masked <b>before</b> any of them see it.</p>
+    <div class="diagram reveal" style="margin-top:.5rem">
+      <svg class="dg" viewBox="0 0 1180 360" role="img" aria-label="Secret redaction fan-out" style="max-height:min(58vh,450px)">
+        <defs><marker id="ar19" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+          <path d="M0,0 L7,3 L0,6 Z" fill="#6b7280"/></marker></defs>
+        <!-- two choke points feeding redact -->
+        <rect class="b" x="20" y="70" width="270" height="56" rx="9"/>
+        <text class="s" x="155" y="94" text-anchor="middle" style="font-size:12.5px;fill:var(--fg)">tool_executor after-hook</text>
+        <text class="s" x="155" y="113" text-anchor="middle" style="font-size:11px;fill:var(--dim)">builtin / shell / skill</text>
+        <rect class="b" x="20" y="206" width="270" height="56" rx="9"/>
+        <text class="s" x="155" y="230" text-anchor="middle" style="font-size:12.5px;fill:var(--fg)">MCP provider</text>
+        <text class="s" x="155" y="249" text-anchor="middle" style="font-size:11px;fill:var(--dim)">bypasses tool_executor</text>
+        <!-- redact -->
+        <rect class="b green" x="350" y="92" width="300" height="148" rx="11"/>
+        <text class="t" x="500" y="120" text-anchor="middle" style="fill:var(--green);font-size:15px">redact_secrets()</text>
+        <text class="s" x="500" y="146" text-anchor="middle" style="font-size:11.5px">PEM · JWT · AWS AKID · GitHub</text>
+        <text class="s" x="500" y="166" text-anchor="middle" style="font-size:11.5px">Anthropic · OpenAI · Slack · Google</text>
+        <text class="s" x="500" y="186" text-anchor="middle" style="font-size:11.5px">URL creds · Bearer · secret-assign</text>
+        <text class="s" x="500" y="214" text-anchor="middle" style="font-size:11px;fill:var(--dim)">high-precision · masks the value, keeps context</text>
+        <line class="edge" x1="290" y1="98" x2="346" y2="130" marker-end="url(#ar19)"/>
+        <line class="edge" x1="290" y1="234" x2="346" y2="202" marker-end="url(#ar19)"/>
+        <!-- shared context -->
+        <rect class="b cyan" x="710" y="138" width="180" height="56" rx="9"/>
+        <text class="t" x="800" y="166" text-anchor="middle" style="fill:var(--cyan);font-size:13px">shared context</text>
+        <text class="s" x="800" y="184" text-anchor="middle" style="font-size:11px">re-broadcast</text>
+        <line class="edge flow" x1="650" y1="166" x2="706" y2="166" marker-end="url(#ar19)"/>
+        <!-- fan-out to bots (amplifier) -->
+        <rect class="b" x="980" y="40" width="150" height="46" rx="9"/><text class="s" x="1055" y="69" text-anchor="middle" style="font-size:12.5px;fill:var(--fg)">bot</text>
+        <rect class="b" x="980" y="110" width="150" height="46" rx="9"/><text class="s" x="1055" y="139" text-anchor="middle" style="font-size:12.5px;fill:var(--fg)">bot</text>
+        <rect class="b" x="980" y="180" width="150" height="46" rx="9"/><text class="s" x="1055" y="209" text-anchor="middle" style="font-size:12.5px;fill:var(--fg)">bot</text>
+        <rect class="b" x="980" y="250" width="150" height="46" rx="9"/><text class="s" x="1055" y="279" text-anchor="middle" style="font-size:12.5px;fill:var(--fg)">bot</text>
+        <line class="edge" x1="890" y1="160" x2="976" y2="63" marker-end="url(#ar19)"/>
+        <line class="edge" x1="890" y1="164" x2="976" y2="133" marker-end="url(#ar19)"/>
+        <line class="edge" x1="890" y1="170" x2="976" y2="203" marker-end="url(#ar19)"/>
+        <line class="edge" x1="890" y1="174" x2="976" y2="273" marker-end="url(#ar19)"/>
+        <text class="elab" x="1055" y="318" text-anchor="middle" style="font-size:11px;fill:var(--dim)">multi-agent = leak amplifier</text>
+      </svg>
+    </div>
+  </div>
+  <div class="foot">redaction <b>·</b> 16 / 27</div>
+</section>
+
+<!-- ===== 17 · SUB-AGENT ATTENUATION ===== -->
+<section class="slide">
+  <div class="wrap">
+    <div class="kick reveal">derive_subagent_ruleset</div>
+    <h2 class="reveal">Permissions <span class="hl">decay</span> downward.</h2>
+    <p class="lead reveal">When a bot spawns a sub-agent, authority can only shrink — never grow.</p>
+    <ul class="blist reveal" style="margin-top:1.2rem">
+      <li><b>bypassPermissions never propagates</b> <span class="d">— a privileged parent can't hand a blank check to a child.</span></li>
+      <li><b>Blanket high-risk allow rules are dropped</b> <span class="d">— sub-agents re-confront the HIL gate for dangerous actions.</span></li>
+      <li><b>Sub-agents can't prompt</b> <span class="d">— an <code>ask</code> they'd trigger resolves as denied rather than hanging.</span></li>
+    </ul>
+  </div>
+  <div class="foot">attenuation <b>·</b> 17 / 27</div>
+</section>
+
+<!-- ===== 18 · DIVIDER: MCP & SANDBOX ===== -->
+<section class="slide divider">
+  <div class="wrap">
+    <div class="kick reveal">part 03</div>
+    <div class="bignum reveal">03</div>
+    <h2 class="reveal">MCP &amp; Sandbox</h2>
+    <p class="sub reveal">One connection owner. Mount-isolated execution.</p>
+  </div>
+  <div class="foot">part 03 <b>·</b> 18 / 27</div>
+</section>
+
+<!-- ===== 19 · MCP COLLECTOR ===== -->
+<section class="slide">
+  <div class="wrap">
+    <div class="kick reveal">runtime/mcp_collector.py</div>
+    <h2 class="reveal">Why MCP lives in <span class="hl">one process</span>.</h2>
+    <p class="lead reveal">An MCP connection's <code>anyio</code> cancel scope is bound to its creating task — so all connections live in <b>one Collector</b>, never re-spawned per worker.</p>
+    <div class="diagram reveal" style="margin-top:.6rem">
+      <svg class="dg" viewBox="0 0 920 280" role="img" aria-label="MCP bus relay" style="max-height:min(42vh,320px)">
+        <defs><marker id="ar3" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+          <path d="M0,0 L7,3 L0,6 Z" fill="#7d8590"/></marker></defs>
+        <!-- boxes -->
+        <rect class="b cyan" x="20" y="96" width="180" height="88" rx="8"/>
+        <text class="t" x="110" y="128" text-anchor="middle" style="fill:var(--cyan)">WORKER</text>
+        <text class="s" x="110" y="148" text-anchor="middle">HIL / permission</text>
+        <text class="s" x="110" y="165" text-anchor="middle">decided here</text>
+        <rect class="b green" x="300" y="96" width="180" height="88" rx="8"/>
+        <text class="t" x="390" y="134" text-anchor="middle" style="fill:var(--green)">SUPERVISOR</text>
+        <text class="s" x="390" y="154" text-anchor="middle">relay / bus</text>
+        <rect class="b amber" x="560" y="96" width="180" height="88" rx="8"/>
+        <text class="t" x="650" y="128" text-anchor="middle" style="fill:var(--amber)">COLLECTOR</text>
+        <text class="s" x="650" y="148" text-anchor="middle">pre-authorized</text>
+        <text class="s" x="650" y="165" text-anchor="middle">+ fence + redact</text>
+        <rect class="b" x="800" y="110" width="100" height="60" rx="8"/>
+        <text class="s" x="850" y="138" text-anchor="middle" style="fill:var(--fg)">MCP</text>
+        <text class="s" x="850" y="155" text-anchor="middle">servers</text>
+        <!-- call (top, →) -->
+        <path class="edge flowc" d="M200,118 L296,118" marker-end="url(#ar3)"/>
+        <path class="edge flowc" d="M480,118 L556,118" marker-end="url(#ar3)"/>
+        <text class="elab" x="206" y="108">MCP_CALL →</text>
+        <text class="elab" x="486" y="108">MCP_CALL →</text>
+        <!-- result (bottom, ←) -->
+        <path class="edge" d="M556,162 L484,162" marker-end="url(#ar3)"/>
+        <path class="edge" d="M296,162 L204,162" marker-end="url(#ar3)"/>
+        <text class="elab" x="500" y="180">← MCP_RESULT</text>
+        <text class="elab" x="214" y="180">← MCP_RESULT</text>
+        <!-- collector ↔ servers -->
+        <path class="edge" d="M740,140 L796,140" marker-end="url(#ar3)"/>
+        <text class="elab" x="744" y="130">stdio/remote</text>
+        <!-- schemas push (curved top) -->
+        <path class="edge" d="M650,96 C650,40 390,40 200,80" marker-end="url(#ar3)" stroke-dasharray="4 5"/>
+        <text class="elab" x="360" y="36">MCP_SCHEMAS push → all workers</text>
+      </svg>
+    </div>
+    <p class="lead reveal" style="margin-top:.5rem"><b>Trust boundary:</b> permission is decided on the worker; the Collector only runs pre-authorized calls. <span class="d">OAuth via <code>MCP_AUTH_START</code>; shutdown sweeps orphaned <code>npx/node</code>.</span></p>
+  </div>
+  <div class="foot">mcp collector <b>·</b> 19 / 27</div>
+</section>
+
+<!-- ===== 19b · MCP CALL SEQUENCE (worked example) ===== -->
+<section class="slide">
+  <div class="wrap">
+    <div class="kick reveal">worked example · MCP tool call</div>
+    <h2 class="reveal">Calling a <span class="hl">Jira</span> tool, end-to-end.</h2>
+    <div class="diagram reveal" style="margin-top:.5rem">
+      <svg class="dg" viewBox="0 0 1180 520" role="img" aria-label="MCP Jira call sequence" style="max-height:min(56vh,470px)">
+        <defs><marker id="ar4" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+          <path d="M0,0 L7,3 L0,6 Z" fill="#6b7280"/></marker></defs>
+
+        <!-- lifelines -->
+        <line class="ll" x1="110" y1="54" x2="110" y2="500"/>
+        <line class="ll" x1="355" y1="54" x2="355" y2="500"/>
+        <line class="ll" x1="600" y1="54" x2="600" y2="500"/>
+        <line class="ll" x1="850" y1="54" x2="850" y2="500"/>
+        <line class="ll" x1="1075" y1="54" x2="1075" y2="500"/>
+        <!-- headers -->
+        <rect class="b purple" x="35" y="12" width="150" height="40" rx="7"/>
+        <text class="hl-t" x="110" y="30" text-anchor="middle" style="fill:var(--purple)">HUMAN</text>
+        <text class="hl-s" x="110" y="45" text-anchor="middle">approver</text>
+        <rect class="b cyan" x="280" y="12" width="150" height="40" rx="7"/>
+        <text class="hl-t" x="355" y="30" text-anchor="middle" style="fill:var(--cyan)">WORKER</text>
+        <text class="hl-s" x="355" y="45" text-anchor="middle">bot · McpProxy</text>
+        <rect class="b green" x="525" y="12" width="150" height="40" rx="7"/>
+        <text class="hl-t" x="600" y="30" text-anchor="middle" style="fill:var(--green)">SUPERVISOR</text>
+        <text class="hl-s" x="600" y="45" text-anchor="middle">bus</text>
+        <rect class="b amber" x="775" y="12" width="150" height="40" rx="7"/>
+        <text class="hl-t" x="850" y="30" text-anchor="middle" style="fill:var(--amber)">COLLECTOR</text>
+        <text class="hl-s" x="850" y="45" text-anchor="middle">×1</text>
+        <rect class="b" x="1000" y="12" width="150" height="40" rx="7"/>
+        <text class="hl-t" x="1075" y="30" text-anchor="middle" style="fill:var(--fg)">JIRA</text>
+        <text class="hl-s" x="1075" y="45" text-anchor="middle">MCP server</text>
+
+        <!-- r1 note: worker self -->
+        <rect class="nb" x="208" y="74" width="370" height="26" rx="6"/>
+        <text class="seqlab" x="393" y="91" text-anchor="middle" style="font-size:12px">① jira__create_issue → ToolRouter → McpProxy</text>
+
+        <!-- r2 worker → human : HIL -->
+        <text class="seclab" x="232" y="124" text-anchor="middle">② permission_request · write → HIL</text>
+        <line class="edge" x1="355" y1="130" x2="116" y2="130" marker-end="url(#ar4)"/>
+        <!-- r3 human → worker : allow -->
+        <text class="seqlab" x="232" y="160" text-anchor="middle" style="font-size:12px">③ allow  ·  else timeout-deny</text>
+        <line class="ret" x1="110" y1="166" x2="349" y2="166" marker-end="url(#ar4)"/>
+        <!-- r4 worker → supervisor : MCP_CALL -->
+        <text class="elab" x="477" y="196" text-anchor="middle" style="font-size:12.5px">④ MCP_CALL · request_id · group_id</text>
+        <line class="edge flow" x1="355" y1="202" x2="594" y2="202" marker-end="url(#ar4)"/>
+        <!-- r5 supervisor → collector : relay -->
+        <text class="elab" x="725" y="232" text-anchor="middle" style="font-size:12.5px">⑤ relay</text>
+        <line class="edge flow" x1="600" y1="238" x2="844" y2="238" marker-end="url(#ar4)"/>
+        <!-- r6 collector → jira : execute -->
+        <text class="elab" x="962" y="268" text-anchor="middle" style="font-size:12.5px">⑥ create_issue · _pre_authorized</text>
+        <line class="edge" x1="850" y1="274" x2="1069" y2="274" marker-end="url(#ar4)"/>
+        <!-- r7 jira → collector : result -->
+        <text class="seqlab" x="962" y="304" text-anchor="middle" style="font-size:12px">⑦ ABC-123 created</text>
+        <line class="ret" x1="1075" y1="310" x2="856" y2="310" marker-end="url(#ar4)"/>
+        <!-- r8 note: collector fence+redact -->
+        <rect class="nb" x="702" y="332" width="296" height="26" rx="6" style="stroke:rgba(227,179,65,.5)"/>
+        <text class="seqlab" x="850" y="349" text-anchor="middle" style="fill:var(--amber);font-size:12px">⑧ untrusted fence + redaction</text>
+        <!-- r9 collector → supervisor -->
+        <text class="seqlab" x="725" y="382" text-anchor="middle" style="font-size:12px">⑨ MCP_RESULT</text>
+        <line class="ret" x1="850" y1="388" x2="606" y2="388" marker-end="url(#ar4)"/>
+        <!-- r10 supervisor → worker -->
+        <text class="seqlab" x="477" y="418" text-anchor="middle" style="font-size:12px">⑩ result · by request_id</text>
+        <line class="ret" x1="600" y1="424" x2="361" y2="424" marker-end="url(#ar4)"/>
+        <!-- r11 note: worker redact+broadcast -->
+        <rect class="nb" x="178" y="446" width="460" height="26" rx="6"/>
+        <text class="seqlab" x="408" y="463" text-anchor="middle" style="font-size:12px">⑪ redact → shared context → re-broadcast · bot replies</text>
+      </svg>
+    </div>
+    <p class="lead reveal" style="margin-top:.3rem;font-size:var(--small)"><span class="d">3 checkpoints:</span> <b>② HIL</b> (worker, fail-closed) · <b>⑥ pre-authorized</b> (collector) · <b>⑧ fence + redaction</b> before sharing.</p>
+  </div>
+  <div class="foot">mcp call · sequence <b>·</b> 20 / 28</div>
+</section>
+
+<!-- ===== 20 · SANDBOX BACKENDS ===== -->
+<section class="slide">
+  <div class="wrap">
+    <div class="kick reveal">shell_backend.py · container_sandbox.py</div>
+    <h2 class="reveal">Isolation by <span class="hl">mount</span>.</h2>
+    <p class="lead reveal"><code>_handle_run_shell</code> builds a normalized request and hands it to a backend that decides isolation strength.</p>
+    <div class="grid2 reveal" style="margin-top:1.1rem">
+      <div class="panel"><h3 class="a">LocalShellBackend</h3><p>Host subprocess, <b>no</b> cross-group isolation — dev only.</p></div>
+      <div class="panel green"><h3>ContainerShellBackend</h3><p>One long-lived <code>sleep infinity</code> Docker container per active group; the worker <code>docker exec</code>s in. Only that group's workspace is bind-mounted — siblings / central DB / host secrets are absent. Gated by <code>NUKE_SHELL_EXEC_BACKEND=container</code>.</p></div>
+    </div>
+  </div>
+  <div class="foot">sandbox <b>·</b> 20 / 27</div>
+</section>
+
+<!-- ===== 21 · DIVIDER: ENGINE ROOM ===== -->
+<section class="slide divider">
+  <div class="wrap">
+    <div class="kick reveal">part 04</div>
+    <div class="bignum reveal">04</div>
+    <h2 class="reveal">The Engine Room</h2>
+    <p class="sub reveal">Edits, memory, context, intelligence.</p>
+  </div>
+  <div class="foot">part 04 <b>·</b> 21 / 27</div>
+</section>
+
+<!-- ===== 22 · EDIT ENGINE ===== -->
+<section class="slide">
+  <div class="wrap">
+    <div class="kick reveal">editing/normalize.py · replacers.py</div>
+    <h2 class="reveal">A <span class="hl">9-tier</span> replacer ladder.</h2>
+    <p class="lead reveal">Try the strictest match first; escalate only as far as needed.</p>
+    <div class="diagram reveal" style="margin-top:.4rem">
+      <svg class="dg" viewBox="0 0 1180 466" role="img" aria-label="9-tier replacer ladder" style="max-height:min(60vh,512px)">
+        <defs><marker id="ar6" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+          <path d="M0,0 L7,3 L0,6 Z" fill="#6b7280"/></marker></defs>
+        <!-- escalation arrow -->
+        <line class="edge" x1="34" y1="34" x2="34" y2="428" marker-end="url(#ar6)"/>
+        <text class="elab" x="20" y="240" transform="rotate(-90 20 240)" text-anchor="middle">match fails → escalate</text>
+        <!-- 9 tiers -->
+        <rect class="b green" x="58" y="30"  width="556" height="38" rx="6"/><text class="s" x="78" y="54" style="fill:var(--fg)">① simple · exact char match</text>
+        <rect class="b green" x="58" y="76"  width="556" height="38" rx="6"/><text class="s" x="78" y="100" style="fill:var(--fg)">② char-normalized</text>
+        <rect class="b green" x="58" y="122" width="556" height="38" rx="6"/><text class="s" x="78" y="146" style="fill:var(--fg)">③ escape-normalized</text>
+        <rect class="b cyan"  x="58" y="168" width="556" height="38" rx="6"/><text class="s" x="78" y="192" style="fill:var(--fg)">④ indentation-flexible</text>
+        <rect class="b cyan"  x="58" y="214" width="556" height="38" rx="6"/><text class="s" x="78" y="238" style="fill:var(--fg)">⑤ line-trimmed</text>
+        <rect class="b cyan"  x="58" y="260" width="556" height="38" rx="6"/><text class="s" x="78" y="284" style="fill:var(--fg)">⑥ trimmed-boundary</text>
+        <rect class="b amber" x="58" y="306" width="556" height="38" rx="6"/><text class="s" x="78" y="330" style="fill:var(--fg)">⑦ whitespace-normalized</text>
+        <rect class="b amber" x="58" y="352" width="556" height="38" rx="6"/><text class="s" x="78" y="376" style="fill:var(--fg)">⑧ context-aware · difflib similarity</text>
+        <rect class="b amber" x="58" y="398" width="556" height="38" rx="6"/><text class="s" x="78" y="422" style="fill:var(--fg)">⑨ block-anchor</text>
+        <text class="elab" x="606" y="22" text-anchor="end" style="fill:var(--green)">STRICT</text>
+        <text class="elab" x="606" y="448" text-anchor="end" style="fill:var(--amber)">FUZZY</text>
+        <!-- right callouts -->
+        <rect class="b green" x="662" y="30" width="488" height="86" rx="9"/>
+        <text class="t" x="684" y="62" style="fill:var(--green);font-size:15px">FIRST UNIQUE MATCH WINS</text>
+        <text class="s" x="684" y="88" style="font-size:13px">the first tier matching exactly one site →</text>
+        <text class="s" x="684" y="106" style="font-size:13px">apply the edit, stop escalating</text>
+        <rect class="b mag" x="662" y="176" width="488" height="104" rx="9"/>
+        <text class="t" x="684" y="208" style="fill:var(--magenta);font-size:15px">EQUIVALENCE-CLASS LOCK</text>
+        <text class="s" x="684" y="234" style="font-size:13px">a relaxed tier matching &gt;1 site → abort</text>
+        <text class="s" x="684" y="258" style="font-size:13px;fill:var(--dim)">no silent corruption from fuzzy matches</text>
+        <path class="edge" d="M662,250 C636,250 620,320 616,355" marker-end="url(#ar6)"/>
+        <rect class="b cyan" x="662" y="340" width="488" height="96" rx="9"/>
+        <text class="t" x="684" y="372" style="fill:var(--cyan);font-size:15px">hashline ANCHOR · SHA-256</text>
+        <text class="s" x="684" y="398" style="font-size:13px">edits ride stable hash coordinates —</text>
+        <text class="s" x="684" y="416" style="font-size:13px;fill:var(--dim)">they survive line shifts elsewhere in the file</text>
+      </svg>
+    </div>
+  </div>
+  <div class="foot">edit engine <b>·</b> 22 / 27</div>
+</section>
+
+<!-- ===== 23 · MEMORY ===== -->
+<section class="slide">
+  <div class="wrap">
+    <div class="kick reveal">ai/memory.py · embeddings.py</div>
+    <h2 class="reveal">Why bots <span class="hl">know the project best</span>.</h2>
+    <p class="lead reveal">A per-group <b>Chroma</b> collection — vectors in Chroma, metadata in the group DB, no cross-group recall.</p>
+    <div class="diagram reveal" style="margin-top:.5rem">
+      <svg class="dg" viewBox="0 0 1180 380" role="img" aria-label="Memory salience pipeline" style="max-height:min(58vh,470px)">
+        <defs><marker id="ar7" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+          <path d="M0,0 L7,3 L0,6 Z" fill="#6b7280"/></marker></defs>
+        <!-- write path -->
+        <rect class="b cyan" x="24" y="78" width="176" height="72" rx="9"/>
+        <text class="t" x="112" y="110" text-anchor="middle" style="fill:var(--cyan);font-size:15px">AGENT TURN</text>
+        <text class="s" x="112" y="132" text-anchor="middle" style="font-size:12px">discussion · tool result</text>
+        <rect class="b purple" x="252" y="72" width="234" height="84" rx="9"/>
+        <text class="t" x="369" y="104" text-anchor="middle" style="fill:var(--purple);font-size:15px">SALIENCE FILTER · LLM</text>
+        <text class="s" x="369" y="128" text-anchor="middle" style="font-size:12px">extract durable facts · score 0.0–1.0</text>
+        <rect class="nb" x="300" y="4" width="240" height="40" rx="7"/>
+        <text class="seqlab" x="420" y="29" text-anchor="middle" style="font-size:12.5px;fill:var(--dim)">DROP · NO_SALIENT_INFO</text>
+        <rect class="b" x="540" y="78" width="130" height="72" rx="9"/>
+        <text class="t" x="605" y="118" text-anchor="middle" style="fill:var(--fg);font-size:14px">EMBED</text>
+        <rect class="b green" x="722" y="72" width="200" height="84" rx="9"/>
+        <text class="t" x="822" y="104" text-anchor="middle" style="fill:var(--green);font-size:15px">CHROMA</text>
+        <text class="s" x="822" y="128" text-anchor="middle" style="font-size:12px">vectors · per-group collection</text>
+        <rect class="b" x="974" y="78" width="180" height="72" rx="9"/>
+        <text class="t" x="1064" y="110" text-anchor="middle" style="fill:var(--fg);font-size:14px">GROUP DB</text>
+        <text class="s" x="1064" y="132" text-anchor="middle" style="font-size:12px">fact metadata</text>
+        <!-- write arrows -->
+        <line class="edge" x1="200" y1="114" x2="246" y2="114" marker-end="url(#ar7)"/>
+        <line class="ret" x1="369" y1="72" x2="420" y2="48" marker-end="url(#ar7)"/>
+        <text class="elab" x="470" y="64" style="font-size:11.5px">no</text>
+        <line class="edge flow" x1="486" y1="114" x2="534" y2="114" marker-end="url(#ar7)"/>
+        <text class="elab" x="500" y="104" style="font-size:11px">fact|score</text>
+        <line class="edge flow" x1="670" y1="114" x2="716" y2="114" marker-end="url(#ar7)"/>
+        <line class="edge" x1="922" y1="114" x2="968" y2="114" marker-end="url(#ar7)"/>
+        <text class="elab" x="930" y="104" style="font-size:11px">metadata</text>
+        <!-- recall lane -->
+        <rect class="b cyan" x="252" y="262" width="902" height="64" rx="9" style="fill:rgba(88,166,255,.04)"/>
+        <text class="t" x="276" y="290" style="fill:var(--cyan);font-size:14px">RECALL</text>
+        <text class="s" x="276" y="312" style="font-size:13px">query → embed → top-K similar from <tspan style="fill:var(--mod)">this group's</tspan> collection → injected into the prompt</text>
+        <path class="edge" d="M822,156 C822,210 700,220 540,250" marker-end="url(#ar7)"/>
+        <text class="elab" x="660" y="200" style="font-size:11.5px">recall</text>
+      </svg>
+    </div>
+  </div>
+  <div class="foot">memory <b>·</b> 23 / 27</div>
+</section>
+
+<!-- ===== 24 · AUTOCOMPACT ===== -->
+<section class="slide">
+  <div class="wrap">
+    <div class="kick reveal">executors/compact.py</div>
+    <h2 class="reveal">AutoCompact — <span class="hl">5 strategies</span>.</h2>
+    <p class="lead reveal">Run per turn, modeled on Claude Code's pipeline — cheap moves first, AI summary last.</p>
+    <div class="diagram reveal" style="margin-top:.5rem">
+      <svg class="dg" viewBox="0 0 1180 376" role="img" aria-label="AutoCompact pipeline" style="max-height:min(58vh,470px)">
+        <defs><marker id="ar8" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+          <path d="M0,0 L7,3 L0,6 Z" fill="#6b7280"/></marker></defs>
+        <!-- trigger -->
+        <text class="elab" x="20" y="120" style="fill:var(--green)">per turn · tokens &gt; threshold ↓</text>
+        <!-- 5 stages -->
+        <rect class="b" x="20" y="130" width="210" height="92" rx="9"/>
+        <text class="t" x="125" y="160" text-anchor="middle" style="font-size:14px;fill:var(--cyan)">① microcompact</text>
+        <text class="s" x="125" y="184" text-anchor="middle" style="font-size:12px">stale tool results</text>
+        <text class="s" x="125" y="202" text-anchor="middle" style="font-size:12px;fill:var(--dim)">count-based · no AI</text>
+        <rect class="b" x="254" y="130" width="200" height="92" rx="9"/>
+        <text class="t" x="354" y="160" text-anchor="middle" style="font-size:14px;fill:var(--cyan)">② snip</text>
+        <text class="s" x="354" y="184" text-anchor="middle" style="font-size:12px">drop oldest</text>
+        <text class="s" x="354" y="202" text-anchor="middle" style="font-size:12px;fill:var(--dim)">user/assistant pair</text>
+        <rect class="b amber" x="478" y="130" width="232" height="92" rx="9"/>
+        <text class="t" x="594" y="158" text-anchor="middle" style="font-size:14px;fill:var(--amber)">③ auto_compact</text>
+        <text class="s" x="594" y="182" text-anchor="middle" style="font-size:12px">reuse summary first ►</text>
+        <text class="s" x="594" y="200" text-anchor="middle" style="font-size:12px;fill:var(--dim)">else 9-section AI summary</text>
+        <rect class="b" x="734" y="130" width="190" height="92" rx="9"/>
+        <text class="t" x="829" y="160" text-anchor="middle" style="font-size:14px;fill:var(--cyan)">④ cached</text>
+        <text class="s" x="829" y="184" text-anchor="middle" style="font-size:12px">microcompact</text>
+        <text class="s" x="829" y="202" text-anchor="middle" style="font-size:12px;fill:var(--dim)">Claude provider</text>
+        <rect class="b green" x="948" y="130" width="210" height="92" rx="9"/>
+        <text class="t" x="1053" y="158" text-anchor="middle" style="font-size:14px;fill:var(--green)">⑤ db_history</text>
+        <text class="s" x="1053" y="182" text-anchor="middle" style="font-size:12px">post-run · soft-delete</text>
+        <text class="s" x="1053" y="200" text-anchor="middle" style="font-size:12px;fill:var(--dim)">+ persist summary</text>
+        <!-- arrows between -->
+        <line class="edge flow" x1="230" y1="176" x2="250" y2="176" marker-end="url(#ar8)"/>
+        <line class="edge flow" x1="454" y1="176" x2="474" y2="176" marker-end="url(#ar8)"/>
+        <line class="edge flow" x1="710" y1="176" x2="730" y2="176" marker-end="url(#ar8)"/>
+        <line class="edge flow" x1="924" y1="176" x2="944" y2="176" marker-end="url(#ar8)"/>
+        <!-- retry loop -->
+        <path class="ret" d="M594,222 C594,300 354,300 230,294" marker-end="url(#ar8)"/>
+        <text class="seclab" x="412" y="322" text-anchor="middle" style="font-size:12.5px">PROMPT_TOO_LONG → bounded retry: drop the oldest round</text>
+      </svg>
+    </div>
+  </div>
+  <div class="foot">autocompact <b>·</b> 24 / 27</div>
+</section>
+
+<!-- ===== 25 · CODE INTEL + AI CLIENT ===== -->
+<section class="slide">
+  <div class="wrap">
+    <div class="kick reveal">code_intel · ai/client.py</div>
+    <h2 class="reveal">Intelligence &amp; model access.</h2>
+    <div class="diagram reveal" style="margin-top:.5rem">
+      <svg class="dg" viewBox="0 0 1180 392" role="img" aria-label="Code intelligence routing and AI client" style="max-height:min(60vh,500px)">
+        <defs><marker id="ar9" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+          <path d="M0,0 L7,3 L0,6 Z" fill="#6b7280"/></marker></defs>
+        <!-- divider -->
+        <line class="ll" x1="590" y1="20" x2="590" y2="372"/>
+        <!-- LEFT: code intel routing -->
+        <text class="elab" x="30" y="22" style="fill:var(--green)">CODE INTELLIGENCE</text>
+        <rect class="b cyan" x="30" y="36" width="250" height="58" rx="9"/>
+        <text class="t" x="155" y="62" text-anchor="middle" style="font-size:14px;fill:var(--cyan)">capability</text>
+        <text class="s" x="155" y="82" text-anchor="middle" style="font-size:12px">definition · references · hover</text>
+        <rect class="b" x="30" y="128" width="250" height="50" rx="9"/>
+        <text class="t" x="155" y="158" text-anchor="middle" style="font-size:13.5px;fill:var(--fg)">router · get_engine(ext)</text>
+        <line class="edge flow" x1="155" y1="94" x2="155" y2="124" marker-end="url(#ar9)"/>
+        <rect class="b" x="20" y="222" width="160" height="62" rx="9"/>
+        <text class="t" x="100" y="248" text-anchor="middle" style="font-size:13px;fill:var(--fg)">jedi</text>
+        <text class="s" x="100" y="270" text-anchor="middle" style="font-size:12px">.py → in-process</text>
+        <rect class="b" x="196" y="222" width="180" height="62" rx="9"/>
+        <text class="t" x="286" y="248" text-anchor="middle" style="font-size:13px;fill:var(--fg)">TS LSP</text>
+        <text class="s" x="286" y="270" text-anchor="middle" style="font-size:12px">.ts/.js → stdio</text>
+        <rect class="b amber" x="20" y="306" width="356" height="54" rx="9"/>
+        <text class="t" x="198" y="330" text-anchor="middle" style="font-size:13px;fill:var(--amber)">else / unavailable → text search</text>
+        <text class="s" x="198" y="350" text-anchor="middle" style="font-size:11.5px">Java &amp; others by design</text>
+        <line class="edge" x1="120" y1="178" x2="100" y2="218" marker-end="url(#ar9)"/>
+        <line class="edge" x1="190" y1="178" x2="286" y2="218" marker-end="url(#ar9)"/>
+        <line class="ret" x1="155" y1="178" x2="198" y2="302" marker-end="url(#ar9)"/>
+        <!-- RIGHT: AI client fan-out -->
+        <text class="elab" x="630" y="22" style="fill:var(--green)">MODEL ACCESS</text>
+        <rect class="b green" x="630" y="36" width="500" height="58" rx="9"/>
+        <text class="t" x="880" y="62" text-anchor="middle" style="font-size:14px;fill:var(--green)">pooled httpx.AsyncClient</text>
+        <text class="s" x="880" y="82" text-anchor="middle" style="font-size:12px">keep-alive · streaming · tenacity retry/backoff</text>
+        <rect class="b" x="630" y="138" width="240" height="50" rx="9"/><text class="t" x="750" y="168" text-anchor="middle" style="font-size:13px;fill:var(--fg)">DeepSeek</text>
+        <rect class="b" x="890" y="138" width="240" height="50" rx="9"/><text class="t" x="1010" y="168" text-anchor="middle" style="font-size:13px;fill:var(--fg)">OpenAI-compatible</text>
+        <rect class="b" x="630" y="202" width="240" height="50" rx="9"/><text class="t" x="750" y="232" text-anchor="middle" style="font-size:13px;fill:var(--fg)">Anthropic</text>
+        <rect class="b" x="890" y="202" width="240" height="50" rx="9"/><text class="t" x="1010" y="232" text-anchor="middle" style="font-size:13px;fill:var(--fg)">Ollama</text>
+        <line class="edge flow" x1="760" y1="94" x2="750" y2="134" marker-end="url(#ar9)"/>
+        <line class="edge flow" x1="900" y1="94" x2="1010" y2="134" marker-end="url(#ar9)"/>
+        <line class="edge flow" x1="800" y1="94" x2="750" y2="198" marker-end="url(#ar9)"/>
+        <line class="edge flow" x1="980" y1="94" x2="1010" y2="198" marker-end="url(#ar9)"/>
+        <text class="s" x="880" y="300" text-anchor="middle" style="font-size:12.5px;fill:var(--dim)">per-model token limits &amp; pricing · DSML fallback parse</text>
+      </svg>
+    </div>
+  </div>
+  <div class="foot">intelligence <b>·</b> 25 / 27</div>
+</section>
+
+<!-- ===== 26 · DATA LAYER ===== -->
+<section class="slide">
+  <div class="wrap">
+    <div class="kick reveal">db/schema_split.py · writer.py · workspace/layout.py</div>
+    <h2 class="reveal">The data layer.</h2>
+    <div class="diagram reveal" style="margin-top:.5rem">
+      <svg class="dg" viewBox="0 0 1180 396" role="img" aria-label="Data layer" style="max-height:min(60vh,500px)">
+        <defs><marker id="ar10" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+          <path d="M0,0 L7,3 L0,6 Z" fill="#6b7280"/></marker></defs>
+        <!-- ZONE 1: schema split -->
+        <text class="elab" x="20" y="22" style="fill:var(--green)">SCHEMA SPLIT · CELL-05</text>
+        <rect class="b green" x="20" y="34" width="330" height="74" rx="9"/>
+        <text class="t" x="185" y="62" text-anchor="middle" style="font-size:14px;fill:var(--green)">central.db</text>
+        <text class="s" x="185" y="84" text-anchor="middle" style="font-size:11.5px">users · groups · members · rules</text>
+        <text class="s" x="185" y="100" text-anchor="middle" style="font-size:11.5px;fill:var(--dim)">cron · unread — Supervisor-owned</text>
+        <rect class="b cyan" x="20" y="170" width="330" height="86" rx="9"/>
+        <rect class="b cyan" x="34" y="158" width="330" height="86" rx="9" style="fill:#0d1117"/>
+        <text class="t" x="199" y="188" text-anchor="middle" style="font-size:14px;fill:var(--cyan)">group_N / chat.db  ×N</text>
+        <text class="s" x="199" y="210" text-anchor="middle" style="font-size:11.5px">messages · sessions · tickets · state</text>
+        <text class="s" x="199" y="228" text-anchor="middle" style="font-size:11.5px;fill:var(--dim)">Worker-owned · one per group</text>
+        <path class="ret" d="M185,108 L199,154" marker-end="url(#ar10)"/>
+        <text class="elab" x="210" y="134" style="font-size:11px">cross-domain FK</text>
+        <text class="elab" x="210" y="148" style="font-size:11px;fill:var(--dim)">app-enforced</text>
+        <!-- ZONE 2: single writer -->
+        <line class="ll" x1="404" y1="16" x2="404" y2="300"/>
+        <text class="elab" x="430" y="22" style="fill:var(--green)">SINGLE-WRITER · DFT-053</text>
+        <rect class="b" x="430" y="40" width="300" height="44" rx="9"/>
+        <text class="s" x="580" y="68" text-anchor="middle" style="font-size:12.5px;fill:var(--fg)">concurrent writes</text>
+        <rect class="b amber" x="430" y="120" width="300" height="60" rx="9"/>
+        <text class="t" x="580" y="146" text-anchor="middle" style="font-size:13px;fill:var(--amber)">key (loop_id, db_path)</text>
+        <text class="s" x="580" y="167" text-anchor="middle" style="font-size:12px">1 conn + asyncio.Lock</text>
+        <rect class="b" x="430" y="216" width="300" height="50" rx="9"/>
+        <text class="s" x="580" y="240" text-anchor="middle" style="font-size:12.5px;fill:var(--fg)">SQLite (WAL) · serialized</text>
+        <text class="s" x="580" y="258" text-anchor="middle" style="font-size:11px;fill:var(--dim)">no "database is locked"</text>
+        <line class="edge flow" x1="580" y1="84" x2="580" y2="116" marker-end="url(#ar10)"/>
+        <line class="edge flow" x1="580" y1="180" x2="580" y2="212" marker-end="url(#ar10)"/>
+        <!-- ZONE 3: workspace tree -->
+        <line class="ll" x1="784" y1="16" x2="784" y2="300"/>
+        <text class="elab" x="810" y="22" style="fill:var(--green)">NESTED WORKSPACE</text>
+        <rect class="b" x="810" y="40" width="350" height="226" rx="9"/>
+        <text class="t" x="832" y="74" style="font-size:14px;fill:var(--cyan)">group_{gid}/</text>
+        <text class="s" x="856" y="114" style="font-size:13px;fill:var(--fg)">├─ shared/</text>
+        <text class="s" x="980" y="114" style="font-size:11.5px;fill:var(--dim)">collab · BOARD.md</text>
+        <text class="s" x="856" y="150" style="font-size:13px;fill:var(--fg)">├─ bots/bot_{id}/</text>
+        <text class="s" x="1010" y="150" style="font-size:11.5px;fill:var(--dim)">private scratch</text>
+        <text class="s" x="856" y="186" style="font-size:13px;fill:var(--fg)">└─ runs/</text>
+        <text class="s" x="980" y="186" style="font-size:11.5px;fill:var(--dim)">outputs · logs</text>
+        <text class="s" x="832" y="230" style="font-size:11.5px;fill:var(--dim)">one layout module · computed</text>
+        <text class="s" x="832" y="248" style="font-size:11.5px;fill:var(--dim)">dynamically, no duplicate defs</text>
+      </svg>
+    </div>
+    <p class="lead reveal" style="margin-top:.4rem;font-size:var(--small)"><span class="d">WS gateway hardened too:</span> re-entrancy lock (DFT-047) · head-of-line timeout (DFT-030) · parallel fan-out with dead-connection eviction.</p>
+  </div>
+  <div class="foot">data layer <b>·</b> 26 / 27</div>
+</section>
+
+<!-- ===== 27 · CLOSING ===== -->
+<section class="slide">
+  <div class="wrap">
+    <div class="kick reveal">design philosophy</div>
+    <h2 class="reveal">Deliberately <span class="hl">single-machine</span>.</h2>
+    <p class="lead reveal">The target is ≤ 30 people and ~100 projects. Single-machine + process isolation isn't a scaling shortcut — it's the optimal design for that envelope.</p>
+    <div class="metrics reveal" style="margin-top:1.3rem">
+      <div><span class="n">3</span><span class="t">PROCESS ROLES</span></div>
+      <div><span class="n">1</span><span class="t">INTERCEPTION POINT</span></div>
+      <div><span class="n">∞</span><span class="t">GROUPS · ISOLATED</span></div>
+      <div><span class="n">fail-closed</span><span class="t">BY DEFAULT</span></div>
+    </div>
+    <div class="term reveal" style="margin-top:1.4rem;max-width:560px">
+      <div class="bar"><i class="dot r"></i><i class="dot y"></i><i class="dot g"></i><span>~/</span></div>
+<pre><span class="d">$</span> <span class="gn">echo</span> <span class="a">"humans + bots, one room, shipping."</span>
+<span class="w">humans + bots, one room, shipping.</span>
+<span class="d">$</span> <span class="cursor" style="height:.9em"></span></pre>
+    </div>
+  </div>
+  <div class="foot">nuke-ai-collaborator <b>·</b> 27 / 27</div>
+</section>
+
+<script>
+/* ===========================================================================
+   SLIDE PRESENTATION CONTROLLER
+   - Intersection Observer → .visible class triggers entrance animations
+   - Keyboard (arrows / space / page / home / end), wheel, touch navigation
+   - Progress bar + nav dots
+   =========================================================================== */
+class SlidePresentation{
+  constructor(){
+    this.slides=[...document.querySelectorAll('.slide')];
+    this.current=0;
+    this.numberFooters();
+    this.progress=document.querySelector('.progress-bar');
+    this.dotsBox=document.querySelector('.nav-dots');
+    this.setupObserver();
+    this.setupDots();
+    this.setupKeys();
+    this.setupWheel();
+    this.setupTouch();
+  }
+  numberFooters(){
+    // Auto-renumber every footer "label · NN / TOTAL" so inserting/removing
+    // slides never desyncs the counters.
+    const total=this.slides.length;
+    this.slides.forEach((s,i)=>{
+      const f=s.querySelector('.foot'); if(!f)return;
+      const label=f.textContent.replace(/[·∙]?\s*\d+\s*\/\s*\d+\s*$/,'').trim();
+      f.innerHTML=label+' <b>·</b> '+String(i+1).padStart(2,'0')+' / '+String(total).padStart(2,'0');
+    });
+  }
+  setupObserver(){
+    const io=new IntersectionObserver((entries)=>{
+      entries.forEach(e=>{
+        if(e.isIntersecting){
+          e.target.classList.add('visible');
+          this.current=this.slides.indexOf(e.target);
+          this.updateChrome();
+        }
+      });
+    },{threshold:0.55});
+    this.slides.forEach(s=>io.observe(s));
+  }
+  setupDots(){
+    // Clear first — re-opening a saved copy must not append a duplicate set.
+    this.dotsBox.innerHTML='';
+    this.slides.forEach((s,i)=>{
+      const b=document.createElement('button');
+      b.setAttribute('aria-label','Go to slide '+(i+1));
+      b.addEventListener('click',()=>this.go(i));
+      this.dotsBox.appendChild(b);
+    });
+    this.dots=[...this.dotsBox.children];
+  }
+  updateChrome(){
+    const pct=this.slides.length>1?(this.current/(this.slides.length-1))*100:100;
+    this.progress.style.width=pct+'%';
+    this.dots.forEach((d,i)=>d.classList.toggle('active',i===this.current));
+  }
+  go(i){
+    i=Math.max(0,Math.min(this.slides.length-1,i));
+    this.slides[i].scrollIntoView({behavior:'smooth'});
+  }
+  setupKeys(){
+    document.addEventListener('keydown',e=>{
+      if(['ArrowDown','ArrowRight','PageDown',' '].includes(e.key)){e.preventDefault();this.go(this.current+1);}
+      else if(['ArrowUp','ArrowLeft','PageUp'].includes(e.key)){e.preventDefault();this.go(this.current-1);}
+      else if(e.key==='Home'){e.preventDefault();this.go(0);}
+      else if(e.key==='End'){e.preventDefault();this.go(this.slides.length-1);}
+    });
+  }
+  setupWheel(){
+    let lock=false;
+    window.addEventListener('wheel',e=>{
+      if(lock||Math.abs(e.deltaY)<24)return;
+      lock=true;
+      this.go(this.current+(e.deltaY>0?1:-1));
+      setTimeout(()=>lock=false,750);
+    },{passive:true});
+  }
+  setupTouch(){
+    let y0=null;
+    window.addEventListener('touchstart',e=>y0=e.touches[0].clientY,{passive:true});
+    window.addEventListener('touchend',e=>{
+      if(y0===null)return;
+      const dy=y0-e.changedTouches[0].clientY;
+      if(Math.abs(dy)>50)this.go(this.current+(dy>0?1:-1));
+      y0=null;
+    },{passive:true});
+  }
+}
+new SlidePresentation();
+</script>
+</body>
+</html>

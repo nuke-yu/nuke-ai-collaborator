@@ -1,0 +1,932 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Nuke AI Collaborator · 内部对齐 Deck v7</title>
+
+<!-- ===========================================
+     FONTS
+     Switzer — a Univers-like neo-grotesque (HSBC's brand face is Univers Next).
+     Noto Sans SC — clean CJK companion so Chinese renders crisply alongside.
+     =========================================== -->
+<link rel="preconnect" href="https://api.fontshare.com" />
+<link rel="stylesheet" href="https://api.fontshare.com/v2/css?f[]=switzer@400,500,600,700,800&display=swap" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;900&family=JetBrains+Mono:wght@400;600&display=swap" />
+
+<style>
+/* ===========================================
+   THEME — HSBC visual identity
+   HSBC Red is the single dominant accent on white.
+   Change these tokens to retheme the whole deck.
+   =========================================== */
+:root {
+  --hsbc-red: #DB0011;       /* the hexagon red */
+  --hsbc-red-dark: #A50008;
+  --ink: #1A1A1A;            /* near-black body text */
+  --ink-soft: #5C5C5C;       /* secondary text */
+  --line: #E0E0E0;           /* hairlines */
+  --paper: #FFFFFF;          /* page */
+  --paper-2: #F6F6F6;        /* alt panels */
+  --paper-3: #FBEAEB;        /* faint red wash */
+
+  --font-display: "Switzer", "Noto Sans SC", sans-serif;
+  --font-body: "Switzer", "Noto Sans SC", sans-serif;
+  --font-mono: "JetBrains Mono", "Noto Sans SC", monospace;
+
+  /* sizing (clamp — viewport-fit) */
+  --title-size: clamp(1.6rem, 5.2vw, 4rem);
+  --h2-size: clamp(1.2rem, 3.2vw, 2.3rem);
+  --h3-size: clamp(1rem, 2.2vw, 1.5rem);
+  --body-size: clamp(0.72rem, 1.4vw, 1.05rem);
+  --small-size: clamp(0.62rem, 1vw, 0.85rem);
+  --eyebrow-size: clamp(0.6rem, 0.95vw, 0.8rem);
+
+  --slide-padding: clamp(1.4rem, 5vw, 5rem);
+  --content-gap: clamp(0.6rem, 1.8vw, 1.6rem);
+  --element-gap: clamp(0.3rem, 1vw, 0.9rem);
+
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --dur: 0.7s;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+/* --- viewport-base.css (MANDATORY, full) --- */
+html, body { height: 100%; overflow-x: hidden; }
+html { scroll-snap-type: y mandatory; scroll-behavior: smooth; }
+.slide {
+  width: 100vw; height: 100vh; height: 100dvh;
+  overflow: hidden; scroll-snap-align: start;
+  display: flex; flex-direction: column; position: relative;
+}
+.slide-content {
+  flex: 1; display: flex; flex-direction: column; justify-content: center;
+  max-height: 100%; overflow: hidden; padding: var(--slide-padding);
+}
+.card, .container, .content-box { max-width: min(90vw, 1000px); max-height: min(80vh, 700px); }
+.feature-list, .bullet-list { gap: clamp(0.4rem, 1vh, 1rem); }
+.feature-list li, .bullet-list li { font-size: var(--body-size); line-height: 1.4; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr)); gap: clamp(0.5rem, 1.5vw, 1rem); }
+img, .image-container { max-width: 100%; max-height: min(50vh, 400px); object-fit: contain; }
+@media (max-height: 700px) { :root { --slide-padding: clamp(0.75rem, 3vw, 2rem); --content-gap: clamp(0.4rem, 1.5vw, 1rem); --title-size: clamp(1.25rem, 4.5vw, 2.5rem); --h2-size: clamp(1rem, 3vw, 1.75rem); } }
+@media (max-height: 600px) { :root { --slide-padding: clamp(0.5rem, 2.5vw, 1.5rem); --content-gap: clamp(0.3rem, 1vw, 0.75rem); --title-size: clamp(1.1rem, 4vw, 2rem); --body-size: clamp(0.7rem, 1.2vw, 0.95rem); } .nav-dots, .keyboard-hint, .decorative { display: none; } }
+@media (max-height: 500px) { :root { --slide-padding: clamp(0.4rem, 2vw, 1rem); --title-size: clamp(1rem, 3.5vw, 1.5rem); --h2-size: clamp(0.9rem, 2.5vw, 1.25rem); --body-size: clamp(0.65rem, 1vw, 0.85rem); } }
+@media (max-width: 600px) { :root { --title-size: clamp(1.25rem, 7vw, 2.5rem); } .grid { grid-template-columns: 1fr; } }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.2s !important; } html { scroll-behavior: auto; } }
+
+/* ===========================================
+   BASE LOOK
+   =========================================== */
+body {
+  font-family: var(--font-body);
+  color: var(--ink);
+  background: var(--paper);
+  -webkit-font-smoothing: antialiased;
+}
+.slide {
+  background: var(--paper);
+  border-top: 1px solid var(--line);
+}
+.slide:first-child { border-top: none; }
+
+/* thin red ruler that runs along the top of content slides */
+.slide:not(.cover):not(.closing)::before {
+  content: "";
+  position: absolute; top: 0; left: 0;
+  width: clamp(60px, 12vw, 160px); height: 6px;
+  background: var(--hsbc-red);
+}
+
+/* ===========================================
+   TYPOGRAPHY HELPERS
+   =========================================== */
+.eyebrow {
+  font-size: var(--eyebrow-size);
+  font-weight: 700; letter-spacing: 0.22em; text-transform: uppercase;
+  color: var(--hsbc-red);
+  display: flex; align-items: center; gap: 0.6em;
+  margin-bottom: clamp(0.5rem, 1.4vw, 1.1rem);
+}
+.eyebrow::before { content: ""; width: clamp(14px,1.6vw,22px); height: clamp(14px,1.6vw,22px); background: var(--hsbc-red);
+  clip-path: polygon(25% 0,75% 0,100% 50%,75% 100%,25% 100%,0 50%); flex: none; }
+
+h2.slide-title {
+  font-family: var(--font-display);
+  font-size: var(--h2-size); font-weight: 800; line-height: 1.12;
+  letter-spacing: -0.01em; color: var(--ink);
+  margin-bottom: clamp(0.4rem, 1.2vw, 0.9rem);
+}
+.lead {
+  font-size: clamp(0.85rem, 1.9vw, 1.35rem); font-weight: 600; line-height: 1.35;
+  color: var(--hsbc-red-dark); margin-bottom: clamp(0.6rem,1.6vw,1.3rem);
+}
+.sub { font-size: var(--body-size); color: var(--ink-soft); line-height: 1.5; }
+
+/* bullet list with hexagon markers */
+ul.bullets { list-style: none; display: flex; flex-direction: column; gap: clamp(0.4rem, 1.3vw, 1rem); }
+ul.bullets > li {
+  position: relative; padding-left: 1.5em;
+  font-size: var(--body-size); line-height: 1.45; color: var(--ink);
+}
+ul.bullets > li::before {
+  content: ""; position: absolute; left: 0; top: 0.55em;
+  width: 0.6em; height: 0.6em; background: var(--hsbc-red);
+  clip-path: polygon(25% 0,75% 0,100% 50%,75% 100%,25% 100%,0 50%);
+}
+ul.bullets > li strong { color: var(--ink); font-weight: 700; }
+.muted { color: var(--ink-soft); }
+
+/* callout / quote — left red rule on a faint wash */
+.callout {
+  border-left: 4px solid var(--hsbc-red);
+  background: var(--paper-2);
+  padding: clamp(0.6rem,1.5vw,1.1rem) clamp(0.8rem,2vw,1.4rem);
+  font-size: var(--body-size); line-height: 1.5; color: var(--ink);
+  margin-top: clamp(0.6rem,1.5vw,1.2rem);
+}
+.callout strong { color: var(--hsbc-red-dark); }
+
+/* monospace diagram box */
+.diagram {
+  font-family: var(--font-mono); font-size: clamp(0.6rem, 1.15vw, 0.95rem);
+  line-height: 1.65; background: var(--ink); color: #F2F2F2;
+  border-radius: 4px; padding: clamp(0.8rem,2vw,1.5rem);
+  white-space: pre; overflow: hidden; letter-spacing: -0.01em;
+}
+.diagram .hl { color: #FF6B72; font-weight: 600; }
+
+/* generic 2-col layout */
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: clamp(1rem,3vw,2.5rem); align-items: center; }
+@media (max-width: 760px){ .two-col { grid-template-columns: 1fr; } }
+
+/* feature cards grid */
+.cards { display: grid; gap: clamp(0.6rem,1.5vw,1.1rem); }
+.cards.c2 { grid-template-columns: repeat(2,1fr); }
+.cards.c3 { grid-template-columns: repeat(3,1fr); }
+.cards.c4 { grid-template-columns: repeat(4,1fr); }
+@media (max-width:760px){ .cards.c3,.cards.c4 { grid-template-columns: repeat(2,1fr);} .cards.c2{grid-template-columns:1fr;} }
+.feat {
+  background: var(--paper); border: 1px solid var(--line);
+  border-top: 3px solid var(--hsbc-red);
+  padding: clamp(0.6rem,1.5vw,1.1rem);
+  display: flex; flex-direction: column; gap: 0.35em;
+}
+.feat .k { font-weight: 800; font-size: clamp(0.78rem,1.5vw,1.05rem); color: var(--ink); }
+.feat .v { font-size: var(--small-size); color: var(--ink-soft); line-height: 1.45; }
+
+/* comparison table */
+table.cmp { width: 100%; border-collapse: collapse; font-size: clamp(0.6rem,1.15vw,0.92rem); }
+table.cmp th, table.cmp td { padding: clamp(0.3rem,0.9vw,0.7rem) clamp(0.35rem,0.9vw,0.75rem); text-align: left; border-bottom: 1px solid var(--line); line-height: 1.3; vertical-align: top; }
+table.cmp thead th { font-weight: 800; color: var(--ink); border-bottom: 2px solid var(--ink); }
+table.cmp thead th.us { color: var(--hsbc-red); }
+table.cmp td.us, table.cmp th.us { background: var(--paper-3); }
+table.cmp tbody td:first-child { color: var(--ink-soft); font-weight: 600; }
+table.cmp td strong { color: var(--ink); }
+table.cmp .us strong { color: var(--hsbc-red-dark); }
+
+/* numbered moat badge */
+.moat-head { display:flex; align-items:center; gap: clamp(0.6rem,1.6vw,1.1rem); margin-bottom: clamp(0.5rem,1.3vw,1rem); }
+.moat-num {
+  flex: none; width: clamp(2.4rem,5vw,3.6rem); height: clamp(2.4rem,5vw,3.6rem);
+  background: var(--hsbc-red); color: #fff; font-family: var(--font-display); font-weight: 800;
+  font-size: clamp(1.1rem,2.6vw,1.9rem);
+  display: flex; align-items: center; justify-content: center;
+  clip-path: polygon(25% 0,75% 0,100% 50%,75% 100%,25% 100%,0 50%);
+}
+
+/* stat row */
+.stats { display: flex; flex-wrap: wrap; gap: clamp(1rem,3vw,3rem); }
+.stat .n { font-family: var(--font-display); font-weight: 800; font-size: clamp(1.4rem,3.4vw,2.6rem); color: var(--hsbc-red); line-height: 1; }
+.stat .l { font-size: var(--small-size); color: var(--ink-soft); margin-top: 0.3em; }
+
+/* page number */
+.pageno { position: absolute; bottom: clamp(0.8rem,2vw,1.6rem); right: clamp(1rem,3vw,2.4rem); font-size: var(--small-size); color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+.pageno b { color: var(--hsbc-red); }
+
+/* ===========================================
+   COVER & CLOSING
+   =========================================== */
+.cover, .closing { background: var(--paper); align-items: stretch; }
+.cover .slide-content, .closing .slide-content { justify-content: center; }
+.cover-red-bar { position: absolute; top: 0; left: 0; height: 100%; width: clamp(10px,2vw,22px); background: var(--hsbc-red); }
+.cover-mark { width: clamp(70px,12vw,140px); height: auto; margin-bottom: clamp(1rem,3vw,2rem); }
+.cover h1 {
+  font-family: var(--font-display); font-weight: 800;
+  font-size: var(--title-size); line-height: 1.05; letter-spacing: -0.02em;
+  color: var(--ink); max-width: 16ch;
+}
+.cover h1 .red { color: var(--hsbc-red); }
+.cover .tag { font-size: clamp(1rem,2.4vw,1.7rem); font-weight: 600; color: var(--hsbc-red-dark); margin-top: clamp(0.8rem,2vw,1.4rem); }
+.cover .meta { font-size: var(--small-size); color: var(--ink-soft); margin-top: clamp(1.2rem,3vw,2rem); letter-spacing: 0.02em; }
+.cover .meta span { color: var(--hsbc-red); }
+
+.closing { background: var(--hsbc-red); }
+.closing::before { display: none; }
+.closing .slide-content { align-items: flex-start; }
+.closing h2 { font-family: var(--font-display); font-weight: 800; color: #fff; font-size: clamp(1.6rem,4.6vw,3.4rem); line-height: 1.12; letter-spacing: -0.01em; max-width: 20ch; }
+.closing .c-sub { color: rgba(255,255,255,0.9); font-size: clamp(0.85rem,1.8vw,1.25rem); line-height: 1.5; margin-top: clamp(1rem,2.5vw,1.8rem); max-width: 40ch; }
+.closing .cta { margin-top: clamp(1.2rem,3vw,2.2rem); display: inline-flex; align-items: center; gap: 0.6em; background: #fff; color: var(--hsbc-red); font-weight: 800; padding: 0.7em 1.4em; font-size: var(--body-size); }
+.closing .watermark { position: absolute; right: -4%; bottom: -8%; width: clamp(220px,40vw,560px); opacity: 0.12; }
+
+/* ===========================================
+   ENTRANCE ANIMATIONS — staggered reveal on view
+   =========================================== */
+.reveal { opacity: 0; transform: translateY(26px); transition: opacity var(--dur) var(--ease), transform var(--dur) var(--ease); }
+.slide.visible .reveal { opacity: 1; transform: translateY(0); }
+.slide.visible .reveal:nth-child(1){transition-delay:.05s}
+.slide.visible .reveal:nth-child(2){transition-delay:.13s}
+.slide.visible .reveal:nth-child(3){transition-delay:.21s}
+.slide.visible .reveal:nth-child(4){transition-delay:.29s}
+.slide.visible .reveal:nth-child(5){transition-delay:.37s}
+.slide.visible .reveal:nth-child(6){transition-delay:.45s}
+.slide.visible .reveal:nth-child(7){transition-delay:.53s}
+/* row stagger inside tables */
+.slide.visible tbody tr { animation: rowIn .5s var(--ease) both; }
+.slide.visible tbody tr:nth-child(n){ animation-delay: calc(.1s + .04s * var(--i,0)); }
+@keyframes rowIn { from{opacity:0; transform:translateX(-12px)} to{opacity:1; transform:none} }
+
+/* ===========================================
+   PROGRESS + NAV
+   =========================================== */
+.progress-bar { position: fixed; top: 0; left: 0; height: 4px; width: 0; background: var(--hsbc-red); z-index: 9999; transition: width 0.15s linear; }
+.nav-dots { position: fixed; right: clamp(0.6rem,1.6vw,1.4rem); top: 50%; transform: translateY(-50%); display: flex; flex-direction: column; gap: 9px; z-index: 9998; }
+.nav-dots button { width: 9px; height: 9px; padding: 0; border: 1px solid var(--hsbc-red); background: transparent; cursor: pointer; clip-path: polygon(25% 0,75% 0,100% 50%,75% 100%,25% 100%,0 50%); transition: background 0.2s; }
+.nav-dots button.active { background: var(--hsbc-red); }
+.keyboard-hint { position: fixed; bottom: clamp(0.6rem,1.6vw,1.2rem); left: clamp(0.8rem,2vw,1.6rem); font-size: var(--small-size); color: var(--ink-soft); z-index: 9998; opacity: 0.7; }
+</style>
+</head>
+<body>
+
+<div class="progress-bar"></div>
+<nav class="nav-dots" aria-label="Slide navigation"></nav>
+<div class="keyboard-hint decorative">← → / 空格 翻页</div>
+
+<!-- ===========================================
+     S1 · COVER
+     =========================================== -->
+<section class="slide cover">
+  <div class="cover-red-bar"></div>
+  <div class="slide-content">
+    <!-- HSBC-style hexagon mark: red hexagon, white triangles top & bottom -->
+    <svg class="cover-mark reveal" viewBox="0 0 140 120" aria-label="logo mark">
+      <!-- 4个红色三角形 -->
+      <polygon points="35,0 105,0 70,60" fill="#DB0011"/>
+      <polygon points="35,120 105,120 70,60" fill="#DB0011"/>
+      <polygon points="0,60 35,0 35,120" fill="#DB0011"/>
+      <polygon points="140,60 105,0 105,120" fill="#DB0011"/>
+      <!-- 2个白色三角形 -->
+      <polygon points="35,0 35,120 70,60" fill="#fff"/>
+      <polygon points="105,0 105,120 70,60" fill="#fff"/>
+    </svg>
+    <h1 class="reveal">Nuke <span class="red">AI</span> Collaborator</h1>
+    <div class="tag reveal">像管理一支团队一样，管理你的 AI 员工。</div>
+    <div class="meta reveal">群组式 AI 协作平台　·　私有化部署　·　企业级隔离与治理<br/>
+      <span>内部对齐 v7</span>　·　2026</div>
+  </div>
+</section>
+
+<!-- ===========================================
+     S2 · TL;DR
+     =========================================== -->
+<section class="slide">
+  <div class="slide-content">
+    <div class="eyebrow reveal">Part 0 · 共识基线　/　S2</div>
+    <h2 class="slide-title reveal">一页读懂（TL;DR）</h2>
+    <ul class="bullets reveal">
+      <li><strong>是什么</strong>：把「群」变成一支常驻数字研发团队（真人 + 角色 Bot）。</li>
+      <li><strong>差异点</strong>：多角色 AI 团队 · 真隔离 · 人在环治理 · <strong>知识资产化（记忆复利）</strong> · <strong>异构大模型混合编排</strong> · <strong>自进化技能（人审批）</strong> · 顺滑人机协作（Recap / 智能建议）。</li>
+      <li><strong>在哪一层</strong>：不是单人 AI 副驾，是它们之上的「组织协作层」。</li>
+      <li><strong>现状</strong>：架构地基 + 生产硬化双收口，已达 <strong>生产可用</strong>。</li>
+      <li><strong>下一步</strong>：能力深化 + 首批私有化试点。</li>
+    </ul>
+  </div>
+  <div class="pageno">S2 · <b>02</b> / 29</div>
+</section>
+
+<!-- ===========================================
+     S3 · POSITIONING
+     =========================================== -->
+<section class="slide">
+  <div class="slide-content">
+    <div class="eyebrow reveal">Part 0 · 共识基线　/　S3</div>
+    <h2 class="slide-title reveal">我们到底在做什么</h2>
+    <div class="lead reveal">从「人用 AI 工具」 → 「人带一支 AI 团队」。</div>
+    <ul class="bullets reveal">
+      <li>群 = 项目 / 团队的数字孪生；Bot 是群里最懂项目的常驻成员。</li>
+      <li>刻意<strong>不做</strong>「更强的单个 Agent」，而做「<strong>可协作、可隔离、可治理、有记忆</strong>」的组织形态。</li>
+    </ul>
+    <div class="callout reveal"><strong>对齐点：</strong>全员统一认知——我们卖的是组织形态，不是写代码速度。</div>
+  </div>
+  <div class="pageno">S3 · <b>03</b> / 29</div>
+</section>
+
+<!-- ===========================================
+     S4 · PAIN POINTS
+     =========================================== -->
+<section class="slide">
+  <div class="slide-content">
+    <div class="eyebrow reveal">Part 1 · 为什么做　/　S4</div>
+    <h2 class="slide-title reveal">行业痛点</h2>
+    <div class="lead reveal">今天的 AI 编程工具，都是「单人副驾」。</div>
+    <div class="cards c2 reveal">
+      <div class="feat"><div class="k">🧠 失忆</div><div class="v">会话级记忆，项目上下文反复重讲。</div></div>
+      <div class="feat"><div class="k">👤 单兵</div><div class="v">真实交付是 BA→开发→测试→PM 接力，工具只模拟一个助理。</div></div>
+      <div class="feat"><div class="k">📉 知识蒸发</div><div class="v">人一走，项目上下文归零。</div></div>
+      <div class="feat"><div class="k">🚪 不敢放权</div><div class="v">无人工关卡、无审计、无权限边界，企业不敢上生产。</div></div>
+    </div>
+    <div class="callout reveal"><strong>一句话：</strong>AI 很聪明，但它不是你团队的一员。</div>
+  </div>
+  <div class="pageno">S4 · <b>04</b> / 29</div>
+</section>
+
+<!-- ===========================================
+     S5 · WHY NOW
+     =========================================== -->
+<section class="slide">
+  <div class="slide-content">
+    <div class="eyebrow reveal">Part 1 · 为什么做　/　S5</div>
+    <h2 class="slide-title reveal">为什么是现在</h2>
+    <div class="lead reveal">AI 能力够了，缺的是「协作的组织形态」。</div>
+    <ul class="bullets reveal">
+      <li>模型能力已到可委派复杂任务的拐点，落地却卡在 <strong>协作 / 隔离 / 可控</strong> 三道墙。</li>
+      <li>竞品在卷「写得更快」，没人解决「团队怎么一起干、上下文怎么不丢、老板怎么放心」。</li>
+      <li>企业要的不是更强的工具，是一个 <strong>可信、可隔离、有记忆的数字团队</strong>。</li>
+    </ul>
+  </div>
+  <div class="pageno">S5 · <b>05</b> / 29</div>
+</section>
+
+<!-- ===========================================
+     S6 · TARGET USERS
+     =========================================== -->
+<section class="slide">
+  <div class="slide-content">
+    <div class="eyebrow reveal">Part 1 · 为什么做　/　S6</div>
+    <h2 class="slide-title reveal">目标场景与用户</h2>
+    <div class="lead reveal">先打「既要效率、又要可控、还要数据不出门」的组织。</div>
+    <div class="cards c3 reveal">
+      <div class="feat"><div class="k">中小研发 / 创新部门</div><div class="v">用 AI 团队放大交付。</div></div>
+      <div class="feat"><div class="k">外包 / 乙方</div><div class="v">以小博大，放大交付产能。</div></div>
+      <div class="feat"><div class="k">知识密集 / 强合规</div><div class="v">私有化 + 数据主权刚需。</div></div>
+    </div>
+    <div class="callout reveal">目标量级（刻意）：<strong>数十人 / 上百项目 / 单机</strong> —— 见 S26。</div>
+  </div>
+  <div class="pageno">S6 · <b>06</b> / 29</div>
+</section>
+
+<!-- ===========================================
+     S7 · GROUP = TEAM
+     =========================================== -->
+<section class="slide">
+  <div class="slide-content">
+    <div class="eyebrow reveal">Part 2 · 产品与差异化　/　S7</div>
+    <h2 class="slide-title reveal">产品形态：群组 = 数字团队</h2>
+    <div class="diagram reveal">[真人 PM]   <span class="hl">@小白(BA)</span>   <span class="hl">@小明(开发)</span>   <span class="hl">@小红(测试)</span>
+   └──────── 同一个群 · 同一份上下文 ────────┘
+         共享看板 <span class="hl">BOARD.md</span>（任务状态的唯一真相）
+      每群：独立数据库 · 独立记忆 · 独立 Bot</div>
+    <ul class="bullets reveal">
+      <li><strong>群间完全隔离</strong>：一个群一个项目，数据永不串。</li>
+      <li><strong>状态写在文件里</strong>：任务看板人类可读、可审计、重启不丢。</li>
+    </ul>
+  </div>
+  <div class="pageno">S7 · <b>07</b> / 29</div>
+</section>
+
+<!-- ===========================================
+     S8 · HUMAN-IN-THE-LOOP PIPELINE
+     =========================================== -->
+<section class="slide">
+  <div class="slide-content">
+    <div class="eyebrow reveal">Part 2 · 招牌能力　/　S8</div>
+    <h2 class="slide-title reveal">人在环的交付流水线</h2>
+    <div class="lead reveal">全自动的效率 + 人把关的可控，二者兼得。</div>
+    <div class="diagram reveal">需求澄清(BA) ──<span class="hl">门①</span>──► 开发(Dev) ──<span class="hl">门②</span>──► 测试(QA) ──<span class="hl">门③</span>──► 交付
+              ↑人确认           ↑人确认          ↑人确认 / 打回返工</div>
+    <ul class="bullets reveal">
+      <li>每阶段 AI 自动干活，<strong>关键节点停下来等人点「确认」</strong>才推进；QA 不通过可一键 <strong>打回 Dev 返工</strong>，全程留痕。</li>
+      <li><strong>效率主张</strong>：把传统 <strong>周级</strong> 交付压缩到智能体流水线的 <strong>小时级</strong>（目标 / 示意，视复杂度）。</li>
+    </ul>
+    <div class="callout reveal">门的推进由 <strong>结构化工具信号</strong> 驱动（R1 已通电）——确定、可审计、不漂移。</div>
+  </div>
+  <div class="pageno">S8 · <b>08</b> / 29</div>
+</section>
+
+<!-- ===========================================
+     S9 · SKILL SYSTEM + L4 SELF-EVOLUTION
+     =========================================== -->
+<section class="slide">
+  <div class="slide-content">
+    <div class="eyebrow reveal">Part 2 · 招牌能力　/　S9</div>
+    <h2 class="slide-title reveal">四层 Skill + 自进化闭环</h2>
+    <div class="sub reveal" style="margin-bottom:.6em"><strong>双轨装配</strong>：Traits（内功）被动常驻、勾选缝进 Prompt；Skills（招式）主动多步、<strong>懒加载</strong>——可拥成百技能而不撑爆上下文。</div>
+    <div class="two-col reveal">
+      <table class="cmp">
+        <thead><tr><th>层</th><th>来源</th><th>内容</th></tr></thead>
+        <tbody>
+          <tr style="--i:0"><td><strong>L1 系统</strong></td><td>平台内置</td><td>全员通用（读写 / 搜索 / 建技能）</td></tr>
+          <tr style="--i:1"><td><strong>L2 群组</strong></td><td>用户 / Bot</td><td>项目专有 SOP（环境 / 测试 / 发布）</td></tr>
+          <tr style="--i:2"><td><strong>L3 角色</strong></td><td>按 role 自动装配</td><td>岗位能力（Dev→review、QA→test-plan）</td></tr>
+          <tr style="--i:3" class="us"><td class="us"><strong>L4 自学</strong></td><td class="us">Bot 自己总结</td><td class="us"><strong>从日志沉淀项目规律 / 团队偏好</strong></td></tr>
+        </tbody>
+      </table>
+      <div class="diagram" style="font-size:clamp(.55rem,1vw,.82rem)">🌟 L4 自进化闭环
+Bot 发现可复用规律
+ → 写 <span class="hl">learned/draft/</span>（带 evidence 证据链）
+ → WebSocket 弹审批卡
+ → 人 Approve → 移入 <span class="hl">learned/active/</span> 才生效</div>
+    </div>
+    <div class="callout reveal"><strong>防自我污染：</strong>draft / active 物理隔离——AI 不能自己让自己的新技能生效，<strong>必须人批</strong>，且每条带证据链可审计。</div>
+  </div>
+  <div class="pageno">S9 · <b>09</b> / 29</div>
+</section>
+
+<!-- ===========================================
+     S10 · AWAY RECAP
+     =========================================== -->
+<section class="slide">
+  <div class="slide-content">
+    <div class="eyebrow reveal">Part 2 · 产品能力　/　S10</div>
+    <h2 class="slide-title reveal">离开复盘 Recap</h2>
+    <div class="lead reveal">AI 团队 7×24 干活，你回来一张卡片秒懂——不掉线。</div>
+    <ul class="bullets reveal">
+      <li><strong>离开复盘（Away Recap）</strong>：你离开期间群里发生了什么，回来一卡片秒懂；一键 dismiss，刷新不丢。</li>
+      <li><strong>自动复盘报告（Retro）</strong>：每轮交付结束自动生成 run 报告——<strong>设计决策、技术债自动归档</strong>进 <code>retros/</code>。</li>
+      <li><strong>事件驱动</strong>：工作流暂停 / 完成自动触发，不用人手点。</li>
+    </ul>
+    <div class="callout reveal">价值：进展 / 决策 / 技术债不靠人脑记；<strong>交接、审计、复盘有据可查</strong>——直接打「知识蒸发」痛点。</div>
+  </div>
+  <div class="pageno">S10 · <b>10</b> / 29</div>
+</section>
+
+<!-- ===========================================
+     S11 · SMART-COMPOSE
+     =========================================== -->
+<section class="slide">
+  <div class="slide-content">
+    <div class="eyebrow reveal">Part 2 · 产品能力　/　S11</div>
+    <h2 class="slide-title reveal">智能建议 Smart-Compose</h2>
+    <div class="lead reveal">下一步说啥，它替你想。</div>
+    <ul class="bullets reveal">
+      <li>基于最近对话 + 执行历史，实时生成 <strong>2–3 条「下一步可发给 Bot」</strong>的自然语言草稿。</li>
+      <li>每条都 <strong>@ 真实 Bot、具体可执行、带安全护栏</strong>（绝不生成 <code>/confirm</code>、<code>/abort</code> 等系统命令）。</li>
+      <li>带缓存，即时返回，不卡顿。</li>
+    </ul>
+    <div class="callout reveal">S8 的人确认门给你控制权，<strong>Recap + Smart-Compose 让这份控制权毫不费力</strong>（理解过去 + 驱动未来）。</div>
+  </div>
+  <div class="pageno">S11 · <b>11</b> / 29</div>
+</section>
+
+<!-- ===========================================
+     S12 · COLLAB / INTEGRATION SUBSTRATE
+     =========================================== -->
+<section class="slide">
+  <div class="slide-content">
+    <div class="eyebrow reveal">Part 2 · 底座能力　/　S12</div>
+    <h2 class="slide-title reveal">协作与接入能力</h2>
+    <div class="cards c2 reveal">
+      <div class="feat"><div class="k">🖼️ 多模态输入</div><div class="v">截图 / 报错图 / UI 稿直接发群，Bot 理解后干活（已覆盖测试）。</div></div>
+      <div class="feat"><div class="k">🤖 子 Agent 并行委派</div><div class="v">派生子 Agent 拆分并行，且<strong>权限自动衰减</strong>——放大产能不放大风险。</div></div>
+      <div class="feat"><div class="k">👁️ 共享工作区全员同视图</div><div class="v">启动 / 重注入时无条件看到目录树 + BOARD / SPEC——杜绝「选择性失明」。</div></div>
+      <div class="feat"><div class="k">⌨️ Headless / CI-CD</div><div class="v">无人值守跑任务，标准 exit code + <code>--resume</code> 断点续跑，接进流水线。</div></div>
+    </div>
+    <div class="callout reveal">多模态降沟通成本 · 子 Agent 放大产能 · 共享视图保一致 · Headless 进得了工程流水线。</div>
+  </div>
+  <div class="pageno">S12 · <b>12</b> / 29</div>
+</section>
+
+<!-- ===========================================
+     S13 · DIFFERENTIATION vs COMMERCIAL
+     =========================================== -->
+<section class="slide">
+  <div class="slide-content">
+    <div class="eyebrow reveal">Part 2 · 差异化对标　/　S13</div>
+    <h2 class="slide-title reveal">差异化对标：商业产品</h2>
+    <table class="cmp reveal">
+      <thead><tr><th>维度</th><th>单人副驾<br/>Cursor / Copilot</th><th>全自动 Agent<br/>AutoGPT / Devin</th><th class="us">Nuke AI</th></tr></thead>
+      <tbody>
+        <tr style="--i:0"><td>协作形态</td><td>单兵</td><td>单黑盒</td><td class="us"><strong>多角色团队接力</strong></td></tr>
+        <tr style="--i:1"><td>上下文记忆</td><td>会话级，易失</td><td>弱</td><td class="us"><strong>项目级常驻 + 复利</strong></td></tr>
+        <tr style="--i:2"><td>数据隔离</td><td>无</td><td>无</td><td class="us"><strong>每群独立库 + 进程隔离</strong></td></tr>
+        <tr style="--i:3"><td>可控性</td><td>手动</td><td>难控、不敢放权</td><td class="us"><strong>人确认门 + 安全纵深</strong></td></tr>
+        <tr style="--i:4"><td>模型策略</td><td>绑定单一模型</td><td>通常绑定单一</td><td class="us"><strong>专岗专模 · 异构混合</strong></td></tr>
+        <tr style="--i:5"><td>部署</td><td>云依赖</td><td>云依赖</td><td class="us"><strong>单机私有化，数据主权</strong></td></tr>
+      </tbody>
+    </table>
+    <div class="callout reveal">我们不在「谁写得快」赛道卷，做 <strong>组织能用、敢用、越用越值钱</strong> 的 AI 团队。</div>
+  </div>
+  <div class="pageno">S13 · <b>13</b> / 29</div>
+</section>
+
+<!-- ===========================================
+     S14a · ARCHITECTURE COMPARISON (1/2)
+     Split from original dense S14 for viewport fit.
+     =========================================== -->
+<section class="slide">
+  <div class="slide-content">
+    <div class="eyebrow reveal">Part 2 · 架构横向对比　/　S14 · 1/2</div>
+    <h2 class="slide-title reveal">架构级对比：形态 / 隔离 / 编排</h2>
+    <div class="sub reveal" style="margin-bottom:.5em">图例：✅ 原生强项　·　◻ 有但较弱　·　❌ 无</div>
+    <table class="cmp reveal">
+      <thead><tr><th>架构维度</th><th class="us">Nuke AI</th><th>claude-main</th><th>gsd-2</th><th>opencode</th><th>openclaw</th></tr></thead>
+      <tbody>
+        <tr style="--i:0"><td>产品形态</td><td class="us"><strong>群组协作平台</strong></td><td>CC 客户端</td><td>CC 官方源码</td><td>Agent 平台</td><td>全渠道助手</td></tr>
+        <tr style="--i:1"><td>隔离 / 多租户</td><td class="us"><strong>✅ 群级DB+进程</strong></td><td>❌ 单用户</td><td>❌ 单用户</td><td>❌ 单会话</td><td>❌ 单用户</td></tr>
+        <tr style="--i:2"><td>进程 / 运行架构</td><td class="us"><strong>✅ Sup/Worker/Collector</strong></td><td>单进程</td><td>daemon+rpc</td><td>client/server</td><td>gateway 控制面</td></tr>
+        <tr style="--i:3"><td>多 Agent 团队编排</td><td class="us"><strong>✅ 角色接力+返工</strong></td><td>◻ subagent</td><td>◻ subagent</td><td>◻ subagent</td><td>❌ 单助手</td></tr>
+        <tr style="--i:4"><td>人在环治理</td><td class="us"><strong>✅ 阶段门+返工</strong></td><td>◻ 工具审批</td><td>◻ 工具审批</td><td>◻ 权限规则</td><td>◻ 渠道确认</td></tr>
+      </tbody>
+    </table>
+    <div class="callout reveal"><strong>结论：</strong>四家都是优秀的「单用户运行时」；Nuke 站在「多租户群组 + 多角色编排 + 人在环」这一层——<strong>品类差，不是分数差</strong>。</div>
+  </div>
+  <div class="pageno">S14 · <b>14</b> / 29</div>
+</section>
+
+<!-- ===========================================
+     S14b · ARCHITECTURE COMPARISON (2/2)
+     =========================================== -->
+<section class="slide">
+  <div class="slide-content">
+    <div class="eyebrow reveal">Part 2 · 架构横向对比　/　S14 · 2/2</div>
+    <h2 class="slide-title reveal">架构级对比：记忆 / 工具 / 模型 / 扩展</h2>
+    <table class="cmp reveal">
+      <thead><tr><th>架构维度</th><th class="us">Nuke AI</th><th>claude-main</th><th>gsd-2</th><th>opencode</th><th>openclaw</th></tr></thead>
+      <tbody>
+        <tr style="--i:0"><td>记忆系统</td><td class="us"><strong>✅ 生成式+反思+隔离</strong></td><td>◻ 项目文件</td><td>◻ 会话/文件</td><td>◻ 会话级</td><td>✅ memory-sdk</td></tr>
+        <tr style="--i:1"><td>工具 / MCP</td><td class="us"><strong>✅ 单进程聚合</strong></td><td>✅ MCP</td><td>✅ MCP+server</td><td>✅ MCP+plugin</td><td>◻ plugin 工具</td></tr>
+        <tr style="--i:2"><td>多模型异构</td><td class="us"><strong>✅ 同群各角色异构</strong></td><td>❌ 单家 Claude</td><td>❌ 单家 Claude</td><td>✅ 多 provider</td><td>✅ 多 provider</td></tr>
+        <tr style="--i:3"><td>headless / 自动化</td><td class="us">✅ headless+恢复</td><td>◻</td><td>✅ resume+exit码</td><td>✅ server API</td><td>◻</td></tr>
+        <tr style="--i:4"><td>扩展 / 插件契约</td><td class="us">◻ 内部 provider</td><td>◻ extension</td><td>◻ 注册</td><td>✅ plugin v2</td><td>✅ plugin-sdk</td></tr>
+      </tbody>
+    </table>
+    <div class="callout reveal"><strong>诚实补一句：</strong>第三方插件契约我们目前弱于 opencode / openclaw（仅内部 provider、无开放 SDK），已列 roadmap 候选。</div>
+  </div>
+  <div class="pageno">S14 · <b>15</b> / 29</div>
+</section>
+
+<!-- ===========================================
+     S15 · ARCHITECTURE OVERVIEW
+     =========================================== -->
+<section class="slide">
+  <div class="slide-content">
+    <div class="eyebrow reveal">Part 3 · 架构护城河　/　S15</div>
+    <h2 class="slide-title reveal">架构总览（进程拓扑）</h2>
+    <div class="diagram reveal">main（FastAPI / WS 入口）
+  └── <span class="hl">Supervisor</span>（路由 / 中继）
+        ├── <span class="hl">Worker × N</span>（AI 推理循环，按群分片）
+        └── <span class="hl">MCP Collector</span>（唯一持 MCP 连接的进程）</div>
+    <div class="callout reveal">分层契约：<strong>编排（决策）/ 执行（副作用）/ glue 三层物理切分</strong>——这是地基级资产。</div>
+  </div>
+  <div class="pageno">S15 · <b>16</b> / 29</div>
+</section>
+
+<!-- ===========================================
+     S16 · MOAT 1 — CELLULAR ISOLATION
+     =========================================== -->
+<section class="slide">
+  <div class="slide-content">
+    <div class="moat-head reveal"><div class="moat-num">1</div>
+      <div><div class="eyebrow" style="margin:0">护城河①</div><h2 class="slide-title" style="margin:0">蜂窝物理隔离</h2></div></div>
+    <div class="lead reveal">一个群一个项目（Project-Cell），从数据到进程，物理隔离。</div>
+    <ul class="bullets reveal">
+      <li>每群独立 SQLite 库 + 独立向量记忆 + 独立 Bot 与权限；<strong>物理文件隔离 = 天然无锁</strong>，杜绝跨项目库锁死与数据泄漏。</li>
+      <li>进程级隔离：一个项目崩溃，不波及其他项目（高可用）。</li>
+      <li><strong>内存性价比</strong>：LRU 驱逐——超 <strong>30 分钟</strong> 不活跃自动持久化释放，新消息 <strong>秒级 Rehydrate</strong> 唤醒，超低 TCO。</li>
+    </ul>
+    <div class="callout reveal"><strong>商业价值：</strong>满足企业数据合规与项目保密 + 极低托管成本，可放心给多客户 / 多团队同时用。</div>
+  </div>
+  <div class="pageno">S16 · <b>17</b> / 29</div>
+</section>
+
+<!-- ===========================================
+     S17 · MOAT 2 — TRUST & GOVERNANCE
+     =========================================== -->
+<section class="slide">
+  <div class="slide-content">
+    <div class="moat-head reveal"><div class="moat-num">2</div>
+      <div><div class="eyebrow" style="margin:0">护城河②</div><h2 class="slide-title" style="margin:0">可信与治理</h2></div></div>
+    <div class="lead reveal">纵深安全，让 AI 进得了生产环境。</div>
+    <ul class="bullets reveal">
+      <li><strong>人确认门</strong>：写操作、关键推进需人工审批。</li>
+      <li><strong>双层命令防护</strong> + <strong>密钥自动脱敏</strong> + <strong>子 Agent 权限衰减</strong>。</li>
+      <li><strong>确定性控制平面（Schema-First）</strong>：推进由结构化工具调用驱动（<code>signal_stage_done</code> / <code>signal_rework</code>）而非正则，可审计、不随温度漂移；保留哨兵 fallback 兜底。</li>
+    </ul>
+    <div class="callout reveal"><strong>商业价值：</strong>把「不敢放权」变成「放权也安心」——这是 to B 落地的入场券。</div>
+  </div>
+  <div class="pageno">S17 · <b>18</b> / 29</div>
+</section>
+
+<!-- ===========================================
+     S18 · MOAT 3 — KNOWLEDGE AS ASSET
+     =========================================== -->
+<section class="slide">
+  <div class="slide-content">
+    <div class="moat-head reveal"><div class="moat-num">3</div>
+      <div><div class="eyebrow" style="margin:0">护城河③</div><h2 class="slide-title" style="margin:0">知识资产化 · 记忆复利</h2></div></div>
+    <div class="lead reveal">Bot 不是用完即弃，是会成长、且记得「干净可信」的数字员工。</div>
+    <ul class="bullets reveal">
+      <li><strong>生成式记忆架构</strong>：对话 → 事实抽取 → 反思固化（episodic→semantic），不是存聊天记录。</li>
+      <li><strong>三因子加权混合检索</strong>（重要性 + 时近性 + 相关性）+ 关键词增强，取回最该用的那条。</li>
+      <li><strong>时间衰减 + TTL + 冲突消解</strong>：过时、矛盾的自动退场，记忆不腐烂。</li>
+      <li><strong>A-MEM 来源链 + 群隔离 + 写入脱敏</strong>：每条可追溯出处、按群隔离、入库前脱敏。</li>
+    </ul>
+    <div class="callout reveal"><strong>商业价值：</strong>用得越久 Bot 越懂项目，迁移成本越高——<strong>复利型护城河，不是一次性功能</strong>。</div>
+  </div>
+  <div class="pageno">S18 · <b>19</b> / 29</div>
+</section>
+
+<!-- ===========================================
+     S19 · MEMORY DEEP DIVE
+     =========================================== -->
+<section class="slide">
+  <div class="slide-content">
+    <div class="eyebrow reveal">Part 3 · 技术深潜　/　S19</div>
+    <h2 class="slide-title reveal">记忆系统：工业级认知记忆架构</h2>
+    <div class="diagram reveal" style="font-size:clamp(.52rem,1vw,.8rem)">① 写入提取  对话 → 抽取原子事实(salience 0~1) → <span class="hl">冲突消解</span> → 写入(脱敏)
+② 周期反思  水位线增量取新事实 → 闸门 → LLM 提炼洞察 → 写回(<span class="hl">A-MEM 溯源链</span>)
+③ 检索装配  Query 重写 → 向量召回(<span class="hl">bot+group 硬隔离</span>) → 三因子精排 → 注入</div>
+    <ul class="bullets reveal">
+      <li><strong>三因子加权</strong>：0.5·相似 + 0.3·时近(7天半衰期) + 0.2·重要性 + 关键词 + 反思特权。</li>
+      <li><strong>防污染</strong>：冲突消解只删检索候选集内 ID（防 LLM 捏造 ID 误删）；写入前脱敏。</li>
+      <li>对标学术 SOTA 的工程化落地：Generative Agents · A-MEM · Reflexion · MemGPT。</li>
+    </ul>
+    <div class="callout reveal">别人的「记忆」是把聊天记录塞回 prompt；<strong>我们的记忆会打分、消解冲突、反思固化、随时间遗忘、可追溯来源——这是工业级认知记忆，不是 RAG</strong>。</div>
+  </div>
+  <div class="pageno">S19 · <b>20</b> / 29</div>
+</section>
+
+<!-- ===========================================
+     S20 · MOAT 4 — ENGINEERING RELIABILITY
+     =========================================== -->
+<section class="slide">
+  <div class="slide-content">
+    <div class="moat-head reveal"><div class="moat-num">4</div>
+      <div><div class="eyebrow" style="margin:0">护城河④</div><h2 class="slide-title" style="margin:0">工程可靠性 · 底层工程底座</h2></div></div>
+    <div class="cards c2 reveal">
+      <div class="feat"><div class="k">韧性 LLM 调用</div><div class="v">限流感知重试（遵从 Retry-After）+ 流式 at-most-once + 异常精确分类 + 持续失败自动暂停。</div></div>
+      <div class="feat"><div class="k">混沌复原力</div><div class="v">SQLite 锁感知退避优雅等主库；崩溃后只重放幂等工具，真 SIGKILL 测试验证无副作用。</div></div>
+      <div class="feat"><div class="k">K8s 级健康探针</div><div class="v">liveness 看本地态；readiness 单行覆盖写校验库可写 + Worker 心跳新鲜度(45s) + MCP 状态。</div></div>
+      <div class="feat"><div class="k">工业级编辑原语 (L0–L3)</div><div class="v">等价类唯一性、块锚点、幂等恢复、批量原子、hashline 抗行漂移——改大文件稳准不截断。</div></div>
+    </div>
+    <div class="callout reveal"><strong>商业价值：</strong>低 TCO、易私有化、可长期演进——而且崩得起、修得回、查得到。</div>
+  </div>
+  <div class="pageno">S20 · <b>21</b> / 29</div>
+</section>
+
+<!-- ===========================================
+     S21 · MOAT 5 — HETEROGENEOUS LLM ORCHESTRATION
+     =========================================== -->
+<section class="slide">
+  <div class="slide-content">
+    <div class="moat-head reveal"><div class="moat-num">5</div>
+      <div><div class="eyebrow" style="margin:0">护城河⑤</div><h2 class="slide-title" style="margin:0">异构大模型混合编排</h2></div></div>
+    <div class="lead reveal">同一隔离群组内，给每个角色配上最适合它的底座模型。</div>
+    <div class="cards c3 reveal" style="margin-bottom:.6em">
+      <div class="feat"><div class="k">Dev Bot</div><div class="v">Claude Sonnet 4.6 / Opus 4.8——代码生成更强</div></div>
+      <div class="feat"><div class="k">QA Bot</div><div class="v">GPT-4o——逻辑验证更稳</div></div>
+      <div class="feat"><div class="k">PM / BA Bot</div><div class="v">DeepSeek V3——性价比 + 长上下文</div></div>
+    </div>
+    <ul class="bullets reveal">
+      <li>🎯 质量最优（专岗专模）· 💰 成本最优（贵模型用在刀刃）· 🔓 零厂商绑定（只换一个角色的底座，全队不动）· 🧩 已接入 7+ 家。</li>
+    </ul>
+    <div class="callout reveal"><strong>映射是可适配配置</strong>——别人「选一个最强模型」，我们「给每个岗位配最合适的、且随时可换」。</div>
+  </div>
+  <div class="pageno">S21 · <b>22</b> / 29</div>
+</section>
+
+<!-- ===========================================
+     S22 · MATURITY
+     =========================================== -->
+<section class="slide">
+  <div class="slide-content">
+    <div class="eyebrow reveal">Part 4 · 现状与诚实评估　/　S22</div>
+    <h2 class="slide-title reveal">当前成熟度坐标</h2>
+    <table class="cmp reveal">
+      <thead><tr><th>维度</th><th>位置</th><th>说明</th></tr></thead>
+      <tbody>
+        <tr style="--i:0"><td>架构骨架</td><td><strong>~85–90%</strong></td><td>分层 + 隔离，行业前列</td></tr>
+        <tr style="--i:1"><td>测试纪律</td><td><strong>~75%</strong></td><td>多进程路径 + 混沌 SIGKILL 覆盖</td></tr>
+        <tr style="--i:2" class="us"><td class="us">控制平面确定性</td><td class="us"><strong>✅ 已通电</strong></td><td class="us">R1 收尾完成</td></tr>
+        <tr style="--i:3" class="us"><td class="us">生产硬化</td><td class="us"><strong>✅ 本周补齐</strong></td><td class="us">5 件事一次性收口（S24）</td></tr>
+      </tbody>
+    </table>
+    <div class="callout reveal"><strong>结论：</strong>已从「早期可用」迈入「生产可用」——架构地基 + 生产硬化双收口，工业级在望。</div>
+  </div>
+  <div class="pageno">S22 · <b>23</b> / 29</div>
+</section>
+
+<!-- ===========================================
+     S23 · STRUCTURAL DEBT CLEARED
+     =========================================== -->
+<section class="slide">
+  <div class="slide-content">
+    <div class="eyebrow reveal">Part 4 · 进展　/　S23</div>
+    <h2 class="slide-title reveal">已清零的架构结构债</h2>
+    <div class="cards c3 reveal">
+      <div class="feat"><div class="k">R1 控制平面确定性</div><div class="v">结构化工具信号驱动，已通电。</div></div>
+      <div class="feat"><div class="k">R2 上帝对象拆分</div><div class="v">tool_loop 拆出 helpers / dispatch / prompt_builder。</div></div>
+      <div class="feat"><div class="k">R3 状态边界文档化</div><div class="v">边界清晰、可维护。</div></div>
+      <div class="feat"><div class="k">R4 关键事件可靠投递</div><div class="v">critical 事件背压保证送达。</div></div>
+      <div class="feat"><div class="k">R5 handoff 持久化 barrier</div><div class="v">切换前强制落盘，不丢状态。</div></div>
+      <div class="feat"><div class="k">R6 文档熵收敛</div><div class="v">类型化 IPC / Pydantic 工具。</div></div>
+    </div>
+    <div class="callout reveal"><strong>一句话：</strong>架构地基本阶段收口完成。</div>
+  </div>
+  <div class="pageno">S23 · <b>24</b> / 29</div>
+</section>
+
+<!-- ===========================================
+     S24 · PRODUCTION HARDENING
+     =========================================== -->
+<section class="slide">
+  <div class="slide-content">
+    <div class="eyebrow reveal">Part 4 · 本周收口　/　S24</div>
+    <h2 class="slide-title reveal">生产硬化：5 件事已补齐</h2>
+    <div class="lead reveal">上一版还是「诚实 gap」；本周 <code>feat(ops)</code> 一个 commit 一次性补齐，且都带测试。</div>
+    <ul class="bullets reveal">
+      <li>✅ <strong>资源生命周期</strong>：LRU 无状态 eviction + 日志 / 工作区清理。</li>
+      <li>✅ <strong>坏天气降级</strong>：LLM 指数退避重试 + 持续失败暂停工作流。</li>
+      <li>✅ <strong>混沌测试</strong>：真 <code>kill -9</code>（SIGKILL）崩溃恢复测试通过。</li>
+      <li>✅ <strong>运维收口</strong>：<code>/health</code> 探针 + systemd 单元。</li>
+      <li>✅ <strong>备份 / 恢复 runbook</strong>：灾备恢复 runbook 已落 <code>deploy/</code>。</li>
+    </ul>
+    <div class="callout reveal"><strong>结论：</strong>离工业级的最后一段，本周走完——从「早期可用」迈入「生产可用」。</div>
+  </div>
+  <div class="pageno">S24 · <b>25</b> / 29</div>
+</section>
+
+<!-- ===========================================
+     S25 · ROADMAP
+     =========================================== -->
+<section class="slide">
+  <div class="slide-content">
+    <div class="eyebrow reveal">Part 5 · 往哪走　/　S25</div>
+    <h2 class="slide-title reveal">Roadmap / 阶段规划</h2>
+    <div class="cards c3 reveal">
+      <div class="feat"><div class="k">阶段一 ✅ 已完成</div><div class="v">架构结构债清零（R1–R6），地基成型。</div></div>
+      <div class="feat"><div class="k">阶段二 ✅ 已完成</div><div class="v">生产硬化 5 件事 + 工业级编辑原语 → 生产可用。</div></div>
+      <div class="feat"><div class="k">阶段三 ⏳ 进行中</div><div class="v">能力深化（记忆 / 技能生态）+ 场景扩展 + 首批私有化试点。</div></div>
+    </div>
+    <div class="callout reveal"><strong>🔭 未来展望（已设计 · 待实现）：</strong>推测性预执行（确认门后台预跑，人一点即「秒级滑出」）；第三方插件开放 SDK（补齐扩展契约差距）。</div>
+  </div>
+  <div class="pageno">S25 · <b>26</b> / 29</div>
+</section>
+
+<!-- ===========================================
+     S26 · SINGLE-MACHINE TRADEOFF
+     =========================================== -->
+<section class="slide">
+  <div class="slide-content">
+    <div class="eyebrow reveal">Part 5 · 关键取舍　/　S26</div>
+    <h2 class="slide-title reveal">单机是战略选择，不是债</h2>
+    <div class="stats reveal" style="margin-bottom:1rem">
+      <div class="stat"><div class="n">≤ 数十人</div><div class="l">目标团队规模</div></div>
+      <div class="stat"><div class="n">上百项目</div><div class="l">目标承载量级</div></div>
+      <div class="stat"><div class="n">单机</div><div class="l">部署形态</div></div>
+    </div>
+    <div class="lead reveal">目标量级下，单机 + 进程隔离是刻意的最优解：低延迟、低部署门槛、数据主权。</div>
+    <div class="callout reveal"><strong>对齐点：</strong>不要拿「缺分布式扩展」去批评它——那不在当前目标内。</div>
+  </div>
+  <div class="pageno">S26 · <b>27</b> / 29</div>
+</section>
+
+<!-- ===========================================
+     S27 · DECISIONS TO ALIGN
+     =========================================== -->
+<section class="slide">
+  <div class="slide-content">
+    <div class="eyebrow reveal">Part 5 · 需要拍板　/　S27</div>
+    <h2 class="slide-title reveal">需要对齐 / 拍板的决策点</h2>
+    <ul class="bullets reveal">
+      <li><strong>目标客户</strong>：生产硬化已收口，首批私有化试点选哪类组织、何时启动？</li>
+      <li><strong>能力优先级</strong>：阶段三先深化哪条线（记忆生态 / 技能生态 / 场景扩展）？</li>
+      <li><strong>第三方插件契约</strong>：是否补开放 SDK（目前弱于 opencode / openclaw，见 S14）？</li>
+    </ul>
+    <div class="callout reveal">这三个问题决定阶段三的资源投向——今天对齐，下一步即可启动。</div>
+  </div>
+  <div class="pageno">S27 · <b>28</b> / 29</div>
+</section>
+
+<!-- ===========================================
+     S28 · CLOSING / VISION
+     =========================================== -->
+<section class="slide closing">
+  <div class="slide-content">
+    <svg class="watermark" viewBox="0 0 140 120" aria-hidden="true">
+      <!-- 4个红色三角形 -->
+      <polygon points="35,0 105,0 70,60" fill="#DB0011"/>
+      <polygon points="35,120 105,120 70,60" fill="#DB0011"/>
+      <polygon points="0,60 35,0 35,120" fill="#DB0011"/>
+      <polygon points="140,60 105,0 105,120" fill="#DB0011"/>
+      <!-- 2个白色三角形 -->
+      <polygon points="35,0 35,120 70,60" fill="#fff"/>
+      <polygon points="105,0 105,120 70,60" fill="#fff"/>
+    </svg>
+    <div class="eyebrow reveal" style="color:#fff">Part 5 · 愿景收尾　/　S28</div>
+    <h2 class="reveal">让每个团队，都拥有一支永不下班、越用越懂的 AI 团队。</h2>
+    <p class="c-sub reveal">软件交付从「人用工具」 → 「人带 AI 团队」；让 AI 协同从「Demo 玩具」 → 「生产就绪」。</p>
+    <div class="cta reveal">对齐首批试点　→　启动私有化落地</div>
+  </div>
+</section>
+
+<script>
+/* ===========================================
+   SLIDE PRESENTATION CONTROLLER
+   Keyboard / wheel / touch nav, progress bar,
+   hexagon nav dots, scroll-triggered reveals.
+   =========================================== */
+class SlidePresentation {
+  constructor() {
+    this.slides = Array.from(document.querySelectorAll('.slide'));
+    this.current = 0;
+    this.progress = document.querySelector('.progress-bar');
+    this.navDots = document.querySelector('.nav-dots');
+    this.locked = false;
+    this.setupObserver();
+    this.setupNavDots();
+    this.setupKeyboard();
+    this.setupWheel();
+    this.setupTouch();
+    this.updateProgress();
+  }
+
+  /* Reveal animations + track current slide */
+  setupObserver() {
+    const io = new IntersectionObserver((entries) => {
+      entries.forEach(e => {
+        if (e.isIntersecting && e.intersectionRatio >= 0.5) {
+          e.target.classList.add('visible');
+          this.current = this.slides.indexOf(e.target);
+          this.updateProgress();
+          this.updateDots();
+        }
+      });
+    }, { threshold: [0.5] });
+    this.slides.forEach(s => io.observe(s));
+  }
+
+  /* Hexagon nav dots — clear first so re-opens don't duplicate */
+  setupNavDots() {
+    this.navDots.innerHTML = '';
+    this.slides.forEach((_, i) => {
+      const b = document.createElement('button');
+      b.setAttribute('aria-label', 'Go to slide ' + (i + 1));
+      b.addEventListener('click', () => this.goTo(i));
+      this.navDots.appendChild(b);
+    });
+    this.updateDots();
+  }
+  updateDots() {
+    Array.from(this.navDots.children).forEach((b, i) =>
+      b.classList.toggle('active', i === this.current));
+  }
+  updateProgress() {
+    this.progress.style.width = ((this.current) / (this.slides.length - 1) * 100) + '%';
+  }
+
+  goTo(i) {
+    i = Math.max(0, Math.min(this.slides.length - 1, i));
+    this.slides[i].scrollIntoView({ behavior: 'smooth' });
+  }
+  next() { this.goTo(this.current + 1); }
+  prev() { this.goTo(this.current - 1); }
+
+  setupKeyboard() {
+    document.addEventListener('keydown', (e) => {
+      if (['ArrowDown', 'ArrowRight', ' ', 'PageDown'].includes(e.key)) { e.preventDefault(); this.next(); }
+      else if (['ArrowUp', 'ArrowLeft', 'PageUp'].includes(e.key)) { e.preventDefault(); this.prev(); }
+      else if (e.key === 'Home') { e.preventDefault(); this.goTo(0); }
+      else if (e.key === 'End') { e.preventDefault(); this.goTo(this.slides.length - 1); }
+    });
+  }
+
+  /* Debounced wheel so one scroll = one slide */
+  setupWheel() {
+    window.addEventListener('wheel', (e) => {
+      if (this.locked) return;
+      if (Math.abs(e.deltaY) < 20) return;
+      this.locked = true;
+      (e.deltaY > 0) ? this.next() : this.prev();
+      setTimeout(() => { this.locked = false; }, 700);
+    }, { passive: true });
+  }
+
+  setupTouch() {
+    let y0 = null;
+    window.addEventListener('touchstart', (e) => { y0 = e.touches[0].clientY; }, { passive: true });
+    window.addEventListener('touchend', (e) => {
+      if (y0 === null) return;
+      const dy = y0 - e.changedTouches[0].clientY;
+      if (Math.abs(dy) > 50) (dy > 0) ? this.next() : this.prev();
+      y0 = null;
+    }, { passive: true });
+  }
+}
+
+new SlidePresentation();
+</script>
+</body>
+</html>

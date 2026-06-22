@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nuke AI Collaborator — High-Level Architecture</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+/* ===========================================================================
+   NUKE AI COLLABORATOR — HIGH-LEVEL ARCHITECTURE
+   High altitude, but NOT dumbed down: every box states a deliberate design
+   decision — the 3-process split, the security pipeline, the group-isolation
+   boundary, the engineered agent runtime. Zero-dependency inline SVG.
+   =========================================================================== */
+:root{
+  --bg:#0d1117; --line:#21262d;
+  --green:#39d353; --cyan:#58a6ff; --amber:#e3b341; --purple:#bc8cff; --magenta:#ff7b72;
+  --fg:#e6edf3; --mod:#adbac7; --dim:#7d8590; --dimmer:#484f58;
+  --font:'JetBrains Mono',ui-monospace,monospace;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%}
+body{
+  font-family:var(--font);background:var(--bg);color:var(--fg);
+  background-image:linear-gradient(var(--line) 1px,transparent 1px),
+    linear-gradient(90deg,var(--line) 1px,transparent 1px);
+  background-size:42px 42px;
+  min-height:100vh;display:flex;flex-direction:column;align-items:center;
+  padding:clamp(.9rem,2.4vh,1.8rem) clamp(1rem,2vw,2rem);gap:.5rem;
+}
+header{width:100%;max-width:1240px}
+header .k{font-size:clamp(.6rem,1.1vw,.82rem);letter-spacing:.24em;color:var(--green);text-transform:uppercase}
+header .k::before{content:"› "}
+header h1{font-size:clamp(1.15rem,2.7vw,2.05rem);font-weight:800;letter-spacing:-.01em;margin-top:.15rem}
+header h1 .hl{color:var(--green)}
+header p{font-size:clamp(.64rem,1.15vw,.92rem);color:var(--dim);margin-top:.25rem}
+
+.diagram{width:100%;flex:1;display:flex;justify-content:center;align-items:center;min-height:0}
+svg.dg{width:1240px;max-width:100%;max-height:80vh;height:auto}
+svg.dg text{font-family:var(--font)}
+svg.dg .t{font-weight:800;font-size:20px}
+svg.dg .s{fill:var(--mod);font-size:13.5px}
+svg.dg .cap{fill:var(--fg);font-size:13.5px;font-weight:600}
+svg.dg .tag{fill:var(--dim);font-size:12px;letter-spacing:.12em}
+svg.dg .b{fill:#161b22;stroke-width:2}
+svg.dg .chip{fill:#0f141b;stroke:#30363d;stroke-width:1.2}
+svg.dg .b.green{stroke:var(--green)} svg.dg .b.cyan{stroke:var(--cyan)}
+svg.dg .b.amber{stroke:var(--amber)} svg.dg .b.purple{stroke:var(--purple)}
+svg.dg .b.mag{stroke:var(--magenta)} svg.dg .b.dim{stroke:var(--dimmer)}
+svg.dg .frame{fill:rgba(57,211,83,.03);stroke:var(--cyan);stroke-width:1.6;stroke-dasharray:9 7}
+svg.dg .edge{stroke:#6b7280;stroke-width:2;fill:none}
+svg.dg .edge.flow{stroke:var(--green);stroke-dasharray:9 7;animation:dash 1.1s linear infinite}
+svg.dg .edge.flowc{stroke:var(--cyan);stroke-dasharray:9 7;animation:dash 1.1s linear infinite}
+svg.dg .elab{fill:var(--fg);font-size:13px;font-weight:600}
+svg.dg .note{fill:var(--dim);font-size:12.5px}
+@keyframes dash{to{stroke-dashoffset:-16}}
+@media (prefers-reduced-motion:reduce){svg.dg .edge.flow,svg.dg .edge.flowc{animation:none}}
+footer{width:100%;max-width:1240px;font-size:clamp(.58rem,1.05vw,.8rem);color:var(--dim);
+  border-top:1px solid var(--line);padding-top:.45rem;line-height:1.5}
+footer b{color:var(--mod)}
+</style>
+</head>
+<body>
+<header>
+  <div class="k">system architecture · high level</div>
+  <h1>Nuke <span class="hl">AI</span> Collaborator</h1>
+  <p>A group-native multi-agent platform — three cooperating processes, an engineered agent runtime, and security &amp; isolation as first-class structure.</p>
+</header>
+
+<div class="diagram">
+<svg class="dg" viewBox="0 0 1240 700" role="img" aria-label="High-level architecture">
+  <defs><marker id="ar" markerWidth="10" markerHeight="10" refX="7.5" refY="3" orient="auto">
+    <path d="M0,0 L7.5,3 L0,6 Z" fill="#6b7280"/></marker></defs>
+
+  <!-- ===== COLLABORATION SURFACE ===== -->
+  <rect class="b purple" x="400" y="16" width="440" height="70" rx="12"/>
+  <text class="t" x="620" y="48" text-anchor="middle" style="fill:var(--purple);font-size:18px">COLLABORATION SURFACE</text>
+  <text class="s" x="620" y="71" text-anchor="middle">group chat · humans + role-bots · live tool &amp; permission stream</text>
+
+  <!-- ===== SUPERVISOR (bus) ===== -->
+  <rect class="b green" x="240" y="120" width="760" height="68" rx="12"/>
+  <text class="t" x="620" y="150" text-anchor="middle" style="fill:var(--green);font-size:18px">SUPERVISOR · the bus</text>
+  <text class="s" x="620" y="173" text-anchor="middle" style="font-size:13px">WS gateway · message routing · worker lifecycle · MCP relay — keeps AI compute off the gateway</text>
+
+  <!-- ===== GROUP ISOLATION BOUNDARY (frame) ===== -->
+  <rect class="frame" x="44" y="232" width="752" height="430" rx="14"/>
+  <rect fill="#0d1117" x="398" y="222" width="394" height="22"/>
+  <text class="tag" x="782" y="238" text-anchor="end" style="fill:var(--cyan)">ONE GROUP · FULLY ISOLATED  (×N, never shared)</text>
+
+  <!-- WORKER / agent runtime -->
+  <rect class="b cyan" x="68" y="258" width="700" height="158" rx="11"/>
+  <text class="t" x="88" y="286" style="fill:var(--cyan);font-size:18px">AI AGENT RUNTIME ×N</text>
+  <text class="tag" x="748" y="286" text-anchor="end">sharded &amp; pinned per worker</text>
+  <!-- 2x2 capability chips -->
+  <rect class="chip" x="88" y="300" width="328" height="38" rx="7"/>
+  <text class="cap" x="252" y="324" text-anchor="middle">Multi-bot agentic loop</text>
+  <rect class="chip" x="424" y="300" width="324" height="38" rx="7"/>
+  <text class="cap" x="586" y="324" text-anchor="middle">Tool router + security gates</text>
+  <rect class="chip" x="88" y="346" width="328" height="38" rx="7"/>
+  <text class="cap" x="252" y="370" text-anchor="middle">Resilient edit engine</text>
+  <rect class="chip" x="424" y="346" width="324" height="38" rx="7"/>
+  <text class="cap" x="586" y="370" text-anchor="middle">Per-group memory &amp; recall</text>
+  <text class="s" x="418" y="406" text-anchor="middle" style="font-size:12.5px;fill:var(--dim)">role auto-routing · sub-agents · runs serialized + human-interruptible · auto-compact</text>
+
+  <!-- SECURITY PIPELINE bar -->
+  <rect class="b mag" x="68" y="430" width="700" height="56" rx="10"/>
+  <text class="t" x="88" y="453" style="fill:var(--magenta);font-size:15px">SECURITY PIPELINE</text>
+  <text class="tag" x="748" y="453" text-anchor="end" style="fill:var(--dim)">one interception point · fail-closed</text>
+  <text class="s" x="88" y="475" style="font-size:13px">HIL approval gate · 2-layer shell guard · secret redaction · sub-agent permission decay</text>
+
+  <!-- substrate inside group: storage + sandbox -->
+  <rect class="b dim" x="68" y="500" width="340" height="150" rx="11"/>
+  <text class="t" x="238" y="528" text-anchor="middle" style="fill:var(--fg);font-size:15px">PER-GROUP STORAGE</text>
+  <text class="s" x="238" y="556" text-anchor="middle" style="font-size:12.5px">private SQLite (WAL)</text>
+  <text class="s" x="238" y="578" text-anchor="middle" style="font-size:12.5px">Chroma vectors · workspace</text>
+  <text class="s" x="238" y="600" text-anchor="middle" style="font-size:12.5px">history · permission rules</text>
+  <rect class="b dim" x="428" y="500" width="340" height="150" rx="11"/>
+  <text class="t" x="598" y="528" text-anchor="middle" style="fill:var(--fg);font-size:15px">SANDBOXED EXECUTION</text>
+  <text class="s" x="598" y="556" text-anchor="middle" style="font-size:12.5px">per-group Docker container</text>
+  <text class="s" x="598" y="578" text-anchor="middle" style="font-size:12.5px">mount-isolated shell</text>
+  <text class="s" x="598" y="600" text-anchor="middle" style="font-size:12.5px">no sibling / host access</text>
+
+  <!-- ===== MCP COLLECTOR (shared, outside group) ===== -->
+  <text class="tag" x="1020" y="248" text-anchor="middle" style="fill:var(--dim)">SHARED · CROSS-GROUP</text>
+  <rect class="b amber" x="840" y="258" width="360" height="158" rx="11"/>
+  <text class="t" x="1020" y="290" text-anchor="middle" style="fill:var(--amber);font-size:17px">MCP COLLECTOR ×1</text>
+  <text class="s" x="1020" y="320" text-anchor="middle" style="font-size:12.5px">single owner of every MCP connection</text>
+  <text class="s" x="1020" y="346" text-anchor="middle" style="font-size:12.5px">OAuth · schema fan-out</text>
+  <text class="s" x="1020" y="372" text-anchor="middle" style="font-size:12.5px">trust boundary —</text>
+  <text class="s" x="1020" y="392" text-anchor="middle" style="font-size:12.5px;fill:var(--mod)">runs pre-authorized calls only</text>
+
+  <!-- ===== EXTERNAL ===== -->
+  <rect class="b dim" x="840" y="500" width="360" height="150" rx="11"/>
+  <text class="t" x="1020" y="540" text-anchor="middle" style="fill:var(--fg);font-size:15px">EXTERNAL</text>
+  <text class="s" x="1020" y="570" text-anchor="middle" style="font-size:12.5px">LLM APIs · DeepSeek/OpenAI/Claude/Ollama</text>
+  <text class="s" x="1020" y="596" text-anchor="middle" style="font-size:12.5px">MCP servers · Git / Jira</text>
+
+  <!-- ===== EDGES ===== -->
+  <path class="edge" d="M620,86 L620,116" marker-end="url(#ar)"/>
+  <text class="elab" x="632" y="107">WSRPC / WebSocket</text>
+
+  <path class="edge flow" d="M390,188 C390,220 300,224 300,254" marker-end="url(#ar)"/>
+  <text class="elab" x="120" y="216">IPC bus · runs the group</text>
+
+  <path class="edge flowc" d="M820,188 C820,222 1020,224 1020,254" marker-end="url(#ar)"/>
+  <text class="elab" x="846" y="218">MCP_CALL / RESULT / SCHEMAS</text>
+
+  <path class="edge" d="M418,416 L418,428" marker-end="url(#ar)"/>
+  <text class="note" x="430" y="424">every tool call ↓</text>
+
+  <path class="edge" d="M238,486 L238,496" marker-end="url(#ar)"/>
+  <path class="edge" d="M598,486 L598,496" marker-end="url(#ar)"/>
+
+  <path class="edge" d="M1020,416 L1020,496" marker-end="url(#ar)"/>
+  <text class="note" x="1030" y="460">stdio / remote</text>
+
+  <path class="edge" d="M768,360 C806,360 1020,430 1020,496" marker-end="url(#ar)"/>
+  <text class="note" x="784" y="430">LLM calls</text>
+</svg>
+</div>
+
+<footer>
+  <b>By design:</b> single-machine, process-isolated — deliberately optimal for ≤30 people / ~100 projects, not a missing distributed tier.
+  Group isolation and fail-closed security are structural, not bolted on. MCP lives in exactly one process by necessity (anyio cancel-scope binding).
+</footer>
+</body>
+</html>

@@ -1,0 +1,2343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Project Intelligent Transformation - Nuke AI Collaborator</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        /* === 核心变量与设计系统 === */
+        :root {
+            --bg-color: #0f1013;
+            --card-bg: #17181c;
+            --card-border: #292b35;
+            --card-border-glow: rgba(219, 0, 17, 0.2);
+            
+            /* 渐变色 (汇丰红官方配色) */
+            --gradient-primary: linear-gradient(135deg, #db0011 0%, #ff3344 100%);
+            --gradient-accent: linear-gradient(135deg, #2f3542 0%, #1e222b 100%);
+            --gradient-success: linear-gradient(135deg, #00847f 0%, #00a896 100%);
+            --gradient-warning: linear-gradient(135deg, #ff9e00 0%, #ff6000 100%);
+            --gradient-danger: linear-gradient(135deg, #db0011 0%, #a6000a 100%);
+            --gradient-dark: linear-gradient(135deg, #222222 0%, #111111 100%);
+            
+            /* 文字颜色 */
+            --text-main: #e3e4e6;
+            --text-muted: #9da3af;
+            --text-dim: #6b7280;
+            --text-accent: #db0011;
+            --text-purple: #00847f; /* 汇丰数码绿 */
+            
+            /* 字体 */
+            --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+            
+            /* 动效 */
+            --transition-smooth: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+            --transition-bounce: all 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+
+        /* === 基础复位 === */
+        *, *::before, *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            font-family: var(--font-sans);
+            overflow: hidden;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background-image: 
+                radial-gradient(circle at 10% 20%, rgba(219, 0, 17, 0.06) 0%, transparent 40%),
+                radial-gradient(circle at 90% 80%, rgba(0, 132, 127, 0.05) 0%, transparent 45%),
+                radial-gradient(circle at 50% 50%, rgba(15, 16, 22, 0.5) 0%, #0c0d10 100%),
+                linear-gradient(rgba(255, 255, 255, 0.005) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255, 255, 255, 0.005) 1px, transparent 1px);
+            background-size: 100% 100%, 100% 100%, 100% 100%, 40px 40px, 40px 40px;
+            background-position: 0 0, 0 0, 0 0, center center, center center;
+        }
+
+        /* === PPT 幻灯片容器 === */
+        .presentation-container {
+            position: relative;
+            width: min(90vw, calc(82vh * 16 / 9));
+            height: min(82vh, calc(90vw * 9 / 16));
+            max-width: 1440px;
+            max-height: 900px;
+            background: #121318;
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            border-radius: 24px;
+            box-shadow: 0 30px 70px rgba(0, 0, 0, 0.6), 
+                        0 0 100px rgba(219, 0, 17, 0.04);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        /* === 顶部全局进度与导航 === */
+        .pres-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 24px 40px 12px 40px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+            z-index: 10;
+        }
+
+        .logo-area {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .logo-icon {
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .logo-text {
+            font-weight: 800;
+            font-size: 18px;
+            letter-spacing: 0.5px;
+            color: var(--text-main);
+        }
+
+        .deck-title {
+            font-size: 13px;
+            color: var(--text-dim);
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+        }
+
+        .slide-progress-bar-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 4px;
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        .slide-progress-bar {
+            height: 100%;
+            background: var(--gradient-primary);
+            width: 12.5%;
+            transition: var(--transition-smooth);
+            box-shadow: 0 0 10px rgba(219, 0, 17, 0.3);
+        }
+
+        /* === 幻灯片内容区 === */
+        .slides-viewport {
+            flex: 1;
+            position: relative;
+            overflow: hidden;
+            padding: 24px 40px;
+        }
+
+        .slide {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            opacity: 0;
+            transform: translateX(50px) scale(0.98);
+            pointer-events: none;
+            transition: opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1), 
+                        transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .slide.active {
+            opacity: 1;
+            transform: translateX(0) scale(1);
+            pointer-events: auto;
+        }
+
+        .slide.prev {
+            transform: translateX(-50px) scale(0.98);
+        }
+
+        /* === 通用排版样式 === */
+        .slide-title-wrap {
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .slide-badge {
+            background: rgba(219, 0, 17, 0.06);
+            border: 1px solid rgba(219, 0, 17, 0.2);
+            padding: 4px 10px;
+            border-radius: 50px;
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-accent);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .slide-title {
+            font-size: 36px;
+            font-weight: 800;
+            letter-spacing: -0.5px;
+            background: linear-gradient(180deg, #ffffff 0%, #bbbbbb 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .slide-title span {
+            background: var(--gradient-primary);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .slide-content-grid {
+            flex: 1;
+            display: grid;
+            gap: 24px;
+            min-height: 0;
+        }
+
+        /* === 幻灯片独立设计 === */
+
+        /* Slide 1: Cover */
+        .slide-cover {
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 0;
+        }
+
+        .cover-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: rgba(219, 0, 17, 0.1);
+            border: 1px solid rgba(219, 0, 17, 0.25);
+            padding: 6px 16px;
+            border-radius: 99px;
+            margin-bottom: 24px;
+            font-size: 13px;
+            letter-spacing: 1.5px;
+            color: #ff4d5a;
+            animation: pulse-glow 3s infinite ease-in-out;
+        }
+
+        .cover-badge span {
+            width: 8px;
+            height: 8px;
+            background: #ff4d5a;
+            border-radius: 50%;
+            box-shadow: 0 0 10px #ff4d5a;
+        }
+
+        .cover-title {
+            font-size: 56px;
+            font-weight: 800;
+            line-height: 1.15;
+            letter-spacing: -1px;
+            margin-bottom: 20px;
+            background: linear-gradient(180deg, #ffffff 30%, #bbbbbb 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .cover-title span {
+            background: var(--gradient-primary);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .cover-subtitle {
+            font-size: 20px;
+            color: var(--text-muted);
+            max-width: 680px;
+            margin: 0 auto 50px auto;
+            line-height: 1.6;
+            font-weight: 300;
+        }
+
+        .cover-stats {
+            display: flex;
+            gap: 40px;
+            justify-content: center;
+        }
+
+        .cover-stat-card {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            padding: 18px 36px;
+            border-radius: 16px;
+            text-align: center;
+            min-width: 180px;
+            transition: var(--transition-bounce);
+        }
+
+        .cover-stat-card:hover {
+            transform: translateY(-5px);
+            border-color: rgba(219, 0, 17, 0.4);
+            background: rgba(255, 255, 255, 0.02);
+            box-shadow: 0 15px 30px rgba(0, 0, 0, 0.4), 0 0 15px rgba(219, 0, 17, 0.05);
+        }
+
+        .cover-stat-num {
+            font-family: var(--font-mono);
+            font-size: 36px;
+            font-weight: 700;
+            background: var(--gradient-primary);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 4px;
+        }
+
+        .cover-stat-num.accent {
+            background: linear-gradient(135deg, #ffb81c 0%, #ff8f00 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .cover-stat-num.success {
+            background: var(--gradient-success);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .cover-stat-label {
+            font-size: 13px;
+            color: var(--text-dim);
+        }
+
+        /* Slide 2: Traditional vs AI */
+        .slide-comparison-grid {
+            grid-template-columns: 1fr 1fr;
+        }
+
+        .comp-column {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .comp-card {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 20px;
+            padding: 30px;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .comp-card.traditional {
+            background: rgba(255, 255, 255, 0.01);
+            border-color: rgba(255, 255, 255, 0.04);
+        }
+
+        .comp-card.ai {
+            background: rgba(0, 242, 254, 0.02);
+            border-color: rgba(0, 242, 254, 0.15);
+            box-shadow: inset 0 0 30px rgba(0, 242, 254, 0.02);
+        }
+
+        .comp-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+
+        .comp-icon {
+            width: 36px;
+            height: 36px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+        }
+
+        .traditional .comp-icon {
+            background: rgba(255, 255, 255, 0.05);
+            color: var(--text-muted);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .ai .comp-icon {
+            background: rgba(0, 242, 254, 0.15);
+            color: var(--text-accent);
+            border: 1px solid rgba(0, 242, 254, 0.25);
+            box-shadow: 0 0 15px rgba(0, 242, 254, 0.2);
+        }
+
+        .comp-title {
+            font-size: 22px;
+            font-weight: 700;
+        }
+
+        .traditional .comp-title {
+            color: var(--text-muted);
+        }
+
+        .ai .comp-title {
+            background: var(--gradient-primary);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .comp-items {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            flex: 1;
+        }
+
+        .comp-item {
+            display: flex;
+            gap: 12px;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        .comp-item-bullet {
+            font-size: 14px;
+            margin-top: 2px;
+        }
+
+        .traditional .comp-item-bullet {
+            color: var(--gradient-danger);
+        }
+
+        .ai .comp-item-bullet {
+            color: #05d59e;
+        }
+
+        .comp-item-text strong {
+            display: block;
+            font-size: 16px;
+            margin-bottom: 4px;
+        }
+
+        .traditional .comp-item-text strong {
+            color: #e5e7eb;
+        }
+
+        .ai .comp-item-text strong {
+            color: #fff;
+        }
+
+        .comp-item-text p {
+            color: var(--text-muted);
+        }
+
+        /* Slide 3: Cycle Time & Delivery */
+        .timeline-container {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            justify-content: center;
+            height: 100%;
+        }
+
+        .flow-row {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 16px;
+            padding: 16px;
+            position: relative;
+        }
+
+        .flow-row.ai-flow {
+            border-color: rgba(0, 242, 254, 0.15);
+            background: rgba(0, 242, 254, 0.01);
+        }
+
+        .flow-meta {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+
+        .flow-label {
+            font-size: 16px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .flow-duration {
+            font-family: var(--font-mono);
+            font-weight: 700;
+            font-size: 16px;
+            padding: 4px 12px;
+            border-radius: 6px;
+        }
+
+        .trad-flow .flow-duration {
+            background: rgba(255, 255, 255, 0.05);
+            color: var(--text-muted);
+        }
+
+        .ai-flow .flow-duration {
+            background: rgba(5, 213, 158, 0.15);
+            color: #05d59e;
+            border: 1px solid rgba(5, 213, 158, 0.25);
+            box-shadow: 0 0 10px rgba(5, 213, 158, 0.1);
+        }
+
+        .flow-steps {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 10px;
+            position: relative;
+        }
+
+        .flow-step {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 10px;
+            padding: 10px;
+            font-size: 12px;
+            position: relative;
+            text-align: center;
+        }
+
+        .flow-step::after {
+            content: "→";
+            position: absolute;
+            right: -10px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--text-dim);
+            font-size: 16px;
+            z-index: 2;
+        }
+
+        .flow-step:last-child::after {
+            display: none;
+        }
+
+        .trad-flow .flow-step.active {
+            border-color: rgba(255, 255, 255, 0.1);
+            background: rgba(255, 255, 255, 0.04);
+        }
+
+        .ai-flow .flow-steps {
+            grid-template-columns: repeat(3, 1fr);
+        }
+
+        .ai-flow .flow-step {
+            background: rgba(0, 242, 254, 0.03);
+            border-color: rgba(0, 242, 254, 0.1);
+        }
+
+        .ai-flow .flow-step.highlight {
+            border-color: rgba(0, 242, 254, 0.3);
+            background: rgba(0, 242, 254, 0.08);
+            box-shadow: 0 0 15px rgba(0, 242, 254, 0.05);
+        }
+
+        .step-num {
+            font-family: var(--font-mono);
+            font-size: 11px;
+            color: var(--text-dim);
+            display: block;
+            margin-bottom: 4px;
+        }
+
+        .ai-flow .step-num {
+            color: var(--text-accent);
+        }
+
+        .step-name {
+            font-weight: 600;
+            color: #fff;
+            margin-bottom: 2px;
+        }
+
+        .step-desc {
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+
+        /* Slide 4: Change response */
+        .slide-change-grid {
+            grid-template-columns: 1.2fr 0.8fr;
+            grid-template-rows: 1fr;
+            align-items: stretch;
+            height: 100%;
+            max-height: 100%;
+            min-height: 0;
+            overflow: hidden;
+        }
+
+        .change-interactive-panel {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 20px;
+            padding: 12px 16px;
+            height: 100%;
+            max-height: 100%;
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            overflow: hidden;
+        }
+
+        .chat-simulator {
+            background: rgba(5, 6, 8, 0.5);
+            border: 1px solid rgba(255, 255, 255, 0.04);
+            border-radius: 12px;
+            padding: 10px;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            overflow-y: auto;
+            font-size: 12px;
+            scrollbar-width: none; /* Hide scrollbar Firefox */
+        }
+
+        .chat-simulator::-webkit-scrollbar {
+            display: none; /* Hide scrollbar Chrome/Safari */
+        }
+
+        .chat-msg {
+            display: flex;
+            gap: 12px;
+            align-items: flex-start;
+            max-width: 85%;
+        }
+
+        .chat-msg.user {
+            margin-left: auto;
+            flex-direction: row-reverse;
+        }
+
+        .chat-avatar {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 12px;
+            flex-shrink: 0;
+        }
+
+        .chat-avatar.u {
+            background: var(--gradient-accent);
+            color: #fff;
+        }
+
+        .chat-avatar.b {
+            background: var(--gradient-primary);
+            color: #000;
+            box-shadow: 0 0 10px rgba(0, 242, 254, 0.3);
+        }
+
+        .chat-bubble {
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            padding: 10px 14px;
+            line-height: 1.4;
+        }
+
+        .chat-msg.user .chat-bubble {
+            background: rgba(219, 0, 17, 0.08);
+            border-color: rgba(219, 0, 17, 0.15);
+            color: var(--text-main);
+        }
+
+        .chat-msg.bot .chat-bubble {
+            background: rgba(0, 132, 127, 0.06);
+            border-color: rgba(0, 132, 127, 0.15);
+            color: var(--text-main);
+        }
+
+        .chat-code-block {
+            font-family: var(--font-mono);
+            font-size: 11px;
+            background: rgba(0,0,0,0.4);
+            padding: 6px 10px;
+            border-radius: 6px;
+            margin-top: 6px;
+            border: 1px solid rgba(255,255,255,0.03);
+            color: #a7f3d0;
+        }
+
+        .change-keypoints {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            overflow-y: auto;
+            max-height: 100%;
+            padding-right: 4px;
+            scrollbar-width: none; /* Hide scrollbar Firefox */
+        }
+
+        .change-keypoints::-webkit-scrollbar {
+            display: none; /* Hide scrollbar Chrome/Safari */
+        }
+
+        .kpi-card {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            padding: 10px 12px;
+            border-radius: 12px;
+            transition: var(--transition-smooth);
+        }
+
+        .kpi-card:hover {
+            border-color: rgba(0, 242, 254, 0.2);
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .kpi-title {
+            font-size: 14px;
+            font-weight: 700;
+            color: #fff;
+            margin-bottom: 4px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .kpi-title span {
+            color: var(--text-accent);
+        }
+
+        .kpi-desc {
+            font-size: 12px;
+            color: var(--text-muted);
+            line-height: 1.4;
+        }
+
+        /* Slide 5: Infinite Scalability */
+        .slide-scale-grid {
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+        }
+
+        .arch-viz {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 20px;
+            padding: 30px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            position: relative;
+        }
+
+        .arch-node {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 12px;
+            padding: 12px 20px;
+            text-align: center;
+            font-size: 14px;
+            font-weight: 600;
+            min-width: 140px;
+            position: relative;
+            z-index: 2;
+        }
+
+        .arch-node.supervisor {
+            background: rgba(114, 9, 183, 0.1);
+            border-color: rgba(114, 9, 183, 0.3);
+            color: #d8b4fe;
+            margin-bottom: 40px;
+            box-shadow: 0 0 20px rgba(114, 9, 183, 0.2);
+        }
+
+        .arch-workers-row {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 40px;
+        }
+
+        .arch-node.worker {
+            background: rgba(0, 242, 254, 0.05);
+            border-color: rgba(0, 242, 254, 0.2);
+            color: var(--text-accent);
+        }
+
+        .arch-dbs-row {
+            display: flex;
+            gap: 24px;
+        }
+
+        .arch-node.db {
+            background: rgba(5, 213, 158, 0.05);
+            border-color: rgba(5, 213, 158, 0.2);
+            color: #6ee7b7;
+            font-size: 12px;
+            padding: 8px 14px;
+            min-width: 90px;
+        }
+
+        .arch-connector {
+            position: absolute;
+            background: rgba(255, 255, 255, 0.1);
+            z-index: 1;
+        }
+
+        .arch-connector.vertical {
+            width: 2px;
+            height: 40px;
+        }
+
+        /* Slide 6: Learning team */
+        .learning-grid {
+            grid-template-columns: repeat(3, 1fr);
+            gap: 20px;
+        }
+
+        .learn-card {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 18px;
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            transition: var(--transition-bounce);
+        }
+
+        .learn-card:hover {
+            transform: translateY(-8px);
+            border-color: rgba(114, 9, 183, 0.25);
+            box-shadow: 0 20px 40px rgba(0,0,0,0.4), 0 0 20px rgba(114, 9, 183, 0.05);
+        }
+
+        .learn-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .learn-badge-icon {
+            width: 32px;
+            height: 32px;
+            background: rgba(114, 9, 183, 0.15);
+            color: #d8b4fe;
+            border: 1px solid rgba(114, 9, 183, 0.25);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+        }
+
+        .learn-card:nth-child(2) .learn-badge-icon {
+            background: rgba(0, 242, 254, 0.15);
+            color: var(--text-accent);
+            border-color: rgba(0, 242, 254, 0.25);
+        }
+
+        .learn-card:nth-child(3) .learn-badge-icon {
+            background: rgba(5, 213, 158, 0.15);
+            color: #6ee7b7;
+            border-color: rgba(5, 213, 158, 0.25);
+        }
+
+        .learn-title {
+            font-size: 18px;
+            font-weight: 700;
+            color: #fff;
+        }
+
+        .learn-desc {
+            font-size: 13px;
+            color: var(--text-muted);
+            line-height: 1.5;
+            flex: none;
+        }
+
+        .learn-tag-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+
+        .learn-tag {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(255,255,255,0.05);
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            color: var(--text-muted);
+            font-family: var(--font-mono);
+        }
+
+        /* Slide 6: Learning team SVG graphics */
+        .learn-visual {
+            width: 100%;
+            flex: 1;
+            min-height: 120px;
+            background: rgba(255, 255, 255, 0.01);
+            border: 1px dashed rgba(255, 255, 255, 0.04);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            overflow: hidden;
+            margin: 4px 0;
+        }
+
+        .flow-line {
+            animation: strokeFlow 3s linear infinite;
+        }
+
+        @keyframes strokeFlow {
+            to {
+                stroke-dashoffset: -20;
+            }
+        }
+
+        .pulse-glow {
+            animation: pulseGlow 4s ease-in-out infinite;
+        }
+
+        @keyframes pulseGlow {
+            0%, 100% { opacity: 0.15; }
+            50% { opacity: 0.45; }
+        }
+
+        /* Slide 7: Interactive ROI */
+        .roi-grid {
+            grid-template-columns: 1fr 1.2fr;
+            grid-template-rows: 1fr;
+            gap: 30px;
+            min-height: 0;
+        }
+
+        .roi-controls {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 20px;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            justify-content: center;
+        }
+
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .control-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .control-label {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-muted);
+        }
+
+        .control-value {
+            font-family: var(--font-mono);
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--text-accent);
+        }
+
+        .roi-slider {
+            -webkit-appearance: none;
+            width: 100%;
+            height: 6px;
+            border-radius: 3px;
+            background: rgba(255, 255, 255, 0.1);
+            outline: none;
+            transition: var(--transition-smooth);
+        }
+
+        .roi-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: var(--gradient-primary);
+            cursor: pointer;
+            box-shadow: 0 0 10px rgba(0, 242, 254, 0.5);
+            transition: var(--transition-bounce);
+        }
+
+        .roi-slider::-webkit-slider-thumb:hover {
+            transform: scale(1.2);
+            box-shadow: 0 0 15px rgba(0, 242, 254, 0.8);
+        }
+
+        .roi-results {
+            background: rgba(255, 255, 255, 0.015);
+            border: 1px solid var(--card-border);
+            border-radius: 20px;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+        }
+
+        .roi-result-card {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 16px;
+            background: rgba(255,255,255,0.02);
+            border: 1px solid rgba(255,255,255,0.04);
+            border-radius: 12px;
+        }
+
+        .roi-result-card.highlight {
+            border-color: rgba(5, 213, 158, 0.2);
+            background: rgba(5, 213, 158, 0.02);
+        }
+
+        .roi-res-info {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .roi-res-label {
+            font-size: 13px;
+            color: var(--text-muted);
+        }
+
+        .roi-res-desc {
+            font-size: 11px;
+            color: var(--text-dim);
+        }
+
+        .roi-res-val {
+            font-family: var(--font-mono);
+            font-size: 26px;
+            font-weight: 700;
+            color: #fff;
+        }
+
+        .roi-result-card.highlight .roi-res-val {
+            color: #05d59e;
+            text-shadow: 0 0 15px rgba(5, 213, 158, 0.3);
+        }
+
+        /* Slide 8: Future Map */
+        .roadmap-grid {
+            grid-template-columns: repeat(3, 1fr);
+            gap: 24px;
+            position: relative;
+        }
+
+        .roadmap-grid::before {
+            content: "";
+            position: absolute;
+            top: 96px;
+            left: 10%;
+            width: 80%;
+            height: 2px;
+            background: linear-gradient(90deg, rgba(0, 242, 254, 0.1) 0%, rgba(114, 9, 183, 0.4) 50%, rgba(5, 213, 158, 0.1) 100%);
+            z-index: 1;
+        }
+
+        .roadmap-node {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+            position: relative;
+            z-index: 2;
+        }
+
+        .roadmap-phase-badge {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            color: var(--text-muted);
+            font-family: var(--font-mono);
+            font-size: 12px;
+            font-weight: 600;
+            padding: 6px 14px;
+            border-radius: 50px;
+            margin-bottom: 12px;
+        }
+
+        .roadmap-node.active .roadmap-phase-badge {
+            background: rgba(0, 242, 254, 0.1);
+            border-color: rgba(0, 242, 254, 0.3);
+            color: var(--text-accent);
+        }
+
+        .roadmap-dot {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            background: #11131c;
+            border: 4px solid var(--text-dim);
+            margin-bottom: 12px;
+            transition: var(--transition-bounce);
+        }
+
+        .roadmap-node.active .roadmap-dot {
+            border-color: var(--text-accent);
+            box-shadow: 0 0 15px var(--text-accent);
+            background: #fff;
+            transform: scale(1.2);
+        }
+
+        .roadmap-box {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 16px;
+            padding: 20px;
+            width: 100%;
+        }
+
+        .roadmap-node.active .roadmap-box {
+            border-color: rgba(0, 242, 254, 0.15);
+            background: rgba(0, 242, 254, 0.01);
+        }
+
+        .roadmap-title {
+            font-size: 16px;
+            font-weight: 700;
+            color: #fff;
+            margin-bottom: 10px;
+        }
+
+        .roadmap-items {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            text-align: left;
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .roadmap-item {
+            display: flex;
+            gap: 6px;
+        }
+
+        .roadmap-item::before {
+            content: "•";
+            color: var(--text-accent);
+        }
+
+        /* === 底部控制栏 === */
+        .pres-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px 40px 24px 40px;
+            border-top: 1px solid rgba(255, 255, 255, 0.06);
+            z-index: 10;
+        }
+
+        .controls-left {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+
+        .slide-counter {
+            font-family: var(--font-mono);
+            font-size: 14px;
+            color: var(--text-muted);
+        }
+
+        .slide-counter span {
+            color: var(--text-dim);
+        }
+
+        .btn-list-menu {
+            background: transparent;
+            border: none;
+            color: var(--text-dim);
+            cursor: pointer;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: var(--transition-smooth);
+        }
+
+        .btn-list-menu:hover {
+            color: var(--text-accent);
+        }
+
+        .controls-right {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .nav-btn {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            color: var(--text-main);
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: var(--transition-bounce);
+        }
+
+        .nav-btn:hover {
+            background: rgba(255, 255, 255, 0.08);
+            border-color: rgba(255, 255, 255, 0.15);
+            transform: scale(1.05);
+        }
+
+        .nav-btn:active {
+            transform: scale(0.95);
+        }
+
+        .nav-btn.btn-primary {
+            background: var(--gradient-primary);
+            color: #ffffff;
+            border: none;
+            box-shadow: 0 5px 15px rgba(219, 0, 17, 0.2);
+        }
+
+        .nav-btn.btn-primary:hover {
+            box-shadow: 0 5px 20px rgba(219, 0, 17, 0.4);
+        }
+
+        /* 快捷目录抽屉 */
+        .drawer-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(5px);
+            z-index: 100;
+            opacity: 0;
+            pointer-events: none;
+            transition: var(--transition-smooth);
+        }
+
+        .drawer-overlay.open {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .menu-drawer {
+            position: absolute;
+            top: 0;
+            left: -320px;
+            width: 320px;
+            height: 100%;
+            background: #14151a;
+            border-right: 1px solid rgba(255, 255, 255, 0.06);
+            z-index: 101;
+            padding: 40px 30px;
+            display: flex;
+            flex-direction: column;
+            gap: 30px;
+            transition: transform 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .drawer-overlay.open .menu-drawer {
+            transform: translateX(320px);
+        }
+
+        .drawer-title {
+            font-size: 20px;
+            font-weight: 800;
+            background: var(--gradient-primary);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .menu-items {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            list-style: none;
+        }
+
+        .menu-item-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            font-size: 14px;
+            text-align: left;
+            padding: 10px 14px;
+            border-radius: 8px;
+            width: 100%;
+            cursor: pointer;
+            transition: var(--transition-smooth);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .menu-item-btn:hover, .menu-item-btn.active {
+            background: rgba(255, 255, 255, 0.04);
+            color: #ffffff;
+        }
+
+        .menu-item-btn.active::before {
+            content: "";
+            width: 6px;
+            height: 6px;
+            background: #db0011;
+            border-radius: 50%;
+            box-shadow: 0 0 10px #db0011;
+        }
+
+        .menu-item-num {
+            font-family: var(--font-mono);
+            font-size: 12px;
+            color: var(--text-dim);
+        }
+
+        /* 呼吸灯动画 */
+        @keyframes pulse-glow {
+            0%, 100% { opacity: 0.8; box-shadow: 0 0 10px rgba(0, 242, 254, 0.1); }
+            50% { opacity: 1; box-shadow: 0 0 25px rgba(0, 242, 254, 0.3); }
+        }
+
+        /* 动效延迟 */
+        .delay-1 { animation-delay: 0.1s; }
+        .delay-2 { animation-delay: 0.2s; }
+        .delay-3 { animation-delay: 0.3s; }
+
+        /* 帮助贴士 */
+        .keyboard-tip {
+            position: absolute;
+            bottom: 24px;
+            right: 40px;
+            font-size: 11px;
+            color: var(--text-dim);
+            background: rgba(255,255,255,0.02);
+            border: 1px solid rgba(255,255,255,0.04);
+            padding: 4px 10px;
+            border-radius: 4px;
+            pointer-events: none;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .keyboard-key {
+            background: rgba(255,255,255,0.1);
+            color: var(--text-muted);
+            padding: 1px 4px;
+            border-radius: 3px;
+            border-bottom: 2px solid rgba(255,255,255,0.15);
+            font-family: var(--font-mono);
+        }
+
+        /* === 响应式高度自适应控制 === */
+        @media (max-height: 800px) {
+            .presentation-container {
+                height: 90vh;
+            }
+            .slides-viewport {
+                padding: 16px 30px;
+            }
+            .slide-title-wrap {
+                margin-bottom: 12px;
+            }
+            .slide-title {
+                font-size: 28px;
+            }
+            /* Slide 3 */
+            .timeline-container { gap: 10px; }
+            .flow-row { padding: 12px 16px; }
+            .flow-step { padding: 8px; font-size: 11px; }
+            
+            /* Slide 4 */
+            .change-interactive-panel { padding: 16px; gap: 10px; }
+            .chat-simulator { padding: 10px; gap: 8px; font-size: 11px; }
+            .change-keypoints { gap: 10px; }
+            .kpi-card { padding: 10px 12px; }
+            .kpi-title { font-size: 14px; margin-bottom: 4px; }
+            .kpi-desc { font-size: 11px; line-height: 1.4; }
+            
+            /* Slide 7 */
+            .roi-controls { padding: 16px; gap: 12px; }
+            .roi-results { padding: 16px; gap: 10px; }
+            .roi-result-card { padding: 10px 14px; }
+            .roi-res-val { font-size: 22px; }
+        }
+
+        @media (max-height: 680px) {
+            .presentation-container {
+                height: 95vh;
+                border-radius: 12px;
+            }
+            .pres-header {
+                padding: 12px 24px 8px 24px;
+            }
+            .pres-footer {
+                padding: 10px 24px 12px 24px;
+            }
+            .slide-title {
+                font-size: 24px;
+            }
+            .slide-title-wrap {
+                margin-bottom: 8px;
+            }
+            /* Slide 3 */
+            .flow-meta { margin-bottom: 6px; }
+            .flow-duration { font-size: 13px; padding: 2px 8px; }
+            .step-name { font-size: 11px; }
+            .step-desc { display: none; }
+            
+            /* Slide 4 */
+            .slide-change-grid {
+                align-items: stretch;
+            }
+            .change-keypoints {
+                overflow-y: auto;
+                max-height: 290px;
+                padding-right: 4px;
+            }
+            .kpi-card {
+                padding: 8px 10px;
+            }
+            
+            /* Slide 7 */
+            .roi-grid {
+                gap: 16px;
+            }
+            .roi-res-desc {
+                display: none;
+            }
+            .roi-result-card {
+                padding: 8px 12px;
+            }
+            .roi-res-val {
+                font-size: 18px;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="presentation-container">
+        <!-- Progress Bar -->
+        <div class="slide-progress-bar-container">
+            <div class="slide-progress-bar" id="progressBar"></div>
+        </div>
+
+        <!-- Header -->
+        <header class="pres-header">
+            <div class="logo-area">
+                <div class="logo-icon" style="width: auto; height: auto;">
+                    <svg viewBox="0 0 24 24" width="28" height="28" style="display: block;">
+                        <path d="M6 6v12l6-6zM18 6v12l-6-6z" fill="#ffffff"/>
+                        <path d="M6 6h12l-6 6zM6 18h12l-6-6zM0 12l6-6v12zM24 12l-6-6v12z" fill="#db0011"/>
+                    </svg>
+                </div>
+                <div class="logo-text" style="color: var(--text-main); font-weight: 800; font-size: 16px;">HSBC AI Collaborator</div>
+            </div>
+            <div class="deck-title" id="deckTitle">Project Intelligent Transformation</div>
+        </header>
+
+        <!-- Slides Viewport -->
+        <main class="slides-viewport" id="slidesViewport">
+
+            <!-- Slide 1: Cover -->
+            <section class="slide slide-cover active" data-title="Cover: Intelligent Transformation">
+                <div style="margin-bottom: 24px;">
+                    <svg viewBox="0 0 24 24" width="72" height="72" style="display: inline-block;">
+                        <path d="M6 6v12l6-6zM18 6v12l-6-6z" fill="#ffffff"/>
+                        <path d="M6 6h12l-6 6zM6 18h12l-6-6zM0 12l6-6v12zM24 12l-6-6v12z" fill="#db0011"/>
+                    </svg>
+                </div>
+                <div class="cover-badge" style="color: #db0011; border-color: rgba(219,0,17,0.25); background: rgba(219,0,17,0.08);">
+                    <span style="background: #db0011; box-shadow: 0 0 10px #db0011;"></span>
+                    HSBC Intelligent Transformation Proposal
+                </div>
+                <h1 class="cover-title">Project Intelligent Transformation: Building AI-Driven <span>Heterogeneous Agentic Digital Teams</span></h1>
+                <p class="cover-subtitle" style="line-height: 1.8;">
+                    Software Delivery: From "People Using Tools" → "People Leading AI Teams"<br>
+                    Breaking traditional cycles of alignment & friction, delivering ideas and needs at lightspeed
+                </p>
+                
+                <div class="cover-stats">
+                    <div class="cover-stat-card">
+                        <div class="cover-stat-num">Hours</div>
+                        <div class="cover-stat-label">Project Delivery Cycle</div>
+                    </div>
+                    <div class="cover-stat-card">
+                        <div class="cover-stat-num accent">Seconds</div>
+                        <div class="cover-stat-label">Change Response Speed</div>
+                    </div>
+                    <div class="cover-stat-card">
+                        <div class="cover-stat-num success">Unlimited</div>
+                        <div class="cover-stat-label">Parallel Projects Supported</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Slide 2: Traditional vs AI -->
+            <section class="slide" data-title="Era Shift: Traditional vs. Intelligent">
+                <div class="slide-title-wrap">
+                    <span class="slide-badge">01 / Contrast</span>
+                    <h2 class="slide-title">Era Shift: From "Human-Machine Separation" to <span>Digital Workshop</span></h2>
+                </div>
+                
+                <div class="slide-content-grid slide-comparison-grid">
+                    <div class="comp-column">
+                        <div class="comp-card traditional">
+                            <div class="comp-header">
+                                <div class="comp-icon">✕</div>
+                                <h3 class="comp-title">Traditional Collaboration Mode</h3>
+                            </div>
+                            <div class="comp-items">
+                                <div class="comp-item">
+                                    <div class="comp-item-bullet">◆</div>
+                                    <div class="comp-item-text">
+                                        <strong>Repetitive Alignment & Friction</strong>
+                                        <p>Business requests go to PMs, translated for architects, passed to developers. Long chain, high misunderstanding, endless confirmations.</p>
+                                    </div>
+                                </div>
+                                <div class="comp-item">
+                                    <div class="comp-item-bullet">◆</div>
+                                    <div class="comp-item-text">
+                                        <strong>Tedious & Inefficient Delivery Chain</strong>
+                                        <p>Requirement briefing, specs writing, manual coding, QA testing, canary release. A tiny change requires multi-person alignment.</p>
+                                    </div>
+                                </div>
+                                <div class="comp-item">
+                                    <div class="comp-item-bullet">◆</div>
+                                    <div class="comp-item-text">
+                                        <strong>Extremely Low Talent Elasticity</strong>
+                                        <p>Starting a new project requires a long hiring and onboarding process. Peak shortages vs. valley idle time; high and rigid headcount costs.</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="comp-column">
+                        <div class="comp-card ai">
+                            <div class="comp-header">
+                                <div class="comp-icon">✓</div>
+                                <h3 class="comp-title">Nuke AI Collaboration Mode</h3>
+                            </div>
+                            <div class="comp-items">
+                                <div class="comp-item">
+                                    <div class="comp-item-bullet">◆</div>
+                                    <div class="comp-item-text">
+                                        <strong>Zero Friction, Self-Executed by Requester</strong>
+                                        <p>The business owner or requester acts directly as the project core. No middleman needed; autonomously recruit digital Bot members to execute.</p>
+                                    </div>
+                                </div>
+                                <div class="comp-item">
+                                    <div class="comp-item-bullet">◆</div>
+                                    <div class="comp-item-text">
+                                        <strong>Direct Verification & Fast Iteration</strong>
+                                        <p>Shift from complex "briefings" to "direct generation, instant interaction, and validation". Quickly converge requirements via sandbox feedback.</p>
+                                    </div>
+                                </div>
+                                <div class="comp-item">
+                                    <div class="comp-item-bullet">◆</div>
+                                    <div class="comp-item-text">
+                                        <strong>Infinite Horizontal Talent Elasticity</strong>
+                                        <p>Clone and assign BAs, Developers, QAs, and other role Bots on demand. Marginal labor cost approaches zero, with onboarding in seconds.</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Slide 3: Delivery Cycle -->
+            <section class="slide" data-title="Efficiency: Cycle Time Reduced by 90%">
+                <div class="slide-title-wrap">
+                    <span class="slide-badge">02 / Efficiency</span>
+                    <h2 class="slide-title">Delivery Efficiency: Shrunk from "Weeks" to <span>"Hours"</span></h2>
+                </div>
+                
+                <div class="slide-content-grid">
+                    <div class="timeline-container">
+                        <!-- Traditional Flow -->
+                        <div class="flow-row trad-flow">
+                            <div class="flow-meta">
+                                <span class="flow-label">Traditional Software Engineering Pipeline</span>
+                                <span class="flow-duration">Estimated: 12 - 20 Days</span>
+                            </div>
+                            <div class="flow-steps">
+                                <div class="flow-step">
+                                    <span class="step-num">01</span>
+                                    <div class="step-name">Briefing & Friction</div>
+                                    <div class="step-desc">Define intent & scope</div>
+                                </div>
+                                <div class="flow-step">
+                                    <span class="step-num">02</span>
+                                    <div class="step-name">Prototyping & Docs</div>
+                                    <div class="step-desc">PRD & API specification</div>
+                                </div>
+                                <div class="flow-step">
+                                    <span class="step-num">03</span>
+                                    <div class="step-name">Scheduling & Coding</div>
+                                    <div class="step-desc">Manual business logic</div>
+                                </div>
+                                <div class="flow-step">
+                                    <span class="step-num">04</span>
+                                    <div class="step-name">Manual QA & Feedback</div>
+                                    <div class="step-desc">Bug fixing & regression</div>
+                                </div>
+                                <div class="flow-step">
+                                    <span class="step-num">05</span>
+                                    <div class="step-name">Canary & Release</div>
+                                    <div class="step-desc">Production validation</div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- AI Flow -->
+                        <div class="flow-row ai-flow">
+                            <div class="flow-meta">
+                                <span class="flow-label" style="color: #05d59e;">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="margin-right: 4px;">
+                                        <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+                                    </svg>
+                                    Nuke AI Intelligent Delivery Loop
+                                </span>
+                                <span class="flow-duration">Estimated: 2 - 4 Hours</span>
+                            </div>
+                            <div class="flow-steps">
+                                <div class="flow-step highlight">
+                                    <span class="step-num">01. Express Ideas & Needs</span>
+                                    <div class="step-name">Natural Language Input</div>
+                                    <div class="step-desc">Business owners propose requirements directly in group, no specs needed</div>
+                                </div>
+                                <div class="flow-step highlight">
+                                    <span class="step-num">02. Intelligent Code Gen</span>
+                                    <div class="step-name">Rapid Bot Execution</div>
+                                    <div class="step-desc">BA Bot auto-decomposes tasks, Developer Bot generates code</div>
+                                </div>
+                                <div class="flow-step highlight">
+                                    <span class="step-num">03. Instant Verification</span>
+                                    <div class="step-name">Iterative Confirmation</div>
+                                    <div class="step-desc">Run & verify in sandbox; reject and iterate instantly if expectations are not met</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Slide 4: Change Response -->
+            <section class="slide" data-title="Agility: Zero-Friction Change Response">
+                <div class="slide-title-wrap">
+                    <span class="slide-badge">03 / Agility</span>
+                    <h2 class="slide-title">Change Response: From "Inter-departmental Friction" to <span>"Requester as Coordinator"</span></h2>
+                </div>
+                
+                <div class="slide-content-grid slide-change-grid">
+                    <div class="change-interactive-panel">
+                        <h3 style="font-size:16px; font-weight:700; color: #fff;">Collaboration Sandbox Simulation (WebSocket interaction)</h3>
+                        <div class="chat-simulator" id="chatSim">
+                            <div class="chat-msg user">
+                                <div class="chat-avatar u">U</div>
+                                <div class="chat-bubble">
+                                    <strong>Requester (You)</strong><br>
+                                    We need to change "Average Response Time" on the project dashboard from a chart to a large metric card, positioned prominently at the top.
+                                </div>
+                            </div>
+                            <!-- Automated replies will be displayed dynamically by JS -->
+                        </div>
+                    </div>
+                    
+                    <div class="change-keypoints">
+                        <div class="kpi-card">
+                            <div class="kpi-title">
+                                <span>✦</span> Zero-Agent Communication
+                            </div>
+                            <div class="kpi-desc">
+                                No "telephone game" between PMs and developers. The business owner assigns changes via natural language in the Group; Bots auto-inspect architecture and execute.
+                            </div>
+                        </div>
+                        
+                        <div class="kpi-card">
+                            <div class="kpi-title">
+                                <span>✦</span> Instant Sandbox Preview
+                            </div>
+                            <div class="kpi-desc">
+                                Change code compiles and runs instantly in a physical sandbox, displaying the UI. Requesters review, adjust, and confirm themselves, eliminating mismatch.
+                            </div>
+                        </div>
+                        
+                        <div class="kpi-card">
+                            <div class="kpi-title">
+                                <span>✦</span> Automated Guardrails
+                            </div>
+                            <div class="kpi-desc">
+                                Built-in HIL (Human-In-The-Loop) authorization. High-risk operations (e.g., database modification, deployment) require one-click human approval.
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Slide 5: Physical Isolation & Architecture -->
+            <section class="slide" data-title="Architecture: Parallel Capacity & Elasticity">
+                <div class="slide-title-wrap">
+                    <span class="slide-badge">04 / Architecture</span>
+                    <h2 class="slide-title">Architecture: Physical Isolation & <span>Infinite Talent Elasticity</span></h2>
+                </div>
+                
+                <div class="slide-content-grid slide-scale-grid">
+                    <div class="arch-viz">
+                        <div class="arch-node supervisor">Supervisor Hub</div>
+                        
+                        <div class="arch-workers-row">
+                            <div class="arch-node worker">Group A Worker</div>
+                            <div class="arch-node worker">Group B Worker</div>
+                            <div class="arch-node worker">Group C Worker</div>
+                        </div>
+                        
+                        <div class="arch-dbs-row">
+                            <div class="arch-node db">Group A DB<br>(SQLite)</div>
+                            <div class="arch-node db">Group B DB<br>(SQLite)</div>
+                            <div class="arch-node db">Group C DB<br>(SQLite)</div>
+                        </div>
+                        
+                        <div style="font-size:11px; color:var(--text-dim); margin-top:20px; text-align:center;">
+                            Multi-process sharding architecture topology based on Supervisor-Worker
+                        </div>
+                    </div>
+                    
+                    <div style="display:flex; flex-direction:column; justify-content:center; gap:20px;">
+                        <div class="kpi-card">
+                            <div class="kpi-title" style="color:var(--text-accent);">
+                                Parallel Projects: Unlimited
+                            </div>
+                            <div class="kpi-desc">
+                                Uses "One Project, One Group, One DB" physical isolation. Data, memories, files, and keys are separated, avoiding cross-contamination. Adding projects causes zero performance bottlenecks.
+                            </div>
+                        </div>
+                        
+                        <div class="kpi-card">
+                            <div class="kpi-title" style="color:#a7f3d0;">
+                                Talent Elasticity: On-Demand Expansion
+                            </div>
+                            <div class="kpi-desc">
+                                Teams are no longer bound by physical recruiting. Create BA, Developer, QA, and PM Bots instantly from role templates. No onboarding lag, no overhead, one-click archive upon project completion.
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Slide 6: Learning Team -->
+            <section class="slide" data-title="Digital Asset: Learning & Retention">
+                <div class="slide-title-wrap">
+                    <span class="slide-badge">05 / Knowledge</span>
+                    <h2 class="slide-title">Self-Evolution: Building a <span>Perpetual Intelligent Asset</span></h2>
+                </div>
+                
+                <div class="slide-content-grid learning-grid">
+                    <div class="learn-card">
+                        <div class="learn-header">
+                            <div class="learn-badge-icon">🧠</div>
+                            <h3 class="learn-title">Persistent Group Memory</h3>
+                        </div>
+                        <p class="learn-desc">
+                            All communication, decisions, and debugging history are kept in isolated group DBs. Bots infer project context from history, preventing context loss common with shifting teams.
+                        </p>
+                        <div class="learn-visual">
+                            <svg viewBox="0 0 300 100" width="100%" height="100%" style="display: block;">
+                                <defs>
+                                    <radialGradient id="glow1" cx="50%" cy="50%" r="50%">
+                                        <stop offset="0%" stop-color="#db0011" stop-opacity="0.4"/>
+                                        <stop offset="100%" stop-color="#db0011" stop-opacity="0"/>
+                                    </radialGradient>
+                                </defs>
+                                <circle cx="150" cy="50" r="45" fill="url(#glow1)" class="pulse-glow"/>
+                                <!-- Topology Lines -->
+                                <line x1="150" y1="50" x2="80" y2="30" stroke="rgba(255,255,255,0.15)" stroke-width="1" class="flow-line"/>
+                                <line x1="150" y1="50" x2="220" y2="30" stroke="rgba(255,255,255,0.15)" stroke-width="1"/>
+                                <line x1="150" y1="50" x2="110" y2="75" stroke="rgba(255,255,255,0.15)" stroke-width="1"/>
+                                <line x1="150" y1="50" x2="190" y2="75" stroke="rgba(255,255,255,0.15)" stroke-width="1" class="flow-line"/>
+                                <line x1="80" y1="30" x2="110" y2="75" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>
+                                <line x1="220" y1="30" x2="190" y2="75" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>
+                                <!-- Nodes -->
+                                <circle cx="150" cy="50" r="7" fill="#db0011" style="filter: drop-shadow(0 0 4px #db0011);"/>
+                                <circle cx="80" cy="30" r="4.5" fill="#9da3af"/>
+                                <circle cx="220" cy="30" r="4.5" fill="#9da3af"/>
+                                <circle cx="110" cy="75" r="4.5" fill="#9da3af"/>
+                                <circle cx="190" cy="75" r="4.5" fill="#9da3af"/>
+                                <!-- Central DB symbol -->
+                                <path d="M146 47h8v2h-8zm0 4h8v2h-8z" fill="#fff" opacity="0.8"/>
+                            </svg>
+                        </div>
+                        <div class="learn-tag-list">
+                            <span class="learn-tag">Context Lock</span>
+                            <span class="learn-tag">Chat History</span>
+                        </div>
+                    </div>
+                    
+                    <div class="learn-card">
+                        <div class="learn-header">
+                            <div class="learn-badge-icon">⚙️</div>
+                            <h3 class="learn-title">Codified Skills & Tools</h3>
+                        </div>
+                        <p class="learn-desc">
+                            APIs invoked, custom skills compiled, and playbooks used are preserved in the VFS/DB as digital assets. Bots get smarter with use.
+                        </p>
+                        <div class="learn-visual">
+                            <svg viewBox="0 0 300 100" width="100%" height="100%" style="display: block;">
+                                <defs>
+                                    <radialGradient id="glow2" cx="50%" cy="50%" r="50%">
+                                        <stop offset="0%" stop-color="#00847f" stop-opacity="0.4"/>
+                                        <stop offset="100%" stop-color="#00847f" stop-opacity="0"/>
+                                    </radialGradient>
+                                </defs>
+                                <circle cx="150" cy="50" r="45" fill="url(#glow2)" class="pulse-glow"/>
+                                <!-- Connections -->
+                                <rect x="95" y="47" width="110" height="6" rx="3" fill="rgba(255,255,255,0.08)"/>
+                                <line x1="150" y1="20" x2="150" y2="47" stroke="#00847f" stroke-width="1.5" class="flow-line"/>
+                                <line x1="110" y1="80" x2="110" y2="53" stroke="rgba(255,255,255,0.2)" stroke-width="1.5"/>
+                                <line x1="190" y1="80" x2="190" y2="53" stroke="rgba(255,255,255,0.2)" stroke-width="1.5" class="flow-line"/>
+                                <!-- Skill Cards -->
+                                <rect x="120" y="12" width="60" height="18" rx="4" fill="#17181c" stroke="#00847f" stroke-width="1"/>
+                                <text x="150" y="24" fill="#6ee7b7" font-size="8" text-anchor="middle" font-family="var(--font-mono)">git_skill</text>
+                                <rect x="80" y="68" width="60" height="18" rx="4" fill="#17181c" stroke="rgba(255,255,255,0.15)" stroke-width="1"/>
+                                <text x="110" y="80" fill="#9da3af" font-size="8" text-anchor="middle" font-family="var(--font-mono)">sql_query</text>
+                                <rect x="160" y="68" width="60" height="18" rx="4" fill="#17181c" stroke="rgba(255,255,255,0.15)" stroke-width="1"/>
+                                <text x="190" y="80" fill="#9da3af" font-size="8" text-anchor="middle" font-family="var(--font-mono)">deploy_s3</text>
+                            </svg>
+                        </div>
+                        <div class="learn-tag-list">
+                            <span class="learn-tag">Skills Provider</span>
+                            <span class="learn-tag">Tool Registry</span>
+                        </div>
+                    </div>
+                    
+                    <div class="learn-card">
+                        <div class="learn-header">
+                            <div class="learn-badge-icon">🔄</div>
+                            <h3 class="learn-title">Frictionless Onboarding</h3>
+                        </div>
+                        <p class="learn-desc">
+                            New Bots entering a group require zero human onboarding. They read group DB history in seconds, immediately taking over code logic and deploy pipelines.
+                        </p>
+                        <div class="learn-visual">
+                            <svg viewBox="0 0 300 100" width="100%" height="100%" style="display: block;">
+                                <defs>
+                                    <linearGradient id="flowGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+                                        <stop offset="0%" stop-color="#db0011" stop-opacity="0.6"/>
+                                        <stop offset="100%" stop-color="#00847f" stop-opacity="0.6"/>
+                                    </linearGradient>
+                                </defs>
+                                <!-- Sync pipes -->
+                                <path d="M 90 40 Q 150 20 210 40" fill="none" stroke="url(#flowGrad)" stroke-width="2.5" class="flow-line"/>
+                                <path d="M 90 60 Q 150 80 210 60" fill="none" stroke="url(#flowGrad)" stroke-width="2.5" class="flow-line" style="animation-direction: reverse;"/>
+                                
+                                <!-- Bot 1 (Left) -->
+                                <circle cx="70" cy="50" r="18" fill="#17181c" stroke="rgba(255,255,255,0.1)"/>
+                                <text x="70" y="54" fill="#9da3af" font-size="10" text-anchor="middle" font-family="var(--font-mono)" font-weight="bold">Bot A</text>
+                                <circle cx="84" cy="38" r="4.5" fill="#db0011" style="filter: drop-shadow(0 0 3px #db0011);"/>
+                                
+                                <!-- Bot 2 (Right) -->
+                                <circle cx="230" cy="50" r="18" fill="#17181c" stroke="rgba(255,255,255,0.1)"/>
+                                <text x="230" y="54" fill="#9da3af" font-size="10" text-anchor="middle" font-family="var(--font-mono)" font-weight="bold">Bot B</text>
+                                <circle cx="244" cy="38" r="4.5" fill="#00847f" style="filter: drop-shadow(0 0 3px #00847f);"/>
+                                
+                                <!-- Arrows -->
+                                <polygon points="152,73 158,70 152,67" fill="#00847f"/>
+                                <polygon points="148,33 142,30 148,27" fill="#db0011"/>
+                            </svg>
+                        </div>
+                        <div class="learn-tag-list">
+                            <span class="learn-tag">Instant Sync</span>
+                            <span class="learn-tag">Zero Handover</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Slide 7: Interactive ROI -->
+            <section class="slide" data-title="ROI: Financial & Productivity Gains">
+                <div class="slide-title-wrap">
+                    <span class="slide-badge">06 / Calculator</span>
+                    <h2 class="slide-title">Efficiency Ledger: Intelligent Transformation <span>ROI Calculator</span></h2>
+                </div>
+                
+                <div class="slide-content-grid roi-grid">
+                    <!-- Control Panel -->
+                    <div class="roi-controls">
+                        <div class="control-group">
+                            <div class="control-header">
+                                <label class="control-label" for="sliderProjects">Number of Projects</label>
+                                <span class="control-value" id="valProjects">10</span>
+                            </div>
+                            <input type="range" id="sliderProjects" class="roi-slider" min="1" max="50" value="10">
+                        </div>
+                        
+                        <div class="control-group">
+                            <div class="control-header">
+                                <label class="control-label" for="sliderChanges">Monthly Changes per Project</label>
+                                <span class="control-value" id="valChanges">8</span>
+                            </div>
+                            <input type="range" id="sliderChanges" class="roi-slider" min="1" max="30" value="8">
+                        </div>
+                        
+                        <div class="control-group">
+                            <div class="control-header">
+                                <label class="control-label" for="sliderTeam">Core Team Size (People)</label>
+                                <span class="control-value" id="valTeam">5</span>
+                            </div>
+                            <input type="range" id="sliderTeam" class="roi-slider" min="1" max="25" value="5">
+                        </div>
+                    </div>
+                    
+                    <!-- Dynamic Results -->
+                    <div class="roi-results">
+                        <div class="roi-result-card">
+                            <div class="roi-res-info">
+                                <span class="roi-res-label">Traditional Alignment & Friction Time</span>
+                                <span class="roi-res-desc">Meetings, confirmation, and handovers (Monthly)</span>
+                            </div>
+                            <span class="roi-res-val" id="resTradHours" style="color: var(--text-muted);">240 hrs</span>
+                        </div>
+                        
+                        <div class="roi-result-card highlight">
+                            <div class="roi-res-info">
+                                <span class="roi-res-label" style="color: #05d59e; font-weight: 700;">AI-Powered Implementation Time</span>
+                                <span class="roi-res-desc">Rapid Bot delivery & instant sandbox preview (Monthly)</span>
+                            </div>
+                            <span class="roi-res-val" id="resAiHours">24 hrs</span>
+                        </div>
+                        
+                        <div class="roi-result-card highlight">
+                            <div class="roi-res-info">
+                                <span class="roi-res-label" style="color: #00f2fe; font-weight: 700;">Labor Hours Saved</span>
+                                <span class="roi-res-desc">Equivalent engineering & alignment capacity freed (Monthly)</span>
+                            </div>
+                            <span class="roi-res-val" id="resSavedHours">216 hrs</span>
+                        </div>
+                        
+                        <div class="roi-result-card">
+                            <div class="roi-res-info">
+                                <span class="roi-res-label">Business Agility Index Boost</span>
+                                <span class="roi-res-desc">Idea-to-delivery cycle reduction ratio</span>
+                            </div>
+                            <span class="roi-res-val" id="resSpeedup" style="color: #ff9e00;">90.0%</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Slide 8: Future Map -->
+            <section class="slide" data-title="Outlook: Transformation Roadmap">
+                <div class="slide-title-wrap">
+                    <span class="slide-badge">07 / Roadmap</span>
+                    <h2 class="slide-title">Outlook: 3-Phase Transformation <span>Roadmap</span></h2>
+                </div>
+                
+                <div class="slide-content-grid roadmap-grid">
+                    <div class="roadmap-node active">
+                        <span class="roadmap-phase-badge">Phase 01</span>
+                        <div class="roadmap-dot"></div>
+                        <div class="roadmap-box">
+                            <h4 class="roadmap-title">Scenario Pilot (1-2 Wks)</h4>
+                            <div class="roadmap-items">
+                                <span class="roadmap-item">Select 1-2 friction-heavy, high-change project groups as sandbox pilots.</span>
+                                <span class="roadmap-item">Deploy Developer and QA Bots to develop and test minor features.</span>
+                                <span class="roadmap-item">Establish direct delivery channels for business owners with clear guardrails.</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="roadmap-node">
+                        <span class="roadmap-phase-badge">Phase 02</span>
+                        <div class="roadmap-dot"></div>
+                        <div class="roadmap-box">
+                            <h4 class="roadmap-title">Scale Expansion (3-8 Wks)</h4>
+                            <div class="roadmap-items">
+                                <span class="roadmap-item">Deploy widely to non-core business lines; configure dedicated BA and PM Bots.</span>
+                                <span class="roadmap-item">Leverage VFS to persist custom toolkits, making tools shareable across Bots.</span>
+                                <span class="roadmap-item">Introduce automated cron task scheduling for 7x24h digital operations.</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="roadmap-node">
+                        <span class="roadmap-phase-badge">Phase 03</span>
+                        <div class="roadmap-dot"></div>
+                        <div class="roadmap-box">
+                            <h4 class="roadmap-title">Digital Workshop (Long-term)</h4>
+                            <div class="roadmap-items">
+                                <span class="roadmap-item">Dissolve IT-business barriers, allowing requesters to drive heterogeneous agentic digital teams directly.</span>
+                                <span class="roadmap-item">Codify corporate brain; Bots achieve seamless knowledge inheritance & evolution.</span>
+                                <span class="roadmap-item">Achieve total business agility with near-zero marginal R&D delivery costs.</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+        </main>
+
+        <!-- Footer Control & Navigation Drawer -->
+        <footer class="pres-footer">
+            <div class="controls-left">
+                <button class="btn-list-menu" id="btnMenu">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="3" y1="12" x2="21" y2="12"></line>
+                        <line x1="3" y1="6" x2="21" y2="6"></line>
+                        <line x1="3" y1="18" x2="21" y2="18"></line>
+                    </svg>
+                    Slide Outline
+                </button>
+                <div class="slide-counter">
+                    <span id="currentSlideNum">1</span> / <span id="totalSlidesNum">8</span>
+                </div>
+            </div>
+
+            <div class="controls-right">
+                <button class="nav-btn" id="btnPrev" title="Previous (Left Arrow)">←</button>
+                <button class="nav-btn btn-primary" id="btnNext" title="Next (Right Arrow / Space)">→</button>
+            </div>
+        </footer>
+
+        <!-- Outline Drawer Drawer -->
+        <div class="drawer-overlay" id="drawerOverlay">
+            <div class="menu-drawer">
+                <h3 class="drawer-title">Slide Outline</h3>
+                <ul class="menu-items" id="menuItemsList">
+                    <!-- Dynamic rendering by JS -->
+                </ul>
+            </div>
+        </div>
+
+        <div class="keyboard-tip">
+            <span class="keyboard-key">←</span>
+            <span class="keyboard-key">→</span>
+            or
+            <span class="keyboard-key">Space</span>
+            to Navigate
+        </div>
+    </div>
+
+    <!-- === Interaction Scripts === -->
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const slides = Array.from(document.querySelectorAll('.slide'));
+            const totalSlides = slides.length;
+            let currentSlideIndex = 0;
+
+            const progressBar = document.getElementById('progressBar');
+            const currentSlideNum = document.getElementById('currentSlideNum');
+            const totalSlidesNum = document.getElementById('totalSlidesNum');
+            const btnPrev = document.getElementById('btnPrev');
+            const btnNext = document.getElementById('btnNext');
+            const btnMenu = document.getElementById('btnMenu');
+            const drawerOverlay = document.getElementById('drawerOverlay');
+            const menuItemsList = document.getElementById('menuItemsList');
+
+            // Set total slide count
+            totalSlidesNum.textContent = totalSlides;
+
+            // Render outline menu
+            slides.forEach((slide, idx) => {
+                const title = slide.getAttribute('data-title') || `Slide ${idx + 1}`;
+                const li = document.createElement('li');
+                li.innerHTML = `
+                    <button class="menu-item-btn ${idx === 0 ? 'active' : ''}" data-index="${idx}">
+                        <span class="menu-item-num">${String(idx + 1).padStart(2, '0')}</span>
+                        ${title}
+                    </button>
+                `;
+                menuItemsList.appendChild(li);
+            });
+
+            const menuButtons = Array.from(menuItemsList.querySelectorAll('.menu-item-btn'));
+
+            // Update Slide Position & active classes
+            function updateSlide(index) {
+                if (index < 0 || index >= totalSlides) return;
+
+                slides[currentSlideIndex].classList.remove('active');
+                slides[currentSlideIndex].classList.remove('prev');
+                
+                // Set prev for backward animations
+                if (index > currentSlideIndex) {
+                    slides[currentSlideIndex].classList.add('prev');
+                }
+
+                currentSlideIndex = index;
+                slides[currentSlideIndex].classList.add('active');
+                slides[currentSlideIndex].classList.remove('prev');
+
+                // Update UI numbers and progress
+                currentSlideNum.textContent = currentSlideIndex + 1;
+                progressBar.style.width = `${((currentSlideIndex + 1) / totalSlides) * 100}%`;
+
+                // Update menu highlight
+                menuButtons.forEach((btn, idx) => {
+                    if (idx === currentSlideIndex) {
+                        btn.classList.add('active');
+                    } else {
+                        btn.classList.remove('active');
+                    }
+                });
+
+                // Trigger animations/simulations for specific slides
+                if (currentSlideIndex === 3) {
+                    startChatSimulation();
+                } else {
+                    stopChatSimulation();
+                }
+            }
+
+            // Navigation helpers
+            function navigateNext() {
+                if (currentSlideIndex < totalSlides - 1) {
+                    updateSlide(currentSlideIndex + 1);
+                } else {
+                    // Loop to start
+                    updateSlide(0);
+                }
+            }
+
+            function navigatePrev() {
+                if (currentSlideIndex > 0) {
+                    updateSlide(currentSlideIndex - 1);
+                }
+            }
+
+            btnNext.addEventListener('click', navigateNext);
+            btnPrev.addEventListener('click', navigatePrev);
+
+            // Keyboards handler
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'Enter' || e.key === 'PageDown') {
+                    navigateNext();
+                    e.preventDefault();
+                } else if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
+                    navigatePrev();
+                    e.preventDefault();
+                }
+            });
+
+            // Outline Drawer toggling
+            btnMenu.addEventListener('click', () => {
+                drawerOverlay.classList.add('open');
+            });
+
+            drawerOverlay.addEventListener('click', (e) => {
+                if (e.target === drawerOverlay) {
+                    drawerOverlay.classList.remove('open');
+                }
+            });
+
+            menuButtons.forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const idx = parseInt(btn.getAttribute('data-index'));
+                    updateSlide(idx);
+                    drawerOverlay.classList.remove('open');
+                });
+            });
+
+            /* ==========================================================
+               Feature 1: Slide 4 Change Response Simulator (WebSocket)
+               ========================================================== */
+            const chatSim = document.getElementById('chatSim');
+            let chatSimTimer = null;
+            const simDialog = [
+                {
+                    sender: 'bot',
+                    name: 'Developer Bot',
+                    avatar: 'D',
+                    text: 'Received! Located <code class="chat-code-block">dashboard/components/MetricsPanel.jsx</code>. Extracting the "Average Response Time" and converting it to a large metric card.'
+                },
+                {
+                    sender: 'bot',
+                    name: 'Developer Bot',
+                    avatar: 'D',
+                    text: 'Changes compiled in sandbox. Here is the code snippet and preview structure: <div class="chat-code-block">&lt;Card className="col-span-4 lg:col-span-12 glow-accent"&gt;<br>&nbsp;&nbsp;&lt;MetricLabel&gt;Avg Response Time&lt;/MetricLabel&gt;<br>&nbsp;&nbsp;&lt;MetricValue&gt;185ms&lt;/MetricValue&gt;<br>&lt;/Card&gt;</div>'
+                },
+                {
+                    sender: 'bot',
+                    name: 'QA Bot',
+                    avatar: 'Q',
+                    text: 'Automated QA checks completed. Ran 12 end-to-end and pixel regression tests. The change caused a minor layout wrap in bottom components; automatically adjusted CSS flex rules. Tests 100% passed!'
+                },
+                {
+                    sender: 'user',
+                    name: 'Requester (You)',
+                    avatar: 'U',
+                    text: 'Excellent, looks great. I approve deployment.'
+                },
+                {
+                    sender: 'bot',
+                    name: 'PM Bot',
+                    avatar: 'P',
+                    text: 'Deployment approved, audit logs recorded. Main branch merged; websocket hot-reloaded to production. Changes live. Time elapsed: <strong>3 mins</strong>.'
+                }
+            ];
+
+            function startChatSimulation() {
+                stopChatSimulation();
+                // Reset to default first user message
+                chatSim.innerHTML = `
+                    <div class="chat-msg user">
+                        <div class="chat-avatar u">U</div>
+                        <div class="chat-bubble">
+                            <strong>Requester (You)</strong><br>
+                            We need to change "Average Response Time" on the project dashboard from a chart to a large metric card, positioned prominently at the top.
+                        </div>
+                    </div>
+                `;
+                
+                let step = 0;
+                function deliverNextMessage() {
+                    if (step >= simDialog.length) return;
+                    
+                    const msgData = simDialog[step];
+                    const msgDiv = document.createElement('div');
+                    msgDiv.className = `chat-msg ${msgData.sender === 'user' ? 'user' : 'bot'}`;
+                    msgDiv.style.opacity = '0';
+                    msgDiv.style.transform = 'translateY(10px)';
+                    msgDiv.style.transition = 'all 0.5s ease';
+                    
+                    msgDiv.innerHTML = `
+                        <div class="chat-avatar ${msgData.sender === 'user' ? 'u' : 'b'}">${msgData.avatar}</div>
+                        <div class="chat-bubble">
+                            <strong>${msgData.name}</strong><br>
+                            ${msgData.text}
+                        </div>
+                    `;
+                    
+                    chatSim.appendChild(msgDiv);
+                    
+                    // Fade in and auto scroll after paint
+                    setTimeout(() => {
+                        msgDiv.style.opacity = '1';
+                        msgDiv.style.transform = 'translateY(0)';
+                        chatSim.scrollTop = chatSim.scrollHeight;
+                    }, 50);
+
+                    setTimeout(() => {
+                        chatSim.scrollTo({
+                            top: chatSim.scrollHeight,
+                            behavior: 'smooth'
+                        });
+                    }, 250);
+
+                    step++;
+                    
+                    // Interval settings
+                    let nextDelay = 3000;
+                    if (msgData.sender === 'user') nextDelay = 2000;
+                    
+                    chatSimTimer = setTimeout(deliverNextMessage, nextDelay);
+                }
+
+                chatSimTimer = setTimeout(deliverNextMessage, 1800);
+            }
+
+            function stopChatSimulation() {
+                if (chatSimTimer) {
+                    clearTimeout(chatSimTimer);
+                    chatSimTimer = null;
+                }
+            }
+
+
+            /* ==========================================================
+               Feature 2: Slide 7 ROI Interactive Calculator
+               ========================================================== */
+            const sliderProjects = document.getElementById('sliderProjects');
+            const sliderChanges = document.getElementById('sliderChanges');
+            const sliderTeam = document.getElementById('sliderTeam');
+
+            const valProjects = document.getElementById('valProjects');
+            const valChanges = document.getElementById('valChanges');
+            const valTeam = document.getElementById('valTeam');
+
+            const resTradHours = document.getElementById('resTradHours');
+            const resAiHours = document.getElementById('resAiHours');
+            const resSavedHours = document.getElementById('resSavedHours');
+            const resSpeedup = document.getElementById('resSpeedup');
+
+            function calculateROI() {
+                const P = parseInt(sliderProjects.value); // Projects count
+                const C = parseInt(sliderChanges.value);  // Changes/month/project
+                const M = parseInt(sliderTeam.value);     // Team headcount
+
+                // Traditional hours estimation: 
+                // Each change: 2 alignment meetings (3 people, 0.75h = 4.5 man-hours) + Dev & QA coordination (2h/person = 2 man-hours)
+                // Traditional per change: 6.5 hours
+                const traditionalHours = Math.round(P * C * 3 * 2.5); 
+                
+                // AI Mode hours estimation:
+                // Natural language request & verification: 0.25h/change
+                // Bots generate/verify automatically with no communication overhead.
+                const aiHours = Math.round(P * C * 0.25);
+                
+                const savedHours = traditionalHours - aiHours;
+                
+                // Delivery boost: Traditional 12 days vs. AI 2 hours (reduction ratio)
+                const speedupPercent = 90.0 + (P > 20 ? 3.5 : 1.5) - (C > 15 ? 1.0 : 0);
+
+                // Update text fields
+                valProjects.textContent = P;
+                valChanges.textContent = C;
+                valTeam.textContent = M;
+
+                resTradHours.textContent = `${traditionalHours} hrs`;
+                resAiHours.textContent = `${aiHours} hrs`;
+                resSavedHours.textContent = `${savedHours} hrs`;
+                resSpeedup.textContent = `${speedupPercent.toFixed(1)}%`;
+            }
+
+            // Slider Listeners
+            sliderProjects.addEventListener('input', calculateROI);
+            sliderChanges.addEventListener('input', calculateROI);
+            sliderTeam.addEventListener('input', calculateROI);
+
+            // Initial calculation
+            calculateROI();
+        });
+    </script>
+</body>
+</html>

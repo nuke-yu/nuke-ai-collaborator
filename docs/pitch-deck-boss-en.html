@@ -1,0 +1,671 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Nuke AI Collaborator · Decision Briefing</title>
+
+<!-- Switzer (Univers-like, HSBC brand face is Univers Next) + Noto Sans SC for crisp CJK -->
+<link rel="preconnect" href="https://api.fontshare.com" />
+<link rel="stylesheet" href="https://api.fontshare.com/v2/css?f[]=switzer@400,500,600,700,800,900&display=swap" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;900&family=JetBrains+Mono:wght@400;600&display=swap" />
+
+<style>
+/* ===========================================
+   THEME — HSBC identity (red on white)
+   =========================================== */
+:root {
+  --hsbc-red: #DB0011;
+  --hsbc-red-dark: #A50008;
+  --ink: #1A1A1A;
+  --ink-soft: #5C5C5C;
+  --line: #E0E0E0;
+  --paper: #FFFFFF;
+  --paper-2: #F6F6F6;
+  --paper-3: #FBEAEB;
+
+  --font-display: "Switzer", "Noto Sans SC", sans-serif;
+  --font-body: "Switzer", "Noto Sans SC", sans-serif;
+  --font-mono: "JetBrains Mono", "Noto Sans SC", monospace;
+
+  --title-size: clamp(1.8rem, 5.6vw, 4.4rem);
+  --h2-size: clamp(1.3rem, 3.4vw, 2.5rem);
+  --body-size: clamp(0.78rem, 1.5vw, 1.12rem);
+  --small-size: clamp(0.64rem, 1vw, 0.88rem);
+  --eyebrow-size: clamp(0.62rem, 0.95vw, 0.82rem);
+
+  --slide-padding: clamp(1.4rem, 5vw, 5.5rem);
+  --content-gap: clamp(0.6rem, 1.8vw, 1.6rem);
+
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --dur: 0.7s;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+/* --- viewport-base.css (full, mandatory) --- */
+html, body { height: 100%; overflow-x: hidden; }
+html { scroll-snap-type: y mandatory; scroll-behavior: smooth; }
+.slide { width: 100vw; height: 100vh; height: 100dvh; overflow: hidden; scroll-snap-align: start; display: flex; flex-direction: column; position: relative; }
+.slide-content { flex: 1; display: flex; flex-direction: column; justify-content: center; max-height: 100%; overflow: hidden; padding: var(--slide-padding); position: relative; z-index: 2; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr)); gap: clamp(0.5rem, 1.5vw, 1rem); }
+img { max-width: 100%; max-height: min(50vh, 400px); object-fit: contain; }
+@media (max-height: 700px) { :root { --slide-padding: clamp(0.9rem, 3vw, 2.4rem); --content-gap: clamp(0.4rem, 1.5vw, 1rem); --title-size: clamp(1.4rem, 4.8vw, 2.8rem); --h2-size: clamp(1.1rem, 3vw, 1.9rem); } }
+@media (max-height: 600px) { :root { --slide-padding: clamp(0.5rem, 2.5vw, 1.5rem); --content-gap: clamp(0.3rem, 1vw, 0.75rem); --body-size: clamp(0.7rem, 1.2vw, 0.95rem); } .nav-dots, .keyboard-hint, .decorative { display: none; } }
+@media (max-height: 500px) { :root { --slide-padding: clamp(0.4rem, 2vw, 1rem); --title-size: clamp(1.1rem, 3.5vw, 1.6rem); --h2-size: clamp(0.95rem, 2.5vw, 1.3rem); --body-size: clamp(0.65rem, 1vw, 0.85rem); } }
+@media (max-width: 600px) { :root { --title-size: clamp(1.4rem, 8vw, 2.6rem); } .grid { grid-template-columns: 1fr; } }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.2s !important; } html { scroll-behavior: auto; } }
+
+/* ===========================================
+   BASE LOOK
+   =========================================== */
+body { font-family: var(--font-body); color: var(--ink); background: var(--paper); -webkit-font-smoothing: antialiased; }
+.slide { background: var(--paper); border-top: 1px solid var(--line); }
+.slide:first-child { border-top: none; }
+
+/* red ruler atop standard content slides */
+.slide:not(.cover):not(.closing):not(.value-hero):not(.hero-statement)::before {
+  content: ""; position: absolute; top: 0; left: 0;
+  width: clamp(60px, 12vw, 160px); height: 6px; background: var(--hsbc-red);
+  z-index: 3;
+}
+
+/* ===========================================
+   TECH ATMOSPHERE — offline CSS/SVG background layers
+   Reads as blurred tech imagery: soft glows, an AI node
+   network, hexagon fields, dot grid. Never breaks, fully
+   on-brand (HSBC red), keeps text crisp (low opacity, behind).
+   =========================================== */
+.s-bg { position: absolute; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
+.pageno { z-index: 3; }
+
+/* faint dotted grid (light slides) */
+.bg-grid { background-image: radial-gradient(rgba(26,26,26,0.055) 1px, transparent 1.4px); background-size: 24px 24px; }
+.bg-grid-dark { background-image: radial-gradient(rgba(255,255,255,0.06) 1px, transparent 1.4px); background-size: 24px 24px; }
+
+/* blurred glow blobs = the soft atmosphere */
+.blob { position: absolute; border-radius: 50%; filter: blur(72px); opacity: 0.13; }
+.blob.red { background: var(--hsbc-red); }
+.blob.red2 { background: #FF5A66; }
+.blob.white { background: #fff; }
+
+/* AI node-network graphic — color set by parent (currentColor) */
+.netfx { position: absolute; }
+.netfx .lines { opacity: 0.5; }
+.netfx line { stroke: currentColor; stroke-width: 1.4; }
+.netfx circle, .netfx polygon { fill: currentColor; }
+.netfx.soft { filter: blur(1.5px); }
+
+/* concentric hexagon rings */
+.hexrings { position: absolute; }
+.hexrings polygon { fill: none; stroke: currentColor; stroke-width: 1.4; }
+
+/* full-bleed blurred photographic backdrop (data center / team /
+   circuit / network). Real images live in pitch-deck-boss-assets/,
+   blurred in-browser via CSS; a white scrim on top keeps text crisp. */
+.photo-bg {
+  position: absolute; inset: -12%; z-index: 0;
+  background-size: cover; background-position: center;
+  filter: blur(6px) saturate(0.95);
+}
+.scrim { position: absolute; inset: 0; z-index: 1; }
+/* gradient scrim for roomy slides — lets the photo breathe on the right */
+.scrim.light { background: linear-gradient(105deg, rgba(255,255,255,0.93) 0%, rgba(255,255,255,0.74) 48%, rgba(255,255,255,0.5) 100%); }
+/* stronger, near-uniform scrim for text/table-dense slides */
+.scrim.solid { background: rgba(255,255,255,0.84); }
+
+/* ===========================================
+   TYPOGRAPHY HELPERS
+   =========================================== */
+.eyebrow { font-size: var(--eyebrow-size); font-weight: 700; letter-spacing: 0.22em; text-transform: uppercase; color: var(--hsbc-red); display: flex; align-items: center; gap: 0.6em; margin-bottom: clamp(0.5rem, 1.4vw, 1.1rem); }
+.eyebrow::before { content: ""; width: clamp(14px,1.6vw,22px); height: clamp(14px,1.6vw,22px); background: var(--hsbc-red); clip-path: polygon(25% 0,75% 0,100% 50%,75% 100%,25% 100%,0 50%); flex: none; }
+
+h2.slide-title { font-family: var(--font-display); font-size: var(--h2-size); font-weight: 800; line-height: 1.12; letter-spacing: -0.01em; color: var(--ink); margin-bottom: clamp(0.4rem, 1.2vw, 0.9rem); }
+.lead { font-size: clamp(0.92rem, 2vw, 1.45rem); font-weight: 600; line-height: 1.35; color: var(--hsbc-red-dark); margin-bottom: clamp(0.7rem,1.8vw,1.4rem); }
+.sub { font-size: var(--body-size); color: var(--ink-soft); line-height: 1.5; }
+
+ul.bullets { list-style: none; display: flex; flex-direction: column; gap: clamp(0.5rem, 1.4vw, 1.1rem); }
+ul.bullets > li { position: relative; padding-left: 1.5em; font-size: var(--body-size); line-height: 1.45; color: var(--ink); }
+ul.bullets > li::before { content: ""; position: absolute; left: 0; top: 0.5em; width: 0.6em; height: 0.6em; background: var(--hsbc-red); clip-path: polygon(25% 0,75% 0,100% 50%,75% 100%,25% 100%,0 50%); }
+ul.bullets > li strong { font-weight: 800; }
+code { font-family: var(--font-mono); font-size: 0.88em; background: var(--paper-2); padding: 0.1em 0.35em; border-radius: 3px; }
+
+/* callout / takeaway line */
+.callout { border-left: 4px solid var(--hsbc-red); background: var(--paper-2); padding: clamp(0.65rem,1.6vw,1.2rem) clamp(0.85rem,2vw,1.5rem); font-size: var(--body-size); line-height: 1.5; color: var(--ink); margin-top: clamp(0.7rem,1.6vw,1.3rem); }
+.callout strong { color: var(--hsbc-red-dark); font-weight: 800; }
+
+/* mono diagram */
+.diagram { font-family: var(--font-mono); font-size: clamp(0.6rem, 1.15vw, 0.95rem); line-height: 1.7; background: var(--ink); color: #F2F2F2; border-radius: 4px; padding: clamp(0.8rem,2vw,1.4rem); white-space: pre; overflow: hidden; }
+.diagram .hl { color: #FF6B72; font-weight: 600; }
+
+/* cards */
+.cards { display: grid; gap: clamp(0.6rem,1.5vw,1.1rem); }
+.cards.c2 { grid-template-columns: repeat(2,1fr); }
+.cards.c3 { grid-template-columns: repeat(3,1fr); }
+@media (max-width:760px){ .cards.c3 { grid-template-columns: repeat(2,1fr);} .cards.c2{grid-template-columns:1fr;} }
+.feat { background: var(--paper); border: 1px solid var(--line); border-top: 3px solid var(--hsbc-red); padding: clamp(0.7rem,1.6vw,1.2rem); display: flex; flex-direction: column; gap: 0.35em; }
+.feat .k { font-weight: 800; font-size: clamp(0.82rem,1.6vw,1.1rem); color: var(--ink); }
+.feat .v { font-size: var(--small-size); color: var(--ink-soft); line-height: 1.45; }
+
+/* comparison table */
+table.cmp { width: 100%; border-collapse: collapse; font-size: clamp(0.66rem,1.25vw,1rem); }
+table.cmp th, table.cmp td { padding: clamp(0.4rem,1vw,0.85rem) clamp(0.4rem,1vw,0.8rem); text-align: left; border-bottom: 1px solid var(--line); line-height: 1.3; vertical-align: top; }
+table.cmp thead th { font-weight: 800; color: var(--ink); border-bottom: 2px solid var(--ink); }
+table.cmp thead th.us { color: var(--hsbc-red); }
+table.cmp td.us, table.cmp th.us { background: var(--paper-3); }
+table.cmp tbody td:first-child { color: var(--ink-soft); font-weight: 600; }
+table.cmp .us strong { color: var(--hsbc-red-dark); }
+/* compact 6-column architecture table */
+table.cmp.arch { font-size: clamp(0.54rem,1.05vw,0.82rem); }
+table.cmp.arch th, table.cmp.arch td { padding: clamp(0.28rem,0.7vw,0.55rem) clamp(0.28rem,0.6vw,0.5rem); }
+.legend { font-size: var(--small-size); color: var(--ink-soft); margin-bottom: clamp(0.3rem,0.8vw,0.6rem); }
+
+/* page number */
+.pageno { position: absolute; bottom: clamp(0.8rem,2vw,1.6rem); right: clamp(1rem,3vw,2.4rem); font-size: var(--small-size); color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+.pageno b { color: var(--hsbc-red); }
+
+/* ===========================================
+   COVER (S1)
+   =========================================== */
+.cover { align-items: stretch; }
+.cover-red-bar { position: absolute; top: 0; left: 0; height: 100%; width: clamp(10px,2vw,22px); background: var(--hsbc-red); }
+.cover-mark { width: clamp(72px,12vw,140px); height: auto; margin-bottom: clamp(1rem,3vw,2rem); }
+.cover h1 { font-family: var(--font-display); font-weight: 800; font-size: clamp(2rem,6vw,4.4rem); line-height: 1.04; letter-spacing: -0.02em; color: var(--ink); }
+.cover h1 .red { color: var(--hsbc-red); }
+.cover .tag { font-size: clamp(1.1rem,2.8vw,2rem); font-weight: 700; color: var(--hsbc-red-dark); margin-top: clamp(0.9rem,2vw,1.5rem); }
+.cover .tag b { color: var(--hsbc-red); }
+.cover .meta { font-size: var(--small-size); color: var(--ink-soft); margin-top: clamp(1.2rem,3vw,2rem); letter-spacing: 0.02em; }
+
+/* ===========================================
+   HERO STATEMENT (S2)
+   =========================================== */
+.hero-statement .slide-content { justify-content: center; }
+.hero-statement h1 { font-family: var(--font-display); font-weight: 900; font-size: var(--title-size); line-height: 1.08; letter-spacing: -0.02em; color: var(--ink); max-width: 22ch; }
+.hero-statement h1 .muted { color: #B9B9B9; }
+.hero-statement h1 .red { color: var(--hsbc-red); }
+.hero-statement .sub { margin-top: clamp(1rem,2.4vw,1.8rem); font-size: clamp(0.92rem,1.9vw,1.4rem); max-width: 42ch; }
+/* two-column hero: statement + group-chat mockup */
+.hs-grid { display: grid; grid-template-columns: 1.05fr 0.95fr; gap: clamp(1.2rem,3.5vw,3rem); align-items: center; width: 100%; }
+.hs-grid .hero-statement-h1 { font-family: var(--font-display); font-weight: 900; font-size: clamp(1.6rem,4.4vw,3.4rem); line-height: 1.08; letter-spacing: -0.02em; color: var(--ink); }
+.hs-grid .hero-statement-h1 .muted { color: #B9B9B9; }
+.hs-grid .hero-statement-h1 .red { color: var(--hsbc-red); }
+@media (max-width: 880px) { .hs-grid { grid-template-columns: 1fr; } .chat-mock { display: none; } }
+
+/* group-chat mockup card (human + role bots in one group) */
+.chat-mock { background: #fff; border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 18px 50px rgba(0,0,0,0.14); overflow: hidden; width: 100%; max-width: min(44vw,460px); justify-self: end; }
+.chat-head { background: var(--ink); color: #fff; display: flex; align-items: center; gap: 0.55em; padding: clamp(0.5rem,1.2vw,0.8rem) clamp(0.7rem,1.5vw,1.05rem); font-weight: 700; font-size: clamp(0.66rem,1.2vw,0.9rem); }
+.chat-head .live { width: 0.55em; height: 0.55em; border-radius: 50%; background: #3ED598; flex: none; }
+.chat-head .mem { margin-left: auto; font-weight: 500; color: #B9B9B9; font-size: 0.82em; }
+.chat-body { padding: clamp(0.6rem,1.5vw,1rem); display: flex; flex-direction: column; gap: clamp(0.45rem,1.1vw,0.8rem); background: var(--paper-2); }
+.msg { display: flex; gap: 0.5em; align-items: flex-start; }
+.msg.me { flex-direction: row-reverse; }
+.av { flex: none; width: clamp(1.5rem,3vw,2rem); height: clamp(1.5rem,3vw,2rem); display: flex; align-items: center; justify-content: center; font-size: clamp(0.5rem,0.95vw,0.66rem); font-weight: 800; color: #fff; }
+.av.bot { background: var(--hsbc-red); clip-path: polygon(25% 0,75% 0,100% 50%,75% 100%,25% 100%,0 50%); }
+.av.human { background: var(--ink); border-radius: 50%; }
+.mline { display: flex; flex-direction: column; max-width: 80%; }
+.msg.me .mline { align-items: flex-end; }
+.who { font-size: clamp(0.5rem,0.92vw,0.64rem); color: var(--ink-soft); font-weight: 700; margin-bottom: 0.18em; }
+.bubble { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 0.42em 0.7em; font-size: clamp(0.6rem,1.15vw,0.82rem); line-height: 1.35; color: var(--ink); }
+.msg.me .bubble { background: var(--hsbc-red); color: #fff; border-color: var(--hsbc-red); }
+
+/* ===========================================
+   SECURITY (S5) — dark, prominent
+   =========================================== */
+.security { background: var(--ink); }
+.security .eyebrow { color: #FF6B72; }
+.security .eyebrow::before { background: var(--hsbc-red); }
+.security h2.slide-title { color: #fff; }
+.security .lead { color: #fff; }
+.security .lead b { color: #FF6B72; }
+.security .feat { background: #262626; border: 1px solid #3A3A3A; border-top: 3px solid var(--hsbc-red); }
+.security .feat .k { color: #fff; display: flex; align-items: center; gap: 0.5em; }
+.security .feat .v { color: #B9B9B9; }
+.security .feat .k .hx { width: 0.9em; height: 0.9em; background: var(--hsbc-red); clip-path: polygon(25% 0,75% 0,100% 50%,75% 100%,25% 100%,0 50%); flex: none; }
+.security .callout { background: #262626; color: #EDEDED; border-left-color: var(--hsbc-red); }
+.security .callout strong { color: #FF6B72; }
+.security .pageno { color: #6E6E6E; }
+
+/* ===========================================
+   VALUE HERO (S6) — full red + compounding curve
+   =========================================== */
+.value-hero { background: var(--hsbc-red); }
+.value-hero .eyebrow { color: #fff; }
+.value-hero .eyebrow::before { background: #fff; }
+.value-hero h1 { font-family: var(--font-display); font-weight: 900; color: #fff; font-size: clamp(2.4rem,8vw,6rem); line-height: 1; letter-spacing: -0.02em; }
+.value-hero .vh-grid { display: grid; grid-template-columns: 1fr 1.1fr; gap: clamp(1rem,3vw,2.5rem); align-items: center; margin-top: clamp(0.8rem,2vw,1.4rem); }
+@media (max-width: 820px){ .value-hero .vh-grid { grid-template-columns: 1fr; } .value-hero .chart-wrap{ display:none; } }
+.vh-contrast { display: flex; flex-direction: column; gap: clamp(0.7rem,1.8vw,1.3rem); }
+.vh-row { color: #fff; }
+.vh-row .t { font-weight: 800; font-size: clamp(0.95rem,2vw,1.35rem); }
+.vh-row .d { color: rgba(255,255,255,0.85); font-size: var(--body-size); line-height: 1.4; margin-top: 0.2em; }
+.vh-row.dim .t { color: rgba(255,255,255,0.6); }
+.value-hero .oneliner { color: #fff; font-size: clamp(0.95rem,2vw,1.4rem); font-weight: 700; margin-top: clamp(0.9rem,2.2vw,1.5rem); border-top: 1px solid rgba(255,255,255,0.3); padding-top: clamp(0.7rem,1.6vw,1.1rem); }
+.value-hero .oneliner b { background: #fff; color: var(--hsbc-red); padding: 0.05em 0.3em; }
+.chart-wrap { width: 100%; }
+.chart-wrap svg { width: 100%; height: auto; }
+
+/* ===========================================
+   CLOSING (S13) — full red
+   =========================================== */
+.closing { background: var(--hsbc-red); }
+.closing .eyebrow { color: #fff; }
+.closing .eyebrow::before { background: #fff; }
+.closing h2 { font-family: var(--font-display); font-weight: 900; color: #fff; font-size: clamp(1.8rem,5vw,3.6rem); line-height: 1.12; letter-spacing: -0.01em; max-width: 20ch; }
+.closing h2 b { text-decoration: underline; text-decoration-thickness: 0.08em; text-underline-offset: 0.12em; }
+.closing .c-sub { color: rgba(255,255,255,0.9); font-size: clamp(0.92rem,1.9vw,1.3rem); line-height: 1.5; margin-top: clamp(1rem,2.5vw,1.8rem); max-width: 42ch; }
+.closing .cta { margin-top: clamp(1.2rem,3vw,2.2rem); display: inline-flex; align-items: center; gap: 0.6em; background: #fff; color: var(--hsbc-red); font-weight: 800; padding: 0.75em 1.5em; font-size: var(--body-size); align-self: flex-start; }
+.closing .watermark { position: absolute; right: -4%; bottom: -8%; width: clamp(220px,40vw,560px); opacity: 0.12; }
+
+/* ===========================================
+   ENTRANCE ANIMATIONS
+   =========================================== */
+.reveal { opacity: 0; transform: translateY(26px); transition: opacity var(--dur) var(--ease), transform var(--dur) var(--ease); }
+.slide.visible .reveal { opacity: 1; transform: translateY(0); }
+.slide.visible .reveal:nth-child(1){transition-delay:.05s}
+.slide.visible .reveal:nth-child(2){transition-delay:.14s}
+.slide.visible .reveal:nth-child(3){transition-delay:.23s}
+.slide.visible .reveal:nth-child(4){transition-delay:.32s}
+.slide.visible .reveal:nth-child(5){transition-delay:.41s}
+.slide.visible .reveal:nth-child(6){transition-delay:.50s}
+.slide.visible tbody tr { animation: rowIn .5s var(--ease) both; }
+.slide.visible tbody tr { animation-delay: calc(.1s + .05s * var(--i,0)); }
+@keyframes rowIn { from{opacity:0; transform:translateX(-12px)} to{opacity:1; transform:none} }
+/* compounding curve draw-on */
+.slide.visible .draw { stroke-dasharray: 900; stroke-dashoffset: 0; transition: stroke-dashoffset 1.6s var(--ease) .3s; }
+.draw { stroke-dasharray: 900; stroke-dashoffset: 900; }
+
+/* ===========================================
+   PROGRESS + NAV
+   =========================================== */
+.progress-bar { position: fixed; top: 0; left: 0; height: 4px; width: 0; background: var(--hsbc-red); z-index: 9999; transition: width 0.15s linear; }
+.nav-dots { position: fixed; right: clamp(0.6rem,1.6vw,1.4rem); top: 50%; transform: translateY(-50%); display: flex; flex-direction: column; gap: 9px; z-index: 9998; }
+.nav-dots button { width: 9px; height: 9px; padding: 0; border: 1px solid var(--hsbc-red); background: transparent; cursor: pointer; clip-path: polygon(25% 0,75% 0,100% 50%,75% 100%,25% 100%,0 50%); transition: background 0.2s; }
+.nav-dots button.active { background: var(--hsbc-red); }
+.keyboard-hint { position: fixed; bottom: clamp(0.6rem,1.6vw,1.2rem); left: clamp(0.8rem,2vw,1.6rem); font-size: var(--small-size); color: var(--ink-soft); z-index: 9998; opacity: 0.7; }
+</style>
+</head>
+<body>
+
+<div class="progress-bar"></div>
+<nav class="nav-dots" aria-label="Slide navigation"></nav>
+<div class="keyboard-hint decorative">← → / Space to navigate</div>
+
+<!-- =========== S1 · COVER =========== -->
+<section class="slide cover">
+  <div class="cover-red-bar"></div>
+  <div class="s-bg">
+    <div class="photo-bg" style="background-image:url('pitch-deck-boss-assets/datacenter.jpg')"></div>
+    <div class="scrim light"></div>
+    <svg class="hexrings" viewBox="0 0 200 200" style="color:var(--hsbc-red);width:min(26vw,300px);right:5%;bottom:-8%;opacity:.12;z-index:2"><polygon points="100,20 169,60 169,140 100,180 31,140 31,60"/><polygon points="100,45 148,72 148,128 100,155 52,128 52,72"/><polygon points="100,70 127,85 127,115 100,130 73,115 73,85"/></svg>
+  </div>
+  <div class="slide-content">
+    <svg class="cover-mark reveal" viewBox="0 0 140 120" aria-label="logo mark">
+      <!-- 4个红色三角形 -->
+      <polygon points="35,0 105,0 70,60" fill="#DB0011"/>
+      <polygon points="35,120 105,120 70,60" fill="#DB0011"/>
+      <polygon points="0,60 35,0 35,120" fill="#DB0011"/>
+      <polygon points="140,60 105,0 105,120" fill="#DB0011"/>
+      <!-- 2个白色三角形 -->
+      <polygon points="35,0 35,120 70,60" fill="#fff"/>
+      <polygon points="105,0 105,120 70,60" fill="#fff"/>
+    </svg>
+    <h1 class="reveal">Nuke <span class="red">AI</span> Collaborator</h1>
+    <div class="tag reveal">An AI team that <b>compounds in value</b>.</div>
+    <div class="meta reveal">Group-based AI collaboration platform　·　Self-hosted, on-prem　·　Enterprise-grade isolation &amp; governance<br/>Internal decision briefing　·　2026</div>
+  </div>
+</section>
+
+<!-- =========== S2 · POSITIONING (HERO) =========== -->
+<section class="slide hero-statement">
+  <div class="s-bg">
+    <div class="photo-bg" style="background-image:url('pitch-deck-boss-assets/team.jpg')"></div>
+    <div class="scrim light"></div>
+  </div>
+  <div class="slide-content">
+    <div class="hs-grid">
+      <div>
+        <div class="eyebrow reveal">POSITIONING</div>
+        <h1 class="hero-statement-h1 reveal">Not a <span class="muted">faster AI copilot</span>.<br/>A <span class="red">resident AI engineering team</span> for your org.</h1>
+        <p class="sub reveal" style="margin-top:clamp(.7rem,1.8vw,1.2rem)">Humans and role-based bots collaborate in one group chat — a whole team working together, getting to know your project better every day.</p>
+      </div>
+      <div class="chat-mock reveal">
+        <div class="chat-head"><span class="live"></span>Project Group · Nuke<span class="mem">1 human · 3 bots</span></div>
+        <div class="chat-body">
+          <div class="msg me"><div class="av human">PM</div><div class="mline"><div class="who">Me (PM)</div><div class="bubble">Login module ships this week — let's organize.</div></div></div>
+          <div class="msg"><div class="av bot">BA</div><div class="mline"><div class="who">@Bailey · BA</div><div class="bubble">Split into 3 user stories, board updated ✅</div></div></div>
+          <div class="msg"><div class="av bot">DEV</div><div class="mline"><div class="who">@Max · Dev</div><div class="bubble">APIs done — @Rita can test now</div></div></div>
+          <div class="msg"><div class="av bot">QA</div><div class="mline"><div class="who">@Rita · QA</div><div class="bubble">Cases pass, regression green 🧪</div></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="pageno">02 / <b>13</b></div>
+</section>
+
+<!-- =========== S3 · PAIN =========== -->
+<section class="slide">
+  <div class="s-bg"><div class="photo-bg" style="background-image:url('pitch-deck-boss-assets/code.jpg')"></div><div class="scrim solid"></div></div>
+  <div class="slide-content">
+    <div class="eyebrow reveal">THE PROBLEM</div>
+    <h2 class="slide-title reveal">Today's AI is a "solo copilot"</h2>
+    <div class="cards c2 reveal">
+      <div class="feat"><div class="k">🧠 Amnesia</div><div class="v">Session-only memory; you re-explain project context every time.</div></div>
+      <div class="feat"><div class="k">👤 Lone wolf</div><div class="v">Real delivery is a BA→Dev→QA→PM relay; the tool mimics just one assistant.</div></div>
+      <div class="feat"><div class="k">📉 Knowledge evaporates</div><div class="v">When a person leaves, project context goes to zero.</div></div>
+      <div class="feat"><div class="k">🚪 Can't delegate</div><div class="v">No gates, no audit, no permission boundaries — enterprises won't run it in production.</div></div>
+    </div>
+    <div class="callout reveal">AI is smart, but it's <strong>not a member of your team</strong> — and it's disposable.</div>
+  </div>
+  <div class="pageno">03 / <b>13</b></div>
+</section>
+
+<!-- =========== S4 · THE ANSWER =========== -->
+<section class="slide">
+  <div class="s-bg">
+    <div class="photo-bg" style="background-image:url('pitch-deck-boss-assets/team2.jpg')"></div>
+    <div class="scrim solid"></div>
+    <svg class="hexrings" viewBox="0 0 200 200" style="color:var(--hsbc-red);width:min(18vw,190px);right:3%;bottom:5%;opacity:.12;z-index:2"><polygon points="100,20 169,60 169,140 100,180 31,140 31,60"/><polygon points="100,45 148,72 148,128 100,155 52,128 52,72"/><polygon points="100,70 127,85 127,115 100,130 73,115 73,85"/></svg>
+  </div>
+  <div class="slide-content">
+    <div class="eyebrow reveal">OUR ANSWER</div>
+    <h2 class="slide-title reveal">Turn the "group chat" into a digital team</h2>
+    <div class="diagram reveal">[Human PM]   <span class="hl">@Bailey(BA)</span>   <span class="hl">@Max(Dev)</span>   <span class="hl">@Rita(QA)</span>
+   └──────── one group · one shared context · shared board ────────┘
+          Per group: dedicated DB · dedicated memory · dedicated bots</div>
+    <ul class="bullets reveal">
+      <li><strong>Fully isolated groups</strong>: one group = one project, data never crosses.</li>
+      <li><strong>State lives in files</strong>: the board is human-readable, auditable, survives restarts.</li>
+      <li><strong>Human-in-the-loop</strong>: AI works on its own, but pauses at key gates for a human to click "confirm".</li>
+    </ul>
+    <div class="callout reveal">Like a Slack group — but some members are <strong>AI colleagues</strong> that write code, run tools, and remember context.</div>
+  </div>
+  <div class="pageno">04 / <b>13</b></div>
+</section>
+
+<!-- =========== S5 · SECURITY (dark, elevated) =========== -->
+<section class="slide security">
+  <div class="s-bg bg-grid-dark">
+    <div class="blob red" style="width:460px;height:460px;right:-120px;top:-140px;opacity:.22"></div>
+    <div class="blob red2" style="width:300px;height:300px;left:-120px;bottom:-130px;opacity:.14"></div>
+    <svg class="netfx soft" viewBox="0 0 300 300" style="color:#FF6B72;width:min(40vw,480px);right:0%;bottom:-6%;opacity:.20"><g class="lines"><line x1="45" y1="60" x2="150" y2="45"/><line x1="150" y1="45" x2="255" y2="70"/><line x1="45" y1="60" x2="90" y2="150"/><line x1="150" y1="45" x2="90" y2="150"/><line x1="150" y1="45" x2="205" y2="160"/><line x1="255" y1="70" x2="205" y2="160"/><line x1="90" y1="150" x2="205" y2="160"/><line x1="90" y1="150" x2="55" y2="245"/><line x1="205" y1="160" x2="160" y2="255"/><line x1="55" y1="245" x2="160" y2="255"/><line x1="205" y1="160" x2="265" y2="240"/><line x1="160" y1="255" x2="265" y2="240"/></g><g class="nodes"><circle cx="45" cy="60" r="5"/><circle cx="255" cy="70" r="4"/><circle cx="90" cy="150" r="6"/><circle cx="205" cy="160" r="5"/><circle cx="55" cy="245" r="4"/><circle cx="265" cy="240" r="4"/><polygon points="150,33 162,40 162,54 150,61 138,54 138,40"/><polygon points="160,243 171,249 171,261 160,267 149,261 149,249"/></g></svg>
+  </div>
+  <div class="slide-content">
+    <div class="eyebrow reveal">MOST IMPORTANT · THE PREREQUISITE TO ADOPT</div>
+    <h2 class="slide-title reveal">First, make it safe to delegate</h2>
+    <div class="lead reveal">Turn "afraid to hand over control" into <b>"delegate with confidence"</b> — the price of admission to production.</div>
+    <div class="cards c2 reveal">
+      <div class="feat"><div class="k"><span class="hx"></span>Human-approval gate (HITL)</div><div class="v">Writes &amp; key transitions require human sign-off — AI accelerates, humans steer.</div></div>
+      <div class="feat"><div class="k"><span class="hx"></span>True isolation</div><div class="v">Per-group DB + process isolation; compliant, never crosses, never cascades.</div></div>
+      <div class="feat"><div class="k"><span class="hx"></span>Defense in depth</div><div class="v">Two-layer command guard + automatic secret redaction + sub-agent permission decay.</div></div>
+      <div class="feat"><div class="k"><span class="hx"></span>Deterministic control plane</div><div class="v">Transitions driven by structured signals — auditable, no drift with model temperature.</div></div>
+    </div>
+    <div class="callout reveal">For enterprises, security = controlled risk = <strong>the confidence to deploy and invest</strong> — the clearest line between us and "fully-autonomous, black-box agents".</div>
+  </div>
+  <div class="pageno">05 / <b>13</b></div>
+</section>
+
+<!-- =========== S6 · VALUE HERO (full red + compounding curve) =========== -->
+<section class="slide value-hero">
+  <div class="s-bg">
+    <div class="blob white" style="width:480px;height:480px;left:-150px;top:-150px;opacity:.10"></div>
+    <div class="blob" style="background:#8E000B;width:440px;height:440px;right:-130px;bottom:-160px;opacity:.55;filter:blur(95px)"></div>
+    <svg class="hexrings" viewBox="0 0 200 200" style="color:#fff;width:min(26vw,300px);left:24%;bottom:-14%;opacity:.10"><polygon points="100,20 169,60 169,140 100,180 31,140 31,60"/><polygon points="100,45 148,72 148,128 100,155 52,128 52,72"/><polygon points="100,70 127,85 127,115 100,130 73,115 73,85"/></svg>
+  </div>
+  <div class="slide-content">
+    <div class="eyebrow reveal">THE CORE</div>
+    <h1 class="reveal">Compounds in value</h1>
+    <div class="vh-grid">
+      <div class="vh-contrast reveal">
+        <div class="vh-row dim"><div class="t">Ordinary AI tools</div><div class="d">Reset to zero; re-explain everything tomorrow.</div></div>
+        <div class="vh-row"><div class="t">Nuke's AI team</div><div class="d">Understands your project more every day; knowledge becomes your own asset.</div></div>
+      </div>
+      <div class="chart-wrap reveal">
+        <!-- compounding value curve: flat tool line vs rising AI-team curve -->
+        <svg viewBox="0 0 600 300" role="img" aria-label="value over time curve">
+          <!-- axes -->
+          <line x1="40" y1="270" x2="580" y2="270" stroke="rgba(255,255,255,0.45)" stroke-width="1.5"/>
+          <line x1="40" y1="270" x2="40" y2="20" stroke="rgba(255,255,255,0.45)" stroke-width="1.5"/>
+          <text x="560" y="292" fill="rgba(255,255,255,0.75)" font-size="16" font-family="Switzer, sans-serif" text-anchor="end">Time →</text>
+          <text x="48" y="34" fill="rgba(255,255,255,0.75)" font-size="16" font-family="Switzer, sans-serif">Value ↑</text>
+          <!-- flat tool line -->
+          <line class="draw" x1="40" y1="232" x2="560" y2="232" stroke="rgba(255,255,255,0.55)" stroke-width="3" stroke-dasharray="8 7"/>
+          <text x="300" y="222" fill="rgba(255,255,255,0.8)" font-size="15" font-family="Switzer, sans-serif">Tool · resets to zero</text>
+          <!-- rising compounding curve -->
+          <path class="draw" d="M40,250 C220,242 360,150 560,45" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round"/>
+          <circle cx="560" cy="45" r="7" fill="#fff"/>
+          <text x="250" y="120" fill="#fff" font-size="17" font-weight="700" font-family="Switzer, sans-serif">AI team · knows you better</text>
+        </svg>
+      </div>
+    </div>
+    <div class="oneliner reveal">Others ship a "tool"; we field a <b>digital employee that grows</b>.</div>
+  </div>
+  <div class="pageno" style="color:rgba(255,255,255,0.8)">06 / <b style="color:#fff">13</b></div>
+</section>
+
+<!-- =========== S7 · WHY ① MEMORY =========== -->
+<section class="slide">
+  <div class="s-bg">
+    <div class="photo-bg" style="background-image:url('pitch-deck-boss-assets/circuit.jpg')"></div>
+    <div class="scrim light"></div>
+    <svg class="netfx soft" viewBox="0 0 300 300" style="color:var(--hsbc-red);width:min(30vw,360px);right:1%;bottom:-8%;opacity:.16;z-index:2"><g class="lines"><line x1="45" y1="60" x2="150" y2="45"/><line x1="150" y1="45" x2="255" y2="70"/><line x1="45" y1="60" x2="90" y2="150"/><line x1="150" y1="45" x2="90" y2="150"/><line x1="150" y1="45" x2="205" y2="160"/><line x1="255" y1="70" x2="205" y2="160"/><line x1="90" y1="150" x2="205" y2="160"/><line x1="90" y1="150" x2="55" y2="245"/><line x1="205" y1="160" x2="160" y2="255"/><line x1="55" y1="245" x2="160" y2="255"/><line x1="205" y1="160" x2="265" y2="240"/><line x1="160" y1="255" x2="265" y2="240"/></g><g class="nodes"><circle cx="45" cy="60" r="5"/><circle cx="255" cy="70" r="4"/><circle cx="90" cy="150" r="6"/><circle cx="205" cy="160" r="5"/><circle cx="55" cy="245" r="4"/><circle cx="265" cy="240" r="4"/><polygon points="150,33 162,40 162,54 150,61 138,54 138,40"/><polygon points="160,243 171,249 171,261 160,267 149,261 149,249"/></g></svg>
+  </div>
+  <div class="slide-content">
+    <div class="eyebrow reveal">WHY IT COMPOUNDS · ①</div>
+    <h2 class="slide-title reveal">Industrial-grade cognitive memory — not RAG</h2>
+    <ul class="bullets reveal">
+      <li>Conversation → <strong>fact extraction</strong> → <strong>reflective consolidation</strong> (episodic→semantic) — not stored chat logs.</li>
+      <li><strong>Three-factor weighted retrieval</strong> (relevance + recency + importance) + time decay / conflict resolution → memory never rots.</li>
+      <li><strong>A-MEM provenance chain + group isolation + write-time redaction</strong> → every memory is clean, trustworthy, traceable.</li>
+    </ul>
+    <div class="callout reveal">Others stuff chat logs back into the prompt; our memory <strong>scores, resolves conflicts, reflects, forgets, and traces its sources</strong>.</div>
+  </div>
+  <div class="pageno">07 / <b>13</b></div>
+</section>
+
+<!-- =========== S8 · WHY ② SELF-EVOLVING SKILLS =========== -->
+<section class="slide">
+  <div class="s-bg">
+    <div class="photo-bg" style="background-image:url('pitch-deck-boss-assets/server2.jpg')"></div>
+    <div class="scrim light"></div>
+    <svg class="hexrings" viewBox="0 0 200 200" style="color:var(--hsbc-red);width:min(22vw,250px);right:4%;top:8%;opacity:.12;z-index:2"><polygon points="100,20 169,60 169,140 100,180 31,140 31,60"/><polygon points="100,45 148,72 148,128 100,155 52,128 52,72"/><polygon points="100,70 127,85 127,115 100,130 73,115 73,85"/></svg>
+  </div>
+  <div class="slide-content">
+    <div class="eyebrow reveal">WHY IT COMPOUNDS · ②</div>
+    <h2 class="slide-title reveal">Bots grow their own skills — but humans must approve</h2>
+    <ul class="bullets reveal">
+      <li><strong>Four-layer skills</strong> (system / group / role / <strong>self-taught</strong>), lazy-loaded — hold hundreds of skills without blowing up the context.</li>
+      <li><strong>L4 self-learning loop</strong>: bot distills patterns from logs → writes a draft → pops an approval card → human approves → only then it takes effect.</li>
+      <li><strong>Anti self-pollution</strong>: draft / active physically isolated, each with an auditable evidence chain.</li>
+    </ul>
+    <div class="callout reveal">Capabilities deepen the more it's used, and <strong>that growth always stays under human control</strong> — governable self-evolution.</div>
+  </div>
+  <div class="pageno">08 / <b>13</b></div>
+</section>
+
+<!-- =========== S9 · WHY OTHERS CAN'T COPY (renamed moat) =========== -->
+<section class="slide">
+  <div class="s-bg"><div class="photo-bg" style="background-image:url('pitch-deck-boss-assets/network.jpg')"></div><div class="scrim solid"></div></div>
+  <div class="slide-content">
+    <div class="eyebrow reveal">STRUCTURAL ADVANTAGE</div>
+    <h2 class="slide-title reveal">Why competitors can't copy it</h2>
+    <div class="cards c3 reveal">
+      <div class="feat"><div class="k">① True multi-tenant isolation</div><div class="v">Physical data isolation, one group per project, never crosses.</div></div>
+      <div class="feat"><div class="k">② Trustworthy governance</div><div class="v">Human-in-the-loop + defense in depth — enterprises dare to delegate (see S5).</div></div>
+      <div class="feat" style="border-top-color:var(--hsbc-red);background:var(--paper-3)"><div class="k" style="color:var(--hsbc-red-dark)">③ ⭐ Knowledge as an asset · compounding memory</div><div class="v">What accumulates is the customer's own domain knowledge; rivals start from zero and can't replicate your history.</div></div>
+      <div class="feat"><div class="k">④ Engineering reliability</div><div class="v">An industrial base that fails gracefully, recovers, and stays auditable.</div></div>
+      <div class="feat"><div class="k">⑤ Heterogeneous orchestration</div><div class="v">Zero vendor lock-in; each role gets the best-fit model, swappable anytime.</div></div>
+    </div>
+    <div class="callout reveal"><strong>Compounding retention:</strong> not a cage — the product genuinely gets more valuable, and the accumulated knowledge <strong>stays on the customer's own machine (data sovereignty)</strong>. Customers want to stay; rivals can't copy it.</div>
+  </div>
+  <div class="pageno">09 / <b>13</b></div>
+</section>
+
+<!-- =========== S10 · DIFFERENTIATION =========== -->
+<section class="slide">
+  <div class="s-bg"><div class="photo-bg" style="background-image:url('pitch-deck-boss-assets/circuit.jpg')"></div><div class="scrim solid"></div></div>
+  <div class="slide-content">
+    <div class="eyebrow reveal">DIFFERENTIATION</div>
+    <h2 class="slide-title reveal">Which layer we're on</h2>
+    <table class="cmp reveal">
+      <thead><tr><th>Dimension</th><th>Solo copilot<br/>Cursor / Copilot</th><th>Full-auto agent<br/>Devin / AutoGPT</th><th class="us">Nuke AI</th></tr></thead>
+      <tbody>
+        <tr style="--i:0"><td>Collaboration</td><td>Lone wolf</td><td>Single black box</td><td class="us"><strong>Multi-role team relay</strong></td></tr>
+        <tr style="--i:1"><td>Context memory</td><td>Session-level, volatile</td><td>Weak</td><td class="us"><strong>Project-level resident + compounding</strong></td></tr>
+        <tr style="--i:2"><td>Data isolation</td><td>None</td><td>None</td><td class="us"><strong>Per-group DB + process isolation</strong></td></tr>
+        <tr style="--i:3"><td>Controllability</td><td>Manual</td><td>Hard to control, can't delegate</td><td class="us"><strong>Human-approval gate + defense in depth</strong></td></tr>
+        <tr style="--i:4"><td>Deployment</td><td>Cloud-dependent</td><td>Cloud-dependent</td><td class="us"><strong>Single-machine private, data sovereignty</strong></td></tr>
+      </tbody>
+    </table>
+    <div class="callout reveal">We don't race on "who types faster" — <strong>a different category, not a different score</strong>.</div>
+  </div>
+  <div class="pageno">10 / <b>13</b></div>
+</section>
+
+<!-- =========== S11 · ARCHITECTURE COMPARISON (open-source agent frameworks) =========== -->
+<section class="slide">
+  <div class="s-bg"><div class="photo-bg" style="background-image:url('pitch-deck-boss-assets/datacenter.jpg')"></div><div class="scrim solid"></div></div>
+  <div class="slide-content">
+    <div class="eyebrow reveal">ARCHITECTURE COMPARISON · PROOF OF CAPABILITY</div>
+    <h2 class="slide-title reveal">Vs. mainstream agent frameworks: a layer above</h2>
+    <div class="legend reveal">Legend: ✅ native strength　·　◻ present but weaker / different focus　·　❌ none</div>
+    <table class="cmp arch reveal">
+      <thead><tr><th>Architecture dimension</th><th class="us">Nuke AI</th><th>claude-main</th><th>gsd-2</th><th>opencode</th><th>openclaw</th></tr></thead>
+      <tbody>
+        <tr style="--i:0"><td>Product form</td><td class="us"><strong>Group collaboration platform</strong></td><td>CC client</td><td>CC official source</td><td>Agent platform</td><td>Omni-channel assistant</td></tr>
+        <tr style="--i:1"><td>Isolation / multi-tenant</td><td class="us"><strong>✅ Group-level DB+process</strong></td><td>❌ Single user</td><td>❌ Single user</td><td>❌ Single session</td><td>❌ Single user</td></tr>
+        <tr style="--i:2"><td>Process / runtime arch</td><td class="us"><strong>✅ Sup/Worker/Collector</strong></td><td>Single process</td><td>daemon+rpc</td><td>client/server</td><td>gateway control plane</td></tr>
+        <tr style="--i:3"><td>Multi-agent orchestration</td><td class="us"><strong>✅ Role relay + rework</strong></td><td>◻ subagent</td><td>◻ subagent</td><td>◻ subagent</td><td>❌ Single assistant</td></tr>
+        <tr style="--i:4"><td>Human-in-the-loop</td><td class="us"><strong>✅ Stage gates + rework</strong></td><td>◻ Tool approval</td><td>◻ Tool approval</td><td>◻ Permission rules</td><td>◻ Channel confirm</td></tr>
+        <tr style="--i:5"><td>Memory system</td><td class="us"><strong>✅ Generative+reflective+isolated</strong></td><td>◻ Project files</td><td>◻ Session/files</td><td>◻ Session-level</td><td>✅ memory-sdk</td></tr>
+        <tr style="--i:6"><td>Heterogeneous models</td><td class="us"><strong>✅ Per-role in one group</strong></td><td>❌ Single-vendor Claude</td><td>❌ Single-vendor Claude</td><td>✅ Multi-provider</td><td>✅ Multi-provider</td></tr>
+      </tbody>
+    </table>
+    <div class="callout reveal">All four are excellent "<strong>single-user runtimes</strong>"; Nuke is the only one at the "<strong>multi-tenant groups + multi-role orchestration + human-in-the-loop</strong>" layer — a different category, not a different score.</div>
+  </div>
+  <div class="pageno">11 / <b>13</b></div>
+</section>
+
+<!-- =========== S12 · PRODUCTION READY =========== -->
+<section class="slide">
+  <div class="s-bg">
+    <div class="photo-bg" style="background-image:url('pitch-deck-boss-assets/server2.jpg')"></div>
+    <div class="scrim light"></div>
+    <svg class="netfx soft" viewBox="0 0 300 300" style="color:var(--hsbc-red);width:min(28vw,330px);right:2%;top:6%;opacity:.16;z-index:2"><g class="lines"><line x1="45" y1="60" x2="150" y2="45"/><line x1="150" y1="45" x2="255" y2="70"/><line x1="45" y1="60" x2="90" y2="150"/><line x1="150" y1="45" x2="90" y2="150"/><line x1="150" y1="45" x2="205" y2="160"/><line x1="255" y1="70" x2="205" y2="160"/><line x1="90" y1="150" x2="205" y2="160"/><line x1="90" y1="150" x2="55" y2="245"/><line x1="205" y1="160" x2="160" y2="255"/><line x1="55" y1="245" x2="160" y2="255"/><line x1="205" y1="160" x2="265" y2="240"/><line x1="160" y1="255" x2="265" y2="240"/></g><g class="nodes"><circle cx="45" cy="60" r="5"/><circle cx="255" cy="70" r="4"/><circle cx="90" cy="150" r="6"/><circle cx="205" cy="160" r="5"/><circle cx="55" cy="245" r="4"/><circle cx="265" cy="240" r="4"/><polygon points="150,33 162,40 162,54 150,61 138,54 138,40"/><polygon points="160,243 171,249 171,261 160,267 149,261 149,249"/></g></svg>
+  </div>
+  <div class="slide-content">
+    <div class="eyebrow reveal">STATUS</div>
+    <h2 class="slide-title reveal">Already "production-ready", not a demo</h2>
+    <ul class="bullets reveal">
+      <li><strong>Architecture foundation closed out</strong>: orchestration / execution layering + group-level physical isolation.</li>
+      <li><strong>Production hardening, both fronts closed</strong>: resource lifecycle, graceful degradation under failures, ops / backup runbooks.</li>
+      <li><strong>116+ test files</strong>; real <code>kill -9</code> (SIGKILL) chaos crash-recovery test <strong>passes</strong>.</li>
+      <li>K8s-grade health probes + systemd resource isolation + online zero-downtime hot backup.</li>
+    </ul>
+    <div class="callout reveal">From "early usable" to <strong>"production-ready"</strong> — ready to seriously talk deployment.</div>
+  </div>
+  <div class="pageno">12 / <b>13</b></div>
+</section>
+
+<!-- =========== S13 · CLOSING (HERO) =========== -->
+<section class="slide closing">
+  <div class="s-bg">
+    <div class="blob white" style="width:460px;height:460px;left:-150px;top:-150px;opacity:.10"></div>
+    <svg class="netfx soft" viewBox="0 0 300 300" style="color:#fff;width:min(34vw,400px);left:5%;bottom:-12%;opacity:.14"><g class="lines"><line x1="45" y1="60" x2="150" y2="45"/><line x1="150" y1="45" x2="255" y2="70"/><line x1="45" y1="60" x2="90" y2="150"/><line x1="150" y1="45" x2="90" y2="150"/><line x1="150" y1="45" x2="205" y2="160"/><line x1="255" y1="70" x2="205" y2="160"/><line x1="90" y1="150" x2="205" y2="160"/><line x1="90" y1="150" x2="55" y2="245"/><line x1="205" y1="160" x2="160" y2="255"/><line x1="55" y1="245" x2="160" y2="255"/><line x1="205" y1="160" x2="265" y2="240"/><line x1="160" y1="255" x2="265" y2="240"/></g><g class="nodes"><circle cx="45" cy="60" r="5"/><circle cx="255" cy="70" r="4"/><circle cx="90" cy="150" r="6"/><circle cx="205" cy="160" r="5"/><circle cx="55" cy="245" r="4"/><circle cx="265" cy="240" r="4"/><polygon points="150,33 162,40 162,54 150,61 138,54 138,40"/><polygon points="160,243 171,249 171,261 160,267 149,261 149,249"/></g></svg>
+  </div>
+  <div class="slide-content">
+    <svg class="watermark" viewBox="0 0 140 120" aria-hidden="true">
+      <!-- 4个红色三角形 -->
+      <polygon points="35,0 105,0 70,60" fill="#DB0011"/>
+      <polygon points="35,120 105,120 70,60" fill="#DB0011"/>
+      <polygon points="0,60 35,0 35,120" fill="#DB0011"/>
+      <polygon points="140,60 105,0 105,120" fill="#DB0011"/>
+      <!-- 2个白色三角形 -->
+      <polygon points="35,0 35,120 70,60" fill="#fff"/>
+      <polygon points="105,0 105,120 70,60" fill="#fff"/>
+    </svg>
+    <div class="eyebrow reveal">VISION</div>
+    <h2 class="reveal">Give every team a tireless AI team<br/>that <b>knows you better the more you use it</b>.</h2>
+    <p class="c-sub reveal">Software delivery shifts from "people use tools" → "people lead an AI team".</p>
+    <div class="cta reveal">Align on the first pilots　→　Launch private deployment</div>
+  </div>
+</section>
+
+<script>
+/* ===========================================
+   SLIDE CONTROLLER — keyboard / wheel / touch,
+   progress bar, hexagon nav dots, reveal-on-view.
+   =========================================== */
+class SlidePresentation {
+  constructor() {
+    this.slides = Array.from(document.querySelectorAll('.slide'));
+    this.current = 0;
+    this.progress = document.querySelector('.progress-bar');
+    this.navDots = document.querySelector('.nav-dots');
+    this.locked = false;
+    this.setupObserver();
+    this.setupNavDots();
+    this.setupKeyboard();
+    this.setupWheel();
+    this.setupTouch();
+    this.updateProgress();
+  }
+  setupObserver() {
+    const io = new IntersectionObserver((entries) => {
+      entries.forEach(e => {
+        if (e.isIntersecting && e.intersectionRatio >= 0.5) {
+          e.target.classList.add('visible');
+          this.current = this.slides.indexOf(e.target);
+          this.updateProgress(); this.updateDots();
+        }
+      });
+    }, { threshold: [0.5] });
+    this.slides.forEach(s => io.observe(s));
+  }
+  setupNavDots() {
+    this.navDots.innerHTML = '';   // clear first so re-opens never duplicate
+    this.slides.forEach((_, i) => {
+      const b = document.createElement('button');
+      b.setAttribute('aria-label', 'Go to slide ' + (i + 1));
+      b.addEventListener('click', () => this.goTo(i));
+      this.navDots.appendChild(b);
+    });
+    this.updateDots();
+  }
+  updateDots() { Array.from(this.navDots.children).forEach((b, i) => b.classList.toggle('active', i === this.current)); }
+  updateProgress() { this.progress.style.width = (this.current / (this.slides.length - 1) * 100) + '%'; }
+  goTo(i) { i = Math.max(0, Math.min(this.slides.length - 1, i)); this.slides[i].scrollIntoView({ behavior: 'smooth' }); }
+  next() { this.goTo(this.current + 1); }
+  prev() { this.goTo(this.current - 1); }
+  setupKeyboard() {
+    document.addEventListener('keydown', (e) => {
+      if (['ArrowDown','ArrowRight',' ','PageDown'].includes(e.key)) { e.preventDefault(); this.next(); }
+      else if (['ArrowUp','ArrowLeft','PageUp'].includes(e.key)) { e.preventDefault(); this.prev(); }
+      else if (e.key === 'Home') { e.preventDefault(); this.goTo(0); }
+      else if (e.key === 'End') { e.preventDefault(); this.goTo(this.slides.length - 1); }
+    });
+  }
+  setupWheel() {
+    window.addEventListener('wheel', (e) => {
+      if (this.locked) return;
+      if (Math.abs(e.deltaY) < 20) return;
+      this.locked = true;
+      (e.deltaY > 0) ? this.next() : this.prev();
+      setTimeout(() => { this.locked = false; }, 700);
+    }, { passive: true });
+  }
+  setupTouch() {
+    let y0 = null;
+    window.addEventListener('touchstart', (e) => { y0 = e.touches[0].clientY; }, { passive: true });
+    window.addEventListener('touchend', (e) => {
+      if (y0 === null) return;
+      const dy = y0 - e.changedTouches[0].clientY;
+      if (Math.abs(dy) > 50) (dy > 0) ? this.next() : this.prev();
+      y0 = null;
+    }, { passive: true });
+  }
+}
+new SlidePresentation();
+</script>
+</body>
+</html>

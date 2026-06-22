@@ -1,0 +1,671 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Nuke AI Collaborator · 决策汇报 Deck</title>
+
+<!-- Switzer (Univers-like, HSBC brand face is Univers Next) + Noto Sans SC for crisp CJK -->
+<link rel="preconnect" href="https://api.fontshare.com" />
+<link rel="stylesheet" href="https://api.fontshare.com/v2/css?f[]=switzer@400,500,600,700,800,900&display=swap" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;900&family=JetBrains+Mono:wght@400;600&display=swap" />
+
+<style>
+/* ===========================================
+   THEME — HSBC identity (red on white)
+   =========================================== */
+:root {
+  --hsbc-red: #DB0011;
+  --hsbc-red-dark: #A50008;
+  --ink: #1A1A1A;
+  --ink-soft: #5C5C5C;
+  --line: #E0E0E0;
+  --paper: #FFFFFF;
+  --paper-2: #F6F6F6;
+  --paper-3: #FBEAEB;
+
+  --font-display: "Switzer", "Noto Sans SC", sans-serif;
+  --font-body: "Switzer", "Noto Sans SC", sans-serif;
+  --font-mono: "JetBrains Mono", "Noto Sans SC", monospace;
+
+  --title-size: clamp(1.8rem, 5.6vw, 4.4rem);
+  --h2-size: clamp(1.3rem, 3.4vw, 2.5rem);
+  --body-size: clamp(0.78rem, 1.5vw, 1.12rem);
+  --small-size: clamp(0.64rem, 1vw, 0.88rem);
+  --eyebrow-size: clamp(0.62rem, 0.95vw, 0.82rem);
+
+  --slide-padding: clamp(1.4rem, 5vw, 5.5rem);
+  --content-gap: clamp(0.6rem, 1.8vw, 1.6rem);
+
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --dur: 0.7s;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+/* --- viewport-base.css (full, mandatory) --- */
+html, body { height: 100%; overflow-x: hidden; }
+html { scroll-snap-type: y mandatory; scroll-behavior: smooth; }
+.slide { width: 100vw; height: 100vh; height: 100dvh; overflow: hidden; scroll-snap-align: start; display: flex; flex-direction: column; position: relative; }
+.slide-content { flex: 1; display: flex; flex-direction: column; justify-content: center; max-height: 100%; overflow: hidden; padding: var(--slide-padding); position: relative; z-index: 2; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr)); gap: clamp(0.5rem, 1.5vw, 1rem); }
+img { max-width: 100%; max-height: min(50vh, 400px); object-fit: contain; }
+@media (max-height: 700px) { :root { --slide-padding: clamp(0.9rem, 3vw, 2.4rem); --content-gap: clamp(0.4rem, 1.5vw, 1rem); --title-size: clamp(1.4rem, 4.8vw, 2.8rem); --h2-size: clamp(1.1rem, 3vw, 1.9rem); } }
+@media (max-height: 600px) { :root { --slide-padding: clamp(0.5rem, 2.5vw, 1.5rem); --content-gap: clamp(0.3rem, 1vw, 0.75rem); --body-size: clamp(0.7rem, 1.2vw, 0.95rem); } .nav-dots, .keyboard-hint, .decorative { display: none; } }
+@media (max-height: 500px) { :root { --slide-padding: clamp(0.4rem, 2vw, 1rem); --title-size: clamp(1.1rem, 3.5vw, 1.6rem); --h2-size: clamp(0.95rem, 2.5vw, 1.3rem); --body-size: clamp(0.65rem, 1vw, 0.85rem); } }
+@media (max-width: 600px) { :root { --title-size: clamp(1.4rem, 8vw, 2.6rem); } .grid { grid-template-columns: 1fr; } }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.2s !important; } html { scroll-behavior: auto; } }
+
+/* ===========================================
+   BASE LOOK
+   =========================================== */
+body { font-family: var(--font-body); color: var(--ink); background: var(--paper); -webkit-font-smoothing: antialiased; }
+.slide { background: var(--paper); border-top: 1px solid var(--line); }
+.slide:first-child { border-top: none; }
+
+/* red ruler atop standard content slides */
+.slide:not(.cover):not(.closing):not(.value-hero):not(.hero-statement)::before {
+  content: ""; position: absolute; top: 0; left: 0;
+  width: clamp(60px, 12vw, 160px); height: 6px; background: var(--hsbc-red);
+  z-index: 3;
+}
+
+/* ===========================================
+   TECH ATMOSPHERE — offline CSS/SVG background layers
+   Reads as blurred tech imagery: soft glows, an AI node
+   network, hexagon fields, dot grid. Never breaks, fully
+   on-brand (HSBC red), keeps text crisp (low opacity, behind).
+   =========================================== */
+.s-bg { position: absolute; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
+.pageno { z-index: 3; }
+
+/* faint dotted grid (light slides) */
+.bg-grid { background-image: radial-gradient(rgba(26,26,26,0.055) 1px, transparent 1.4px); background-size: 24px 24px; }
+.bg-grid-dark { background-image: radial-gradient(rgba(255,255,255,0.06) 1px, transparent 1.4px); background-size: 24px 24px; }
+
+/* blurred glow blobs = the "虚化" atmosphere */
+.blob { position: absolute; border-radius: 50%; filter: blur(72px); opacity: 0.13; }
+.blob.red { background: var(--hsbc-red); }
+.blob.red2 { background: #FF5A66; }
+.blob.white { background: #fff; }
+
+/* AI node-network graphic — color set by parent (currentColor) */
+.netfx { position: absolute; }
+.netfx .lines { opacity: 0.5; }
+.netfx line { stroke: currentColor; stroke-width: 1.4; }
+.netfx circle, .netfx polygon { fill: currentColor; }
+.netfx.soft { filter: blur(1.5px); }
+
+/* concentric hexagon rings */
+.hexrings { position: absolute; }
+.hexrings polygon { fill: none; stroke: currentColor; stroke-width: 1.4; }
+
+/* full-bleed blurred photographic backdrop (data center / team /
+   circuit / network). Real images live in pitch-deck-boss-assets/,
+   blurred in-browser via CSS; a white scrim on top keeps text crisp. */
+.photo-bg {
+  position: absolute; inset: -12%; z-index: 0;
+  background-size: cover; background-position: center;
+  filter: blur(6px) saturate(0.95);
+}
+.scrim { position: absolute; inset: 0; z-index: 1; }
+/* gradient scrim for roomy slides — lets the photo breathe on the right */
+.scrim.light { background: linear-gradient(105deg, rgba(255,255,255,0.93) 0%, rgba(255,255,255,0.74) 48%, rgba(255,255,255,0.5) 100%); }
+/* stronger, near-uniform scrim for text/table-dense slides */
+.scrim.solid { background: rgba(255,255,255,0.84); }
+
+/* ===========================================
+   TYPOGRAPHY HELPERS
+   =========================================== */
+.eyebrow { font-size: var(--eyebrow-size); font-weight: 700; letter-spacing: 0.22em; text-transform: uppercase; color: var(--hsbc-red); display: flex; align-items: center; gap: 0.6em; margin-bottom: clamp(0.5rem, 1.4vw, 1.1rem); }
+.eyebrow::before { content: ""; width: clamp(14px,1.6vw,22px); height: clamp(14px,1.6vw,22px); background: var(--hsbc-red); clip-path: polygon(25% 0,75% 0,100% 50%,75% 100%,25% 100%,0 50%); flex: none; }
+
+h2.slide-title { font-family: var(--font-display); font-size: var(--h2-size); font-weight: 800; line-height: 1.12; letter-spacing: -0.01em; color: var(--ink); margin-bottom: clamp(0.4rem, 1.2vw, 0.9rem); }
+.lead { font-size: clamp(0.92rem, 2vw, 1.45rem); font-weight: 600; line-height: 1.35; color: var(--hsbc-red-dark); margin-bottom: clamp(0.7rem,1.8vw,1.4rem); }
+.sub { font-size: var(--body-size); color: var(--ink-soft); line-height: 1.5; }
+
+ul.bullets { list-style: none; display: flex; flex-direction: column; gap: clamp(0.5rem, 1.4vw, 1.1rem); }
+ul.bullets > li { position: relative; padding-left: 1.5em; font-size: var(--body-size); line-height: 1.45; color: var(--ink); }
+ul.bullets > li::before { content: ""; position: absolute; left: 0; top: 0.5em; width: 0.6em; height: 0.6em; background: var(--hsbc-red); clip-path: polygon(25% 0,75% 0,100% 50%,75% 100%,25% 100%,0 50%); }
+ul.bullets > li strong { font-weight: 800; }
+code { font-family: var(--font-mono); font-size: 0.88em; background: var(--paper-2); padding: 0.1em 0.35em; border-radius: 3px; }
+
+/* callout /收敛句 */
+.callout { border-left: 4px solid var(--hsbc-red); background: var(--paper-2); padding: clamp(0.65rem,1.6vw,1.2rem) clamp(0.85rem,2vw,1.5rem); font-size: var(--body-size); line-height: 1.5; color: var(--ink); margin-top: clamp(0.7rem,1.6vw,1.3rem); }
+.callout strong { color: var(--hsbc-red-dark); font-weight: 800; }
+
+/* mono diagram */
+.diagram { font-family: var(--font-mono); font-size: clamp(0.6rem, 1.15vw, 0.95rem); line-height: 1.7; background: var(--ink); color: #F2F2F2; border-radius: 4px; padding: clamp(0.8rem,2vw,1.4rem); white-space: pre; overflow: hidden; }
+.diagram .hl { color: #FF6B72; font-weight: 600; }
+
+/* cards */
+.cards { display: grid; gap: clamp(0.6rem,1.5vw,1.1rem); }
+.cards.c2 { grid-template-columns: repeat(2,1fr); }
+.cards.c3 { grid-template-columns: repeat(3,1fr); }
+@media (max-width:760px){ .cards.c3 { grid-template-columns: repeat(2,1fr);} .cards.c2{grid-template-columns:1fr;} }
+.feat { background: var(--paper); border: 1px solid var(--line); border-top: 3px solid var(--hsbc-red); padding: clamp(0.7rem,1.6vw,1.2rem); display: flex; flex-direction: column; gap: 0.35em; }
+.feat .k { font-weight: 800; font-size: clamp(0.82rem,1.6vw,1.1rem); color: var(--ink); }
+.feat .v { font-size: var(--small-size); color: var(--ink-soft); line-height: 1.45; }
+
+/* comparison table */
+table.cmp { width: 100%; border-collapse: collapse; font-size: clamp(0.66rem,1.25vw,1rem); }
+table.cmp th, table.cmp td { padding: clamp(0.4rem,1vw,0.85rem) clamp(0.4rem,1vw,0.8rem); text-align: left; border-bottom: 1px solid var(--line); line-height: 1.3; vertical-align: top; }
+table.cmp thead th { font-weight: 800; color: var(--ink); border-bottom: 2px solid var(--ink); }
+table.cmp thead th.us { color: var(--hsbc-red); }
+table.cmp td.us, table.cmp th.us { background: var(--paper-3); }
+table.cmp tbody td:first-child { color: var(--ink-soft); font-weight: 600; }
+table.cmp .us strong { color: var(--hsbc-red-dark); }
+/* compact 6-column architecture table */
+table.cmp.arch { font-size: clamp(0.54rem,1.05vw,0.82rem); }
+table.cmp.arch th, table.cmp.arch td { padding: clamp(0.28rem,0.7vw,0.55rem) clamp(0.28rem,0.6vw,0.5rem); }
+.legend { font-size: var(--small-size); color: var(--ink-soft); margin-bottom: clamp(0.3rem,0.8vw,0.6rem); }
+
+/* page number */
+.pageno { position: absolute; bottom: clamp(0.8rem,2vw,1.6rem); right: clamp(1rem,3vw,2.4rem); font-size: var(--small-size); color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+.pageno b { color: var(--hsbc-red); }
+
+/* ===========================================
+   COVER (S1)
+   =========================================== */
+.cover { align-items: stretch; }
+.cover-red-bar { position: absolute; top: 0; left: 0; height: 100%; width: clamp(10px,2vw,22px); background: var(--hsbc-red); }
+.cover-mark { width: clamp(72px,12vw,140px); height: auto; margin-bottom: clamp(1rem,3vw,2rem); }
+.cover h1 { font-family: var(--font-display); font-weight: 800; font-size: clamp(2rem,6vw,4.4rem); line-height: 1.04; letter-spacing: -0.02em; color: var(--ink); }
+.cover h1 .red { color: var(--hsbc-red); }
+.cover .tag { font-size: clamp(1.1rem,2.8vw,2rem); font-weight: 700; color: var(--hsbc-red-dark); margin-top: clamp(0.9rem,2vw,1.5rem); }
+.cover .tag b { color: var(--hsbc-red); }
+.cover .meta { font-size: var(--small-size); color: var(--ink-soft); margin-top: clamp(1.2rem,3vw,2rem); letter-spacing: 0.02em; }
+
+/* ===========================================
+   HERO STATEMENT (S2)
+   =========================================== */
+.hero-statement .slide-content { justify-content: center; }
+.hero-statement h1 { font-family: var(--font-display); font-weight: 900; font-size: var(--title-size); line-height: 1.08; letter-spacing: -0.02em; color: var(--ink); max-width: 22ch; }
+.hero-statement h1 .muted { color: #B9B9B9; }
+.hero-statement h1 .red { color: var(--hsbc-red); }
+.hero-statement .sub { margin-top: clamp(1rem,2.4vw,1.8rem); font-size: clamp(0.92rem,1.9vw,1.4rem); max-width: 42ch; }
+/* two-column hero: statement + group-chat mockup */
+.hs-grid { display: grid; grid-template-columns: 1.05fr 0.95fr; gap: clamp(1.2rem,3.5vw,3rem); align-items: center; width: 100%; }
+.hs-grid .hero-statement-h1 { font-family: var(--font-display); font-weight: 900; font-size: clamp(1.6rem,4.4vw,3.4rem); line-height: 1.08; letter-spacing: -0.02em; color: var(--ink); }
+.hs-grid .hero-statement-h1 .muted { color: #B9B9B9; }
+.hs-grid .hero-statement-h1 .red { color: var(--hsbc-red); }
+@media (max-width: 880px) { .hs-grid { grid-template-columns: 1fr; } .chat-mock { display: none; } }
+
+/* group-chat mockup card (人 + 角色 Bot 在同一个群) */
+.chat-mock { background: #fff; border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 18px 50px rgba(0,0,0,0.14); overflow: hidden; width: 100%; max-width: min(44vw,460px); justify-self: end; }
+.chat-head { background: var(--ink); color: #fff; display: flex; align-items: center; gap: 0.55em; padding: clamp(0.5rem,1.2vw,0.8rem) clamp(0.7rem,1.5vw,1.05rem); font-weight: 700; font-size: clamp(0.66rem,1.2vw,0.9rem); }
+.chat-head .live { width: 0.55em; height: 0.55em; border-radius: 50%; background: #3ED598; flex: none; }
+.chat-head .mem { margin-left: auto; font-weight: 500; color: #B9B9B9; font-size: 0.82em; }
+.chat-body { padding: clamp(0.6rem,1.5vw,1rem); display: flex; flex-direction: column; gap: clamp(0.45rem,1.1vw,0.8rem); background: var(--paper-2); }
+.msg { display: flex; gap: 0.5em; align-items: flex-start; }
+.msg.me { flex-direction: row-reverse; }
+.av { flex: none; width: clamp(1.5rem,3vw,2rem); height: clamp(1.5rem,3vw,2rem); display: flex; align-items: center; justify-content: center; font-size: clamp(0.5rem,0.95vw,0.66rem); font-weight: 800; color: #fff; }
+.av.bot { background: var(--hsbc-red); clip-path: polygon(25% 0,75% 0,100% 50%,75% 100%,25% 100%,0 50%); }
+.av.human { background: var(--ink); border-radius: 50%; }
+.mline { display: flex; flex-direction: column; max-width: 80%; }
+.msg.me .mline { align-items: flex-end; }
+.who { font-size: clamp(0.5rem,0.92vw,0.64rem); color: var(--ink-soft); font-weight: 700; margin-bottom: 0.18em; }
+.bubble { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 0.42em 0.7em; font-size: clamp(0.6rem,1.15vw,0.82rem); line-height: 1.35; color: var(--ink); }
+.msg.me .bubble { background: var(--hsbc-red); color: #fff; border-color: var(--hsbc-red); }
+
+/* ===========================================
+   SECURITY (S5) — dark, prominent
+   =========================================== */
+.security { background: var(--ink); }
+.security .eyebrow { color: #FF6B72; }
+.security .eyebrow::before { background: var(--hsbc-red); }
+.security h2.slide-title { color: #fff; }
+.security .lead { color: #fff; }
+.security .lead b { color: #FF6B72; }
+.security .feat { background: #262626; border: 1px solid #3A3A3A; border-top: 3px solid var(--hsbc-red); }
+.security .feat .k { color: #fff; display: flex; align-items: center; gap: 0.5em; }
+.security .feat .v { color: #B9B9B9; }
+.security .feat .k .hx { width: 0.9em; height: 0.9em; background: var(--hsbc-red); clip-path: polygon(25% 0,75% 0,100% 50%,75% 100%,25% 100%,0 50%); flex: none; }
+.security .callout { background: #262626; color: #EDEDED; border-left-color: var(--hsbc-red); }
+.security .callout strong { color: #FF6B72; }
+.security .pageno { color: #6E6E6E; }
+
+/* ===========================================
+   VALUE HERO (S6) — full red + compounding curve
+   =========================================== */
+.value-hero { background: var(--hsbc-red); }
+.value-hero .eyebrow { color: #fff; }
+.value-hero .eyebrow::before { background: #fff; }
+.value-hero h1 { font-family: var(--font-display); font-weight: 900; color: #fff; font-size: clamp(2.4rem,8vw,6rem); line-height: 1; letter-spacing: -0.02em; }
+.value-hero .vh-grid { display: grid; grid-template-columns: 1fr 1.1fr; gap: clamp(1rem,3vw,2.5rem); align-items: center; margin-top: clamp(0.8rem,2vw,1.4rem); }
+@media (max-width: 820px){ .value-hero .vh-grid { grid-template-columns: 1fr; } .value-hero .chart-wrap{ display:none; } }
+.vh-contrast { display: flex; flex-direction: column; gap: clamp(0.7rem,1.8vw,1.3rem); }
+.vh-row { color: #fff; }
+.vh-row .t { font-weight: 800; font-size: clamp(0.95rem,2vw,1.35rem); }
+.vh-row .d { color: rgba(255,255,255,0.85); font-size: var(--body-size); line-height: 1.4; margin-top: 0.2em; }
+.vh-row.dim .t { color: rgba(255,255,255,0.6); }
+.value-hero .oneliner { color: #fff; font-size: clamp(0.95rem,2vw,1.4rem); font-weight: 700; margin-top: clamp(0.9rem,2.2vw,1.5rem); border-top: 1px solid rgba(255,255,255,0.3); padding-top: clamp(0.7rem,1.6vw,1.1rem); }
+.value-hero .oneliner b { background: #fff; color: var(--hsbc-red); padding: 0.05em 0.3em; }
+.chart-wrap { width: 100%; }
+.chart-wrap svg { width: 100%; height: auto; }
+
+/* ===========================================
+   CLOSING (S13) — full red
+   =========================================== */
+.closing { background: var(--hsbc-red); }
+.closing .eyebrow { color: #fff; }
+.closing .eyebrow::before { background: #fff; }
+.closing h2 { font-family: var(--font-display); font-weight: 900; color: #fff; font-size: clamp(1.8rem,5vw,3.6rem); line-height: 1.12; letter-spacing: -0.01em; max-width: 20ch; }
+.closing h2 b { text-decoration: underline; text-decoration-thickness: 0.08em; text-underline-offset: 0.12em; }
+.closing .c-sub { color: rgba(255,255,255,0.9); font-size: clamp(0.92rem,1.9vw,1.3rem); line-height: 1.5; margin-top: clamp(1rem,2.5vw,1.8rem); max-width: 42ch; }
+.closing .cta { margin-top: clamp(1.2rem,3vw,2.2rem); display: inline-flex; align-items: center; gap: 0.6em; background: #fff; color: var(--hsbc-red); font-weight: 800; padding: 0.75em 1.5em; font-size: var(--body-size); align-self: flex-start; }
+.closing .watermark { position: absolute; right: -4%; bottom: -8%; width: clamp(220px,40vw,560px); opacity: 0.12; }
+
+/* ===========================================
+   ENTRANCE ANIMATIONS
+   =========================================== */
+.reveal { opacity: 0; transform: translateY(26px); transition: opacity var(--dur) var(--ease), transform var(--dur) var(--ease); }
+.slide.visible .reveal { opacity: 1; transform: translateY(0); }
+.slide.visible .reveal:nth-child(1){transition-delay:.05s}
+.slide.visible .reveal:nth-child(2){transition-delay:.14s}
+.slide.visible .reveal:nth-child(3){transition-delay:.23s}
+.slide.visible .reveal:nth-child(4){transition-delay:.32s}
+.slide.visible .reveal:nth-child(5){transition-delay:.41s}
+.slide.visible .reveal:nth-child(6){transition-delay:.50s}
+.slide.visible tbody tr { animation: rowIn .5s var(--ease) both; }
+.slide.visible tbody tr { animation-delay: calc(.1s + .05s * var(--i,0)); }
+@keyframes rowIn { from{opacity:0; transform:translateX(-12px)} to{opacity:1; transform:none} }
+/* compounding curve draw-on */
+.slide.visible .draw { stroke-dasharray: 900; stroke-dashoffset: 0; transition: stroke-dashoffset 1.6s var(--ease) .3s; }
+.draw { stroke-dasharray: 900; stroke-dashoffset: 900; }
+
+/* ===========================================
+   PROGRESS + NAV
+   =========================================== */
+.progress-bar { position: fixed; top: 0; left: 0; height: 4px; width: 0; background: var(--hsbc-red); z-index: 9999; transition: width 0.15s linear; }
+.nav-dots { position: fixed; right: clamp(0.6rem,1.6vw,1.4rem); top: 50%; transform: translateY(-50%); display: flex; flex-direction: column; gap: 9px; z-index: 9998; }
+.nav-dots button { width: 9px; height: 9px; padding: 0; border: 1px solid var(--hsbc-red); background: transparent; cursor: pointer; clip-path: polygon(25% 0,75% 0,100% 50%,75% 100%,25% 100%,0 50%); transition: background 0.2s; }
+.nav-dots button.active { background: var(--hsbc-red); }
+.keyboard-hint { position: fixed; bottom: clamp(0.6rem,1.6vw,1.2rem); left: clamp(0.8rem,2vw,1.6rem); font-size: var(--small-size); color: var(--ink-soft); z-index: 9998; opacity: 0.7; }
+</style>
+</head>
+<body>
+
+<div class="progress-bar"></div>
+<nav class="nav-dots" aria-label="Slide navigation"></nav>
+<div class="keyboard-hint decorative">← → / 空格 翻页</div>
+
+<!-- =========== S1 · COVER =========== -->
+<section class="slide cover">
+  <div class="cover-red-bar"></div>
+  <div class="s-bg">
+    <div class="photo-bg" style="background-image:url('pitch-deck-boss-assets/datacenter.jpg')"></div>
+    <div class="scrim light"></div>
+    <svg class="hexrings" viewBox="0 0 200 200" style="color:var(--hsbc-red);width:min(26vw,300px);right:5%;bottom:-8%;opacity:.12;z-index:2"><polygon points="100,20 169,60 169,140 100,180 31,140 31,60"/><polygon points="100,45 148,72 148,128 100,155 52,128 52,72"/><polygon points="100,70 127,85 127,115 100,130 73,115 73,85"/></svg>
+  </div>
+  <div class="slide-content">
+    <svg class="cover-mark reveal" viewBox="0 0 140 120" aria-label="logo mark">
+      <!-- 4个红色三角形 -->
+      <polygon points="35,0 105,0 70,60" fill="#DB0011"/>
+      <polygon points="35,120 105,120 70,60" fill="#DB0011"/>
+      <polygon points="0,60 35,0 35,120" fill="#DB0011"/>
+      <polygon points="140,60 105,0 105,120" fill="#DB0011"/>
+      <!-- 2个白色三角形 -->
+      <polygon points="35,0 35,120 70,60" fill="#fff"/>
+      <polygon points="105,0 105,120 70,60" fill="#fff"/>
+    </svg>
+    <h1 class="reveal">Nuke <span class="red">AI</span> Collaborator</h1>
+    <div class="tag reveal">一支 <b>越用越值钱</b> 的 AI 团队。</div>
+    <div class="meta reveal">群组式 AI 协作平台　·　私有化部署　·　企业级隔离与治理<br/>内部决策汇报　·　2026</div>
+  </div>
+</section>
+
+<!-- =========== S2 · POSITIONING (HERO) =========== -->
+<section class="slide hero-statement">
+  <div class="s-bg">
+    <div class="photo-bg" style="background-image:url('pitch-deck-boss-assets/team.jpg')"></div>
+    <div class="scrim light"></div>
+  </div>
+  <div class="slide-content">
+    <div class="hs-grid">
+      <div>
+        <div class="eyebrow reveal">定位</div>
+        <h1 class="hero-statement-h1 reveal">不是<span class="muted">更快的 AI 副驾</span>。<br/>是给组织的 <span class="red">常驻 AI 研发团队</span>。</h1>
+        <p class="sub reveal" style="margin-top:clamp(.7rem,1.8vw,1.2rem)">真人与角色 Bot 在同一个群里协作——一支团队一起干，还越干越懂你。</p>
+      </div>
+      <div class="chat-mock reveal">
+        <div class="chat-head"><span class="live"></span>项目群 · Nuke<span class="mem">1 人 · 3 Bot</span></div>
+        <div class="chat-body">
+          <div class="msg me"><div class="av human">PM</div><div class="mline"><div class="who">我（PM）</div><div class="bubble">登录模块这周要上，安排一下</div></div></div>
+          <div class="msg"><div class="av bot">BA</div><div class="mline"><div class="who">@小白 · BA</div><div class="bubble">已拆成 3 个用户故事，看板更新了 ✅</div></div></div>
+          <div class="msg"><div class="av bot">开</div><div class="mline"><div class="who">@小明 · 开发</div><div class="bubble">接口写完了，@小红 可以测了</div></div></div>
+          <div class="msg"><div class="av bot">测</div><div class="mline"><div class="who">@小红 · 测试</div><div class="bubble">用例跑通，回归通过 🧪</div></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="pageno">02 / <b>13</b></div>
+</section>
+
+<!-- =========== S3 · PAIN =========== -->
+<section class="slide">
+  <div class="s-bg"><div class="photo-bg" style="background-image:url('pitch-deck-boss-assets/code.jpg')"></div><div class="scrim solid"></div></div>
+  <div class="slide-content">
+    <div class="eyebrow reveal">痛点</div>
+    <h2 class="slide-title reveal">今天的 AI，都是「单人副驾」</h2>
+    <div class="cards c2 reveal">
+      <div class="feat"><div class="k">🧠 失忆</div><div class="v">会话级记忆，项目上下文反复重讲。</div></div>
+      <div class="feat"><div class="k">👤 单兵</div><div class="v">真实交付是 BA→开发→测试→PM 接力，工具只模拟一个助理。</div></div>
+      <div class="feat"><div class="k">📉 知识蒸发</div><div class="v">人一走，项目上下文归零。</div></div>
+      <div class="feat"><div class="k">🚪 不敢放权</div><div class="v">无关卡、无审计、无权限边界，企业不敢上生产。</div></div>
+    </div>
+    <div class="callout reveal">AI 很聪明，但它<strong>不是你团队的一员</strong>——而且用完即弃。</div>
+  </div>
+  <div class="pageno">03 / <b>13</b></div>
+</section>
+
+<!-- =========== S4 · THE ANSWER =========== -->
+<section class="slide">
+  <div class="s-bg">
+    <div class="photo-bg" style="background-image:url('pitch-deck-boss-assets/team2.jpg')"></div>
+    <div class="scrim solid"></div>
+    <svg class="hexrings" viewBox="0 0 200 200" style="color:var(--hsbc-red);width:min(18vw,190px);right:3%;bottom:5%;opacity:.12;z-index:2"><polygon points="100,20 169,60 169,140 100,180 31,140 31,60"/><polygon points="100,45 148,72 148,128 100,155 52,128 52,72"/><polygon points="100,70 127,85 127,115 100,130 73,115 73,85"/></svg>
+  </div>
+  <div class="slide-content">
+    <div class="eyebrow reveal">我们的答案</div>
+    <h2 class="slide-title reveal">把「群」变成一支数字团队</h2>
+    <div class="diagram reveal">[真人 PM]   <span class="hl">@小白(BA)</span>   <span class="hl">@小明(开发)</span>   <span class="hl">@小红(测试)</span>
+   └──────── 同一个群 · 同一份上下文 · 共享看板 ────────┘
+            每群：独立数据库 · 独立记忆 · 独立 Bot</div>
+    <ul class="bullets reveal">
+      <li><strong>群间完全隔离</strong>：一个群一个项目，数据永不串。</li>
+      <li><strong>状态写在文件里</strong>：看板人类可读、可审计、重启不丢。</li>
+      <li><strong>人在环</strong>：AI 自动干活，关键节点停下来等人点「确认」才推进。</li>
+    </ul>
+    <div class="callout reveal">像 Slack 群，但群员里有会写代码、跑工具、记上下文的 <strong>AI 同事</strong>。</div>
+  </div>
+  <div class="pageno">04 / <b>13</b></div>
+</section>
+
+<!-- =========== S5 · SECURITY (dark, elevated) =========== -->
+<section class="slide security">
+  <div class="s-bg bg-grid-dark">
+    <div class="blob red" style="width:460px;height:460px;right:-120px;top:-140px;opacity:.22"></div>
+    <div class="blob red2" style="width:300px;height:300px;left:-120px;bottom:-130px;opacity:.14"></div>
+    <svg class="netfx soft" viewBox="0 0 300 300" style="color:#FF6B72;width:min(40vw,480px);right:0%;bottom:-6%;opacity:.20"><g class="lines"><line x1="45" y1="60" x2="150" y2="45"/><line x1="150" y1="45" x2="255" y2="70"/><line x1="45" y1="60" x2="90" y2="150"/><line x1="150" y1="45" x2="90" y2="150"/><line x1="150" y1="45" x2="205" y2="160"/><line x1="255" y1="70" x2="205" y2="160"/><line x1="90" y1="150" x2="205" y2="160"/><line x1="90" y1="150" x2="55" y2="245"/><line x1="205" y1="160" x2="160" y2="255"/><line x1="55" y1="245" x2="160" y2="255"/><line x1="205" y1="160" x2="265" y2="240"/><line x1="160" y1="255" x2="265" y2="240"/></g><g class="nodes"><circle cx="45" cy="60" r="5"/><circle cx="255" cy="70" r="4"/><circle cx="90" cy="150" r="6"/><circle cx="205" cy="160" r="5"/><circle cx="55" cy="245" r="4"/><circle cx="265" cy="240" r="4"/><polygon points="150,33 162,40 162,54 150,61 138,54 138,40"/><polygon points="160,243 171,249 171,261 160,267 149,261 149,249"/></g></svg>
+  </div>
+  <div class="slide-content">
+    <div class="eyebrow reveal">最重要 · 企业敢用的前提</div>
+    <h2 class="slide-title reveal">先解决「敢不敢放权」</h2>
+    <div class="lead reveal">把「不敢放权」变成 <b>「放权也安心」</b>——这是企业上生产的入场券。</div>
+    <div class="cards c2 reveal">
+      <div class="feat"><div class="k"><span class="hx"></span>人确认门（HITL）</div><div class="v">写操作 / 关键推进必须人批——AI 提速，人类掌舵。</div></div>
+      <div class="feat"><div class="k"><span class="hx"></span>真隔离</div><div class="v">每群独立库 + 进程隔离，数据合规、永不串、互不波及。</div></div>
+      <div class="feat"><div class="k"><span class="hx"></span>安全纵深</div><div class="v">双层命令防护 + 密钥自动脱敏 + 子 Agent 权限衰减。</div></div>
+      <div class="feat"><div class="k"><span class="hx"></span>确定性控制平面</div><div class="v">推进由结构化信号驱动，可审计、不随模型温度漂移。</div></div>
+    </div>
+    <div class="callout reveal">对企业，安全 = 风险可控 = <strong>敢落地、敢投</strong>——这是我们与「全自动黑盒 Agent」最大的分野。</div>
+  </div>
+  <div class="pageno">05 / <b>13</b></div>
+</section>
+
+<!-- =========== S6 · VALUE HERO (full red + compounding curve) =========== -->
+<section class="slide value-hero">
+  <div class="s-bg">
+    <div class="blob white" style="width:480px;height:480px;left:-150px;top:-150px;opacity:.10"></div>
+    <div class="blob" style="background:#8E000B;width:440px;height:440px;right:-130px;bottom:-160px;opacity:.55;filter:blur(95px)"></div>
+    <svg class="hexrings" viewBox="0 0 200 200" style="color:#fff;width:min(26vw,300px);left:24%;bottom:-14%;opacity:.10"><polygon points="100,20 169,60 169,140 100,180 31,140 31,60"/><polygon points="100,45 148,72 148,128 100,155 52,128 52,72"/><polygon points="100,70 127,85 127,115 100,130 73,115 73,85"/></svg>
+  </div>
+  <div class="slide-content">
+    <div class="eyebrow reveal">全场核心</div>
+    <h1 class="reveal">越用越值钱</h1>
+    <div class="vh-grid">
+      <div class="vh-contrast reveal">
+        <div class="vh-row dim"><div class="t">普通 AI 工具</div><div class="d">用完归零，明天从头讲一遍。</div></div>
+        <div class="vh-row"><div class="t">Nuke 的 AI 团队</div><div class="d">每天都更懂你的项目，知识沉淀成你自己的资产。</div></div>
+      </div>
+      <div class="chart-wrap reveal">
+        <!-- compounding value curve: flat tool line vs rising AI-team curve -->
+        <svg viewBox="0 0 600 300" role="img" aria-label="价值随时间曲线">
+          <!-- axes -->
+          <line x1="40" y1="270" x2="580" y2="270" stroke="rgba(255,255,255,0.45)" stroke-width="1.5"/>
+          <line x1="40" y1="270" x2="40" y2="20" stroke="rgba(255,255,255,0.45)" stroke-width="1.5"/>
+          <text x="560" y="292" fill="rgba(255,255,255,0.75)" font-size="16" font-family="Switzer, sans-serif" text-anchor="end">时间 →</text>
+          <text x="48" y="34" fill="rgba(255,255,255,0.75)" font-size="16" font-family="Switzer, sans-serif">价值 ↑</text>
+          <!-- flat tool line -->
+          <line class="draw" x1="40" y1="232" x2="560" y2="232" stroke="rgba(255,255,255,0.55)" stroke-width="3" stroke-dasharray="8 7"/>
+          <text x="350" y="222" fill="rgba(255,255,255,0.8)" font-size="15" font-family="Switzer, sans-serif">工具 · 用完归零</text>
+          <!-- rising compounding curve -->
+          <path class="draw" d="M40,250 C220,242 360,150 560,45" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round"/>
+          <circle cx="560" cy="45" r="7" fill="#fff"/>
+          <text x="300" y="120" fill="#fff" font-size="17" font-weight="700" font-family="Switzer, sans-serif">AI 团队 · 越用越懂你</text>
+        </svg>
+      </div>
+    </div>
+    <div class="oneliner reveal">别人是「工具」，我们是 <b>会成长的数字员工</b>。</div>
+  </div>
+  <div class="pageno" style="color:rgba(255,255,255,0.8)">06 / <b style="color:#fff">13</b></div>
+</section>
+
+<!-- =========== S7 · WHY ① MEMORY =========== -->
+<section class="slide">
+  <div class="s-bg">
+    <div class="photo-bg" style="background-image:url('pitch-deck-boss-assets/circuit.jpg')"></div>
+    <div class="scrim light"></div>
+    <svg class="netfx soft" viewBox="0 0 300 300" style="color:var(--hsbc-red);width:min(30vw,360px);right:1%;bottom:-8%;opacity:.16;z-index:2"><g class="lines"><line x1="45" y1="60" x2="150" y2="45"/><line x1="150" y1="45" x2="255" y2="70"/><line x1="45" y1="60" x2="90" y2="150"/><line x1="150" y1="45" x2="90" y2="150"/><line x1="150" y1="45" x2="205" y2="160"/><line x1="255" y1="70" x2="205" y2="160"/><line x1="90" y1="150" x2="205" y2="160"/><line x1="90" y1="150" x2="55" y2="245"/><line x1="205" y1="160" x2="160" y2="255"/><line x1="55" y1="245" x2="160" y2="255"/><line x1="205" y1="160" x2="265" y2="240"/><line x1="160" y1="255" x2="265" y2="240"/></g><g class="nodes"><circle cx="45" cy="60" r="5"/><circle cx="255" cy="70" r="4"/><circle cx="90" cy="150" r="6"/><circle cx="205" cy="160" r="5"/><circle cx="55" cy="245" r="4"/><circle cx="265" cy="240" r="4"/><polygon points="150,33 162,40 162,54 150,61 138,54 138,40"/><polygon points="160,243 171,249 171,261 160,267 149,261 149,249"/></g></svg>
+  </div>
+  <div class="slide-content">
+    <div class="eyebrow reveal">凭什么越用越值钱 · ①</div>
+    <h2 class="slide-title reveal">工业级认知记忆，不是 RAG</h2>
+    <ul class="bullets reveal">
+      <li>对话 → <strong>事实抽取</strong> → <strong>反思固化</strong>（episodic→semantic），不是存聊天记录。</li>
+      <li><strong>三因子加权检索</strong>（相关性 + 时近性 + 重要性）+ 时间衰减 / 冲突消解 → 记忆不腐烂。</li>
+      <li><strong>A-MEM 溯源链 + 群隔离 + 写入脱敏</strong> → 每条记忆干净、可信、可追溯出处。</li>
+    </ul>
+    <div class="callout reveal">别人把聊天记录塞回 prompt；我们的记忆<strong>会打分、会消解冲突、会反思、会遗忘、还能溯源</strong>。</div>
+  </div>
+  <div class="pageno">07 / <b>13</b></div>
+</section>
+
+<!-- =========== S8 · WHY ② SELF-EVOLVING SKILLS =========== -->
+<section class="slide">
+  <div class="s-bg">
+    <div class="photo-bg" style="background-image:url('pitch-deck-boss-assets/server2.jpg')"></div>
+    <div class="scrim light"></div>
+    <svg class="hexrings" viewBox="0 0 200 200" style="color:var(--hsbc-red);width:min(22vw,250px);right:4%;top:8%;opacity:.12;z-index:2"><polygon points="100,20 169,60 169,140 100,180 31,140 31,60"/><polygon points="100,45 148,72 148,128 100,155 52,128 52,72"/><polygon points="100,70 127,85 127,115 100,130 73,115 73,85"/></svg>
+  </div>
+  <div class="slide-content">
+    <div class="eyebrow reveal">凭什么越用越值钱 · ②</div>
+    <h2 class="slide-title reveal">Bot 自己长本事——但必须人批</h2>
+    <ul class="bullets reveal">
+      <li><strong>四层 Skill</strong>（系统 / 群组 / 角色 / <strong>自学</strong>），懒加载——可拥成百技能不撑爆上下文。</li>
+      <li><strong>L4 自学闭环</strong>：Bot 从日志总结规律 → 写 draft → 弹审批卡 → 人 Approve → 才生效。</li>
+      <li><strong>防自我污染</strong>：draft / active 物理隔离，每条带证据链可审计。</li>
+    </ul>
+    <div class="callout reveal">能力越用越厚，且 <strong>增长始终在人的掌控里</strong>——可治理的自进化。</div>
+  </div>
+  <div class="pageno">08 / <b>13</b></div>
+</section>
+
+<!-- =========== S9 · WHY OTHERS CAN'T COPY (renamed moat) =========== -->
+<section class="slide">
+  <div class="s-bg"><div class="photo-bg" style="background-image:url('pitch-deck-boss-assets/network.jpg')"></div><div class="scrim solid"></div></div>
+  <div class="slide-content">
+    <div class="eyebrow reveal">结构性优势</div>
+    <h2 class="slide-title reveal">为什么别人抄不走</h2>
+    <div class="cards c3 reveal">
+      <div class="feat"><div class="k">① 真隔离多租户</div><div class="v">数据物理隔离，一群一项目永不串。</div></div>
+      <div class="feat"><div class="k">② 可信治理</div><div class="v">人在环 + 安全纵深，企业敢放权（见 S5）。</div></div>
+      <div class="feat" style="border-top-color:var(--hsbc-red);background:var(--paper-3)"><div class="k" style="color:var(--hsbc-red-dark)">③ ⭐ 知识资产化 · 记忆复利</div><div class="v">积累的是客户自己的领域知识，竞品从零开始、复制不了你的历史。</div></div>
+      <div class="feat"><div class="k">④ 工程可靠性</div><div class="v">崩得起、修得回、查得到的工业级底座。</div></div>
+      <div class="feat"><div class="k">⑤ 异构混合编排</div><div class="v">零厂商绑定，每角色配最合适的模型、随时可换。</div></div>
+    </div>
+    <div class="callout reveal"><strong>复利型留存：</strong>不是把客户关进笼子——产品真的越用越值钱，积累的知识<strong>留在客户自己机器上（数据主权）</strong>。客户愿意留，竞品抄不走。</div>
+  </div>
+  <div class="pageno">09 / <b>13</b></div>
+</section>
+
+<!-- =========== S10 · DIFFERENTIATION =========== -->
+<section class="slide">
+  <div class="s-bg"><div class="photo-bg" style="background-image:url('pitch-deck-boss-assets/circuit.jpg')"></div><div class="scrim solid"></div></div>
+  <div class="slide-content">
+    <div class="eyebrow reveal">差异化对标</div>
+    <h2 class="slide-title reveal">我们在哪一层</h2>
+    <table class="cmp reveal">
+      <thead><tr><th>维度</th><th>单人副驾<br/>Cursor / Copilot</th><th>全自动 Agent<br/>Devin / AutoGPT</th><th class="us">Nuke AI</th></tr></thead>
+      <tbody>
+        <tr style="--i:0"><td>协作形态</td><td>单兵</td><td>单黑盒</td><td class="us"><strong>多角色团队接力</strong></td></tr>
+        <tr style="--i:1"><td>上下文记忆</td><td>会话级，易失</td><td>弱</td><td class="us"><strong>项目级常驻 + 复利</strong></td></tr>
+        <tr style="--i:2"><td>数据隔离</td><td>无</td><td>无</td><td class="us"><strong>每群独立库 + 进程隔离</strong></td></tr>
+        <tr style="--i:3"><td>可控性</td><td>手动</td><td>难控、不敢放权</td><td class="us"><strong>人确认门 + 安全纵深</strong></td></tr>
+        <tr style="--i:4"><td>部署</td><td>云依赖</td><td>云依赖</td><td class="us"><strong>单机私有化，数据主权</strong></td></tr>
+      </tbody>
+    </table>
+    <div class="callout reveal">我们不在「谁写得快」赛道卷——<strong>品类差，不是分数差</strong>。</div>
+  </div>
+  <div class="pageno">10 / <b>13</b></div>
+</section>
+
+<!-- =========== S11 · ARCHITECTURE COMPARISON (open-source agent frameworks) =========== -->
+<section class="slide">
+  <div class="s-bg"><div class="photo-bg" style="background-image:url('pitch-deck-boss-assets/datacenter.jpg')"></div><div class="scrim solid"></div></div>
+  <div class="slide-content">
+    <div class="eyebrow reveal">架构级对比 · 证明产品能力</div>
+    <h2 class="slide-title reveal">对标主流 Agent 框架：我们在更高一层</h2>
+    <div class="legend reveal">图例：✅ 原生强项　·　◻ 有但较弱 / 侧重不同　·　❌ 无</div>
+    <table class="cmp arch reveal">
+      <thead><tr><th>架构维度</th><th class="us">Nuke AI</th><th>claude-main</th><th>gsd-2</th><th>opencode</th><th>openclaw</th></tr></thead>
+      <tbody>
+        <tr style="--i:0"><td>产品形态</td><td class="us"><strong>群组协作平台</strong></td><td>CC 客户端</td><td>CC 官方源码</td><td>Agent 平台</td><td>全渠道助手</td></tr>
+        <tr style="--i:1"><td>隔离 / 多租户</td><td class="us"><strong>✅ 群级DB+进程</strong></td><td>❌ 单用户</td><td>❌ 单用户</td><td>❌ 单会话</td><td>❌ 单用户</td></tr>
+        <tr style="--i:2"><td>进程 / 运行架构</td><td class="us"><strong>✅ Sup/Worker/Collector</strong></td><td>单进程</td><td>daemon+rpc</td><td>client/server</td><td>gateway 控制面</td></tr>
+        <tr style="--i:3"><td>多 Agent 团队编排</td><td class="us"><strong>✅ 角色接力+返工</strong></td><td>◻ subagent</td><td>◻ subagent</td><td>◻ subagent</td><td>❌ 单助手</td></tr>
+        <tr style="--i:4"><td>人在环治理</td><td class="us"><strong>✅ 阶段门+返工</strong></td><td>◻ 工具审批</td><td>◻ 工具审批</td><td>◻ 权限规则</td><td>◻ 渠道确认</td></tr>
+        <tr style="--i:5"><td>记忆系统</td><td class="us"><strong>✅ 生成式+反思+隔离</strong></td><td>◻ 项目文件</td><td>◻ 会话/文件</td><td>◻ 会话级</td><td>✅ memory-sdk</td></tr>
+        <tr style="--i:6"><td>多模型异构</td><td class="us"><strong>✅ 同群各角色异构</strong></td><td>❌ 单家 Claude</td><td>❌ 单家 Claude</td><td>✅ 多 provider</td><td>✅ 多 provider</td></tr>
+      </tbody>
+    </table>
+    <div class="callout reveal">四家都是优秀的「<strong>单用户运行时</strong>」；Nuke 唯一站在「<strong>多租户群组 + 多角色编排 + 人在环</strong>」这一层——品类差，不是分数差。</div>
+  </div>
+  <div class="pageno">11 / <b>13</b></div>
+</section>
+
+<!-- =========== S12 · PRODUCTION READY =========== -->
+<section class="slide">
+  <div class="s-bg">
+    <div class="photo-bg" style="background-image:url('pitch-deck-boss-assets/server2.jpg')"></div>
+    <div class="scrim light"></div>
+    <svg class="netfx soft" viewBox="0 0 300 300" style="color:var(--hsbc-red);width:min(28vw,330px);right:2%;top:6%;opacity:.16;z-index:2"><g class="lines"><line x1="45" y1="60" x2="150" y2="45"/><line x1="150" y1="45" x2="255" y2="70"/><line x1="45" y1="60" x2="90" y2="150"/><line x1="150" y1="45" x2="90" y2="150"/><line x1="150" y1="45" x2="205" y2="160"/><line x1="255" y1="70" x2="205" y2="160"/><line x1="90" y1="150" x2="205" y2="160"/><line x1="90" y1="150" x2="55" y2="245"/><line x1="205" y1="160" x2="160" y2="255"/><line x1="55" y1="245" x2="160" y2="255"/><line x1="205" y1="160" x2="265" y2="240"/><line x1="160" y1="255" x2="265" y2="240"/></g><g class="nodes"><circle cx="45" cy="60" r="5"/><circle cx="255" cy="70" r="4"/><circle cx="90" cy="150" r="6"/><circle cx="205" cy="160" r="5"/><circle cx="55" cy="245" r="4"/><circle cx="265" cy="240" r="4"/><polygon points="150,33 162,40 162,54 150,61 138,54 138,40"/><polygon points="160,243 171,249 171,261 160,267 149,261 149,249"/></g></svg>
+  </div>
+  <div class="slide-content">
+    <div class="eyebrow reveal">现状</div>
+    <h2 class="slide-title reveal">已经「生产可用」，不是 demo</h2>
+    <ul class="bullets reveal">
+      <li><strong>架构地基收口</strong>：编排 / 执行分层 + 群级物理隔离。</li>
+      <li><strong>生产硬化双收口</strong>：资源生命周期、坏天气降级、运维 / 备份 runbook。</li>
+      <li><strong>116+ 测试文件</strong>；真 <code>kill -9</code>（SIGKILL）混沌崩溃恢复测试 <strong>通过</strong>。</li>
+      <li>K8s 级健康探针 + systemd 资源隔离 + 在线零停机热备。</li>
+    </ul>
+    <div class="callout reveal">从「早期可用」迈入 <strong>「生产可用」</strong>——可以认真谈落地了。</div>
+  </div>
+  <div class="pageno">12 / <b>13</b></div>
+</section>
+
+<!-- =========== S13 · CLOSING (HERO) =========== -->
+<section class="slide closing">
+  <div class="s-bg">
+    <div class="blob white" style="width:460px;height:460px;left:-150px;top:-150px;opacity:.10"></div>
+    <svg class="netfx soft" viewBox="0 0 300 300" style="color:#fff;width:min(34vw,400px);left:5%;bottom:-12%;opacity:.14"><g class="lines"><line x1="45" y1="60" x2="150" y2="45"/><line x1="150" y1="45" x2="255" y2="70"/><line x1="45" y1="60" x2="90" y2="150"/><line x1="150" y1="45" x2="90" y2="150"/><line x1="150" y1="45" x2="205" y2="160"/><line x1="255" y1="70" x2="205" y2="160"/><line x1="90" y1="150" x2="205" y2="160"/><line x1="90" y1="150" x2="55" y2="245"/><line x1="205" y1="160" x2="160" y2="255"/><line x1="55" y1="245" x2="160" y2="255"/><line x1="205" y1="160" x2="265" y2="240"/><line x1="160" y1="255" x2="265" y2="240"/></g><g class="nodes"><circle cx="45" cy="60" r="5"/><circle cx="255" cy="70" r="4"/><circle cx="90" cy="150" r="6"/><circle cx="205" cy="160" r="5"/><circle cx="55" cy="245" r="4"/><circle cx="265" cy="240" r="4"/><polygon points="150,33 162,40 162,54 150,61 138,54 138,40"/><polygon points="160,243 171,249 171,261 160,267 149,261 149,249"/></g></svg>
+  </div>
+  <div class="slide-content">
+    <svg class="watermark" viewBox="0 0 140 120" aria-hidden="true">
+      <!-- 4个红色三角形 -->
+      <polygon points="35,0 105,0 70,60" fill="#DB0011"/>
+      <polygon points="35,120 105,120 70,60" fill="#DB0011"/>
+      <polygon points="0,60 35,0 35,120" fill="#DB0011"/>
+      <polygon points="140,60 105,0 105,120" fill="#DB0011"/>
+      <!-- 2个白色三角形 -->
+      <polygon points="35,0 35,120 70,60" fill="#fff"/>
+      <polygon points="105,0 105,120 70,60" fill="#fff"/>
+    </svg>
+    <div class="eyebrow reveal">愿景</div>
+    <h2 class="reveal">让每个团队，都拥有一支<br/>永不下班、<b>越用越懂</b>的 AI 团队。</h2>
+    <p class="c-sub reveal">软件交付从「人用工具」 → 「人带 AI 团队」。</p>
+    <div class="cta reveal">对齐首批试点　→　启动私有化落地</div>
+  </div>
+</section>
+
+<script>
+/* ===========================================
+   SLIDE CONTROLLER — keyboard / wheel / touch,
+   progress bar, hexagon nav dots, reveal-on-view.
+   =========================================== */
+class SlidePresentation {
+  constructor() {
+    this.slides = Array.from(document.querySelectorAll('.slide'));
+    this.current = 0;
+    this.progress = document.querySelector('.progress-bar');
+    this.navDots = document.querySelector('.nav-dots');
+    this.locked = false;
+    this.setupObserver();
+    this.setupNavDots();
+    this.setupKeyboard();
+    this.setupWheel();
+    this.setupTouch();
+    this.updateProgress();
+  }
+  setupObserver() {
+    const io = new IntersectionObserver((entries) => {
+      entries.forEach(e => {
+        if (e.isIntersecting && e.intersectionRatio >= 0.5) {
+          e.target.classList.add('visible');
+          this.current = this.slides.indexOf(e.target);
+          this.updateProgress(); this.updateDots();
+        }
+      });
+    }, { threshold: [0.5] });
+    this.slides.forEach(s => io.observe(s));
+  }
+  setupNavDots() {
+    this.navDots.innerHTML = '';   // clear first so re-opens never duplicate
+    this.slides.forEach((_, i) => {
+      const b = document.createElement('button');
+      b.setAttribute('aria-label', 'Go to slide ' + (i + 1));
+      b.addEventListener('click', () => this.goTo(i));
+      this.navDots.appendChild(b);
+    });
+    this.updateDots();
+  }
+  updateDots() { Array.from(this.navDots.children).forEach((b, i) => b.classList.toggle('active', i === this.current)); }
+  updateProgress() { this.progress.style.width = (this.current / (this.slides.length - 1) * 100) + '%'; }
+  goTo(i) { i = Math.max(0, Math.min(this.slides.length - 1, i)); this.slides[i].scrollIntoView({ behavior: 'smooth' }); }
+  next() { this.goTo(this.current + 1); }
+  prev() { this.goTo(this.current - 1); }
+  setupKeyboard() {
+    document.addEventListener('keydown', (e) => {
+      if (['ArrowDown','ArrowRight',' ','PageDown'].includes(e.key)) { e.preventDefault(); this.next(); }
+      else if (['ArrowUp','ArrowLeft','PageUp'].includes(e.key)) { e.preventDefault(); this.prev(); }
+      else if (e.key === 'Home') { e.preventDefault(); this.goTo(0); }
+      else if (e.key === 'End') { e.preventDefault(); this.goTo(this.slides.length - 1); }
+    });
+  }
+  setupWheel() {
+    window.addEventListener('wheel', (e) => {
+      if (this.locked) return;
+      if (Math.abs(e.deltaY) < 20) return;
+      this.locked = true;
+      (e.deltaY > 0) ? this.next() : this.prev();
+      setTimeout(() => { this.locked = false; }, 700);
+    }, { passive: true });
+  }
+  setupTouch() {
+    let y0 = null;
+    window.addEventListener('touchstart', (e) => { y0 = e.touches[0].clientY; }, { passive: true });
+    window.addEventListener('touchend', (e) => {
+      if (y0 === null) return;
+      const dy = y0 - e.changedTouches[0].clientY;
+      if (Math.abs(dy) > 50) (dy > 0) ? this.next() : this.prev();
+      y0 = null;
+    }, { passive: true });
+  }
+}
+new SlidePresentation();
+</script>
+</body>
+</html>
