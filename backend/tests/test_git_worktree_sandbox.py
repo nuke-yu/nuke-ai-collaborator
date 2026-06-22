@@ -333,3 +333,45 @@ class TestGitWorktreeSandbox(unittest.IsolatedAsyncioTestCase):
         
         # Clean up
         await remove_worktree(self.group_id, tz_id)
+
+    async def test_hydration_promotion_and_pruning(self):
+        """Verify that group hydration promotes 'done' worktrees and prunes remaining stale ones."""
+        jira = get_jira()
+        
+        # 1. Create tickets X (stale/in_progress) and Y (done but deferred promotion)
+        ticket_x = await jira.create_ticket(self.group_id, title="Ticket X")
+        ticket_y = await jira.create_ticket(self.group_id, title="Ticket Y")
+        tx_id = ticket_x["ticket_id"]
+        ty_id = ticket_y["ticket_id"]
+        
+        # Create worktrees
+        wt_x = await create_worktree(self.group_id, tx_id)
+        wt_y = await create_worktree(self.group_id, ty_id)
+        
+        # Write some file inside Y's worktree
+        with use_worktree(self.group_id, wt_y):
+            await write_file(bot_id=1, path="workspace/y_hydration.py", content="y hydration changes", group_id=self.group_id)
+            
+        # Write some file inside X's worktree
+        with use_worktree(self.group_id, wt_x):
+            await write_file(bot_id=1, path="workspace/x_hydration.py", content="x hydration changes", group_id=self.group_id)
+            
+        # 2. Simulate out-of-band update setting Y to done (deferred because X has active worktree or similar,
+        # but here we can just update status in database directly and keep the worktree folder intact)
+        await jira.update_ticket(self.group_id, ty_id, status="done")
+        
+        # 3. Simulate group hydration
+        from runtime.lifecycle import LifecycleManager
+        lm = LifecycleManager()
+        await lm.hydrate(self.group_id)
+        
+        # 4. Verify Y (done status) is promoted successfully (directory deleted, changes merged)
+        self.assertFalse(wt_y.exists())
+        shared_y = layout.group_shared_dir(self.group_id) / "workspace" / "y_hydration.py"
+        self.assertTrue(shared_y.exists())
+        self.assertEqual(shared_y.read_text(encoding="utf-8"), "y hydration changes")
+        
+        # 5. Verify X (in_progress status) is pruned (directory deleted, changes NOT merged)
+        self.assertFalse(wt_x.exists())
+        shared_x = layout.group_shared_dir(self.group_id) / "workspace" / "x_hydration.py"
+        self.assertFalse(shared_x.exists())

@@ -200,17 +200,35 @@ class LifecycleManager:
                 from db.migrations import run_migrations
                 await run_migrations(conn)
             
-            # Sweep stale worktrees and branches on hydration
-            try:
-                from workspace.git_worktree import prune_group_worktrees
-                await prune_group_worktrees(group_id)
-            except Exception:
-                log.exception("lifecycle: failed to prune stale worktrees for group %d on hydration", group_id)
-            
             # Steps 3 & 4 read/write GROUP-private tables (tickets / workflow_state /
             # agent_sessions). Bind the group DB so their connect()/get_db() resolve
             # to it — otherwise they hit the central DB, which has no such tables.
             with db.bind_db(path):
+                # Drain deferred promotions and prune stale worktrees on hydration
+                try:
+                    from workspace import layout
+                    worktrees_dir = layout.group_dir(group_id) / "worktrees"
+                    if worktrees_dir.exists():
+                        from integrations.jira import get_jira
+                        from workspace.git_worktree import promote_worktree, prune_group_worktrees
+                        tickets = await get_jira().list_tickets(group_id)
+                        status_by_id = {t["ticket_id"]: t["status"] for t in tickets}
+                        
+                        for item in list(worktrees_dir.iterdir()):
+                            if item.is_dir() and item.name.startswith("task_"):
+                                tid = item.name[5:]
+                                if status_by_id.get(tid) == "done":
+                                    log.info(f"Hydration drain: promoting deferred task {tid} in group {group_id}")
+                                    try:
+                                        await promote_worktree(group_id, tid)
+                                    except Exception as pe:
+                                        log.exception(f"Failed to execute deferred promotion for task {tid} on hydration: {pe}")
+                        
+                        # Prune remaining stale worktrees
+                        await prune_group_worktrees(group_id)
+                except Exception:
+                    log.exception("lifecycle: failed to drain promotions/prune worktrees for group %d on hydration", group_id)
+
                 # 3. RDManager pre-scan
                 try:
                     from core.orchestration.rd_manager import rd_manager
