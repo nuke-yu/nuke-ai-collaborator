@@ -35,17 +35,20 @@ graph TD
 
 To meet industrial standards and prevent repository corruption, data loss, or race conditions, we implemented the following guardrails:
 
-### A. Lock Synchronization (Group-Level Git Lock)
+### A. Lock Serialization (Group-Level Git Lock)
 To prevent concurrent git commands from corrupting the `.git/index` or ref locks (such as concurrent worktree creations or merges), all manager actions (`create_worktree`, `remove_worktree`, `promote_worktree`) serialize execution per group using the application's process-level `_get_worktree_lock(group_id)`.
 *   **Lock Safety**: To prevent asyncio lock deadlocks, cleanup actions use a lock-free inner function (`_remove_worktree_nolock`) when invoked inside other locked manager scopes (like promotion).
+*   **Deterministic Import Safety**: Lock lookup invariants are guaranteed as the success of importing `workspace_tools` is deterministic per Python process, ensuring both normal runs and manager calls route to the same lock registry.
 
 ### B. Auto-Commit Baseline Synchronization (Solving Baseline Drift)
 Instead of branching task worktrees from a stale committed `HEAD` (which is often empty or missing files in direct-edit working trees), `create_worktree` automatically stages (`git add -A`) and commits any uncommitted changes on the main branch *prior* to branching. This ensures sandboxes always start with a true, up-to-date copy of the project's files.
 *   **Orphan Prevention**: This baseline commit guarantees pre-existing project files are never orphaned or left out of the task branch.
+*   **Dynamic Branch Baseline**: Baseline branch selection dynamically resolves the actual default branch name of the repository (e.g. `master` vs `main` via `rev-parse`) before worktree additions, preventing crashes on master-based legacy repos.
 
-### C. Deferred Promotion Flow (Solving Sandbox Self-Deletion)
+### C. Deferred Promotion Flow (Solving Sandbox Self-Deletion & HTTP Race)
 If a bot updates its own Jira ticket status to `done` mid-run, performing a synchronous merge and deletion (`shutil.rmtree`) of the sandbox directory would cause subsequent file/shell actions in that execution turn to fail.
-*   **Deferred Check**: In `jira.py`, promotion is deferred if `current_workspace_path` contains an active override for the group. The runner (`runner.py`) then catches this and safely invokes `promote_worktree` *after* the execution context manager has fully unwound.
+*   **Deferred Check**: In `jira.py`, promotion is deferred if `current_workspace_path` contains an active override for the group, or if the group-wide run lock (`bg.group_run_lock`) is locked (covering HTTP API triggers by human users that run in separate asyncio tasks during an active bot execution).
+*   **Execution Cleanup**: The runner (`runner.py`) then catches this and safely invokes `promote_worktree` only *after* the execution context manager has fully unwound.
 
 ### D. Merge Conflict Abort & Surface Warning
 Uncontrolled automated merges can fail and leave the main repository in a conflicted state (corrupted with conflict markers).
@@ -58,7 +61,10 @@ Dependencies (such as `node_modules/`, `venv/`, `.venv/`) are symlinked into wor
 ### F. Group-Keyed Workspace Overrides
 To preserve group isolation, the ContextVar `current_workspace_path` stores overrides as a dictionary mapping `group_id -> path`. Path overrides are resolved selectively by `gid` inside `layout.group_shared_dir(gid)`.
 
-### G. Subprocess Timeouts
+### G. Stale Worktree Sweeper (Preventing Directory Bloat)
+If bot runs are aborted or crash before completion, we intentionally preserve their worktrees on disk to allow developer inspection/debugging. However, to prevent disk leak over time, a sweeper is executed during group workspace startup (`init_group_workspace`) that purges all stale `worktrees/` directories cleanly before new tasks begin.
+
+### H. Subprocess Timeouts
 All async git commands are wrapped with a `30-second` timeout and process group cleanup to prevent hung tasks due to locking issues or credential prompts.
 
 ---
