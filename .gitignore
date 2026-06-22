@@ -10,10 +10,12 @@ env/
 *.db
 *.db-shm
 *.db-wal
+*.db.bak*
 backend/uploads/
 backend/api/uploads/
 backend/chroma_db/
 chroma_db/
+node_modules/
 
 # Logs
 *.log
