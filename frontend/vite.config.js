@@ -11,9 +11,12 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      '/api': 'http://localhost:8000',
-      '/uploads': 'http://localhost:8000',
-      '/ws': { target: 'ws://localhost:8000', ws: true },
+      // 127.0.0.1 (not "localhost"): pin to the LOCAL backend on IPv4. "localhost"
+      // resolves to IPv6 ::1 first on macOS, which would hit a Docker container if
+      // one is also bound to :8000 — keeping the local dev stack fully isolated.
+      '/api': 'http://127.0.0.1:8000',
+      '/uploads': 'http://127.0.0.1:8000',
+      '/ws': { target: 'ws://127.0.0.1:8000', ws: true },
     }
   }
 })
