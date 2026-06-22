@@ -31,52 +31,62 @@ graph TD
 
 ---
 
-## 2. Key Components Implemented
+## 2. Industrial-Grade Reliability Features
 
-### A. ContextVar Override (`backend/workspace/layout.py`)
-Introduced `current_workspace_path` as a context-local variable. When set, `layout.group_shared_dir(gid)` dynamically overrides the workspace path, redirecting VFS operations and shell commands to the worktree root.
-*   **Code Reference**: [layout.py](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/workspace/layout.py)
+To meet industrial standards and prevent repository corruption, data loss, or race conditions, we implemented the following guardrails:
 
-### B. Git Worktree Manager (`backend/workspace/git_worktree.py`)
-Handles worktree creation, symlinking shared coordination files, sharing dependencies, and promotion (merging) changes.
-*   **Creation (`create_worktree`)**: Spins up a git worktree at `workspaces/group_{gid}/worktrees/task_{task_id}/workspace`. It dynamically handles empty workspaces by initializing git configuration on demand.
-*   **Resource Symlinking (`link_shared_resources`)**: Symlinks `docs/`, `skills/`, `prs/`, `BOARD.md`, and `SPEC.md` back to the group's main shared directory.
-*   **Dependency Sharing (`link_dependencies`)**: Recursively scans the parent workspace for virtual environments (`venv`, `.venv`) and `node_modules`, symlinking them to the task directory to prevent package reinstall overhead.
-*   **Promotion (`promote_worktree`)**: Automatically commits any uncommitted task changes to the worktree branch, checks out the target branch (`main`), performs a `git merge`, and cleans up the worktree branch.
-*   **Context Manager (`use_worktree`)**: Context manager that binds the active execution to the worktree.
-*   **Code Reference**: [git_worktree.py](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/workspace/git_worktree.py)
+### A. Lock Synchronization (Group-Level Git Lock)
+To prevent concurrent git commands from corrupting the `.git/index` or ref locks (such as concurrent worktree creations or merges), all manager actions (`create_worktree`, `remove_worktree`, `promote_worktree`) serialize execution per group using the application's process-level `_get_worktree_lock(group_id)`.
+*   **Lock Safety**: To prevent asyncio lock deadlocks, cleanup actions use a lock-free inner function (`_remove_worktree_nolock`) when invoked inside other locked manager scopes (like promotion).
 
-### C. Execution Hook (`backend/core/runner.py`)
-Extracted the `ticket_id` from the `WorkUnit` and wrapped the execution block in `use_worktree` when present.
-*   **Code Reference**: [runner.py](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/core/runner.py)
+### B. Auto-Commit Baseline Synchronization (Solving Baseline Drift)
+Instead of branching task worktrees from a stale committed `HEAD` (which is often empty or missing files in direct-edit working trees), `create_worktree` automatically stages (`git add -A`) and commits any uncommitted changes on the main branch *prior* to branching. This ensures sandboxes always start with a true, up-to-date copy of the project's files.
+*   **Orphan Prevention**: This baseline commit guarantees pre-existing project files are never orphaned or left out of the task branch.
 
-### D. Promotion Hook (`backend/integrations/jira.py`)
-Listens to Jira ticket status changes. When a ticket status transitions to `"done"` (representing completion and user approval), it invokes `promote_worktree`.
-*   **Code Reference**: [jira.py](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/integrations/jira.py)
+### C. Deferred Promotion Flow (Solving Sandbox Self-Deletion)
+If a bot updates its own Jira ticket status to `done` mid-run, performing a synchronous merge and deletion (`shutil.rmtree`) of the sandbox directory would cause subsequent file/shell actions in that execution turn to fail.
+*   **Deferred Check**: In `jira.py`, promotion is deferred if `current_workspace_path` contains an active override for the group. The runner (`runner.py`) then catches this and safely invokes `promote_worktree` *after* the execution context manager has fully unwound.
+
+### D. Merge Conflict Abort & Surface Warning
+Uncontrolled automated merges can fail and leave the main repository in a conflicted state (corrupted with conflict markers).
+*   **Merge Abort**: If `git merge` fails or hits a conflict during promotion, the manager catches the error, immediately executes `git merge --abort` to return the main branch to a clean state, and propagates the error.
+*   **Error Visibility**: Instead of failing silently, the error is raised and a system warning message is posted back to the group chat (`[工作流系统错误] 工单 DFT-XXX 自动合并失败...`), alerting users to resolve it manually.
+
+### E. Dynamic Git Exclude (Preventing Symlink Commits)
+Dependencies (such as `node_modules/`, `venv/`, `.venv/`) are symlinked into worktrees to avoid reinstall delays. To prevent absolute symlink paths from accidentally being committed, we dynamically configure patterns inside the local git exclude file (`.git/info/exclude`) of the group repository.
+
+### F. Group-Keyed Workspace Overrides
+To preserve group isolation, the ContextVar `current_workspace_path` stores overrides as a dictionary mapping `group_id -> path`. Path overrides are resolved selectively by `gid` inside `layout.group_shared_dir(gid)`.
+
+### G. Subprocess Timeouts
+All async git commands are wrapped with a `30-second` timeout and process group cleanup to prevent hung tasks due to locking issues or credential prompts.
 
 ---
 
 ## 3. Test Verification
 
-We implemented a robust test suite in [test_git_worktree_sandbox.py](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/tests/test_git_worktree_sandbox.py) to cover all functional requirements:
+We implemented a robust test suite in [test_git_worktree_sandbox.py](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/tests/test_git_worktree_sandbox.py) covering both happy paths and error regression states:
 
-1.  **Worktree Lifecycle**: Verified that `create_worktree` sets up directories and symlinks correctly, and `remove_worktree` cleans them up.
-2.  **Dependency Sharing**: Verified that heavy directories (such as `node_modules`) inside project subdirectories are correctly symlinked to preserve package state.
-3.  **VFS Path Redirection & Isolation**: Verified that writing to `workspace/src/foo.py` inside the context manager writes to the worktree, while the main shared directory remains untouched.
-4.  **Promotion (Merge)**: Verified that promotion successfully merges files created under the worktree back into the main branch.
-5.  **Jira Integration**: Verified that changing ticket status to `"done"` automatically triggers promotion.
+1.  **Worktree Lifecycle**: Verifies worktree creation, symlinks, and deletion.
+2.  **Dependency Symlinking**: Verifies correct symlinking of monorepo dependencies.
+3.  **VFS Path Redirection & Isolation**: Verifies path override and write confinement.
+4.  **Promotion (Merge)**: Verifies file promotion.
+5.  **Baseline Synchronization (RED Test #1)**: Verifies pre-existing files in the shared workspace are committed as a baseline before check out.
+6.  **Conflict Abort Recovery (RED Test #2)**: Verifies that when a merge conflict occurs, the merge is safely aborted to keep the main repo untainted.
+7.  **Deferred Promotion (RED Test #3)**: Verifies that completing a ticket during a bot run defers promotion to post-run and prevents directory self-deletion.
+8.  **Error Propagation & Visibility (RED Test #4)**: Verifies promotion errors are raised and system warnings are posted in chat instead of swallowing errors.
 
 ### Test Results
 
-All tests have passed successfully:
+All 21 workspace and sandbox tests pass successfully:
 ```bash
 $ PYTHONPATH=backend python3 -m pytest backend/tests/test_layout.py backend/tests/test_workspace_redirect.py backend/tests/test_git_worktree_sandbox.py
 ============================= test session starts ==============================
-collected 18 items
+collected 21 items
 
-backend/tests/test_layout.py ........                                    [ 44%]
-backend/tests/test_workspace_redirect.py ...                             [ 72%]
-backend/tests/test_git_worktree_sandbox.py .....                         [100%]
+backend/tests/test_layout.py ........                                    [ 38%]
+backend/tests/test_workspace_redirect.py .....                           [ 61%]
+backend/tests/test_git_worktree_sandbox.py ........                      [100%]
 
-======================== 18 passed, 1 warning in 3.21s =========================
+======================== 21 passed, 1 warning in 6.71s =========================
 ```
