@@ -132,3 +132,105 @@ class TestI18nPromptLocalization(unittest.IsolatedAsyncioTestCase):
         # Iteration >= 3
         preview_en_3 = generate_thinking_preview(runner, 3)
         self.assertIn("Continuing with remaining tasks, consolidating results", preview_en_3)
+
+    async def test_tool_visibility_by_skill_discovery(self):
+        from executors.plugins.tool_loop_v1_helpers import setup_session
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        bot = {
+            "id": 1,
+            "name": "DevBot",
+            "role": "developer",
+            "system_prompt": "",
+            "traits": [],
+            "executor_config": {}
+        }
+        
+        class MockCtx:
+            def __init__(self, group_id):
+                self.group_id = group_id
+                self.workflow_suffix = ""
+                self.user_message = "hello"
+                self.sender = {"name": "User"}
+                self.history = []
+                self.is_workflow = False
+                self.resume_session_id = None
+                self.resume_messages = []
+                self.file_url = None
+                self.file_type = None
+                self.ruleset = None
+                self.group_name = "TestGroup"
+                self.group_announcement = "TestAnnouncement"
+                self.all_members = [
+                    {"name": "Alice", "type": "human"},
+                    {"name": "BobBot", "type": "bot", "role": "Assistant"}
+                ]
+                self.interaction = AsyncMock()
+
+        ctx = MockCtx(self.group_id)
+
+        class DummyRunner:
+            def __init__(self):
+                self.ctx = ctx
+                self.bot = bot
+                self.bot["avatar_color"] = "#000"
+                self.executor = MagicMock()
+                self.executor.executor_id = "test-executor"
+                self.model_name = "test-model"
+                self.provider = "test-provider"
+                self.temperature = 0.7
+                self.max_tokens = 2048
+                self.memory = AsyncMock()
+                self.memory.recall = AsyncMock(return_value="test memory")
+                
+                # Mock statically registered tools in executor manifest
+                self.executor.manifest.tools = [
+                    MagicMock(name="run_skill"),
+                    MagicMock(name="read_file")
+                ]
+                self.executor.manifest.tools[0].name = "run_skill"
+                self.executor.manifest.tools[1].name = "read_file"
+                
+                self.ruleset = None
+                self.system_prompt_base = ""
+                self.system_prompt = ""
+                self.skills_xml = ""
+                self.skills_snapshot = []
+                self.always_skills = []
+                self.tool_schemas = []
+                self.messages = []
+                self.session_id = "test-session"
+                self.temp_id = "test-temp"
+
+        def mock_get_schemas(names):
+            all_schemas = [
+                {"function": {"name": "run_skill"}},
+                {"function": {"name": "read_file"}}
+            ]
+            return [s for s in all_schemas if s["function"]["name"] in names]
+
+        # Mock dependencies in setup_session
+        with patch("workspace.load_group_context", new=AsyncMock(return_value="")), \
+             patch("core.workflow.current_thread_id", return_value="123"), \
+             patch("executors.tool_router.router.has_providers", return_value=False), \
+             patch("executors.tool_executor.get_schemas", side_effect=mock_get_schemas), \
+             patch("core.orchestration.prompt_builder.compile_system_prompt", new=AsyncMock(return_value=("compiled prompt", "", [], []))):
+
+            # Test Case 1: skill_discovery = True -> run_skill is in tool_schemas
+            runner_true = DummyRunner()
+            runner_true.executor.manifest.workspace.skill_discovery = True
+            await setup_session(runner_true)
+            
+            tool_names_true = [s["function"]["name"] for s in runner_true.tool_schemas]
+            self.assertIn("run_skill", tool_names_true)
+            self.assertIn("read_file", tool_names_true)
+
+            # Test Case 2: skill_discovery = False -> run_skill is NOT in tool_schemas
+            runner_false = DummyRunner()
+            runner_false.executor.manifest.workspace.skill_discovery = False
+            await setup_session(runner_false)
+            
+            tool_names_false = [s["function"]["name"] for s in runner_false.tool_schemas]
+            self.assertNotIn("run_skill", tool_names_false)
+            self.assertIn("read_file", tool_names_false)
+

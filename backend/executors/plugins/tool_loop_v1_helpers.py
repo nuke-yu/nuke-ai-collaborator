@@ -194,6 +194,7 @@ async def _run_fork_skill(
 
 
 async def setup_session(runner) -> None:
+    skill_discovery = bool(runner.executor.manifest.workspace.skill_discovery)
     # Build ruleset
     if runner.ctx.ruleset is not None:
         runner.ruleset = runner.ctx.ruleset
@@ -216,7 +217,7 @@ async def setup_session(runner) -> None:
         thread_id=thread_id,
     ))
 
-    if runner.executor.manifest.workspace.skill_discovery:
+    if skill_discovery:
         runner.system_prompt_base, runner.skills_xml, runner.skills_snapshot, runner.always_skills = await prompt_builder.compile_system_prompt(
             runner.bot, runner.ctx, runner.model_name, memory
         )
@@ -254,7 +255,7 @@ async def setup_session(runner) -> None:
         runner.messages = list(history) + [{"role": "user", "content": user_content}]
 
     tool_names = [t.name for t in runner.executor.manifest.tools]
-    if not runner.executor.manifest.workspace.skill_discovery:
+    if not skill_discovery:
         tool_names = [name for name in tool_names if name != "run_skill"]
     from executors.tool_router import router as _tool_router
     if _tool_router.has_providers():
