@@ -202,6 +202,44 @@ svg.dg .hl-t{font-weight:800;font-size:15px} svg.dg .hl-s{fill:var(--dim);font-s
 .chips{display:flex;flex-wrap:wrap;gap:.3rem;padding:.4rem .55rem;align-items:center;align-content:center}
 .chips i{font-style:normal;font-size:clamp(.55rem,.98vw,.78rem);color:var(--dim);
   border:1px solid var(--line);border-radius:5px;padding:.1em .5em;background:var(--bg);white-space:nowrap}
+/* tier-stack chips sit on a lighter card → raise them above the dark backing for contrast */
+.tier .chips i{background:#252e3d;color:var(--mod);border-color:#3a4456}
+/* ====== CODEBASE MAP (real-module architecture) ====== */
+.cmap-pills{display:flex;flex-wrap:wrap;gap:.4rem;margin:.55rem 0 .7rem}
+.cmap-pills i{font-style:normal;font-size:clamp(.56rem,1vw,.8rem);color:var(--mod);
+  border:1px solid #2b3444;border-radius:999px;padding:.18em .8em;background:var(--panel2);white-space:nowrap}
+.cmap-pills i b{color:var(--green);font-weight:800}
+.cmap{display:grid;grid-template-columns:1.55fr 1fr;gap:clamp(.4rem,1vw,.8rem)}
+.cmap .colL,.cmap .colR{display:flex;flex-direction:column;gap:clamp(.35rem,.95vh,.62rem)}
+.clayer{border:1px solid var(--line);border-radius:9px;background:var(--panel);
+  padding:clamp(.42rem,1vw,.65rem) clamp(.55rem,1.2vw,.85rem)}
+.clayer .ch{font-size:clamp(.55rem,1vw,.74rem);font-weight:800;letter-spacing:.07em;text-transform:uppercase;
+  display:flex;align-items:center;gap:.5rem;margin-bottom:.42rem}
+.clayer .ch::after{content:'';flex:1;height:1px;background:currentColor;opacity:.2}
+.clayer .ch span{color:var(--dim);font-weight:500;letter-spacing:0;text-transform:none}
+.cchips{display:flex;flex-wrap:wrap;gap:.3rem}
+.cchips code{font-family:var(--font);font-size:clamp(.5rem,.92vw,.7rem);color:var(--mod);
+  background:#1c2230;border:1px solid #2b3444;border-radius:5px;padding:.12em .5em;white-space:nowrap}
+.clayer.green{border-color:rgba(57,211,83,.35)} .clayer.green .ch{color:var(--green)}
+.clayer.cyan{border-color:rgba(88,166,255,.35)} .clayer.cyan .ch{color:var(--cyan)}
+.clayer.mag{border-color:rgba(255,123,114,.35)} .clayer.mag .ch{color:var(--magenta)}
+.clayer.amber{border-color:rgba(227,179,65,.35)} .clayer.amber .ch{color:var(--amber)}
+.clayer.purple{border-color:rgba(188,140,255,.35)} .clayer.purple .ch{color:var(--purple)}
+.clayer.dim .ch{color:var(--dim)}
+@media (max-width:760px){.cmap{grid-template-columns:1fr}}
+/* ====== HIGH-LEVEL ARCHITECTURE SVG (ported from standalone; scoped so it
+   doesn't override the deck's other svg.dg diagrams) ====== */
+svg.hldg .t{font-weight:800}
+svg.hldg .s{fill:var(--mod);font-size:13.5px}
+svg.hldg .cap{fill:var(--fg);font-size:13.5px;font-weight:600}
+svg.hldg .tag{fill:var(--dim);font-size:12px;letter-spacing:.12em}
+svg.hldg .b{stroke-width:2}
+svg.hldg .b.dim{stroke:var(--dimmer)}
+svg.hldg .chip{fill:#0f141b;stroke:#30363d;stroke-width:1.2}
+svg.hldg .frame{fill:rgba(57,211,83,.03);stroke:var(--cyan);stroke-width:1.6;stroke-dasharray:9 7}
+svg.hldg .edge{stroke-width:2}
+svg.hldg .elab{fill:var(--fg);font-size:13px;font-weight:600}
+svg.hldg .note{fill:var(--dim);font-size:12.5px}
 .wgroups{display:flex;flex-direction:column;gap:.28rem;padding:.4rem .55rem}
 .wg{display:flex;flex-wrap:wrap;align-items:center;gap:.32rem}
 .wg b{font-size:clamp(.56rem,.95vw,.76rem);color:var(--fg);min-width:max-content}
@@ -221,12 +259,48 @@ svg.dg .hl-t{font-weight:800;font-size:15px} svg.dg .hl-s{fill:var(--dim);font-s
   color:var(--dimmer);z-index:100;letter-spacing:.1em}
 .hint kbd{color:var(--dim);border:1px solid var(--line);border-radius:4px;padding:.05em .4em;font-family:inherit}
 @media (max-height:600px){.nav-dots,.hint{display:none}}
+
+/* ====== SIDEBAR TABLE OF CONTENTS ====== */
+.toc{position:fixed;left:0;top:0;height:100vh;height:100dvh;width:clamp(212px,18vw,268px);
+  background:rgba(13,17,23,.95);backdrop-filter:blur(8px);border-right:1px solid var(--line);
+  z-index:120;display:flex;flex-direction:column;transform:translateX(-100%);
+  transition:transform .3s var(--ease)}
+.toc.open{transform:none}
+.toc-head{padding:1rem 1.05rem .8rem;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:.6rem;flex-shrink:0}
+.toc-head .dotg{width:9px;height:9px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green)}
+.toc-head b{font-size:var(--small);color:var(--fg);letter-spacing:.16em;text-transform:uppercase;font-weight:700}
+.toc-list{flex:1;overflow-y:auto;padding:.5rem .5rem 1.2rem;scrollbar-width:thin;scrollbar-color:#30363d transparent}
+.toc-list::-webkit-scrollbar{width:7px}.toc-list::-webkit-scrollbar-thumb{background:#30363d;border-radius:4px}
+.toc-sec{font-size:.6rem;letter-spacing:.2em;text-transform:uppercase;color:var(--dimmer);
+  padding:.85rem .65rem .3rem;font-weight:700}
+.toc-sec.nav{cursor:pointer;color:var(--dim);transition:color .15s}
+.toc-sec.nav:hover{color:var(--green)}
+.toc-sec.nav.active{color:var(--green)}
+.toc-item{display:flex;align-items:center;gap:.6rem;padding:.38rem .65rem;border-radius:6px;
+  cursor:pointer;color:var(--dim);font-size:.74rem;line-height:1.25;border:1px solid transparent;
+  transition:background .15s,color .15s}
+.toc-item:hover{background:rgba(255,255,255,.04);color:var(--fg)}
+.toc-item.active{background:rgba(57,211,83,.12);color:var(--green);border-color:rgba(57,211,83,.3)}
+.toc-item .ix{font-size:.62rem;color:var(--dimmer);min-width:20px;text-align:right;font-variant-numeric:tabular-nums}
+.toc-item.active .ix{color:var(--green)}
+.toc-toggle{position:fixed;left:14px;top:13px;z-index:121;width:38px;height:38px;border-radius:8px;
+  background:rgba(22,27,34,.92);border:1px solid var(--line);color:var(--dim);cursor:pointer;
+  display:flex;align-items:center;justify-content:center;font-size:1.05rem;font-family:var(--font);
+  transition:left .3s var(--ease),color .15s,border-color .15s}
+.toc-toggle:hover{color:var(--fg);border-color:var(--dim)}
+body.toc-open .toc-toggle{left:clamp(224px,calc(18vw + 12px),280px)}
+@media print{.toc,.toc-toggle,.nav-dots,.hint{display:none}}
 </style>
 </head>
 <body>
 <div class="progress-bar"></div>
 <nav class="nav-dots" aria-label="slide navigation"></nav>
-<div class="hint"><kbd>↑</kbd> <kbd>↓</kbd> / <kbd>Space</kbd> to navigate</div>
+<div class="hint"><kbd>↑</kbd> <kbd>↓</kbd> / <kbd>Space</kbd> to navigate · <kbd>T</kbd> contents</div>
+<button class="toc-toggle" aria-label="Toggle table of contents">☰</button>
+<aside class="toc" aria-label="Table of contents">
+  <div class="toc-head"><span class="dotg"></span><b>Contents</b></div>
+  <div class="toc-list"></div>
+</aside>
 
 <!-- ===== 01 · TITLE ===== -->
 <section class="slide title">
@@ -245,43 +319,179 @@ svg.dg .hl-t{font-weight:800;font-size:15px} svg.dg .hl-s{fill:var(--dim);font-s
   <div class="foot">nuke-ai-collaborator <b>·</b> 01 / 27</div>
 </section>
 
+<!-- ===== 01b · HIGH-LEVEL ARCHITECTURE (ported from standalone) ===== -->
+<section class="slide">
+  <div class="wrap" style="max-width:1240px">
+    <div class="kick reveal">system architecture · high level</div>
+    <h2 class="reveal" style="font-size:clamp(1.05rem,2.5vw,1.8rem);margin-bottom:.2rem">Nuke AI Collaborator — <span class="hl">the whole system</span>.</h2>
+    <div class="diagram reveal" style="margin-top:.35rem">
+      <svg class="dg hldg" viewBox="0 0 1240 700" role="img" aria-label="High-level architecture" style="max-height:min(72vh,620px)">
+        <defs><marker id="arhl" markerWidth="10" markerHeight="10" refX="7.5" refY="3" orient="auto">
+          <path d="M0,0 L7.5,3 L0,6 Z" fill="#6b7280"/></marker></defs>
+
+        <!-- ===== COLLABORATION SURFACE ===== -->
+        <rect class="b purple" x="400" y="16" width="440" height="70" rx="12"/>
+        <text class="t" x="620" y="48" text-anchor="middle" style="fill:var(--purple);font-size:18px">COLLABORATION SURFACE</text>
+        <text class="s" x="620" y="71" text-anchor="middle">group chat · humans + role-bots · live tool &amp; permission stream</text>
+
+        <!-- ===== SUPERVISOR (bus) ===== -->
+        <rect class="b green" x="240" y="120" width="760" height="68" rx="12"/>
+        <text class="t" x="620" y="150" text-anchor="middle" style="fill:var(--green);font-size:18px">SUPERVISOR · the bus</text>
+        <text class="s" x="620" y="173" text-anchor="middle" style="font-size:13px">WS gateway · message routing · worker lifecycle · MCP relay — keeps AI compute off the gateway</text>
+
+        <!-- ===== GROUP ISOLATION BOUNDARY (frame) ===== -->
+        <rect class="frame" x="44" y="232" width="752" height="430" rx="14"/>
+        <rect fill="#0d1117" x="398" y="222" width="394" height="22"/>
+        <text class="tag" x="782" y="238" text-anchor="end" style="fill:var(--cyan)">ONE GROUP · FULLY ISOLATED  (×N, never shared)</text>
+
+        <!-- WORKER / agent runtime -->
+        <rect class="b cyan" x="68" y="258" width="700" height="158" rx="11"/>
+        <text class="t" x="88" y="286" style="fill:var(--cyan);font-size:18px">AI AGENT RUNTIME ×N</text>
+        <text class="tag" x="748" y="286" text-anchor="end">sharded &amp; pinned per worker</text>
+        <rect class="chip" x="88" y="300" width="328" height="38" rx="7"/>
+        <text class="cap" x="252" y="324" text-anchor="middle">Multi-bot agentic loop</text>
+        <rect class="chip" x="424" y="300" width="324" height="38" rx="7"/>
+        <text class="cap" x="586" y="324" text-anchor="middle">Tool router + security gates</text>
+        <rect class="chip" x="88" y="346" width="328" height="38" rx="7"/>
+        <text class="cap" x="252" y="370" text-anchor="middle">Resilient edit engine</text>
+        <rect class="chip" x="424" y="346" width="324" height="38" rx="7"/>
+        <text class="cap" x="586" y="370" text-anchor="middle">Per-group memory &amp; recall</text>
+        <text class="s" x="418" y="406" text-anchor="middle" style="font-size:12.5px;fill:var(--dim)">role auto-routing · sub-agents · runs serialized + human-interruptible · auto-compact</text>
+
+        <!-- SECURITY PIPELINE bar -->
+        <rect class="b mag" x="68" y="430" width="700" height="56" rx="10"/>
+        <text class="t" x="88" y="453" style="fill:var(--magenta);font-size:15px">SECURITY PIPELINE</text>
+        <text class="tag" x="748" y="453" text-anchor="end" style="fill:var(--dim)">one interception point · fail-closed</text>
+        <text class="s" x="88" y="475" style="font-size:13px">HIL approval gate · 2-layer shell guard · secret redaction · sub-agent permission decay</text>
+
+        <!-- substrate inside group: storage + sandbox -->
+        <rect class="b dim" x="68" y="500" width="340" height="150" rx="11"/>
+        <text class="t" x="238" y="528" text-anchor="middle" style="fill:var(--fg);font-size:15px">PER-GROUP STORAGE</text>
+        <text class="s" x="238" y="556" text-anchor="middle" style="font-size:12.5px">private SQLite (WAL)</text>
+        <text class="s" x="238" y="578" text-anchor="middle" style="font-size:12.5px">Chroma vectors · workspace</text>
+        <text class="s" x="238" y="600" text-anchor="middle" style="font-size:12.5px">history · permission rules</text>
+        <rect class="b dim" x="428" y="500" width="340" height="150" rx="11"/>
+        <text class="t" x="598" y="528" text-anchor="middle" style="fill:var(--fg);font-size:15px">SANDBOXED EXECUTION</text>
+        <text class="s" x="598" y="556" text-anchor="middle" style="font-size:12.5px">per-group Docker container</text>
+        <text class="s" x="598" y="578" text-anchor="middle" style="font-size:12.5px">mount-isolated shell</text>
+        <text class="s" x="598" y="600" text-anchor="middle" style="font-size:12.5px">no sibling / host access</text>
+
+        <!-- ===== MCP COLLECTOR (shared, outside group) ===== -->
+        <text class="tag" x="1020" y="248" text-anchor="middle" style="fill:var(--dim)">SHARED · CROSS-GROUP</text>
+        <rect class="b amber" x="840" y="258" width="360" height="158" rx="11"/>
+        <text class="t" x="1020" y="290" text-anchor="middle" style="fill:var(--amber);font-size:17px">MCP COLLECTOR ×1</text>
+        <text class="s" x="1020" y="320" text-anchor="middle" style="font-size:12.5px">single owner of every MCP connection</text>
+        <text class="s" x="1020" y="346" text-anchor="middle" style="font-size:12.5px">OAuth · schema fan-out</text>
+        <text class="s" x="1020" y="372" text-anchor="middle" style="font-size:12.5px">trust boundary —</text>
+        <text class="s" x="1020" y="392" text-anchor="middle" style="font-size:12.5px;fill:var(--mod)">runs pre-authorized calls only</text>
+
+        <!-- ===== EXTERNAL ===== -->
+        <rect class="b dim" x="840" y="500" width="360" height="150" rx="11"/>
+        <text class="t" x="1020" y="540" text-anchor="middle" style="fill:var(--fg);font-size:15px">EXTERNAL</text>
+        <text class="s" x="1020" y="570" text-anchor="middle" style="font-size:12.5px">LLM APIs · DeepSeek/OpenAI/Claude/Ollama</text>
+        <text class="s" x="1020" y="596" text-anchor="middle" style="font-size:12.5px">MCP servers · Git / Jira</text>
+
+        <!-- ===== EDGES ===== -->
+        <path class="edge" d="M620,86 L620,116" marker-end="url(#arhl)"/>
+        <text class="elab" x="632" y="107">WSRPC / WebSocket</text>
+        <path class="edge flow" d="M390,188 C390,220 300,224 300,254" marker-end="url(#arhl)"/>
+        <text class="elab" x="120" y="216">IPC bus · runs the group</text>
+        <path class="edge flowc" d="M820,188 C820,222 1020,224 1020,254" marker-end="url(#arhl)"/>
+        <text class="elab" x="846" y="218">MCP_CALL / RESULT / SCHEMAS</text>
+        <path class="edge" d="M418,416 L418,428" marker-end="url(#arhl)"/>
+        <text class="note" x="430" y="424">every tool call ↓</text>
+        <path class="edge" d="M238,486 L238,496" marker-end="url(#arhl)"/>
+        <path class="edge" d="M598,486 L598,496" marker-end="url(#arhl)"/>
+        <path class="edge" d="M1020,416 L1020,496" marker-end="url(#arhl)"/>
+        <text class="note" x="1030" y="460">stdio / remote</text>
+        <path class="edge" d="M768,360 C806,360 1020,430 1020,496" marker-end="url(#arhl)"/>
+        <text class="note" x="784" y="430">LLM calls</text>
+      </svg>
+    </div>
+  </div>
+  <div class="foot">high level <b>·</b> 02 / 33</div>
+</section>
+
 <!-- ===== 02 · MENTAL MODEL ===== -->
 <section class="slide">
   <div class="wrap">
     <div class="kick reveal">the mental model</div>
     <h2 class="reveal">Think <span class="hl">Slack</span>, but some members can<br>code, run tools &amp; remember.</h2>
-    <p class="lead reveal">One group ≈ one project. Inside: 1–2 humans + a roster of role-bots; <code>@</code> or a plain message triggers them.</p>
-    <div class="diagram reveal" style="margin-top:.5rem">
-      <svg class="dg" viewBox="0 0 1180 360" role="img" aria-label="The group room" style="max-height:min(58vh,460px)">
-        <defs><marker id="ar11" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+    <p class="lead reveal">One group ≈ one project. Inside: 1–2 humans + a roster of role-bots. A bare <b>keyword</b> — or an <code>@mention</code> — wakes the right bot automatically.</p>
+    <div class="diagram reveal" style="margin-top:.4rem">
+      <svg class="dg" viewBox="0 0 1180 418" role="img" aria-label="The group room — keyword routing to role-bots" style="max-height:min(49vh,440px)">
+        <defs><marker id="armm" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
           <path d="M0,0 L7,3 L0,6 Z" fill="#6b7280"/></marker></defs>
-        <!-- group container -->
-        <rect class="b cyan" x="28" y="44" width="804" height="296" rx="14" style="fill:rgba(88,166,255,.04)"/>
-        <text class="t" x="52" y="78" style="fill:var(--cyan);font-size:15px">GROUP · one project / team</text>
-        <!-- humans -->
-        <rect class="b purple" x="66" y="108" width="150" height="60" rx="9"/>
-        <text class="t" x="141" y="144" text-anchor="middle" style="fill:var(--purple);font-size:14px">HUMAN</text>
-        <rect class="b purple" x="66" y="196" width="150" height="60" rx="9"/>
-        <text class="t" x="141" y="232" text-anchor="middle" style="fill:var(--purple);font-size:14px">HUMAN</text>
-        <text class="s" x="141" y="282" text-anchor="middle" style="font-size:11.5px">1–2 per group</text>
-        <!-- role bots -->
-        <rect class="b" x="324" y="100" width="138" height="54" rx="9"/><text class="t" x="393" y="132" text-anchor="middle" style="fill:var(--cyan);font-size:14px">BA</text>
-        <rect class="b" x="324" y="172" width="138" height="54" rx="9"/><text class="t" x="393" y="204" text-anchor="middle" style="fill:var(--cyan);font-size:14px">Dev</text>
-        <rect class="b" x="484" y="100" width="138" height="54" rx="9"/><text class="t" x="553" y="132" text-anchor="middle" style="fill:var(--cyan);font-size:14px">QA</text>
-        <rect class="b" x="484" y="172" width="138" height="54" rx="9"/><text class="t" x="553" y="204" text-anchor="middle" style="fill:var(--cyan);font-size:14px">PM</text>
-        <text class="s" x="473" y="258" text-anchor="middle" style="font-size:11.5px">role-bots · know the project best</text>
-        <!-- sub agents -->
-        <rect class="b amber" x="668" y="130" width="148" height="64" rx="9"/>
-        <text class="t" x="742" y="158" text-anchor="middle" style="fill:var(--amber);font-size:13.5px">sub-agents ×N</text>
-        <text class="s" x="742" y="180" text-anchor="middle" style="font-size:11.5px">attenuated perms</text>
-        <!-- edges -->
-        <line class="edge flow" x1="216" y1="134" x2="320" y2="124" marker-end="url(#ar11)"/>
-        <text class="elab" x="222" y="116" style="font-size:11.5px">@ / msg</text>
-        <line class="edge flow" x1="216" y1="224" x2="320" y2="200" marker-end="url(#ar11)"/>
-        <line class="edge" x1="462" y1="127" x2="484" y2="127" marker-end="url(#ar11)"/>
-        <text class="elab" x="455" y="150" text-anchor="middle" style="font-size:11px">collaborate</text>
-        <line class="edge" x1="622" y1="180" x2="664" y2="166" marker-end="url(#ar11)"/>
-        <text class="elab" x="628" y="214" style="font-size:11px">spawn</text>
+
+        <!-- ===== the group room ===== -->
+        <rect class="b cyan" x="16" y="12" width="1148" height="392" rx="16" style="fill:rgba(88,166,255,.035)"/>
+        <text class="t" x="40" y="42" style="fill:var(--cyan);font-size:14.5px">GROUP · one isolated project room</text>
+        <text class="s" x="1140" y="42" text-anchor="end" style="font-size:11.5px">bots persist here — shared memory + tools</text>
+
+        <!-- ===== human + message ===== -->
+        <rect class="b purple" x="40" y="64" width="150" height="56" rx="10"/>
+        <text class="t" x="115" y="89" text-anchor="middle" style="fill:var(--purple);font-size:13.5px">HUMAN ×1–2</text>
+        <text class="s" x="115" y="108" text-anchor="middle" style="font-size:10.5px">the real members</text>
+        <!-- message bubble -->
+        <path class="b" d="M40,150 h238 a10,10 0 0 1 10,10 v78 a10,10 0 0 1 -10,10 h-198 l-18,18 v-18 h-22 a10,10 0 0 1 -10,-10 v-78 a10,10 0 0 1 10,-10 z" style="fill:var(--panel2)"/>
+        <text class="s" x="58" y="180" style="font-size:12px">「登录有 <tspan style="fill:var(--green)">bug</tspan>，帮我测一下」</text>
+        <text class="s" x="58" y="206" style="font-size:12px"><tspan style="fill:var(--cyan)">@Dev</tspan> 把 /orders API 实现一下</text>
+        <text class="elab" x="58" y="232" style="font-size:10.5px">plain keyword · or @mention</text>
+        <line class="edge flow" x1="298" y1="195" x2="334" y2="195" marker-end="url(#armm)"/>
+
+        <!-- ===== role_router (dispatch brain) ===== -->
+        <rect class="b green" x="334" y="132" width="190" height="126" rx="12" style="fill:rgba(57,211,83,.05)"/>
+        <text class="t" x="429" y="162" text-anchor="middle" style="fill:var(--green);font-size:14px">role_router</text>
+        <text class="s" x="429" y="183" text-anchor="middle" style="font-size:10.5px">matches every message</text>
+        <rect x="350" y="194" width="158" height="24" rx="6" fill="#0d1117" stroke="rgba(57,211,83,.4)"/>
+        <text class="s" x="429" y="210" text-anchor="middle" style="font-size:10.5px">@name · @all</text>
+        <rect x="350" y="224" width="158" height="24" rx="6" fill="#0d1117" stroke="rgba(57,211,83,.4)"/>
+        <text class="s" x="429" y="240" text-anchor="middle" style="font-size:10.5px">keyword family → bot</text>
+
+        <!-- ===== role-bot cards (with real trigger keywords) ===== -->
+        <!-- BA -->
+        <rect class="b purple" x="600" y="58" width="424" height="92" rx="11"/>
+        <circle cx="624" cy="86" r="7" fill="var(--purple)"/>
+        <text class="t" x="642" y="91" style="fill:var(--purple);font-size:13px">BA · 需求分析师</text>
+        <rect x="642" y="108" width="74" height="24" rx="6" fill="#0d1117" stroke="rgba(188,140,255,.35)"/><text class="s" x="679" y="124" text-anchor="middle" style="font-size:10.5px">spec</text>
+        <rect x="724" y="108" width="86" height="24" rx="6" fill="#0d1117" stroke="rgba(188,140,255,.35)"/><text class="s" x="767" y="124" text-anchor="middle" style="font-size:10.5px">feature</text>
+        <rect x="818" y="108" width="74" height="24" rx="6" fill="#0d1117" stroke="rgba(188,140,255,.35)"/><text class="s" x="855" y="124" text-anchor="middle" style="font-size:10.5px">需求</text>
+        <rect x="900" y="108" width="74" height="24" rx="6" fill="#0d1117" stroke="rgba(188,140,255,.35)"/><text class="s" x="937" y="124" text-anchor="middle" style="font-size:10.5px">验收</text>
+        <!-- Dev -->
+        <rect class="b cyan" x="600" y="162" width="424" height="92" rx="11"/>
+        <circle cx="624" cy="190" r="7" fill="var(--cyan)"/>
+        <text class="t" x="642" y="195" style="fill:var(--cyan);font-size:13px">Dev · 开发工程师</text>
+        <rect x="642" y="212" width="74" height="24" rx="6" fill="#0d1117" stroke="rgba(88,166,255,.35)"/><text class="s" x="679" y="228" text-anchor="middle" style="font-size:10.5px">code</text>
+        <rect x="724" y="212" width="64" height="24" rx="6" fill="#0d1117" stroke="rgba(88,166,255,.35)"/><text class="s" x="756" y="228" text-anchor="middle" style="font-size:10.5px">api</text>
+        <rect x="796" y="212" width="86" height="24" rx="6" fill="#0d1117" stroke="rgba(88,166,255,.35)"/><text class="s" x="839" y="228" text-anchor="middle" style="font-size:10.5px">deploy</text>
+        <rect x="890" y="212" width="74" height="24" rx="6" fill="#0d1117" stroke="rgba(88,166,255,.35)"/><text class="s" x="927" y="228" text-anchor="middle" style="font-size:10.5px">重构</text>
+        <!-- QA -->
+        <rect class="b green" x="600" y="266" width="424" height="92" rx="11"/>
+        <circle cx="624" cy="294" r="7" fill="var(--green)"/>
+        <text class="t" x="642" y="299" style="fill:var(--green);font-size:13px">QA · 测试工程师</text>
+        <rect x="642" y="316" width="64" height="24" rx="6" fill="#0d1117" stroke="rgba(57,211,83,.35)"/><text class="s" x="674" y="332" text-anchor="middle" style="font-size:10.5px">test</text>
+        <rect x="714" y="316" width="64" height="24" rx="6" fill="#0d1117" stroke="rgba(57,211,83,.35)"/><text class="s" x="746" y="332" text-anchor="middle" style="font-size:10.5px">bug</text>
+        <rect x="786" y="316" width="74" height="24" rx="6" fill="#0d1117" stroke="rgba(57,211,83,.35)"/><text class="s" x="823" y="332" text-anchor="middle" style="font-size:10.5px">用例</text>
+        <rect x="868" y="316" width="74" height="24" rx="6" fill="#0d1117" stroke="rgba(57,211,83,.35)"/><text class="s" x="905" y="332" text-anchor="middle" style="font-size:10.5px">验证</text>
+
+        <!-- router → bot dispatch -->
+        <path class="edge flow" d="M524,168 C560,130 566,104 598,104" marker-end="url(#armm)"/><text class="elab" x="536" y="118" style="font-size:10px;fill:var(--purple)">ba</text>
+        <path class="edge flow" d="M524,195 C560,200 566,206 598,208" marker-end="url(#armm)"/><text class="elab" x="540" y="190" style="font-size:10px;fill:var(--cyan)">dev</text>
+        <path class="edge flow" d="M524,222 C560,270 566,308 598,312" marker-end="url(#armm)"/><text class="elab" x="536" y="300" style="font-size:10px;fill:var(--green)">qa</text>
+
+        <!-- ===== sub-agents ===== -->
+        <rect class="b amber" x="1048" y="148" width="100" height="120" rx="11" style="stroke-dasharray:5 4;fill:rgba(227,179,65,.05)"/>
+        <text class="t" x="1098" y="194" text-anchor="middle" style="fill:var(--amber);font-size:12px">sub-agents</text>
+        <text class="s" x="1098" y="214" text-anchor="middle" style="font-size:11px">×N</text>
+        <text class="s" x="1098" y="236" text-anchor="middle" style="font-size:10px">attenuated</text>
+        <text class="s" x="1098" y="250" text-anchor="middle" style="font-size:10px">perms</text>
+        <path class="edge" d="M1024,104 C1060,120 1066,140 1066,146" marker-end="url(#armm)"/>
+        <path class="edge" d="M1024,208 L1046,208" marker-end="url(#armm)"/>
+        <path class="edge" d="M1024,312 C1060,296 1066,276 1066,270" marker-end="url(#armm)"/>
+        <text class="elab" x="1040" y="138" style="font-size:10px;fill:var(--amber)">spawn</text>
+
+        <!-- bottom note -->
+        <text class="s" x="40" y="388" style="font-size:11.5px">Role-bots are the group's longest-standing members — they accumulate domain memory, run tools, and know the project best.</text>
       </svg>
     </div>
   </div>
@@ -356,63 +566,111 @@ svg.dg .hl-t{font-weight:800;font-size:15px} svg.dg .hl-s{fill:var(--dim);font-s
     <div class="kick reveal">capability panorama</div>
     <h2 class="reveal">Everything Nuke does — <span class="hl">one map</span>.</h2>
     <div class="diagram reveal" style="margin-top:.4rem">
-      <svg class="dg" viewBox="0 0 1180 560" role="img" aria-label="Capability panorama" style="max-height:min(60vh,520px)">
-        <defs><marker id="ar5" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
-          <path d="M0,0 L6,3 L0,6 Z" fill="#484f58"/></marker></defs>
-        <!-- spokes (drawn first, behind) -->
-        <line class="edge" x1="590" y1="308" x2="520" y2="284"/>
-        <line class="edge" x1="590" y1="308" x2="660" y2="284"/>
-        <line class="edge" x1="590" y1="308" x2="520" y2="324"/>
-        <line class="edge" x1="590" y1="308" x2="660" y2="324"/>
+      <svg class="dg" viewBox="0 0 1180 560" role="img" aria-label="Capability panorama — layered architecture" style="max-height:min(62vh,540px)">
+        <defs>
+          <marker id="arL5" markerWidth="9" markerHeight="9" refX="1" refY="3" orient="auto">
+            <path d="M6,0 L0,3 L6,6 Z" fill="var(--magenta)"/></marker>
+          <marker id="arD5" markerWidth="9" markerHeight="9" refX="3" refY="6" orient="auto">
+            <path d="M0,0 L6,0 L3,6 Z" fill="#484f58"/></marker>
+        </defs>
 
-        <!-- P1 Collaboration (TL) -->
-        <rect class="b cyan" x="24" y="64" width="500" height="220" rx="10"/>
-        <text class="t" x="44" y="98" style="fill:var(--cyan);font-size:16px">GROUP-NATIVE COLLABORATION</text>
-        <text class="s" x="44" y="138" style="font-size:13.5px">▹ Multi-human + role-bots</text>
-        <text class="s" x="284" y="138" style="font-size:13.5px">▹ Group isolation</text>
-        <text class="s" x="44" y="174" style="font-size:13.5px">▹ Role auto-routing</text>
-        <text class="s" x="284" y="174" style="font-size:13.5px">▹ Orchestration pipelines</text>
-        <text class="s" x="44" y="210" style="font-size:13.5px">▹ Serialized runs</text>
-        <text class="s" x="284" y="210" style="font-size:13.5px">▹ Human-interruptible</text>
-        <text class="s" x="44" y="246" style="font-size:13.5px">▹ Real-time tool/permission stream</text>
+        <!-- ===== left rail: top-down composition spine ===== -->
+        <line class="edge" x1="13" y1="30" x2="13" y2="520" marker-end="url(#arD5)"/>
+        <text class="s" x="13" y="285" transform="rotate(-90 13 285)" text-anchor="middle"
+              style="font-size:10.5px;letter-spacing:.18em">COMPOSES TOP-DOWN</text>
 
-        <!-- P2 Runtime (TR) -->
-        <rect class="b green" x="656" y="64" width="500" height="220" rx="10"/>
-        <text class="t" x="676" y="98" style="fill:var(--green);font-size:16px">SHARDED RUNTIME &amp; BUS</text>
-        <text class="s" x="676" y="138" style="font-size:13.5px">▹ 3-process model</text>
-        <text class="s" x="916" y="138" style="font-size:13.5px">▹ Supervisor bus</text>
-        <text class="s" x="676" y="174" style="font-size:13.5px">▹ Worker sharding + pin</text>
-        <text class="s" x="916" y="174" style="font-size:13.5px">▹ IPC (UDS / pipes)</text>
-        <text class="s" x="676" y="210" style="font-size:13.5px">▹ Single-owner MCP</text>
-        <text class="s" x="916" y="210" style="font-size:13.5px">▹ Lease handoff</text>
-        <text class="s" x="676" y="246" style="font-size:13.5px">▹ Group-DB ownership (QUERY / MUTATE)</text>
+        <!-- ===== SURFACE (context band) ===== -->
+        <rect class="b" x="34" y="22" width="884" height="62" rx="9" style="stroke:#30363d;stroke-dasharray:5 4"/>
+        <text class="t" x="56" y="48" style="fill:var(--dim);font-size:13.5px;letter-spacing:.06em">SURFACE · GROUP ROOM</text>
+        <text class="s" x="56" y="70" style="font-size:12.5px">1–2 humans + role-bots (BA · Dev · QA · PM) collaborate over WebSocket — the experience layer</text>
+        <rect x="838" y="38" width="62" height="28" rx="6" fill="#0d1117" stroke="#30363d"/>
+        <text class="s" x="869" y="56" text-anchor="middle" style="font-size:11.5px;fill:var(--dim)">WS</text>
 
-        <!-- center hub -->
-        <rect class="b" x="528" y="276" width="124" height="64" rx="10" style="stroke:var(--fg)"/>
-        <text class="t" x="590" y="304" text-anchor="middle" style="fill:var(--green);font-size:14px">NUKE AI</text>
-        <text class="s" x="590" y="324" text-anchor="middle" style="font-size:11px">the platform</text>
+        <!-- ===== ① COLLABORATION ===== -->
+        <rect class="b cyan" x="34" y="96" width="884" height="112" rx="9"/>
+        <rect x="34" y="96" width="74" height="112" rx="9" fill="rgba(88,166,255,.10)"/>
+        <line x1="108" y1="96" x2="108" y2="208" stroke="rgba(88,166,255,.4)" stroke-width="1.5"/>
+        <text x="71" y="162" text-anchor="middle" style="fill:var(--cyan);font-size:30px;font-weight:800">01</text>
+        <text class="t" x="128" y="134" style="fill:var(--cyan);font-size:16px">GROUP-NATIVE COLLABORATION</text>
+        <text class="s" x="128" y="157" style="font-size:12.5px">the room — one isolated group; humans &amp; role-bots share full project context</text>
+        <g>
+          <rect x="128" y="172" width="156" height="26" rx="6" fill="#0d1117" stroke="rgba(88,166,255,.4)"/>
+          <text class="s" x="141" y="189" style="font-size:11.5px">group isolation</text>
+          <rect x="296" y="172" width="174" height="26" rx="6" fill="#0d1117" stroke="rgba(88,166,255,.4)"/>
+          <text class="s" x="309" y="189" style="font-size:11.5px">role auto-routing</text>
+          <rect x="482" y="172" width="240" height="26" rx="6" fill="#0d1117" stroke="rgba(88,166,255,.4)"/>
+          <text class="s" x="495" y="189" style="font-size:11.5px">serialized · human-interruptible</text>
+        </g>
 
-        <!-- P3 Security (BL) -->
-        <rect class="b mag" x="24" y="320" width="500" height="220" rx="10"/>
-        <text class="t" x="44" y="354" style="fill:var(--magenta);font-size:16px">DEFENSE-IN-DEPTH SECURITY</text>
-        <text class="s" x="44" y="394" style="font-size:13.5px">▹ HIL approval gate</text>
-        <text class="s" x="284" y="394" style="font-size:13.5px">▹ 2-layer shell guard</text>
-        <text class="s" x="44" y="430" style="font-size:13.5px">▹ Secret redaction</text>
-        <text class="s" x="284" y="430" style="font-size:13.5px">▹ Sub-agent attenuation</text>
-        <text class="s" x="44" y="466" style="font-size:13.5px">▹ MCP trust boundary</text>
-        <text class="s" x="284" y="466" style="font-size:13.5px">▹ Mount-isolated sandbox</text>
-        <text class="s" x="44" y="502" style="font-size:13.5px">▹ Fail-closed by default</text>
+        <!-- ===== ② RUNTIME ===== -->
+        <rect class="b green" x="34" y="216" width="884" height="112" rx="9"/>
+        <rect x="34" y="216" width="74" height="112" rx="9" fill="rgba(57,211,83,.10)"/>
+        <line x1="108" y1="216" x2="108" y2="328" stroke="rgba(57,211,83,.4)" stroke-width="1.5"/>
+        <text x="71" y="282" text-anchor="middle" style="fill:var(--green);font-size:30px;font-weight:800">02</text>
+        <text class="t" x="128" y="254" style="fill:var(--green);font-size:16px">SHARDED RUNTIME &amp; BUS</text>
+        <text class="s" x="128" y="277" style="font-size:12.5px">3 processes share the AI loop; one supervisor bus keeps I/O off the hot path</text>
+        <g>
+          <rect x="128" y="292" width="148" height="26" rx="6" fill="#0d1117" stroke="rgba(57,211,83,.4)"/>
+          <text class="s" x="141" y="309" style="font-size:11.5px">supervisor bus</text>
+          <rect x="288" y="292" width="176" height="26" rx="6" fill="#0d1117" stroke="rgba(57,211,83,.4)"/>
+          <text class="s" x="301" y="309" style="font-size:11.5px">worker shard + pin</text>
+          <rect x="476" y="292" width="176" height="26" rx="6" fill="#0d1117" stroke="rgba(57,211,83,.4)"/>
+          <text class="s" x="489" y="309" style="font-size:11.5px">single-owner MCP</text>
+          <rect x="664" y="292" width="142" height="26" rx="6" fill="#0d1117" stroke="rgba(57,211,83,.4)"/>
+          <text class="s" x="677" y="309" style="font-size:11.5px">lease handoff</text>
+        </g>
 
-        <!-- P4 Agent Engine (BR) -->
-        <rect class="b amber" x="656" y="320" width="500" height="220" rx="10"/>
-        <text class="t" x="676" y="354" style="fill:var(--amber);font-size:16px">ENGINEERED AGENT ENGINE</text>
-        <text class="s" x="676" y="394" style="font-size:13.5px">▹ First-match tool router</text>
-        <text class="s" x="916" y="394" style="font-size:13.5px">▹ 9-tier edit engine</text>
-        <text class="s" x="676" y="430" style="font-size:13.5px">▹ Vector memory</text>
-        <text class="s" x="916" y="430" style="font-size:13.5px">▹ Salience extraction</text>
-        <text class="s" x="676" y="466" style="font-size:13.5px">▹ 5-strategy autocompact</text>
-        <text class="s" x="916" y="466" style="font-size:13.5px">▹ Code intelligence</text>
-        <text class="s" x="676" y="502" style="font-size:13.5px">▹ Multi-provider AI client</text>
+        <!-- ===== ④ AGENT ENGINE ===== -->
+        <rect class="b amber" x="34" y="336" width="884" height="112" rx="9"/>
+        <rect x="34" y="336" width="74" height="112" rx="9" fill="rgba(227,179,65,.10)"/>
+        <line x1="108" y1="336" x2="108" y2="448" stroke="rgba(227,179,65,.4)" stroke-width="1.5"/>
+        <text x="71" y="402" text-anchor="middle" style="fill:var(--amber);font-size:30px;font-weight:800">04</text>
+        <text class="t" x="128" y="374" style="fill:var(--amber);font-size:16px">ENGINEERED AGENT ENGINE</text>
+        <text class="s" x="128" y="397" style="font-size:12.5px">what makes bots effective — resilient edits, durable memory, bounded context, real code intel</text>
+        <g>
+          <rect x="128" y="412" width="176" height="26" rx="6" fill="#0d1117" stroke="rgba(227,179,65,.4)"/>
+          <text class="s" x="141" y="429" style="font-size:11.5px">9-tier edit ladder</text>
+          <rect x="316" y="412" width="216" height="26" rx="6" fill="#0d1117" stroke="rgba(227,179,65,.4)"/>
+          <text class="s" x="329" y="429" style="font-size:11.5px">vector memory + salience</text>
+          <rect x="544" y="412" width="200" height="26" rx="6" fill="#0d1117" stroke="rgba(227,179,65,.4)"/>
+          <text class="s" x="557" y="429" style="font-size:11.5px">5-strategy autocompact</text>
+          <rect x="756" y="412" width="150" height="26" rx="6" fill="#0d1117" stroke="rgba(227,179,65,.4)"/>
+          <text class="s" x="769" y="429" style="font-size:11.5px">code intelligence</text>
+        </g>
+
+        <!-- ===== FOUNDATION (context band) ===== -->
+        <rect class="b purple" x="34" y="456" width="884" height="72" rx="9" style="stroke-dasharray:5 4"/>
+        <text class="t" x="56" y="484" style="fill:var(--purple);font-size:13.5px;letter-spacing:.06em">FOUNDATION · PER-GROUP STATE</text>
+        <text class="s" x="56" y="508" style="font-size:12.5px">isolated SQLite (WAL) + Chroma vectors + workspace + sandbox mount — nothing crosses the group line</text>
+
+        <!-- ===== ③ SECURITY — vertical defense-in-depth band wrapping every layer ===== -->
+        <rect class="b mag" x="938" y="22" width="218" height="506" rx="9"/>
+        <rect x="938" y="22" width="218" height="46" rx="9" fill="rgba(255,123,114,.12)"/>
+        <text x="962" y="54" style="fill:var(--magenta);font-size:26px;font-weight:800">03</text>
+        <text class="t" x="1010" y="50" style="fill:var(--magenta);font-size:15px">DEFENSE-IN-DEPTH</text>
+        <text class="s" x="962" y="88" style="font-size:11.5px">wraps every layer —</text>
+        <text class="s" x="962" y="106" style="font-size:11.5px">one fail-closed gate per call</text>
+        <g>
+          <rect x="956" y="124" width="182" height="30" rx="6" fill="#0d1117" stroke="rgba(255,123,114,.4)"/>
+          <text class="s" x="970" y="143" style="font-size:11.5px">HIL approval gate</text>
+          <rect x="956" y="162" width="182" height="30" rx="6" fill="#0d1117" stroke="rgba(255,123,114,.4)"/>
+          <text class="s" x="970" y="181" style="font-size:11.5px">2-layer shell guard</text>
+          <rect x="956" y="200" width="182" height="30" rx="6" fill="#0d1117" stroke="rgba(255,123,114,.4)"/>
+          <text class="s" x="970" y="219" style="font-size:11.5px">secret redaction</text>
+          <rect x="956" y="238" width="182" height="30" rx="6" fill="#0d1117" stroke="rgba(255,123,114,.4)"/>
+          <text class="s" x="970" y="257" style="font-size:11.5px">sub-agent attenuation</text>
+          <rect x="956" y="276" width="182" height="30" rx="6" fill="#0d1117" stroke="rgba(255,123,114,.4)"/>
+          <text class="s" x="970" y="295" style="font-size:11.5px">MCP trust fence</text>
+          <rect x="956" y="314" width="182" height="30" rx="6" fill="#0d1117" stroke="rgba(255,123,114,.4)"/>
+          <text class="s" x="970" y="333" style="font-size:11.5px">mount-isolated sandbox</text>
+          <rect x="956" y="358" width="182" height="44" rx="6" fill="rgba(255,123,114,.07)" stroke="rgba(255,123,114,.4)"/>
+          <text class="s" x="1047" y="376" text-anchor="middle" style="font-size:11.5px;fill:var(--magenta)">fail-closed</text>
+          <text class="s" x="1047" y="392" text-anchor="middle" style="font-size:11.5px;fill:var(--magenta)">by default</text>
+        </g>
+        <!-- ticks: security wraps each capability layer -->
+        <line class="edge" x1="936" y1="152" x2="918" y2="152" style="stroke:var(--magenta);stroke-dasharray:4 4" marker-end="url(#arL5)"/>
+        <line class="edge" x1="936" y1="272" x2="918" y2="272" style="stroke:var(--magenta);stroke-dasharray:4 4" marker-end="url(#arL5)"/>
+        <line class="edge" x1="936" y1="392" x2="918" y2="392" style="stroke:var(--magenta);stroke-dasharray:4 4" marker-end="url(#arL5)"/>
       </svg>
     </div>
   </div>
@@ -449,6 +707,39 @@ svg.dg .hl-t{font-weight:800;font-size:15px} svg.dg .hl-s{fill:var(--dim);font-s
     </div>
   </div>
   <div class="foot">four pillars <b>·</b> 05 / 30</div>
+</section>
+
+<!-- ===== 03d · CODEBASE MAP (the real machine) ===== -->
+<section class="slide">
+  <div class="wrap">
+    <div class="kick reveal">the real machine · backend/</div>
+    <h2 class="reveal">Every layer is <span class="hl">real modules</span>.</h2>
+    <div class="cmap-pills reveal">
+      <i><b>3</b> process roles</i><i><b>4</b> workers (default)</i><i><b>9</b>-tier edit ladder</i>
+      <i><b>5</b> compact strategies</i><i><b>4</b> LLM providers</i><i>per-group SQLite + Chroma</i>
+    </div>
+    <div class="cmap reveal">
+      <div class="colL">
+        <div class="clayer green"><div class="ch">① Runtime &amp; Bus <span>process topology</span></div>
+          <div class="cchips"><code>runtime/supervisor.py</code><code>runtime/worker.py</code><code>runtime/mcp_collector.py</code><code>runtime/lifecycle.py</code><code>runtime/dispatch.py</code><code>bus/engine.py</code><code>ws_manager.py</code></div></div>
+        <div class="clayer cyan"><div class="ch">② Collaboration <span>group-native</span></div>
+          <div class="cchips"><code>core/bg.py</code><code>core/runner.py</code><code>core/role_router.py</code><code>core/workflow.py</code><code>scheduler/engine.py</code><code>skills/traits.py</code><code>skills/loader.py</code></div></div>
+        <div class="clayer mag"><div class="ch">③ Tools &amp; Security <span>defense in depth</span></div>
+          <div class="cchips"><code>executors/tool_router.py</code><code>executors/tool_executor.py</code><code>permissions/engine.py</code><code>permissions/patterns.py</code><code>plugins/workspace_tools.py</code><code>executors/redaction.py</code><code>plugins/container_sandbox.py</code></div></div>
+        <div class="clayer amber"><div class="ch">④ Agent Engine <span>the engine room</span></div>
+          <div class="cchips"><code>editing/replacers.py</code><code>editing/hashline.py</code><code>editing/recovery.py</code><code>executors/compact.py</code><code>ai/memory.py</code><code>code_intel/jedi_engine.py</code><code>code_intel/lsp_engine.py</code><code>ai/client.py</code></div></div>
+      </div>
+      <div class="colR">
+        <div class="clayer purple"><div class="ch">MCP <span>single-owner</span></div>
+          <div class="cchips"><code>providers/mcp_proxy.py</code><code>providers/mcp_client.py</code><code>executors/mcp_bridge.py</code><code>providers/mcp_auth_flows.py</code><code>providers/mcp_oauth_store.py</code></div></div>
+        <div class="clayer dim"><div class="ch">Data &amp; Workspace <span>per-group state</span></div>
+          <div class="cchips"><code>db/schema_split.py</code><code>db/writer.py</code><code>db/queries.py</code><code>workspace/layout.py</code><code>workspace/git_worktree.py</code><code>sessions/store.py</code></div></div>
+        <div class="clayer dim"><div class="ch">External <span>protocols &amp; APIs</span></div>
+          <div class="cchips"><code>DeepSeek</code><code>OpenAI</code><code>Anthropic</code><code>Ollama</code><code>MCP servers</code><code>integrations/git.py</code><code>integrations/jira.py</code></div></div>
+      </div>
+    </div>
+  </div>
+  <div class="foot">codebase map <b>·</b> 06 / 31</div>
 </section>
 
 <!-- ===== 04 · DIVIDER: RUNTIME TOPOLOGY ===== -->
@@ -599,30 +890,68 @@ svg.dg .hl-t{font-weight:800;font-size:15px} svg.dg .hl-s{fill:var(--dim);font-s
   <div class="wrap">
     <div class="kick reveal">role: worker · CELL-15</div>
     <h2 class="reveal">Groups are <span class="hl">balanced</span> across workers.</h2>
-    <p class="lead reveal">There are <code>NUKE_WORKERS</code> long-lived workers (default 4 ≈ host cores). Each active group is <b>pinned to exactly one</b> — many groups per worker, but a group only ever runs in a single worker.</p>
-    <div class="diagram reveal" style="margin-top:.5rem">
-      <svg class="dg" viewBox="0 0 1180 356" role="img" aria-label="Group to worker routing" style="max-height:min(56vh,440px)">
+    <p class="lead reveal"><code>NUKE_WORKERS</code> long-lived workers (default 4). Each active group is <b>pinned to exactly one</b> — one worker per group.</p>
+    <div class="diagram reveal" style="margin-top:.4rem">
+      <svg class="dg" viewBox="0 0 1180 430" role="img" aria-label="Group to worker routing" style="max-height:min(62vh,480px)">
         <defs><marker id="ar14" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
           <path d="M0,0 L7,3 L0,6 Z" fill="#6b7280"/></marker></defs>
-        <rect class="b cyan" x="30" y="146" width="170" height="64" rx="10"/>
-        <text class="t" x="115" y="174" text-anchor="middle" style="fill:var(--cyan);font-size:14px">new group</text>
-        <text class="s" x="115" y="196" text-anchor="middle" style="font-size:12px">group_id</text>
-        <rect class="b green" x="246" y="134" width="320" height="90" rx="10"/>
-        <text class="t" x="406" y="164" text-anchor="middle" style="fill:var(--green);font-size:15px">route(group_id)</text>
-        <text class="s" x="406" y="188" text-anchor="middle" style="font-size:12.5px">assigned_worker_id? (persisted)</text>
-        <text class="s" x="406" y="208" text-anchor="middle" style="font-size:12.5px;fill:var(--amber)">else → w{group_id % N}</text>
-        <line class="edge flow" x1="200" y1="178" x2="242" y2="178" marker-end="url(#ar14)"/>
-        <!-- workers -->
-        <rect class="b" x="650" y="20" width="500" height="62" rx="10"/><text class="t" x="678" y="50" style="fill:var(--fg);font-size:14px">w0</text><text class="s" x="730" y="50" style="font-size:13px">← g4 · g8 · g12</text>
-        <rect class="b" x="650" y="98" width="500" height="62" rx="10"/><text class="t" x="678" y="128" style="fill:var(--fg);font-size:14px">w1</text><text class="s" x="730" y="128" style="font-size:13px">← g1 · g5 · g9</text>
-        <rect class="b" x="650" y="176" width="500" height="62" rx="10"/><text class="t" x="678" y="206" style="fill:var(--fg);font-size:14px">w2</text><text class="s" x="730" y="206" style="font-size:13px">← g2 · g6 · g10</text>
-        <rect class="b" x="650" y="254" width="500" height="62" rx="10"/><text class="t" x="678" y="284" style="fill:var(--fg);font-size:14px">w3</text><text class="s" x="730" y="284" style="font-size:13px">← g3 · g7 · g11</text>
-        <line class="edge" x1="566" y1="168" x2="646" y2="51" marker-end="url(#ar14)"/>
-        <line class="edge" x1="566" y1="172" x2="646" y2="129" marker-end="url(#ar14)"/>
-        <line class="edge" x1="566" y1="184" x2="646" y2="207" marker-end="url(#ar14)"/>
-        <line class="edge" x1="566" y1="190" x2="646" y2="285" marker-end="url(#ar14)"/>
-        <text class="elab" x="115" y="296" style="font-size:12px;fill:var(--dim)">NUKE_WORKERS (default 4) · pinned, so one group → one worker</text>
-        <text class="elab" x="115" y="316" style="font-size:12px;fill:var(--dim)">old default 'w0' stacked everything — NULL now spreads them</text>
+
+        <!-- new group -->
+        <rect class="b cyan" x="22" y="178" width="200" height="76" rx="11"/>
+        <text class="t" x="122" y="212" text-anchor="middle" style="fill:var(--cyan);font-size:16px">new group</text>
+        <text class="s" x="122" y="236" text-anchor="middle" style="font-size:13px">group_id = N</text>
+        <line class="edge flow" x1="222" y1="216" x2="256" y2="216" marker-end="url(#ar14)"/>
+
+        <!-- route() -->
+        <rect class="b green" x="258" y="150" width="372" height="132" rx="13" style="fill:rgba(57,211,83,.05)"/>
+        <text class="t" x="444" y="190" text-anchor="middle" style="fill:var(--green);font-size:18px">route(group_id)</text>
+        <text class="s" x="444" y="218" text-anchor="middle" style="font-size:13.5px">assigned_worker_id? · persisted</text>
+        <rect x="296" y="234" width="296" height="34" rx="7" fill="#0d1117" stroke="rgba(227,179,65,.45)"/>
+        <text class="s" x="444" y="256" text-anchor="middle" style="font-size:13.5px;fill:var(--amber)">else → w{ group_id % N }</text>
+
+        <!-- route → workers -->
+        <line class="edge" x1="630" y1="196" x2="686" y2="64"  marker-end="url(#ar14)"/>
+        <line class="edge" x1="630" y1="206" x2="686" y2="168" marker-end="url(#ar14)"/>
+        <line class="edge" x1="630" y1="226" x2="686" y2="272" marker-end="url(#ar14)"/>
+        <line class="edge" x1="630" y1="236" x2="686" y2="376" marker-end="url(#ar14)"/>
+
+        <!-- workers (each row: label + pinned group chips) -->
+        <!-- w0 -->
+        <rect class="b" x="688" y="20" width="468" height="88" rx="11"/>
+        <text class="t" x="724" y="60" text-anchor="middle" style="fill:var(--fg);font-size:22px">w0</text>
+        <text class="s" x="724" y="80" text-anchor="middle" style="font-size:11px">worker</text>
+        <line x1="770" y1="34" x2="770" y2="94" stroke="var(--line)" stroke-width="1.4"/>
+        <rect x="788" y="40" width="86" height="48" rx="9" fill="rgba(88,166,255,.07)" stroke="rgba(88,166,255,.45)"/><text class="t" x="831" y="70" text-anchor="middle" style="fill:var(--cyan);font-size:16px">g4</text>
+        <rect x="888" y="40" width="86" height="48" rx="9" fill="rgba(88,166,255,.07)" stroke="rgba(88,166,255,.45)"/><text class="t" x="931" y="70" text-anchor="middle" style="fill:var(--cyan);font-size:16px">g8</text>
+        <rect x="988" y="40" width="86" height="48" rx="9" fill="rgba(88,166,255,.07)" stroke="rgba(88,166,255,.45)"/><text class="t" x="1031" y="70" text-anchor="middle" style="fill:var(--cyan);font-size:16px">g12</text>
+        <text class="s" x="1112" y="70" text-anchor="middle" style="font-size:16px;fill:var(--dim)">···</text>
+        <!-- w1 -->
+        <rect class="b" x="688" y="124" width="468" height="88" rx="11"/>
+        <text class="t" x="724" y="164" text-anchor="middle" style="fill:var(--fg);font-size:22px">w1</text>
+        <text class="s" x="724" y="184" text-anchor="middle" style="font-size:11px">worker</text>
+        <line x1="770" y1="138" x2="770" y2="198" stroke="var(--line)" stroke-width="1.4"/>
+        <rect x="788" y="144" width="86" height="48" rx="9" fill="rgba(88,166,255,.07)" stroke="rgba(88,166,255,.45)"/><text class="t" x="831" y="174" text-anchor="middle" style="fill:var(--cyan);font-size:16px">g1</text>
+        <rect x="888" y="144" width="86" height="48" rx="9" fill="rgba(88,166,255,.07)" stroke="rgba(88,166,255,.45)"/><text class="t" x="931" y="174" text-anchor="middle" style="fill:var(--cyan);font-size:16px">g5</text>
+        <rect x="988" y="144" width="86" height="48" rx="9" fill="rgba(88,166,255,.07)" stroke="rgba(88,166,255,.45)"/><text class="t" x="1031" y="174" text-anchor="middle" style="fill:var(--cyan);font-size:16px">g9</text>
+        <text class="s" x="1112" y="174" text-anchor="middle" style="font-size:16px;fill:var(--dim)">···</text>
+        <!-- w2 -->
+        <rect class="b" x="688" y="228" width="468" height="88" rx="11"/>
+        <text class="t" x="724" y="268" text-anchor="middle" style="fill:var(--fg);font-size:22px">w2</text>
+        <text class="s" x="724" y="288" text-anchor="middle" style="font-size:11px">worker</text>
+        <line x1="770" y1="242" x2="770" y2="302" stroke="var(--line)" stroke-width="1.4"/>
+        <rect x="788" y="248" width="86" height="48" rx="9" fill="rgba(88,166,255,.07)" stroke="rgba(88,166,255,.45)"/><text class="t" x="831" y="278" text-anchor="middle" style="fill:var(--cyan);font-size:16px">g2</text>
+        <rect x="888" y="248" width="86" height="48" rx="9" fill="rgba(88,166,255,.07)" stroke="rgba(88,166,255,.45)"/><text class="t" x="931" y="278" text-anchor="middle" style="fill:var(--cyan);font-size:16px">g6</text>
+        <rect x="988" y="248" width="86" height="48" rx="9" fill="rgba(88,166,255,.07)" stroke="rgba(88,166,255,.45)"/><text class="t" x="1031" y="278" text-anchor="middle" style="fill:var(--cyan);font-size:16px">g10</text>
+        <text class="s" x="1112" y="278" text-anchor="middle" style="font-size:16px;fill:var(--dim)">···</text>
+        <!-- w3 -->
+        <rect class="b" x="688" y="332" width="468" height="88" rx="11"/>
+        <text class="t" x="724" y="372" text-anchor="middle" style="fill:var(--fg);font-size:22px">w3</text>
+        <text class="s" x="724" y="392" text-anchor="middle" style="font-size:11px">worker</text>
+        <line x1="770" y1="346" x2="770" y2="406" stroke="var(--line)" stroke-width="1.4"/>
+        <rect x="788" y="352" width="86" height="48" rx="9" fill="rgba(88,166,255,.07)" stroke="rgba(88,166,255,.45)"/><text class="t" x="831" y="382" text-anchor="middle" style="fill:var(--cyan);font-size:16px">g3</text>
+        <rect x="888" y="352" width="86" height="48" rx="9" fill="rgba(88,166,255,.07)" stroke="rgba(88,166,255,.45)"/><text class="t" x="931" y="382" text-anchor="middle" style="fill:var(--cyan);font-size:16px">g7</text>
+        <rect x="988" y="352" width="86" height="48" rx="9" fill="rgba(88,166,255,.07)" stroke="rgba(88,166,255,.45)"/><text class="t" x="1031" y="382" text-anchor="middle" style="fill:var(--cyan);font-size:16px">g11</text>
+        <text class="s" x="1112" y="382" text-anchor="middle" style="font-size:16px;fill:var(--dim)">···</text>
       </svg>
     </div>
   </div>
@@ -738,13 +1067,68 @@ svg.dg .hl-t{font-weight:800;font-size:15px} svg.dg .hl-s{fill:var(--dim);font-s
   <div class="wrap">
     <div class="kick reveal">executors/tool_router.py</div>
     <h2 class="reveal">ToolRouter is <span class="hl">first-match</span>.</h2>
-    <p class="lead reveal">Every tool call funnels through one path so the global before/after hooks — the <b>single</b> interception point — always fire.</p>
-    <ul class="blist reveal" style="margin-top:1.1rem">
-      <li><b>builtin / skill / shell</b> <span class="d">→ stay on <code>tool_executor.execute()</code> so permission + shell-guard + redaction necessarily run.</span></li>
-      <li><b>mcp:*</b> <span class="d">→ not in the registry; route to <code>McpProxyProvider</code> → bus → collector.</span></li>
-      <li><b>ShellToolProvider left unregistered</b> <span class="d">— registering it would let run_shell match a hook-bypassing path (a fail-open regression).</span></li>
-    </ul>
-    <p class="lead reveal" style="margin-top:.9rem"><span class="d">The router does <i>not</i> add a second hook layer and does <i>not</i> replace tool_executor.</span></p>
+    <p class="lead reveal">The catch-all is registered <b>last</b>, so every builtin / skill / shell call lands on <b>one</b> hook point — where permission, shell-guard and redaction fire.</p>
+    <div class="diagram reveal" style="margin-top:.4rem">
+      <svg class="dg" viewBox="0 0 1180 466" role="img" aria-label="ToolRouter first-match routing" style="max-height:min(60vh,500px)">
+        <defs><marker id="artr" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+          <path d="M0,0 L7,3 L0,6 Z" fill="#6b7280"/></marker></defs>
+
+        <!-- entry -->
+        <rect class="b" x="20" y="196" width="112" height="56" rx="9"/>
+        <text class="t" x="76" y="221" text-anchor="middle" style="font-size:13px">tool call</text>
+        <text class="s" x="76" y="240" text-anchor="middle" style="font-size:11px">name + args</text>
+
+        <!-- router -->
+        <rect class="b green" x="156" y="184" width="176" height="80" rx="10"/>
+        <text class="t" x="244" y="214" text-anchor="middle" style="fill:var(--green);font-size:14px">ToolRouter</text>
+        <text class="s" x="244" y="236" text-anchor="middle" style="font-size:11.5px">first-match ·</text>
+        <text class="s" x="244" y="252" text-anchor="middle" style="font-size:11.5px">registration order</text>
+        <line class="edge" x1="132" y1="224" x2="154" y2="224" marker-end="url(#artr)"/>
+
+        <!-- ===== LANE 1 · MCP (checked first, bypasses hooks) ===== -->
+        <path class="edge" d="M332,200 C360,170 366,96 392,86" marker-end="url(#artr)"/>
+        <text class="elab" x="346" y="150" style="font-size:10.5px;fill:var(--cyan)">1st</text>
+        <rect class="b cyan" x="392" y="50" width="214" height="72" rx="10"/>
+        <text class="t" x="499" y="80" text-anchor="middle" style="fill:var(--cyan);font-size:13.5px">McpProxyProvider</text>
+        <text class="s" x="499" y="102" text-anchor="middle" style="font-size:11px">matches mcp:: · checked first</text>
+        <line class="edge" x1="606" y1="86" x2="640" y2="86" marker-end="url(#artr)"/>
+        <rect class="b" x="640" y="50" width="118" height="72" rx="10"/>
+        <text class="t" x="699" y="82" text-anchor="middle" style="font-size:12.5px">supervisor</text>
+        <text class="s" x="699" y="101" text-anchor="middle" style="font-size:11px">bus</text>
+        <line class="edge" x1="758" y1="86" x2="792" y2="86" marker-end="url(#artr)"/>
+        <rect class="b green" x="792" y="50" width="186" height="72" rx="10"/>
+        <text class="t" x="885" y="80" text-anchor="middle" style="fill:var(--green);font-size:13px">MCP Collector</text>
+        <text class="s" x="885" y="102" text-anchor="middle" style="font-size:11px">pre-authorized exec</text>
+        <text class="elab" x="392" y="143" style="font-size:11px;fill:var(--magenta)">▹ bypasses keyword hooks — MCP output is untrusted, inspected at the HIL gate</text>
+
+        <!-- ===== LANE 2 · Builtin (catch-all LAST → the single hook point) ===== -->
+        <path class="edge flow" d="M332,248 C360,286 366,300 392,304" marker-end="url(#artr)"/>
+        <text class="elab" x="346" y="300" style="font-size:10.5px;fill:var(--amber)">last</text>
+        <rect class="b amber" x="392" y="276" width="214" height="72" rx="10"/>
+        <text class="t" x="499" y="306" text-anchor="middle" style="fill:var(--amber);font-size:13.5px">BuiltinToolProvider</text>
+        <text class="s" x="499" y="328" text-anchor="middle" style="font-size:11px">builtin · skill · shell — catch-all</text>
+        <line class="edge flow" x1="606" y1="312" x2="640" y2="312" marker-end="url(#artr)"/>
+
+        <!-- the single interception point -->
+        <rect class="b" x="640" y="232" width="338" height="186" rx="11" style="stroke:var(--fg)"/>
+        <text class="t" x="660" y="262" style="font-size:13.5px">tool_executor.execute()</text>
+        <rect x="836" y="246" width="126" height="22" rx="5" fill="rgba(57,211,83,.12)" stroke="rgba(57,211,83,.5)"/>
+        <text class="s" x="899" y="261" text-anchor="middle" style="font-size:10px;fill:var(--green)">single hook point</text>
+        <rect class="b mag" x="660" y="282" width="300" height="36" rx="7" style="fill:rgba(255,123,114,.06)"/>
+        <text class="s" x="676" y="304" style="font-size:11.5px;fill:var(--magenta)">① before-hook · permission gate + shell guard</text>
+        <rect class="b" x="660" y="326" width="300" height="30" rx="7"/>
+        <text class="s" x="676" y="345" style="font-size:11.5px">run command</text>
+        <rect class="b cyan" x="660" y="364" width="300" height="36" rx="7" style="fill:rgba(88,166,255,.06)"/>
+        <text class="s" x="676" y="386" style="font-size:11.5px;fill:var(--cyan)">② after-hook · secret redaction</text>
+
+        <!-- design decision: ShellToolProvider stays out -->
+        <rect class="b mag" x="20" y="330" width="300" height="92" rx="10" style="stroke-dasharray:5 4;fill:rgba(255,123,114,.04)"/>
+        <text class="t" x="36" y="358" style="fill:var(--magenta);font-size:12.5px">✗ ShellToolProvider</text>
+        <text class="s" x="36" y="380" style="font-size:11px">deliberately NOT registered —</text>
+        <text class="s" x="36" y="398" style="font-size:11px">a separate path would let run_shell</text>
+        <text class="s" x="36" y="414" style="font-size:11px">skip the hooks (fail-open).</text>
+      </svg>
+    </div>
   </div>
   <div class="foot">tool router <b>·</b> 12 / 27</div>
 </section>
@@ -1407,6 +1791,8 @@ class SlidePresentation{
     this.dotsBox=document.querySelector('.nav-dots');
     this.setupObserver();
     this.setupDots();
+    this.setupSidebar();
+    this.setupToc();
     this.setupKeys();
     this.setupWheel();
     this.setupTouch();
@@ -1444,10 +1830,50 @@ class SlidePresentation{
     });
     this.dots=[...this.dotsBox.children];
   }
+  setupSidebar(){
+    // Build a clickable, section-grouped table of contents.
+    // Part-divider slides become clickable section headers; every other
+    // slide becomes an item under the current section. Labels come from the
+    // footer (before the "·") so they stay in sync with the slides.
+    const list=document.querySelector('.toc-list'); list.innerHTML='';
+    this.tocItems=new Array(this.slides.length).fill(null);
+    const label=s=>(s.querySelector('.foot')?.textContent||'').split('·')[0].trim();
+    const title=s=>{const h=s.querySelector('h2');return h?h.textContent.trim():label(s);};
+    let opened=false;
+    this.slides.forEach((s,i)=>{
+      if(s.classList.contains('divider')){
+        const sec=document.createElement('div');
+        sec.className='toc-sec nav'; sec.textContent=title(s);
+        sec.addEventListener('click',()=>this.go(i));
+        list.appendChild(sec); this.tocItems[i]=sec; opened=true; return;
+      }
+      if(!opened){const o=document.createElement('div');o.className='toc-sec';o.textContent='Overview';list.appendChild(o);opened=true;}
+      const it=document.createElement('div'); it.className='toc-item';
+      it.innerHTML='<span class="ix">'+String(i+1).padStart(2,'0')+'</span><span class="tx">'+label(s)+'</span>';
+      it.addEventListener('click',()=>{this.go(i); if(window.innerWidth<900)this.setToc(false);});
+      list.appendChild(it); this.tocItems[i]=it;
+    });
+  }
+  setupToc(){
+    this.toc=document.querySelector('.toc');
+    this.tocBtn=document.querySelector('.toc-toggle');
+    this.tocBtn.addEventListener('click',()=>this.setToc(!this.toc.classList.contains('open')));
+    this.setToc(false);
+  }
+  setToc(open){
+    this.toc.classList.toggle('open',open);
+    document.body.classList.toggle('toc-open',open);
+    this.tocBtn.innerHTML=open?'✕':'☰';
+  }
   updateChrome(){
     const pct=this.slides.length>1?(this.current/(this.slides.length-1))*100:100;
     this.progress.style.width=pct+'%';
     this.dots.forEach((d,i)=>d.classList.toggle('active',i===this.current));
+    if(this.tocItems){
+      this.tocItems.forEach((it,i)=>{if(it)it.classList.toggle('active',i===this.current);});
+      const act=this.tocItems[this.current];
+      if(act&&act.scrollIntoView)act.scrollIntoView({block:'nearest'});
+    }
   }
   go(i){
     i=Math.max(0,Math.min(this.slides.length-1,i));
@@ -1459,6 +1885,7 @@ class SlidePresentation{
       else if(['ArrowUp','ArrowLeft','PageUp'].includes(e.key)){e.preventDefault();this.go(this.current-1);}
       else if(e.key==='Home'){e.preventDefault();this.go(0);}
       else if(e.key==='End'){e.preventDefault();this.go(this.slides.length-1);}
+      else if(e.key==='t'||e.key==='T'){e.preventDefault();this.setToc(!this.toc.classList.contains('open'));}
     });
   }
   setupWheel(){
