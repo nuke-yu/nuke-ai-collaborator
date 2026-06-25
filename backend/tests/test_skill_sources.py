@@ -44,5 +44,25 @@ class TestGroupSource(unittest.TestCase):
         self.assertEqual(src.signature(), ())
 
 
+class TestRoleSource(unittest.TestCase):
+    def test_enumerate_role_skills_global_for_now(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            rdir = Path(tmp) / "roles" / "dev" / "skills"
+            rdir.mkdir(parents=True)
+            (rdir / "code-review.md").write_text(
+                "---\nname: code-review\ndescription: x\n---\nb", encoding="utf-8")
+            with patch("skills.sources.role.ROLES_ROOT", Path(tmp) / "roles"):
+                from skills.sources.role import RoleSource
+                from skills.sources.base import ScanCtx
+                src = RoleSource(ScanCtx(bot_id=1, group_id=3, role="dev"))
+                self.assertEqual([s["name"] for s in src.enumerate()], ["code-review"])
+
+    def test_no_role_is_empty(self):
+        from skills.sources.role import RoleSource
+        from skills.sources.base import ScanCtx
+        src = RoleSource(ScanCtx(bot_id=1, group_id=3, role=None))
+        self.assertEqual(src.enumerate(), [])
+
+
 if __name__ == "__main__":
     unittest.main()
