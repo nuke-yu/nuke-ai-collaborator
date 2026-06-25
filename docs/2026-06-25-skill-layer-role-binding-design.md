@@ -21,7 +21,9 @@
 3. 角色与技能恒为**文件**（不进 DB），与开源 agent 通行做法一致；UI 作为文件管理器对其增删改。
 4. 提供"逐层整理"的群内 UI，看清并维护本群四层技能。
 5. 默认模板**中英文两套**，建群时按群语言拷对应语种。
-6. 为将来"从 GitHub 导入技能（如 Claude skill）"预留扩展，但本 spec 不实现。
+6. **技能加载代码按层拆开**（单一职责、接口清晰、可独立测试），未来改某一层 impact 不蔓延。
+7. **本次所有改动均支持中英文**（UI 文案、角色显示名、后端面向用户消息、技能正文）。
+8. 为将来"从 GitHub 导入技能（如 Claude skill）"预留扩展，但本 spec 不实现。
 
 ## 非目标（YAGNI / 留作后续 spec）
 
@@ -145,16 +147,54 @@ discovery **不读** `role.yaml`（它只列 skills），元数据仅由 roles A
 - 自由输入框 → 下拉，数据来自 `GET /api/groups/{id}/roles`。
 - 选中后带出该角色默认 system_prompt（快照，可改）。`add_member` 后端校验 role ∈ 群角色。
 
-## `discovery.py` 改动点（外科手术式，四层合并/缓存/注入逻辑不动）
+## 国际化（中英文）— 横切要求
 
-1. **L3 路径切群内**（`_compute_skills_all`，约 discovery.py:281-283）：
-   `_scan_dir_sync(ROLES_ROOT / role / "skills", "role")`
-   → `_scan_dir_sync(layout.group_roles_dir(group_id) / role / "skills", "role")`；`group_id is None` 时跳过 L3。
-2. **签名同步改**（`_scan_signature`，约 discovery.py:43-48）：L3 目录换为同一群内路径，保证缓存失效追踪正确文件。
-3. **`constants.py` / `layout.py`**：
-   - `ROLES_ROOT` 不再被 discovery 引用；改指 `TEMPLATES_ROOT = WORKSPACE_ROOT/"templates"`（仅迁移与建群拷贝用）。
-   - `layout.py` 加 `group_roles_dir(gid)` → `group_dir(gid)/"roles"`、`templates_roles_dir(lang)` → `_root()/"templates"/lang/"roles"`。
-4. L1 池 / L2 / L4 路径不动。
+> 设计目标新增：**本次所有改动都必须中英文双语**，不止模板数据。
+
+沿用现有 i18n 设施（`frontend/src/i18n/keys.js` + `locales/{zh,en}.json`、后端 `get_group_language` 与 `prompt_builder` 既有按群语言分支）。具体落点：
+
+- **前端 UI 文案**：三条 UI 链路（全局管理台、群内整理台、建 bot 下拉）新增的所有字符串走 i18n key，`zh.json` / `en.json` 同步补齐；不得硬编码中文/英文。
+- **角色显示名**：模板与群角色的 `display_name` 本身按语言取自对应语种模板套（`templates/zh/...` vs `templates/en/...`）；UI 下拉直接展示该群语言下的 display_name。
+- **后端面向用户的消息**：`add_member` 校验失败等 422 文案、群内整理台 API 的提示，按群语言返回（复用既有本地化模式），不写死单语。
+- **技能正文**：`zh` / `en` 两套模板各自携带对应语种 SKILL 正文（见默认目录章节，英文正文为独立产出任务）。
+- **i18n 测试**：新增 key 在 `zh.json` / `en.json` 中均存在、无悬空 key（可加一条键覆盖一致性的单测）。
+
+## 技能加载代码分层（SkillSource 架构）
+
+> 设计目标新增：**加载代码本身按层拆开，让未来改某一层时 impact 不蔓延。**
+
+现状 `backend/skills/discovery.py`（356 行）把"每层从哪扫"、"签名缓存"、"跨层合并/保护/覆盖"、"注入策略计算"、"draft 诊断"全揉在一处——改任意一层的来源（正如本次改 L3）都要在多个函数里同时动手，且容易波及合并/缓存。借本次重做把它拆成单一职责、接口清晰、可独立测试的单元。
+
+### 目标结构 `backend/skills/sources/`
+
+```
+skills/
+├── sources/
+│   ├── base.py        # SkillSource 协议：enumerate(ctx) -> list[SkillEntry]; signature(ctx) -> tuple
+│   ├── system.py      # SystemPoolSource  ← workspaces/system/skills/（L1 跨群池）
+│   ├── group.py       # GroupSource       ← group_<id>/shared/skills/（L2）
+│   ├── role.py        # RoleSource        ← group_<id>/roles/<role>/skills/（L3，本次新来源）
+│   └── learned.py     # LearnedSource     ← bot_ws/skills/{learned/active, manual, ..., learned/draft}（L4）
+├── composer.py        # 按 _LAYER_ORDER 串接各 source，执行 A1 保护 / A3 深合并 / A5 覆盖诊断 / injected 计算
+├── cache.py           # 签名缓存装饰器：聚合各 source.signature() 做指纹，命中即免扫
+└── discovery.py       # 瘦门面：list_skills_all() 组装 sources → composer → cache，保持对外签名不变
+```
+
+**契约（每个单元能独立回答"做什么/怎么用/依赖谁"）**：
+- `SkillSource`：只懂**自己这一层**怎么枚举技能、怎么算自己的签名。改"role 技能从哪来" = 只动 `role.py`，不碰合并/缓存/其它层 —— 这就是 impact 隔离。
+- `composer`：只懂**跨层优先级**（system 保护 first-wins、后层深合并覆盖、override 诊断、injected=full/metadata/none），完全不知道技能来自哪个目录。
+- `cache`：只懂**指纹与失效**，对 source/composer 透明。
+- `discovery.py` 保留为门面，对外 API（`list_skills_all` / `list_skills` / `invalidate_skills_cache` 等）**签名不变**，调用方零改动。
+
+### 本次落到各单元的具体改动
+- **`RoleSource`（新）**：L3 来源即 `layout.group_roles_dir(group_id)/<role>/skills/`；`group_id is None` 时 `enumerate` 返回空。原 `_compute_skills_all` 里的 L3 分支迁入此处。
+- **签名**：原 `_scan_signature` 拆解到各 source 的 `signature()`，`cache` 聚合；L3 指纹自然跟随群内路径，杜绝"改了路径忘了改签名"。
+- **`constants.py` / `layout.py`**：`ROLES_ROOT` 不再被加载链引用；改指 `TEMPLATES_ROOT = WORKSPACE_ROOT/"templates"`（仅迁移与建群拷贝用）。`layout.py` 加 `group_roles_dir(gid)` → `group_dir(gid)/"roles"`、`templates_roles_dir(lang)` → `_root()/"templates"/lang/"roles"`。
+- **L1 池 / L2 / L4**：来源逻辑原样迁入各自 source 文件，行为不变。
+
+### 重构纪律
+- **行为等价优先**：先在不改外部行为的前提下把 discovery.py 拆成上述结构（现有 `test_skills_*` 全绿），**再**叠加 L3 群内化这一行为变更。两步分开提交，便于回滚与定位。
+- 拆分严格圈定在 skill 加载链；不顺手重构无关模块。
 
 ## 迁移
 
@@ -184,6 +224,8 @@ discovery **不读** `role.yaml`（它只列 skills），元数据仅由 roles A
 - 建群拷贝测试：新群按语言拿到对应模板套、幂等、System 池不拷。
 - 迁移脚本测试：dry-run 无副作用；apply 后老群有角色、不命中 bot 自动建空角色、`roles.legacy` 改名到位。
 - roles / library / shared-skills 新 API 的 CRUD 单元测试。
+- **SkillSource 分层**：每个 source 的 `enumerate` / `signature` 独立单测；composer 的保护/合并/覆盖/injected 在 mock source 上单测（脱离磁盘）；门面 `discovery.py` 行为等价回归（拆分前后 `test_skills_*` 全绿）。
+- **i18n 一致性**：新增 i18n key 在 `zh.json` / `en.json` 同时存在、无悬空 key。
 
 ## 待评审决策（已确认）
 
@@ -192,6 +234,8 @@ discovery **不读** `role.yaml`（它只列 skills），元数据仅由 roles A
 - [x] System=跨群池；Group/Role 群内隔离；全局模板建群时拷贝、之后群内自治。
 - [x] 默认目录 = 现有 10 中文角色 + Architecture + PM；丢弃 developer/qa/pm。
 - [x] 中英文两套模板，建群按群语言拷。
+- [x] 技能加载代码按 SkillSource 分层（来源/合并/缓存/门面单一职责），行为等价拆分先行、L3 变更后叠。
+- [x] 本次所有改动支持中英文（UI / 显示名 / 后端消息 / 技能正文）。
 - [ ] `Architecture` / `PM` 默认技能组合（本 spec 暂定值，待 review 确认）。
 
 ## 影响与风险
@@ -200,3 +244,5 @@ discovery **不读** `role.yaml`（它只列 skills），元数据仅由 roles A
 - **签名缓存**：L3 路径变更须同步 `_scan_signature`，否则缓存追踪错文件、改动不生效（已列为改动点 2）。
 - **部署纪律**：迁移须停服务 + 备份后 `--apply`，与既有 `migrate_workspace_layout` 同等对待。
 - **英文技能正文撰写**：体量不小，作为实现计划中的独立任务，可并行或分批。
+- **重构与行为变更混提的风险**：SkillSource 拆分必须"行为等价先行、L3 群内化后叠"，两步分离提交；若混在一起，回归失败时难以定位是拆分引入还是 L3 变更引入。
+- **i18n 遗漏**：新 UI/消息若漏挂 i18n key 会退化成单语；以"key 一致性单测"+ review 清单兜底。
