@@ -31,5 +31,26 @@ class TestSkillsGroupPath(unittest.TestCase):
                 self.assertTrue(any("foo.md" in str(part) for part in sig))
 
 
+    def test_l3_role_resolves_under_group_and_isolated(self):
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        from skills.sources.role import RoleSource
+        from skills.sources.base import ScanCtx
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("skills.constants.WORKSPACE_ROOT", Path(tmp)):
+                from workspace import layout
+                rdir = layout.group_roles_dir(3) / "dev" / "skills"
+                rdir.mkdir(parents=True)
+                (rdir / "code-review.md").write_text(
+                    "---\nname: code-review\ndescription: x\n---\nb", encoding="utf-8")
+                # group 3 sees it
+                src3 = RoleSource(ScanCtx(bot_id=7, group_id=3, role="dev"))
+                self.assertEqual([s["name"] for s in src3.enumerate()], ["code-review"])
+                # group 4 (no such dir) sees nothing — cross-group isolation
+                src4 = RoleSource(ScanCtx(bot_id=7, group_id=4, role="dev"))
+                self.assertEqual(src4.enumerate(), [])
+
+
 if __name__ == "__main__":
     unittest.main()

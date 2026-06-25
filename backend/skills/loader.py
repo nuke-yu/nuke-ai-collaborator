@@ -5,6 +5,7 @@ from . import constants as C
 from .metadata import skill_path, parse_skill_meta
 from .discovery import list_skills, list_skills_all
 from .processor import process_skill_content
+from workspace import layout
 
 # Budget for always-on (常驻) skill bodies injected into every system prompt.
 # Without a cap, many/large always-skills silently balloon the prompt.
@@ -23,15 +24,15 @@ def _skills_dir_for_layer(layer: str, bot_id: int,
     """Return the skills directory Path for a given layer.
 
     Reads ``skills.constants`` live so test-time monkeypatching of the canonical
-    constants is honored. L3 role still uses the GLOBAL ROLES_ROOT (Task 12
-    flips it to group-internal).
+    constants is honored. L3 role resolves under group_<id>/roles/<role>/skills
+    (group-internal, cross-group isolated).
     """
     if layer == "system":
         return C.SYSTEM_SKILLS_ROOT
     if layer == "group" and group_id:
         return C.WORKSPACE_ROOT / f"group_{group_id}" / "shared" / "skills"
-    if layer == "role" and role:
-        return C.ROLES_ROOT / role / "skills"
+    if layer == "role" and role and group_id:
+        return layout.group_roles_dir(group_id) / role / "skills"
     if layer == "learned":
         return C.bot_ws(bot_id, group_id) / "skills" / "learned" / "active"
     return C.bot_ws(bot_id, group_id) / "skills"

@@ -44,13 +44,14 @@ class TestGroupSource(unittest.TestCase):
 
 
 class TestRoleSource(unittest.TestCase):
-    def test_enumerate_role_skills_global_for_now(self):
+    def test_enumerate_role_skills_under_group(self):
         with tempfile.TemporaryDirectory() as tmp:
-            rdir = Path(tmp) / "roles" / "dev" / "skills"
-            rdir.mkdir(parents=True)
-            (rdir / "code-review.md").write_text(
-                "---\nname: code-review\ndescription: x\n---\nb", encoding="utf-8")
-            with patch("skills.constants.ROLES_ROOT", Path(tmp) / "roles"):
+            with patch("skills.constants.WORKSPACE_ROOT", Path(tmp)):
+                from workspace import layout
+                rdir = layout.group_roles_dir(3) / "dev" / "skills"
+                rdir.mkdir(parents=True)
+                (rdir / "code-review.md").write_text(
+                    "---\nname: code-review\ndescription: x\n---\nb", encoding="utf-8")
                 from skills.sources.role import RoleSource
                 from skills.sources.base import ScanCtx
                 src = RoleSource(ScanCtx(bot_id=1, group_id=3, role="dev"))
