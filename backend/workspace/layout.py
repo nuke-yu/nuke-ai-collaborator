@@ -39,6 +39,14 @@ def group_runs_dir(gid: int) -> Path:
     return group_dir(gid) / "runs"
 
 
+def group_roles_dir(gid: int) -> Path:
+    return group_dir(gid) / "roles"
+
+
+def templates_roles_dir(lang: str) -> Path:
+    return _root() / "templates" / lang / "roles"
+
+
 def bot_dir(gid: int | None, bot_id: int) -> Path:
     """bot 私有区路径。
 

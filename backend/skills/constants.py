@@ -4,7 +4,8 @@ import os
 WORKSPACE_ROOT = Path(os.environ.get("NUKE_WORKSPACE_ROOT") or (Path(__file__).parent.parent / "workspaces"))
 SYSTEM_SKILLS_ROOT = WORKSPACE_ROOT / "system" / "skills"
 TRAITS_ROOT = WORKSPACE_ROOT / "system" / "traits"
-ROLES_ROOT = WORKSPACE_ROOT / "roles"
+ROLES_ROOT = WORKSPACE_ROOT / "roles"            # legacy global roles (migration source only; not scanned at runtime after Plan 1)
+TEMPLATES_ROOT = WORKSPACE_ROOT / "templates"    # global role templates root (copied into groups on creation)
 
 LEARNED_ACTIVE = "skills/learned/active"
 LEARNED_DRAFT = "skills/learned/draft"
