@@ -1,8 +1,22 @@
 from __future__ import annotations
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from workspace import layout
 from . import constants as C
+
+_SAFE_SEGMENT = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+def _safe_segment(seg: str) -> str:
+    """Validate a descriptor path segment (role / lang). Mixed-case ASCII +
+    dash/underscore only — blocks path traversal (`..`, `/`, `\\`) out of the
+    group tree while still allowing capitalized role names like 'PM' /
+    'Architecture'. NOTE: deliberately NOT skills.metadata._is_safe_name, which
+    is lowercase-only and would reject those roles."""
+    if not _SAFE_SEGMENT.match(seg or ""):
+        raise ValueError(f"unsafe scope segment: {seg!r}")
+    return seg
 
 
 @dataclass(frozen=True)
@@ -51,9 +65,9 @@ def parse_descriptor(s: str):
         if kind == "group":
             return GroupScope(int(parts[1]))
         if kind == "role":
-            return RoleScope(int(parts[1]), parts[2])
+            return RoleScope(int(parts[1]), _safe_segment(parts[2]))
         if kind == "template":
-            return TemplateScope(parts[1], parts[2])
+            return TemplateScope(_safe_segment(parts[1]), _safe_segment(parts[2]))
         if kind == "bot":
             return BotScope(int(parts[1]), int(parts[2]))
     except (IndexError, ValueError) as e:

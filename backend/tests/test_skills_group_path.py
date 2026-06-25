@@ -31,6 +31,10 @@ class TestSkillsGroupPath(unittest.TestCase):
                 self.assertTrue(any("foo.md" in str(part) for part in sig))
 
 
+    def test_loader_role_without_group_returns_none(self):
+        from skills.loader import _skills_dir_for_layer
+        self.assertIsNone(_skills_dir_for_layer("role", bot_id=7, group_id=None, role="dev"))
+
     def test_l3_role_resolves_under_group_and_isolated(self):
         import tempfile
         from pathlib import Path
@@ -39,6 +43,7 @@ class TestSkillsGroupPath(unittest.TestCase):
         from skills.sources.base import ScanCtx
         with tempfile.TemporaryDirectory() as tmp:
             with patch("skills.constants.WORKSPACE_ROOT", Path(tmp)):
+                # layout resolves WORKSPACE_ROOT at call time, so import order vs. patch is irrelevant
                 from workspace import layout
                 rdir = layout.group_roles_dir(3) / "dev" / "skills"
                 rdir.mkdir(parents=True)

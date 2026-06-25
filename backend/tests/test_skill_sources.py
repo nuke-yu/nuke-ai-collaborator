@@ -24,6 +24,7 @@ class TestGroupSource(unittest.TestCase):
     def test_enumerate_group_skills_under_group(self):
         with tempfile.TemporaryDirectory() as tmp:
             with patch("skills.constants.WORKSPACE_ROOT", Path(tmp)):
+                # layout resolves WORKSPACE_ROOT at call time, so import order vs. patch is irrelevant
                 from workspace import layout
                 gdir = layout.group_shared_dir(3) / "skills"
                 gdir.mkdir(parents=True)
@@ -47,6 +48,7 @@ class TestRoleSource(unittest.TestCase):
     def test_enumerate_role_skills_under_group(self):
         with tempfile.TemporaryDirectory() as tmp:
             with patch("skills.constants.WORKSPACE_ROOT", Path(tmp)):
+                # layout resolves WORKSPACE_ROOT at call time, so import order vs. patch is irrelevant
                 from workspace import layout
                 rdir = layout.group_roles_dir(3) / "dev" / "skills"
                 rdir.mkdir(parents=True)
@@ -68,6 +70,7 @@ class TestLearnedSource(unittest.TestCase):
     def test_active_personal_draft_partitioned(self):
         with tempfile.TemporaryDirectory() as tmp:
             with patch("skills.constants.WORKSPACE_ROOT", Path(tmp)):
+                # layout resolves WORKSPACE_ROOT at call time, so import order vs. patch is irrelevant
                 from workspace import layout
                 base = layout.bot_dir(3, 7) / "skills"
                 (base / "learned" / "active").mkdir(parents=True)

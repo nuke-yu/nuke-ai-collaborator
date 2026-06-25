@@ -22,6 +22,15 @@ class TestScope(unittest.TestCase):
         with self.assertRaises(ValueError):
             S.parse_descriptor("bogus:1")
 
+    def test_parse_descriptor_rejects_traversal(self):
+        for bad in ("role:7:../../evil", "role:7:a/b", "template:..:dev", "template:en:../x"):
+            with self.assertRaises(ValueError):
+                S.parse_descriptor(bad)
+
+    def test_parse_descriptor_allows_capitalized_roles(self):
+        self.assertEqual(S.parse_descriptor("template:en:PM"), S.TemplateScope("en", "PM"))
+        self.assertEqual(S.parse_descriptor("role:7:Architecture"), S.RoleScope(7, "Architecture"))
+
 
 if __name__ == "__main__":
     unittest.main()

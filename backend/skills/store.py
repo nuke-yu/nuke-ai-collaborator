@@ -28,6 +28,9 @@ class SkillStore:
             fp.parent.mkdir(parents=True, exist_ok=True)
             fp.write_text(content, encoding="utf-8")
         low = content.lower()
+        # Intentionally differs from composer's C2 check: store scans raw `content` by
+        # substring because it has no parsed metadata yet; composer scans parsed
+        # `allowed_tools` + body. They are not duplicates of the same logic.
         flagged = [t for t in HIGH_PRIVILEGE_TOOLS if t in low]
         return {"name": name, "high_privilege": flagged}
 

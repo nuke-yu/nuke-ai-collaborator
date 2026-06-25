@@ -1,5 +1,5 @@
 # backend/skills/sources/learned.py
-from typing import Dict, List
+from typing import Dict
 from pathlib import Path
 from .. import constants as C
 from ..metadata import parse_skill_meta
