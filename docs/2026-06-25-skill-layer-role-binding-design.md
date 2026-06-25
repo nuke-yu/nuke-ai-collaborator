@@ -123,25 +123,66 @@ discovery **不读** `role.yaml`（它只列 skills），元数据仅由 roles A
 
 被丢弃：`workspaces/roles/` 下的 `developer` / `qa` / `pm` 三个目录（更早一代英文残留、与中文角色重复，且 `role_templates` 无对应行）。
 
+## 统一抽象：SkillScope + SkillStore（前向兼容接口）
+
+> 目标：把"加/删/改/拷技能"做成对**所有粒度统一**的接口，未来加 per-bot 只是多传一个 scope，**不重构已有文件**。
+
+不要为每一层各写一套 bespoke 端点（library / group-shared / role-skills…），否则将来加 per-bot 又得平行加第 5 套、并回头改建群拷贝。改为引入一个**作用域描述符**和一个**统一仓储**，所有写路径与拷贝走它。
+
+### `SkillScope`（标识"技能落在哪"，可解析为一个目录）
+| Scope | 解析目录 | 用于 |
+|---|---|---|
+| `SystemScope` | `system/skills/` | L1 池 |
+| `GroupScope(gid)` | `group_<gid>/shared/skills/` | L2 |
+| `RoleScope(gid, role)` | `group_<gid>/roles/<role>/skills/` | L3 |
+| `TemplateScope(lang, role)` | `templates/<lang>/roles/<role>/skills/` | 全局模板 |
+| `BotScope(gid, bot_id)` | `bot_<…>/skills/manual/` | **L4 个人层（per-bot）** |
+
+路径解析全部委托 `layout.py`（布局单一真相源）。
+
+### `SkillStore`（统一写/管理仓储，所有粒度共用）
+```python
+class SkillStore:
+    def list(scope) -> list[SkillEntry]
+    def read(scope, name) -> str
+    def write(scope, name, content)        # 新建/编辑（含 HIL 高权诊断）
+    def delete(scope, name)
+    def copy(src_scope, name, dst_scope)   # 单一拷贝原语
+```
+- `copy` 是**唯一的拷贝原语**：建群拷模板（`TemplateScope → RoleScope`）、未来"从池一键指派给 bot"（`SystemScope → BotScope`）、"拷技能到角色"全是它，参数不同而已。
+- **`BotScope` 后端现在就实现**（无非多一个 `layout` 路径分支）；只是本期不出 per-bot 的 UI。将来 per-bot UI = 纯前端薄入口，后端零改动。
+- 读路径与之对偶：每个 `SkillSource`（见代码分层章节）**绑定一个 scope**，`SystemSource=SystemScope`、`RoleSource=RoleScope(gid,role)`、`LearnedSource` 覆盖 `BotScope` + `learned/active`。读写共用同一套 scope→路径解析，杜绝两侧漂移。
+
+### 统一 API（scope 参数化，替代 bespoke 端点）
+- `GET    /api/skills?scope=<descriptor>` — 列
+- `GET    /api/skills/{name}?scope=<descriptor>` — 读
+- `PUT    /api/skills/{name}?scope=<descriptor>` — 新建/编辑
+- `DELETE /api/skills/{name}?scope=<descriptor>` — 删
+- `POST   /api/skills/copy` — `{from_scope, name, to_scope}`
+
+`<descriptor>` 为类型化作用域（如 `system` / `group:7` / `role:7:系统架构师` / `template:en:PM` / `bot:7:1018`）。**加 per-bot = descriptor 多一种取值，端点零新增。** 角色/模板的**元数据**（创建/删除角色、改 `role.yaml`）走单独的轻端点（见下），与技能内容 CRUD 解耦。
+
 ## 流程
 
 ### 建群拷贝（后端，UI 无感）
-`create_group` 后新增一步：按 `get_group_language(group_id)`（缺省回退 zh）将 `templates/<lang>/roles/*` **整体拷贝**进 `group_<id>/roles/*`（role.yaml + skills 一起）。
+`create_group` 后新增一步：按 `get_group_language(group_id)`（缺省回退 zh）把每个模板角色 `SkillStore.copy(TemplateScope(lang, role) → RoleScope(gid, role))`，role.yaml 元数据同拷。
 - 默认全量拷贝作起点，群里再删用不上的角色（不在建群时勾选，YAGNI）。
 - System 池（L1）不拷贝，是跨群共享引用。
 - 挂在现有 `ensure_group_db_ready` 那条群初始化路径附近，保证**幂等**（已存在不覆盖）。
 
+> 三条 UI 链路的技能内容增删改拷**统一走 `SkillStore` + scope 参数化 API**（见上节）；下面只列各台**展示哪些 scope** 与各自的**元数据**端点。
+
 ### UI 链路 ①：全局管理台（admin 范围，跨群）
-- **System 池**：CRUD `workspaces/system/skills/` 通用技能。
-- **角色模板**：`TemplateManager` 升级，CRUD `templates/<lang>/roles/*`，编辑元数据 + 维护 `skills/`，按语言切换。
-- 新 API：`/api/library/skills`（池 CRUD）、`/api/templates/roles`（模板 CRUD，替代旧 `/api/templates`）。
+- **System 池**：管理 `SystemScope` 技能。
+- **角色模板**：`TemplateManager` 升级，管理 `TemplateScope(lang, role)` 技能 + 编辑模板 `role.yaml`，按语言切换。
+- 模板**元数据**端点：`/api/templates/roles`（列/建/删模板、改 role.yaml，替代旧 `/api/templates`）。技能内容走统一 `/api/skills?scope=template:<lang>:<role>`。
 
 ### UI 链路 ②：群内技能整理台（"逐层整理"主界面，扩展 `SkillPanel.jsx`）
-- **System (L1)**：只读，标"继承自全局池"。
-- **Group (L2)**：CRUD 本群群级技能。
-- **Role (L3)**：列本群角色，进每个角色 CRUD 其技能、编辑 role.yaml。
-- **Learned/Personal (L4)**：按 bot 展示反思沉淀（draft 待审批 / active），沿用既有 draft 审批。
-- 新 API：`/api/groups/{id}/roles`（列/CRUD 角色）、`/api/groups/{id}/roles/{role}/skills`、`/api/groups/{id}/shared/skills`（L2 CRUD）。
+- **System (L1)**：只读 `SystemScope`，标"继承自全局池"。
+- **Group (L2)**：管理 `GroupScope(gid)` 技能。
+- **Role (L3)**：列本群角色，进每个角色管理 `RoleScope(gid, role)` 技能、改 role.yaml。
+- **Learned/Personal (L4)**：按 bot 展示反思沉淀（draft 待审批 / active），沿用既有 draft 审批。（per-bot 主动加技能的 UI 见"未来延伸"，后端 `BotScope` 已就绪。）
+- 群角色**元数据**端点：`/api/groups/{id}/roles`（列/建/删角色、改 role.yaml）。技能内容走统一 `/api/skills?scope=group:<id>` 或 `role:<id>:<role>`。
 
 ### UI 链路 ③：建 bot 选角色（`MemberList.jsx`）
 - 自由输入框 → 下拉，数据来自 `GET /api/groups/{id}/roles`。
@@ -217,6 +258,21 @@ skills/
 **D. 退役老全局目录**
 - 旧 `workspaces/roles/` 改名 `workspaces/roles.legacy/`（运行时已不扫），留一发布周期回滚兜底，下个迁移再删。
 
+## 未来延伸：per-bot 技能添加（本期不实现，仅锚定方向 + 备好接口）
+
+给单个 bot 加技能 = 往其 personal 层（`BotScope`）写文件，内容四种来源，全部复用本期已建的原语：
+
+| 方式 | 机制 | 复用的本期原语 |
+|---|---|---|
+| ① 从已有来源指派 | `SkillStore.copy(SystemScope/GroupScope/RoleScope → BotScope)` | `copy` 原语 |
+| ② 手写新技能 | `SkillStore.write(BotScope, …)` | `write`（含 HIL 高权诊断） |
+| ③ 提拔自学产物 | `learned/draft → learned/active` 审批 | 既有 `approve_draft_skill` |
+| ④ 开关继承技能 | 在本 bot 做启用/禁用覆盖 | 既有 `update_skill_status` 覆盖 stub |
+
+**因为本期就把 `BotScope` 落进 `SkillStore` 与 `LearnedSource`，per-bot 这块将来只是前端薄入口 + 一种新 scope descriptor 取值，后端零重构。**
+
+原则（与"群=项目"一致）：**主力策展在 group/role 层，per-bot 是例外**；UI 应引导"能在角色层解决的别加到单个 bot"，避免 bot 雪花化、碎片化。
+
 ## 测试
 
 - `backend/tests/test_skills_group_path.py`：扩展覆盖 "L3 解析到 `group_<id>/roles/`、跨群不串"。
@@ -225,6 +281,7 @@ skills/
 - 迁移脚本测试：dry-run 无副作用；apply 后老群有角色、不命中 bot 自动建空角色、`roles.legacy` 改名到位。
 - roles / library / shared-skills 新 API 的 CRUD 单元测试。
 - **SkillSource 分层**：每个 source 的 `enumerate` / `signature` 独立单测；composer 的保护/合并/覆盖/injected 在 mock source 上单测（脱离磁盘）；门面 `discovery.py` 行为等价回归（拆分前后 `test_skills_*` 全绿）。
+- **SkillScope / SkillStore**：每种 scope 的路径解析单测（含 `BotScope`，即便本期无 UI）；`copy` 原语单测（template→role、system→bot 等）；`write` 触发 HIL 高权诊断；scope descriptor 解析/校验（非法 descriptor 拒绝）。
 - **i18n 一致性**：新增 i18n key 在 `zh.json` / `en.json` 同时存在、无悬空 key。
 
 ## 待评审决策（已确认）
@@ -236,6 +293,7 @@ skills/
 - [x] 中英文两套模板，建群按群语言拷。
 - [x] 技能加载代码按 SkillSource 分层（来源/合并/缓存/门面单一职责），行为等价拆分先行、L3 变更后叠。
 - [x] 本次所有改动支持中英文（UI / 显示名 / 后端消息 / 技能正文）。
+- [x] 统一 `SkillScope` + `SkillStore` + scope 参数化 API；`BotScope` 后端本期即实现，per-bot UI 后续零重构接入。
 - [ ] `Architecture` / `PM` 默认技能组合（本 spec 暂定值，待 review 确认）。
 
 ## 影响与风险
