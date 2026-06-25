@@ -1,7 +1,7 @@
 import os
 import platform
 
-from .constants import bot_ws, WORKSPACE_ROOT, SYSTEM_SKILLS_ROOT, ROLES_ROOT
+from . import constants as C
 from .metadata import skill_path, parse_skill_meta
 from .discovery import list_skills, list_skills_all
 from .processor import process_skill_content
@@ -20,16 +20,21 @@ def _fold_home(text: str) -> str:
 
 def _skills_dir_for_layer(layer: str, bot_id: int,
                            group_id: int | None, role: str | None):
-    """Return the skills directory Path for a given layer."""
+    """Return the skills directory Path for a given layer.
+
+    Reads ``skills.constants`` live so test-time monkeypatching of the canonical
+    constants is honored. L3 role still uses the GLOBAL ROLES_ROOT (Task 12
+    flips it to group-internal).
+    """
     if layer == "system":
-        return SYSTEM_SKILLS_ROOT
+        return C.SYSTEM_SKILLS_ROOT
     if layer == "group" and group_id:
-        return WORKSPACE_ROOT / f"group_{group_id}" / "shared" / "skills"
+        return C.WORKSPACE_ROOT / f"group_{group_id}" / "shared" / "skills"
     if layer == "role" and role:
-        return ROLES_ROOT / role / "skills"
+        return C.ROLES_ROOT / role / "skills"
     if layer == "learned":
-        return bot_ws(bot_id, group_id) / "skills" / "learned" / "active"
-    return bot_ws(bot_id, group_id) / "skills"
+        return C.bot_ws(bot_id, group_id) / "skills" / "learned" / "active"
+    return C.bot_ws(bot_id, group_id) / "skills"
 
 
 async def load_always_skills(bot_id: int, group_id: int | None = None,

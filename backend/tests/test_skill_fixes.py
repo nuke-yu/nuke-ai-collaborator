@@ -16,7 +16,8 @@ import unittest
 from unittest.mock import patch
 
 from skills.processor import render_sandboxed, process_skill_content
-from skills.discovery import _merge_skill_entry
+from skills.composer import _merge_skill_entry
+import skills.constants as skill_constants
 import skills.discovery as skill_discovery
 import skills.loader as skill_loader
 from skills.loader import load_always_skills
@@ -86,7 +87,7 @@ class TestOverrideDiagnostic(unittest.TestCase):
     def test_nonsystem_override_logs(self):
         merged = {}
         _merge_skill_entry(merged, self._entry("group", "/g/t.md"))
-        with self.assertLogs("skills.discovery", level="INFO") as cm:
+        with self.assertLogs("skills.composer", level="INFO") as cm:
             _merge_skill_entry(merged, self._entry("role", "/r/t.md"))
         self.assertTrue(any("override" in line.lower() for line in cm.output))
         # winner is the later (role) layer
@@ -96,7 +97,7 @@ class TestOverrideDiagnostic(unittest.TestCase):
         merged = {}
         # No prior entry → no override → no diagnostic (assertNoLogs needs 3.10+)
         with self.assertRaises(AssertionError):
-            with self.assertLogs("skills.discovery", level="INFO"):
+            with self.assertLogs("skills.composer", level="INFO"):
                 _merge_skill_entry(merged, self._entry("group", "/g/t.md"))
 
 
@@ -107,14 +108,14 @@ class TestOverrideDiagnostic(unittest.TestCase):
 class _SkillDirFixture(unittest.IsolatedAsyncioTestCase):
 
     def setUp(self):
-        self._orig = {}
-        for mod in (skill_discovery, skill_loader):
-            self._orig[mod] = (mod.WORKSPACE_ROOT, mod.SYSTEM_SKILLS_ROOT,
-                               mod.ROLES_ROOT, mod.bot_ws)
-            mod.WORKSPACE_ROOT = _TEST_WS_ROOT
-            mod.SYSTEM_SKILLS_ROOT = _TEST_WS_ROOT / "system" / "skills"
-            mod.ROLES_ROOT = _TEST_WS_ROOT / "roles"
-            mod.bot_ws = lambda bot_id, group_id=None: _TEST_WS_ROOT / "bot_ws_1"
+        # Patch the canonical source of truth (skills.constants); discovery,
+        # loader and the SkillSource classes all read it live.
+        self._orig = (skill_constants.WORKSPACE_ROOT, skill_constants.SYSTEM_SKILLS_ROOT,
+                      skill_constants.ROLES_ROOT, skill_constants.bot_ws)
+        skill_constants.WORKSPACE_ROOT = _TEST_WS_ROOT
+        skill_constants.SYSTEM_SKILLS_ROOT = _TEST_WS_ROOT / "system" / "skills"
+        skill_constants.ROLES_ROOT = _TEST_WS_ROOT / "roles"
+        skill_constants.bot_ws = lambda bot_id, group_id=None: _TEST_WS_ROOT / "bot_ws_1"
 
         self.test_sys = _TEST_WS_ROOT / "system" / "skills"
         self.test_sys.mkdir(parents=True, exist_ok=True)
@@ -123,9 +124,8 @@ class _SkillDirFixture(unittest.IsolatedAsyncioTestCase):
         skill_discovery.invalidate_skills_cache()
 
     def tearDown(self):
-        for mod, vals in self._orig.items():
-            (mod.WORKSPACE_ROOT, mod.SYSTEM_SKILLS_ROOT,
-             mod.ROLES_ROOT, mod.bot_ws) = vals
+        (skill_constants.WORKSPACE_ROOT, skill_constants.SYSTEM_SKILLS_ROOT,
+         skill_constants.ROLES_ROOT, skill_constants.bot_ws) = self._orig
         skill_discovery.invalidate_skills_cache()
         if _TEST_WS_ROOT.exists():
             shutil.rmtree(_TEST_WS_ROOT)
@@ -165,6 +165,16 @@ class TestScanCache(_SkillDirFixture):
         r1[0]["injected"] = "MUTATED"           # caller mutates its copy
         r2 = skill_discovery._list_skills_all_sync(bot_id=1, group_id=1)
         self.assertNotEqual(r2[0].get("injected"), "MUTATED")  # cache not poisoned
+
+    async def test_returned_lists_are_deeply_independent_copies(self):
+        (self.test_sys / "a.md").write_text(
+            "---\nname: a\nallowed_tools:\n  - read_file\n---\nbody", encoding="utf-8"
+        )
+        skill_discovery.invalidate_skills_cache()
+        r1 = skill_discovery._list_skills_all_sync(bot_id=1, group_id=1)
+        r1[0]["allowed_tools"].append("MUTATED_TOOL")  # caller mutates nested list
+        r2 = skill_discovery._list_skills_all_sync(bot_id=1, group_id=1)
+        self.assertNotIn("MUTATED_TOOL", r2[0].get("allowed_tools", []))  # cache not poisoned
 
     async def test_invalidate_forces_recompute(self):
         (self.test_sys / "a.md").write_text("---\nname: a\n---\nbody", encoding="utf-8")

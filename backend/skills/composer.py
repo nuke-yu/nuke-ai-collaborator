@@ -8,16 +8,16 @@ Receives already-enumerated per-layer results and applies:
   layer-order sort
   draft append with C1 / C2 diagnostics
 
-The core helpers (_merge_skill_entry, _draft_diagnostics) are ported verbatim
-from discovery.py (lines 187-244 and 302-338 respectively).  The transient
-duplication is intentional and will be removed in Task 9 when discovery.py's
-own copies of these functions are deleted.
+The core helpers (_merge_skill_entry, _draft_diagnostics) now live here as the
+single source of truth (Task 9 removed discovery.py's own copies). discovery.py
+is a thin facade that instantiates the SkillSource classes and calls
+merge_layers().
 """
 import logging
 from pathlib import Path
 from typing import Dict, List
 
-from .constants import SYSTEM_SKILLS_ROOT
+from . import constants as C
 from .sources.base import SkillEntry
 
 log = logging.getLogger(__name__)
@@ -41,7 +41,7 @@ def _merge_skill_entry(merged: Dict[str, SkillEntry], incoming: SkillEntry) -> N
     existing_path = existing.get("path")
     if existing_path:
         try:
-            is_system = Path(existing_path).resolve().is_relative_to(SYSTEM_SKILLS_ROOT.resolve())
+            is_system = Path(existing_path).resolve().is_relative_to(C.SYSTEM_SKILLS_ROOT.resolve())
         except (ValueError, OSError):
             pass
     if is_system or existing.get("layer") == "system":

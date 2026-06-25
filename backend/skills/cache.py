@@ -1,3 +1,4 @@
+import copy
 import threading
 from typing import Callable, Dict, List, Tuple
 
@@ -15,8 +16,9 @@ class CachedScan:
         with self._lock:
             entry = self._cache.get(key)
             if entry is not None and entry[0] == sig:
-                return [dict(s) for s in entry[1]]
+                return copy.deepcopy(entry[1])
         result = compute()
         with self._lock:
-            self._cache[key] = (sig, [dict(s) for s in result])
+            self._cache[key] = (sig, copy.deepcopy(result))
         return result
+

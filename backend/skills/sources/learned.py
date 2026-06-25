@@ -1,7 +1,7 @@
 # backend/skills/sources/learned.py
 from typing import Dict, List
 from pathlib import Path
-from workspace import layout
+from .. import constants as C
 from ..metadata import parse_skill_meta
 from .base import ScanCtx, SkillEntry
 from ._scan import scan_dir, dir_signature
@@ -47,14 +47,21 @@ class LearnedSource:
 
     def __init__(self, ctx: ScanCtx):
         self.ctx = ctx
-        self._base = layout.bot_dir(ctx.group_id, ctx.bot_id) / "skills"
+
+    @property
+    def _base(self) -> Path:
+        # Resolved live on every access so a late monkeypatch of C.bot_ws (or
+        # of constants.WORKSPACE_ROOT, read through layout) is honored. Matches
+        # the original discovery behavior: bot_ws(bot_id, group_id) / "skills".
+        return C.bot_ws(self.ctx.bot_id, self.ctx.group_id) / "skills"
 
     def enumerate(self) -> dict:
-        active = scan_dir(self._base / "learned" / "active", "learned")
+        base = self._base
+        active = scan_dir(base / "learned" / "active", "learned")
         for s in active:
             s["status"] = "active"
-        personal = _scan_personal(self._base)
-        draft = scan_dir(self._base / "learned" / "draft", "learned")
+        personal = _scan_personal(base)
+        draft = scan_dir(base / "learned" / "draft", "learned")
         for s in draft:
             s["status"] = "draft"
         return {"active": active, "personal": personal, "draft": draft}

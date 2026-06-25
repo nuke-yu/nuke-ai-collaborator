@@ -11,6 +11,7 @@ import unittest
 from skills.metadata import parse_frontmatter, parse_skill_meta
 from skills.discovery import _list_skills_all_sync
 from skills.loader import run_skill, load_always_skills
+import skills.constants as skill_constants
 import skills.discovery as skill_discovery
 import skills.loader as skill_loader
 
@@ -21,31 +22,22 @@ _TEST_WS_ROOT = _HERE / "test_ws_skills_a1_a3"
 class TestSkillsA1A3(unittest.IsolatedAsyncioTestCase):
 
     def setUp(self):
-        # Save original values
-        self._orig_discovery_ws = skill_discovery.WORKSPACE_ROOT
-        self._orig_discovery_sys = skill_discovery.SYSTEM_SKILLS_ROOT
-        self._orig_discovery_roles = skill_discovery.ROLES_ROOT
-        self._orig_discovery_bot_ws = skill_discovery.bot_ws
-
-        self._orig_loader_ws = skill_loader.WORKSPACE_ROOT
-        self._orig_loader_sys = skill_loader.SYSTEM_SKILLS_ROOT
-        self._orig_loader_roles = skill_loader.ROLES_ROOT
-        self._orig_loader_bot_ws = skill_loader.bot_ws
+        # Save original values — patch the canonical source of truth
+        # (skills.constants); discovery/loader/sources all read it live.
+        self._orig_ws = skill_constants.WORKSPACE_ROOT
+        self._orig_sys = skill_constants.SYSTEM_SKILLS_ROOT
+        self._orig_roles = skill_constants.ROLES_ROOT
+        self._orig_bot_ws = skill_constants.bot_ws
 
         # Setup test paths
         self.test_sys = _TEST_WS_ROOT / "system" / "skills"
         self.test_roles = _TEST_WS_ROOT / "roles"
 
-        # Apply overrides
-        skill_discovery.WORKSPACE_ROOT = _TEST_WS_ROOT
-        skill_discovery.SYSTEM_SKILLS_ROOT = self.test_sys
-        skill_discovery.ROLES_ROOT = self.test_roles
-        skill_discovery.bot_ws = lambda bot_id, group_id=None: _TEST_WS_ROOT / "bot_ws_1"
-
-        skill_loader.WORKSPACE_ROOT = _TEST_WS_ROOT
-        skill_loader.SYSTEM_SKILLS_ROOT = self.test_sys
-        skill_loader.ROLES_ROOT = self.test_roles
-        skill_loader.bot_ws = lambda bot_id, group_id=None: _TEST_WS_ROOT / "bot_ws_1"
+        # Apply overrides on skills.constants (single source of truth)
+        skill_constants.WORKSPACE_ROOT = _TEST_WS_ROOT
+        skill_constants.SYSTEM_SKILLS_ROOT = self.test_sys
+        skill_constants.ROLES_ROOT = self.test_roles
+        skill_constants.bot_ws = lambda bot_id, group_id=None: _TEST_WS_ROOT / "bot_ws_1"
 
         # Create temporary directories
         self.test_sys.mkdir(parents=True, exist_ok=True)
@@ -53,16 +45,11 @@ class TestSkillsA1A3(unittest.IsolatedAsyncioTestCase):
         (_TEST_WS_ROOT / "bot_ws_1" / "skills").mkdir(parents=True, exist_ok=True)
 
     def tearDown(self):
-        # Restore original values
-        skill_discovery.WORKSPACE_ROOT = self._orig_discovery_ws
-        skill_discovery.SYSTEM_SKILLS_ROOT = self._orig_discovery_sys
-        skill_discovery.ROLES_ROOT = self._orig_discovery_roles
-        skill_discovery.bot_ws = self._orig_discovery_bot_ws
-
-        skill_loader.WORKSPACE_ROOT = self._orig_loader_ws
-        skill_loader.SYSTEM_SKILLS_ROOT = self._orig_loader_sys
-        skill_loader.ROLES_ROOT = self._orig_loader_roles
-        skill_loader.bot_ws = self._orig_loader_bot_ws
+        # Restore original values on skills.constants
+        skill_constants.WORKSPACE_ROOT = self._orig_ws
+        skill_constants.SYSTEM_SKILLS_ROOT = self._orig_sys
+        skill_constants.ROLES_ROOT = self._orig_roles
+        skill_constants.bot_ws = self._orig_bot_ws
 
         # Cleanup test workspace
         if _TEST_WS_ROOT.exists():

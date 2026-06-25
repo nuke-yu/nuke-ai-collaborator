@@ -12,8 +12,7 @@ class TestSystemSource(unittest.TestCase):
             sysdir.mkdir(parents=True)
             (sysdir / "read-file.md").write_text(
                 "---\nname: read-file\ndescription: reads\n---\nbody", encoding="utf-8")
-            with patch("skills.constants.SYSTEM_SKILLS_ROOT", sysdir), \
-                 patch("skills.sources.system.SYSTEM_SKILLS_ROOT", sysdir):
+            with patch("skills.constants.SYSTEM_SKILLS_ROOT", sysdir):
                 from skills.sources.system import SystemPoolSource
                 src = SystemPoolSource(ScanCtx(bot_id=1))
                 names = [s["name"] for s in src.enumerate()]
@@ -51,7 +50,7 @@ class TestRoleSource(unittest.TestCase):
             rdir.mkdir(parents=True)
             (rdir / "code-review.md").write_text(
                 "---\nname: code-review\ndescription: x\n---\nb", encoding="utf-8")
-            with patch("skills.sources.role.ROLES_ROOT", Path(tmp) / "roles"):
+            with patch("skills.constants.ROLES_ROOT", Path(tmp) / "roles"):
                 from skills.sources.role import RoleSource
                 from skills.sources.base import ScanCtx
                 src = RoleSource(ScanCtx(bot_id=1, group_id=3, role="dev"))

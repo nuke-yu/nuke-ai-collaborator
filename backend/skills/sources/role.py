@@ -1,5 +1,5 @@
 from typing import List
-from ..constants import ROLES_ROOT
+from .. import constants as C
 from .base import ScanCtx, SkillEntry
 from ._scan import scan_dir, dir_signature
 
@@ -14,7 +14,7 @@ class RoleSource:
         if not self.ctx.role:
             return None
         # NOTE: still the global ROLES_ROOT here — flipped to group-internal in Task 12.
-        return ROLES_ROOT / self.ctx.role / "skills"
+        return C.ROLES_ROOT / self.ctx.role / "skills"
 
     def enumerate(self) -> List[SkillEntry]:
         d = self._dir()

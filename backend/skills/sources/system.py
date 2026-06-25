@@ -1,6 +1,6 @@
 # backend/skills/sources/system.py
 from typing import List
-from ..constants import SYSTEM_SKILLS_ROOT
+from .. import constants as C
 from .base import ScanCtx, SkillEntry
 from ._scan import scan_dir, dir_signature
 
@@ -12,7 +12,7 @@ class SystemPoolSource:
         self.ctx = ctx
 
     def enumerate(self) -> List[SkillEntry]:
-        return scan_dir(SYSTEM_SKILLS_ROOT, "system")
+        return scan_dir(C.SYSTEM_SKILLS_ROOT, "system")
 
     def signature(self) -> tuple:
-        return tuple(dir_signature(SYSTEM_SKILLS_ROOT))
+        return tuple(dir_signature(C.SYSTEM_SKILLS_ROOT))
