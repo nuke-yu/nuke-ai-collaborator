@@ -294,7 +294,7 @@ skills/
 - [x] 技能加载代码按 SkillSource 分层（来源/合并/缓存/门面单一职责），行为等价拆分先行、L3 变更后叠。
 - [x] 本次所有改动支持中英文（UI / 显示名 / 后端消息 / 技能正文）。
 - [x] 统一 `SkillScope` + `SkillStore` + scope 参数化 API；`BotScope` 后端本期即实现，per-bot UI 后续零重构接入。
-- [ ] `Architecture` / `PM` 默认技能组合（本 spec 暂定值，待 review 确认）。
+- [x] `Architecture` / `PM` 默认技能按暂定值落地（Architecture=design-architecture+tech-stack-review；PM=write-spec+update-board+write-user-story），实现中可微调。
 
 ## 影响与风险
 
