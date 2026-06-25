@@ -130,7 +130,7 @@ def _wrap_untrusted(server_name: str, tool_name: str, text: str) -> str:
     hits = _scan_injection(text)
     if hits:
         notice += f" ⚠️ Detected {len(hits)} suspected injection pattern(s) / 已检测到 {len(hits)} 处疑似注入模式。"
-    logger.warning(f"MCP result injection markers [{server_name}/{tool_name}]: {hits}")
+        logger.warning(f"MCP result injection markers [{server_name}/{tool_name}]: {hits}")
     return f"{notice}\n---\n{text}"
 
 
