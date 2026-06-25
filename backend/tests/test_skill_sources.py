@@ -64,5 +64,28 @@ class TestRoleSource(unittest.TestCase):
         self.assertEqual(src.enumerate(), [])
 
 
+class TestLearnedSource(unittest.TestCase):
+    def test_active_personal_draft_partitioned(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("skills.constants.WORKSPACE_ROOT", Path(tmp)):
+                from workspace import layout
+                base = layout.bot_dir(3, 7) / "skills"
+                (base / "learned" / "active").mkdir(parents=True)
+                (base / "learned" / "active" / "a.md").write_text(
+                    "---\nname: a\ndescription: x\n---\nb", encoding="utf-8")
+                (base / "manual").mkdir(parents=True)
+                (base / "manual" / "p.md").write_text(
+                    "---\nname: p\ndescription: x\n---\nb", encoding="utf-8")
+                (base / "learned" / "draft").mkdir(parents=True)
+                (base / "learned" / "draft" / "d.md").write_text(
+                    "---\nname: d\ndescription: x\n---\nb", encoding="utf-8")
+                from skills.sources.learned import LearnedSource
+                from skills.sources.base import ScanCtx
+                out = LearnedSource(ScanCtx(bot_id=7, group_id=3)).enumerate()
+                self.assertEqual([s["name"] for s in out["active"]], ["a"])
+                self.assertIn("p", out["personal"])
+                self.assertEqual([s["name"] for s in out["draft"]], ["d"])
+
+
 if __name__ == "__main__":
     unittest.main()
