@@ -40,6 +40,18 @@ class TestStore(unittest.TestCase):
             with self.assertRaises(ValueError):
                 SkillStore().write(S.GroupScope(7), "../evil", "x")
 
+    def test_reject_bad_name_all_methods(self):
+        # The _is_safe_name guard is a path-traversal defense; pin it on every
+        # name-taking method so a future refactor can't silently drop one.
+        with tempfile.TemporaryDirectory() as tmp, self._ws(tmp):
+            st, sc = SkillStore(), S.GroupScope(7)
+            with self.assertRaises(ValueError):
+                st.read(sc, "../evil")
+            with self.assertRaises(ValueError):
+                st.delete(sc, "../evil")
+            with self.assertRaises(ValueError):
+                st.copy(S.TemplateScope("zh", "dev"), "../evil", sc)
+
 
 if __name__ == "__main__":
     unittest.main()

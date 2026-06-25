@@ -36,6 +36,9 @@ class SkillStore:
             raise ValueError(f"unsafe skill name: {name!r}")
         fp = _skill_file(scope, name)
         with file_lock(fp):
+            # Idempotent by design: deleting an absent skill is a no-op, not an
+            # error (desired end-state is "absent"). copy() fails loud on a
+            # missing source because it cannot reach its end-state without one.
             if fp.exists():
                 fp.unlink()
 
