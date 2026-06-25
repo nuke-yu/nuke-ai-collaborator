@@ -21,5 +21,28 @@ class TestSystemSource(unittest.TestCase):
                 self.assertTrue(any("read-file.md" in str(p) for p in src.signature()))
 
 
+class TestGroupSource(unittest.TestCase):
+    def test_enumerate_group_skills_under_group(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("skills.constants.WORKSPACE_ROOT", Path(tmp)):
+                from workspace import layout
+                gdir = layout.group_shared_dir(3) / "skills"
+                gdir.mkdir(parents=True)
+                (gdir / "house-style.md").write_text(
+                    "---\nname: house-style\ndescription: x\n---\nb", encoding="utf-8")
+                from skills.sources.group import GroupSource
+                from skills.sources.base import ScanCtx
+                src = GroupSource(ScanCtx(bot_id=1, group_id=3))
+                self.assertEqual([s["name"] for s in src.enumerate()], ["house-style"])
+                self.assertEqual(src.enumerate()[0]["layer"], "group")
+
+    def test_no_group_id_is_empty(self):
+        from skills.sources.group import GroupSource
+        from skills.sources.base import ScanCtx
+        src = GroupSource(ScanCtx(bot_id=1, group_id=None))
+        self.assertEqual(src.enumerate(), [])
+        self.assertEqual(src.signature(), ())
+
+
 if __name__ == "__main__":
     unittest.main()
