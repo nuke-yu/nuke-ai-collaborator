@@ -110,7 +110,7 @@ def _draft_diagnostics(s: SkillEntry, merged: Dict[str, SkillEntry]) -> list:
 
     # C2: Check high-privilege tools in draft (allowed_tools + body text check)
     allowed_tools = s.get("allowed_tools", [])
-    high_privilege_tools = ["run_shell", "write_file"]
+    high_privilege_tools = list(C.HIGH_PRIVILEGE_TOOLS)
     triggered = [t for t in allowed_tools if t in high_privilege_tools]
 
     # Scan file body content for privilege tool mentions

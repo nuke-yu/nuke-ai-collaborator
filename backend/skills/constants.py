@@ -10,6 +10,9 @@ TEMPLATES_ROOT = WORKSPACE_ROOT / "templates"    # global role templates root (c
 LEARNED_ACTIVE = "skills/learned/active"
 LEARNED_DRAFT = "skills/learned/draft"
 
+# High-privilege tool names flagged by C2 draft diagnostics and SkillStore.write.
+HIGH_PRIVILEGE_TOOLS = ("run_shell", "write_file")
+
 
 def bot_ws(bot_id: int, group_id: int | None = None) -> Path:
     """Return bot workspace path (no mkdir — caller is responsible)."""
