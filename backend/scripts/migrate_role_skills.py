@@ -172,6 +172,34 @@ def seed_existing_groups(root: Path, group_ids: list[int], *, dry_run: bool) -> 
     return {"seeded": seeded, "dry_run": dry_run}
 
 
+def plan_bot_roles(root: Path, bots: list[tuple[int, int, str]]) -> dict:
+    """Step C 规划（纯函数）：命中群角色的 bot 不动；不命中的去重收集为待建空角色。"""
+    from workspace import layout
+    ok: list[tuple[int, int, str]] = []
+    create: list[tuple[int, str]] = []
+    seen: set[tuple[int, str]] = set()
+    for bot_id, gid, role in bots:
+        if (layout.group_roles_dir(gid) / role).exists():
+            ok.append((bot_id, gid, role))
+        elif (gid, role) not in seen:
+            seen.add((gid, role))
+            create.append((gid, role))
+    return {"ok": ok, "create": create}
+
+
+def align_bot_roles(root: Path, bots: list[tuple[int, int, str]], *,
+                    dry_run: bool) -> dict:
+    """Step C 执行：为不命中的 (gid, role) 在该群建空角色（非破坏性）。"""
+    from workspace import layout
+    plan = plan_bot_roles(root, bots)
+    if not dry_run:
+        for gid, role in plan["create"]:
+            cdir = layout.group_roles_dir(gid) / role
+            (cdir / "skills").mkdir(parents=True, exist_ok=True)
+            synth_role_yaml(cdir, role, None)
+    return {**plan, "dry_run": dry_run}
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     apply = "--apply" in argv

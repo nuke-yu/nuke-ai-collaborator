@@ -162,5 +162,40 @@ class TestStepB(unittest.TestCase):
                 self.assertFalse((root / "group_3").exists())
 
 
+class TestStepC(unittest.TestCase):
+    def test_plan_hits_and_misses(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with patch("skills.constants.WORKSPACE_ROOT", root):
+                from workspace import layout
+                (layout.group_roles_dir(3) / "需求分析师").mkdir(parents=True)
+                bots = [(101, 3, "需求分析师"), (102, 3, "CEO"), (103, 4, "Tester")]
+                plan = M.plan_bot_roles(root, bots)
+                self.assertIn((101, 3, "需求分析师"), plan["ok"])
+                self.assertIn((3, "CEO"), plan["create"])
+                self.assertIn((4, "Tester"), plan["create"])
+
+    def test_align_creates_empty_roles(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with patch("skills.constants.WORKSPACE_ROOT", root):
+                from workspace import layout
+                bots = [(102, 3, "CEO")]
+                M.align_bot_roles(root, bots, dry_run=False)
+                cdir = layout.group_roles_dir(3) / "CEO"
+                self.assertTrue((cdir / "skills").is_dir())
+                self.assertEqual(list((cdir / "skills").iterdir()), [])   # empty skills
+                from skills.role_meta import read_role_meta
+                self.assertEqual(read_role_meta(cdir)["display_name"], "CEO")
+
+    def test_align_dryrun_no_write(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with patch("skills.constants.WORKSPACE_ROOT", root):
+                from workspace import layout
+                M.align_bot_roles(root, [(102, 3, "CEO")], dry_run=True)
+                self.assertFalse((layout.group_roles_dir(3) / "CEO").exists())
+
+
 if __name__ == "__main__":
     unittest.main()
