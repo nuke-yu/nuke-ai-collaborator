@@ -33,6 +33,13 @@ from httpx import AsyncClient
 class TestMemberRoutes(unittest.IsolatedAsyncioTestCase):
 
     async def asyncSetUp(self):
+        # Re-pin module-global paths: other test modules set the same globals at
+        # IMPORT time, so collection order can otherwise leave db / layout (which
+        # live-read these globals) pointing at another suite's DB / workspace.
+        database.DB_PATH = TEST_DB_PATH
+        _db_writer.DB_PATH = TEST_DB_PATH
+        workspace.WORKSPACE_ROOT = TEST_WORKSPACES_ROOT
+        _skill_const.WORKSPACE_ROOT = TEST_WORKSPACES_ROOT
         # Bypass DFT-082 auth so these tests exercise route logic (cleared in tearDown).
         from core import auth as _auth
         app.dependency_overrides[_auth.get_current_user] = lambda: {"uid": 1, "sub": "test"}
@@ -89,17 +96,6 @@ class TestMemberRoutes(unittest.IsolatedAsyncioTestCase):
             data = response.json()
             self.assertIn("id", data)
             bot_id = data["id"]
-            import sqlite3 as _sq
-            from db.context import current_db_path as _cdp
-            print("DBG ctxvar=", _cdp.get(), "db.DB_PATH=", database.DB_PATH, "writer.DB_PATH=", _db_writer.DB_PATH, "bot_id=", bot_id)
-            print("DBG test_chat.db members=", _sq.connect(TEST_DB_PATH).execute("SELECT id,name FROM members").fetchall())
-            async with database.get_db() as _d:
-                async with _d.execute("SELECT id,name FROM members") as _c:
-                    print("DBG get_db ALL members=", await _c.fetchall())
-            import aiosqlite as _ai
-            _rc = await _ai.connect(TEST_DB_PATH)
-            print("DBG raw aiosqlite members=", await (await _rc.execute("SELECT id,name FROM members")).fetchall())
-            await _rc.close()
 
             # Now verify the database has all the fields populated correctly
             async with database.get_db() as db:

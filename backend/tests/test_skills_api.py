@@ -28,8 +28,19 @@ def _client():
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://t")
 
 
+def _pin_paths():
+    """Re-pin module-global paths at setUp time. Other test modules set the same
+    globals at IMPORT time, so collection order can otherwise leave db / layout
+    (which live-read these globals) pointing at another suite's DB / workspace."""
+    database.DB_PATH = TEST_DB_PATH
+    _db_writer.DB_PATH = TEST_DB_PATH
+    workspace.WORKSPACE_ROOT = TEST_WS
+    _skill_const.WORKSPACE_ROOT = TEST_WS
+
+
 class TestSkillsReadApi(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
+        _pin_paths()
         from core import auth as _auth
         app.dependency_overrides[_auth.get_current_user] = lambda: {"uid": 1, "sub": "test"}
         if TEST_WS.exists():
@@ -70,6 +81,7 @@ class TestSkillsReadApi(unittest.IsolatedAsyncioTestCase):
 
 class TestSkillsWriteApi(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
+        _pin_paths()
         from core import auth as _auth
         app.dependency_overrides[_auth.get_current_user] = lambda: {"uid": 1, "sub": "test"}
         if TEST_WS.exists():
@@ -116,6 +128,7 @@ class TestSkillsWriteApi(unittest.IsolatedAsyncioTestCase):
 
 class TestRoleCatalogApi(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
+        _pin_paths()
         from core import auth as _auth
         app.dependency_overrides[_auth.get_current_user] = lambda: {"uid": 1, "sub": "test"}
         if TEST_WS.exists():

@@ -29,8 +29,18 @@ def _client():
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://t")
 
 
+def _pin_paths():
+    """Re-pin module-global paths at setUp time so cross-file import order can't
+    leave db / layout (which live-read these globals) pointing at another suite."""
+    database.DB_PATH = TEST_DB_PATH
+    _db_writer.DB_PATH = TEST_DB_PATH
+    workspace.WORKSPACE_ROOT = TEST_WS
+    _skill_const.WORKSPACE_ROOT = TEST_WS
+
+
 class TestMemberRoleBinding(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
+        _pin_paths()
         from core import auth as _auth
         app.dependency_overrides[_auth.get_current_user] = lambda: {"uid": 1, "sub": "test"}
         for p in (TEST_DB_PATH,):
