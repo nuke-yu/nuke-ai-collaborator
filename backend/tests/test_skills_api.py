@@ -1,0 +1,72 @@
+# backend/tests/test_skills_api.py
+import unittest
+import os
+import sys
+import shutil
+from pathlib import Path
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import db as database
+import db.writer as _db_writer
+import workspace
+
+TEST_DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "test_skills_api.db")
+TEST_WS = Path(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) / "test_skills_api_ws"
+database.DB_PATH = TEST_DB_PATH
+_db_writer.DB_PATH = TEST_DB_PATH
+workspace.WORKSPACE_ROOT = TEST_WS
+import skills.constants as _skill_const
+_skill_const.WORKSPACE_ROOT = TEST_WS
+
+from main import app
+from httpx import AsyncClient, ASGITransport
+from workspace import layout
+
+
+def _client():
+    return AsyncClient(transport=ASGITransport(app=app), base_url="http://t")
+
+
+class TestSkillsReadApi(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        from core import auth as _auth
+        app.dependency_overrides[_auth.get_current_user] = lambda: {"uid": 1, "sub": "test"}
+        if TEST_WS.exists():
+            shutil.rmtree(TEST_WS)
+        # Seed a group role skill: group_7/roles/PM/skills/write-spec.md
+        d = layout.group_roles_dir(7) / "PM" / "skills"
+        d.mkdir(parents=True)
+        (d / "write-spec.md").write_text("---\nname: write-spec\n---\nspec body", encoding="utf-8")
+
+    async def asyncTearDown(self):
+        app.dependency_overrides.clear()
+        if TEST_WS.exists():
+            shutil.rmtree(TEST_WS)
+
+    async def test_list_role_scope(self):
+        async with _client() as c:
+            r = await c.get("/api/skills", params={"scope": "role:7:PM"})
+        self.assertEqual(r.status_code, 200)
+        names = [s["name"] for s in r.json()["skills"]]
+        self.assertIn("write-spec", names)
+
+    async def test_read_skill_content(self):
+        async with _client() as c:
+            r = await c.get("/api/skills/content", params={"scope": "role:7:PM", "name": "write-spec"})
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("spec body", r.json()["content"])
+
+    async def test_bad_descriptor_400(self):
+        async with _client() as c:
+            r = await c.get("/api/skills", params={"scope": "role:7:../etc"})
+        self.assertEqual(r.status_code, 400)
+
+    async def test_missing_skill_404(self):
+        async with _client() as c:
+            r = await c.get("/api/skills/content", params={"scope": "role:7:PM", "name": "nope"})
+        self.assertEqual(r.status_code, 404)
+
+
+if __name__ == "__main__":
+    unittest.main()

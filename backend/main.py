@@ -32,6 +32,7 @@ from api.sessions import router as sessions_router
 from api.auth import router as auth_router
 from api.config import router as config_router
 from permissions.routes import router as permissions_router
+from api.skills import router as skills_router
 from executors import registry
 
 @asynccontextmanager
@@ -120,6 +121,7 @@ app.include_router(workspace_router, dependencies=[Depends(auth.get_current_user
 app.include_router(workspace_preview_router)
 app.include_router(sessions_router, dependencies=[Depends(auth.get_current_user)])
 app.include_router(permissions_router, dependencies=[Depends(auth.get_current_user)])
+app.include_router(skills_router, dependencies=[Depends(auth.get_current_user)])
 app.include_router(config_router, dependencies=[Depends(auth.get_current_user)])
 app.include_router(scheduler.router)
 app.include_router(auth_router)
