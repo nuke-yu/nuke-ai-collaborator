@@ -7,6 +7,8 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 import skills.constants as _const
+import db as _database
+import db.writer as _db_writer
 from workspace import init_group_workspace, write_file, read_file, layout
 from workspace.git_worktree import create_worktree, remove_worktree, promote_worktree, use_worktree, _run_git_cmd
 from integrations.jira import get_jira
@@ -18,19 +20,32 @@ class TestGitWorktreeSandbox(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.workspace_root = Path(self._tmp.name).resolve()
-        
+
         # Patch WORKSPACE_ROOT to our temporary directory
         self._patcher = patch("skills.constants.WORKSPACE_ROOT", self.workspace_root)
         self._patcher.start()
-        
+
+        # Pin the DB path globals to an isolated temp DB and build its full schema
+        # (init_db runs migrations, incl. the `tickets` table jira.create_ticket
+        # needs). Without this, these process-wide globals are left pointing at
+        # whichever other suite imported last — and once that suite deletes its
+        # test DB in tearDown, our write_connect auto-creates a fresh schema-less
+        # DB at the stale path → 'no such table: tickets' (collection-order flake).
+        self._db_file = str(self.workspace_root / "test_git_worktree.db")
+        self._orig_db_paths = (_database.DB_PATH, _db_writer.DB_PATH)
+        _database.DB_PATH = self._db_file
+        _db_writer.DB_PATH = self._db_file
+        await _database.init_db()
+
         self.group_id = 99
         self.task_id = "DFT-123"
-        
+
         # Initialize group workspace
         await init_group_workspace(self.group_id)
 
     async def asyncTearDown(self):
         self._patcher.stop()
+        _database.DB_PATH, _db_writer.DB_PATH = self._orig_db_paths
         self._tmp.cleanup()
 
     async def test_create_and_remove_worktree(self):
