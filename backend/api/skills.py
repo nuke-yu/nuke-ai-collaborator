@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from skills.role_catalog import list_role_catalog
-from skills.scope import parse_descriptor
+from skills.scope import parse_descriptor, _safe_segment
 from skills.store import SkillStore
 from workspace import layout
 
@@ -79,6 +79,12 @@ async def copy_scope_skill(req: CopySkillRequest):
 
 @router.get("/api/templates/roles")
 async def list_template_roles(lang: str = "zh"):
+    # `lang` is request input that becomes a path segment — validate it with the
+    # same boundary the scope descriptors use (blocks ../ and separators).
+    try:
+        _safe_segment(lang)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
     return {"lang": lang, "roles": list_role_catalog(layout.templates_roles_dir(lang))}
 
 

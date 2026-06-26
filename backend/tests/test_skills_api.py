@@ -163,6 +163,11 @@ class TestRoleCatalogApi(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(r.status_code, 200)
         self.assertEqual([x["role"] for x in r.json()["roles"]], ["PM"])
 
+    async def test_template_roles_unsafe_lang_400(self):
+        async with _client() as c:
+            r = await c.get("/api/templates/roles", params={"lang": "../etc"})
+        self.assertEqual(r.status_code, 400)
+
 
 if __name__ == "__main__":
     unittest.main()
