@@ -53,5 +53,34 @@ class TestStore(unittest.TestCase):
                 st.copy(S.TemplateScope("zh", "dev"), "../evil", sc)
 
 
+    def test_directory_skill_operations(self):
+        with tempfile.TemporaryDirectory() as tmp, self._ws(tmp):
+            st = SkillStore()
+            src = S.GroupScope(7)
+            dst = S.RoleScope(7, "dev")
+            
+            # 1. Create a directory skill in group scope manually
+            dir_path = src.dir() / "folder-skill"
+            dir_path.mkdir(parents=True)
+            (dir_path / "SKILL.md").write_text("---\nname: folder-skill\n---\nbody", encoding="utf-8")
+            (dir_path / "companion.txt").write_text("companion", encoding="utf-8")
+            
+            # 2. Read it
+            self.assertIn("body", st.read(src, "folder-skill"))
+            
+            # 3. Copy it
+            st.copy(src, "folder-skill", dst)
+            self.assertTrue((dst.dir() / "folder-skill" / "SKILL.md").exists())
+            self.assertTrue((dst.dir() / "folder-skill" / "companion.txt").exists())
+            
+            # 4. Write to it (edit)
+            st.write(dst, "folder-skill", "---\nname: folder-skill\n---\nnew body")
+            self.assertIn("new body", (dst.dir() / "folder-skill" / "SKILL.md").read_text(encoding="utf-8"))
+            
+            # 5. Delete it
+            st.delete(dst, "folder-skill")
+            self.assertFalse((dst.dir() / "folder-skill").exists())
+
+
 if __name__ == "__main__":
     unittest.main()
