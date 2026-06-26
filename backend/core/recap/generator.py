@@ -30,11 +30,27 @@ _GROUP_SYS = (
     "5. 必须直接输出摘要文本，不要包含任何前导词（如“这里是摘要：”）、Markdown 格式标记或解释。"
 )
 
+_GROUP_SYS_EN = (
+    "You are a project collaboration assistant. Based on the provided recent chat logs, generate a short 1-3 sentence recap for a returning user.\n"
+    "Requirements:\n"
+    "1. Summarize the core status of the current task/ticket.\n"
+    "2. Summarize what each bot agent (e.g., BA, Dev, QA) has just completed.\n"
+    "3. Explain the next steps or what action/confirmation is currently required from the human user.\n"
+    "4. The language should be concise, lively, friendly, and tech-savvy. Use English, and keep it under 80 words.\n"
+    "5. Output the recap text directly. Do not include any prefix (like 'Here is the recap:'), Markdown formatting, or explanations."
+)
+
 _PERSONAL_SYS = (
     "你是一个项目协作助手。下面是某位用户离开期间他「错过」的群聊消息。"
     "请用第二人称「你」生成一段 1-3 句的简短摘要，概括：你离开期间发生的关键进展、"
     "各 Bot（BA/Dev/QA）做了什么、以及现在需要你做什么/确认什么。\n"
     "语言简洁生动、使用中文、120 字以内。必须直接输出摘要文本，不要前导词、不要 Markdown 标记。"
+)
+
+_PERSONAL_SYS_EN = (
+    "You are a project collaboration assistant. Below are the group messages the user missed while away.\n"
+    "Please generate a short 1-3 sentence summary using the second person 'you', summarizing: key progress made during your absence, what each bot (BA/Dev/QA) did, and what you need to do/confirm now.\n"
+    "The language should be concise and lively. Use English, and keep it under 80 words. Output the recap text directly. No prefixes, no Markdown formatting."
 )
 
 
@@ -49,7 +65,7 @@ def _pick_provider_model(members: list) -> tuple[str, str]:
     return provider, model
 
 
-async def _summarize(messages: list, members: list, *, personal: bool = False) -> str | None:
+async def _summarize(messages: list, members: list, group_id: int, *, personal: bool = False) -> str | None:
     """把一段消息历史摘成一句话 recap（group/personal 共用）。空历史/空结果返回 None。"""
     formatted = []
     for msg in messages:
@@ -61,12 +77,25 @@ async def _summarize(messages: list, members: list, *, personal: bool = False) -
         return None
     log_text = "\n".join(formatted)
     provider, model = _pick_provider_model(members)
-    system_prompt = _PERSONAL_SYS if personal else _GROUP_SYS
-    user_message = (
-        f"以下是你离开期间错过的群聊消息：\n\n{log_text}\n\n请生成你的「缺席重回」摘要。"
-        if personal else
-        f"以下是项目协作中最近的聊天记录：\n\n{log_text}\n\n请为重回项目的用户生成一段 1-3 句的简短“缺席重回”摘要（Recap）。"
-    )
+    
+    from workspace.layout import get_group_language
+    lang = get_group_language(group_id)
+
+    if lang == "en":
+        system_prompt = _PERSONAL_SYS_EN if personal else _GROUP_SYS_EN
+        user_message = (
+            f"Here are the group messages you missed while away:\n\n{log_text}\n\nPlease generate your recap."
+            if personal else
+            f"Here are the recent chat logs from the project collaboration:\n\n{log_text}\n\nPlease generate a short 1-3 sentence recap for a returning user."
+        )
+    else:
+        system_prompt = _PERSONAL_SYS if personal else _GROUP_SYS
+        user_message = (
+            f"以下是你离开期间错过的群聊消息：\n\n{log_text}\n\n请生成你的「缺席重回」摘要。"
+            if personal else
+            f"以下是项目协作中最近的聊天记录：\n\n{log_text}\n\n请为重回项目的用户生成一段 1-3 句的简短“缺席重回”摘要（Recap）。"
+        )
+
     res = await call_ai_once(
         system_prompt=system_prompt,
         messages=[{"role": "user", "content": user_message}],
@@ -113,7 +142,7 @@ async def generate_and_cache_recap(group_id: int, force: bool = False) -> str | 
             return None
 
         # 2-5. Summarize the recent group activity (shared helper)
-        summary = await _summarize(messages, members)
+        summary = await _summarize(messages, members, group_id)
         if not summary:
             log.warning("Generated empty recap for group %s", group_id)
             return None
@@ -195,7 +224,7 @@ async def generate_personal_recap(group_id: int, member_id: int) -> dict:
         async with global_db() as cdb:
             members = await get_members(cdb, group_id)
 
-        summary = await _summarize(messages, members, personal=True)
+        summary = await _summarize(messages, members, group_id, personal=True)
         covered_through_id = messages[-1]["id"]
         return {"unread_count": len(messages), "summary": summary, "covered_through_id": covered_through_id}
     except Exception as e:

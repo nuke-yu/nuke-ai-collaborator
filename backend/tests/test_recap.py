@@ -258,6 +258,35 @@ class TestAwaySummaryRecap(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await generate_and_cache_recap(1, force=True), "Forced summary.")
         self.assertEqual(mock_call_ai.call_count, 2)
 
+    @patch("core.recap.generator.call_ai_once", new_callable=AsyncMock)
+    @patch("workspace.layout.get_group_language")
+    async def test_recap_i18n_english(self, mock_get_lang, mock_call_ai):
+        mock_get_lang.return_value = "en"
+        mock_call_ai.return_value = {"content": "English recap."}
+        
+        summary = await generate_and_cache_recap(1, force=True)
+        self.assertEqual(summary, "English recap.")
+        
+        mock_call_ai.assert_called_once()
+        kwargs = mock_call_ai.call_args.kwargs
+        self.assertIn("You are a project collaboration assistant.", kwargs["system_prompt"])
+        self.assertIn("Here are the recent chat logs", kwargs["messages"][0]["content"])
+
+    @patch("core.recap.generator.call_ai_once", new_callable=AsyncMock)
+    @patch("workspace.layout.get_group_language")
+    async def test_recap_i18n_default_chinese(self, mock_get_lang, mock_call_ai):
+        mock_get_lang.return_value = "zh"
+        mock_call_ai.return_value = {"content": "中文摘要。"}
+        
+        summary = await generate_and_cache_recap(1, force=True)
+        self.assertEqual(summary, "中文摘要。")
+        
+        mock_call_ai.assert_called_once()
+        kwargs = mock_call_ai.call_args.kwargs
+        self.assertIn("你是一个项目协作助手。", kwargs["system_prompt"])
+        self.assertIn("以下是项目协作中最近的聊天记录", kwargs["messages"][0]["content"])
+
+
 
 class TestRecapApi(unittest.IsolatedAsyncioTestCase):
 
