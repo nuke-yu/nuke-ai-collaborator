@@ -65,6 +65,9 @@ class TestStore(unittest.TestCase):
             (dir_path / "SKILL.md").write_text("---\nname: folder-skill\n---\nbody", encoding="utf-8")
             (dir_path / "companion.txt").write_text("companion", encoding="utf-8")
             
+            # Assert list(scope) surfaces the directory skill
+            self.assertIn("folder-skill", [e["name"] for e in st.list(src)])
+
             # 2. Read it
             self.assertIn("body", st.read(src, "folder-skill"))
             
@@ -77,9 +80,33 @@ class TestStore(unittest.TestCase):
             st.write(dst, "folder-skill", "---\nname: folder-skill\n---\nnew body")
             self.assertIn("new body", (dst.dir() / "folder-skill" / "SKILL.md").read_text(encoding="utf-8"))
             
-            # 5. Delete it
+            # 5. Test escaping symlink rejection for directory skills
+            outside_file = src.dir().parent / "outside.txt"
+            outside_file.write_text("outside", encoding="utf-8")
+            
+            escaping_link = dir_path / "escaping_link"
+            escaping_link.symlink_to(outside_file)
+            
+            with self.assertRaises(ValueError) as ctx:
+                st.copy(src, "folder-skill", dst)
+            self.assertIn("symlink escapes scope directory", str(ctx.exception))
+            escaping_link.unlink()
+
+            # 6. Test escaping symlink rejection for file skills
+            escaping_file = src.dir() / "escaping-file.md"
+            escaping_file.symlink_to(outside_file)
+            
+            with self.assertRaises(ValueError) as ctx:
+                st.copy(src, "escaping-file", dst)
+            self.assertIn("symlink escapes scope directory", str(ctx.exception))
+            escaping_file.unlink()
+            
+            outside_file.unlink()
+
+            # 7. Delete it
             st.delete(dst, "folder-skill")
             self.assertFalse((dst.dir() / "folder-skill").exists())
+
 
 
 if __name__ == "__main__":
