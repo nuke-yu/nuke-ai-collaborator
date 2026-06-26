@@ -26,7 +26,7 @@ describe('ErrorBoundary', () => {
       </ErrorBoundary>
     )
     
-    expect(screen.getByText('应用出错了')).toBeInTheDocument()
+    expect(screen.getByText('页面出错了')).toBeInTheDocument()
     expect(screen.getByText(/Test Error/)).toBeInTheDocument()
     
     spy.mockRestore()

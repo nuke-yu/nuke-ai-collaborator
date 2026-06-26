@@ -242,20 +242,22 @@ describe('dispatchWsEvent — other events', () => {
   })
 
   it('tool_progress_start creates block', () => {
+    // Block key is `${temp_id}-${call_id}` (call_id disambiguates repeated calls
+    // of the same tool in one turn) — matches the backend tool_progress_* emission.
     useChatStore.getState().dispatchWsEvent(
-      { type: 'tool_progress_start', temp_id: 't1', tool_name: 'run_shell', tool_args: { cmd: 'ls' }, iteration: 1 },
+      { type: 'tool_progress_start', temp_id: 't1', call_id: 'c1', tool_name: 'run_shell', tool_args: { cmd: 'ls' }, iteration: 1 },
       notify
     )
-    expect(useChatStore.getState().toolProgressBlocks['t1-run_shell']).toMatchObject({ tool_name: 'run_shell', iteration: 1 })
+    expect(useChatStore.getState().toolProgressBlocks['t1-c1']).toMatchObject({ tool_name: 'run_shell', iteration: 1 })
   })
 
   it('tool_progress_end adds duration', () => {
-    useChatStore.setState({ toolProgressBlocks: { 't1-run_shell': { tool_name: 'run_shell', iteration: 1 } } })
+    useChatStore.setState({ toolProgressBlocks: { 't1-c1': { tool_name: 'run_shell', iteration: 1 } } })
     useChatStore.getState().dispatchWsEvent(
-      { type: 'tool_progress_end', temp_id: 't1', tool_name: 'run_shell', duration_sec: 0.42 },
+      { type: 'tool_progress_end', temp_id: 't1', call_id: 'c1', tool_name: 'run_shell', duration_sec: 0.42 },
       notify
     )
-    expect(useChatStore.getState().toolProgressBlocks['t1-run_shell'].duration_sec).toBe(0.42)
+    expect(useChatStore.getState().toolProgressBlocks['t1-c1'].duration_sec).toBe(0.42)
   })
 
   it('recovery_prompt deduplicates by session_id', () => {
