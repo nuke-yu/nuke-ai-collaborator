@@ -531,6 +531,8 @@ export const K = {
     added: 'template.added',
     newTemplate: 'template.newTemplate',
     titleManage: 'template.titleManage',
+    fileRolesTitle: 'template.fileRolesTitle',
+    lang: 'template.lang',
   },
   workflow: {
     title: 'workflow.title',

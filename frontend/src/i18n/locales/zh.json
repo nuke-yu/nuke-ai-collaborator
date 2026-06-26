@@ -530,7 +530,9 @@
     "addToGroup": "+ 添加到群组",
     "added": "✓ 已添加",
     "newTemplate": "+ 新建模板",
-    "titleManage": "角色模板管理"
+    "titleManage": "角色模板管理",
+    "fileRolesTitle": "角色模板（文件）",
+    "lang": "语言"
   },
   "workflow": {
     "title": "工作流",

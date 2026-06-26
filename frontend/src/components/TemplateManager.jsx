@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { K } from '../i18n/keys'
+import { fetchTemplateRoles, fetchScopeSkills } from '../skillsApi'
 
 const COLORS = ['#6366f1', '#8b5cf6', '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#ec4899']
 
@@ -13,7 +14,22 @@ export default function TemplateManager({ onClose, groupId, onAdded }) {
   const [form, setForm] = useState(empty)
   const [addedIds, setAddedIds] = useState(new Set())
 
+  // File-based role catalog state
+  const [lang, setLang] = useState('zh')
+  const [tplRoles, setTplRoles] = useState([])
+  const [selRole, setSelRole] = useState(null)
+  const [roleSkills, setRoleSkills] = useState([])
+
   useEffect(() => { loadTemplates() }, [])
+
+  useEffect(() => {
+    fetchTemplateRoles(lang).then((d) => setTplRoles(d.roles || [])).catch(() => setTplRoles([]))
+  }, [lang])
+
+  useEffect(() => {
+    if (!selRole) return
+    fetchScopeSkills(`template:${lang}:${selRole}`).then((d) => setRoleSkills(d.skills || [])).catch(() => setRoleSkills([]))
+  }, [selRole, lang])
 
   const loadTemplates = () =>
     fetch('/api/templates').then(r => r.json()).then(setTemplates)
@@ -156,6 +172,43 @@ export default function TemplateManager({ onClose, groupId, onAdded }) {
               <div className="flex items-center justify-center h-full text-gray-500 text-sm">{t(K.template.selectOrCreate)}</div>
             )}
           </div>
+        </div>
+
+        {/* File-based role catalog section */}
+        <div className="border-t border-gray-700 px-6 py-4">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-white text-sm font-semibold">{t(K.template.fileRolesTitle)}</h3>
+            <div className="flex items-center gap-2 text-xs text-gray-400">
+              <span>{t(K.template.lang)}</span>
+              <button
+                onClick={() => setLang('zh')}
+                className={`px-2 py-0.5 rounded transition-colors ${lang === 'zh' ? 'bg-indigo-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
+              >zh</button>
+              <button
+                onClick={() => setLang('en')}
+                className={`px-2 py-0.5 rounded transition-colors ${lang === 'en' ? 'bg-indigo-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
+              >en</button>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {tplRoles.map((r) => (
+              <button
+                key={r.role}
+                onClick={() => setSelRole(r.role)}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm transition-colors ${selRole === r.role ? 'bg-indigo-700 text-white' : 'bg-gray-700 hover:bg-gray-600 text-gray-200'}`}
+              >
+                <span className="w-4 h-4 rounded-full flex-shrink-0 inline-block" style={{ backgroundColor: r.avatar_color }} />
+                <span>{r.display_name} ({r.skill_count})</span>
+              </button>
+            ))}
+          </div>
+          {selRole && roleSkills.length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-1">
+              {roleSkills.map((s) => (
+                <span key={s.name} className="text-xs bg-gray-700 text-gray-300 px-2 py-0.5 rounded">{s.name}</span>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>

@@ -530,7 +530,9 @@
     "addToGroup": "+ Add to Group",
     "added": "✓ Added",
     "newTemplate": "+ New Template",
-    "titleManage": "Role Template Manager"
+    "titleManage": "Role Template Manager",
+    "fileRolesTitle": "Role templates (files)",
+    "lang": "Language"
   },
   "workflow": {
     "title": "Workflow",
