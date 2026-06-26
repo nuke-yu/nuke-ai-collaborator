@@ -554,6 +554,7 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
       />
       {showAddMember && (
         <MemberList
+          groupId={activeGroupId}
           onAddMember={async (form) => {
             const result = await addMember(activeGroupId, form)
             const { members: updated } = await fetchGroupInfo(activeGroupId)
@@ -569,6 +570,7 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
       )}
       {editingMember && (
         <MemberList
+          groupId={activeGroupId}
           initialData={editingMember}
           onEditMember={async (id, form) => {
             await fetch(`/api/members/${id}`, {

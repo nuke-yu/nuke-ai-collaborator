@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { K } from '../i18n/keys'
+import { fetchGroupRoles } from '../skillsApi'
 
 const COLORS = ['#6366f1', '#8b5cf6', '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#ec4899']
 
@@ -169,7 +170,7 @@ Delete this file. You don't need a bootstrap script anymore — you're you now.
 _Good luck out there. Make it count._
 `
 
-export default function MemberList({ onAddMember, onEditMember, onClose, initialData }) {
+export default function MemberList({ groupId, onAddMember, onEditMember, onClose, initialData }) {
   const { t } = useTranslation()
   const isEdit = !!initialData
   const [form, setForm] = useState(() => {
@@ -196,6 +197,13 @@ export default function MemberList({ onAddMember, onEditMember, onClose, initial
   const [cronCustom, setCronCustom] = useState(false)
   const [cronErr, setCronErr] = useState('')
   const [cronRunning, setCronRunning] = useState(null)
+  const [roleCatalog, setRoleCatalog] = useState([])
+  const [submitError, setSubmitError] = useState('')
+
+  useEffect(() => {
+    if (!groupId) return
+    fetchGroupRoles(groupId).then((d) => setRoleCatalog(d.roles || [])).catch(() => setRoleCatalog([]))
+  }, [groupId])
 
   useEffect(() => {
     fetch('/api/plugins').then(r => r.json()).then(setPlugins).catch(() => {})
@@ -339,7 +347,13 @@ export default function MemberList({ onAddMember, onEditMember, onClose, initial
         })
       }
     } else {
-      const result = await onAddMember({ ...form, bootstrap_content: bootstrap })
+      let result
+      try {
+        result = await onAddMember({ ...form, bootstrap_content: bootstrap })
+      } catch (err) {
+        setSubmitError(err.message)
+        return
+      }
       // onAddMember returns the new bot id; write bootstrap if we have it
       const newId = result?.id
       if (newId) {
@@ -396,12 +410,34 @@ export default function MemberList({ onAddMember, onEditMember, onClose, initial
             <>
               <div>
                 <label className="text-xs text-gray-400 mb-1 block">{t(K.member.role)}</label>
-                <input
-                  className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
-                  placeholder={t(K.member.rolePlaceholder2)}
-                  value={form.role}
-                  onChange={(e) => setField({ role: e.target.value })}
-                />
+                {roleCatalog.length > 0 ? (
+                  <select
+                    className="w-full bg-gray-800 rounded px-3 py-2 text-sm"
+                    value={form.role}
+                    onChange={(e) => {
+                      const role = e.target.value
+                      const meta = roleCatalog.find((r) => r.role === role)
+                      setField({
+                        role,
+                        ...(meta?.avatar_color ? { avatar_color: meta.avatar_color } : {}),
+                      })
+                    }}
+                  >
+                    <option value="">{t(K.member.roleSelectPlaceholder)}</option>
+                    {roleCatalog.map((r) => (
+                      <option key={r.role} value={r.role}>
+                        {r.display_name} ({r.skill_count})
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                    placeholder={t(K.member.rolePlaceholder2)}
+                    value={form.role}
+                    onChange={(e) => setField({ role: e.target.value })}
+                  />
+                )}
               </div>
               <div>
                 <label className="text-xs text-gray-400 mb-1 block">{t(K.member.systemPromptLabel)}</label>
@@ -787,6 +823,7 @@ export default function MemberList({ onAddMember, onEditMember, onClose, initial
           </div>
         </div>
 
+        {submitError && <p className="text-xs text-red-400 mt-2">{submitError}</p>}
         <div className="flex gap-2 mt-5">
           <button onClick={handleSubmit} className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg py-2 text-sm font-medium transition-colors">{isEdit ? t(K.member.save) : t(K.common.add)}</button>
           <button onClick={onClose} className="flex-1 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-lg py-2 text-sm transition-colors">{t(K.member.cancel)}</button>

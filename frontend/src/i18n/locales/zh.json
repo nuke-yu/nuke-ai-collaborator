@@ -225,6 +225,7 @@
     "typeHumanLabel": "👤 真人",
     "typeBotLabel": "🤖 AI 角色",
     "rolePlaceholder2": "如：产品经理、架构师...",
+    "roleSelectPlaceholder": "选择角色（来自本群角色目录）",
     "systemPromptLabel": "角色描述（System Prompt）",
     "systemPromptPlaceholder2": "描述这个 AI 角色的职责和行为...",
     "traits": "能力特征 (Traits)",

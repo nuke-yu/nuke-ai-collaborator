@@ -225,6 +225,7 @@
     "typeHumanLabel": "👤 Human",
     "typeBotLabel": "🤖 AI Role",
     "rolePlaceholder2": "e.g. Product Manager, Architect...",
+    "roleSelectPlaceholder": "Select a role (from this group's catalog)",
     "systemPromptLabel": "Role Description (System Prompt)",
     "systemPromptPlaceholder2": "Describe this AI role's responsibilities and behavior...",
     "traits": "Capability Traits",

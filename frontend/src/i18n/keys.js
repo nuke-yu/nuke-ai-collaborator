@@ -225,6 +225,7 @@ export const K = {
     typeHumanLabel: 'member.typeHumanLabel',
     typeBotLabel: 'member.typeBotLabel',
     rolePlaceholder2: 'member.rolePlaceholder2',
+    roleSelectPlaceholder: 'member.roleSelectPlaceholder',
     systemPromptLabel: 'member.systemPromptLabel',
     systemPromptPlaceholder2: 'member.systemPromptPlaceholder2',
     traits: 'member.traits',
