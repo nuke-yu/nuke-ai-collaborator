@@ -114,5 +114,42 @@ class TestSkillsWriteApi(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(d2.status_code, 200)
 
 
+class TestRoleCatalogApi(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        from core import auth as _auth
+        app.dependency_overrides[_auth.get_current_user] = lambda: {"uid": 1, "sub": "test"}
+        if TEST_WS.exists():
+            shutil.rmtree(TEST_WS)
+        from skills.role_meta import write_role_meta
+        tpl = layout.templates_roles_dir("zh") / "PM"
+        (tpl / "skills").mkdir(parents=True)
+        (tpl / "skills" / "write-spec.md").write_text("---\nname: write-spec\n---\nx", encoding="utf-8")
+        write_role_meta(tpl, {"display_name": "需求分析师", "avatar_color": "#0ea5e9"})
+        grp = layout.group_roles_dir(7) / "PM"
+        (grp / "skills").mkdir(parents=True)
+        write_role_meta(grp, {"display_name": "需求分析师", "avatar_color": "#0ea5e9"})
+
+    async def asyncTearDown(self):
+        app.dependency_overrides.clear()
+        if TEST_WS.exists():
+            shutil.rmtree(TEST_WS)
+
+    async def test_template_roles_default_lang_zh(self):
+        async with _client() as c:
+            r = await c.get("/api/templates/roles")
+        self.assertEqual(r.status_code, 200)
+        body = r.json()
+        self.assertEqual(body["lang"], "zh")
+        pm = next(x for x in body["roles"] if x["role"] == "PM")
+        self.assertEqual(pm["display_name"], "需求分析师")
+        self.assertEqual(pm["skill_count"], 1)
+
+    async def test_group_roles(self):
+        async with _client() as c:
+            r = await c.get("/api/groups/7/roles")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual([x["role"] for x in r.json()["roles"]], ["PM"])
+
+
 if __name__ == "__main__":
     unittest.main()

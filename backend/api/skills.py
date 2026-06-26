@@ -5,8 +5,10 @@ role-catalog listing. Path-safety lives entirely in skills.scope.parse_descripto
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from skills.role_catalog import list_role_catalog
 from skills.scope import parse_descriptor
 from skills.store import SkillStore
+from workspace import layout
 
 router = APIRouter()
 _store = SkillStore()
@@ -73,3 +75,13 @@ async def copy_scope_skill(req: CopySkillRequest):
     except (FileNotFoundError, NotADirectoryError):
         raise HTTPException(404, f"source skill not found: {req.name!r}")
     return {"ok": True}
+
+
+@router.get("/api/templates/roles")
+async def list_template_roles(lang: str = "zh"):
+    return {"lang": lang, "roles": list_role_catalog(layout.templates_roles_dir(lang))}
+
+
+@router.get("/api/groups/{group_id}/roles")
+async def list_group_roles(group_id: int):
+    return {"group_id": group_id, "roles": list_role_catalog(layout.group_roles_dir(group_id))}
