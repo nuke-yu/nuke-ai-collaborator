@@ -197,5 +197,60 @@ class TestStepC(unittest.TestCase):
                 self.assertFalse((layout.group_roles_dir(3) / "CEO").exists())
 
 
+class TestStepD(unittest.TestCase):
+    def test_rename_roles_to_legacy(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "roles" / "代码助手").mkdir(parents=True)
+            rep = M.retire_legacy_roles(root, dry_run=False)
+            self.assertTrue(rep["renamed"])
+            self.assertFalse((root / "roles").exists())
+            self.assertTrue((root / "roles.legacy" / "代码助手").exists())
+
+    def test_idempotent_when_already_retired(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "roles.legacy").mkdir(parents=True)
+            rep = M.retire_legacy_roles(root, dry_run=False)
+            self.assertFalse(rep["renamed"])      # nothing to do
+
+    def test_dryrun_no_rename(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "roles" / "x").mkdir(parents=True)
+            M.retire_legacy_roles(root, dry_run=True)
+            self.assertTrue((root / "roles").exists())
+            self.assertFalse((root / "roles.legacy").exists())
+
+
+class TestEndToEnd(unittest.TestCase):
+    def test_apply_pipeline_no_db(self):
+        # 直接驱动各 step（绕过 DB loader），验证 A→A2→B→C→D 串起来自洽
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with patch("skills.constants.WORKSPACE_ROOT", root):
+                sd = root / "roles" / "系统架构师" / "skills"
+                sd.mkdir(parents=True)
+                for s in ("design-architecture", "tech-stack-review"):
+                    (sd / f"{s}.md").write_text(f"---\nname: {s}\n---\nb", encoding="utf-8")
+
+                M.build_zh_templates(root, {}, dry_run=False)
+                M.build_en_skeletons(root, dry_run=False)
+                M.seed_existing_groups(root, [3], dry_run=False)
+                M.align_bot_roles(root, [(9, 3, "CEO")], dry_run=False)
+                M.retire_legacy_roles(root, dry_run=False)
+
+                from workspace import layout
+                # 群 3 拿到了系统架构师角色
+                self.assertTrue((layout.group_roles_dir(3) / "系统架构师" / "skills" / "design-architecture.md").exists())
+                # CEO 空角色建好
+                self.assertTrue((layout.group_roles_dir(3) / "CEO" / "skills").is_dir())
+                # 老目录退役
+                self.assertFalse((root / "roles").exists())
+                self.assertTrue((root / "roles.legacy").exists())
+                ok, problems = M.verify(root)
+                self.assertTrue(ok, problems)
+
+
 if __name__ == "__main__":
     unittest.main()

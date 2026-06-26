@@ -200,6 +200,54 @@ def align_bot_roles(root: Path, bots: list[tuple[int, int, str]], *,
     return {**plan, "dry_run": dry_run}
 
 
+def retire_legacy_roles(root: Path, *, dry_run: bool) -> dict:
+    """Step D：roles/ → roles.legacy/（幂等）。"""
+    src = root / "roles"
+    dst = root / "roles.legacy"
+    if dst.exists() or not src.exists():
+        return {"renamed": False, "dry_run": dry_run}
+    if not dry_run:
+        src.rename(dst)
+    return {"renamed": True, "dry_run": dry_run}
+
+
+def verify(root: Path) -> tuple[bool, list[str]]:
+    """收尾校验：zh 模板已建、老 roles/ 已退役。"""
+    problems: list[str] = []
+    if not (root / "templates" / "zh" / "roles").exists():
+        problems.append("缺 templates/zh/roles")
+    if (root / "roles").exists():
+        problems.append("老 roles/ 未退役")
+    if not (root / "roles.legacy").exists():
+        problems.append("缺 roles.legacy/（未改名）")
+    return (len(problems) == 0), problems
+
+
+def _load_role_db_meta() -> dict[str, dict]:
+    """中央 DB role_templates → {role 列: {system_prompt, avatar_color}}。"""
+    from db import connect_sync
+    out: dict[str, dict] = {}
+    with connect_sync() as conn:
+        for role, sp, color in conn.execute(
+                "SELECT role, system_prompt, avatar_color FROM role_templates").fetchall():
+            out[role] = {"system_prompt": sp, "avatar_color": color}
+    return out
+
+
+def _load_groups_from_db() -> list[int]:
+    from db import connect_sync
+    with connect_sync() as conn:
+        return [int(r[0]) for r in conn.execute("SELECT id FROM groups").fetchall()]
+
+
+def _load_bots_from_db() -> list[tuple[int, int, str]]:
+    from db import connect_sync
+    with connect_sync() as conn:
+        rows = conn.execute(
+            "SELECT id, group_id, COALESCE(role, '') FROM members WHERE type = 'bot'").fetchall()
+    return [(int(r[0]), int(r[1]), r[2]) for r in rows if r[2]]
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     apply = "--apply" in argv
@@ -216,8 +264,27 @@ def main(argv: list[str] | None = None) -> int:
     if not apply:
         print("\n[迁移] dry-run 完成。确认无误后加 --apply 执行。")
         return 0
-    print("\n[迁移] （步骤尚未接入，见后续任务）")
-    return 0
+    role_db_meta = _load_role_db_meta()
+    groups = _load_groups_from_db()
+    bots = _load_bots_from_db()
+
+    a = build_zh_templates(root, role_db_meta, dry_run=False)
+    a2 = build_en_skeletons(root, dry_run=False)
+    b = seed_existing_groups(root, groups, dry_run=False)
+    c = align_bot_roles(root, bots, dry_run=False)
+    d = retire_legacy_roles(root, dry_run=False)
+
+    print(f"  A 建 zh 模板: {a['built']}")
+    print(f"  A2 建 en 骨架: {a2['built']}")
+    print(f"  B 灌群: {list(b['seeded'].keys())}")
+    print(f"  C 对齐 bot：命中 {len(c['ok'])}，新建空角色 {c['create']}")
+    print(f"  D 退役 roles/: {'已改名' if d['renamed'] else '跳过'}")
+
+    ok, problems = verify(root)
+    print(f"\n[校验] {'通过 ✓' if ok else '发现问题 ✗'}")
+    for p in problems:
+        print(f"    - {p}")
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":
