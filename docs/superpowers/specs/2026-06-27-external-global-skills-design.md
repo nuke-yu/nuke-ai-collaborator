@@ -150,6 +150,39 @@
 
 ---
 
+## 7.5 运行时交互与执行层增强（inline / fork / compaction）
+
+参考 OpenCode（`tool/skill.ts`）与 Claude Code（`SkillTool.ts`/`processSlashCommand.tsx`）实现后定的三项执行层取舍。前提:Claude Code 是单用户/单进程,其若干选择是「单用户最优」,不可整体照搬;只采纳其**执行层**精炼处,守住我们的多租户/隔离/权限衰减。
+
+### 7.5.1 inline 正文框架 —— 保留 `tool` 结果（**不**学 Claude Code 的 user 消息）
+
+- 现状(保留):`run_skill` 处理后的正文作为 **`role:"tool"`** 消息进 `messages`（`tool_loop_v1_helpers.py:636`，按 `tool_call_id` 配对）。
+- **不采纳** Claude Code 的「stub 工具结果 + 注入 `user/isMeta` 正文」,理由:
+  1. 破坏 tool-use 协议配对;我们**多 provider**(DeepSeek/Ollama 校验严),stub+插队 user 易踩消息顺序校验。
+  2. 「user 比 tool 更服从」无证据;模型本就把工具结果当权威 ground truth。
+  3. **群组场景**:user 消息带 sender 身份,把技能正文伪装成 user 会污染「谁说的」——单用户 Claude Code 无此问题。
+  4. run_skill 已在 `_MICROCOMPACT_TOOLS`,压缩器按工具名抓;改 user 消息要重做。
+- **唯一增强**(零协议成本):把正文包一层 `<skill_instructions>…现在按以下步骤执行…</skill_instructions>`,拿「指令感」收益。
+
+### 7.5.2 fork 升级为真子 agent（采纳 Claude Code，但加我们的安全约束）
+
+- 现状问题:fork = 单轮 `ai_service.call`,模型请求工具调用**不执行**(`tool_loop_v1_helpers.py:188`)——除纯文本生成几乎无用。
+- **升级**:`context:fork` 路由到现成子 agent 设施(`spawn_agent`/AgentTool runner),对齐 Claude Code 的多轮 + 工具能力。**但不照抄其松散工具继承**,强制三条约束:
+  1. **走 `derive_subagent_ruleset()`**:bypassPermissions 不向下传、blanket high-risk allow 被 drop（这块我们比 Claude Code 严谨,不得退回）。
+  2. **套 `spawn_depth` 上限**:防技能调技能指数爆炸（对应 Claude Code 的 `queryTracking.depth`）。
+  3. **工具门控**:技能声明了 `allowed_tools` → 多轮子 agent;未声明 → 维持轻量单次调用,不为纯文本 fork 付子 agent 开销。
+- 回传父对话仍只是子 agent 的**结果文本**（包成 run_skill 工具结果,父上下文不被中间步骤污染)。
+
+### 7.5.3 compaction 保活（采纳 Claude Code 的「pin 已调用技能」）
+
+- 问题:任务跑到一半,技能正文若被上下文压缩丢弃,模型会断片。现状只有 micro-compact,无「保活」。
+- **增强**:镜像 Claude Code `addInvokedSkill`——已 `run_skill` 加载的技能正文登记为「已调用」,压缩时**pin 住或压缩后在预算内还原**其正文（含 base-dir 头 / `${SKILL_DIR}` 已替换后的版本）。
+- 顺带:`skill_model` 模型覆盖处理 `[1m]` 窗口后缀（技能 `model: opus` 不把 opus[1m] 会话窗口打回 200K）。
+
+> 三点净取舍:**抄 Claude Code 的 fork + compaction 保活;顶住其 inline-user 框架;守住我们的 ruleset 衰减/depth/隔离。**
+
+---
+
 ## 8. 受影响文件清单（实现期参考）
 
 | 文件 | 改动 |
@@ -162,6 +195,8 @@
 | `backend/skills/metadata.py` | frontmatter 加 `shell`、`platforms` 解析 |
 | `backend/permissions/patterns.py` | `synthesize_args_pattern` 补 `run_skill` 分支（name-scoped，修 blanket bug） |
 | prompt-build / available 路径 | 对 `layer=="external"` 按 bot 做权限可见性过滤 |
+| `backend/skills/loader.py` | inline 正文包 `<skill_instructions>`（§7.5.1）；fork 工具门控（§7.5.2） |
+| `backend/executors/plugins/tool_loop_v1*.py` | fork 路由到子 agent runner + `derive_subagent_ruleset` + `spawn_depth`（§7.5.2）；compaction 保活/还原已调用技能正文（§7.5.3）；`skill_model` 处理 `[1m]`（§7.5.3） |
 | `backend/api/skills.py` | `POST /api/skills/import` |
 | `backend/api/groups.py`（或 permissions 路由） | bot↔skill 分配端点 |
 | frontend Bot 配置面板 | 技能分配（allow/deny）+ 导入 UI |
@@ -177,6 +212,9 @@
 - **覆盖顺序**：`external` 盖过 `role`，被 `learned` 盖过；signature 缓存对外部池增删改敏感。
 - **跨平台**：Windows 下 `${SKILL_DIR}` 反斜杠归一化；`shell:`/`{{ is_windows }}` 分支生效。
 - **群组隔离**：bot A 的分配规则不影响 bot B；外部池定义跨群组可见。
+- **inline 框架**（§7.5.1）：技能正文仍走 `role:"tool"`，按 `tool_call_id` 配对；含 `<skill_instructions>` 包装。
+- **fork 子 agent**（§7.5.2）：声明 `allowed_tools` 的 fork 技能能多轮跑工具；ruleset 经 `derive_subagent_ruleset` 衰减（bypass 不下传、blanket high-risk 被 drop）；超 `spawn_depth` 上限被拒；未声明工具的 fork 仍单次调用。
+- **compaction 保活**（§7.5.3）：已调用技能正文经压缩后仍在上下文（pin/还原）；`skill_model` 的 `[1m]` 窗口后缀保留。
 
 ---
 
