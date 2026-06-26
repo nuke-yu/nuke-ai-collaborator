@@ -13,6 +13,20 @@
 
 两套**都用权限规则**决定「这个 agent 能看到/调哪些 skill」，跨平台**都靠作者声明 + 路径归一化**而非按主机 OS 分类门禁。本设计据此对齐。
 
+### 0.1 三方对比与取舍
+
+| 维度 | 我们（现状） | OpenCode | Claude Code | 我的建议 / 评价 |
+|---|---|---|---|---|
+| 执行层 tool | `run_skill`：base-dir 头 + `${SKILL_DIR}` + 参数替换 + companion 列表 + fork | 注入正文 + base dir + 文件列表（不替换） | inline/fork + `${CLAUDE_SKILL_DIR}` + 内联 shell | **保留我们的**——已是三者最全的执行层。仅补两处：Windows `${SKILL_DIR}` 反斜杠归一化、companion 文件列表加采样上限。 |
+| inline / fork | ✅ | ❌（只 inline） | ✅ | **保留，无需改**。我们与 Claude Code 一致，OpenCode 缺 fork。 |
+| 跨平台 | `template:true` Jinja 暴露 `{{ os/is_windows/shell }}` | 无 OS 感知 | `shell:` frontmatter 作者声明 + 路径归一化 | **采纳 Claude Code 的「作者声明」**：加 `shell: bash\|powershell` frontmatter，复用我们已有的 Jinja，废掉「按主机 OS 硬门禁」；`platforms` 降为 UI 徽章/警告。 |
+| 分配 / 可见性 | 原计划：`_assigned.json` 清单 + 新 source | 权限规则 `Permission.evaluate("skill",…)` | 权限规则 `Skill(name)`/`(name:*)` + safe-props 自动放行 | **采纳权限规则**（两家共识）：复用现有 `permission_rules`，弃清单方案。可见性==执行门禁同源，零新文件状态。 |
+| 分层 merge | ✅ 4 层 + A1 保护 + 深合并 + 诊断 | 扁平、后者覆盖 | 扁平、按目录深度 | **保留我们的，是优势**——多群组/角色/bot 场景必需，别学扁平。外部池作第 5 源插在 `role` 与 `learned` 之间。 |
+| 导入安全 | `HIGH_PRIVILEGE` 诊断 | —（来源视为可信） | 不可信来源（MCP/远程）禁内联 shell | **两者叠加**：HIGH_PRIVILEGE 诊断 + 不可信导入禁内联 shell + 未知 frontmatter 属性 fail-safe 要审批。 |
+| 远程导入 | 无 | `index.json` 清单 + 逐文件下载 + 缓存 | `_canonical_` 远程拉取 + GCS/AKI 缓存（实验） | **本期用 git URL**（用户已定）；`index.json` 式 registry 留作后续「skill 市场」演进参考。 |
+
+> 一句话取舍：**执行层、inline/fork、分层 merge 我们已领先 → 保留**；**分配、跨平台、导入安全 → 采纳两家的成熟做法**。
+
 ---
 
 ## 1. 目标
