@@ -369,7 +369,12 @@
     "aiResponse": "AI 响应",
     "requestFailed": "请求失败",
     "trigger": "触发：",
-    "confirmReject": "拒绝并删除草稿技能「{{name}}」？"
+    "confirmReject": "拒绝并删除草稿技能「{{name}}」？",
+    "browseScopes": "浏览其他层技能",
+    "scopeGroup": "群组层",
+    "scopeRole": "角色层",
+    "scopeSystem": "系统层",
+    "copyToGroup": "复制到本群"
   },
   "botLog": {
     "title": "Bot 日志",

@@ -369,7 +369,12 @@
     "aiResponse": "AI Response",
     "requestFailed": "Request failed",
     "trigger": "Trigger: ",
-    "confirmReject": "Reject and delete draft skill \"{{name}}\"?"
+    "confirmReject": "Reject and delete draft skill \"{{name}}\"?",
+    "browseScopes": "Browse other layers",
+    "scopeGroup": "Group",
+    "scopeRole": "Role",
+    "scopeSystem": "System",
+    "copyToGroup": "Copy to group"
   },
   "botLog": {
     "title": "Bot Logs",

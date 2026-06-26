@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { K } from '../i18n/keys'
+import { fetchScopeSkills, copyScopeSkill } from '../skillsApi'
 
 const LAYER_LABEL = {
   system:   { text: 'System',   color: 'bg-purple-900/50 text-purple-300' },
@@ -30,6 +31,24 @@ export default function SkillPanel({ bot, groupId, onClose }) {
   const [filter, setFilter] = useState('all') // all / active / disabled / draft
   const [toggling, setToggling] = useState(null)
   const [testSkill, setTestSkill] = useState(null)   // skill object being tested
+  const [browsing, setBrowsing] = useState(false)
+  const [browseScope, setBrowseScope] = useState('system')
+  const [scopeSkills, setScopeSkills] = useState([])
+
+  const scopeDescriptor = useCallback((kind) => {
+    if (kind === 'group') return `group:${groupId}`
+    if (kind === 'role') return `role:${groupId}:${bot.role}`
+    return 'system'
+  }, [groupId, bot.role])
+
+  const loadScope = useCallback(async (kind) => {
+    const d = await fetchScopeSkills(scopeDescriptor(kind))
+    setScopeSkills(d.skills || [])
+  }, [scopeDescriptor])
+
+  useEffect(() => {
+    if (browsing) loadScope(browseScope)
+  }, [browsing, browseScope, loadScope])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -131,9 +150,50 @@ export default function SkillPanel({ bot, groupId, onClose }) {
                 </button>
               ))}
             </div>
+            <button
+              data-testid="browse-scopes-toggle"
+              onClick={() => setBrowsing(b => !b)}
+              className={`text-xs px-3 py-1 rounded-lg transition-colors ${browsing ? 'bg-indigo-600 text-white' : 'bg-gray-700 text-gray-300 hover:text-white'}`}
+            >
+              {t(K.skill.browseScopes)}
+            </button>
             <button onClick={onClose} className="text-gray-500 hover:text-white text-xl leading-none">×</button>
           </div>
         </div>
+
+        {/* Scope browser */}
+        {browsing && (
+          <div className="border-b border-gray-700 px-5 py-3 flex-shrink-0">
+            <div className="flex items-center gap-3 mb-3">
+              <select
+                value={browseScope}
+                onChange={e => setBrowseScope(e.target.value)}
+                className="bg-gray-900 text-gray-300 text-xs rounded-lg px-2 py-1 outline-none"
+              >
+                <option value="group">{t(K.skill.scopeGroup)}</option>
+                <option value="role">{t(K.skill.scopeRole)}</option>
+                <option value="system">{t(K.skill.scopeSystem)}</option>
+              </select>
+            </div>
+            <div className="space-y-1 max-h-48 overflow-y-auto">
+              {scopeSkills.map(s => (
+                <div key={s.name} className="flex items-center justify-between py-1 px-2 rounded-lg hover:bg-gray-700/50">
+                  <span className="text-sm text-gray-200">{s.name}</span>
+                  <button
+                    data-testid={`copy-skill-${s.name}`}
+                    onClick={async () => {
+                      await copyScopeSkill(scopeDescriptor(browseScope), s.name, `group:${groupId}`)
+                      await load()
+                    }}
+                    className="text-xs px-2.5 py-1 rounded-lg bg-indigo-700 hover:bg-indigo-600 text-white transition-colors flex-shrink-0 ml-3"
+                  >
+                    {t(K.skill.copyToGroup)}
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Skill test panel */}
         {testSkill && (

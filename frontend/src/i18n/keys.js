@@ -370,6 +370,11 @@ export const K = {
     requestFailed: 'skill.requestFailed',
     trigger: 'skill.trigger',
     confirmReject: 'skill.confirmReject',
+    browseScopes: 'skill.browseScopes',
+    scopeGroup: 'skill.scopeGroup',
+    scopeRole: 'skill.scopeRole',
+    scopeSystem: 'skill.scopeSystem',
+    copyToGroup: 'skill.copyToGroup',
   },
   botLog: {
     title: 'botLog.title',
