@@ -13,6 +13,9 @@ from db import (get_db, write_connect, get_group, get_members, get_all_messages,
 from ws_manager import manager
 from models import AddMemberRequest, CreateGroupRequest, UpdateGroupRequest
 from workspace import init_bot_workspace, init_group_workspace
+from workspace import layout
+from skills.role_catalog import list_role_catalog
+from skills.role_meta import read_role_meta
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -158,6 +161,23 @@ async def add_member(group_id: int, req: AddMemberRequest):
             existing = await cur.fetchone()
         if existing:
             return {"id": existing[0], "name": req.name, "type": req.type}
+
+        # Role binding (bots only): validate against the group's role catalog and
+        # snapshot the role's system_prompt when the caller didn't supply one.
+        # An empty catalog (un-provisioned legacy group) is not enforced.
+        system_prompt = req.system_prompt
+        if req.type == "bot" and req.role:
+            catalog = {r["role"] for r in list_role_catalog(layout.group_roles_dir(group_id))}
+            if catalog and req.role not in catalog:
+                lang = layout.get_group_language(group_id)
+                msg = (f"角色 '{req.role}' 不在本群角色目录中" if lang == "zh"
+                       else f"Role '{req.role}' is not in this group's role catalog")
+                raise HTTPException(422, msg)
+            if not (system_prompt and system_prompt.strip()):
+                meta = read_role_meta(layout.group_roles_dir(group_id) / req.role)
+                if meta and meta.get("system_prompt"):
+                    system_prompt = meta["system_prompt"]
+
         config_str = json.dumps(req.executor_config or {})
         async with db.execute(
             """INSERT INTO members (
@@ -165,7 +185,7 @@ async def add_member(group_id: int, req: AddMemberRequest):
                 model_provider, model_name, temperature, max_tokens,
                 personality_prompt, executor_id, executor_config, done_keyword
             ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (group_id, req.name, req.type, req.role, req.system_prompt, req.avatar_color,
+            (group_id, req.name, req.type, req.role, system_prompt, req.avatar_color,
              req.model_provider, req.model_name, req.temperature, req.max_tokens,
              req.personality_prompt or None, req.executor_id, config_str, req.done_keyword or None)
         ) as cur:
@@ -178,7 +198,7 @@ async def add_member(group_id: int, req: AddMemberRequest):
                 "group_id": group_id,   # 关键：不传则落旧扁平区 workspaces/bot_{id}，而非 group_{id}/bots/
                 "name": req.name,
                 "role": req.role,
-                "system_prompt": req.system_prompt,
+                "system_prompt": system_prompt,
                 "personality_prompt": req.personality_prompt or "",
             })
 
