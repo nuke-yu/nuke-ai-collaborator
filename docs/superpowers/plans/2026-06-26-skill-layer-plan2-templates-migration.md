@@ -590,8 +590,11 @@ class TestStepA(unittest.TestCase):
             self.assertTrue((zh / "系统架构师" / "skills" / "design-architecture.md").exists())
             from skills.role_meta import read_role_meta
             self.assertEqual(read_role_meta(zh / "系统架构师")["system_prompt"], "你是架构师")
-            # discard 目录没建成模板
-            self.assertFalse((zh / "pm").exists())
+            # discard 目录没建成模板（用 built + 精确目录名，避免大小写不敏感 FS 上 pm/PM 碰撞）
+            self.assertNotIn("pm", rep["built"])
+            zh_names = {p.name for p in zh.iterdir()}
+            self.assertNotIn("pm", zh_names)
+            self.assertIn("PM", zh_names)
             # 新角色 Architecture（源自系统架构师）+ PM（update-board 源自 pm）
             self.assertTrue((zh / "Architecture" / "skills" / "tech-stack-review.md").exists())
             self.assertTrue((zh / "PM" / "skills" / "update-board.md").exists())
