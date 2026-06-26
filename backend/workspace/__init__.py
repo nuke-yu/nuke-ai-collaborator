@@ -753,6 +753,11 @@ async def init_group_workspace(group_id: int, group_name: str = ""):
         if not p.exists():
             p.write_text(content, encoding="utf-8")
 
+    # 建群拷贝：按群语言把全局角色模板拷进 group_<id>/roles/（幂等，System 池不拷）。
+    # 延迟 import 避免 workspace 包 import 期与 skills.store 形成环。
+    from workspace.role_provision import provision_group_roles
+    provision_group_roles(group_id)
+
 
 async def init_all_bots(bots: list[dict]):
     """Backfill workspace files for all existing bots that don't have them yet."""

@@ -40,6 +40,17 @@ class TestProvision(unittest.TestCase):
             with patch("skills.constants.WORKSPACE_ROOT", Path(tmp)):
                 self.assertEqual(provision_group_roles(7, lang="en"), [])
 
+    def test_init_group_workspace_provisions_roles(self):
+        import asyncio
+        from workspace import init_group_workspace
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with patch("skills.constants.WORKSPACE_ROOT", root):
+                self._seed_template(root, "zh", "代码助手", {"code-review": "---\nname: code-review\n---\nb"})
+                asyncio.run(init_group_workspace(5, "Proj"))
+                self.assertTrue(
+                    (layout.group_roles_dir(5) / "代码助手" / "skills" / "code-review.md").exists())
+
 
 if __name__ == "__main__":
     unittest.main()
