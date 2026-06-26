@@ -214,6 +214,14 @@ class TestStepD(unittest.TestCase):
             rep = M.retire_legacy_roles(root, dry_run=False)
             self.assertFalse(rep["renamed"])      # nothing to do
 
+    def test_idempotent_when_roles_absent(self):
+        # neither roles/ nor roles.legacy/ present → nothing to do
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            rep = M.retire_legacy_roles(root, dry_run=False)
+            self.assertFalse(rep["renamed"])
+            self.assertFalse((root / "roles.legacy").exists())
+
     def test_dryrun_no_rename(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

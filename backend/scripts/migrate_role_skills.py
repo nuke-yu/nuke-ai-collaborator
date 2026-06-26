@@ -201,7 +201,10 @@ def align_bot_roles(root: Path, bots: list[tuple[int, int, str]], *,
 
 
 def retire_legacy_roles(root: Path, *, dry_run: bool) -> dict:
-    """Step D：roles/ → roles.legacy/（幂等）。"""
+    """Step D：roles/ → roles.legacy/（幂等）。
+
+    返回 `renamed`：与本仓库 migrate_workspace_layout 的 "moved" 同义——dry-run 时
+    表示「将会改名」，apply 时表示「已改名」。两种情况下都不动 roles.legacy（已退役则跳过）。"""
     src = root / "roles"
     dst = root / "roles.legacy"
     if dst.exists() or not src.exists():
@@ -260,7 +263,6 @@ def main(argv: list[str] | None = None) -> int:
     if apply:
         print("[迁移] 确认：已停机且已备份 workspaces/ 与中央 DB ？(Ctrl-C 取消)")
 
-    # 各 step 在 Task 5-9 接入；本脚手架版 dry-run 不动盘。
     if not apply:
         print("\n[迁移] dry-run 完成。确认无误后加 --apply 执行。")
         return 0
