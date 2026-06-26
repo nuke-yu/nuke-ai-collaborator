@@ -29,14 +29,29 @@ class TestScaffold(unittest.TestCase):
             self.assertEqual(meta["avatar_color"], "#8b5cf6")
             self.assertEqual(meta["system_prompt"], "你是架构师")
 
-    def test_synth_role_yaml_minimal_when_no_db_meta(self):
+    def test_synth_role_yaml_new_role_uses_new_role_meta_avatar(self):
+        # Architecture/PM have no role_templates row (db_meta is None) but must
+        # still get their NEW_ROLE_META default avatar; system_prompt stays None.
         with tempfile.TemporaryDirectory() as tmp:
             d = Path(tmp) / "Architecture"
             M.synth_role_yaml(d, "Architecture", None)
             from skills.role_meta import read_role_meta
             meta = read_role_meta(d)
             self.assertEqual(meta["display_name"], "Architecture")
+            self.assertEqual(meta["avatar_color"], "#8b5cf6")
+            self.assertIsNone(meta["system_prompt"])
+
+    def test_synth_role_yaml_minimal_for_unknown_role(self):
+        # A role with neither db_meta nor a NEW_ROLE_META entry (e.g. step C's
+        # auto-created empty role) → only display_name, everything else None.
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp) / "CEO"
+            M.synth_role_yaml(d, "CEO", None)
+            from skills.role_meta import read_role_meta
+            meta = read_role_meta(d)
+            self.assertEqual(meta["display_name"], "CEO")
             self.assertIsNone(meta["avatar_color"])
+            self.assertIsNone(meta["system_prompt"])
 
     def test_main_dryrun_touches_nothing(self):
         with tempfile.TemporaryDirectory() as tmp:

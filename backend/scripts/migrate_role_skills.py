@@ -59,19 +59,16 @@ NEW_ROLE_META: dict[str, dict] = {
 def synth_role_yaml(dst_dir: Path, role: str, db_meta: dict | None, *,
                     display_name: str | None = None) -> None:
     """落 dst_dir/role.yaml。display_name 缺省取 role；db_meta 提供 system_prompt/avatar。
-    当 db_meta 为 None 时输出最小 meta（avatar_color=None，system_prompt=None）。
-    当 db_meta 有值但缺 avatar_color 时，回退 NEW_ROLE_META。
+
+    avatar_color 解析：db_meta 的值优先，否则回退 NEW_ROLE_META（Architecture/PM 这类
+    新角色没有 role_templates 行，db_meta 恒为 None，仍应拿到各自默认头像色）。既无
+    db_meta 又不在 NEW_ROLE_META 的角色（如 step C 自动建的空角色 CEO）→ avatar/prompt 均 None。
     """
-    if db_meta is not None:
-        avatar = db_meta.get("avatar_color") or NEW_ROLE_META.get(role, {}).get("avatar_color")
-        prompt = db_meta.get("system_prompt")
-    else:
-        avatar = None
-        prompt = None
+    db_meta = db_meta or {}
     meta = {
         "display_name": display_name or role,
-        "avatar_color": avatar,
-        "system_prompt": prompt,
+        "avatar_color": db_meta.get("avatar_color") or NEW_ROLE_META.get(role, {}).get("avatar_color"),
+        "system_prompt": db_meta.get("system_prompt"),
     }
     write_role_meta(dst_dir, meta)
 

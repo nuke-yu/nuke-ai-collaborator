@@ -394,14 +394,27 @@ class TestScaffold(unittest.TestCase):
             self.assertEqual(meta["avatar_color"], "#8b5cf6")
             self.assertEqual(meta["system_prompt"], "你是架构师")
 
-    def test_synth_role_yaml_minimal_when_no_db_meta(self):
+    def test_synth_role_yaml_new_role_uses_new_role_meta_avatar(self):
+        # Architecture/PM 无 role_templates 行（db_meta=None）但仍取 NEW_ROLE_META 默认头像色
         with tempfile.TemporaryDirectory() as tmp:
             d = Path(tmp) / "Architecture"
             M.synth_role_yaml(d, "Architecture", None)
             from skills.role_meta import read_role_meta
             meta = read_role_meta(d)
             self.assertEqual(meta["display_name"], "Architecture")
+            self.assertEqual(meta["avatar_color"], "#8b5cf6")
+            self.assertIsNone(meta["system_prompt"])
+
+    def test_synth_role_yaml_minimal_for_unknown_role(self):
+        # 既无 db_meta 又不在 NEW_ROLE_META（如 step C 自动建的空角色）→ 仅 display_name
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp) / "CEO"
+            M.synth_role_yaml(d, "CEO", None)
+            from skills.role_meta import read_role_meta
+            meta = read_role_meta(d)
+            self.assertEqual(meta["display_name"], "CEO")
             self.assertIsNone(meta["avatar_color"])
+            self.assertIsNone(meta["system_prompt"])
 
     def test_main_dryrun_touches_nothing(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -487,12 +500,17 @@ NEW_ROLE_META: dict[str, dict] = {
 
 def synth_role_yaml(dst_dir: Path, role: str, db_meta: dict | None, *,
                     display_name: str | None = None) -> None:
-    """落 dst_dir/role.yaml。display_name 缺省取 role；db_meta 提供 system_prompt/avatar。"""
+    """落 dst_dir/role.yaml。display_name 缺省取 role；db_meta 提供 system_prompt/avatar。
+
+    avatar_color：db_meta 优先，否则回退 NEW_ROLE_META（Architecture/PM 这类新角色无
+    role_templates 行、db_meta 恒为 None，仍应拿到默认头像色）。既无 db_meta 又不在
+    NEW_ROLE_META 的角色（step C 自动建的空角色）→ avatar/prompt 均 None。"""
+    db_meta = db_meta or {}
     meta = {
         "display_name": display_name or role,
-        "avatar_color": (db_meta or {}).get("avatar_color")
+        "avatar_color": db_meta.get("avatar_color")
                         or NEW_ROLE_META.get(role, {}).get("avatar_color"),
-        "system_prompt": (db_meta or {}).get("system_prompt"),
+        "system_prompt": db_meta.get("system_prompt"),
     }
     write_role_meta(dst_dir, meta)
 
