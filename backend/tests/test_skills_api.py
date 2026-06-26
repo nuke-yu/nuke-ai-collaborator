@@ -68,5 +68,51 @@ class TestSkillsReadApi(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(r.status_code, 404)
 
 
+class TestSkillsWriteApi(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        from core import auth as _auth
+        app.dependency_overrides[_auth.get_current_user] = lambda: {"uid": 1, "sub": "test"}
+        if TEST_WS.exists():
+            shutil.rmtree(TEST_WS)
+        d = layout.templates_roles_dir("zh") / "PM" / "skills"
+        d.mkdir(parents=True)
+        (d / "write-spec.md").write_text("---\nname: write-spec\n---\nspec", encoding="utf-8")
+
+    async def asyncTearDown(self):
+        app.dependency_overrides.clear()
+        if TEST_WS.exists():
+            shutil.rmtree(TEST_WS)
+
+    async def test_write_then_read(self):
+        async with _client() as c:
+            w = await c.post("/api/skills", json={
+                "scope": "group:7", "name": "house-rule", "content": "---\nname: house-rule\n---\nbe nice"})
+            self.assertEqual(w.status_code, 200)
+            r = await c.get("/api/skills/content", params={"scope": "group:7", "name": "house-rule"})
+        self.assertIn("be nice", r.json()["content"])
+
+    async def test_copy_template_to_role(self):
+        async with _client() as c:
+            cp = await c.post("/api/skills/copy", json={
+                "src": "template:zh:PM", "name": "write-spec", "dst": "role:7:PM"})
+            self.assertEqual(cp.status_code, 200)
+            r = await c.get("/api/skills", params={"scope": "role:7:PM"})
+        self.assertIn("write-spec", [s["name"] for s in r.json()["skills"]])
+
+    async def test_copy_missing_source_404(self):
+        async with _client() as c:
+            cp = await c.post("/api/skills/copy", json={
+                "src": "template:zh:PM", "name": "ghost", "dst": "role:7:PM"})
+        self.assertEqual(cp.status_code, 404)
+
+    async def test_delete_is_idempotent(self):
+        async with _client() as c:
+            await c.post("/api/skills", json={"scope": "group:7", "name": "tmp", "content": "x"})
+            d1 = await c.delete("/api/skills", params={"scope": "group:7", "name": "tmp"})
+            d2 = await c.delete("/api/skills", params={"scope": "group:7", "name": "tmp"})
+        self.assertEqual(d1.status_code, 200)
+        self.assertEqual(d2.status_code, 200)
+
+
 if __name__ == "__main__":
     unittest.main()
