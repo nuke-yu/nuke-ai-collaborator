@@ -138,5 +138,29 @@ class TestStepA2(unittest.TestCase):
             self.assertFalse((root / "templates" / "en").exists())
 
 
+class TestStepB(unittest.TestCase):
+    def test_seed_existing_groups(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with patch("skills.constants.WORKSPACE_ROOT", root):
+                # zh 模板里有一个角色
+                tsk = root / "templates" / "zh" / "roles" / "代码助手" / "skills"
+                tsk.mkdir(parents=True)
+                (tsk / "code-review.md").write_text("---\nname: code-review\n---\nb", encoding="utf-8")
+                rep = M.seed_existing_groups(root, [3, 4], dry_run=False)
+                from workspace import layout
+                self.assertTrue((layout.group_roles_dir(3) / "代码助手" / "skills" / "code-review.md").exists())
+                self.assertTrue((layout.group_roles_dir(4) / "代码助手").exists())
+                self.assertEqual(rep["seeded"][3], ["代码助手"])
+
+    def test_dryrun_no_write(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with patch("skills.constants.WORKSPACE_ROOT", root):
+                (root / "templates" / "zh" / "roles" / "PM" / "skills").mkdir(parents=True)
+                M.seed_existing_groups(root, [3], dry_run=True)
+                self.assertFalse((root / "group_3").exists())
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -159,6 +159,19 @@ def build_en_skeletons(root: Path, *, dry_run: bool) -> dict:
     return {"built": built, "dry_run": dry_run}
 
 
+def seed_existing_groups(root: Path, group_ids: list[int], *, dry_run: bool) -> dict:
+    """Step B：给现有群按语言灌角色（复用 provision_group_roles，幂等）。"""
+    seeded: dict[int, list[str]] = {}
+    if not dry_run:
+        from workspace.role_provision import provision_group_roles
+        for gid in group_ids:
+            seeded[gid] = provision_group_roles(gid)
+    else:
+        for gid in group_ids:
+            seeded[gid] = []  # dry-run：只列出待灌的群，不动盘
+    return {"seeded": seeded, "dry_run": dry_run}
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     apply = "--apply" in argv
