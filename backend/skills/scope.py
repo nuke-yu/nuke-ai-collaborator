@@ -5,15 +5,16 @@ from pathlib import Path
 from workspace import layout
 from . import constants as C
 
-_SAFE_SEGMENT = re.compile(r"^[A-Za-z0-9_-]+$")
+_SAFE_SEGMENT = re.compile(r"^[\w-]+$")
 
 
 def _safe_segment(seg: str) -> str:
-    """Validate a descriptor path segment (role / lang). Mixed-case ASCII +
-    dash/underscore only — blocks path traversal (`..`, `/`, `\\`) out of the
+    """Validate a descriptor path segment (role / lang). Unicode word characters
+    + dash/underscore only — blocks path traversal (`..`, `/`, `\\`) out of the
     group tree while still allowing capitalized role names like 'PM' /
-    'Architecture'. NOTE: deliberately NOT skills.metadata._is_safe_name, which
-    is lowercase-only and would reject those roles."""
+    'Architecture' and Chinese role names like '系统架构师'. NOTE: deliberately
+    NOT skills.metadata._is_safe_name, which is lowercase-only and would reject
+    those roles."""
     if not _SAFE_SEGMENT.match(seg or ""):
         raise ValueError(f"unsafe scope segment: {seg!r}")
     return seg

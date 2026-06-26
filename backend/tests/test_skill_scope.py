@@ -27,9 +27,11 @@ class TestScope(unittest.TestCase):
             with self.assertRaises(ValueError):
                 S.parse_descriptor(bad)
 
-    def test_parse_descriptor_allows_capitalized_roles(self):
+    def test_parse_descriptor_allows_capitalized_and_unicode_roles(self):
         self.assertEqual(S.parse_descriptor("template:en:PM"), S.TemplateScope("en", "PM"))
         self.assertEqual(S.parse_descriptor("role:7:Architecture"), S.RoleScope(7, "Architecture"))
+        self.assertEqual(S.parse_descriptor("role:7:系统架构师"), S.RoleScope(7, "系统架构师"))
+        self.assertEqual(S.parse_descriptor("template:zh:需求分析师"), S.TemplateScope("zh", "需求分析师"))
 
 
 if __name__ == "__main__":
