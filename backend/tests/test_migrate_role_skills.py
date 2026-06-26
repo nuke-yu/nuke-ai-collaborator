@@ -65,5 +65,45 @@ class TestScaffold(unittest.TestCase):
                 self.assertIn("DRY-RUN", buf.getvalue())
 
 
+class TestStepA(unittest.TestCase):
+    def _legacy(self, root: Path):
+        # 造两个保留角色 + 一个 discard + PM 的源
+        for role, skills in {
+            "系统架构师": ["design-architecture", "tech-stack-review"],
+            "需求分析师": ["write-spec", "write-user-story"],
+            "pm": ["update-board", "write-spec"],         # discard 目录，但 PM 借其 update-board
+        }.items():
+            sd = root / "roles" / role / "skills"
+            sd.mkdir(parents=True)
+            for s in skills:
+                (sd / f"{s}.md").write_text(f"# {s}\n", encoding="utf-8")
+
+    def test_build_zh_templates(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._legacy(root)
+            db_meta = {"系统架构师": {"system_prompt": "你是架构师", "avatar_color": "#8b5cf6"}}
+            rep = M.build_zh_templates(root, db_meta, dry_run=False)
+            zh = root / "templates" / "zh" / "roles"
+            # 保留角色拷过来了
+            self.assertTrue((zh / "系统架构师" / "skills" / "design-architecture.md").exists())
+            from skills.role_meta import read_role_meta
+            self.assertEqual(read_role_meta(zh / "系统架构师")["system_prompt"], "你是架构师")
+            # discard 目录没建成模板
+            self.assertFalse((zh / "pm").exists())
+            # 新角色 Architecture（源自系统架构师）+ PM（update-board 源自 pm）
+            self.assertTrue((zh / "Architecture" / "skills" / "tech-stack-review.md").exists())
+            self.assertTrue((zh / "PM" / "skills" / "update-board.md").exists())
+            self.assertTrue((zh / "PM" / "skills" / "write-spec.md").exists())
+            self.assertIn("Architecture", rep["built"])
+
+    def test_build_zh_templates_dryrun_no_write(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._legacy(root)
+            M.build_zh_templates(root, {}, dry_run=True)
+            self.assertFalse((root / "templates").exists())
+
+
 if __name__ == "__main__":
     unittest.main()

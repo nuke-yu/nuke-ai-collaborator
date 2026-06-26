@@ -19,6 +19,7 @@
     python3 -m scripts.migrate_role_skills --apply    # 执行
 """
 from __future__ import annotations
+import shutil
 import sys
 from pathlib import Path
 
@@ -71,6 +72,46 @@ def synth_role_yaml(dst_dir: Path, role: str, db_meta: dict | None, *,
         "system_prompt": db_meta.get("system_prompt"),
     }
     write_role_meta(dst_dir, meta)
+
+
+def _copy_skill_md(src_md: Path, dst_skills: Path, *, dry_run: bool) -> None:
+    if dry_run or not src_md.exists():
+        return
+    dst_skills.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src_md, dst_skills / src_md.name)
+
+
+def build_zh_templates(root: Path, role_db_meta: dict[str, dict], *,
+                       dry_run: bool) -> dict:
+    """Step A：从 root/roles/* 建 templates/zh/roles/*（保留 10 角色 + Architecture/PM）。"""
+    roles_src = root / "roles"
+    zh_root = root / "templates" / "zh" / "roles"
+    built: list[str] = []
+
+    # 10 个保留的中文角色：磁盘有、且不在 DISCARD
+    if roles_src.exists():
+        for src in sorted(roles_src.iterdir()):
+            if not src.is_dir() or src.name in DISCARD:
+                continue
+            role = src.name
+            dst = zh_root / role
+            for md in sorted((src / "skills").glob("*.md")) if (src / "skills").exists() else []:
+                _copy_skill_md(md, dst / "skills", dry_run=dry_run)
+            if not dry_run:
+                synth_role_yaml(dst, role, role_db_meta.get(role))
+            built.append(role)
+
+    # 新角色：技能正文从既有角色 .md 取
+    for role, sources in NEW_ROLES.items():
+        dst = zh_root / role
+        for src_role, skill in sources:
+            _copy_skill_md(roles_src / src_role / "skills" / f"{skill}.md",
+                           dst / "skills", dry_run=dry_run)
+        if not dry_run:
+            synth_role_yaml(dst, role, role_db_meta.get(role))
+        built.append(role)
+
+    return {"built": built, "dry_run": dry_run}
 
 
 def main(argv: list[str] | None = None) -> int:
