@@ -114,6 +114,51 @@ def build_zh_templates(root: Path, role_db_meta: dict[str, dict], *,
     return {"built": built, "dry_run": dry_run}
 
 
+def _frontmatter_only(md_text: str, skill_name: str) -> str:
+    """取 zh 技能的 YAML frontmatter，正文换成英文占位（TODO）。
+
+    没有 frontmatter（首行非 '---'）时，合成最小 frontmatter。"""
+    lines = md_text.splitlines()
+    if lines and lines[0].strip() == "---":
+        end = next((i for i in range(1, len(lines)) if lines[i].strip() == "---"), None)
+        if end is not None:
+            fm = "\n".join(lines[: end + 1])
+            return f"{fm}\n\nTODO: English skill body for '{skill_name}'.\n"
+    return f"---\nname: {skill_name}\ndescription: TODO\n---\n\nTODO: English skill body for '{skill_name}'.\n"
+
+
+def build_en_skeletons(root: Path, *, dry_run: bool) -> dict:
+    """Step A2：按 zh 模板套建 en 骨架（en display_name + 占位技能正文）。"""
+    zh_root = root / "templates" / "zh" / "roles"
+    en_root = root / "templates" / "en" / "roles"
+    built: list[str] = []
+    if not zh_root.exists():
+        return {"built": built, "dry_run": dry_run}
+
+    from skills.role_meta import read_role_meta
+
+    for zdir in sorted(zh_root.iterdir()):
+        if not zdir.is_dir():
+            continue
+        role = zdir.name
+        edir = en_root / role
+        if not dry_run:
+            (edir / "skills").mkdir(parents=True, exist_ok=True)
+            zmeta = read_role_meta(zdir) or {}
+            synth_role_yaml(
+                edir, role,
+                {"system_prompt": zmeta.get("system_prompt"),
+                 "avatar_color": zmeta.get("avatar_color")},
+                display_name=EN_DISPLAY.get(role, role),
+            )
+            for md in sorted((zdir / "skills").glob("*.md")) if (zdir / "skills").exists() else []:
+                (edir / "skills" / md.name).write_text(
+                    _frontmatter_only(md.read_text(encoding="utf-8"), md.stem),
+                    encoding="utf-8")
+        built.append(role)
+    return {"built": built, "dry_run": dry_run}
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     apply = "--apply" in argv

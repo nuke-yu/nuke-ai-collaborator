@@ -109,5 +109,34 @@ class TestStepA(unittest.TestCase):
             self.assertFalse((root / "templates").exists())
 
 
+class TestStepA2(unittest.TestCase):
+    def test_build_en_skeletons(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            # 先有一个 zh 模板角色
+            zsk = root / "templates" / "zh" / "roles" / "系统架构师" / "skills"
+            zsk.mkdir(parents=True)
+            (zsk / "design-architecture.md").write_text(
+                "---\nname: design-architecture\ndescription: x\n---\n中文正文", encoding="utf-8")
+            (root / "templates" / "zh" / "roles" / "系统架构师" / "role.yaml").write_text(
+                "display_name: 系统架构师\navatar_color: '#8b5cf6'\n", encoding="utf-8")
+
+            M.build_en_skeletons(root, dry_run=False)
+            en = root / "templates" / "en" / "roles" / "系统架构师"
+            from skills.role_meta import read_role_meta
+            self.assertEqual(read_role_meta(en)["display_name"], "System Architect")
+            body = (en / "skills" / "design-architecture.md").read_text(encoding="utf-8")
+            self.assertIn("name: design-architecture", body)   # frontmatter preserved
+            self.assertIn("TODO", body)                        # placeholder body
+            self.assertNotIn("中文正文", body)                  # zh body NOT carried over
+
+    def test_dryrun_no_write(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "templates" / "zh" / "roles" / "PM" / "skills").mkdir(parents=True)
+            M.build_en_skeletons(root, dry_run=True)
+            self.assertFalse((root / "templates" / "en").exists())
+
+
 if __name__ == "__main__":
     unittest.main()
