@@ -221,3 +221,149 @@ async def fetch_events(group_id: int, ids: list[int]) -> list[dict]:
             [group_id, *ids],
         ) as cur:
             return [_full_row(r) for r in await cur.fetchall()]
+
+
+# ───────────────────── L4 批量压缩（1 次模型调用/触发，无 observer） ─────────────────────
+# turn 后由 ChromaMemoryProvider.observe 触发（与 maybe_summarize/maybe_reflect 同列），
+# 纯条数门控：某 bot 在某群累计 compressed=0 的事件达到阈值，就用一次 call_ai 把这批总结成
+# 1-3 条持久结论，写进 Chroma（mem_type=tool_episode，供 recall / session-init 语义注入），
+# 再把这批标记 compressed=1。不引入常驻 observer，成本上限 = 1 次模型调用/触发。
+
+_COMPRESS_PROMPT = (
+    "你是工具活动总结助手。下面是某 AI 同事近期的工具调用记录（✓成功/✗出错 工具 文件或命令 → 结果摘要）。"
+    "请提炼成对未来工作有用的【持久结论】：改动过/创建过的关键文件、踩过的坑与报错、有效的命令、"
+    "得出的事实。每条一行，简洁具体，可在行尾用 `|重要性` 标注 0–1 的分数。"
+    "只输出结论行，不要解释；若整批都无值得长期记住的内容，只输出 NO_INSIGHT。\n\n"
+)
+
+
+def _compress_line(r) -> str:
+    # r = (id, ts, tool, args_summary, result_summary, is_error, files_touched, command)
+    import json as _json
+    tag = "✗" if r[5] else "✓"
+    detail = r[7]  # command
+    if not detail:
+        try:
+            files = _json.loads(r[6] or "[]")
+        except Exception:
+            files = []
+        detail = ", ".join(files[:3])
+    out = (r[4] or "").strip().replace("\n", " ")[:120]
+    return f"- {tag} {r[2]} {detail} → {out}".rstrip()
+
+
+def _parse_insights(text: str, cap: int) -> list[tuple[str, float]]:
+    insights: list[tuple[str, float]] = []
+    if not text or "NO_INSIGHT" in text:
+        return insights
+    for line in text.split("\n"):
+        line = line.strip().lstrip("-").strip()
+        if not line or line.startswith("#"):
+            continue
+        if "|" in line:
+            txt, _, sc = line.rpartition("|")
+            txt = txt.strip()
+            try:
+                score = max(0.0, min(1.0, float(sc.strip())))
+            except ValueError:
+                txt, score = line, 0.7
+        else:
+            txt, score = line, 0.7
+        if txt:
+            insights.append((txt[:500], score))
+    return insights[:cap]
+
+
+async def maybe_compress_tool_events(group_id: int, bot_id: int, role: str = "",
+                                     thread_id: str | None = None,
+                                     provider: str = "deepseek",
+                                     model: str = "deepseek-chat") -> None:
+    """L4：条数门控压缩。未达阈值即早退（不调模型）。fail-soft，schema 缺口上抛。"""
+    if group_id is None or bot_id is None:
+        return
+    import asyncio
+    from functools import partial
+    from core import config
+    threshold = config.TOOL_EVENT_COMPRESS_THRESHOLD
+    max_batch = config.TOOL_EVENT_COMPRESS_MAX_BATCH
+    try:
+        from ai.memory import _memory_db, ChromaStore
+        async with await _memory_db("tool_events", group_id, write=False) as db:
+            async with db.execute(
+                "SELECT id, ts, tool, args_summary, result_summary, is_error, "
+                "files_touched, command FROM tool_events "
+                "WHERE group_id=? AND bot_id=? AND compressed=0 ORDER BY id LIMIT ?",
+                (group_id, bot_id, max_batch),
+            ) as cur:
+                rows = await cur.fetchall()
+        if len(rows) < threshold:
+            return  # 门控未到：不烧模型
+
+        from ai.client import call_ai_once
+        body = "\n".join(_compress_line(r) for r in rows)
+        res = await call_ai_once(
+            _COMPRESS_PROMPT + body,
+            [{"role": "user", "content": "请提炼持久结论。"}],
+            provider, model, temperature=0.3, max_tokens=512,
+        )
+        text = (res.get("content") if isinstance(res, dict) and res.get("type") == "text" else "") or ""
+        insights = _parse_insights(text, config.TOOL_EVENT_COMPRESS_MAX_INSIGHTS)
+
+        if insights:
+            loop = asyncio.get_running_loop()
+            max_ts = max(r[1] for r in rows) / 1000.0  # ms → s，对齐 time.time() 基准
+            for idx, (insight, score) in enumerate(insights):
+                ts = max_ts + (idx + 1) * 0.001
+                metadata = {
+                    "bot_id": bot_id,
+                    "role": role or "",
+                    "timestamp": ts,
+                    "importance": score,
+                    "mem_type": "tool_episode",      # 区别于 fact / reflection
+                    "thread_id": thread_id or "",
+                    "scored_by_model": f"{provider}/{model}",
+                }
+                if group_id is not None:
+                    metadata["group_id"] = group_id
+                fid = f"toolsum_{bot_id}_{group_id}_{int(ts * 1000)}_{idx}"
+                await loop.run_in_executor(
+                    None, partial(ChromaStore.write_fact_sync, fid, insight, metadata)
+                )
+
+        # 无论是否有洞察都推进 compressed（NO_INSIGHT 也推进，避免下一轮重复压同一批）。
+        ids = [r[0] for r in rows]
+        ph = ",".join("?" * len(ids))
+        async with await _memory_db("tool_events", group_id, write=True) as db:
+            await db.execute(
+                f"UPDATE tool_events SET compressed=1 WHERE id IN ({ph})", ids
+            )
+            await db.commit()
+        log.info("compressed %d tool_events → %d insight(s) (group=%s, bot=%s)",
+                 len(rows), len(insights), group_id, bot_id)
+
+        # 低概率后台清理：已压缩且超保留期的原始行只是审计冗余，删之防表无限增长。
+        import random
+        if random.random() < 0.1:
+            await _prune_compressed(group_id)
+    except Exception:
+        from db.errors import is_missing_schema_error
+        import sys
+        e = sys.exc_info()[1]
+        if e is not None and is_missing_schema_error(e):
+            raise
+        log.debug("maybe_compress_tool_events swallowed (group=%s, bot=%s)",
+                  group_id, bot_id, exc_info=True)
+
+
+async def _prune_compressed(group_id: int) -> None:
+    """删除 compressed=1 且超过保留天数的原始事件行。"""
+    import time as _time
+    from core import config
+    from ai.memory import _memory_db
+    cutoff_ms = int((_time.time() - config.TOOL_EVENT_RETENTION_DAYS * 86400) * 1000)
+    async with await _memory_db("tool_events", group_id, write=True) as db:
+        await db.execute(
+            "DELETE FROM tool_events WHERE group_id=? AND compressed=1 AND ts < ?",
+            (group_id, cutoff_ms),
+        )
+        await db.commit()

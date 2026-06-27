@@ -259,5 +259,84 @@ class HandlerTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("无群组上下文", out)
 
 
+class CompressionTest(unittest.IsolatedAsyncioTestCase):
+    """L4 — batch compression of tool_events into durable memory."""
+
+    async def asyncSetUp(self):
+        self._orig = database.DB_PATH
+        database.DB_PATH = TEST_DB_PATH
+        if os.path.exists(TEST_DB_PATH):
+            os.remove(TEST_DB_PATH)
+        await database.init_db()
+
+    async def asyncTearDown(self):
+        database.DB_PATH = self._orig
+        if os.path.exists(TEST_DB_PATH):
+            try:
+                os.remove(TEST_DB_PATH)
+            except OSError:
+                pass
+
+    async def _seed(self, n: int, group_id: int = 1, bot_id: int = 1):
+        for i in range(n):
+            await record_event(group_id=group_id, bot_id=bot_id, tool="edit_file",
+                               arguments={"path": f"f{i}.py"}, result=f"edited {i}", is_error=False)
+
+    async def _compressed_count(self, group_id: int = 1) -> int:
+        async with database.connect(TEST_DB_PATH) as db:
+            async with db.execute(
+                "SELECT COUNT(*) FROM tool_events WHERE group_id=? AND compressed=1", (group_id,)
+            ) as cur:
+                return (await cur.fetchone())[0]
+
+    async def test_below_threshold_is_noop(self):
+        from ai import tool_events as te
+        await self._seed(3)
+        with patch("core.config.TOOL_EVENT_COMPRESS_THRESHOLD", 20), \
+             patch("ai.client.call_ai_once", new=AsyncMock()) as mock_ai:
+            await te.maybe_compress_tool_events(1, 1)
+        mock_ai.assert_not_called()
+        self.assertEqual(await self._compressed_count(), 0)
+
+    async def test_compresses_and_writes_chroma(self):
+        from ai import tool_events as te
+        await self._seed(5)
+        ai_ret = {"type": "text", "content": "- 改过 f0.py 等多个文件|0.9\n- 全部成功无报错|0.6"}
+        with patch("core.config.TOOL_EVENT_COMPRESS_THRESHOLD", 5), \
+             patch("ai.client.call_ai_once", new=AsyncMock(return_value=ai_ret)) as mock_ai, \
+             patch("ai.memory.ChromaStore.write_fact_sync") as mock_write:
+            await te.maybe_compress_tool_events(1, 1, role="dev")
+        mock_ai.assert_awaited_once()
+        self.assertEqual(mock_write.call_count, 2)  # two insights
+        # the written memory carries tool_episode type + group scope
+        _, _, meta = mock_write.call_args_list[0].args
+        self.assertEqual(meta["mem_type"], "tool_episode")
+        self.assertEqual(meta["group_id"], 1)
+        self.assertEqual(await self._compressed_count(), 5)
+
+    async def test_no_insight_still_advances(self):
+        from ai import tool_events as te
+        await self._seed(5)
+        with patch("core.config.TOOL_EVENT_COMPRESS_THRESHOLD", 5), \
+             patch("ai.client.call_ai_once",
+                   new=AsyncMock(return_value={"type": "text", "content": "NO_INSIGHT"})), \
+             patch("ai.memory.ChromaStore.write_fact_sync") as mock_write:
+            await te.maybe_compress_tool_events(1, 1)
+        mock_write.assert_not_called()
+        self.assertEqual(await self._compressed_count(), 5)  # advanced anyway
+
+    async def test_prune_removes_old_compressed(self):
+        from ai import tool_events as te
+        await self._seed(2)
+        # mark them compressed + backdate ts far past retention
+        async with database.connect(TEST_DB_PATH) as db:
+            await db.execute("UPDATE tool_events SET compressed=1, ts=1000")
+            await db.commit()
+        await te._prune_compressed(1)
+        async with database.connect(TEST_DB_PATH) as db:
+            async with db.execute("SELECT COUNT(*) FROM tool_events") as cur:
+                self.assertEqual((await cur.fetchone())[0], 0)
+
+
 if __name__ == "__main__":
     unittest.main()

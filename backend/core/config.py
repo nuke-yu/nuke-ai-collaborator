@@ -93,6 +93,16 @@ MEMORY_TTL_DAYS = float(os.environ.get("NUKE_MEMORY_TTL_DAYS") or 180.0)
 REFLECT_TTL_DAYS = float(os.environ.get("NUKE_REFLECT_TTL_DAYS") or 540.0)
 # 检索时给反思洞察的加性 bonus，使沉淀的高层知识更易浮现 (P2)。
 REFLECT_RETRIEVAL_BONUS = float(os.environ.get("NUKE_REFLECT_RETRIEVAL_BONUS") or 0.1)
+
+# L4 工具事件压缩：某 bot 在某群累计未压缩的 tool_events（L1 事件日志）达到
+# TOOL_EVENT_COMPRESS_THRESHOLD 条时，turn 后用一次 call_ai 把这批（最多 MAX_BATCH 条）
+# 总结成持久记忆写入 Chroma（供 recall / session-init 语义注入），并标记 compressed=1。
+# 仿 maybe_reflect，但触发改为纯条数门控、成本上限 1 次模型调用/触发。
+TOOL_EVENT_COMPRESS_THRESHOLD = int(os.environ.get("NUKE_TOOL_EVENT_COMPRESS_THRESHOLD") or 20)
+TOOL_EVENT_COMPRESS_MAX_BATCH = int(os.environ.get("NUKE_TOOL_EVENT_COMPRESS_MAX_BATCH") or 40)
+TOOL_EVENT_COMPRESS_MAX_INSIGHTS = int(os.environ.get("NUKE_TOOL_EVENT_COMPRESS_MAX_INSIGHTS") or 3)
+# 已压缩原始事件行的保留天数：压缩后这些行只是审计冗余，超期低概率后台清理防表无限增长。
+TOOL_EVENT_RETENTION_DAYS = float(os.environ.get("NUKE_TOOL_EVENT_RETENTION_DAYS") or 30.0)
 # 检索时给「与当前讨论 topic 同 thread」的记忆的加性 bonus：让本话题记忆上浮，
 # 但**不硬过滤**跨话题记忆（软作用域）——避免按话题孤岛化、保住跨话题的长期知识召回。
 MEMORY_THREAD_AFFINITY_BONUS = float(os.environ.get("NUKE_MEMORY_THREAD_AFFINITY_BONUS") or 0.15)

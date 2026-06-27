@@ -83,6 +83,7 @@ class ChromaMemoryProvider:
 
     async def observe(self, ev: MemoryEvent) -> None:
         from ai.memory import add_to_chroma, maybe_summarize, maybe_reflect
+        from ai.tool_events import maybe_compress_tool_events
         # 既有语义：ingest 用 role（可空）；summarize / reflect 在 role 空时回退到 bot_name。
         ingest_role = ev.role or ""
         compact_role = ev.role or ev.bot_name
@@ -90,6 +91,8 @@ class ChromaMemoryProvider:
             add_to_chroma(ev.message_id, ev.text, ingest_role, ev.bot_id, ev.group_id, ev.provider, ev.model, ev.thread_id),
             maybe_summarize(ev.group_id, ev.bot_id, compact_role, [ev.bot_id], ev.thread_id),
             maybe_reflect(ev.group_id, ev.bot_id, compact_role, ev.provider, ev.model),
+            # L4：把 L1 事件日志批量压缩成持久记忆（条数门控，1 次模型调用/触发，无 observer）。
+            maybe_compress_tool_events(ev.group_id, ev.bot_id, compact_role, ev.thread_id, ev.provider, ev.model),
             return_exceptions=True,
         )
         from db.errors import is_missing_schema_error

@@ -304,9 +304,13 @@ _GROUP_DDL = [
         result_summary TEXT    NOT NULL DEFAULT '',
         is_error       INTEGER NOT NULL DEFAULT 0,
         files_touched  TEXT    NOT NULL DEFAULT '[]',  -- JSON array of paths
-        command        TEXT                            -- run_shell cmd, else NULL
+        command        TEXT,                           -- run_shell cmd, else NULL
+        -- L4: 0 = not yet folded into a durable summary; 1 = compressed (then
+        -- prunable). maybe_compress_tool_events advances this in batches.
+        compressed     INTEGER NOT NULL DEFAULT 0
     )""",
     "CREATE INDEX IF NOT EXISTS idx_tool_events_grp_ts ON tool_events(group_id, ts)",
+    "CREATE INDEX IF NOT EXISTS idx_tool_events_uncompressed ON tool_events(group_id, bot_id, compressed)",
 ]
 
 

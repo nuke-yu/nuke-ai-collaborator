@@ -623,6 +623,27 @@ async def migration_025(db):
     await db.commit()
 
 
+async def migration_026(db):
+    """L4 — tool_events.compressed flag + uncompressed lookup index.
+
+    ADD COLUMN is idempotent via _safe_add_column (swallows duplicate-column,
+    skips if the table doesn't exist on this split DB). CREATE INDEX IF NOT
+    EXISTS is harmless on the central DB where tool_events stays empty.
+
+    Rollback:
+        DROP INDEX IF EXISTS idx_tool_events_uncompressed;
+        -- SQLite has no DROP COLUMN before 3.35; leaving the column is benign.
+    """
+    await _safe_add_column(
+        db, "ALTER TABLE tool_events ADD COLUMN compressed INTEGER NOT NULL DEFAULT 0"
+    )
+    await db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_tool_events_uncompressed "
+        "ON tool_events(group_id, bot_id, compressed)"
+    )
+    await db.commit()
+
+
 MIGRATIONS: list = [
     migration_001,
     migration_002,
@@ -649,6 +670,7 @@ MIGRATIONS: list = [
     migration_023,
     migration_024,
     migration_025,
+    migration_026,
 ]
 
 
