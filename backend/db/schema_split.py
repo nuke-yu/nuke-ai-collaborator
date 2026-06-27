@@ -370,7 +370,13 @@ async def init_group_db(path: str | None = None) -> None:
     import db as _db
     async with _db.connect(path or DB_PATH) as conn:
         for ddl in _GROUP_DDL:
-            await conn.execute(ddl)
+            try:
+                await conn.execute(ddl)
+            except Exception as e:
+                if "CREATE INDEX" in ddl.upper():
+                    log.warning("init_group_db: index creation deferred (column might be missing before migrations): %s", e)
+                else:
+                    raise
         await conn.commit()
         # FTS5 index — best-effort so a build without FTS5 still yields a usable
         # group DB (search_events degrades to LIKE).
