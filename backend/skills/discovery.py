@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import List, Dict, Optional
 
 from . import constants as C
-from .metadata import parse_skill_meta
+from .metadata import parse_skill_meta, clear_meta_cache
 from .composer import merge_layers
 from .cache import CachedScan
 from .sources.base import ScanCtx
@@ -36,7 +36,6 @@ _SCAN_CACHE = CachedScan()
 def invalidate_skills_cache() -> None:
     """Clear the four-layer scan cache (called by the watcher on skill changes)."""
     _SCAN_CACHE.clear()
-    from .metadata import clear_meta_cache
     clear_meta_cache()
 
 
