@@ -147,3 +147,17 @@ def _compute_skills_all(bot_id: int, group_id: Optional[int] = None,
         lrn.enumerate(),
         external=ext.enumerate(),
     )
+
+
+async def available_skills_for_bot(bot_id: int, group_id: Optional[int] = None,
+                                   role: Optional[str] = None) -> List[Dict]:
+    """list_skills_all + per-bot external visibility (Plan B §6.3).
+
+    The single visibility-filtered entry point shared by prompt-build and
+    run_skill. External-layer skills not enabled in bot_skills for this bot are
+    dropped; all other layers pass through. Runs OUTSIDE the mtime scan cache
+    because visibility is a per-bot DB fact, not a file-signature fact.
+    """
+    from .assignment import filter_visible
+    skills = await list_skills_all(bot_id, group_id=group_id, role=role)
+    return await filter_visible(bot_id, skills)

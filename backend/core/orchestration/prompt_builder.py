@@ -1,6 +1,6 @@
 import sys
 from executors.plugins.workspace_tools import _IS_WINDOWS, _with_personality, _build_skills_xml
-from skills import list_skills_all, load_always_skills, filter_skills_by_context
+from skills import list_skills_all, load_always_skills, filter_skills_by_context, available_skills_for_bot
 from skills.traits import load_traits
 from executors.base import build_group_section
 
@@ -86,7 +86,7 @@ async def compile_system_prompt(
     always_skills = []
     
     # Skill Discovery
-    raw_skills = await list_skills_all(bot["id"], group_id=ctx.group_id, role=bot.get("role"))
+    raw_skills = await available_skills_for_bot(bot["id"], group_id=ctx.group_id, role=bot.get("role"))
     lazy_candidates = [
         s for s in raw_skills
         if not s.get("always")

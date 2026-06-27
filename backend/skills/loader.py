@@ -3,7 +3,7 @@ import platform
 
 from . import constants as C
 from .metadata import skill_path, parse_skill_meta, strip_context_window_suffix
-from .discovery import list_skills, list_skills_all
+from .discovery import list_skills, list_skills_all, available_skills_for_bot
 from .processor import process_skill_content
 from workspace import layout
 
@@ -50,7 +50,7 @@ async def load_always_skills(bot_id: int, group_id: int | None = None,
     short summary (full text still reachable via run_skill). Skills are visited
     in layer order (system first), so foundational layers keep priority.
     """
-    skills = await list_skills_all(bot_id, group_id=group_id, role=role)
+    skills = await available_skills_for_bot(bot_id, group_id=group_id, role=role)
     result = []
     total = 0
     for skill in skills:
@@ -95,7 +95,7 @@ async def run_skill(bot_id: int, name: str, args: str = "", ctx: dict | None = N
     role = ctx.get("role") if ctx else None
 
     # Resolve from all layers dynamically (A3 Fallback support)
-    available_skills = await list_skills_all(bot_id, group_id=group_id, role=role)
+    available_skills = await available_skills_for_bot(bot_id, group_id=group_id, role=role)
     skill_entry = next((s for s in available_skills if s["name"] == name), None)
 
     if not skill_entry:

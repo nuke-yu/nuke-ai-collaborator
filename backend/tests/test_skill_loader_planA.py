@@ -26,7 +26,7 @@ class TestInlineFraming(unittest.IsolatedAsyncioTestCase):
         async def fake_list(*a, **k):
             return [entry]
 
-        with patch.object(loader, "list_skills_all", new=fake_list), \
+        with patch.object(loader, "available_skills_for_bot", new=fake_list), \
              patch("pathlib.Path.exists", lambda self: True), \
              patch("pathlib.Path.read_text", lambda self, encoding="utf-8": "BODY-TEXT"), \
              patch("pathlib.Path.iterdir", lambda self: iter([])):
@@ -53,7 +53,7 @@ class TestCompanionCap(unittest.IsolatedAsyncioTestCase):
         def fake_iterdir(self):
             return iter(companions)
 
-        with patch.object(loader, "list_skills_all", new=fake_list), \
+        with patch.object(loader, "available_skills_for_bot", new=fake_list), \
              patch("pathlib.Path.exists", lambda self: True), \
              patch("pathlib.Path.read_text", lambda self, encoding="utf-8": "BODY"), \
              patch("pathlib.Path.iterdir", new=fake_iterdir):
