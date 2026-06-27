@@ -64,3 +64,43 @@ describe('ExternalSkillPanel — pool + assignment', () => {
     expect(assigned.map(a => a.name)).toEqual([])             // deploy removed, nothing else assigned
   })
 })
+
+describe('ExternalSkillPanel — import', () => {
+  let api
+  beforeEach(async () => {
+    vi.clearAllMocks()
+    api = await import('../externalSkillsApi')
+    api.fetchMemberExternalSkills.mockResolvedValue({ pool: [], assigned: [] })
+    api.importExternalSkill.mockResolvedValue({ imported: [{ id: 9, name: 'new-skill' }], rejected: [] })
+  })
+  afterEach(() => vi.restoreAllMocks())
+
+  it('submits the import form with group scope and reloads the pool', async () => {
+    render(<ExternalSkillPanel bot={{ id: 3, name: 'dev' }} groupId={7} onClose={() => {}} />)
+    await waitFor(() => expect(api.fetchMemberExternalSkills).toHaveBeenCalledTimes(1))
+
+    fireEvent.click(screen.getByTestId('open-import'))
+    fireEvent.change(screen.getByTestId('import-url'), { target: { value: 'https://github.com/x/y' } })
+    fireEvent.change(screen.getByTestId('import-ref'), { target: { value: 'v1' } })
+    // scope select defaults to 'group'
+    fireEvent.click(screen.getByTestId('submit-import'))
+
+    await waitFor(() => expect(api.importExternalSkill).toHaveBeenCalled())
+    expect(api.importExternalSkill).toHaveBeenCalledWith({
+      git_url: 'https://github.com/x/y', ref: 'v1', scope: { group_id: 7 },
+    })
+    // pool reloaded after import
+    await waitFor(() => expect(api.fetchMemberExternalSkills).toHaveBeenCalledTimes(2))
+  })
+
+  it('sends scope:"global" when global is selected', async () => {
+    render(<ExternalSkillPanel bot={{ id: 3, name: 'dev' }} groupId={7} onClose={() => {}} />)
+    await waitFor(() => expect(api.fetchMemberExternalSkills).toHaveBeenCalledTimes(1))
+    fireEvent.click(screen.getByTestId('open-import'))
+    fireEvent.change(screen.getByTestId('import-scope'), { target: { value: 'global' } })
+    fireEvent.change(screen.getByTestId('import-url'), { target: { value: 'https://github.com/a/b' } })
+    fireEvent.click(screen.getByTestId('submit-import'))
+    await waitFor(() => expect(api.importExternalSkill).toHaveBeenCalled())
+    expect(api.importExternalSkill.mock.calls[0][0].scope).toBe('global')
+  })
+})
