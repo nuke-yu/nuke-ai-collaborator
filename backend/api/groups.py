@@ -17,7 +17,7 @@ from workspace import layout
 from pathlib import Path
 from skills.role_catalog import list_role_catalog
 from skills.role_meta import read_role_meta
-from skills.metadata import parse_skill_meta
+from skills.metadata import parse_skill_meta_cached
 from skills import assignment, registry
 
 log = logging.getLogger(__name__)
@@ -72,9 +72,11 @@ def _attach_descriptions(pool: list[dict]) -> list[dict]:
     """Join each pool row's frontmatter `description` from disk (the source of truth).
     Not a stored registry column — derived at read time to avoid store-and-stale.
     Mirrors how OpenCode / Claude Code surface descriptions: parse on read, never persist.
-    parse_skill_meta is exception-safe (missing/garbage file → empty description)."""
+    Uses the mtime-cached parser so repeated panel opens don't re-read every SKILL.md;
+    an edit still surfaces immediately (cache invalidates on mtime). Missing/garbage
+    file → empty description (parse is exception-safe)."""
     for row in pool:
-        row["description"] = parse_skill_meta(_external_skill_md(row)).get("description", "")
+        row["description"] = parse_skill_meta_cached(_external_skill_md(row)).get("description", "")
     return pool
 
 

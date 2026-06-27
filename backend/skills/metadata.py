@@ -223,3 +223,35 @@ def parse_skill_meta(path: Path) -> dict:
         return {"description": "", "always": False, "status": "active",
                 "layer": "", "learns": False, "is_stub": False, "fm_keys": [],
                 "roles": [], "stages": []}
+
+
+# path -> (mtime_ns, parsed meta). Bounded by the number of SKILL.md files on
+# disk (itself capped by the deployment's scale ceiling), so it cannot grow
+# without bound. Concurrent readers may redundantly parse-and-store the same
+# key; that is idempotent (same value, last write wins) so no lock is needed.
+_META_CACHE: dict[str, tuple[int, dict]] = {}
+
+
+def parse_skill_meta_cached(path: Path) -> dict:
+    """`parse_skill_meta` with an mtime-invalidated cache.
+
+    Serves an unchanged file from cache and re-parses only when its mtime
+    moves — so a hot read path (e.g. the member-skills GET description join,
+    hit on every panel open) doesn't re-read+parse every SKILL.md each time,
+    while edits to a skill still surface immediately. A missing/inaccessible
+    file falls back to the empty-meta result and is NOT cached (cheap to
+    re-stat; lets a later-created file populate naturally).
+
+    Returns the cached dict by reference; treat the result as read-only.
+    """
+    try:
+        mtime = os.stat(path).st_mtime_ns
+    except OSError:
+        return parse_skill_meta(path)
+    key = str(path)
+    cached = _META_CACHE.get(key)
+    if cached is not None and cached[0] == mtime:
+        return cached[1]
+    meta = parse_skill_meta(path)
+    _META_CACHE[key] = (mtime, meta)
+    return meta
