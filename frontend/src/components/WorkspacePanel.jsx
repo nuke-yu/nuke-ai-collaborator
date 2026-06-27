@@ -393,6 +393,7 @@ function buildTree(flat, sharedZoneLabel) {
 
 // Recursively render one tree level: files first, then nested directories.
 function TreeLevel({ node, depth, prefix, selected, onOpen, onDelete, isShared = false, t }) {
+  const [collapsed, setCollapsed] = useState({})
   const files = [...node.files].sort((a, b) => a.name.localeCompare(b.name))
   const dirNames = Object.keys(node.dirs).sort()
   return (
@@ -409,17 +410,25 @@ function TreeLevel({ node, depth, prefix, selected, onOpen, onDelete, isShared =
         const dirPath = prefix ? `${prefix}/${name}` : name
         // Shared workspace is the root (starts with workspace/, docs/, prs/)
         const childIsShared = !prefix && isShared
+        const isExpanded = !collapsed[name]
         return (
           <div key={name}>
             <div
-              className="group/row py-1 text-xs text-gray-500 font-medium mt-1 flex items-center gap-1 hover:bg-gray-800/60"
+              onClick={() => setCollapsed(prev => ({ ...prev, [name]: !prev[name] }))}
+              className="group/row py-1 text-xs text-gray-500 hover:text-gray-300 font-medium mt-1 flex items-center gap-1.5 hover:bg-gray-800/60 cursor-pointer select-none"
               style={{ paddingLeft: `${12 + depth * 14}px`, paddingRight: '6px' }}
             >
+              <span className="text-[9px] w-2.5 inline-block text-gray-500">
+                {isExpanded ? '▼' : '▶'}
+              </span>
               <span>📁</span>
               <span className="truncate flex-1">{isShared && <span title={t('workspace.sharedZoneReadonly')}>🌐</span>} {name}</span>
               {!isShared && (
                 <button
-                  onClick={() => onDelete(dirPath, true)}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onDelete(dirPath, true)
+                  }}
                   title={t('workspace.deleteDirTitle')}
                   className="opacity-0 group-hover/row:opacity-100 text-gray-500 hover:text-red-400 px-1 flex-shrink-0 transition-opacity"
                 >
@@ -427,10 +436,12 @@ function TreeLevel({ node, depth, prefix, selected, onOpen, onDelete, isShared =
                 </button>
               )}
             </div>
-            <TreeLevel
-              node={node.dirs[name]} depth={depth + 1} prefix={dirPath}
-              selected={selected} onOpen={onOpen} onDelete={onDelete} isShared={childIsShared} t={t}
-            />
+            {isExpanded && (
+              <TreeLevel
+                node={node.dirs[name]} depth={depth + 1} prefix={dirPath}
+                selected={selected} onOpen={onOpen} onDelete={onDelete} isShared={childIsShared} t={t}
+              />
+            )}
           </div>
         )
       })}
@@ -451,6 +462,7 @@ function FileRow({ name, active, depth = 0, onClick, onDelete, isShared = false,
         className="flex-1 min-w-0 text-left py-1.5 flex items-center gap-1.5"
         style={{ paddingLeft: `${12 + depth * 14}px` }}
       >
+        <span className="w-2.5 inline-block" />
         <span className="text-gray-500">📄</span>
         <span className="truncate">{isShared && <span title={sharedZoneReadonly}>🌐</span>} {name}</span>
       </button>
