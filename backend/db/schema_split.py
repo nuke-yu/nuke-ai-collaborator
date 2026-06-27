@@ -30,7 +30,7 @@ CENTRAL_TABLES = frozenset({
 GROUP_TABLES = frozenset({
     "messages", "role_summaries", "message_embeddings", "member_read",
     "message_reactions", "pinned_messages", "agent_sessions", "session_events",
-    "workflow_state", "group_locks", "tickets", "reflection_state",
+    "workflow_state", "group_locks", "tickets", "reflection_state", "tool_events",
 })
 
 # ── CENTRAL DDL (final shape; central-internal FKs kept) ──────────────────
@@ -288,6 +288,25 @@ _GROUP_DDL = [
         total_usd_cost REAL DEFAULT 0.0,
         UNIQUE(group_id, ticket_id)
     )""",
+    # tool_events (L1): deterministic per-tool-call event log (zero LLM). Every
+    # tool dispatched through executors/tool_dispatch.dispatch_tool — builtin /
+    # skill / shell AND MCP — appends one structured row here, fire-and-forget.
+    # This is the recall floor for "what happened" without paying a model to
+    # narrate it. Cross-domain FKs dropped (group_id/bot_id are bare ints).
+    """CREATE TABLE IF NOT EXISTS tool_events (
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        ts             INTEGER NOT NULL,          -- epoch ms
+        group_id       INTEGER NOT NULL,
+        bot_id         INTEGER,
+        thread_id      TEXT    NOT NULL DEFAULT '',
+        tool           TEXT    NOT NULL,
+        args_summary   TEXT    NOT NULL DEFAULT '',
+        result_summary TEXT    NOT NULL DEFAULT '',
+        is_error       INTEGER NOT NULL DEFAULT 0,
+        files_touched  TEXT    NOT NULL DEFAULT '[]',  -- JSON array of paths
+        command        TEXT                            -- run_shell cmd, else NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_tool_events_grp_ts ON tool_events(group_id, ts)",
 ]
 
 

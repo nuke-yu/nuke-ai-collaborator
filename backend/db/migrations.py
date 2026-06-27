@@ -591,6 +591,38 @@ async def migration_024(db):
     await db.commit()
 
 
+async def migration_025(db):
+    """L1 — tool_events: deterministic per-tool-call event log (group-domain).
+
+    CREATE IF NOT EXISTS is idempotent and harmless if it also runs on the
+    central DB (the table stays empty there). See db/schema_split.py _GROUP_DDL
+    for the canonical shape applied to fresh group DBs.
+
+    Rollback:
+        DROP INDEX IF EXISTS idx_tool_events_grp_ts;
+        DROP TABLE IF EXISTS tool_events;
+    """
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS tool_events (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts             INTEGER NOT NULL,
+            group_id       INTEGER NOT NULL,
+            bot_id         INTEGER,
+            thread_id      TEXT    NOT NULL DEFAULT '',
+            tool           TEXT    NOT NULL,
+            args_summary   TEXT    NOT NULL DEFAULT '',
+            result_summary TEXT    NOT NULL DEFAULT '',
+            is_error       INTEGER NOT NULL DEFAULT 0,
+            files_touched  TEXT    NOT NULL DEFAULT '[]',
+            command        TEXT
+        )
+    """)
+    await db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_tool_events_grp_ts ON tool_events(group_id, ts)"
+    )
+    await db.commit()
+
+
 MIGRATIONS: list = [
     migration_001,
     migration_002,
@@ -616,6 +648,7 @@ MIGRATIONS: list = [
     migration_022,
     migration_023,
     migration_024,
+    migration_025,
 ]
 
 

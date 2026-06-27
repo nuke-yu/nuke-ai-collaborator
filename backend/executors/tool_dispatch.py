@@ -1,4 +1,42 @@
+import asyncio
+
 from executors import tool_executor
+
+# Keep strong refs to fire-and-forget L1 recording tasks so the event loop
+# doesn't GC them mid-flight (asyncio only holds weak refs to bare tasks).
+_recording_tasks: set = set()
+
+
+def _record_event_l1(name: str, arguments: dict, result: str, is_error: bool, context: dict) -> None:
+    """L1 — fire-and-forget the deterministic tool-event log. NEVER blocks or
+    raises into the dispatch path: any failure stays inside record_event (which
+    swallows everything except a genuine missing-schema migration gap)."""
+    context = context or {}
+    group_id = context.get("group_id")
+    if group_id is None:
+        return  # minimal/test loop without group scope — nothing to record
+    try:
+        thread_id = None
+        try:
+            import core.workflow as _wf
+            thread_id = _wf.current_thread_id(group_id)
+        except Exception:
+            pass
+        from ai.tool_events import record_event
+        task = asyncio.create_task(record_event(
+            group_id=group_id,
+            bot_id=context.get("bot_id"),
+            tool=name,
+            arguments=arguments,
+            result=result,
+            is_error=is_error,
+            thread_id=thread_id,
+        ))
+        _recording_tasks.add(task)
+        task.add_done_callback(_recording_tasks.discard)
+    except Exception:
+        pass  # scheduling the recorder must never perturb the tool loop
+
 
 async def dispatch_tool(name: str, arguments: dict, context: dict) -> tuple[str, bool]:
     """Dispatch a tool call to the right executor, returning (result, is_error).
@@ -13,12 +51,21 @@ async def dispatch_tool(name: str, arguments: dict, context: dict) -> tuple[str,
         through the router (→ McpClientToolProvider, which applies its own HIL
         gate + timeout). Guarded by has_providers() so a worker/test without
         MCP falls straight through to tool_executor.
+
+    L1 event log: this is the single chokepoint both the serial and parallel
+    executors funnel through, and it sees the post-dispatch (result, is_error)
+    for EVERY tool — builtin AND MCP — so it's where the deterministic
+    tool_events row is recorded (fire-and-forget; see _record_event_l1).
     """
     if not tool_executor.has_tool(name):
         from executors.tool_router import router as _tool_router
         if _tool_router.has_providers():
-            return await _tool_router.execute(name, arguments, context=context)
-    return await tool_executor.execute(name, arguments, context=context)
+            result, is_error = await _tool_router.execute(name, arguments, context=context)
+            _record_event_l1(name, arguments, result, is_error, context)
+            return result, is_error
+    result, is_error = await tool_executor.execute(name, arguments, context=context)
+    _record_event_l1(name, arguments, result, is_error, context)
+    return result, is_error
 
 
 async def execute_tool_call(name: str, arguments: dict, context: dict) -> str:
