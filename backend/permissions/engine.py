@@ -33,11 +33,9 @@ _ASK_TIMEOUT_SECONDS = config.ASK_TIMEOUT_SECONDS
 # (DFT-032). Keying by group + the specific call stops "once" from leaking into
 # other groups or becoming a permanent blanket allow.
 _once_grants: dict[tuple[int, int], list[tuple[str, str]]] = {}
-_once_grants_lock = asyncio.Lock()
 
 # Pending ask futures keyed by request_id
 _pending: dict[str, _PendingRequest] = {}
-_pending_lock = asyncio.Lock()
 
 
 def pending_stats() -> dict:
@@ -230,11 +228,10 @@ async def check(
     # 7. ask — suspend and wait for user response
     request_id = str(uuid.uuid4())
     future: asyncio.Future = asyncio.get_running_loop().create_future()
-    async with _pending_lock:
-        _pending[request_id] = _PendingRequest(
-            future=future, bot_id=bot_id, group_id=group_id,
-            tool_name=tool_name, arguments=arguments,
-        )
+    _pending[request_id] = _PendingRequest(
+        future=future, bot_id=bot_id, group_id=group_id,
+        tool_name=tool_name, arguments=arguments,
+    )
 
     await broadcaster.broadcast(group_id, {
         "type": "permission_request",
@@ -249,17 +246,15 @@ async def check(
         return {"action": "deny",
                 "reason": f"权限请求超时（{_ASK_TIMEOUT_SECONDS}s 未响应），已自动拒绝"}
     finally:
-        async with _pending_lock:
-            _pending.pop(request_id, None)
+        _pending.pop(request_id, None)
 
     if not approved:
         return {"action": "deny", "reason": "用户拒绝授权"}
 
     if persistence == "once":
-        async with _once_grants_lock:
-            _once_grants.setdefault((bot_id, group_id), []).append(
-                (tool_name, _args_hash(arguments))
-            )
+        _once_grants.setdefault((bot_id, group_id), []).append(
+            (tool_name, _args_hash(arguments))
+        )
         return {"action": "allow"}
     # persistence == "always" → caller saves to DB. Scope the rule to the *kind*
     # of call approved (e.g. `git push *`) instead of a blanket allow-all-args —

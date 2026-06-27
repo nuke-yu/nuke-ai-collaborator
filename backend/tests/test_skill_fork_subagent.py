@@ -75,6 +75,35 @@ class TestForkSubagent(unittest.IsolatedAsyncioTestCase):
             await _run_fork_skill("b", "t", "deepseek", "deepseek-chat", 0.7, ai,
                                   usage_out=[])
 
+    async def test_fork_compaction_recovery_on_overflow(self):
+        from ai.client import AIContextOverflowError
+        from core.orchestration.ai_service import AIService
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        call_count = 0
+        async def fake_call_ai_once(*a, **k):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise AIContextOverflowError("context full")
+            return {"type": "text", "content": "recovered text", "usage": {}}
+
+        ctx = MagicMock()
+        ctx.bot = {}
+        ctx.interaction.broadcast = AsyncMock()
+        ctx.interaction.update_session_tokens = AsyncMock()
+        ai_service = AIService(ctx, "session-123", "temp-456")
+
+        with patch("core.orchestration.ai_service.call_ai_once", new=fake_call_ai_once), \
+             patch("executors.compact.compact_conversation", new=AsyncMock(return_value=[])):
+            out = await _run_fork_skill(
+                "body", "task", "deepseek", "deepseek-chat", 0.7, ai_service,
+                tool_schemas=None,
+            )
+
+        self.assertEqual(out, "recovered text")
+        self.assertEqual(call_count, 2)
+
 
 if __name__ == "__main__":
     unittest.main()

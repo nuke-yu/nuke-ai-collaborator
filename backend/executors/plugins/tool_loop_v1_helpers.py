@@ -209,7 +209,7 @@ async def _run_fork_skill(
         try:
             result = await ai_service.call(
                 skill_content, messages, model, provider, temperature, 4096,
-                tools=tool_schemas or None, auto_compact=False,
+                tools=tool_schemas or None, auto_compact=True,
             )
         except Exception as e:
             return f"[fork skill 执行错误] {e}"
