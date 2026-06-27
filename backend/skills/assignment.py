@@ -60,3 +60,22 @@ async def enabled_skill_names(bot_id: int) -> set[str]:
             (bot_id,),
         ) as cur:
             return {r[0] for r in await cur.fetchall()}
+
+
+async def filter_visible(bot_id: int, skills: list[dict]) -> list[dict]:
+    """Drop external-layer skills not enabled for this bot; pass others through.
+
+    Runs OUTSIDE the mtime-signature scan cache (the cache returns ALL external
+    skills; visibility is a per-bot DB fact that must not be cached by file
+    signature). Only queries the DB when an external-layer entry is present.
+    """
+    enabled: set[str] | None = None
+    out: list[dict] = []
+    for s in skills:
+        if s.get("layer") in EXTERNAL_LAYERS:
+            if enabled is None:
+                enabled = await enabled_skill_names(bot_id)
+            if s.get("name") not in enabled:
+                continue
+        out.append(s)
+    return out

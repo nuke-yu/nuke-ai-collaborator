@@ -104,5 +104,51 @@ class TestAssignmentCRUD(unittest.TestCase):
         self.assertEqual({r["skill_name"] for r in rows_after}, {"lint"})
 
 
+class TestFilterVisible(unittest.TestCase):
+    def test_external_filtered_by_enabled_others_passthrough(self):
+        from skills import assignment
+        fd, path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        orig = _db.DB_PATH
+
+        skills = [
+            {"name": "write-spec", "layer": "system"},
+            {"name": "code-review", "layer": "role"},
+            {"name": "deploy", "layer": "external_global"},
+            {"name": "lint", "layer": "external_group"},
+            {"name": "secret", "layer": "external_global"},
+        ]
+
+        async def go():
+            await init_central_db(path)
+            async with _db.write_connect(path) as conn:
+                await conn.execute("INSERT INTO groups (id, name) VALUES (1, 'g')")
+                await conn.execute(
+                    "INSERT INTO members (id, group_id, name, type) VALUES (1,1,'dev','bot')"
+                )
+                await conn.commit()
+            await assignment.set_assignment(1, "deploy", "external_global", enabled=True)
+            await assignment.set_assignment(1, "lint", "external_group", enabled=True)
+            # 'secret' is NOT assigned → must be filtered out.
+            return await assignment.filter_visible(1, skills)
+
+        try:
+            _db.DB_PATH = path
+            visible = _run(go())
+        finally:
+            _db.DB_PATH = orig
+            os.unlink(path)
+
+        names = {s["name"] for s in visible}
+        self.assertEqual(names, {"write-spec", "code-review", "deploy", "lint"})
+
+    def test_no_external_layers_does_no_db_work(self):
+        from skills import assignment
+        skills = [{"name": "x", "layer": "system"}, {"name": "y", "layer": "learned"}]
+        # No external entries → must not touch the DB (DB_PATH points nowhere here).
+        out = _run(assignment.filter_visible(999, skills))
+        self.assertEqual(out, skills)
+
+
 if __name__ == "__main__":
     unittest.main()
