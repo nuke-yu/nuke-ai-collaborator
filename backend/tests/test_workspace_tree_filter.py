@@ -54,5 +54,46 @@ class TestWorkspaceTreeFilter(unittest.TestCase):
             self.assertIn("skills/system/read-file.md", paths)
             self.assertNotIn("skills/system/create-skill.md", paths)
 
+    @patch("workspace.layout.external_global_skills_dir")
+    def test_safe_path_resolves_allowed_roots_but_write_blocks_them(self, mock_system_skills):
+        from workspace import _safe_path, write_file, read_file
+        import asyncio
+        with tempfile.TemporaryDirectory() as d1, tempfile.TemporaryDirectory() as d2:
+            ws_path = Path(d1)
+            # Create a mock group workspace structure to extract group_id 2
+            group_ws_path = ws_path / "group_2" / "bots" / "bot_1"
+            group_ws_path.mkdir(parents=True, exist_ok=True)
+            
+            system_skills_path = Path(d2)
+            mock_system_skills.return_value = system_skills_path
+            
+            # create file inside system skills
+            skill_file = system_skills_path / "global-skill.md"
+            skill_file.write_text("global content")
+            
+            # create symlink in group_ws_path pointing to system_skills_path
+            skills_dir = group_ws_path / "skills"
+            skills_dir.mkdir()
+            system_link = skills_dir / "system"
+            system_link.symlink_to(system_skills_path, target_is_directory=True)
+            
+            # _safe_path should resolve it successfully
+            resolved = _safe_path(group_ws_path, "skills/system/global-skill.md")
+            self.assertIsNotNone(resolved)
+            self.assertEqual(resolved.resolve(), skill_file.resolve())
+            
+            # read_file should succeed
+            # We mock bot_workspace to return group_ws_path
+            with patch("workspace.bot_workspace", return_value=group_ws_path):
+                content = asyncio.run(read_file(bot_id=1, path="skills/system/global-skill.md", group_id=2))
+                self.assertEqual(content, "global content")
+                
+                # write_file should fail with [只读]
+                write_res = asyncio.run(write_file(bot_id=1, path="skills/system/global-skill.md", content="new content", group_id=2))
+                self.assertIn("[只读]", write_res)
+                
+            # content should remain unchanged
+            self.assertEqual(skill_file.read_text(), "global content")
+
 if __name__ == "__main__":
     unittest.main()

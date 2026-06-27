@@ -74,8 +74,31 @@ def _safe_path(workspace: Path, relative: str) -> Path | None:
         resolved = (workspace / relative).resolve()
         if resolved.is_relative_to(workspace.resolve()):
             return resolved
+
+        # Extract group_id from workspace path (e.g. ".../group_11/bots/bot_1033")
+        group_id = None
+        for part in workspace.parts:
+            if part.startswith("group_"):
+                try:
+                    group_id = int(part.split("_")[1])
+                    break
+                except ValueError:
+                    pass
+
+        # Check allowed external/shared roots to support symlinked skills
+        from workspace import layout
+        allowed_roots = [
+            layout.external_global_skills_dir().resolve(),
+        ]
+        if group_id is not None:
+            allowed_roots.append(layout.group_shared_dir(group_id).resolve())
+            allowed_roots.append(layout.group_roles_dir(group_id).resolve())
+
+        for root in allowed_roots:
+            if resolved.is_relative_to(root):
+                return resolved
     except Exception:
-        log.exception("vfs: failed to save history for %s", p)
+        log.warning("vfs: failed to resolve safe path for %s", relative, exc_info=True)
     return None
 
 
@@ -287,6 +310,8 @@ async def write_file(bot_id: int, path: str, content: str, group_id: int | None 
     p = _safe_path(ws, path)
     if p is None:
         return f"[错误] 非法路径: {path}"
+    if not p.is_relative_to(ws.resolve()):
+        return f"[只读] {path} 位于只读共享区域，无法写入。"
     if p.name in _WRITE_PROTECTED:
         return f"[受保护] {p.name} 是永久记忆文件，Bot 无法覆盖。如需追加记录，请通过工作区面板手动编辑。"
     rel = str(p.relative_to(ws)).replace("\\", "/")
@@ -307,6 +332,8 @@ def make_dir(bot_id: int, path: str, group_id: int | None = None) -> str:
     p = _safe_path(ws, path)
     if p is None:
         return f"[错误] 非法路径: {path}"
+    if not p.is_relative_to(ws.resolve()):
+        return f"[只读] {path} 位于只读共享区域，无法创建子目录。"
     if p.exists():
         return "目录已存在" if p.is_dir() else f"[错误] 已存在同名文件: {path}"
     p.mkdir(parents=True, exist_ok=True)
@@ -325,6 +352,8 @@ def delete_path(bot_id: int, path: str, group_id: int | None = None) -> str:
     p = _safe_path(ws, path)
     if p is None:
         return f"[错误] 非法路径: {path}"
+    if not p.is_relative_to(ws.resolve()):
+        return f"[只读] {path} 位于只读共享区域，无法删除。"
     if p == ws.resolve():
         return "[错误] 不能删除工作区根目录"
     if p.name in _WRITE_PROTECTED:
@@ -345,6 +374,8 @@ async def edit_file(bot_id: int, path: str, old_string: str | None = None, new_s
     p = _safe_path(ws, path)
     if p is None:
         return f"[错误] 非法路径: {path}"
+    if not p.is_relative_to(ws.resolve()):
+        return f"[只读] {path} 位于只读共享区域，无法修改。"
     if p.name in _WRITE_PROTECTED:
         return f"[受保护] {p.name} 是永久记忆文件，Bot 无法编辑。如需修改记录，请通过工作区面板手动编辑。"
     if not p.exists():
