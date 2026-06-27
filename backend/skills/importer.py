@@ -238,7 +238,11 @@ async def clone_and_import(git_url: str, ref: str, scope_kind: str, group_id: in
     clone = _clone or _git_clone
     tmp = tempfile.mkdtemp(prefix="nuke_skill_import_")
     try:
-        commit_sha = clone(clone_url, parsed_ref or "", tmp) or ""
+        try:
+            commit_sha = clone(clone_url, parsed_ref or "", tmp) or ""
+        except subprocess.CalledProcessError as e:
+            stderr_msg = e.stderr.decode(errors="replace") if e.stderr else str(e)
+            raise ValueError(f"git clone failed: {stderr_msg.strip()}")
         return await import_from_dir(
             tmp, scope_kind, group_id, git_url, parsed_ref or "", commit_sha, imported_by,
             subdir=subdir
