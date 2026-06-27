@@ -237,6 +237,9 @@ function ExternalSkillRow({ skill, assigned, busy, policy, onToggle, onRemove, o
             <span className="text-[10px] bg-gray-700 text-gray-300 px-1.5 py-0.5 rounded">v{skill.version}</span>
           )}
         </div>
+        {skill.description && (
+          <div className="text-xs text-gray-400 mt-0.5">{skill.description}</div>
+        )}
         <div className="text-xs text-gray-600 mt-0.5 truncate">{skill.source_url}</div>
         {skill.imported_by != null && (
           <div className="text-[10px] text-gray-600 mt-0.5">{t(K.externalSkill.importedBy)} #{skill.imported_by}</div>

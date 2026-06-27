@@ -15,9 +15,11 @@ vi.mock('../externalSkillsApi', () => ({
 
 const POOL = [
   { id: 1, name: 'deploy', scope_kind: 'global', group_id: 0, source_url: 'https://github.com/x/y',
-    version: '1.2.0', platforms: 'pure', high_privilege: '', imported_by: null, imported_at: '2026-06-27', status: 'active' },
+    version: '1.2.0', platforms: 'pure', high_privilege: '', imported_by: null, imported_at: '2026-06-27', status: 'active',
+    description: 'Ship the build to prod' },
   { id: 2, name: 'nuke-prod', scope_kind: 'group', group_id: 7, source_url: 'https://github.com/x/z',
-    version: '', platforms: 'posix', high_privilege: 'run_shell', imported_by: 42, imported_at: '2026-06-27', status: 'active' },
+    version: '', platforms: 'posix', high_privilege: 'run_shell', imported_by: 42, imported_at: '2026-06-27', status: 'active',
+    description: 'Wipe and rebuild the prod cluster' },
 ]
 
 describe('ExternalSkillPanel — pool + assignment', () => {
@@ -36,6 +38,8 @@ describe('ExternalSkillPanel — pool + assignment', () => {
     render(<ExternalSkillPanel bot={{ id: 3, name: 'dev' }} groupId={7} onClose={() => {}} />)
     await waitFor(() => expect(screen.getByText('deploy')).toBeInTheDocument())
     expect(screen.getByText('nuke-prod')).toBeInTheDocument()
+    // description (derived from SKILL.md at GET time) renders
+    expect(screen.getByText('Ship the build to prod')).toBeInTheDocument()
     // high-privilege warning shows the tool name
     expect(screen.getByText(/run_shell/)).toBeInTheDocument()
   })
