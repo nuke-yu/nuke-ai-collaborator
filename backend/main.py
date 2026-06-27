@@ -75,7 +75,7 @@ async def lifespan(app: FastAPI):
     yield
     
     # Teardown
-    await scheduler.stop()
+    scheduler.stop()   # sync (returns None); awaiting it raised TypeError on teardown
     await sup.stop()
     from executors.tool_router import router as tool_router
     await tool_router.close_all()

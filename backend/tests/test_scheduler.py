@@ -253,6 +253,19 @@ class TestSchedulerEngine(unittest.IsolatedAsyncioTestCase):
         eng.stop()
         self.assertIsNone(eng._scheduler)
 
+    def test_stop_is_sync_callers_must_not_await(self):
+        # Regression: main.py lifespan teardown did `await scheduler.stop()`, but
+        # stop() is sync and returns None -> awaiting it raised "object NoneType
+        # can't be used in 'await' expression" while unwinding lifespan (surfaced
+        # on a failed startup). Lock the contract: start() is the only async half;
+        # stop() must stay sync so the teardown `await` stays removed. If stop() is
+        # ever made async, this fails -> forcing the caller in main.py to be updated.
+        import inspect
+        import scheduler.engine as eng
+        self.assertTrue(inspect.iscoroutinefunction(eng.start))
+        self.assertFalse(inspect.iscoroutinefunction(eng.stop))
+        self.assertIsNone(eng.stop())  # safe no-op when nothing is running
+
     async def test_start_loads_enabled_jobs(self):
         from scheduler.store import create_job
         import scheduler.engine as eng
