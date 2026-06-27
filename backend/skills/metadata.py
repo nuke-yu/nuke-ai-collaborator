@@ -11,6 +11,19 @@ def _is_safe_name(name: str) -> bool:
     return bool(re.match(r"^[a-z0-9_-]+$", name))
 
 
+def strip_context_window_suffix(model: str) -> str:
+    """Drop a trailing [1m] long-context-window marker from a skill's model id.
+
+    Authors may write `model: claude-opus-4-8[1m]` to request the 1M-token
+    window; we strip the marker so the bare id resolves normally (the window
+    request itself is not yet wired into providers).
+    """
+    m = (model or "").strip()
+    if m.endswith("[1m]"):
+        return m[:-4].strip()
+    return m
+
+
 def _contained(base: Path, target: Path) -> bool:
     """True if target, fully resolved, stays inside base (blocks symlink escapes too)."""
     try:

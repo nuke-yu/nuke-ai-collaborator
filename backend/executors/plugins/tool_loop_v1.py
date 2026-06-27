@@ -229,7 +229,10 @@ class ToolLoopRunner:
                     else:
                         _active_schemas = self.tool_schemas
 
-                    _iter_model = self.execution_ctx.pop("skill_model", None) or self.model_name
+                    from skills.metadata import strip_context_window_suffix
+                    _iter_model = strip_context_window_suffix(
+                        self.execution_ctx.pop("skill_model", None) or self.model_name
+                    )
 
                     await self.ctx.interaction.broadcast(self.ctx.group_id, {
                         "type": "ai_thought_start",

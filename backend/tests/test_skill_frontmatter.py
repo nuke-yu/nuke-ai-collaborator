@@ -52,5 +52,17 @@ class TestRunForkSkillWithToolSchemas(unittest.IsolatedAsyncioTestCase):
         self.assertIn("fork", result)
 
 
+class TestModelWindowSuffix(unittest.TestCase):
+    def test_strips_1m_suffix(self):
+        from skills.metadata import strip_context_window_suffix
+        self.assertEqual(strip_context_window_suffix("claude-opus-4-8[1m]"), "claude-opus-4-8")
+        self.assertEqual(strip_context_window_suffix("claude-opus-4-8 [1m]"), "claude-opus-4-8")
+
+    def test_leaves_plain_model_untouched(self):
+        from skills.metadata import strip_context_window_suffix
+        self.assertEqual(strip_context_window_suffix("deepseek-chat"), "deepseek-chat")
+        self.assertEqual(strip_context_window_suffix(""), "")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -2,7 +2,7 @@ import os
 import platform
 
 from . import constants as C
-from .metadata import skill_path, parse_skill_meta
+from .metadata import skill_path, parse_skill_meta, strip_context_window_suffix
 from .discovery import list_skills, list_skills_all
 from .processor import process_skill_content
 from workspace import layout
@@ -165,13 +165,13 @@ async def run_skill(bot_id: int, name: str, args: str = "", ctx: dict | None = N
                 "content": content,
                 "args": args,
                 "allowed_tools": skill_entry.get("allowed_tools", []),
-                "model": skill_entry.get("model", ""),
+                "model": strip_context_window_suffix(skill_entry.get("model", "")),
             }
             return "__SKILL_FORK__"
         if skill_entry.get("allowed_tools"):
             ctx["skill_allowed_tools"] = skill_entry["allowed_tools"]
         if skill_entry.get("model"):
-            ctx["skill_model"] = skill_entry["model"]
+            ctx["skill_model"] = strip_context_window_suffix(skill_entry["model"])
 
     # Inline framing: tell the model this is an instruction set to execute now.
     # The fork path returned "__SKILL_FORK__" earlier, so it is never wrapped.
