@@ -35,21 +35,30 @@ class TestRunForkSkillWithToolSchemas(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, "done")
         self.assertEqual(mock_ai.call.call_args[1].get("tools"), schemas)
 
-    async def test_fork_tool_calls_result_returns_summary(self):
+    async def test_fork_tool_calls_dispatched_then_final_text(self):
+        # Plan A §7.5.2: a fork that declares tools now runs a real multi-turn
+        # loop — it dispatches the requested tool and continues until the model
+        # returns text (no more "fork doesn't support tool loops" placeholder).
         from executors.plugins.tool_loop_v1 import _run_fork_skill
-        
+
         mock_ai = MagicMock()
-        mock_ai.call = AsyncMock(return_value={
-            "type": "tool_calls",
-            "calls": [{"name": "run_shell"}],
-            "assistant_message": {},
-        })
+        mock_ai.call = AsyncMock(side_effect=[
+            {"type": "tool_calls",
+             "calls": [{"id": "c1", "name": "run_shell", "arguments": {"cmd": "ls"}}],
+             "assistant_message": {"role": "assistant", "content": ""}},
+            {"type": "text", "content": "all done"},
+        ])
 
-        result = await _run_fork_skill("sp", "task", "claude", "claude-opus-4-7", 0.7,
-                                       mock_ai, tool_schemas=[{"name": "run_shell"}])
+        async def fake_dispatch(name, args, ctx):
+            return ("ok", False)
 
-        self.assertIn("run_shell", result)
-        self.assertIn("fork", result)
+        with patch("executors.tool_dispatch.dispatch_tool", new=fake_dispatch):
+            result = await _run_fork_skill(
+                "sp", "task", "claude", "claude-opus-4-7", 0.7,
+                mock_ai, tool_schemas=[{"name": "run_shell"}],
+            )
+
+        self.assertEqual(result, "all done")
 
 
 class TestModelWindowSuffix(unittest.TestCase):

@@ -166,6 +166,11 @@ class ToolLoopRunner:
                 self.provider, fork_model, self.temperature,
                 self.ai_service,
                 tool_schemas=fork_schemas,
+                parent_ruleset=self.ruleset,
+                spawn_depth=self.ctx.spawn_depth,
+                group_id=self.ctx.group_id,
+                bot_id=self.bot["id"],
+                broadcaster=self.ctx.interaction,
             )
             await self.ctx.interaction.append_session_event(self.session_id, "child_join", {
                 "child_session_id": child_sid,

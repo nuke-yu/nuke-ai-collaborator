@@ -173,24 +173,70 @@ async def _run_fork_skill(
     temperature: float,
     ai_service: AIService,
     tool_schemas: list | None = None,
+    *,
+    parent_ruleset=None,
+    spawn_depth: int = 0,
+    group_id: int | None = None,
+    bot_id: int | None = None,
+    broadcaster=None,
+    max_iter: int = 8,
 ) -> str:
-    """Execute a fork skill in an isolated single AI call."""
-    try:
-        result = await ai_service.call(
-            skill_content,
-            [{"role": "user", "content": task or "请执行此技能。"}],
-            model, provider, temperature, 4096,
-            tools=tool_schemas or None,
-            auto_compact=False
-        )
+    """Execute a fork skill as a real, attenuated sub-agent.
+
+    Security contract (§7.5.2):
+      - refuses past SPAWN_MAX_DEPTH (prevents skill→skill explosion);
+      - child tools run at spawn_depth+1 through the permission pipeline with a
+        ruleset attenuated by derive_subagent_ruleset (bypass not propagated,
+        blanket high-risk allows dropped; the engine denies `ask` at depth>0);
+      - tool gating: no declared tool_schemas → single call, and if the model
+        still requests tools we return a notice rather than executing anything.
+    Tokens roll into the parent ai_service.usage (canonical accumulator).
+    """
+    if spawn_depth >= config.SPAWN_MAX_DEPTH:
+        return f"[fork skill 已达最大深度 {config.SPAWN_MAX_DEPTH}，拒绝执行]"
+
+    child_ctx = {
+        "bot_id": bot_id,
+        "group_id": group_id,
+        "spawn_depth": spawn_depth + 1,
+        "ruleset": permissions.derive_subagent_ruleset(parent_ruleset),
+        "broadcaster": broadcaster,
+    }
+    messages = [{"role": "user", "content": task or "请执行此技能。"}]
+
+    from executors.tool_dispatch import dispatch_tool
+    for _ in range(max_iter):
+        try:
+            result = await ai_service.call(
+                skill_content, messages, model, provider, temperature, 4096,
+                tools=tool_schemas or None, auto_compact=False,
+            )
+        except Exception as e:
+            return f"[fork skill 执行错误] {e}"
+
         if result["type"] == "text":
             return result["content"]
-        if result["type"] == "tool_calls":
-            names = [c["name"] for c in result.get("calls", [])]
-            return f"[fork skill 请求工具调用: {', '.join(names)}]（fork 不支持多轮工具循环）"
-        return f"[fork skill 返回了非文本类型: {result['type']}]"
-    except Exception as e:
-        return f"[fork skill 执行错误] {e}"
+        if result["type"] != "tool_calls":
+            return f"[fork skill 返回了非文本类型: {result['type']}]"
+
+        calls = result.get("calls", [])
+        if not tool_schemas:
+            names = ", ".join(c["name"] for c in calls)
+            return f"[fork skill 请求工具 {names} 但未声明 allowed_tools，已拒绝]"
+
+        messages.append(result["assistant_message"])
+        for call in calls:
+            out, _is_err = await dispatch_tool(
+                call["name"], call.get("arguments", {}), child_ctx
+            )
+            messages.append({
+                "role": "tool",
+                "tool_call_id": call.get("id", ""),
+                "name": call["name"],
+                "content": out,
+            })
+
+    return "[fork skill 达到最大迭代次数，未完成]"
 
 
 async def setup_session(runner) -> None:
