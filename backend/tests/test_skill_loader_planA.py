@@ -1,0 +1,41 @@
+"""Plan A — loader enhancements: inline framing, companion cap, SKILL_DIR norm."""
+import asyncio
+import os
+import sys
+import unittest
+from pathlib import Path
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+def _run(coro):
+    return asyncio.run(coro)
+
+
+class TestInlineFraming(unittest.IsolatedAsyncioTestCase):
+    async def test_inline_body_wrapped_in_skill_instructions(self):
+        from unittest.mock import patch
+        from skills import loader
+
+        skill_dir = Path("/tmp/nuke_skill_x")
+        entry = {
+            "name": "demo", "type": "md", "path": skill_dir / "SKILL.md",
+            "description": "d", "context": "inline",
+        }
+
+        async def fake_list(*a, **k):
+            return [entry]
+
+        with patch.object(loader, "list_skills_all", new=fake_list), \
+             patch("pathlib.Path.exists", lambda self: True), \
+             patch("pathlib.Path.read_text", lambda self, encoding="utf-8": "BODY-TEXT"), \
+             patch("pathlib.Path.iterdir", lambda self: iter([])):
+            out = await loader.run_skill(1, "demo", "", ctx={"group_id": 1})
+
+        self.assertTrue(out.startswith("<skill_instructions>"))
+        self.assertIn("BODY-TEXT", out)
+        self.assertTrue(out.rstrip().endswith("</skill_instructions>"))
+
+
+if __name__ == "__main__":
+    unittest.main()

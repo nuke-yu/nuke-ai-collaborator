@@ -166,4 +166,11 @@ async def run_skill(bot_id: int, name: str, args: str = "", ctx: dict | None = N
         if skill_entry.get("model"):
             ctx["skill_model"] = skill_entry["model"]
 
-    return content
+    # Inline framing: tell the model this is an instruction set to execute now.
+    # The fork path returned "__SKILL_FORK__" earlier, so it is never wrapped.
+    return (
+        "<skill_instructions>\n"
+        f"{content}\n"
+        "\n现在请按以上技能描述的步骤开始执行。\n"
+        "</skill_instructions>"
+    )
