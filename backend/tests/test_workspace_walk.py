@@ -62,5 +62,26 @@ class TestWalkVisible(unittest.TestCase):
             self.assertLessEqual(len(paths), _WS_MAX_ENTRIES)
 
 
+    def test_follows_symlinks(self):
+        with tempfile.TemporaryDirectory() as d1, tempfile.TemporaryDirectory() as d2:
+            root = Path(d1)
+            target = Path(d2)
+            
+            # Create a file in the target directory
+            (target / "external-skill.md").write_text("content")
+            
+            # Create a symlink under root pointing to target
+            link_dir = root / "skills"
+            link_dir.mkdir()
+            (link_dir / "system").symlink_to(target.resolve(), target_is_directory=True)
+            
+            paths, _ = walk_visible(root)
+            rels = {str(p.relative_to(root)).replace("\\", "/") for p in paths}
+            
+            self.assertIn("skills", rels)
+            self.assertIn("skills/system", rels)
+            self.assertIn("skills/system/external-skill.md", rels)
+
+
 if __name__ == "__main__":
     unittest.main()

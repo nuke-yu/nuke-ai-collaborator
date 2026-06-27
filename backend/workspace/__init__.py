@@ -474,7 +474,7 @@ def walk_visible(root: Path, max_entries: int = _WS_MAX_ENTRIES,
         return [], False
     paths: list[Path] = []
     truncated = False
-    for dirpath, dirnames, filenames in os.walk(root):
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=True):
         # 原地剪枝 + 排序：os.walk 的物理顺序依赖文件系统(inode)、非确定；先排序保证
         # 遍历顺序稳定，这样在超大工作区因 max_entries 截断时每次前缀一致，UI 树不抖动。
         dirnames[:] = sorted(
@@ -677,6 +677,54 @@ async def init_bot_workspace(bot: dict):
         p = ws / filename
         if not p.exists():
             p.write_text(content, encoding="utf-8")
+
+    # Ensure skills/ manual and learned subdirectories exist
+    skills_dir = ws / "skills"
+    skills_dir.mkdir(exist_ok=True)
+    (skills_dir / "manual").mkdir(exist_ok=True)
+    (skills_dir / "learned").mkdir(exist_ok=True)
+    (skills_dir / "learned" / "active").mkdir(exist_ok=True)
+    (skills_dir / "learned" / "draft").mkdir(exist_ok=True)
+
+    # 1. system -> system/skills (4 levels up)
+    system_link = skills_dir / "system"
+    if not system_link.exists() and not system_link.is_symlink():
+        try:
+            system_link.symlink_to("../../../../system/skills")
+        except Exception as e:
+            log.warning(f"Failed to symlink system skills: {e}", exc_info=True)
+
+    # 2. group -> group shared/skills (3 levels up)
+    group_link = skills_dir / "group"
+    if not group_link.exists() and not group_link.is_symlink():
+        try:
+            group_link.symlink_to("../../../shared/skills")
+        except Exception as e:
+            log.warning(f"Failed to symlink group skills: {e}", exc_info=True)
+
+    # 3. role -> group roles/<role>/skills (3 levels up)
+    if role:
+        role_link = skills_dir / "role"
+        expected_target = f"../../../roles/{role}/skills"
+        if role_link.is_symlink():
+            try:
+                actual_target = os.readlink(role_link)
+                if actual_target != expected_target:
+                    role_link.unlink()
+            except Exception:
+                pass
+        if not role_link.exists() and not role_link.is_symlink():
+            try:
+                role_link.symlink_to(expected_target)
+            except Exception as e:
+                log.warning(f"Failed to symlink role skills to {expected_target}: {e}", exc_info=True)
+    else:
+        role_link = skills_dir / "role"
+        if role_link.is_symlink():
+            try:
+                role_link.unlink()
+            except Exception:
+                pass
 
 
 
