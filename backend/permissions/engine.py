@@ -144,7 +144,7 @@ def derive_subagent_ruleset(parent: "Ruleset | None") -> "Ruleset | None":
     mode = "default" if parent.mode in _SUBAGENT_NON_INHERITABLE_MODES else parent.mode
     rules = [
         r for r in parent.rules
-        if not (r.action == "allow" and not r.args_pattern and _covers_high_risk(r.tool_pattern))
+        if not (r.action == "allow" and (not r.args_pattern or r.args_pattern == "*") and _covers_high_risk(r.tool_pattern))
     ]
     return Ruleset(mode=mode, rules=rules)
 

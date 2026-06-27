@@ -40,6 +40,13 @@ class TestDeriveSubagentRuleset(unittest.TestCase):
         child = derive_subagent_ruleset(parent)
         self.assertEqual(child.rules, [])   # blanket run_shell allow stripped
 
+    def test_wildcard_args_blanket_high_risk_allow_dropped(self):
+        parent = Ruleset(rules=[
+            Rule(tool_pattern="run_shell", args_pattern="*", action="allow"),
+        ])
+        child = derive_subagent_ruleset(parent)
+        self.assertEqual(child.rules, [])   # wildcard args blanket run_shell allow stripped
+
     def test_wildcard_blanket_allow_dropped(self):
         parent = Ruleset(rules=[Rule(tool_pattern="*", args_pattern="", action="allow")])
         self.assertEqual(derive_subagent_ruleset(parent).rules, [])
