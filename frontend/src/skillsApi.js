@@ -44,6 +44,9 @@ export async function fetchTemplateRoles(lang = 'zh') {
   return jsonOrThrow(await authFetch(`/api/templates/roles?lang=${encodeURIComponent(lang)}`))
 }
 
-export async function fetchGroupRoles(groupId) {
-  return jsonOrThrow(await authFetch(`/api/groups/${groupId}/roles`))
+export async function fetchGroupRoles(groupId, lang = 'zh') {
+  // Backend resolves display names by exact 'en' vs other; normalize locales
+  // like 'en-US' → 'en' so role names follow the active UI language.
+  const l = String(lang).toLowerCase().startsWith('en') ? 'en' : 'zh'
+  return jsonOrThrow(await authFetch(`/api/groups/${groupId}/roles?lang=${l}`))
 }

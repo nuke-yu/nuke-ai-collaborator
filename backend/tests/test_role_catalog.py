@@ -51,6 +51,30 @@ class TestListRoleCatalog(unittest.TestCase):
         rows = list_role_catalog(self.root)
         self.assertEqual([r["role"] for r in rows], ["PM"])
 
+    def test_display_name_resolves_by_lang(self):
+        self._role("系统架构师", meta={"display_name": "系统架构师",
+                                  "display_name_en": "System Architect"})
+        # role identity (dir name) is language-neutral; only display switches
+        zh = list_role_catalog(self.root, "zh")[0]
+        en = list_role_catalog(self.root, "en")[0]
+        self.assertEqual(zh["role"], "系统架构师")
+        self.assertEqual(en["role"], "系统架构师")
+        self.assertEqual(zh["display_name"], "系统架构师")
+        self.assertEqual(en["display_name"], "System Architect")
+
+    def test_lang_en_falls_back_when_no_en_name(self):
+        # no display_name_en → en falls back to base display_name, then dir name
+        self._role("代码助手", meta={"display_name": "代码助手"})
+        self._role("CEO")  # no role.yaml at all
+        rows = {r["role"]: r["display_name"] for r in list_role_catalog(self.root, "en")}
+        self.assertEqual(rows["代码助手"], "代码助手")  # base display_name
+        self.assertEqual(rows["CEO"], "CEO")          # dir name
+
+    def test_default_lang_is_zh(self):
+        self._role("系统架构师", meta={"display_name": "系统架构师",
+                                  "display_name_en": "System Architect"})
+        self.assertEqual(list_role_catalog(self.root)[0]["display_name"], "系统架构师")
+
 
 if __name__ == "__main__":
     unittest.main()

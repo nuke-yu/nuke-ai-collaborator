@@ -85,9 +85,16 @@ async def list_template_roles(lang: str = "zh"):
         _safe_segment(lang)
     except ValueError as e:
         raise HTTPException(400, str(e))
-    return {"lang": lang, "roles": list_role_catalog(layout.templates_roles_dir(lang))}
+    return {"lang": lang, "roles": list_role_catalog(layout.templates_roles_dir(lang), lang)}
 
 
 @router.get("/api/groups/{group_id}/roles")
-async def list_group_roles(group_id: int):
-    return {"group_id": group_id, "roles": list_role_catalog(layout.group_roles_dir(group_id))}
+async def list_group_roles(group_id: int, lang: str = "zh"):
+    # `lang` selects the display-name language; role identity (dir name) is
+    # language-neutral. Validate it as a path-safe segment for consistency.
+    try:
+        _safe_segment(lang)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"group_id": group_id, "lang": lang,
+            "roles": list_role_catalog(layout.group_roles_dir(group_id), lang)}

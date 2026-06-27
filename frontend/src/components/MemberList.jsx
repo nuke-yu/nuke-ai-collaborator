@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { K } from '../i18n/keys'
 import { fetchGroupRoles } from '../skillsApi'
+import ThemedSelect from './ThemedSelect'
 
 const COLORS = ['#6366f1', '#8b5cf6', '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#ec4899']
 
@@ -171,7 +172,7 @@ _Good luck out there. Make it count._
 `
 
 export default function MemberList({ groupId, onAddMember, onEditMember, onClose, initialData }) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const isEdit = !!initialData
   const [form, setForm] = useState(() => {
     const base = isEdit ? { ...INIT_FORM, ...initialData } : INIT_FORM
@@ -202,8 +203,8 @@ export default function MemberList({ groupId, onAddMember, onEditMember, onClose
 
   useEffect(() => {
     if (!groupId) return
-    fetchGroupRoles(groupId).then((d) => setRoleCatalog(d.roles || [])).catch(() => setRoleCatalog([]))
-  }, [groupId])
+    fetchGroupRoles(groupId, i18n.language).then((d) => setRoleCatalog(d.roles || [])).catch(() => setRoleCatalog([]))
+  }, [groupId, i18n.language])
 
   useEffect(() => {
     fetch('/api/plugins').then(r => r.json()).then(setPlugins).catch(() => {})
@@ -375,13 +376,13 @@ export default function MemberList({ groupId, onAddMember, onEditMember, onClose
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={onClose}>
       <div className="bg-gray-800 rounded-2xl p-6 w-[600px] max-w-[95vw] shadow-xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-        <h2 className="text-white font-semibold mb-4">{isEdit ? t(K.member.editMember) : t(K.member.addMember)}</h2>
+        <h2 className="text-gray-100 font-semibold mb-4">{isEdit ? t(K.member.editMember) : t(K.member.addMember)}</h2>
 
         <div className="space-y-3">
           <div>
             <label className="text-xs text-gray-400 mb-1 block">{t(K.member.name)}</label>
             <input
-              className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+              className="w-full bg-gray-700 text-gray-100 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
               placeholder={t(K.member.namePlaceholder)}
               value={form.name}
               onChange={(e) => setField({ name: e.target.value })}
@@ -411,28 +412,27 @@ export default function MemberList({ groupId, onAddMember, onEditMember, onClose
               <div>
                 <label className="text-xs text-gray-400 mb-1 block">{t(K.member.role)}</label>
                 {roleCatalog.length > 0 ? (
-                  <select
-                    className="w-full bg-gray-800 rounded px-3 py-2 text-sm"
+                  <ThemedSelect
                     value={form.role}
-                    onChange={(e) => {
-                      const role = e.target.value
+                    placeholder={t(K.member.roleSelectPlaceholder)}
+                    options={[
+                      { value: '', label: t(K.member.roleSelectPlaceholder) },
+                      ...roleCatalog.map((r) => ({
+                        value: r.role,
+                        label: `${r.display_name} (${r.skill_count})`,
+                      })),
+                    ]}
+                    onChange={(role) => {
                       const meta = roleCatalog.find((r) => r.role === role)
                       setField({
                         role,
                         ...(meta?.avatar_color ? { avatar_color: meta.avatar_color } : {}),
                       })
                     }}
-                  >
-                    <option value="">{t(K.member.roleSelectPlaceholder)}</option>
-                    {roleCatalog.map((r) => (
-                      <option key={r.role} value={r.role}>
-                        {r.display_name} ({r.skill_count})
-                      </option>
-                    ))}
-                  </select>
+                  />
                 ) : (
                   <input
-                    className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                    className="w-full bg-gray-700 text-gray-100 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
                     placeholder={t(K.member.rolePlaceholder2)}
                     value={form.role}
                     onChange={(e) => setField({ role: e.target.value })}
@@ -442,7 +442,7 @@ export default function MemberList({ groupId, onAddMember, onEditMember, onClose
               <div>
                 <label className="text-xs text-gray-400 mb-1 block">{t(K.member.systemPromptLabel)}</label>
                 <textarea
-                  className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
+                  className="w-full bg-gray-700 text-gray-100 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
                   placeholder={t(K.member.systemPromptPlaceholder2)}
                   rows={3}
                   value={form.system_prompt}
@@ -484,18 +484,14 @@ export default function MemberList({ groupId, onAddMember, onEditMember, onClose
               <div>
                 <label className="text-xs text-gray-400 mb-1 block">{t(K.member.model)}</label>
                 {PROVIDER_MODELS[form.model_provider] ? (
-                  <select
-                    className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                  <ThemedSelect
                     value={form.model_name}
-                    onChange={(e) => setField({ model_name: e.target.value })}
-                  >
-                    {PROVIDER_MODELS[form.model_provider].map(m => (
-                      <option key={m} value={m}>{m}</option>
-                    ))}
-                  </select>
+                    onChange={(model_name) => setField({ model_name })}
+                    options={PROVIDER_MODELS[form.model_provider].map(m => ({ value: m, label: m }))}
+                  />
                 ) : (
                   <input
-                    className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                    className="w-full bg-gray-700 text-gray-100 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
                     placeholder={t(K.member.ollamaModelPlaceholder)}
                     value={form.model_name}
                     onChange={(e) => setField({ model_name: e.target.value })}
@@ -522,7 +518,7 @@ export default function MemberList({ groupId, onAddMember, onEditMember, onClose
                 <label className="text-xs text-gray-400 mb-1 block">{t(K.member.maxTokensLabel)}</label>
                 <input
                   type="number" min="256" max="32768" step="256"
-                  className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                  className="w-full bg-gray-700 text-gray-100 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
                   value={form.max_tokens}
                   onChange={(e) => setField({ max_tokens: parseInt(e.target.value) || 4096 })}
                 />
@@ -532,7 +528,7 @@ export default function MemberList({ groupId, onAddMember, onEditMember, onClose
                 <label className="text-xs text-gray-400 mb-1 block">{t(K.member.maxIterationsLabel)}</label>
                 <input
                   type="number" min="1" max="1000" step="1"
-                  className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                  className="w-full bg-gray-700 text-gray-100 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
                   value={form.executor_config?.max_iterations ?? 100}
                   onChange={(e) => setField({
                     executor_config: {
@@ -574,7 +570,7 @@ export default function MemberList({ groupId, onAddMember, onEditMember, onClose
               <div className="border-t border-gray-700 pt-3">
                 <label className="text-xs text-gray-400 mb-1 block">{t(K.member.doneKeyword)}</label>
                 <input
-                  className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                  className="w-full bg-gray-700 text-gray-100 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
                   placeholder={t(K.member.doneKeywordPlaceholder)}
                   value={form.done_keyword || ''}
                   onChange={(e) => setField({ done_keyword: e.target.value })}
@@ -659,14 +655,12 @@ export default function MemberList({ groupId, onAddMember, onEditMember, onClose
                       onChange={e => setNewRule(r => ({ ...r, tool_pattern: e.target.value }))}
                       onKeyDown={e => e.key === 'Enter' && addPermRule()}
                     />
-                    <select
-                      className="bg-gray-900 text-gray-300 rounded-lg px-2 py-1.5 text-xs outline-none focus:ring-1 focus:ring-indigo-500"
+                    <ThemedSelect
+                      className="w-24 flex-shrink-0"
                       value={newRule.action}
-                      onChange={e => setNewRule(r => ({ ...r, action: e.target.value }))}
-                    >
-                      <option value="allow">allow</option>
-                      <option value="deny">deny</option>
-                    </select>
+                      onChange={(action) => setNewRule(r => ({ ...r, action }))}
+                      options={[{ value: 'allow', label: 'allow' }, { value: 'deny', label: 'deny' }]}
+                    />
                     <button onClick={addPermRule} className="bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg px-3 py-1.5 text-xs transition-colors">+</button>
                   </div>
                 </div>
@@ -688,7 +682,7 @@ export default function MemberList({ groupId, onAddMember, onEditMember, onClose
                       >
                         <div className="flex items-center gap-2">
                           <span className={`w-2 h-2 rounded-full flex-shrink-0 ${form.executor_id === p.executor_id ? 'bg-indigo-400' : 'bg-gray-600'}`} />
-                          <span className="text-xs text-white font-medium">{p.display_name}</span>
+                          <span className="text-xs text-gray-100 font-medium">{p.display_name}</span>
                           <span className="text-xs text-gray-500 ml-auto">{p.executor_id}</span>
                         </div>
                         <p className="text-xs text-gray-400 mt-0.5 ml-4">{p.manifest.description}</p>
@@ -766,15 +760,12 @@ export default function MemberList({ groupId, onAddMember, onEditMember, onClose
                     </div>
 
                     <div className="flex gap-1.5">
-                      <select
-                        className="bg-gray-800 text-gray-300 rounded-lg px-2 py-1.5 text-xs outline-none focus:ring-1 focus:ring-indigo-500 flex-shrink-0"
+                      <ThemedSelect
+                        className="w-44 flex-shrink-0"
                         value={cronPreset}
-                        onChange={e => handleCronPresetChange(e.target.value)}
-                      >
-                        {CRON_PRESET_KEYS.map(p => (
-                          <option key={p.value} value={p.value}>{t(p.labelKey)}</option>
-                        ))}
-                      </select>
+                        onChange={handleCronPresetChange}
+                        options={CRON_PRESET_KEYS.map(p => ({ value: p.value, label: t(p.labelKey) }))}
+                      />
                       {cronCustom && (
                         <input
                           className="flex-1 bg-gray-800 text-gray-200 rounded-lg px-2 py-1.5 text-xs font-mono outline-none focus:ring-1 focus:ring-indigo-500"

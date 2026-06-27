@@ -15,4 +15,7 @@
 # code. After changing backend code, Ctrl-C and re-run this script.
 set -euo pipefail
 cd "$(dirname "$0")/backend"
-exec python3 -m uvicorn main:app --host 127.0.0.1 --port 8000
+# Use the venv interpreter explicitly: bare `python3` resolves to the homebrew
+# build, whose chromadb is broken and silently kills all memory. The whole
+# worker/collector subprocess tree inherits this sys.executable.
+exec ./venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port 8000

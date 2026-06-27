@@ -30,8 +30,13 @@ describe('skillsApi wiring', () => {
     expect(global.fetch.mock.calls[0][0]).toBe('/api/templates/roles?lang=en')
   })
 
-  it('fetchGroupRoles hits the group path', async () => {
+  it('fetchGroupRoles hits the group path with default lang zh', async () => {
     await fetchGroupRoles(7)
-    expect(global.fetch.mock.calls[0][0]).toBe('/api/groups/7/roles')
+    expect(global.fetch.mock.calls[0][0]).toBe('/api/groups/7/roles?lang=zh')
+  })
+
+  it('fetchGroupRoles normalizes locale to en/zh', async () => {
+    await fetchGroupRoles(7, 'en-US')
+    expect(global.fetch.mock.calls[0][0]).toBe('/api/groups/7/roles?lang=en')
   })
 })
