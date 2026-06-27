@@ -64,15 +64,24 @@ def _pool_dir(scope_kind: str, group_id: int) -> Path:
 
 async def import_from_dir(repo_dir, scope_kind: str, group_id: int,
                           source_url: str, ref: str, commit_sha: str,
-                          imported_by: int | None) -> dict:
+                          imported_by: int | None, subdir: str = "") -> dict:
     repo_dir = Path(repo_dir)
+    target_dir = repo_dir
+    if subdir:
+        target_dir = (repo_dir / subdir).resolve()
+        repo_dir_resolved = repo_dir.resolve()
+        if not target_dir.is_relative_to(repo_dir_resolved):
+            raise ValueError("unsafe subdirectory path")
+        if not target_dir.exists():
+            raise ValueError(f"subdirectory not found in repository: {subdir}")
+
     pool = _pool_dir(scope_kind, group_id)
     store = SkillStore()
     dst_scope = _DirScope(pool)
 
     imported, rejected = [], []
     # Every directory holding a SKILL.md is one skill.
-    for skill_md in sorted(repo_dir.rglob("SKILL.md")):
+    for skill_md in sorted(target_dir.rglob("SKILL.md")):
         skill_dir = skill_md.parent
         name = skill_dir.name
         try:
@@ -156,20 +165,63 @@ def _git_clone(url: str, ref: str, dst: str) -> str:
     return sha
 
 
+def parse_git_url_subdir(url: str, ref: str = "") -> tuple[str, str, str]:
+    """Parse git URL to extract clone URL, ref/branch, and subdirectory.
+
+    Supports web URLs pointing to a branch and subdirectory.
+    Examples:
+    - https://github.com/owner/repo/tree/main/subdir -> clone_url='https://github.com/owner/repo.git', ref='main', subdir='subdir'
+    - https://github.com/owner/repo/tree/dev -> clone_url='https://github.com/owner/repo.git', ref='dev', subdir=''
+    - https://github.com/owner/repo -> clone_url='https://github.com/owner/repo.git', ref=ref, subdir=''
+    """
+    url = url.strip()
+
+    # Handle SSH URL format
+    if "://" not in url and "@" in url:
+        return url, ref, ""
+
+    for sep in ("/tree/", "/src/"):
+        if sep in url:
+            base_part, rest = url.split(sep, 1)
+            clone_url = base_part
+            if not clone_url.endswith(".git"):
+                clone_url += ".git"
+
+            # rest has the form: branch_name/subdir_path
+            # If the user passed an explicit ref, check if rest starts with it
+            if ref and rest.startswith(ref + "/"):
+                subdir = rest[len(ref) + 1:]
+                final_ref = ref
+            else:
+                parts = rest.split("/")
+                final_ref = parts[0]
+                subdir = "/".join(parts[1:])
+            return clone_url, final_ref, subdir
+
+    clone_url = url
+    if "github.com" in url or "gitlab.com" in url or "gitee.com" in url:
+        if not clone_url.endswith(".git") and not clone_url.endswith("/"):
+            clone_url = clone_url + ".git"
+    return clone_url, ref, ""
+
+
 async def clone_and_import(git_url: str, ref: str, scope_kind: str, group_id: int,
                            imported_by: int | None, *, _clone=None) -> dict:
     """Host-checked git clone → import_from_dir. `_clone(url, ref, dst)->sha` is
     injectable for tests (no network)."""
-    host = _host_of(git_url)
+    clone_url, parsed_ref, subdir = parse_git_url_subdir(git_url, ref)
+
+    host = _host_of(clone_url)
     if not (host in _allowed_hosts() or _is_private_host(host)):
         raise ValueError(f"host not allowed for skill import: {host!r}")
 
     clone = _clone or _git_clone
     tmp = tempfile.mkdtemp(prefix="nuke_skill_import_")
     try:
-        commit_sha = clone(git_url, ref or "", tmp) or ""
+        commit_sha = clone(clone_url, parsed_ref or "", tmp) or ""
         return await import_from_dir(
-            tmp, scope_kind, group_id, git_url, ref or "", commit_sha, imported_by,
+            tmp, scope_kind, group_id, git_url, parsed_ref or "", commit_sha, imported_by,
+            subdir=subdir
         )
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

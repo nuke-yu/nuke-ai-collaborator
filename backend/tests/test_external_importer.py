@@ -82,5 +82,79 @@ class TestImporter(unittest.TestCase):
         self.assertEqual(rows[0]["platforms"], "posix")
 
 
+    def test_parse_git_url_subdir(self):
+        from skills.importer import parse_git_url_subdir
+
+        # Basic GitHub HTTP URL
+        clone, ref, subdir = parse_git_url_subdir("https://github.com/phuryn/pm-skills")
+        self.assertEqual(clone, "https://github.com/phuryn/pm-skills.git")
+        self.assertEqual(ref, "")
+        self.assertEqual(subdir, "")
+
+        # GitHub URL with tree/branch and subdirectory
+        clone, ref, subdir = parse_git_url_subdir(
+            "https://github.com/phuryn/pm-skills/tree/main/pm-product-discovery"
+        )
+        self.assertEqual(clone, "https://github.com/phuryn/pm-skills.git")
+        self.assertEqual(ref, "main")
+        self.assertEqual(subdir, "pm-product-discovery")
+
+        # GitHub URL with branch containing slashes
+        clone, ref, subdir = parse_git_url_subdir(
+            "https://github.com/phuryn/pm-skills/tree/feature/new-skills/pm-product-discovery",
+            ref="feature/new-skills"
+        )
+        self.assertEqual(clone, "https://github.com/phuryn/pm-skills.git")
+        self.assertEqual(ref, "feature/new-skills")
+        self.assertEqual(subdir, "pm-product-discovery")
+
+    def test_import_from_dir_with_subdir(self):
+        from skills import importer, registry
+        repo = Path(tempfile.mkdtemp())
+        _mk_skill(repo, "git-helper") # outside subdir
+        sub = repo / "my-sub"
+        _mk_skill(sub, "deploy") # inside subdir
+
+        fd, path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        orig = _db.DB_PATH
+
+        async def go():
+            await init_central_db(path)
+            # import from my-sub subdir
+            result = await importer.import_from_dir(
+                repo, "global", registry.GLOBAL_GROUP_ID,
+                "https://github.com/x/y", "main", "abc123", imported_by=1,
+                subdir="my-sub"
+            )
+            return result
+
+        try:
+            _db.DB_PATH = path
+            result = _run(go())
+        finally:
+            _db.DB_PATH = orig
+            os.unlink(path)
+
+        imported_names = {i["name"] for i in result["imported"]}
+        # Only deploy should be imported since it is inside "my-sub"
+        self.assertEqual(imported_names, {"deploy"})
+        self.assertNotIn("git-helper", imported_names)
+
+    def test_import_from_dir_unsafe_subdir_traversal(self):
+        from skills import importer
+        repo = Path(tempfile.mkdtemp())
+
+        async def go():
+            await importer.import_from_dir(
+                repo, "global", 0, "https://github.com/x/y", "main", "abc", 1,
+                subdir="../unsafe"
+            )
+
+        with self.assertRaises(ValueError) as ctx:
+            _run(go())
+        self.assertIn("unsafe subdirectory path", str(ctx.exception))
+
+
 if __name__ == "__main__":
     unittest.main()
