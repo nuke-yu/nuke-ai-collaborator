@@ -108,7 +108,9 @@ async def process_skill_content(
     Embedded `!` shell blocks are intentionally NOT executed (DFT-022).
     """
     content = substitute_arguments(content, args)
-    content = content.replace("${SKILL_DIR}", str(skill_dir))
+    # Normalize to forward slashes so Windows skill dirs (backslashes) work in
+    # cross-platform skills the same as POSIX ones.
+    content = content.replace("${SKILL_DIR}", str(skill_dir).replace("\\", "/"))
     if template_vars:
         content = render_sandboxed(content, template_vars)
     return content

@@ -64,5 +64,16 @@ class TestCompanionCap(unittest.IsolatedAsyncioTestCase):
         self.assertIn("还有 15 个文件", out)
 
 
+class TestSkillDirNormalization(unittest.IsolatedAsyncioTestCase):
+    async def test_skill_dir_backslashes_normalized(self):
+        from skills.processor import process_skill_content
+        out = await process_skill_content(
+            "see ${SKILL_DIR}/scripts/run.ps1",
+            "C:\\workspaces\\group_1\\skills\\demo",
+        )
+        self.assertEqual(out, "see C:/workspaces/group_1/skills/demo/scripts/run.ps1")
+        self.assertNotIn("\\", out)
+
+
 if __name__ == "__main__":
     unittest.main()

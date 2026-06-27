@@ -131,7 +131,8 @@ async def run_skill(bot_id: int, name: str, args: str = "", ctx: dict | None = N
         }
 
     # Base directory header + full transformation pipeline
-    content = f"Base directory for this skill: {skill_dir}\n\n{raw}"
+    skill_dir_norm = str(skill_dir).replace("\\", "/")
+    content = f"Base directory for this skill: {skill_dir_norm}\n\n{raw}"
     content = await process_skill_content(content, skill_dir, args=args, template_vars=template_vars)
 
     # Companion files (directory skills only)
