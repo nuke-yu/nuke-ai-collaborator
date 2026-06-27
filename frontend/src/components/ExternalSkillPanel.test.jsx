@@ -104,3 +104,31 @@ describe('ExternalSkillPanel — import', () => {
     expect(api.importExternalSkill.mock.calls[0][0].scope).toBe('global')
   })
 })
+
+describe('ExternalSkillPanel — remove', () => {
+  let api
+  beforeEach(async () => {
+    vi.clearAllMocks()
+    api = await import('../externalSkillsApi')
+    api.fetchMemberExternalSkills.mockResolvedValue({ pool: POOL, assigned: [] })
+    api.removeExternalSkill.mockResolvedValue({ id: 1 })
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+  })
+  afterEach(() => vi.restoreAllMocks())
+
+  it('removes a pool skill after confirm and reloads', async () => {
+    render(<ExternalSkillPanel bot={{ id: 3, name: 'dev' }} groupId={7} onClose={() => {}} />)
+    await waitFor(() => expect(screen.getByText('deploy')).toBeInTheDocument())
+    fireEvent.click(screen.getByTestId('remove-skill-1'))
+    await waitFor(() => expect(api.removeExternalSkill).toHaveBeenCalledWith(1))
+    await waitFor(() => expect(api.fetchMemberExternalSkills).toHaveBeenCalledTimes(2))
+  })
+
+  it('does nothing when confirm is cancelled', async () => {
+    window.confirm.mockReturnValue(false)
+    render(<ExternalSkillPanel bot={{ id: 3, name: 'dev' }} groupId={7} onClose={() => {}} />)
+    await waitFor(() => expect(screen.getByText('deploy')).toBeInTheDocument())
+    fireEvent.click(screen.getByTestId('remove-skill-1'))
+    expect(api.removeExternalSkill).not.toHaveBeenCalled()
+  })
+})

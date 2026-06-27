@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { K } from '../i18n/keys'
-import { fetchMemberExternalSkills, putMemberExternalSkills, importExternalSkill } from '../externalSkillsApi'
+import { fetchMemberExternalSkills, putMemberExternalSkills, importExternalSkill, removeExternalSkill } from '../externalSkillsApi'
 
 const POOL_FOR_SCOPE = { global: 'external_global', group: 'external_group' }
 
@@ -69,6 +69,12 @@ export default function ExternalSkillPanel({ bot, groupId, onClose }) {
     }
   }
 
+  const removeFromPool = async (skill) => {
+    if (!confirm(t(K.externalSkill.confirmRemove, { name: skill.name }))) return
+    await removeExternalSkill(skill.id)
+    await load()
+  }
+
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={onClose}>
       <div
@@ -118,6 +124,7 @@ export default function ExternalSkillPanel({ bot, groupId, onClose }) {
                   assigned={assignedNames.has(skill.name)}
                   busy={busy === skill.name}
                   onToggle={() => toggleAssign(skill)}
+                  onRemove={() => removeFromPool(skill)}
                   t={t}
                 />
               ))}
@@ -177,7 +184,7 @@ export default function ExternalSkillPanel({ bot, groupId, onClose }) {
   )
 }
 
-function ExternalSkillRow({ skill, assigned, busy, onToggle, t }) {
+function ExternalSkillRow({ skill, assigned, busy, onToggle, onRemove, t }) {
   const isGlobal = skill.scope_kind === 'global'
   const hostSpecific = skill.platforms === 'posix' || skill.platforms === 'windows'
   return (
@@ -196,6 +203,9 @@ function ExternalSkillRow({ skill, assigned, busy, onToggle, t }) {
           )}
         </div>
         <div className="text-xs text-gray-600 mt-0.5 truncate">{skill.source_url}</div>
+        {skill.imported_by != null && (
+          <div className="text-[10px] text-gray-600 mt-0.5">{t(K.externalSkill.importedBy)} #{skill.imported_by}</div>
+        )}
         {skill.high_privilege && (
           <div className="mt-1.5 text-[10px] px-2 py-0.5 rounded border bg-red-950/40 border-red-900/40 text-red-300 leading-tight inline-block">
             ⚠️ {t(K.externalSkill.highPrivilege, { tools: skill.high_privilege })}
@@ -209,6 +219,13 @@ function ExternalSkillRow({ skill, assigned, busy, onToggle, t }) {
       </div>
 
       <div className="flex items-center gap-2 flex-shrink-0">
+        <button
+          data-testid={`remove-skill-${skill.id}`}
+          onClick={onRemove}
+          className="text-xs px-2.5 py-1 rounded-lg bg-red-900/60 hover:bg-red-800 text-red-300 transition-colors"
+        >
+          {t(K.externalSkill.remove)}
+        </button>
         <button
           data-testid={`assign-toggle-${skill.name}`}
           onClick={onToggle}
