@@ -80,10 +80,20 @@ def _match_args_pattern(args_pattern: str, args_json: str) -> bool:
     return any(search_nested(v) for v in arguments.values())
 
 
+# Tools whose permission args_pattern matches a SINGLE identifying field, not a
+# recursive search across every argument value. run_skill's `args` is freeform
+# task text; recursive matching would let a name-scoped rule fire on the wrong
+# skill (e.g. rule "deploy" firing on run_skill(name="build", args="deploy ...")).
+_NAME_SCOPED_TOOLS = {"run_skill": "name"}
+
+
 def _matches(rule: Rule, tool_name: str, arguments: dict) -> bool:
     if not _match_tool_pattern(tool_name, rule.tool_pattern):
         return False
     if rule.args_pattern:
+        field = _NAME_SCOPED_TOOLS.get(tool_name)
+        if field is not None:
+            return fnmatch.fnmatch(str(arguments.get(field, "")), rule.args_pattern)
         args_json = json.dumps(arguments, sort_keys=True, default=str)
         return _match_args_pattern(rule.args_pattern, args_json)
     return True

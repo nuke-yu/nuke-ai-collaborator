@@ -96,6 +96,25 @@ class TestScopedRuleMatching(unittest.TestCase):
         self.assertTrue(engine._matches(blanket, "run_shell", {"cmd": "rm -rf /"}))
 
 
+class TestRunSkillNameScopedMatch(unittest.TestCase):
+    """A run_skill rule scoped to skill 'deploy' must match ONLY by name, never
+    by the freeform args string (the recursive-args blanket bug)."""
+
+    def test_matches_by_name(self):
+        rule = Rule(tool_pattern="run_skill", args_pattern="deploy", action="allow")
+        self.assertTrue(engine._matches(rule, "run_skill", {"name": "deploy", "args": ""}))
+
+    def test_does_not_match_via_args_string(self):
+        rule = Rule(tool_pattern="run_skill", args_pattern="deploy", action="allow")
+        self.assertFalse(
+            engine._matches(rule, "run_skill", {"name": "build", "args": "deploy prod"})
+        )
+
+    def test_empty_args_pattern_still_matches_any_skill(self):
+        rule = Rule(tool_pattern="run_skill", args_pattern="", action="allow")
+        self.assertTrue(engine._matches(rule, "run_skill", {"name": "anything", "args": ""}))
+
+
 class TestAlwaysPersistsScopedPattern(unittest.TestCase):
 
     def setUp(self):
