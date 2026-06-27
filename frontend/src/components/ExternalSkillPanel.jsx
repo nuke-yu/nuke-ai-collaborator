@@ -1,14 +1,22 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { K } from '../i18n/keys'
-import { fetchMemberExternalSkills, putMemberExternalSkills, importExternalSkill, removeExternalSkill } from '../externalSkillsApi'
+import {
+  fetchMemberExternalSkills, putMemberExternalSkills, importExternalSkill, removeExternalSkill,
+  fetchPermissionRules, addPermissionRule, removePermissionRule,
+} from '../externalSkillsApi'
 
 const POOL_FOR_SCOPE = { global: 'external_global', group: 'external_group' }
+
+const RUN_SKILL_PATTERNS = new Set(['run_skill', 'run_skill*'])
+const matchesSkill = (rule, name) =>
+  RUN_SKILL_PATTERNS.has(rule.tool_pattern) && rule.args_pattern === name
 
 export default function ExternalSkillPanel({ bot, groupId, onClose }) {
   const { t } = useTranslation()
   const [pool, setPool] = useState([])
   const [assignedNames, setAssignedNames] = useState(new Set())
+  const [rules, setRules] = useState([])
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(null)   // skill name currently being PUT
   const [importing, setImporting] = useState(false)
@@ -26,7 +34,11 @@ export default function ExternalSkillPanel({ bot, groupId, onClose }) {
     setLoading(false)
   }, [groupId, bot.id])
 
-  useEffect(() => { load() }, [load])
+  const loadRules = useCallback(async () => {
+    setRules(await fetchPermissionRules(bot.id))
+  }, [bot.id])
+
+  useEffect(() => { load(); loadRules(); }, [load, loadRules])
 
   const poolFor = useCallback(
     (name) => {
@@ -73,6 +85,27 @@ export default function ExternalSkillPanel({ bot, groupId, onClose }) {
     if (!confirm(t(K.externalSkill.confirmRemove, { name: skill.name }))) return
     await removeExternalSkill(skill.id)
     await load()
+  }
+
+  const policyOf = useCallback(
+    (name) => {
+      const r = rules.find(rule => matchesSkill(rule, name))
+      return r ? r.action : 'ask'   // no rule = default HIL = 'ask'
+    },
+    [rules],
+  )
+
+  const setPolicy = async (skill, action) => {
+    // Clear every existing matching rule first, then add one if not 'ask'.
+    for (const r of rules.filter(rule => matchesSkill(rule, skill.name))) {
+      await removePermissionRule(bot.id, r.id)
+    }
+    if (action !== 'ask') {
+      await addPermissionRule(bot.id, {
+        tool_pattern: 'run_skill', args_pattern: skill.name, action,
+      })
+    }
+    await loadRules()
   }
 
   return (
@@ -123,8 +156,10 @@ export default function ExternalSkillPanel({ bot, groupId, onClose }) {
                   skill={skill}
                   assigned={assignedNames.has(skill.name)}
                   busy={busy === skill.name}
+                  policy={policyOf(skill.name)}
                   onToggle={() => toggleAssign(skill)}
                   onRemove={() => removeFromPool(skill)}
+                  onPolicy={(action) => setPolicy(skill, action)}
                   t={t}
                 />
               ))}
@@ -184,7 +219,7 @@ export default function ExternalSkillPanel({ bot, groupId, onClose }) {
   )
 }
 
-function ExternalSkillRow({ skill, assigned, busy, onToggle, onRemove, t }) {
+function ExternalSkillRow({ skill, assigned, busy, policy, onToggle, onRemove, onPolicy, t }) {
   const isGlobal = skill.scope_kind === 'global'
   const hostSpecific = skill.platforms === 'posix' || skill.platforms === 'windows'
   return (
@@ -226,6 +261,18 @@ function ExternalSkillRow({ skill, assigned, busy, onToggle, onRemove, t }) {
         >
           {t(K.externalSkill.remove)}
         </button>
+        {skill.high_privilege && (
+          <select
+            data-testid={`policy-${skill.name}`}
+            value={policy}
+            onChange={e => onPolicy(e.target.value)}
+            className="bg-gray-900 text-gray-300 text-xs rounded-lg px-2 py-1 outline-none"
+          >
+            <option value="allow">{t(K.externalSkill.policyAllow)}</option>
+            <option value="ask">{t(K.externalSkill.policyAsk)}</option>
+            <option value="deny">{t(K.externalSkill.policyDeny)}</option>
+          </select>
+        )}
         <button
           data-testid={`assign-toggle-${skill.name}`}
           onClick={onToggle}

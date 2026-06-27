@@ -132,3 +132,44 @@ describe('ExternalSkillPanel — remove', () => {
     expect(api.removeExternalSkill).not.toHaveBeenCalled()
   })
 })
+
+describe('ExternalSkillPanel — approval policy', () => {
+  let api
+  beforeEach(async () => {
+    vi.clearAllMocks()
+    api = await import('../externalSkillsApi')
+    api.fetchMemberExternalSkills.mockResolvedValue({ pool: POOL, assigned: [] })
+    // 'nuke-prod' is high-privilege; start with no rules
+    api.fetchPermissionRules.mockResolvedValue([])
+    api.addPermissionRule.mockResolvedValue({ id: 11 })
+    api.removePermissionRule.mockResolvedValue({})
+  })
+  afterEach(() => vi.restoreAllMocks())
+
+  it('shows a policy dropdown only for high-privilege skills', async () => {
+    render(<ExternalSkillPanel bot={{ id: 3, name: 'dev' }} groupId={7} onClose={() => {}} />)
+    await waitFor(() => expect(screen.getByText('nuke-prod')).toBeInTheDocument())
+    expect(screen.getByTestId('policy-nuke-prod')).toBeInTheDocument()
+    expect(screen.queryByTestId('policy-deploy')).not.toBeInTheDocument()   // deploy has no high_privilege
+  })
+
+  it('selecting Deny posts a name-scoped deny rule', async () => {
+    render(<ExternalSkillPanel bot={{ id: 3, name: 'dev' }} groupId={7} onClose={() => {}} />)
+    await waitFor(() => expect(screen.getByTestId('policy-nuke-prod')).toBeInTheDocument())
+    fireEvent.change(screen.getByTestId('policy-nuke-prod'), { target: { value: 'deny' } })
+    await waitFor(() => expect(api.addPermissionRule).toHaveBeenCalled())
+    expect(api.addPermissionRule).toHaveBeenCalledWith(3, {
+      tool_pattern: 'run_skill', args_pattern: 'nuke-prod', action: 'deny',
+    })
+  })
+
+  it('selecting Ask deletes the existing matching rule', async () => {
+    api.fetchPermissionRules.mockResolvedValue([
+      { id: 88, tool_pattern: 'run_skill', args_pattern: 'nuke-prod', action: 'allow' },
+    ])
+    render(<ExternalSkillPanel bot={{ id: 3, name: 'dev' }} groupId={7} onClose={() => {}} />)
+    await waitFor(() => expect(screen.getByTestId('policy-nuke-prod')).toBeInTheDocument())
+    fireEvent.change(screen.getByTestId('policy-nuke-prod'), { target: { value: 'ask' } })
+    await waitFor(() => expect(api.removePermissionRule).toHaveBeenCalledWith(3, 88))
+  })
+})
