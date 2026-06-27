@@ -28,7 +28,7 @@ async def get_workspace_tree(member_id: int):
         bot = await get_member(db, member_id)
     if not bot or bot["type"] != "bot":
         raise HTTPException(404, "Bot not found")
-    return list_workspace_tree(member_id, bot["group_id"])
+    return list_workspace_tree(member_id, bot["group_id"], role=bot.get("role"))
 
 
 @router.get("/api/members/{member_id}/workspace/file")
@@ -71,7 +71,7 @@ async def make_workspace_dir(member_id: int, body: dict):
     result = await asyncio.to_thread(make_dir, member_id, path, bot["group_id"])
     if result.startswith("[错误]"):
         raise HTTPException(400, result)
-    return {"ok": True, "result": result, "files": list_workspace_tree(member_id, bot["group_id"])}
+    return {"ok": True, "result": result, "files": list_workspace_tree(member_id, bot["group_id"], role=bot.get("role"))}
 
 
 @router.delete("/api/members/{member_id}/workspace/file")
@@ -85,7 +85,7 @@ async def delete_workspace_file(member_id: int, path: str):
     result = await asyncio.to_thread(delete_path, member_id, path, bot["group_id"])
     if not result.startswith("已删除"):
         raise HTTPException(400, result)
-    return {"ok": True, "result": result, "files": list_workspace_tree(member_id, bot["group_id"])}
+    return {"ok": True, "result": result, "files": list_workspace_tree(member_id, bot["group_id"], role=bot.get("role"))}
 
 
 @router.post("/api/members/{member_id}/workspace/init")
@@ -95,7 +95,7 @@ async def init_workspace(member_id: int):
     if not bot or bot["type"] != "bot":
         raise HTTPException(404, "Bot not found")
     await init_bot_workspace(bot)
-    return {"ok": True, "files": list_workspace_tree(member_id, bot["group_id"])}
+    return {"ok": True, "files": list_workspace_tree(member_id, bot["group_id"], role=bot.get("role"))}
 
 
 # ---------------------------------------------------------------------------

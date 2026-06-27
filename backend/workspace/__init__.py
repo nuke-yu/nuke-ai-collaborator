@@ -728,14 +728,30 @@ async def init_bot_workspace(bot: dict):
 
 
 
-def list_workspace_tree(bot_id: int, group_id: int | None = None) -> list[dict]:
-    """Return file tree as list of {path, name, is_dir} for UI."""
+def list_workspace_tree(bot_id: int, group_id: int | None = None, role: str | None = None) -> list[dict]:
+    """Return file tree as list of {path, name, is_dir} for UI, filtering out disabled skills."""
     ws = bot_workspace(bot_id, group_id)
+    
+    # Resolve disabled skill stems for the bot to hide them from the tree
+    try:
+        from skills.discovery import _list_skills_all_sync
+        all_skills = _list_skills_all_sync(bot_id, group_id, role)
+        disabled_stems = {s["name"] for s in all_skills if s.get("status") in ("disabled", "deprecated")}
+    except Exception:
+        disabled_stems = set()
+
     result = []
     # UI 文件树：剪枝重型目录(node_modules/.git/.history)防卡顿，但保留 .gitignore 等 dotfile 给人看
     paths, _ = walk_visible(ws, max_entries=2000, skip_hidden=False)
     for p in paths:
         rel = str(p.relative_to(ws)).replace("\\", "/")
+        
+        # Filter out disabled skills from the skills/ folder
+        parts = rel.split("/")
+        if len(parts) >= 2 and parts[0] == "skills" and not p.is_dir():
+            if p.stem in disabled_stems:
+                continue
+                
         result.append({"path": rel, "name": p.name, "is_dir": p.is_dir()})
     return result
 
