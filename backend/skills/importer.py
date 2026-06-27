@@ -7,6 +7,11 @@ external_skills registry row per imported skill. Imported skills are untrusted:
 inline shell is already inert (DFT-022); we additionally record high-privilege
 tool hits for the operator UI.
 """
+import os
+import re
+import shutil
+import subprocess
+import tempfile
 from pathlib import Path
 
 from . import constants as C
@@ -14,6 +19,11 @@ from . import registry
 from .metadata import parse_skill_meta, _is_safe_name
 from .store import SkillStore
 from workspace import layout
+
+# Host allowlist for git import. Default allows github.com plus private/internal
+# hosts; tighten in production via NUKE_SKILL_IMPORT_HOSTS (comma-separated).
+_DEFAULT_ALLOWED_HOSTS = {"github.com"}
+_CLONE_TIMEOUT_SECONDS = 120
 
 
 class _DirScope:
@@ -104,3 +114,53 @@ async def import_from_dir(repo_dir, scope_kind: str, group_id: int,
                          "platforms": platforms, "high_privilege": high_priv})
 
     return {"imported": imported, "rejected": rejected}
+
+
+def _allowed_hosts() -> set[str]:
+    env = os.environ.get("NUKE_SKILL_IMPORT_HOSTS", "")
+    extra = {h.strip().lower() for h in env.split(",") if h.strip()}
+    return _DEFAULT_ALLOWED_HOSTS | extra
+
+
+def _host_of(url: str) -> str:
+    from urllib.parse import urlparse
+    return (urlparse(url).hostname or "").lower()
+
+
+def _is_private_host(host: str) -> bool:
+    # Internal hosts (no dot, .local, or RFC1918-looking) are allowed by default.
+    if not host or "." not in host or host.endswith(".local"):
+        return True
+    return bool(re.match(r"^(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[0-1])\.)", host))
+
+
+def _git_clone(url: str, ref: str, dst: str) -> str:
+    """Clone shallow and return the commit sha. Raises on failure/timeout."""
+    cmd = ["git", "clone", "--depth", "1"]
+    if ref:
+        cmd += ["--branch", ref]
+    cmd += [url, dst]
+    subprocess.run(cmd, check=True, capture_output=True, timeout=_CLONE_TIMEOUT_SECONDS)
+    sha = subprocess.run(["git", "-C", dst, "rev-parse", "HEAD"],
+                         check=True, capture_output=True, text=True,
+                         timeout=30).stdout.strip()
+    return sha
+
+
+async def clone_and_import(git_url: str, ref: str, scope_kind: str, group_id: int,
+                           imported_by: int | None, *, _clone=None) -> dict:
+    """Host-checked git clone → import_from_dir. `_clone(url, ref, dst)->sha` is
+    injectable for tests (no network)."""
+    host = _host_of(git_url)
+    if not (host in _allowed_hosts() or _is_private_host(host)):
+        raise ValueError(f"host not allowed for skill import: {host!r}")
+
+    clone = _clone or _git_clone
+    tmp = tempfile.mkdtemp(prefix="nuke_skill_import_")
+    try:
+        commit_sha = clone(git_url, ref or "", tmp) or ""
+        return await import_from_dir(
+            tmp, scope_kind, group_id, git_url, ref or "", commit_sha, imported_by,
+        )
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)

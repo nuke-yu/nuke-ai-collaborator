@@ -5,9 +5,12 @@ role-catalog listing. Path-safety lives entirely in skills.scope.parse_descripto
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+import shutil
+
 from skills.role_catalog import list_role_catalog
 from skills.scope import parse_descriptor, _safe_segment
 from skills.store import SkillStore
+from skills import importer, registry
 from workspace import layout
 
 router = APIRouter()
@@ -74,6 +77,54 @@ async def copy_scope_skill(req: CopySkillRequest):
         raise HTTPException(400, str(e))
     except (FileNotFoundError, NotADirectoryError):
         raise HTTPException(404, f"source skill not found: {req.name!r}")
+    return {"ok": True}
+
+
+class ImportSkillRequest(BaseModel):
+    git_url: str
+    ref: str = ""
+    scope: object   # "global" or {"group_id": int}
+
+
+def _scope_kind_group(scope) -> tuple[str, int]:
+    if scope == "global":
+        return "global", registry.GLOBAL_GROUP_ID
+    if isinstance(scope, dict) and "group_id" in scope:
+        return "group", int(scope["group_id"])
+    raise HTTPException(400, "scope must be 'global' or {group_id}")
+
+
+@router.post("/api/skills/import")
+async def import_external_skill(req: ImportSkillRequest):
+    scope_kind, group_id = _scope_kind_group(req.scope)
+    try:
+        return await importer.clone_and_import(
+            req.git_url, req.ref, scope_kind, group_id, imported_by=None
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        raise HTTPException(502, f"import failed: {e}")
+
+
+@router.get("/api/skills/external")
+async def list_external_skills(scope_kind: str | None = None, group_id: int | None = None):
+    return {"external": await registry.list_external(scope_kind, group_id)}
+
+
+@router.delete("/api/skills/external/{external_id}")
+async def remove_external_skill(external_id: int):
+    row = await registry.remove_external(external_id)
+    if row is None:
+        raise HTTPException(404, f"external skill not found: {external_id}")
+    # Delete the pool files too (registry + disk stay consistent).
+    if row["scope_kind"] == "global":
+        pool = layout.external_global_skills_dir()
+    else:
+        pool = layout.group_external_skills_dir(row["group_id"])
+    target = pool / row["name"]
+    if target.exists():
+        shutil.rmtree(target, ignore_errors=True)
     return {"ok": True}
 
 
