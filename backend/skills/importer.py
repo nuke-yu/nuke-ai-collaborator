@@ -80,8 +80,17 @@ async def import_from_dir(repo_dir, scope_kind: str, group_id: int,
     dst_scope = _DirScope(pool)
 
     imported, rejected = [], []
+    # Handle single file target (e.g. if URL pointed directly to a SKILL.md file)
+    if target_dir.is_file():
+        if target_dir.name == "SKILL.md":
+            skill_mds = [target_dir]
+        else:
+            skill_mds = []
+    else:
+        skill_mds = sorted(target_dir.rglob("SKILL.md"))
+
     # Every directory holding a SKILL.md is one skill.
-    for skill_md in sorted(target_dir.rglob("SKILL.md")):
+    for skill_md in skill_mds:
         skill_dir = skill_md.parent
         name = skill_dir.name
         try:
@@ -175,14 +184,25 @@ def parse_git_url_subdir(url: str, ref: str = "") -> tuple[str, str, str]:
     - https://github.com/owner/repo -> clone_url='https://github.com/owner/repo.git', ref=ref, subdir=''
     """
     url = url.strip()
+    if not url:
+        return "", "", ""
+
+    # Prepend https:// if it is a schemeless web URL (e.g. github.com/owner/repo)
+    if "://" not in url and not url.startswith("git@"):
+        url = "https://" + url
 
     # Handle SSH URL format
     if "://" not in url and "@" in url:
         return url, ref, ""
 
-    for sep in ("/tree/", "/src/"):
+    for sep in ("/tree/", "/src/", "/blob/"):
         if sep in url:
             base_part, rest = url.split(sep, 1)
+            # Remove GitLab/Gitea "/-" helper if present
+            base_part = base_part.rstrip("/")
+            if base_part.endswith("/-"):
+                base_part = base_part[:-2]
+
             clone_url = base_part
             if not clone_url.endswith(".git"):
                 clone_url += ".git"

@@ -108,6 +108,30 @@ class TestImporter(unittest.TestCase):
         self.assertEqual(ref, "feature/new-skills")
         self.assertEqual(subdir, "pm-product-discovery")
 
+        # Schemeless URL
+        clone, ref, subdir = parse_git_url_subdir(
+            "github.com/phuryn/pm-skills/tree/main/pm-product-discovery"
+        )
+        self.assertEqual(clone, "https://github.com/phuryn/pm-skills.git")
+        self.assertEqual(ref, "main")
+        self.assertEqual(subdir, "pm-product-discovery")
+
+        # GitLab URL with slash-dash
+        clone, ref, subdir = parse_git_url_subdir(
+            "https://gitlab.com/phuryn/pm-skills/-/tree/main/pm-product-discovery"
+        )
+        self.assertEqual(clone, "https://gitlab.com/phuryn/pm-skills.git")
+        self.assertEqual(ref, "main")
+        self.assertEqual(subdir, "pm-product-discovery")
+
+        # GitHub file blob URL
+        clone, ref, subdir = parse_git_url_subdir(
+            "https://github.com/phuryn/pm-skills/blob/main/pm-product-discovery/skills/prioritize-features/SKILL.md"
+        )
+        self.assertEqual(clone, "https://github.com/phuryn/pm-skills.git")
+        self.assertEqual(ref, "main")
+        self.assertEqual(subdir, "pm-product-discovery/skills/prioritize-features/SKILL.md")
+
     def test_import_from_dir_with_subdir(self):
         from skills import importer, registry
         repo = Path(tempfile.mkdtemp())
@@ -154,6 +178,38 @@ class TestImporter(unittest.TestCase):
         with self.assertRaises(ValueError) as ctx:
             _run(go())
         self.assertIn("unsafe subdirectory path", str(ctx.exception))
+
+
+    def test_import_from_dir_with_file_target(self):
+        from skills import importer, registry
+        repo = Path(tempfile.mkdtemp())
+        sub = repo / "my-sub"
+        skill_dir = _mk_skill(sub, "deploy")
+        file_path = skill_dir / "SKILL.md"
+
+        fd, path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        orig = _db.DB_PATH
+
+        async def go():
+            await init_central_db(path)
+            # import pointing directly to the file
+            result = await importer.import_from_dir(
+                repo, "global", registry.GLOBAL_GROUP_ID,
+                "https://github.com/x/y", "main", "abc123", imported_by=1,
+                subdir="my-sub/deploy/SKILL.md"
+            )
+            return result
+
+        try:
+            _db.DB_PATH = path
+            result = _run(go())
+        finally:
+            _db.DB_PATH = orig
+            os.unlink(path)
+
+        imported_names = {i["name"] for i in result["imported"]}
+        self.assertEqual(imported_names, {"deploy"})
 
 
 if __name__ == "__main__":
