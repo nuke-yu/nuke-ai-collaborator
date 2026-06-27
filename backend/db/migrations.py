@@ -644,6 +644,54 @@ async def migration_026(db):
     await db.commit()
 
 
+async def migration_027(db):
+    """L3 upgrade — FTS5 ranked search over tool_events.
+
+    Creates an external-content FTS5 virtual table mirroring tool_events' text
+    columns (no data duplication; the index references rows by rowid=id), keeps
+    it in sync with AFTER INSERT/DELETE triggers, and backfills existing rows via
+    the 'rebuild' command. search_events uses MATCH + bm25() when this exists and
+    falls back to LIKE otherwise — so if a SQLite build lacks FTS5 this migration
+    degrades to a no-op (wrapped in try/except) rather than blocking startup.
+
+    No UPDATE trigger: a row's searchable columns are immutable after insert
+    (only the `compressed` flag changes, which isn't indexed).
+
+    Rollback:
+        DROP TRIGGER IF EXISTS tool_events_fts_ai;
+        DROP TRIGGER IF EXISTS tool_events_fts_ad;
+        DROP TABLE IF EXISTS tool_events_fts;
+    """
+    # Only meaningful where tool_events exists (group DBs + the empty central copy).
+    cur = await db.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='tool_events'"
+    )
+    if (await cur.fetchone()) is None:
+        return
+    try:
+        await db.execute(
+            "CREATE VIRTUAL TABLE IF NOT EXISTS tool_events_fts USING fts5("
+            "tool, args_summary, result_summary, command, files_touched, "
+            "content='tool_events', content_rowid='id')"
+        )
+    except Exception as e:
+        log.warning("migration_027: FTS5 unavailable, skipping tool_events_fts (search falls back to LIKE): %s", e)
+        return
+    await db.execute(
+        "CREATE TRIGGER IF NOT EXISTS tool_events_fts_ai AFTER INSERT ON tool_events BEGIN "
+        "INSERT INTO tool_events_fts(rowid, tool, args_summary, result_summary, command, files_touched) "
+        "VALUES (new.id, new.tool, new.args_summary, new.result_summary, new.command, new.files_touched); END"
+    )
+    await db.execute(
+        "CREATE TRIGGER IF NOT EXISTS tool_events_fts_ad AFTER DELETE ON tool_events BEGIN "
+        "INSERT INTO tool_events_fts(tool_events_fts, rowid, tool, args_summary, result_summary, command, files_touched) "
+        "VALUES ('delete', old.id, old.tool, old.args_summary, old.result_summary, old.command, old.files_touched); END"
+    )
+    # Backfill rows that predate the index.
+    await db.execute("INSERT INTO tool_events_fts(tool_events_fts) VALUES('rebuild')")
+    await db.commit()
+
+
 MIGRATIONS: list = [
     migration_001,
     migration_002,
@@ -671,6 +719,7 @@ MIGRATIONS: list = [
     migration_024,
     migration_025,
     migration_026,
+    migration_027,
 ]
 
 

@@ -18,9 +18,13 @@ all central-internal).
 The legacy single-DB db.schema.init_db() is unchanged; these split inits are
 additive, used by the future Supervisor (central) and Worker (per group).
 """
+import logging
+
 from db import DB_PATH
 from db.migrations import MIGRATIONS
 from db.schema import _seed_templates
+
+log = logging.getLogger(__name__)
 
 # ── table → domain ────────────────────────────────────────────────────────
 CENTRAL_TABLES = frozenset({
@@ -313,6 +317,22 @@ _GROUP_DDL = [
     "CREATE INDEX IF NOT EXISTS idx_tool_events_uncompressed ON tool_events(group_id, bot_id, compressed)",
 ]
 
+# FTS5 ranked search over tool_events (L3 upgrade). Kept separate and applied
+# best-effort: a SQLite build without FTS5 must NOT brick group-DB init —
+# search_events falls back to LIKE when tool_events_fts is absent. Mirrors
+# migration_027 (which brings legacy group DBs up to the same shape).
+_GROUP_FTS_DDL = [
+    "CREATE VIRTUAL TABLE IF NOT EXISTS tool_events_fts USING fts5("
+    "tool, args_summary, result_summary, command, files_touched, "
+    "content='tool_events', content_rowid='id')",
+    "CREATE TRIGGER IF NOT EXISTS tool_events_fts_ai AFTER INSERT ON tool_events BEGIN "
+    "INSERT INTO tool_events_fts(rowid, tool, args_summary, result_summary, command, files_touched) "
+    "VALUES (new.id, new.tool, new.args_summary, new.result_summary, new.command, new.files_touched); END",
+    "CREATE TRIGGER IF NOT EXISTS tool_events_fts_ad AFTER DELETE ON tool_events BEGIN "
+    "INSERT INTO tool_events_fts(tool_events_fts, rowid, tool, args_summary, result_summary, command, files_touched) "
+    "VALUES ('delete', old.id, old.tool, old.args_summary, old.result_summary, old.command, old.files_touched); END",
+]
+
 
 async def _stamp_version(conn) -> None:
     """Mark a fresh per-domain DB at the current schema level so the legacy linear
@@ -352,6 +372,14 @@ async def init_group_db(path: str | None = None) -> None:
         for ddl in _GROUP_DDL:
             await conn.execute(ddl)
         await conn.commit()
+        # FTS5 index — best-effort so a build without FTS5 still yields a usable
+        # group DB (search_events degrades to LIKE).
+        try:
+            for ddl in _GROUP_FTS_DDL:
+                await conn.execute(ddl)
+            await conn.commit()
+        except Exception as e:
+            log.warning("init_group_db: FTS5 unavailable, tool_events_fts skipped (search falls back to LIKE): %s", e)
         await _stamp_version(conn)
         await conn.commit()
 

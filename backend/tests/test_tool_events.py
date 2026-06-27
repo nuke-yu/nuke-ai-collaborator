@@ -338,5 +338,74 @@ class CompressionTest(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual((await cur.fetchone())[0], 0)
 
 
+class FtsSearchTest(unittest.IsolatedAsyncioTestCase):
+    """L3 upgrade — FTS5 ranked search + LIKE fallback."""
+
+    async def asyncSetUp(self):
+        self._orig = database.DB_PATH
+        database.DB_PATH = TEST_DB_PATH
+        if os.path.exists(TEST_DB_PATH):
+            os.remove(TEST_DB_PATH)
+        await database.init_db()
+
+    async def asyncTearDown(self):
+        database.DB_PATH = self._orig
+        if os.path.exists(TEST_DB_PATH):
+            try:
+                os.remove(TEST_DB_PATH)
+            except OSError:
+                pass
+
+    async def test_fts_table_created(self):
+        async with database.connect(TEST_DB_PATH) as db:
+            async with db.execute(
+                "SELECT 1 FROM sqlite_master WHERE name='tool_events_fts'"
+            ) as cur:
+                self.assertIsNotNone(await cur.fetchone())
+
+    async def test_fts_matches_content_word_only(self):
+        await record_event(group_id=1, bot_id=1, tool="edit_file",
+                           arguments={"path": "auth/login.py"}, result="fixed token refresh", is_error=False)
+        await record_event(group_id=1, bot_id=1, tool="run_shell",
+                           arguments={"cmd": "grep nonsense"}, result="nothing here", is_error=False)
+        rows = await search_events(1, "token")
+        self.assertEqual([r["tool"] for r in rows], ["edit_file"])
+
+    async def test_fts_keeps_index_in_sync_on_insert(self):
+        await record_event(group_id=2, bot_id=1, tool="write_file",
+                           arguments={"path": "x.py"}, result="created widget module", is_error=False)
+        rows = await search_events(2, "widget")
+        self.assertEqual(len(rows), 1)
+
+    async def test_special_chars_do_not_crash(self):
+        await record_event(group_id=3, bot_id=1, tool="run_shell",
+                           arguments={"cmd": "ls"}, result="ok", is_error=False)
+        for q in ['a(b', 'foo"bar', 'x OR', '* near']:
+            rows = await search_events(3, q)
+            self.assertIsInstance(rows, list)
+
+    async def test_fallback_to_like_when_fts_absent(self):
+        # Simulate a SQLite build without FTS5: neither the virtual table nor its
+        # sync triggers exist (they're created/skipped together — never half).
+        async with database.connect(TEST_DB_PATH) as db:
+            await db.execute("DROP TRIGGER IF EXISTS tool_events_fts_ai")
+            await db.execute("DROP TRIGGER IF EXISTS tool_events_fts_ad")
+            await db.execute("DROP TABLE tool_events_fts")
+            await db.commit()
+        await record_event(group_id=4, bot_id=1, tool="edit_file",
+                           arguments={"path": "core/widget.py"}, result="done", is_error=False)
+        rows = await search_events(4, "widget")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["tool"], "edit_file")
+
+    async def test_fts_group_scoped(self):
+        await record_event(group_id=5, bot_id=1, tool="edit_file",
+                           arguments={"path": "shared.py"}, result="token logic", is_error=False)
+        await record_event(group_id=6, bot_id=1, tool="edit_file",
+                           arguments={"path": "shared.py"}, result="token logic", is_error=False)
+        rows = await search_events(5, "token")
+        self.assertEqual(len(rows), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

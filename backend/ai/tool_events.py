@@ -159,28 +159,80 @@ def _full_row(r) -> dict:
             "files_touched": r[9], "command": r[10]}
 
 
-async def search_events(group_id: int, query: str = "", limit: int = 20,
-                        tool: str | None = None) -> list[dict]:
-    """L3-1：关键词检索，返回 index 行（不含全文）。空 query = 最近 N 条。
+def _fts_match_query(query: str) -> str:
+    """把用户输入转成安全的 FTS5 query：每个词作为字面 phrase（双引号包裹、内部引号转义），
+    词间空格 = 隐式 AND。这样用户输入里的 FTS5 特殊字符不会引发语法错误（兜底仍有 LIKE）。"""
+    terms = [t.replace('"', '""') for t in query.split() if t]
+    return " ".join(f'"{t}"' for t in terms)
 
-    多词按 AND 跨整段可搜文本匹配。group_id 强制过滤，绝不跨群。"""
-    if group_id is None:
-        return []
+
+async def _search_recency(db, group_id, limit, tool) -> list[dict]:
     where = ["group_id = ?"]
     params: list = [group_id]
-    for term in (query or "").split():
+    if tool:
+        where.append("tool = ?")
+        params.append(tool)
+    params.append(limit)
+    async with db.execute(
+        f"SELECT {_INDEX_COLS} FROM tool_events WHERE {' AND '.join(where)} "
+        f"ORDER BY id DESC LIMIT ?", params,
+    ) as cur:
+        return [_index_row(r) for r in await cur.fetchall()]
+
+
+async def _search_like(db, group_id, query, limit, tool) -> list[dict]:
+    """关键词 LIKE 兜底：多词 AND 跨整段可搜文本，按时间倒序。"""
+    where = ["group_id = ?"]
+    params: list = [group_id]
+    for term in query.split():
         where.append(f"({_SEARCHABLE}) LIKE ?")
         params.append(f"%{term}%")
     if tool:
         where.append("tool = ?")
         params.append(tool)
-    params.append(max(1, min(int(limit or 20), 100)))
-    sql = (f"SELECT {_INDEX_COLS} FROM tool_events WHERE {' AND '.join(where)} "
-           f"ORDER BY id DESC LIMIT ?")
+    params.append(limit)
+    async with db.execute(
+        f"SELECT {_INDEX_COLS} FROM tool_events WHERE {' AND '.join(where)} "
+        f"ORDER BY id DESC LIMIT ?", params,
+    ) as cur:
+        return [_index_row(r) for r in await cur.fetchall()]
+
+
+async def _search_fts(db, group_id, query, limit, tool) -> list[dict]:
+    """FTS5 MATCH + bm25 相关性排序（bm25 越小越相关）。"""
+    cols = ", ".join(f"te.{c}" for c in _INDEX_COLS.split(", "))
+    where = ["f MATCH ?", "te.group_id = ?"]
+    params: list = [_fts_match_query(query), group_id]
+    if tool:
+        where.append("te.tool = ?")
+        params.append(tool)
+    params.append(limit)
+    async with db.execute(
+        f"SELECT {cols} FROM tool_events_fts f "
+        f"JOIN tool_events te ON te.id = f.rowid "
+        f"WHERE {' AND '.join(where)} ORDER BY bm25(f) LIMIT ?", params,
+    ) as cur:
+        return [_index_row(r) for r in await cur.fetchall()]
+
+
+async def search_events(group_id: int, query: str = "", limit: int = 20,
+                        tool: str | None = None) -> list[dict]:
+    """L3-1：检索，返回 index 行（不含全文）。空 query = 最近 N 条。
+
+    非空 query 走 FTS5（MATCH + bm25 相关性排序）；FTS5 不可用或 query 被拒时
+    自动降级到 LIKE 关键词（时间倒序）。group_id 强制过滤，绝不跨群。"""
+    if group_id is None:
+        return []
+    limit = max(1, min(int(limit or 20), 100))
+    query = (query or "").strip()
     from ai.memory import _memory_db
     async with await _memory_db("tool_events", group_id, write=False) as db:
-        async with db.execute(sql, params) as cur:
-            return [_index_row(r) for r in await cur.fetchall()]
+        if not query:
+            return await _search_recency(db, group_id, limit, tool)
+        try:
+            return await _search_fts(db, group_id, query, limit, tool)
+        except Exception:
+            return await _search_like(db, group_id, query, limit, tool)
 
 
 async def timeline_events(group_id: int, anchor: int, before: int = 3,
