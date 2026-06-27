@@ -14,8 +14,10 @@ from ws_manager import manager
 from models import AddMemberRequest, CreateGroupRequest, UpdateGroupRequest
 from workspace import init_bot_workspace, init_group_workspace
 from workspace import layout
+from pathlib import Path
 from skills.role_catalog import list_role_catalog
 from skills.role_meta import read_role_meta
+from skills.metadata import parse_skill_meta
 from skills import assignment, registry
 
 log = logging.getLogger(__name__)
@@ -57,12 +59,31 @@ async def _verify_bot_group(group_id: int, bot_id: int) -> None:
             raise HTTPException(404, f"Bot {bot_id} not found in group {group_id}")
 
 
+def _external_skill_md(row: dict) -> Path:
+    """On-disk SKILL.md path for a pooled external skill (mirrors importer._pool_dir)."""
+    if row.get("scope_kind") == "global":
+        base = layout.external_global_skills_dir()
+    else:
+        base = layout.group_external_skills_dir(row.get("group_id"))
+    return base / row["name"] / "SKILL.md"
+
+
+def _attach_descriptions(pool: list[dict]) -> list[dict]:
+    """Join each pool row's frontmatter `description` from disk (the source of truth).
+    Not a stored registry column — derived at read time to avoid store-and-stale.
+    Mirrors how OpenCode / Claude Code surface descriptions: parse on read, never persist.
+    parse_skill_meta is exception-safe (missing/garbage file → empty description)."""
+    for row in pool:
+        row["description"] = parse_skill_meta(_external_skill_md(row)).get("description", "")
+    return pool
+
+
 @router.get("/api/groups/{gid}/members/{bot_id}/skills")
 async def get_member_skills(gid: int, bot_id: int):
     await _verify_bot_group(gid, bot_id)
     pool = await registry.list_external("global")
     pool += await registry.list_external("group", gid)
-    return {"pool": pool, "assigned": await assignment.list_assignments(bot_id)}
+    return {"pool": _attach_descriptions(pool), "assigned": await assignment.list_assignments(bot_id)}
 
 
 @router.put("/api/groups/{gid}/members/{bot_id}/skills")
