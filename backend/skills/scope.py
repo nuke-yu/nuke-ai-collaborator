@@ -57,6 +57,21 @@ class BotScope:
         return layout.bot_dir(self.gid, self.bot_id) / "skills" / "manual"
 
 
+@dataclass(frozen=True)
+class ExternalGlobalScope:
+    layer: str = "external_global"
+    def dir(self) -> Path:
+        return layout.external_global_skills_dir()
+
+
+@dataclass(frozen=True)
+class ExternalGroupScope:
+    gid: int
+    layer: str = "external_group"
+    def dir(self) -> Path:
+        return layout.group_external_skills_dir(self.gid)
+
+
 def parse_descriptor(s: str):
     parts = s.split(":")
     kind = parts[0]
@@ -71,6 +86,10 @@ def parse_descriptor(s: str):
             return TemplateScope(_safe_segment(parts[1]), _safe_segment(parts[2]))
         if kind == "bot":
             return BotScope(int(parts[1]), int(parts[2]))
+        if kind == "external_global":
+            return ExternalGlobalScope()
+        if kind == "external_group":
+            return ExternalGroupScope(int(parts[1]))
     except (IndexError, ValueError) as e:
         raise ValueError(f"bad scope descriptor: {s!r}") from e
     raise ValueError(f"unknown scope kind: {kind!r}")

@@ -460,6 +460,8 @@ function SkillEditorPanel({ bot, groupId, skill, onClose }) {
     if (skill.layer === 'system') return 'system'
     if (skill.layer === 'group') return `group:${groupId}`
     if (skill.layer === 'role') return `role:${groupId}:${bot.role}`
+    if (skill.layer === 'external_global') return 'external_global'
+    if (skill.layer === 'external_group') return `external_group:${groupId}`
     return `bot:${groupId}:${bot.id}`
   }, [skill.layer, groupId, bot.role, bot.id])
 

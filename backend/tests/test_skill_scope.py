@@ -12,11 +12,15 @@ class TestScope(unittest.TestCase):
             self.assertEqual(S.RoleScope(7, "dev").dir(), Path("/ws/group_7/roles/dev/skills"))
             self.assertEqual(S.TemplateScope("en", "PM").dir(), Path("/ws/templates/en/roles/PM/skills"))
             self.assertEqual(S.BotScope(7, 1018).dir(), Path("/ws/group_7/bots/bot_1018/skills/manual"))
+            self.assertEqual(S.ExternalGlobalScope().dir(), Path("/ws/external/skills"))
+            self.assertEqual(S.ExternalGroupScope(7).dir(), Path("/ws/group_7/external/skills"))
 
     def test_parse_descriptor(self):
         self.assertEqual(S.parse_descriptor("group:7"), S.GroupScope(7))
         self.assertEqual(S.parse_descriptor("role:7:dev"), S.RoleScope(7, "dev"))
         self.assertEqual(S.parse_descriptor("bot:7:1018"), S.BotScope(7, 1018))
+        self.assertEqual(S.parse_descriptor("external_global"), S.ExternalGlobalScope())
+        self.assertEqual(S.parse_descriptor("external_group:7"), S.ExternalGroupScope(7))
 
     def test_parse_invalid_raises(self):
         with self.assertRaises(ValueError):
