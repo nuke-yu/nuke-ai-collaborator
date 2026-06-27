@@ -547,6 +547,50 @@ async def migration_023(db):
         raise
 
 
+async def migration_024(db):
+    """Plan A: create bot_skills (capability) + external_skills (import registry).
+
+    Both are central-domain tables. CREATE IF NOT EXISTS is idempotent and
+    harmless if it also runs on a group DB (the tables stay empty there).
+
+    Rollback:
+        DROP TABLE IF EXISTS bot_skills;
+        DROP TABLE IF EXISTS external_skills;
+    """
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS bot_skills (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            bot_id      INTEGER NOT NULL,
+            skill_name  TEXT    NOT NULL,
+            pool        TEXT    NOT NULL DEFAULT 'external_global',
+            enabled     INTEGER NOT NULL DEFAULT 1,
+            assigned_by INTEGER,
+            assigned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(bot_id, skill_name),
+            FOREIGN KEY (bot_id) REFERENCES members(id)
+        )
+    """)
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS external_skills (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            name        TEXT    NOT NULL,
+            scope_kind  TEXT    NOT NULL DEFAULT 'global',
+            group_id    INTEGER NOT NULL DEFAULT 0,
+            source_url  TEXT,
+            ref         TEXT,
+            commit_sha  TEXT,
+            version     TEXT,
+            platforms   TEXT,
+            high_privilege TEXT,
+            imported_by INTEGER,
+            imported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            status      TEXT    NOT NULL DEFAULT 'active',
+            UNIQUE(scope_kind, group_id, name)
+        )
+    """)
+    await db.commit()
+
+
 MIGRATIONS: list = [
     migration_001,
     migration_002,
@@ -571,6 +615,7 @@ MIGRATIONS: list = [
     migration_021,
     migration_022,
     migration_023,
+    migration_024,
 ]
 
 

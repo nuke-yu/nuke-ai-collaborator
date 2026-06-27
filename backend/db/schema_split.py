@@ -25,7 +25,7 @@ from db.schema import _seed_templates
 # ── table → domain ────────────────────────────────────────────────────────
 CENTRAL_TABLES = frozenset({
     "users", "groups", "members", "role_templates", "permission_rules", "cron_jobs",
-    "unread_counts",
+    "unread_counts", "bot_skills", "external_skills",
 })
 GROUP_TABLES = frozenset({
     "messages", "role_summaries", "message_embeddings", "member_read",
@@ -118,6 +118,39 @@ _CENTRAL_DDL = [
         unread     INTEGER NOT NULL DEFAULT 0,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (member_id, group_id)
+    )""",
+    # bot_skills: per-bot capability/assignment truth source (Plan A). enabled
+    # toggles visibility WITHOUT removing the assignment; assigned_by/at audit it.
+    # Separate from permission_rules (which only gates HIL at call time).
+    """CREATE TABLE IF NOT EXISTS bot_skills (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        bot_id      INTEGER NOT NULL,
+        skill_name  TEXT    NOT NULL,
+        pool        TEXT    NOT NULL DEFAULT 'external_global',
+        enabled     INTEGER NOT NULL DEFAULT 1,
+        assigned_by INTEGER,
+        assigned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(bot_id, skill_name),
+        FOREIGN KEY (bot_id) REFERENCES members(id)
+    )""",
+    # external_skills: import registry — provenance + lifecycle truth source.
+    # group_id uses 0 (NOT NULL) for global scope so UNIQUE actually fires
+    # (SQLite treats multiple NULLs as distinct).
+    """CREATE TABLE IF NOT EXISTS external_skills (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        name        TEXT    NOT NULL,
+        scope_kind  TEXT    NOT NULL DEFAULT 'global',
+        group_id    INTEGER NOT NULL DEFAULT 0,
+        source_url  TEXT,
+        ref         TEXT,
+        commit_sha  TEXT,
+        version     TEXT,
+        platforms   TEXT,
+        high_privilege TEXT,
+        imported_by INTEGER,
+        imported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        status      TEXT    NOT NULL DEFAULT 'active',
+        UNIQUE(scope_kind, group_id, name)
     )""",
 ]
 
