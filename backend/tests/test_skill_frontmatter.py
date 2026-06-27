@@ -73,5 +73,30 @@ class TestModelWindowSuffix(unittest.TestCase):
         self.assertEqual(strip_context_window_suffix(""), "")
 
 
+class TestPlatformsVersionParsing(unittest.TestCase):
+    def _meta(self, body):
+        import tempfile
+        from pathlib import Path
+        from skills.metadata import parse_skill_meta
+        d = tempfile.mkdtemp()
+        p = Path(d) / "SKILL.md"
+        p.write_text(body, encoding="utf-8")
+        return parse_skill_meta(p)
+
+    def test_parses_platforms_and_version(self):
+        meta = self._meta(
+            "---\nname: x\ndescription: d\nplatforms: posix\nversion: 1.2.3\nshell: powershell\n---\nbody"
+        )
+        self.assertEqual(meta["platforms"], "posix")
+        self.assertEqual(meta["version"], "1.2.3")
+        self.assertEqual(meta["shell"], "powershell")
+
+    def test_defaults_when_absent(self):
+        meta = self._meta("---\nname: x\ndescription: d\n---\nbody")
+        self.assertEqual(meta["platforms"], "pure")
+        self.assertEqual(meta["version"], "")
+        self.assertEqual(meta["shell"], "bash")
+
+
 if __name__ == "__main__":
     unittest.main()

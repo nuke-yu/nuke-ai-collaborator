@@ -91,7 +91,7 @@ def parse_frontmatter(content: str) -> dict:
     fm: dict = {}
     
     # Process standard string fields
-    for str_key in ["name", "description", "when_to_use", "status", "layer", "paths", "context", "shell", "model"]:
+    for str_key in ["name", "description", "when_to_use", "status", "layer", "paths", "context", "shell", "model", "platforms", "version"]:
         if str_key in raw_fm:
             fm[str_key] = str(raw_fm[str_key]) if raw_fm[str_key] is not None else ""
             
@@ -208,6 +208,8 @@ def parse_skill_meta(path: Path) -> dict:
             "paths": fm.get("paths", ""),
             "context": fm.get("context", "inline"),
             "shell": fm.get("shell", "bash"),
+            "platforms": fm.get("platforms", "pure"),
+            "version": fm.get("version", ""),
             "user_invocable": fm.get("user_invocable", True),
             "argument_hint": fm.get("argument_hint", ""),
             "allowed_tools": fm.get("allowed_tools", []),
