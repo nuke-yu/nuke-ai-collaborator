@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { K } from '../i18n/keys'
-import { fetchScopeSkills, copyScopeSkill } from '../skillsApi'
+import { fetchScopeSkills, copyScopeSkill, fetchSkillContent, writeScopeSkill } from '../skillsApi'
 import ExternalSkillPanel from './ExternalSkillPanel'
 
 const LAYER_LABEL = {
@@ -32,6 +32,7 @@ export default function SkillPanel({ bot, groupId, onClose }) {
   const [filter, setFilter] = useState('all') // all / active / disabled / draft
   const [toggling, setToggling] = useState(null)
   const [testSkill, setTestSkill] = useState(null)   // skill object being tested
+  const [editingSkill, setEditingSkill] = useState(null) // skill object being edited/viewed
   const [browsing, setBrowsing] = useState(false)
   const [browseScope, setBrowseScope] = useState('system')
   const [scopeSkills, setScopeSkills] = useState([])
@@ -218,6 +219,16 @@ export default function SkillPanel({ bot, groupId, onClose }) {
           />
         )}
 
+        {/* Skill editor panel */}
+        {editingSkill && (
+          <SkillEditorPanel
+            bot={bot}
+            groupId={groupId}
+            skill={editingSkill}
+            onClose={() => setEditingSkill(null)}
+          />
+        )}
+
         {/* Skill list */}
         <div className="flex-1 overflow-y-auto">
           {loading ? (
@@ -236,6 +247,7 @@ export default function SkillPanel({ bot, groupId, onClose }) {
                   onApprove={() => approve(skill)}
                   onReject={() => reject(skill)}
                   onTest={() => setTestSkill(skill)}
+                  onEdit={() => setEditingSkill(skill)}
                   toggling={toggling === skill.name}
                   t={t}
                 />
@@ -331,7 +343,7 @@ function SkillTestPanel({ bot, groupId, skill, onClose }) {
   )
 }
 
-function SkillRow({ skill, onToggle, onApprove, onReject, onTest, toggling, t }) {
+function SkillRow({ skill, onToggle, onApprove, onReject, onTest, onEdit, toggling, t }) {
   const layer = LAYER_LABEL[skill.layer] || { text: skill.layer, color: 'bg-gray-700 text-gray-300' }
   const injected = INJECTED_LABEL[skill.injected] || INJECTED_LABEL['null']
   const isDraft = skill.status === 'draft'
@@ -407,6 +419,12 @@ function SkillRow({ skill, onToggle, onApprove, onReject, onTest, toggling, t })
         ) : (
           <>
             <button
+              onClick={onEdit}
+              className="text-xs px-2.5 py-1 rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-300 transition-colors"
+            >
+              {isSystem ? t(K.skill.view) : t(K.skill.edit)}
+            </button>
+            <button
               onClick={onTest}
               className="text-xs px-2.5 py-1 rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-300 transition-colors"
             >
@@ -417,13 +435,120 @@ function SkillRow({ skill, onToggle, onApprove, onReject, onTest, toggling, t })
               disabled={toggling || isSystem}
               className={`relative w-10 h-5 rounded-full transition-colors flex-shrink-0 ${
                 isSystem ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'
-              } ${isDisabled ? 'bg-gray-700' : 'bg-indigo-600'}`}
+              } ${!isDisabled ? 'bg-indigo-600' : 'bg-gray-700'}`}
             >
-              <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all ${
-                isDisabled ? 'left-0.5' : 'left-5'
-              }`} />
+              <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all ${!isDisabled ? 'left-5' : 'left-0.5'}`} />
             </button>
           </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function SkillEditorPanel({ bot, groupId, skill, onClose }) {
+  const { t } = useTranslation()
+  const [content, setContent] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState(null)
+  const [success, setSuccess] = useState(false)
+
+  const isSystem = skill.layer === 'system'
+
+  const getSkillScope = useCallback(() => {
+    if (skill.layer === 'system') return 'system'
+    if (skill.layer === 'group') return `group:${groupId}`
+    if (skill.layer === 'role') return `role:${groupId}:${bot.role}`
+    return `bot:${groupId}:${bot.id}`
+  }, [skill.layer, groupId, bot.role, bot.id])
+
+  const scope = getSkillScope()
+
+  useEffect(() => {
+    let active = true
+    setLoading(true)
+    setError(null)
+    fetchSkillContent(scope, skill.name)
+      .then(d => {
+        if (active) {
+          setContent(d.content || '')
+          setLoading(false)
+        }
+      })
+      .catch(e => {
+        if (active) {
+          setError(e.message)
+          setLoading(false)
+        }
+      })
+    return () => { active = false }
+  }, [scope, skill.name])
+
+  const save = async () => {
+    if (isSystem || saving) return
+    setSaving(true)
+    setError(null)
+    setSuccess(false)
+    try {
+      await writeScopeSkill(scope, skill.name, content)
+      setSuccess(true)
+      setTimeout(() => setSuccess(false), 3000)
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="absolute inset-0 bg-gray-800 z-10 flex flex-col rounded-2xl overflow-hidden">
+      {/* Header */}
+      <div className="flex items-center justify-between px-5 py-4 border-b border-gray-700 flex-shrink-0">
+        <div>
+          <button onClick={onClose} className="text-xs text-gray-500 hover:text-gray-300 flex items-center gap-1 mb-1">
+            ← {t(K.common.back)}
+          </button>
+          <div className="text-base font-semibold text-white">
+            {isSystem ? t(K.skill.viewTitle, { name: skill.name }) : t(K.skill.editTitle, { name: skill.name })}
+          </div>
+          {skill.description && <div className="text-xs text-gray-500 mt-0.5">{skill.description}</div>}
+        </div>
+      </div>
+
+      {/* Editor Body */}
+      <div className="flex-1 flex flex-col p-5 overflow-hidden">
+        {loading ? (
+          <div className="flex-1 flex items-center justify-center text-gray-500 text-sm">{t(K.common.loading)}</div>
+        ) : (
+          <div className="flex-1 flex flex-col gap-3 min-h-0">
+            {error && (
+              <div className="text-xs text-red-400 bg-red-900/20 rounded-lg px-3 py-2 flex-shrink-0">{error}</div>
+            )}
+            {success && (
+              <div className="text-xs text-emerald-400 bg-emerald-900/20 rounded-lg px-3 py-2 flex-shrink-0">{t(K.skill.saveSuccess)}</div>
+            )}
+
+            <div className="flex-1 min-h-0 flex flex-col">
+              <textarea
+                className="flex-1 w-full bg-gray-900 text-gray-100 text-sm rounded-lg p-3 outline-none focus:ring-1 focus:ring-indigo-500 font-mono resize-none leading-relaxed"
+                value={content}
+                onChange={e => setContent(e.target.value)}
+                readOnly={isSystem}
+                placeholder="# SKILL.md..."
+              />
+            </div>
+
+            {!isSystem && (
+              <button
+                onClick={save}
+                disabled={saving}
+                className="self-start text-sm px-4 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white transition-colors flex-shrink-0"
+              >
+                {saving ? t(K.skill.saving) : t(K.skill.save)}
+              </button>
+            )}
+          </div>
         )}
       </div>
     </div>
