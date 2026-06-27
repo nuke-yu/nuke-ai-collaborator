@@ -11,6 +11,7 @@ from workspace import layout
 # Without a cap, many/large always-skills silently balloon the prompt.
 _MAX_SKILL_BODY_CHARS = 8000       # per-skill full-body cap
 _MAX_ALWAYS_TOTAL_CHARS = 24000    # total budget across all always-skills
+_MAX_COMPANION_FILES = 10          # cap directory-skill companion listing
 
 
 def _fold_home(text: str) -> str:
@@ -140,7 +141,12 @@ async def run_skill(bot_id: int, name: str, args: str = "", ctx: dict | None = N
             if f.name != "SKILL.md" and not f.name.startswith('.')
         )
         if companions:
-            file_list = "\n".join(f"  {f}" for f in companions)
+            shown = companions[:_MAX_COMPANION_FILES]
+            lines = [f"  {f}" for f in shown]
+            overflow = len(companions) - len(shown)
+            if overflow > 0:
+                lines.append(f"  …还有 {overflow} 个文件（已省略）")
+            file_list = "\n".join(lines)
             content += (
                 f"\n\n<skill_files>\n{file_list}\n</skill_files>"
                 "\nRelative paths in this skill are relative to the base directory above."

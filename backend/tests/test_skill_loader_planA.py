@@ -37,5 +37,32 @@ class TestInlineFraming(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(out.rstrip().endswith("</skill_instructions>"))
 
 
+class TestCompanionCap(unittest.IsolatedAsyncioTestCase):
+    async def test_companion_listing_capped(self):
+        from unittest.mock import patch
+        from skills import loader
+
+        skill_dir = Path("/tmp/nuke_skill_y")
+        companions = [skill_dir / f"f{i}.py" for i in range(25)]
+        entry = {"name": "big", "type": "md", "path": skill_dir / "SKILL.md",
+                 "description": "d", "context": "inline"}
+
+        async def fake_list(*a, **k):
+            return [entry]
+
+        def fake_iterdir(self):
+            return iter(companions)
+
+        with patch.object(loader, "list_skills_all", new=fake_list), \
+             patch("pathlib.Path.exists", lambda self: True), \
+             patch("pathlib.Path.read_text", lambda self, encoding="utf-8": "BODY"), \
+             patch("pathlib.Path.iterdir", new=fake_iterdir):
+            out = await loader.run_skill(1, "big", "", ctx={"group_id": 1})
+
+        # Only 10 listed; an overflow note for the remaining 15.
+        self.assertEqual(out.count("/tmp/nuke_skill_y/f"), 10)
+        self.assertIn("还有 15 个文件", out)
+
+
 if __name__ == "__main__":
     unittest.main()
