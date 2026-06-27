@@ -16,6 +16,7 @@ from workspace import init_bot_workspace, init_group_workspace
 from workspace import layout
 from skills.role_catalog import list_role_catalog
 from skills.role_meta import read_role_meta
+from skills import assignment, registry
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -27,6 +28,36 @@ async def _try_exec(conn, sql, params):
         await conn.execute(sql, params)
     except Exception:
         pass
+
+
+async def _reconcile_bot_skills(bot_id: int, desired: list[dict]) -> list[dict]:
+    """Make bot_skills match `desired` exactly: upsert listed, remove the rest."""
+    desired_names = set()
+    for d in desired:
+        name = d["name"]
+        desired_names.add(name)
+        await assignment.set_assignment(
+            bot_id, name, d.get("pool", "external_global"),
+            enabled=bool(d.get("enabled", True)),
+        )
+    for row in await assignment.list_assignments(bot_id):
+        if row["skill_name"] not in desired_names:
+            await assignment.remove_assignment(bot_id, row["skill_name"])
+    return await assignment.list_assignments(bot_id)
+
+
+@router.get("/api/groups/{gid}/members/{bot_id}/skills")
+async def get_member_skills(gid: int, bot_id: int):
+    pool = await registry.list_external("global")
+    pool += await registry.list_external("group", gid)
+    return {"pool": pool, "assigned": await assignment.list_assignments(bot_id)}
+
+
+@router.put("/api/groups/{gid}/members/{bot_id}/skills")
+async def put_member_skills(gid: int, bot_id: int, body: dict):
+    desired = body.get("assigned", [])
+    assigned = await _reconcile_bot_skills(bot_id, desired)
+    return {"assigned": assigned}
 
 
 # Rows owned by / referencing a member. Split so we can run the right set against
