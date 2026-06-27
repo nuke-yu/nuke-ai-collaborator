@@ -660,6 +660,11 @@ async def execute_serial_tools(runner, calls, iteration=None) -> None:
 
         if call["name"] == "run_skill":
             tool_result = await runner._handle_run_skill_result(tool_result)
+            # Pin inline skill bodies so they survive micro/auto-compaction
+            # (run_skill is in _MICROCOMPACT_TOOLS; its tool message gets cleared).
+            _sname = call.get("arguments", {}).get("name")
+            if _sname and isinstance(tool_result, str) and tool_result.startswith("<skill_instructions>"):
+                runner.invoked_skills[_sname] = tool_result
 
         display_result = tool_result
         if call["name"] == "write_file" and tool_result.startswith("__DRAFT_WRITTEN__:"):
@@ -762,12 +767,32 @@ async def get_fresh_context_prefix(runner) -> tuple[str, str]:
     )
 
 
+def build_invoked_skills_block(invoked_skills: dict, budget: int = 6000) -> str:
+    """Render invoked inline skill bodies for reinjection after compaction.
+
+    Newest-first within a char budget so a long-running task keeps its active
+    skill instructions even after the run_skill tool message is micro-compacted.
+    """
+    if not invoked_skills:
+        return ""
+    parts: list[str] = []
+    remaining = budget
+    for name, body in reversed(list(invoked_skills.items())):
+        if remaining <= 0:
+            break
+        snippet = body[:remaining]
+        parts.append(f'<active_skill name="{name}">\n{snippet}\n</active_skill>')
+        remaining -= len(snippet)
+    return "\n\n".join(parts)
+
+
 async def build_reinject(runner) -> str:
     fresh_prefix, _ = await runner._get_fresh_context_prefix()
     ft_xml = compact.build_file_tracker_xml(runner.file_tracker)
     file_contents = compact.build_file_contents_for_reinject(
         runner.file_tracker, workspace_dir=str(_bot_ws(runner.bot["id"], runner.ctx.group_id))
     )
-    parts = [p for p in [fresh_prefix, ft_xml, file_contents] if p]
+    invoked = build_invoked_skills_block(getattr(runner, "invoked_skills", {}))
+    parts = [p for p in [fresh_prefix, invoked, ft_xml, file_contents] if p]
     return "\n\n".join(parts)
 

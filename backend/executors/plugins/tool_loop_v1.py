@@ -82,6 +82,7 @@ class ToolLoopRunner:
         self.tool_calls_history = []
         self.tool_records = []
         self.file_tracker = {}
+        self.invoked_skills = {}   # name -> inline skill body, for compaction survival
         self.temp_id = str(uuid.uuid4())
         self.session_id = ctx.resume_session_id or str(uuid.uuid4())
         self.ai_service = AIService(ctx, self.session_id, self.temp_id)
