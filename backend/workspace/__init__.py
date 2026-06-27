@@ -88,6 +88,7 @@ def _safe_path(workspace: Path, relative: str) -> Path | None:
         # Check allowed external/shared roots to support symlinked skills
         from workspace import layout
         allowed_roots = [
+            (layout._root() / "system" / "skills").resolve(),
             layout.external_global_skills_dir().resolve(),
         ]
         if group_id is not None:
