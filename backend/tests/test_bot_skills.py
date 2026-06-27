@@ -51,5 +51,58 @@ class TestSkillTables(unittest.TestCase):
         )
 
 
+class TestAssignmentCRUD(unittest.TestCase):
+    def _fresh_db(self):
+        fd, path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        return path
+
+    def test_upsert_list_remove_and_enabled_set(self):
+        from skills import assignment
+        path = self._fresh_db()
+        orig = _db.DB_PATH
+
+        async def go():
+            await init_central_db(path)
+            # bot_skills.bot_id → members → groups: create the FK chain first.
+            async with _db.write_connect(path) as conn:
+                await conn.execute("INSERT INTO groups (id, name) VALUES (1, 'g')")
+                await conn.execute(
+                    "INSERT INTO members (id, group_id, name, type) "
+                    "VALUES (1, 1, 'dev', 'bot')"
+                )
+                await conn.commit()
+
+            await assignment.set_assignment(1, "deploy", "external_global",
+                                            enabled=True, assigned_by=42)
+            await assignment.set_assignment(1, "lint", "external_group",
+                                            enabled=False)
+            rows = await assignment.list_assignments(1)
+            enabled = await assignment.enabled_skill_names(1)
+
+            # Upsert: flip 'lint' to enabled, change nothing else.
+            await assignment.set_assignment(1, "lint", "external_group", enabled=True)
+            enabled_after = await assignment.enabled_skill_names(1)
+
+            await assignment.remove_assignment(1, "deploy")
+            rows_after = await assignment.list_assignments(1)
+            return rows, enabled, enabled_after, rows_after
+
+        try:
+            _db.DB_PATH = path
+            rows, enabled, enabled_after, rows_after = _run(go())
+        finally:
+            _db.DB_PATH = orig
+            os.unlink(path)
+
+        by_name = {r["skill_name"]: r for r in rows}
+        self.assertEqual(by_name["deploy"]["pool"], "external_global")
+        self.assertTrue(by_name["deploy"]["enabled"])
+        self.assertFalse(by_name["lint"]["enabled"])
+        self.assertEqual(enabled, {"deploy"})
+        self.assertEqual(enabled_after, {"deploy", "lint"})
+        self.assertEqual({r["skill_name"] for r in rows_after}, {"lint"})
+
+
 if __name__ == "__main__":
     unittest.main()
