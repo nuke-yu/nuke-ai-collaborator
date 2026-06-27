@@ -12,6 +12,7 @@ from .sources.system import SystemPoolSource
 from .sources.group import GroupSource
 from .sources.role import RoleSource
 from .sources.learned import LearnedSource
+from .sources.external import ExternalPoolSource
 
 log = logging.getLogger(__name__)
 
@@ -38,7 +39,7 @@ def invalidate_skills_cache() -> None:
 
 
 def _sources(bot_id: int, group_id: Optional[int], role: Optional[str]):
-    """Instantiate the four per-layer SkillSource objects for this scan key.
+    """Instantiate the five per-layer SkillSource objects for this scan key.
 
     Path resolution inside each source reads ``skills.constants`` live, so
     test-time monkeypatching of ``constants.{WORKSPACE_ROOT,SYSTEM_SKILLS_ROOT,
@@ -48,6 +49,7 @@ def _sources(bot_id: int, group_id: Optional[int], role: Optional[str]):
         SystemPoolSource(ctx),
         GroupSource(ctx),
         RoleSource(ctx),
+        ExternalPoolSource(ctx),
         LearnedSource(ctx),
     )
 
@@ -59,9 +61,9 @@ def _scan_signature(bot_id: int, group_id: Optional[int] = None,
     Aggregates each source's own ``signature()`` (mtime_ns + size stats, no
     content reads) so a hit covers exactly the same dirs the full scan would —
     detecting any add / delete / edit at a fraction of the cost."""
-    sysm, grp, rol, lrn = _sources(bot_id, group_id, role)
+    sysm, grp, rol, ext, lrn = _sources(bot_id, group_id, role)
     union: list = []
-    for src in (sysm, grp, rol, lrn):
+    for src in (sysm, grp, rol, ext, lrn):
         union.extend(src.signature())
     return tuple(sorted(union))
 
@@ -137,10 +139,11 @@ def _compute_skills_all(bot_id: int, group_id: Optional[int] = None,
     hands the per-layer results to ``composer.merge_layers`` which applies A1
     protection, A3 deep-merge, A5/C1/C2 diagnostics, injected calc and sort.
     """
-    sysm, grp, rol, lrn = _sources(bot_id, group_id, role)
+    sysm, grp, rol, ext, lrn = _sources(bot_id, group_id, role)
     return merge_layers(
         sysm.enumerate(),
         grp.enumerate(),
         rol.enumerate(),
         lrn.enumerate(),
+        external=ext.enumerate(),
     )
