@@ -43,6 +43,16 @@ def group_roles_dir(gid: int) -> Path:
     return group_dir(gid) / "roles"
 
 
+def external_global_skills_dir() -> Path:
+    """Global operator-curated external skill pool (cross-group definitions)."""
+    return _root() / "external" / "skills"
+
+
+def group_external_skills_dir(gid: int) -> Path:
+    """Per-group external skill pool — visible ONLY to that group (isolation)."""
+    return group_dir(gid) / "external" / "skills"
+
+
 def templates_roles_dir(lang: str) -> Path:
     return _root() / "templates" / lang / "roles"
 
