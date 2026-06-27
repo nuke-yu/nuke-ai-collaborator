@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { K } from '../i18n/keys'
 import { fetchScopeSkills, copyScopeSkill } from '../skillsApi'
+import ExternalSkillPanel from './ExternalSkillPanel'
 
 const LAYER_LABEL = {
   system:   { text: 'System',   color: 'bg-purple-900/50 text-purple-300' },
@@ -34,6 +35,7 @@ export default function SkillPanel({ bot, groupId, onClose }) {
   const [browsing, setBrowsing] = useState(false)
   const [browseScope, setBrowseScope] = useState('system')
   const [scopeSkills, setScopeSkills] = useState([])
+  const [showExternal, setShowExternal] = useState(false)
 
   const scopeDescriptor = useCallback((kind) => {
     if (kind === 'group') return `group:${groupId}`
@@ -117,6 +119,10 @@ export default function SkillPanel({ bot, groupId, onClose }) {
     return t(K.skill.pending)
   }
 
+  if (showExternal) {
+    return <ExternalSkillPanel bot={bot} groupId={groupId} onClose={() => setShowExternal(false)} />
+  }
+
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={onClose}>
       <div
@@ -150,6 +156,13 @@ export default function SkillPanel({ bot, groupId, onClose }) {
                 </button>
               ))}
             </div>
+            <button
+              data-testid="open-external-skills"
+              onClick={() => setShowExternal(true)}
+              className="text-xs px-3 py-1 rounded-lg bg-gray-700 text-gray-300 hover:text-white transition-colors"
+            >
+              {t(K.externalSkill.open)}
+            </button>
             <button
               data-testid="browse-scopes-toggle"
               onClick={() => setBrowsing(b => !b)}
