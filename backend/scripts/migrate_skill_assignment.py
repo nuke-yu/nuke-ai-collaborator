@@ -69,3 +69,43 @@ async def plan_for_bot(bot_id: int, group_id: int | None, role: str | None) -> d
         else:
             plan["add_patterns"].append(pat)
     return plan
+
+
+async def apply_for_bot(bot_id: int, group_id: int | None, role: str | None) -> dict:
+    """写盘：按 plan 加 name-scoped allow，再删 blanket。幂等。"""
+    plan = await plan_for_bot(bot_id, group_id, role)
+    if not plan["blanket_rule_ids"]:
+        return {**plan, "added": 0, "deleted": 0}
+    for pat in plan["add_patterns"]:
+        await pdb.save_rule(bot_id, "run_skill", pat, "allow")
+    for rid in plan["blanket_rule_ids"]:
+        await pdb.delete_rule(rid)
+    return {**plan, "added": len(plan["add_patterns"]),
+            "deleted": len(plan["blanket_rule_ids"])}
+
+
+async def _load_bots() -> list[tuple[int, int, str | None]]:
+    async with _db.global_db() as db:
+        async with db.execute(
+            "SELECT id, group_id, role FROM members WHERE type='bot'"
+        ) as cur:
+            return [(r[0], r[1], r[2]) for r in await cur.fetchall()]
+
+
+async def migrate(apply: bool) -> dict:
+    bots = await _load_bots()
+    out_bots: list[dict] = []
+    total_added = total_deleted = 0
+    for bot_id, group_id, role in bots:
+        plan = await plan_for_bot(bot_id, group_id, role)
+        if not plan["blanket_rule_ids"]:
+            continue
+        if apply:
+            res = await apply_for_bot(bot_id, group_id, role)
+            total_added += res["added"]
+            total_deleted += res["deleted"]
+            out_bots.append(res)
+        else:
+            out_bots.append(plan)
+    return {"bots": out_bots, "apply": apply,
+            "total_added": total_added, "total_deleted": total_deleted}
