@@ -82,4 +82,10 @@ def synthesize_args_pattern(tool_name: str, arguments: dict) -> str:
     if tool_name == "spawn_agent":
         name = arguments.get("bot_name") or ""
         return _escape_glob(str(name)) if name else ""
+    if tool_name == "run_skill":
+        # Scope to the skill NAME only. The freeform `args` task string must not
+        # widen the rule (recursive-args matching would let an "always allow
+        # deploy" rule fire on run_skill(name="build", args="deploy ...")).
+        name = arguments.get("name") or ""
+        return _escape_glob(str(name)) if name else ""
     return ""

@@ -69,6 +69,15 @@ class TestSynthesizeArgsPattern(unittest.TestCase):
     def test_unknown_tool_blanket(self):
         self.assertEqual(synthesize_args_pattern("some_tool", {"x": 1}), "")
 
+    def test_run_skill_scoped_to_name(self):
+        self.assertEqual(
+            synthesize_args_pattern("run_skill", {"name": "build", "args": "deploy prod"}),
+            "build",
+        )
+
+    def test_run_skill_empty_name_blanket(self):
+        self.assertEqual(synthesize_args_pattern("run_skill", {"args": "x"}), "")
+
 
 class TestScopedRuleMatching(unittest.TestCase):
     """The whole point: a synthesized `git push *` rule must NOT auto-allow
