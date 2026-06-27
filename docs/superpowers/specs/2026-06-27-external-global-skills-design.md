@@ -168,16 +168,24 @@ external_skills(
 ## 7. 分配：接口 + UI
 
 ### 7.1 接口（一等分配 + 执行审批分离）
+
+> 实现已落地，本节字段以**代码为准**（`backend/api/groups.py` + `skills/registry.py` + `skills/assignment.py`）。
+
 - `GET /api/groups/{gid}/members/{bot_id}/skills`
-  → `{ pool: [{name, description, version, platforms, high_privilege, source}...], assigned: [{name, enabled}...] }`。
-- `PUT /api/groups/{gid}/members/{bot_id}/skills` body `{ assigned: [{name, enabled}] }` → 增删改 `bot_skills` 行（带 `assigned_by`）。
-- 执行审批仍走 `permissions/routes.py`（可选地为高权技能配 ask/allow）。
+  → `{ pool: [...], assigned: [...] }`。
+  - `pool` = `registry.list_external(group_id=gid)`，每条是外部技能注册表行（registry `_COLS`）：
+    `{ id, name, scope_kind, group_id, source_url, ref, commit_sha, version, platforms, high_privilege, imported_by, imported_at, status }`，
+    **再 join 一个派生字段 `description`**。其中 `scope_kind ∈ {global, group}` 即来源（全局/本群）。
+  - **`description` 是派生字段，不存注册表列**（避免 store-and-stale + 双真相源）：GET 端对每条 pool 行，按 `name` 查扫描器已解析的 `SKILL.md` frontmatter description（`skills/metadata.parse_skill_meta` / `parse_frontmatter` 早已解析），join 进响应。真相源 = 磁盘上的 `SKILL.md`。这与 OpenCode/Claude Code 一致——两者均「用时从 frontmatter 派生」，无一把 description 落库。解析不到则空串。
+  - `assigned` = `assignment.list_assignments(bot_id)`，每条 `{ skill_name, pool, enabled, assigned_by }`（`pool ∈ {external_global, external_group}`）。
+- `PUT /api/groups/{gid}/members/{bot_id}/skills` body `{ assigned: [{name, pool, enabled}] }` → **全量 reconcile** `bot_skills`：使该 bot 的行与 `assigned` 完全一致（未列出的删除），写入带 `assigned_by`。
+- 执行审批仍走 `permissions/routes.py`。action 词表只有 `{allow, deny}`（**没有 ask**）；「ask」= 不存在匹配规则、回落默认 HIL。高权技能的三态策略由前端映射：allow→POST allow，deny→POST deny，ask→DELETE 匹配规则。
 
 ### 7.2 UI（Bot 配置「技能」面板）
-- 列两层池：description + 版本 + 可移植性徽章 + 高权限警告 + 来源（全局/本群）。
-- 每个 skill：**分配开关**（写 `bot_skills`）+（高权技能）审批策略下拉（写 `permission_rules`）。
+- 列两层池：description（GET 派生字段）+ 版本 + 可移植性徽章（`platforms`）+ 高权限警告（`high_privilege`）+ 来源（`scope_kind`：全局/本群）。
+- 每个 skill：**分配开关**（写 `bot_skills`，全量 reconcile PUT）+（高权技能）审批策略下拉 allow/ask/deny（写 / 删 `permission_rules`，name-scoped 到 `run_skill` + `args_pattern=skill.name`）。
 - 「导入 skill」按钮 → 选 scope（全局/本群，按权限）→ 填 git URL → 驱动 §4，刷新池。
-- 管理入口：已导入技能列表（来源/版本/导入者）+ remove。
+- 管理入口：已导入技能列表（来源/版本/导入者）+ remove（`DELETE /api/skills/external/{id}`）。
 
 ---
 

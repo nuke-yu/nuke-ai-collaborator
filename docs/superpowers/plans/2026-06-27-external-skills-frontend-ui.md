@@ -15,7 +15,7 @@
 - **i18n is mandatory:** every user-facing string goes through `t(K....)`. Add keys to `frontend/src/i18n/keys.js` AND both `frontend/src/i18n/locales/zh.json` and `en.json`. Default UI language is `zh`; tests assert Chinese text.
 - **Auth:** all network calls use `authFetch` (from `frontend/src/api.js`) so the JWT bearer token is attached. The groups/skills/permissions routers are all mounted with `Depends(auth.get_current_user)`.
 - **Test command:** full suite `npm test` (= `vitest run`) run from `frontend/`. Single file: `npx vitest run src/<path>` from `frontend/`.
-- **Backend is frozen for this plan.** These endpoints already exist and ship on this branch — do NOT modify backend code:
+- **Backend is frozen EXCEPT Task 0.** Task 0 adds a derived `description` field to the GET pool response (join the scanner's parsed `SKILL.md` frontmatter). Every other endpoint already exists and ships on this branch — do NOT modify any backend code beyond Task 0's GET enrichment:
   - `GET /api/groups/{gid}/members/{botId}/skills` → `{ pool: ExternalRow[], assigned: Assignment[] }`
   - `PUT /api/groups/{gid}/members/{botId}/skills` body `{ assigned: {name,pool,enabled}[] }` → `{ assigned }` — **full reconcile**: bot_skills is made to match the array exactly; any skill not listed is removed.
   - `POST /api/skills/import` body `{ git_url, ref, scope }` where `scope` is `"global"` or `{ group_id }` → `{ imported: {id,name,version,platforms,high_privilege}[], rejected: {path,reason}[] }`.
@@ -23,7 +23,7 @@
   - `GET /api/members/{botId}/permissions` → `{id,tool_pattern,args_pattern,action}[]`.
   - `POST /api/members/{botId}/permissions` body `{ tool_pattern, args_pattern, action }`, **action ∈ {"allow","deny"} only** (no "ask") → `{ id }`.
   - `DELETE /api/members/{botId}/permissions/{ruleId}`.
-- **`ExternalRow` shape** (registry `_COLS`, NO `description` field): `{ id, name, scope_kind:"global"|"group", group_id, source_url, ref, commit_sha, version, platforms, high_privilege, imported_by, imported_at, status }`. The UI must render only fields that exist — there is no description to show.
+- **`ExternalRow` shape** (registry `_COLS` + Task 0's derived `description`): `{ id, name, scope_kind:"global"|"group", group_id, source_url, ref, commit_sha, version, platforms, high_privilege, imported_by, imported_at, status, description }`. `description` is derived at GET time from the on-disk `SKILL.md` frontmatter (NOT a stored registry column); it is always present (empty string if unparseable). The importer rejects skills with no description, so registered external skills carry a real one.
 - **`Assignment` shape:** `{ skill_name, pool:"external_global"|"external_group", enabled, assigned_by }`.
 - **pool↔scope mapping:** an `ExternalRow` with `scope_kind:"global"` maps to assignment `pool:"external_global"`; `scope_kind:"group"` maps to `pool:"external_group"`.
 
@@ -31,12 +31,177 @@
 
 ## File Structure
 
+- **Modify** `backend/api/groups.py` — Task 0: derive `description` from each pooled skill's on-disk `SKILL.md` into the GET response (the one backend change in this plan).
 - **Create** `frontend/src/externalSkillsApi.js` — all network helpers for this feature (assignment, import, remove, permission rules). One module, one responsibility: the HTTP surface for external skills.
 - **Create** `frontend/src/components/ExternalSkillPanel.jsx` — the panel UI (pool list, assignment toggles, import modal, remove, approval dropdown). Built up across Tasks 2–5.
 - **Modify** `frontend/src/i18n/keys.js` — add an `externalSkill` key block.
 - **Modify** `frontend/src/i18n/locales/zh.json` and `en.json` — add the `externalSkill` strings.
 - **Modify** `frontend/src/components/SkillPanel.jsx` — add a header button that opens `ExternalSkillPanel` as an overlay.
 - **Create** test files alongside: `frontend/src/externalSkillsApi.test.js`, `frontend/src/components/ExternalSkillPanel.test.jsx`, and an entry-point assertion in a new `frontend/src/components/SkillPanel.external.test.jsx`.
+
+---
+
+## Task 0: Backend — derive `description` into the GET pool
+
+**Why a backend task in a frontend plan:** the assignment panel's core job is letting an operator recognize what each pooled skill does. The registry (`_COLS`) stores provenance, not the skill's `description`. Both reference implementations (OpenCode, Claude Code) treat `description` as load-bearing and **derive it from the scanned `SKILL.md` frontmatter rather than storing it** — single source of truth on disk, no staleness. We do the same: enrich the GET pool response at read time. This must land first because Tasks 2–6 render the field.
+
+**Files:**
+- Modify: `backend/api/groups.py` (the `GET /api/groups/{gid}/members/{bot_id}/skills` handler at `groups.py:60-65`)
+- Test: `backend/tests/test_member_skill_descriptions.py`
+
+**Interfaces:**
+- Consumes: `registry.list_external` (existing), `skills.metadata.parse_skill_meta` (existing, tolerates a missing file → returns `{"description": ""...}`), `workspace.layout.external_global_skills_dir()` / `layout.group_external_skills_dir(gid)` (existing — the on-disk pool roots).
+- Produces: each pool row gains a `description` string. Shape is otherwise unchanged. The frontend (Task 1+) relies on `row.description` being present.
+
+**Design notes for the implementer:**
+- A pooled skill lives at `<pool_dir>/<name>/SKILL.md`, where `<pool_dir>` is `layout.external_global_skills_dir()` for `scope_kind=="global"` else `layout.group_external_skills_dir(row["group_id"])`. This mirrors `skills/importer.py:_pool_dir`.
+- `parse_skill_meta(path)` already parses frontmatter `description` and is exception-safe (missing/garbage file → empty description). Don't add your own file existence check — let it return `""`.
+- Keep the enrichment a pure, synchronous helper over the already-fetched pool list; the filesystem reads are cheap (a handful of skills) and match how the importer already calls `parse_skill_meta`.
+
+- [ ] **Step 1: Write the failing test**
+
+Create `backend/tests/test_member_skill_descriptions.py`:
+
+```python
+"""Plan B follow-up — GET member skills joins SKILL.md description into the pool."""
+import asyncio
+import os
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import db as _db
+from db.schema_split import init_central_db
+
+
+def _run(coro):
+    return asyncio.run(coro)
+
+
+class TestDescriptionJoin(unittest.TestCase):
+    def test_pool_rows_get_description_from_skill_md(self):
+        from api import groups
+        from skills import registry
+
+        fd, path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        tmp_global = tempfile.mkdtemp()
+        orig = _db.DB_PATH
+
+        # Lay a global-scope skill on disk: <global_dir>/deploy/SKILL.md
+        skill_dir = Path(tmp_global) / "deploy"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: deploy\ndescription: Ship the build to prod\n---\nbody\n",
+            encoding="utf-8",
+        )
+
+        async def go():
+            await init_central_db(path)
+            await registry.register(
+                "deploy", "global", 0, "https://github.com/x/y", "main",
+                "abc123", "1.0.0", "pure", "", None,
+            )
+            pool = await registry.list_external("global")
+            return groups._attach_descriptions(pool)
+
+        try:
+            _db.DB_PATH = path
+            with patch("api.groups.layout.external_global_skills_dir",
+                       return_value=Path(tmp_global)):
+                pool = _run(go())
+        finally:
+            _db.DB_PATH = orig
+            os.unlink(path)
+            import shutil
+            shutil.rmtree(tmp_global, ignore_errors=True)
+
+        row = next(r for r in pool if r["name"] == "deploy")
+        self.assertEqual(row["description"], "Ship the build to prod")
+
+    def test_missing_skill_md_yields_empty_description(self):
+        from api import groups
+
+        # scope_kind=group, but no file on disk → empty string, no crash.
+        with patch("api.groups.layout.group_external_skills_dir",
+                   return_value=Path(tempfile.mkdtemp())):
+            pool = groups._attach_descriptions(
+                [{"name": "ghost", "scope_kind": "group", "group_id": 7}]
+            )
+        self.assertEqual(pool[0]["description"], "")
+
+
+if __name__ == "__main__":
+    unittest.main()
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run (from `backend/`, using the venv): `venv/bin/python -m pytest tests/test_member_skill_descriptions.py -v`
+Expected: FAIL — `api.groups` has no attribute `_attach_descriptions`.
+
+- [ ] **Step 3: Add the enrichment helper and wire it into GET**
+
+In `backend/api/groups.py`, add these imports near the existing `from skills import assignment, registry` line:
+
+```python
+from pathlib import Path
+from skills.metadata import parse_skill_meta
+```
+
+(`from workspace import layout` is already imported at the top of the file.)
+
+Add the helper just above the `get_member_skills` handler:
+
+```python
+def _external_skill_md(row: dict) -> Path:
+    """On-disk SKILL.md path for a pooled external skill (mirrors importer._pool_dir)."""
+    if row.get("scope_kind") == "global":
+        base = layout.external_global_skills_dir()
+    else:
+        base = layout.group_external_skills_dir(row.get("group_id"))
+    return base / row["name"] / "SKILL.md"
+
+
+def _attach_descriptions(pool: list[dict]) -> list[dict]:
+    """Join each pool row's frontmatter `description` from disk (source of truth).
+    Not a stored registry column — derived at read time to avoid staleness."""
+    for row in pool:
+        row["description"] = parse_skill_meta(_external_skill_md(row)).get("description", "")
+    return pool
+```
+
+Update the GET handler body to enrich the pool before returning:
+
+```python
+@router.get("/api/groups/{gid}/members/{bot_id}/skills")
+async def get_member_skills(gid: int, bot_id: int):
+    await _verify_bot_group(gid, bot_id)
+    pool = await registry.list_external("global")
+    pool += await registry.list_external("group", gid)
+    return {"pool": _attach_descriptions(pool), "assigned": await assignment.list_assignments(bot_id)}
+```
+
+- [ ] **Step 4: Run the test to verify it passes**
+
+Run: `venv/bin/python -m pytest tests/test_member_skill_descriptions.py -v`
+Expected: PASS (2 tests).
+
+- [ ] **Step 5: Regression — the existing assignment-API test still passes**
+
+Run: `venv/bin/python -m pytest tests/test_skill_assignment_api.py -v`
+Expected: PASS (the GET still returns 200 with a `pool`/`assigned` shape; the cross-group 404s are unaffected).
+
+- [ ] **Step 6: Commit**
+
+```bash
+git -C /Users/Nuke/claudeFolder/nuke-ai-collaborator add backend/api/groups.py backend/tests/test_member_skill_descriptions.py
+git -C /Users/Nuke/claudeFolder/nuke-ai-collaborator commit -m "feat(skills): derive SKILL.md description into member skills GET pool"
+```
 
 ---
 
@@ -333,7 +498,7 @@ git -C /Users/Nuke/claudeFolder/nuke-ai-collaborator commit -m "feat(skills-ui):
 
 **Interfaces:**
 - Consumes: `fetchMemberExternalSkills`, `putMemberExternalSkills` (Task 1); `useTranslation`, `K`.
-- Produces: default-export `ExternalSkillPanel({ bot, groupId, onClose })` — a fixed-overlay modal. On mount it loads `{ pool, assigned }`. Each pool row shows name + source badge + version + high-privilege warning + platform warning, and an assignment toggle. Toggling rebuilds the full desired array from current on-toggles and PUTs it.
+- Produces: default-export `ExternalSkillPanel({ bot, groupId, onClose })` — a fixed-overlay modal. On mount it loads `{ pool, assigned }`. Each pool row shows name + source badge + version + description (Task 0's derived field) + high-privilege warning + platform warning, and an assignment toggle. Toggling rebuilds the full desired array from current on-toggles and PUTs it.
 
 **Design notes for the implementer:**
 - The PUT is a **full reconcile**. Hold the set of assigned skill names in state (`assignedNames: Set`). On toggle, mutate that set, then build `assigned = [...assignedNames].map(name => ({ name, pool: poolForName(name), enabled: true }))` and PUT it. `poolForName` reads `scope_kind` from the pool row.
@@ -363,9 +528,11 @@ vi.mock('../externalSkillsApi', () => ({
 
 const POOL = [
   { id: 1, name: 'deploy', scope_kind: 'global', group_id: 0, source_url: 'https://github.com/x/y',
-    version: '1.2.0', platforms: 'pure', high_privilege: '', imported_by: null, imported_at: '2026-06-27', status: 'active' },
+    version: '1.2.0', platforms: 'pure', high_privilege: '', imported_by: null, imported_at: '2026-06-27', status: 'active',
+    description: 'Ship the build to prod' },
   { id: 2, name: 'nuke-prod', scope_kind: 'group', group_id: 7, source_url: 'https://github.com/x/z',
-    version: '', platforms: 'posix', high_privilege: 'run_shell', imported_by: 42, imported_at: '2026-06-27', status: 'active' },
+    version: '', platforms: 'posix', high_privilege: 'run_shell', imported_by: 42, imported_at: '2026-06-27', status: 'active',
+    description: 'Wipe and rebuild the prod cluster' },
 ]
 
 describe('ExternalSkillPanel — pool + assignment', () => {
@@ -383,6 +550,8 @@ describe('ExternalSkillPanel — pool + assignment', () => {
     render(<ExternalSkillPanel bot={{ id: 3, name: 'dev' }} groupId={7} onClose={() => {}} />)
     await waitFor(() => expect(screen.getByText('deploy')).toBeInTheDocument())
     expect(screen.getByText('nuke-prod')).toBeInTheDocument()
+    // description (derived from SKILL.md, Task 0) renders
+    expect(screen.getByText('Ship the build to prod')).toBeInTheDocument()
     // high-privilege warning shows the tool name
     expect(screen.getByText(/run_shell/)).toBeInTheDocument()
   })
@@ -529,6 +698,9 @@ function ExternalSkillRow({ skill, assigned, busy, onToggle, t }) {
             <span className="text-[10px] bg-gray-700 text-gray-300 px-1.5 py-0.5 rounded">v{skill.version}</span>
           )}
         </div>
+        {skill.description && (
+          <div className="text-xs text-gray-400 mt-0.5">{skill.description}</div>
+        )}
         <div className="text-xs text-gray-600 mt-0.5 truncate">{skill.source_url}</div>
         {skill.high_privilege && (
           <div className="mt-1.5 text-[10px] px-2 py-0.5 rounded border bg-red-950/40 border-red-900/40 text-red-300 leading-tight inline-block">
@@ -1171,7 +1343,6 @@ git -C /Users/Nuke/claudeFolder/nuke-ai-collaborator commit -m "feat(skills-ui):
 
 ## Out of scope (deferred)
 
-- **Skill description in the pool list.** The `GET …/skills` pool comes from the `external_skills` registry (`_COLS`), which has no `description` column. Showing a description would need a backend change to join the scanner's parsed metadata — a separate backend follow-up, not this UI plan. The UI shows name/version/source/source_url/high_privilege/platforms only.
 - **Assigned-but-disabled state.** The spec distinguishes "assigned but temporarily disabled" from "not assigned". v1 uses a single assignment toggle (present+enabled vs absent). A second disable control is a future enhancement; the backend `bot_skills.enabled` column already supports it.
 - **`external_skills` update/pin/audit UI.** v1 backend only models these columns; no endpoints exist, so no UI.
 
@@ -1180,12 +1351,12 @@ git -C /Users/Nuke/claudeFolder/nuke-ai-collaborator commit -m "feat(skills-ui):
 ## Self-Review
 
 **Spec coverage (§7.2):**
+- ✅ `description` in pool list — derived from `SKILL.md` at GET time (Task 0), rendered in the row (Task 2).
 - ✅ Two-layer pool list with version + platform badge + high-privilege warning + source — Task 2.
 - ✅ Per-skill assignment toggle (writes `bot_skills`) — Task 2.
 - ✅ High-privilege approval-policy dropdown (writes `permission_rules`) — Task 5.
 - ✅ "Import skill" button → scope select → git URL → drives §4 → refresh — Task 3.
 - ✅ Manage list (source/version/importer) + remove — Task 4.
-- ⚠️ Description in pool list — not available from the backend endpoint; documented as deferred (no fabricated field).
 
 **Placeholder scan:** every code step shows complete code; every test step has runnable assertions; every run step has an exact command + expected result. No TBD/TODO.
 
