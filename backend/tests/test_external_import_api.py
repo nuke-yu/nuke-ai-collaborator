@@ -40,6 +40,14 @@ class TestCloneAndImport(unittest.TestCase):
                 _clone=lambda url, ref, dst: None,
             ))
 
+    def test_disallowed_ssh_host_rejected(self):
+        from skills import importer
+        with self.assertRaises(ValueError):
+            _run(importer.clone_and_import(
+                "git@evil.example.com:x/y.git", "main", "global", 0, 1,
+                _clone=lambda url, ref, dst: None,
+            ))
+
     def test_allowed_host_imports_via_injected_clone(self):
         from skills import importer, registry
         repo = Path(tempfile.mkdtemp())

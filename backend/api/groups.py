@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, Depends
 
 from api.deps import ensure_group_ready
 from fastapi.responses import Response
-from db import (get_db, write_connect, get_group, get_members, get_all_messages, get_member_stats,
+from db import (get_db, write_connect, global_db, get_group, get_members, get_all_messages, get_member_stats,
                       update_member_setting, update_member_full, clear_bot_context)
 from ws_manager import manager
 from models import AddMemberRequest, CreateGroupRequest, UpdateGroupRequest
@@ -46,8 +46,20 @@ async def _reconcile_bot_skills(bot_id: int, desired: list[dict]) -> list[dict]:
     return await assignment.list_assignments(bot_id)
 
 
+async def _verify_bot_group(group_id: int, bot_id: int) -> None:
+    async with global_db() as db:
+        async with db.execute(
+            "SELECT id FROM members WHERE id = ? AND group_id = ? AND type = 'bot'",
+            (bot_id, group_id)
+        ) as cur:
+            row = await cur.fetchone()
+        if not row:
+            raise HTTPException(404, f"Bot {bot_id} not found in group {group_id}")
+
+
 @router.get("/api/groups/{gid}/members/{bot_id}/skills")
 async def get_member_skills(gid: int, bot_id: int):
+    await _verify_bot_group(gid, bot_id)
     pool = await registry.list_external("global")
     pool += await registry.list_external("group", gid)
     return {"pool": pool, "assigned": await assignment.list_assignments(bot_id)}
@@ -55,6 +67,7 @@ async def get_member_skills(gid: int, bot_id: int):
 
 @router.put("/api/groups/{gid}/members/{bot_id}/skills")
 async def put_member_skills(gid: int, bot_id: int, body: dict):
+    await _verify_bot_group(gid, bot_id)
     desired = body.get("assigned", [])
     assigned = await _reconcile_bot_skills(bot_id, desired)
     return {"assigned": assigned}

@@ -124,6 +124,15 @@ def _allowed_hosts() -> set[str]:
 
 def _host_of(url: str) -> str:
     from urllib.parse import urlparse
+    # Handle SCP-like SSH syntax: [user@]host:path/to/repo
+    if "://" not in url:
+        first_colon = url.find(":")
+        first_slash = url.find("/")
+        if first_colon != -1 and (first_slash == -1 or first_colon < first_slash):
+            host_part = url[:first_colon]
+            if "@" in host_part:
+                return host_part.split("@")[-1].lower()
+            return host_part.lower()
     return (urlparse(url).hostname or "").lower()
 
 
@@ -139,7 +148,7 @@ def _git_clone(url: str, ref: str, dst: str) -> str:
     cmd = ["git", "clone", "--depth", "1"]
     if ref:
         cmd += ["--branch", ref]
-    cmd += [url, dst]
+    cmd += ["--", url, dst]
     subprocess.run(cmd, check=True, capture_output=True, timeout=_CLONE_TIMEOUT_SECONDS)
     sha = subprocess.run(["git", "-C", dst, "rev-parse", "HEAD"],
                          check=True, capture_output=True, text=True,
