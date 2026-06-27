@@ -22,7 +22,9 @@ from .sources.base import SkillEntry
 
 log = logging.getLogger(__name__)
 
-_LAYER_ORDER = {"system": 0, "group": 1, "role": 2, "learned": 3, "personal": 4}
+_LAYER_ORDER = {"system": 0, "group": 1, "role": 2,
+                "external_global": 2.3, "external_group": 2.6,
+                "learned": 3, "personal": 4}
 
 
 def _merge_skill_entry(merged: Dict[str, SkillEntry], incoming: SkillEntry) -> None:
@@ -133,11 +135,12 @@ def _draft_diagnostics(s: SkillEntry, merged: Dict[str, SkillEntry]) -> list:
     return diagnostics
 
 
-def merge_layers(system: list, group: list, role: list, learned: dict) -> List[SkillEntry]:
+def merge_layers(system: list, group: list, role: list, learned: dict,
+                 *, external: list | None = None) -> List[SkillEntry]:
     """Merge enumerated per-layer skill lists into a single ordered result list.
 
     Order of precedence (later wins, except system which is protected):
-      system → group → role → learned["active"] → learned["personal"].values()
+      system → group → role → external → learned["active"] → learned["personal"].values()
 
     After merging, computes the ``injected`` field for each skill, sorts by
     layer order then name, and appends draft skills (learned["draft"]) with
@@ -151,6 +154,8 @@ def merge_layers(system: list, group: list, role: list, learned: dict) -> List[S
     for s in group:
         _merge_skill_entry(merged, s)
     for s in role:
+        _merge_skill_entry(merged, s)
+    for s in (external or []):
         _merge_skill_entry(merged, s)
     for s in learned.get("active", []):
         _merge_skill_entry(merged, s)
