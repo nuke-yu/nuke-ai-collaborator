@@ -176,7 +176,8 @@ external_skills(
   - `pool` = `registry.list_external(group_id=gid)`，每条是外部技能注册表行（registry `_COLS`）：
     `{ id, name, scope_kind, group_id, source_url, ref, commit_sha, version, platforms, high_privilege, imported_by, imported_at, status }`，
     **再 join 一个派生字段 `description`**。其中 `scope_kind ∈ {global, group}` 即来源（全局/本群）。
-  - **`description` 是派生字段，不存注册表列**（避免 store-and-stale + 双真相源）：GET 端对每条 pool 行，按 `name` 查扫描器已解析的 `SKILL.md` frontmatter description（`skills/metadata.parse_skill_meta` / `parse_frontmatter` 早已解析），join 进响应。真相源 = 磁盘上的 `SKILL.md`。这与 OpenCode/Claude Code 一致——两者均「用时从 frontmatter 派生」，无一把 description 落库。解析不到则空串。
+  - **`description` 是派生字段，不存注册表列**（避免 store-and-stale + 双真相源）：GET 端对每条 pool 行，按 `name` 查扫描器解析的 `SKILL.md` frontmatter description，join 进响应（`api/groups.py:_attach_descriptions`）。真相源 = 磁盘上的 `SKILL.md`。这与 OpenCode/Claude Code 一致——两者均「用时从 frontmatter 派生」，无一把 description 落库。解析不到则空串。
+  - **读路径走 mtime 失效缓存**（`skills/metadata.parse_skill_meta_cached`）：按 `path → (mtime_ns, meta)` 缓存解析结果，文件 mtime 不变即命中缓存、不重复读盘解析；技能被编辑（mtime 变）则立即重解析。这条 GET 是「打开配置面板即触发」的热读路径，故做成产品级缓存而非每次裸解析。缓存上界 = 磁盘 SKILL.md 文件数（受部署规模上限约束，不会无界增长）；并发读最多重复解析同一 key（幂等，无需锁）；文件缺失不缓存（廉价 re-stat，留待文件后续出现自然填充）。
   - `assigned` = `assignment.list_assignments(bot_id)`，每条 `{ skill_name, pool, enabled, assigned_by }`（`pool ∈ {external_global, external_group}`）。
 - `PUT /api/groups/{gid}/members/{bot_id}/skills` body `{ assigned: [{name, pool, enabled}] }` → **全量 reconcile** `bot_skills`：使该 bot 的行与 `assigned` 完全一致（未列出的删除），写入带 `assigned_by`。
 - 执行审批仍走 `permissions/routes.py`。action 词表只有 `{allow, deny}`（**没有 ask**）；「ask」= 不存在匹配规则、回落默认 HIL。高权技能的三态策略由前端映射：allow→POST allow，deny→POST deny，ask→DELETE 匹配规则。
