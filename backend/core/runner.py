@@ -182,6 +182,11 @@ async def _run_unit_body(group_id: int, unit, orch) -> None:
             recent = await compress_history(recent, viewpoints_summary, members, all_bots, pc)
 
     ticket_id = unit.tag.get("ticket_id") if isinstance(unit.tag, dict) else None
+    temp_ticket_id = None
+    if not ticket_id:
+        import uuid
+        temp_ticket_id = f"chat_{uuid.uuid4().hex[:8]}"
+        ticket_id = temp_ticket_id
 
     ctx = ExecutionContext(
         bot=unit.bot, group_id=group_id, user_message=unit.trigger_msg,
@@ -195,12 +200,23 @@ async def _run_unit_body(group_id: int, unit, orch) -> None:
         # workflow path explicit and testable.)
         interaction=StandardInteraction(),
     )
+    use_sandbox = False
     try:
         try:
             if ticket_id:
                 from workspace.git_worktree import create_worktree, use_worktree
-                worktree_path = await create_worktree(group_id, ticket_id)
-                with use_worktree(group_id, worktree_path):
+                try:
+                    worktree_path = await create_worktree(group_id, ticket_id)
+                    use_sandbox = True
+                except Exception as w_err:
+                    log.warning(f"Failed to create worktree sandbox for {ticket_id}, falling back to direct workspace: {w_err}")
+                    ctx.active_ticket_id = None
+                    use_sandbox = False
+
+                if use_sandbox:
+                    with use_worktree(group_id, worktree_path):
+                        result = await exec_registry.get(unit.executor_id).run(ctx)
+                else:
                     result = await exec_registry.get(unit.executor_id).run(ctx)
             else:
                 result = await exec_registry.get(unit.executor_id).run(ctx)
@@ -208,9 +224,21 @@ async def _run_unit_body(group_id: int, unit, orch) -> None:
             try:
                 from workspace import layout
                 worktrees_dir = layout.group_dir(group_id) / "worktrees"
-                if worktrees_dir.exists():
+                if worktrees_dir.exists() and use_sandbox:
                     from integrations.jira import get_jira
                     from workspace.git_worktree import promote_worktree
+                    
+                    if temp_ticket_id:
+                        log.info(f"Promoting temporary chat worktree {temp_ticket_id} for group {group_id}")
+                        try:
+                            await promote_worktree(group_id, temp_ticket_id)
+                        except Exception as pe:
+                            log.exception(f"Failed to execute immediate promotion for temp chat {temp_ticket_id}: {pe}")
+                            try:
+                                await _post_system_msg(group_id, 0, f"⚠️ [沙箱合并失败] 临时会话自动合并失败: {pe}。请手动处理冲突。")
+                            except Exception:
+                                pass
+                                
                     tickets = await get_jira().list_tickets(group_id)
                     status_by_id = {t["ticket_id"]: t["status"] for t in tickets}
                     

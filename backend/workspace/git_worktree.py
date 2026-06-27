@@ -332,6 +332,8 @@ async def promote_worktree(group_id: int, task_id: str, target_branch: str = "ma
 
         # Save original HEAD to restore later
         current_branch = await _run_git_cmd(shared_workspace, "rev-parse", "--abbrev-ref", "HEAD")
+        if target_branch == "main" and current_branch != "main":
+            target_branch = current_branch
 
         try:
             # Checkout target branch

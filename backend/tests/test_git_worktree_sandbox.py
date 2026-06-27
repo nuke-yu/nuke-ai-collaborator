@@ -390,3 +390,63 @@ class TestGitWorktreeSandbox(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(wt_x.exists())
         shared_x = layout.group_shared_dir(self.group_id) / "workspace" / "x_hydration.py"
         self.assertFalse(shared_x.exists())
+
+    @patch("core.runner.exec_registry")
+    async def test_temporary_chat_worktree_promotion(self, mock_exec_registry):
+        class MockResult:
+            def __init__(self):
+                self.full_text = "success"
+                
+        # Mock executor to write a file in the worktree
+        class MockExecutor:
+            async def run(self, ctx):
+                # Write a file using workspace write_file
+                # Since ctx.active_ticket_id is set to the temp ticket, VFS will write into the worktree
+                await write_file(
+                    bot_id=1,
+                    path="workspace/chat_game.py",
+                    content="print('chat game')",
+                    group_id=ctx.group_id
+                )
+                return MockResult()
+                
+        mock_executor = MockExecutor()
+        mock_exec_registry.get.return_value = mock_executor
+        
+        # Create a work unit without ticket_id in tag
+        unit = WorkUnit(
+            bot={"id": 1, "name": "dev"},
+            trigger_msg="write a game",
+            executor_id="mock_exec",
+            tag={},
+        )
+        
+        class MockStep:
+            def __init__(self):
+                self.announcements = []
+                self.confirm_gate = None
+                self.broadcast_state = False
+                self.done = True
+                self.next_units = []
+
+        class MockOrch:
+            def participant_count(self, group_id):
+                return 1
+            def observe(self, group_id, bot_id, full_text, signals=None):
+                return MockStep()
+        mock_orch = MockOrch()
+        
+        # Run run_unit
+        res = await run_unit(self.group_id, unit, mock_orch)
+        self.assertIsNone(res)
+        
+        # Verify the file was promoted back to the shared workspace
+        shared_file = layout.group_shared_dir(self.group_id) / "workspace" / "chat_game.py"
+        self.assertTrue(shared_file.exists())
+        self.assertEqual(shared_file.read_text(encoding="utf-8"), "print('chat game')")
+        
+        # Verify that no worktree folders are left behind
+        worktrees_dir = layout.group_dir(self.group_id) / "worktrees"
+        if worktrees_dir.exists():
+            worktree_folders = [f for f in worktrees_dir.iterdir() if f.is_dir()]
+            self.assertEqual(len(worktree_folders), 0)
