@@ -2,6 +2,8 @@ import os
 from pathlib import Path
 import re
 import yaml
+import copy
+import threading
 
 
 def _is_safe_name(name: str) -> bool:
@@ -225,33 +227,42 @@ def parse_skill_meta(path: Path) -> dict:
                 "roles": [], "stages": []}
 
 
-# path -> (mtime_ns, parsed meta). Bounded by the number of SKILL.md files on
+# path -> ((mtime_ns, size), parsed meta). Bounded by the number of SKILL.md files on
 # disk (itself capped by the deployment's scale ceiling), so it cannot grow
-# without bound. Concurrent readers may redundantly parse-and-store the same
-# key; that is idempotent (same value, last write wins) so no lock is needed.
-_META_CACHE: dict[str, tuple[int, dict]] = {}
+# without bound.
+_META_CACHE: dict[str, tuple[tuple[int, int], dict]] = {}
+_META_LOCK = threading.Lock()
+
+
+def clear_meta_cache() -> None:
+    """Clear the metadata parse cache."""
+    with _META_LOCK:
+        _META_CACHE.clear()
 
 
 def parse_skill_meta_cached(path: Path) -> dict:
-    """`parse_skill_meta` with an mtime-invalidated cache.
+    """`parse_skill_meta` with an mtime-and-size invalidated cache.
 
     Serves an unchanged file from cache and re-parses only when its mtime
-    moves — so a hot read path (e.g. the member-skills GET description join,
+    or size moves — so a hot read path (e.g. the member-skills GET description join,
     hit on every panel open) doesn't re-read+parse every SKILL.md each time,
     while edits to a skill still surface immediately. A missing/inaccessible
     file falls back to the empty-meta result and is NOT cached (cheap to
     re-stat; lets a later-created file populate naturally).
 
-    Returns the cached dict by reference; treat the result as read-only.
+    Returns a deepcopy of the cached dict to prevent cache pollution.
     """
     try:
-        mtime = os.stat(path).st_mtime_ns
+        stat_res = os.stat(path)
+        sig = (stat_res.st_mtime_ns, stat_res.st_size)
     except OSError:
         return parse_skill_meta(path)
     key = str(path)
-    cached = _META_CACHE.get(key)
-    if cached is not None and cached[0] == mtime:
-        return cached[1]
+    with _META_LOCK:
+        cached = _META_CACHE.get(key)
+        if cached is not None and cached[0] == sig:
+            return copy.deepcopy(cached[1])
     meta = parse_skill_meta(path)
-    _META_CACHE[key] = (mtime, meta)
+    with _META_LOCK:
+        _META_CACHE[key] = (sig, copy.deepcopy(meta))
     return meta

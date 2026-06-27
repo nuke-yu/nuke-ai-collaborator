@@ -36,6 +36,8 @@ _SCAN_CACHE = CachedScan()
 def invalidate_skills_cache() -> None:
     """Clear the four-layer scan cache (called by the watcher on skill changes)."""
     _SCAN_CACHE.clear()
+    from .metadata import clear_meta_cache
+    clear_meta_cache()
 
 
 def _sources(bot_id: int, group_id: Optional[int], role: Optional[str]):

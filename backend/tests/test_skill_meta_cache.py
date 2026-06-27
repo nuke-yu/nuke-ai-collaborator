@@ -75,6 +75,50 @@ class TestMetaCache(unittest.TestCase):
         self.assertEqual(meta["description"], "")
         self.assertNotIn(str(ghost), metadata._META_CACHE)
 
+    def test_prevent_cache_pollution_by_reference_mutation(self):
+        from skills import metadata
+        m1 = metadata.parse_skill_meta_cached(self.path)
+        m1["description"] = "hijacked"
+        
+        m2 = metadata.parse_skill_meta_cached(self.path)
+        self.assertEqual(m2["description"], "first")  # original value is untouched in cache
+
+    def test_reparses_when_size_changes_even_if_mtime_is_same(self):
+        from skills import metadata
+        calls = {"n": 0}
+        real = metadata.parse_skill_meta
+        def counting(path):
+            calls["n"] += 1
+            return real(path)
+
+        with patch.object(metadata, "parse_skill_meta", counting):
+            m1 = metadata.parse_skill_meta_cached(self.path)
+            self.assertEqual(calls["n"], 1)
+
+            # Change content (hence file size), but preserve the exact same mtime.
+            stat = os.stat(self.path)
+            mtime = stat.st_mtime_ns
+            
+            # Write larger content
+            self.path.write_text(
+                "---\nname: x\ndescription: second-longer-description\n---\nbody\n",
+                encoding="utf-8"
+            )
+            os.utime(self.path, ns=(mtime, mtime))  # restore original mtime
+            
+            m2 = metadata.parse_skill_meta_cached(self.path)
+            self.assertEqual(calls["n"], 2)  # size changed -> re-parsed
+            self.assertEqual(m2["description"], "second-longer-description")
+
+    def test_invalidation_clears_metadata_cache(self):
+        from skills import metadata
+        from skills.discovery import invalidate_skills_cache
+        m1 = metadata.parse_skill_meta_cached(self.path)
+        self.assertIn(str(self.path), metadata._META_CACHE)
+        
+        invalidate_skills_cache()
+        self.assertNotIn(str(self.path), metadata._META_CACHE)
+
 
 if __name__ == "__main__":
     unittest.main()
