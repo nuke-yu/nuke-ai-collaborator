@@ -149,5 +149,40 @@ class TestDryRunNoWrite(unittest.TestCase):
         self.assertEqual(len([r for r in rules_after if r.args_pattern == "deploy"]), 0)
 
 
+class TestMainCLI(unittest.TestCase):
+    def test_main_dry_run_returns_zero_and_no_write(self):
+        from scripts import migrate_skill_assignment as M
+        from permissions import db as pdb
+
+        fd, path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        orig = _db.DB_PATH
+
+        async def fake_list(bot_id, group_id=None, role=None):
+            return [{"name": "deploy"}]
+
+        async def seed():
+            await init_central_db(path)
+            async with _db.write_connect(path) as conn:
+                await conn.execute("INSERT INTO groups (id, name) VALUES (1,'g')")
+                await conn.execute("INSERT INTO members (id, group_id, name, type, role) VALUES (7,1,'dev','bot','developer')")
+                await conn.commit()
+            await pdb.save_rule(7, "run_skill", "", "allow")
+
+        try:
+            _db.DB_PATH = path
+            _run(seed())
+            with patch.object(M, "list_skills_all", new=fake_list):
+                rc = M.main([])           # dry-run
+            # blanket still present (dry-run wrote nothing)
+            rules = _run(pdb.load_rules(7))
+        finally:
+            _db.DB_PATH = orig
+            os.unlink(path)
+
+        self.assertEqual(rc, 0)
+        self.assertTrue(any(r.args_pattern == "" for r in rules))
+
+
 if __name__ == "__main__":
     unittest.main()

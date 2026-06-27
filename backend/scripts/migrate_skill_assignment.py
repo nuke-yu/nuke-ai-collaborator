@@ -109,3 +109,37 @@ async def migrate(apply: bool) -> dict:
             out_bots.append(plan)
     return {"bots": out_bots, "apply": apply,
             "total_added": total_added, "total_deleted": total_deleted}
+
+
+import asyncio
+
+
+def main(argv: list[str] | None = None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
+    apply = "--apply" in argv
+
+    print(f"[迁移] 模式: {'APPLY（写盘）' if apply else 'DRY-RUN（只打印）'}")
+    if apply:
+        print("[迁移] 确认：已停机且已备份中央 DB ？(Ctrl-C 取消)")
+
+    result = asyncio.run(migrate(apply=apply))
+
+    if not result["bots"]:
+        print("[迁移] 没有需要收紧的 blanket run_skill allow 规则。无操作。")
+        return 0
+
+    for p in result["bots"]:
+        verb = "已加" if apply else "将加"
+        print(f"  bot {p['bot_id']}: {verb} name-scoped allow {p['add_patterns']}"
+              f"；blanket 规则 {p['blanket_rule_ids']}"
+              f"（已覆盖跳过: {p['skipped_existing']}）")
+    if apply:
+        print(f"[迁移] 完成：新增 {result['total_added']} 条 name-scoped allow，"
+              f"删除 {result['total_deleted']} 条 blanket。")
+    else:
+        print("\n[迁移] dry-run 完成。确认无误后加 --apply 执行。")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
