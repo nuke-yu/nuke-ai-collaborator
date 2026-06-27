@@ -107,6 +107,20 @@ describe('ExternalSkillPanel — import', () => {
     await waitFor(() => expect(api.importExternalSkill).toHaveBeenCalled())
     expect(api.importExternalSkill.mock.calls[0][0].scope).toBe('global')
   })
+
+  it('shows error message inside the modal when import API throws', async () => {
+    api.importExternalSkill.mockRejectedValue(new Error('Cloning failed: auth error'))
+    render(<ExternalSkillPanel bot={{ id: 3, name: 'dev' }} groupId={7} onClose={() => {}} />)
+    await waitFor(() => expect(api.fetchMemberExternalSkills).toHaveBeenCalledTimes(1))
+
+    fireEvent.click(screen.getByTestId('open-import'))
+    fireEvent.change(screen.getByTestId('import-url'), { target: { value: 'https://github.com/x/y' } })
+    fireEvent.click(screen.getByTestId('submit-import'))
+
+    // The modal should NOT close, and the error should be displayed inside the modal
+    await waitFor(() => expect(screen.getByText('Cloning failed: auth error')).toBeInTheDocument())
+    expect(screen.getByTestId('submit-import')).toBeInTheDocument() // still open
+  })
 })
 
 describe('ExternalSkillPanel — remove', () => {

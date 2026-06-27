@@ -25,6 +25,7 @@ export default function ExternalSkillPanel({ bot, groupId, onClose }) {
   const [gitUrl, setGitUrl] = useState('')
   const [gitRef, setGitRef] = useState('')
   const [importResult, setImportResult] = useState(null)
+  const [importError, setImportError] = useState(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -66,6 +67,7 @@ export default function ExternalSkillPanel({ bot, groupId, onClose }) {
     if (!gitUrl.trim() || importing) return
     setImporting(true)
     setImportResult(null)
+    setImportError(null)
     try {
       const scope = importScope === 'global' ? 'global' : { group_id: groupId }
       const res = await importExternalSkill({ git_url: gitUrl.trim(), ref: gitRef.trim(), scope })
@@ -75,7 +77,7 @@ export default function ExternalSkillPanel({ bot, groupId, onClose }) {
       setGitRef('')
       await load()
     } catch (e) {
-      setImportResult({ imported: [], rejected: [{ path: gitUrl, reason: e.message }] })
+      setImportError(e.message)
     } finally {
       setImporting(false)
     }
@@ -124,7 +126,7 @@ export default function ExternalSkillPanel({ bot, groupId, onClose }) {
           <div className="flex items-center gap-3">
             <button
               data-testid="open-import"
-              onClick={() => setShowImport(true)}
+              onClick={() => { setImportError(null); setShowImport(true); }}
               className="text-xs px-3 py-1 rounded-lg bg-indigo-700 hover:bg-indigo-600 text-white transition-colors"
             >
               {t(K.externalSkill.importButton)}
@@ -202,6 +204,12 @@ export default function ExternalSkillPanel({ bot, groupId, onClose }) {
                 placeholder={t(K.externalSkill.importRefPlaceholder)}
                 className="bg-gray-900 text-gray-100 text-sm rounded-lg px-3 py-2 outline-none focus:ring-1 focus:ring-indigo-500 font-mono"
               />
+
+              {importError && (
+                <div className="text-xs text-red-400 bg-red-900/20 rounded-lg px-3 py-2 font-mono">
+                  {importError}
+                </div>
+              )}
 
               <button
                 data-testid="submit-import"
