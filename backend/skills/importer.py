@@ -18,6 +18,7 @@ from . import constants as C
 from . import registry
 from .metadata import parse_skill_meta, _is_safe_name
 from .store import SkillStore
+from .lifecycle import file_lock
 from workspace import layout
 
 # Host allowlist for git import. Default allows github.com plus private/internal
@@ -56,6 +57,18 @@ def _safe_dest(name: str) -> None:
         raise ValueError(f"unsafe skill name: {name!r}")
 
 
+def _repo_name_of(url: str) -> str:
+    url = url.rstrip("/")
+    if url.endswith(".git"):
+        url = url[:-4]
+    # Remove branch/tree segments if any
+    for sep in ("/tree/", "/src/", "/blob/"):
+        if sep in url:
+            url = url.split(sep, 1)[0]
+    parts = url.split("/")
+    return parts[-1]
+
+
 def _pool_dir(scope_kind: str, group_id: int) -> Path:
     if scope_kind == "global":
         return layout.external_global_skills_dir()
@@ -92,15 +105,19 @@ async def import_from_dir(repo_dir, scope_kind: str, group_id: int,
     # Every directory holding a SKILL.md is one skill.
     for skill_md in skill_mds:
         skill_dir = skill_md.parent
-        name = skill_dir.name
+        
+        # If SKILL.md is at the root of the repository, the skill's name
+        # should be the repository name instead of the temp directory name.
+        is_root_skill = (skill_dir.resolve() == repo_dir.resolve())
+        dest_name = _repo_name_of(source_url) if is_root_skill else skill_dir.name
+
         try:
-            _safe_dest(name)
+            _safe_dest(dest_name)
         except ValueError as e:
             rejected.append({"path": str(skill_dir), "reason": str(e)})
             continue
 
-        # `name` is the (already safe-validated) directory name; parse_skill_meta
-        # surfaces description from frontmatter (it does not echo back `name`).
+        # parse_skill_meta surfaces description from frontmatter
         meta = parse_skill_meta(skill_md)
         if not meta.get("description"):
             rejected.append({"path": str(skill_dir), "reason": "missing description"})
@@ -110,25 +127,37 @@ async def import_from_dir(repo_dir, scope_kind: str, group_id: int,
         high_priv = scan_high_privilege(skill_dir)
         version = meta.get("version", "")
 
-        # Copy into the pool (symlink-escape protection lives in SkillStore.copy).
-        # src.dir() is the skill's PARENT so src.dir()/name resolves to the folder.
-        src_scope = _DirScope(skill_dir.parent)
+        # Copy into the pool
         try:
-            store.copy(src_scope, name, dst_scope)
+            if is_root_skill:
+                dst_folder = dst_scope.dir() / dest_name
+                # Check for escaping symlinks
+                for p in skill_dir.rglob("*"):
+                    if p.is_symlink():
+                        resolved = p.resolve()
+                        if not resolved.is_relative_to(skill_dir.resolve()):
+                            raise ValueError(f"symlink escapes scope directory: {p} -> {resolved}")
+                with file_lock(dst_folder / "SKILL.md"):
+                    if dst_folder.exists():
+                        shutil.rmtree(dst_folder)
+                    shutil.copytree(skill_dir, dst_folder, symlinks=False)
+            else:
+                src_scope = _DirScope(skill_dir.parent)
+                store.copy(src_scope, skill_dir.name, dst_scope)
         except (ValueError, FileNotFoundError) as e:
             rejected.append({"path": str(skill_dir), "reason": f"copy failed: {e}"})
             continue
 
         try:
             rid = await registry.register(
-                name, scope_kind, group_id, source_url, ref, commit_sha,
+                dest_name, scope_kind, group_id, source_url, ref, commit_sha,
                 version, platforms, high_priv, imported_by,
             )
         except ValueError:
             rejected.append({"path": str(skill_dir), "reason": "duplicate name in scope"})
             continue
 
-        imported.append({"id": rid, "name": name, "version": version,
+        imported.append({"id": rid, "name": dest_name, "version": version,
                          "platforms": platforms, "high_privilege": high_priv})
 
     return {"imported": imported, "rejected": rejected}

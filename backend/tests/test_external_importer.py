@@ -212,5 +212,40 @@ class TestImporter(unittest.TestCase):
         self.assertEqual(imported_names, {"deploy"})
 
 
+    def test_import_from_dir_with_root_level_skill(self):
+        from skills import importer, registry
+        repo = Path(tempfile.mkdtemp())
+        
+        # Write SKILL.md directly at the root of the repository
+        (repo / "SKILL.md").write_text(
+            "---\nname: ignore-this-name\ndescription: bill gates skill description\n---\nbody",
+            encoding="utf-8"
+        )
+
+        fd, path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        orig = _db.DB_PATH
+
+        async def go():
+            await init_central_db(path)
+            # import pointing directly to the root of the repository
+            result = await importer.import_from_dir(
+                repo, "global", registry.GLOBAL_GROUP_ID,
+                "https://github.com/OpenDemon/bill-gates-skill.git", "", "abc123", imported_by=1
+            )
+            return result
+
+        try:
+            _db.DB_PATH = path
+            result = _run(go())
+        finally:
+            _db.DB_PATH = orig
+            os.unlink(path)
+
+        imported_names = {i["name"] for i in result["imported"]}
+        # Name should be resolved to the repository name "bill-gates-skill"
+        self.assertEqual(imported_names, {"bill-gates-skill"})
+
+
 if __name__ == "__main__":
     unittest.main()
