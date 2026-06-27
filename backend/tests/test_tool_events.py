@@ -11,7 +11,15 @@ from unittest.mock import AsyncMock, patch
 
 import db as database
 from ai import tool_events
-from ai.tool_events import _extract_command, _extract_files, _summarize, record_event
+from ai.tool_events import (
+    _extract_command,
+    _extract_files,
+    _summarize,
+    fetch_events,
+    record_event,
+    search_events,
+    timeline_events,
+)
 
 TEST_DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "test_tool_events.db")
 
@@ -140,6 +148,115 @@ class RecordEventTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["tool"], "read_file")
         self.assertEqual(json.loads(rows[0]["files_touched"]), ["z.py"])
+
+
+class RetrievalTest(unittest.IsolatedAsyncioTestCase):
+    """L3 — 3-layer retrieval over tool_events."""
+
+    async def asyncSetUp(self):
+        self._orig = database.DB_PATH
+        database.DB_PATH = TEST_DB_PATH
+        if os.path.exists(TEST_DB_PATH):
+            os.remove(TEST_DB_PATH)
+        await database.init_db()
+        # Seed a small chronological log in group 1; group 2 gets a decoy.
+        await record_event(group_id=1, bot_id=1, tool="read_file",
+                           arguments={"path": "alpha.py"}, result="content of alpha", is_error=False)
+        await record_event(group_id=1, bot_id=1, tool="edit_file",
+                           arguments={"path": "beta.py"}, result="edited beta", is_error=False)
+        await record_event(group_id=1, bot_id=1, tool="run_shell",
+                           arguments={"cmd": "pytest beta"}, result="1 failed", is_error=True)
+        await record_event(group_id=2, bot_id=9, tool="edit_file",
+                           arguments={"path": "alpha.py"}, result="other group", is_error=False)
+
+    async def asyncTearDown(self):
+        database.DB_PATH = self._orig
+        if os.path.exists(TEST_DB_PATH):
+            try:
+                os.remove(TEST_DB_PATH)
+            except OSError:
+                pass
+
+    async def test_search_returns_index_only(self):
+        rows = await search_events(1, "beta")
+        # matches edit_file(beta.py) and run_shell(pytest beta)
+        self.assertEqual({r["tool"] for r in rows}, {"edit_file", "run_shell"})
+        self.assertNotIn("args_summary", rows[0])  # index, not full
+
+    async def test_search_empty_query_returns_recent(self):
+        rows = await search_events(1, "", limit=10)
+        self.assertEqual(len(rows), 3)
+        self.assertEqual(rows[0]["tool"], "run_shell")  # newest first
+
+    async def test_search_filters_by_tool(self):
+        rows = await search_events(1, "", tool="edit_file")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["tool"], "edit_file")
+
+    async def test_search_group_scoped(self):
+        # "alpha" exists in both groups; group 1 must not see group 2's row.
+        rows = await search_events(1, "alpha")
+        self.assertTrue(all(r["tool"] == "read_file" for r in rows))
+        self.assertEqual(len(rows), 1)
+
+    async def test_timeline_around_anchor(self):
+        ids = [r["id"] for r in await search_events(1, "", limit=10)][::-1]  # chronological
+        anchor = ids[1]  # the edit_file row
+        rows = await timeline_events(1, anchor, before=1, after=1)
+        tools = [r["tool"] for r in rows]
+        self.assertEqual(tools, ["read_file", "edit_file", "run_shell"])
+
+    async def test_fetch_full_rows_group_scoped(self):
+        all_rows = await search_events(1, "", limit=10)
+        ids = [r["id"] for r in all_rows]
+        full = await fetch_events(1, ids)
+        self.assertEqual(len(full), 3)
+        self.assertIn("alpha", "".join(r["result_summary"] for r in full))
+        # cross-group id leakage guard: fetching a group-2 id under group 1 = empty
+        g2 = await search_events(2, "")
+        self.assertEqual(await fetch_events(1, [g2[0]["id"]]), [])
+
+
+class HandlerTest(unittest.IsolatedAsyncioTestCase):
+    """L3 builtin tool handlers — context-scoped, formatted output."""
+
+    async def asyncSetUp(self):
+        self._orig = database.DB_PATH
+        database.DB_PATH = TEST_DB_PATH
+        if os.path.exists(TEST_DB_PATH):
+            os.remove(TEST_DB_PATH)
+        await database.init_db()
+        await record_event(group_id=1, bot_id=1, tool="run_shell",
+                           arguments={"cmd": "pytest -q"}, result="1 failed", is_error=True)
+
+    async def asyncTearDown(self):
+        database.DB_PATH = self._orig
+        if os.path.exists(TEST_DB_PATH):
+            try:
+                os.remove(TEST_DB_PATH)
+            except OSError:
+                pass
+
+    async def test_search_handler_renders_index(self):
+        from executors.plugins.memory_search_tool import _handle_search_memory
+        out = await _handle_search_memory(query="pytest", context={"group_id": 1, "bot_id": 1})
+        self.assertIn("run_shell", out)
+        self.assertIn("pytest -q", out)
+        self.assertIn("memory_fetch", out)  # next-step hint
+
+    async def test_fetch_handler_returns_full(self):
+        from executors.plugins.memory_search_tool import _handle_memory_fetch, _handle_search_memory
+        # find the id via search, then fetch
+        idx = await _handle_search_memory(query="", context={"group_id": 1})
+        first_id = int(idx.splitlines()[2].split("|")[0].strip())
+        out = await _handle_memory_fetch(ids=[first_id], context={"group_id": 1})
+        self.assertIn("结果: 1 failed", out)
+        self.assertIn("出错", out)  # is_error marker
+
+    async def test_handler_requires_group_context(self):
+        from executors.plugins.memory_search_tool import _handle_search_memory
+        out = await _handle_search_memory(query="x", context={})
+        self.assertIn("无群组上下文", out)
 
 
 if __name__ == "__main__":

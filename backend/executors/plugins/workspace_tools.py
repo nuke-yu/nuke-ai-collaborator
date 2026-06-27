@@ -1328,6 +1328,13 @@ def register_workspace_tools() -> None:
     from executors.plugins import code_intel_tool
     tool_executor.register(code_intel_tool.CODE_INTEL_TOOL_DEF, code_intel_tool._handle_code_intel)
 
+    # L3 — 3-layer tool-memory retrieval (search → timeline → fetch over the L1
+    # tool_events log). Builtin so they stay on the hooked tool_executor path.
+    from executors.plugins import memory_search_tool as _mem
+    tool_executor.register(_mem.SEARCH_MEMORY_TOOL_DEF, _mem._handle_search_memory)
+    tool_executor.register(_mem.MEMORY_TIMELINE_TOOL_DEF, _mem._handle_memory_timeline)
+    tool_executor.register(_mem.MEMORY_FETCH_TOOL_DEF, _mem._handle_memory_fetch)
+
     # MCP OAuth trigger (McpAuthTool style). Builtin so it stays on the hooked
     # tool_executor path; bots that should authenticate MCP servers must include
     # "mcp_authenticate" in their allowed_tools to have it surfaced to the LLM.

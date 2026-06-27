@@ -12,6 +12,7 @@ from executors.plugins.workspace_tools import (
     register_workspace_tools,
 )
 from executors.plugins.rd_tools import RD_TOOLS, register_rd_tools
+from executors.plugins.memory_search_tool import MEMORY_TOOLS
 import executors.compact as compact
 from ai.client import call_ai_once, call_ai_stream_messages, AIError, AIContextOverflowError
 from ai.memory_provider import get_memory_provider
@@ -367,7 +368,7 @@ class ToolLoopV1(BotExecutor):
 
     manifest = PluginManifest(
         description="多轮工具调用循环：AI 可读写工作区文件、执行技能，直至任务完成",
-        tools=_WORKSPACE_TOOLS + RD_TOOLS,
+        tools=_WORKSPACE_TOOLS + RD_TOOLS + MEMORY_TOOLS,
         memory_layers=["short_term", "vector_search", "summary", "permanent"],
         workspace=WorkspaceConfig(
             startup_files=["AGENT.md", "BOOTSTRAP.md", "IDENTITY.md", "MEMORY.md"],

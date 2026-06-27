@@ -133,3 +133,91 @@ async def record_event(
             # 缺表/缺列是迁移缺口，响亮上抛而非当成"没记成"咽下（对齐 ai.memory 约定）。
             raise
         log.debug("record_event swallowed (group_id=%s, tool=%s)", group_id, tool, exc_info=True)
+
+
+# ───────────────────────── L3 三层检索（读路径，零模型） ─────────────────────────
+# search → 只返回 index（id/tool/files/cmd，便宜）；timeline → anchor 周围时间线；
+# fetch → 仅对筛过的 id 取全文（贵）。读路径同样复用 _memory_db 解析到同一群库。
+
+# 拼成一段可搜文本，让一次 LIKE 覆盖 tool/入参/结果/命令/文件。
+_SEARCHABLE = ("tool || ' ' || args_summary || ' ' || result_summary || ' ' "
+               "|| IFNULL(command,'') || ' ' || files_touched")
+_INDEX_COLS = "id, ts, tool, is_error, files_touched, command"
+_FULL_COLS = ("id, ts, group_id, bot_id, thread_id, tool, args_summary, "
+              "result_summary, is_error, files_touched, command")
+
+
+def _index_row(r) -> dict:
+    return {"id": r[0], "ts": r[1], "tool": r[2], "is_error": bool(r[3]),
+            "files_touched": r[4], "command": r[5]}
+
+
+def _full_row(r) -> dict:
+    return {"id": r[0], "ts": r[1], "group_id": r[2], "bot_id": r[3],
+            "thread_id": r[4], "tool": r[5], "args_summary": r[6],
+            "result_summary": r[7], "is_error": bool(r[8]),
+            "files_touched": r[9], "command": r[10]}
+
+
+async def search_events(group_id: int, query: str = "", limit: int = 20,
+                        tool: str | None = None) -> list[dict]:
+    """L3-1：关键词检索，返回 index 行（不含全文）。空 query = 最近 N 条。
+
+    多词按 AND 跨整段可搜文本匹配。group_id 强制过滤，绝不跨群。"""
+    if group_id is None:
+        return []
+    where = ["group_id = ?"]
+    params: list = [group_id]
+    for term in (query or "").split():
+        where.append(f"({_SEARCHABLE}) LIKE ?")
+        params.append(f"%{term}%")
+    if tool:
+        where.append("tool = ?")
+        params.append(tool)
+    params.append(max(1, min(int(limit or 20), 100)))
+    sql = (f"SELECT {_INDEX_COLS} FROM tool_events WHERE {' AND '.join(where)} "
+           f"ORDER BY id DESC LIMIT ?")
+    from ai.memory import _memory_db
+    async with await _memory_db("tool_events", group_id, write=False) as db:
+        async with db.execute(sql, params) as cur:
+            return [_index_row(r) for r in await cur.fetchall()]
+
+
+async def timeline_events(group_id: int, anchor: int, before: int = 3,
+                          after: int = 3) -> list[dict]:
+    """L3-2：anchor 事件周围的时间线（index 行，按时间升序）。id 单调即时序。"""
+    if group_id is None or anchor is None:
+        return []
+    before = max(0, min(int(before or 0), 20))
+    after = max(0, min(int(after or 0), 20))
+    from ai.memory import _memory_db
+    async with await _memory_db("tool_events", group_id, write=False) as db:
+        async with db.execute(
+            f"SELECT {_INDEX_COLS} FROM tool_events "
+            "WHERE group_id=? AND id < ? ORDER BY id DESC LIMIT ?",
+            (group_id, anchor, before),
+        ) as cur:
+            pre = [_index_row(r) for r in await cur.fetchall()][::-1]
+        async with db.execute(
+            f"SELECT {_INDEX_COLS} FROM tool_events "
+            "WHERE group_id=? AND id >= ? ORDER BY id ASC LIMIT ?",
+            (group_id, anchor, after + 1),
+        ) as cur:
+            rest = [_index_row(r) for r in await cur.fetchall()]
+    return pre + rest
+
+
+async def fetch_events(group_id: int, ids: list[int]) -> list[dict]:
+    """L3-3：仅对筛过的 id 取全文。group_id 强制过滤防跨群读取。"""
+    if group_id is None or not ids:
+        return []
+    ids = [int(i) for i in ids][:50]
+    ph = ",".join("?" * len(ids))
+    from ai.memory import _memory_db
+    async with await _memory_db("tool_events", group_id, write=False) as db:
+        async with db.execute(
+            f"SELECT {_FULL_COLS} FROM tool_events "
+            f"WHERE group_id=? AND id IN ({ph}) ORDER BY id ASC",
+            [group_id, *ids],
+        ) as cur:
+            return [_full_row(r) for r in await cur.fetchall()]
