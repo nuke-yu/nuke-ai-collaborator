@@ -209,16 +209,36 @@ export async function fetchAiSuggestions(groupId, awaitingConfirm) {
 
 export async function fetchMcpConfig() {
   const res = await authFetch('/api/config/mcp')
-  return res.json()
+  if (!res.ok) {
+    let detail = 'Failed to load MCP config'
+    try { detail = (await res.json()).detail || detail } catch { /* ignore */ }
+    const err = new Error(detail)
+    err.status = res.status
+    throw err
+  }
+  const etag = res.headers.get('ETag')
+  const config = await res.json()
+  return { config, etag }
 }
 
-export async function saveMcpConfig(data) {
+export async function saveMcpConfig(data, etag) {
+  const headers = { 'Content-Type': 'application/json' }
+  if (etag) headers['If-Match'] = etag
   const res = await authFetch('/api/config/mcp', {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify(data),
   })
-  return res.json()
+  if (!res.ok) {
+    let detail = 'Failed to save MCP config'
+    try { detail = (await res.json()).detail || detail } catch { /* ignore */ }
+    const err = new Error(detail)
+    err.status = res.status
+    throw err
+  }
+  const newEtag = res.headers.get('ETag')
+  const config = await res.json()
+  return { config, etag: newEtag }
 }
 
 

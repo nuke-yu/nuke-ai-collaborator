@@ -142,3 +142,40 @@ def test_get_mcp_config_corrupted_json(client, temp_mcp_config):
     response = client.get("/api/config/mcp")
     assert response.status_code == 500
     assert "corrupted/invalid JSON" in response.json()["detail"]
+
+
+def test_get_returns_etag(client, temp_mcp_config):
+    response = client.get("/api/config/mcp")
+    assert response.status_code == 200
+    assert response.headers.get("ETag")
+
+
+def test_put_with_matching_if_match_succeeds(client, temp_mcp_config):
+    etag = client.get("/api/config/mcp").headers["ETag"]
+    new_config = {"mcpServers": {"s": {"command": "node", "args": []}}}
+    response = client.put("/api/config/mcp", json=new_config, headers={"If-Match": etag})
+    assert response.status_code == 200
+    # A fresh validator is returned for the just-written content.
+    assert response.headers.get("ETag")
+
+
+def test_put_with_stale_if_match_is_rejected(client, temp_mcp_config):
+    stale = client.get("/api/config/mcp").headers["ETag"]
+    # Someone else changes the file underneath us.
+    with open(temp_mcp_config, "w", encoding="utf-8") as f:
+        json.dump({"mcpServers": {"other": {"command": "x", "args": []}}}, f)
+    response = client.put(
+        "/api/config/mcp",
+        json={"mcpServers": {"mine": {"command": "y", "args": []}}},
+        headers={"If-Match": stale},
+    )
+    assert response.status_code == 412
+    # The concurrent edit must remain intact (no clobber).
+    with open(temp_mcp_config, "r", encoding="utf-8") as f:
+        assert json.load(f)["mcpServers"] == {"other": {"command": "x", "args": []}}
+
+
+def test_put_without_if_match_still_works(client, temp_mcp_config):
+    new_config = {"mcpServers": {"s": {"command": "node", "args": []}}}
+    response = client.put("/api/config/mcp", json=new_config)
+    assert response.status_code == 200

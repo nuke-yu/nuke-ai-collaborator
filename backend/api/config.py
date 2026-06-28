@@ -3,7 +3,8 @@
 Keys are stored in backend/app_config.json (git-ignored); get_key() falls back to
 the matching env var (DEEPSEEK_API_KEY, OPENAI_API_KEY, ...) when the file has none.
 """
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response, Header
+import hashlib
 import json
 from pathlib import Path
 
@@ -103,33 +104,49 @@ def _unmask_mcp_config(new_config: dict, old_config: dict) -> dict:
     return cfg
 
 
+def _mcp_config_etag(raw: bytes) -> str:
+    """Strong validator over the on-disk bytes — used for optimistic concurrency."""
+    return hashlib.sha256(raw).hexdigest()
+
+
 @router.get("/api/config/mcp")
-async def get_mcp_config():
+async def get_mcp_config(response: Response):
     path = resolve_mcp_config_path()
     if not path.exists():
         return {"mcpServers": {}}
     try:
-        with path.open("r", encoding="utf-8") as f:
-            data = json.load(f)
-            return _mask_mcp_config(data)
-    except json.JSONDecodeError as e:
-        raise HTTPException(500, f"MCP config file is corrupted/invalid JSON: {e}")
+        raw = path.read_bytes()
     except Exception as e:
         raise HTTPException(500, f"Failed to read MCP config: {e}")
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as e:
+        raise HTTPException(500, f"MCP config file is corrupted/invalid JSON: {e}")
+    # ETag reflects the real on-disk content so PUT can detect concurrent edits.
+    response.headers["ETag"] = _mcp_config_etag(raw)
+    return _mask_mcp_config(data)
 
 
 @router.put("/api/config/mcp")
-async def save_mcp_config(data: dict):
+async def save_mcp_config(data: dict, response: Response, if_match: str | None = Header(default=None)):
     path = resolve_mcp_config_path()
     if not isinstance(data, dict) or "mcpServers" not in data:
         raise HTTPException(400, "Invalid MCP config format. Must contain 'mcpServers'.")
     old_config = {}
+    current_etag = None
     if path.exists():
         try:
-            with path.open("r", encoding="utf-8") as f:
-                old_config = json.load(f)
+            raw = path.read_bytes()
+            current_etag = _mcp_config_etag(raw)
+            old_config = json.loads(raw)
         except Exception:
-            pass
+            old_config = {}
+            current_etag = None
+    # Optimistic concurrency: if the file changed since the client loaded it, the masked
+    # placeholders it is sending back would be un-masked against the wrong old values and a
+    # literal placeholder string could be written as a real secret. Reject instead.
+    if if_match is not None and current_etag is not None and if_match != current_etag:
+        raise HTTPException(412, "MCP config changed since it was loaded. Reload and re-apply your edits.")
     unmasked_data = _unmask_mcp_config(data, old_config)
     import tempfile
     import os
@@ -149,6 +166,13 @@ async def save_mcp_config(data: dict):
             raise
     except Exception as e:
         raise HTTPException(500, f"Failed to save MCP config file: {e}")
+
+    # New strong validator for the content we just wrote, so the client can keep editing
+    # and saving without a reload between writes.
+    try:
+        response.headers["ETag"] = _mcp_config_etag(path.read_bytes())
+    except Exception:
+        pass
 
     warning = None
     # Notify MCP collector process of the change

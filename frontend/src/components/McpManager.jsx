@@ -7,13 +7,15 @@ export default function McpManager({ onClose }) {
   const [errorMsg, setErrorMsg] = useState(null)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [etag, setEtag] = useState(null)
 
   const isZh = i18n.language?.startsWith('zh')
 
   useEffect(() => {
     fetchMcpConfig()
-      .then(data => {
-        setJsonText(JSON.stringify(data || { mcpServers: {} }, null, 2))
+      .then(({ config, etag: tag }) => {
+        setJsonText(JSON.stringify(config || { mcpServers: {} }, null, 2))
+        setEtag(tag)
         setErrorMsg(null)
       })
       .catch(err => {
@@ -91,14 +93,21 @@ export default function McpManager({ onClose }) {
     setSaved(false)
     try {
       const parsed = JSON.parse(jsonText)
-      await saveMcpConfig(parsed)
+      const { etag: newEtag } = await saveMcpConfig(parsed, etag)
+      setEtag(newEtag)
       setSaved(true)
       setTimeout(() => {
         setSaved(false)
         onClose()
       }, 1000)
     } catch (err) {
-      setErrorMsg(err.message || (isZh ? '保存配置失败' : 'Failed to save configuration'))
+      if (err.status === 412) {
+        setErrorMsg(isZh
+          ? '配置已被其他人修改，请关闭后重新打开以加载最新配置再编辑。'
+          : 'Config was changed by someone else. Please reopen to load the latest version before editing.')
+      } else {
+        setErrorMsg(err.message || (isZh ? '保存配置失败' : 'Failed to save configuration'))
+      }
     } finally {
       setSaving(false)
     }
