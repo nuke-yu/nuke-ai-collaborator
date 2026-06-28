@@ -334,11 +334,16 @@ class ToolLoopRunner:
                     self.full_text = "[达到最大工具调用次数，任务未完成]"
 
         except asyncio.CancelledError:
-            await self.ctx.interaction.update_session_status(self.session_id, "failed")
-            await self.ctx.interaction.broadcast(self.ctx.group_id, {
-                "type": "stream_aborted", "temp_id": self.temp_id, "member_id": self.bot["id"],
-                "session_id": self.session_id,
-            })
+            async def _cleanup():
+                try:
+                    await self.ctx.interaction.update_session_status(self.session_id, "failed")
+                    await self.ctx.interaction.broadcast(self.ctx.group_id, {
+                        "type": "stream_aborted", "temp_id": self.temp_id, "member_id": self.bot["id"],
+                        "session_id": self.session_id,
+                    })
+                except Exception:
+                    pass
+            await asyncio.shield(_cleanup())
             raise
         except AIError as e:
             await self.ctx.interaction.update_session_status(self.session_id, "failed")

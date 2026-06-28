@@ -286,6 +286,49 @@ class TestAwaySummaryRecap(unittest.IsolatedAsyncioTestCase):
         self.assertIn("你是一个项目协作助手。", kwargs["system_prompt"])
         self.assertIn("以下是项目协作中最近的聊天记录", kwargs["messages"][0]["content"])
 
+    @patch("core.recap.generator.call_ai_once", new_callable=AsyncMock)
+    async def test_recap_with_git_and_jira_context(self, mock_call_ai):
+        from pathlib import Path
+        mock_call_ai.return_value = {"content": "Recap with git and jira."}
+        
+        # 1. Seed a JIRA ticket
+        async with database.get_db() as db_conn:
+            await db_conn.execute(
+                "INSERT INTO tickets (ticket_id, group_id, title, status, project) "
+                "VALUES ('DFT-101', 1, 'Build Pac-Man Game', 'in_progress', 'GameProj')"
+            )
+            await db_conn.commit()
+            
+        # 2. Mock Git CLI execution
+        mock_proc_log = MagicMock()
+        mock_proc_log.communicate = AsyncMock(return_value=(b"feat: initialize board", b""))
+        mock_proc_status = MagicMock()
+        mock_proc_status.communicate = AsyncMock(return_value=(b"M src/index.js", b""))
+        
+        async def mock_exec(*args, **kwargs):
+            if "log" in args:
+                return mock_proc_log
+            if "status" in args:
+                return mock_proc_status
+            return MagicMock()
+            
+        with patch("workspace.layout.group_shared_dir", return_value=Path("/tmp/mock_ws")), \
+             patch("pathlib.Path.exists", return_value=True), \
+             patch("asyncio.create_subprocess_exec", side_effect=mock_exec):
+            
+            summary = await generate_and_cache_recap(1, force=True)
+            self.assertEqual(summary, "Recap with git and jira.")
+            
+            mock_call_ai.assert_called_once()
+            kwargs = mock_call_ai.call_args.kwargs
+            prompt_content = kwargs["messages"][0]["content"]
+            
+            # Check Jira info presence
+            self.assertIn("DFT-101: Build Pac-Man Game (状态: in_progress, 项目: GameProj)", prompt_content)
+            # Check Git info presence
+            self.assertIn("feat: initialize board", prompt_content)
+            self.assertIn("M src/index.js", prompt_content)
+
 
 
 class TestRecapApi(unittest.IsolatedAsyncioTestCase):

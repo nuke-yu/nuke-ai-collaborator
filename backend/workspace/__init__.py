@@ -509,12 +509,16 @@ def walk_visible(root: Path, max_entries: int = _WS_MAX_ENTRIES,
     for dirpath, dirnames, filenames in os.walk(root, followlinks=True):
         # 原地剪枝 + 排序：os.walk 的物理顺序依赖文件系统(inode)、非确定；先排序保证
         # 遍历顺序稳定，这样在超大工作区因 max_entries 截断时每次前缀一致，UI 树不抖动。
-        dirnames[:] = sorted(
-            d for d in dirnames
+        all_dirs = sorted(dirnames)
+        dirnames[:] = [
+            d for d in all_dirs
             if d not in _WS_IGNORE_DIRS and (not skip_hidden or not d.startswith("."))
-        )
+        ]
         base = Path(dirpath)
-        for name in dirnames:
+        for name in all_dirs:
+            if skip_hidden:
+                if name.startswith(".") or name in _WS_IGNORE_DIRS:
+                    continue
             paths.append(base / name)
         for name in sorted(filenames):
             if skip_hidden and name.startswith("."):

@@ -221,42 +221,45 @@ async def _run_unit_body(group_id: int, unit, orch) -> None:
             else:
                 result = await exec_registry.get(unit.executor_id).run(ctx)
         finally:
-            try:
-                from workspace import layout
-                worktrees_dir = layout.group_dir(group_id) / "worktrees"
-                if worktrees_dir.exists() and use_sandbox:
-                    from integrations.jira import get_jira
-                    from workspace.git_worktree import promote_worktree
-                    
-                    if temp_ticket_id:
-                        log.info(f"Promoting temporary chat worktree {temp_ticket_id} for group {group_id}")
-                        try:
-                            await promote_worktree(group_id, temp_ticket_id)
-                        except Exception as pe:
-                            log.exception(f"Failed to execute immediate promotion for temp chat {temp_ticket_id}: {pe}")
+            async def _cleanup_finally():
+                try:
+                    from workspace import layout
+                    worktrees_dir = layout.group_dir(group_id) / "worktrees"
+                    if worktrees_dir.exists() and use_sandbox:
+                        from integrations.jira import get_jira
+                        from workspace.git_worktree import promote_worktree
+                        
+                        if temp_ticket_id:
+                            log.info(f"Promoting temporary chat worktree {temp_ticket_id} for group {group_id}")
                             try:
-                                await _post_system_msg(group_id, 0, f"⚠️ [沙箱合并失败] 临时会话自动合并失败: {pe}。请手动处理冲突。")
-                            except Exception:
-                                pass
-                                
-                    tickets = await get_jira().list_tickets(group_id)
-                    status_by_id = {t["ticket_id"]: t["status"] for t in tickets}
-                    
-                    for item in list(worktrees_dir.iterdir()):
-                        if item.is_dir() and item.name.startswith("task_"):
-                            tid = item.name[5:]
-                            if status_by_id.get(tid) == "done":
-                                log.info(f"Draining deferred promotion for task {tid} in group {group_id}")
+                                await promote_worktree(group_id, temp_ticket_id)
+                            except Exception as pe:
+                                log.exception(f"Failed to execute immediate promotion for temp chat {temp_ticket_id}: {pe}")
                                 try:
-                                    await promote_worktree(group_id, tid)
-                                except Exception as pe:
-                                    log.exception(f"Failed to execute deferred promotion for task {tid}: {pe}")
+                                    await _post_system_msg(group_id, 0, f"⚠️ [沙箱合并失败] 临时会话自动合并失败: {pe}。请手动处理冲突。")
+                                except Exception:
+                                    pass
+                                    
+                        tickets = await get_jira().list_tickets(group_id)
+                        status_by_id = {t["ticket_id"]: t["status"] for t in tickets}
+                        
+                        for item in list(worktrees_dir.iterdir()):
+                            if item.is_dir() and item.name.startswith("task_"):
+                                tid = item.name[5:]
+                                if status_by_id.get(tid) == "done":
+                                    log.info(f"Draining deferred promotion for task {tid} in group {group_id}")
                                     try:
-                                        await _post_system_msg(group_id, 0, f"⚠️ [工作流系统错误] 工单 {tid} 自动合并失败: {pe}。请手动处理冲突。")
-                                    except Exception:
-                                        pass
-            except Exception as drain_err:
-                log.exception(f"Failed to execute group promotion drain: {drain_err}")
+                                        await promote_worktree(group_id, tid)
+                                    except Exception as pe:
+                                        log.exception(f"Failed to execute deferred promotion for task {tid}: {pe}")
+                                        try:
+                                            await _post_system_msg(group_id, 0, f"⚠️ [工作流系统错误] 工单 {tid} 自动合并失败: {pe}。请手动处理冲突。")
+                                        except Exception:
+                                            pass
+                except Exception as drain_err:
+                    log.exception(f"Failed to execute group promotion drain: {drain_err}")
+            
+            await asyncio.shield(_cleanup_finally())
     except Exception as e:
         log.exception("Workflow execution failed for group %d", group_id)
         from ai.client import AIError

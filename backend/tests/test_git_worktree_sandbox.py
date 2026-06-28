@@ -450,3 +450,65 @@ class TestGitWorktreeSandbox(unittest.IsolatedAsyncioTestCase):
         if worktrees_dir.exists():
             worktree_folders = [f for f in worktrees_dir.iterdir() if f.is_dir()]
             self.assertEqual(len(worktree_folders), 0)
+
+    @patch("core.runner.exec_registry")
+    async def test_nested_git_repo_promotion(self, mock_exec_registry):
+        class MockResult:
+            def __init__(self):
+                self.full_text = "success"
+                
+        class MockExecutor:
+            async def run(self, ctx):
+                # Write a nested file and initialize a nested git directory in the worktree
+                await write_file(
+                    bot_id=1,
+                    path="workspace/nested-project/test.txt",
+                    content="hello nested",
+                    group_id=ctx.group_id
+                )
+                # Create a nested .git directory and write some content in it
+                # We need to resolve the path within the active worktree (ctx.group_id, temp ticket)
+                from workspace.layout import group_dir
+                wt_workspace = group_dir(ctx.group_id) / "worktrees" / f"task_{ctx.active_ticket_id}" / "workspace"
+                nested_git = wt_workspace / "nested-project" / ".git"
+                nested_git.mkdir(parents=True, exist_ok=True)
+                (nested_git / "config").write_text("[core]\n\trepositoryformatversion = 0", encoding="utf-8")
+                
+                return MockResult()
+                
+        mock_executor = MockExecutor()
+        mock_exec_registry.get.return_value = mock_executor
+        
+        unit = WorkUnit(
+            bot={"id": 1, "name": "dev"},
+            trigger_msg="create nested git",
+            executor_id="mock_exec",
+            tag={},
+        )
+        
+        class MockStep:
+            def __init__(self):
+                self.announcements = []
+                self.confirm_gate = None
+                self.broadcast_state = False
+                self.done = True
+                self.next_units = []
+
+        class MockOrch:
+            def participant_count(self, group_id):
+                return 1
+            def observe(self, group_id, bot_id, full_text, signals=None):
+                return MockStep()
+        mock_orch = MockOrch()
+        
+        await run_unit(self.group_id, unit, mock_orch)
+        
+        # Verify the nested file and the nested .git directory were promoted back to the shared workspace
+        shared_project_dir = layout.group_shared_dir(self.group_id) / "workspace" / "nested-project"
+        self.assertTrue((shared_project_dir / "test.txt").exists())
+        
+        shared_nested_git = shared_project_dir / ".git"
+        self.assertTrue(shared_nested_git.exists())
+        self.assertTrue(shared_nested_git.is_dir())
+        self.assertTrue((shared_nested_git / "config").exists())
+        self.assertEqual((shared_nested_git / "config").read_text(encoding="utf-8"), "[core]\n\trepositoryformatversion = 0")

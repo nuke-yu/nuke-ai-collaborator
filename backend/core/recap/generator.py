@@ -20,6 +20,22 @@ def _prune_last_generated(now: float) -> None:
         del _last_generated[gid]
 
 
+from contextlib import nullcontext
+import os
+
+def _maybe_bind_group_db(group_id: int):
+    from db.context import current_db_path
+    if current_db_path.get():
+        return nullcontext()
+    from runtime.dbpaths import group_db_path
+    import db as _db
+    g_path = os.path.abspath(group_db_path(group_id))
+    c_path = os.path.abspath(_db.DB_PATH)
+    if g_path == c_path or "test" in os.path.basename(c_path):
+        return nullcontext()
+    return _db.bind_db(group_db_path(group_id))
+
+
 _GROUP_SYS = (
     "你是一个项目协作助手。请根据提供的最近聊天记录，生成一段 1-3 句的简短“缺席重回”摘要（Recap）。\n"
     "摘要要求：\n"
@@ -78,23 +94,84 @@ async def _summarize(messages: list, members: list, group_id: int, *, personal: 
     log_text = "\n".join(formatted)
     provider, model = _pick_provider_model(members)
     
+    import asyncio
+    # Fetch JIRA tickets from Group DB
+    tickets_info = []
+    try:
+        from db import get_db
+        async with get_db() as gdb:
+            async with gdb.execute(
+                "SELECT ticket_id, title, status, project FROM tickets WHERE group_id = ?",
+                (group_id,)
+            ) as cur:
+                rows = await cur.fetchall()
+                for r in rows:
+                    tickets_info.append(f"- {r[0]}: {r[1]} (状态: {r[2]}, 项目: {r[3] or '未分配'})")
+    except Exception as e:
+        log.warning(f"Failed to fetch tickets for recap: {e}")
+
+    # Fetch Git Status & Recent Commits
+    git_info = []
+    try:
+        from workspace import layout
+        shared_workspace = layout.group_shared_dir(group_id) / "workspace"
+        if shared_workspace.exists() and (shared_workspace / ".git").exists():
+            # Get recent 5 commits
+            proc = await asyncio.create_subprocess_exec(
+                "git", "log", "-n", "5", "--oneline",
+                cwd=str(shared_workspace),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, _ = await proc.communicate()
+            commits = stdout.decode("utf-8", errors="ignore").strip()
+            if commits:
+                git_info.append("最近 Git 提交记录：\n" + commits)
+            
+            # Get uncommitted status
+            proc_status = await asyncio.create_subprocess_exec(
+                "git", "status", "--porcelain",
+                cwd=str(shared_workspace),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout_status, _ = await proc_status.communicate()
+            status_out = stdout_status.decode("utf-8", errors="ignore").strip()
+            if status_out:
+                git_info.append("当前工作区未提交的文件变更：\n" + status_out)
+    except Exception as e:
+        log.warning(f"Failed to fetch git info for recap: {e}")
+
+    extra_parts = []
+    if tickets_info:
+        extra_parts.append("【Jira 看板任务状态】\n" + "\n".join(tickets_info))
+    if git_info:
+        extra_parts.append("【Git 代码库最新变更】\n" + "\n".join(git_info))
+    extra_context = "\n\n".join(extra_parts)
+
     from workspace.layout import get_group_language
     lang = get_group_language(group_id)
 
     if lang == "en":
         system_prompt = _PERSONAL_SYS_EN if personal else _GROUP_SYS_EN
         user_message = (
-            f"Here are the group messages you missed while away:\n\n{log_text}\n\nPlease generate your recap."
+            f"Here are the group messages you missed while away:\n\n{log_text}"
             if personal else
-            f"Here are the recent chat logs from the project collaboration:\n\n{log_text}\n\nPlease generate a short 1-3 sentence recap for a returning user."
+            f"Here are the recent chat logs from the project collaboration:\n\n{log_text}"
         )
+        if extra_context:
+            user_message += f"\n\nHere is the current system state (Git changes & Jira tickets status):\n{extra_context}"
+        user_message += "\n\nPlease generate your recap."
     else:
         system_prompt = _PERSONAL_SYS if personal else _GROUP_SYS
         user_message = (
-            f"以下是你离开期间错过的群聊消息：\n\n{log_text}\n\n请生成你的「缺席重回」摘要。"
+            f"以下是你离开期间错过的群聊消息：\n\n{log_text}"
             if personal else
-            f"以下是项目协作中最近的聊天记录：\n\n{log_text}\n\n请为重回项目的用户生成一段 1-3 句的简短“缺席重回”摘要（Recap）。"
+            f"以下是项目协作中最近的聊天记录：\n\n{log_text}"
         )
+        if extra_context:
+            user_message += f"\n\n以下是当前系统实际发生的数据变更（Git 代码库与 Jira 任务看板最新状态）：\n{extra_context}"
+        user_message += "\n\n请生成你的「缺席重回」摘要。"
 
     res = await call_ai_once(
         system_prompt=system_prompt,
@@ -129,44 +206,44 @@ async def generate_and_cache_recap(group_id: int, force: bool = False) -> str | 
 
     _generating_groups.add(group_id)
     try:
-        log.info("Starting recap generation for group %s", group_id)
-        # 1. Fetch members from Central DB and messages from Group Private DB
-        from db import global_db
-        async with global_db() as cdb:
-            members = await get_members(cdb, group_id)
-        async with get_db() as gdb:
-            messages = await get_messages(gdb, group_id, limit=30)
-        
-        if not messages:
-            log.info("No messages found in group %s to summarize", group_id)
-            return None
-
-        # 2-5. Summarize the recent group activity (shared helper)
-        summary = await _summarize(messages, members, group_id)
-        if not summary:
-            log.warning("Generated empty recap for group %s", group_id)
-            return None
-
-        # 6. Save the summary in the database (groups table in the central DB, hence passing db.DB_PATH explicitly)
-        async with write_connect(db.DB_PATH) as db_conn:
-            await db_conn.execute(
-                "UPDATE groups SET away_summary = ? WHERE id = ?",
-                (summary, group_id)
-            )
-            await db_conn.commit()
+        with _maybe_bind_group_db(group_id):
+            log.info("Starting recap generation for group %s", group_id)
+            # 1. Fetch members from Central DB and messages from Group Private DB
+            from db import global_db
+            async with global_db() as cdb:
+                members = await get_members(cdb, group_id)
+            async with get_db() as gdb:
+                messages = await get_messages(gdb, group_id, limit=30)
             
-        log.info("Recap generated and cached successfully for group %s: %s", group_id, summary)
-        _last_generated[group_id] = time.time()
-        
-        # 7. Broadcast the updated recap to websocket clients
-        await bus.broadcast(group_id, {
-            "type": "recap_updated",
-            "group_id": group_id,
-            "away_summary": summary
-        })
-        
-        return summary
-        
+            if not messages:
+                log.info("No messages found in group %s to summarize", group_id)
+                return None
+
+            # 2-5. Summarize the recent group activity (shared helper)
+            summary = await _summarize(messages, members, group_id)
+            if not summary:
+                log.warning("Generated empty recap for group %s", group_id)
+                return None
+
+            # 6. Save the summary in the database (groups table in the central DB, hence passing db.DB_PATH explicitly)
+            async with write_connect(db.DB_PATH) as db_conn:
+                await db_conn.execute(
+                    "UPDATE groups SET away_summary = ? WHERE id = ?",
+                    (summary, group_id)
+                )
+                await db_conn.commit()
+                
+            log.info("Recap generated and cached successfully for group %s: %s", group_id, summary)
+            _last_generated[group_id] = time.time()
+            
+            # 7. Broadcast the updated recap to websocket clients
+            await bus.broadcast(group_id, {
+                "type": "recap_updated",
+                "group_id": group_id,
+                "away_summary": summary
+            })
+            
+            return summary
     except Exception as e:
         log.error("Failed to generate and cache recap for group %s: %r", group_id, e, exc_info=True)
         return None
@@ -204,29 +281,30 @@ async def generate_personal_recap(group_id: int, member_id: int) -> dict:
     成员/消息分属 central/group 库，分别用 global_db()/get_db() 读。
     """
     try:
-        from db import global_db
-        async with get_db() as gdb:
-            cur = await gdb.execute(
-                "SELECT last_read_id, last_recap_ack_id FROM member_read WHERE member_id = ? AND group_id = ?",
-                (member_id, group_id),
-            )
-            row = await cur.fetchone()
-            last_read = (row[0] if row else 0) or 0
-            last_ack = (row[1] if row else 0) or 0
-            # 门槛 = max(已读, 已确认)：未读才弹，但点 ✕ (ack) 能压制这批；
-            # 对从未离开、已读到最新的用户不会误弹。after_id 升序取门槛之后的消息（cap 30）。
-            anchor = max(last_read, last_ack)
-            messages = await get_messages(gdb, group_id, limit=30, after_id=anchor)
+        with _maybe_bind_group_db(group_id):
+            from db import global_db
+            async with get_db() as gdb:
+                cur = await gdb.execute(
+                    "SELECT last_read_id, last_recap_ack_id FROM member_read WHERE member_id = ? AND group_id = ?",
+                    (member_id, group_id),
+                )
+                row = await cur.fetchone()
+                last_read = (row[0] if row else 0) or 0
+                last_ack = (row[1] if row else 0) or 0
+                # 门槛 = max(已读, 已确认)：未读才弹，但点 ✕ (ack) 能压制这批；
+                # 对从未离开、已读到最新的用户不会误弹。after_id 升序取门槛之后的消息（cap 30）。
+                anchor = max(last_read, last_ack)
+                messages = await get_messages(gdb, group_id, limit=30, after_id=anchor)
 
-        if not messages:
-            return {"unread_count": 0, "summary": None, "covered_through_id": 0}
+            if not messages:
+                return {"unread_count": 0, "summary": None, "covered_through_id": 0}
 
-        async with global_db() as cdb:
-            members = await get_members(cdb, group_id)
+            async with global_db() as cdb:
+                members = await get_members(cdb, group_id)
 
-        summary = await _summarize(messages, members, group_id, personal=True)
-        covered_through_id = messages[-1]["id"]
-        return {"unread_count": len(messages), "summary": summary, "covered_through_id": covered_through_id}
+            summary = await _summarize(messages, members, group_id, personal=True)
+            covered_through_id = messages[-1]["id"]
+            return {"unread_count": len(messages), "summary": summary, "covered_through_id": covered_through_id}
     except Exception as e:
         from db.errors import is_missing_schema_error
         if is_missing_schema_error(e):
