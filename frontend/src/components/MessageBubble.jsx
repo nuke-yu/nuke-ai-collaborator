@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, memo } from 'react'
+import { useState, useRef, useEffect, useCallback, useMemo, memo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { K } from '../i18n/keys'
 import ReactMarkdown from 'react-markdown'
@@ -94,74 +94,7 @@ function MentionText({ children }) {
   )
 }
 
-const mdComponents = {
-  code({ node, inline, className, children, ...props }) {
-    const match = /language-(\w+)/.exec(className || '')
-    const language = match?.[1] || ''
-    const code = String(children).replace(/\n$/, '')
-    
-    // Point 5: Terminal Aesthetic for Shell Commands
-    if (!inline && (language === 'bash' || language === 'shell' || code.startsWith('exit_code:'))) {
-      return (
-        <div className="my-2 rounded-lg overflow-hidden border border-gray-700 shadow-xl">
-          <div className="bg-gray-800 px-3 py-1.5 flex items-center gap-1.5 border-b border-gray-700">
-            <div className="flex gap-1">
-              <div className="w-2.5 h-2.5 rounded-full bg-red-500/50" />
-              <div className="w-2.5 h-2.5 rounded-full bg-yellow-500/50" />
-              <div className="w-2.5 h-2.5 rounded-full bg-green-500/50" />
-            </div>
-            <span className="text-[10px] text-gray-500 font-mono uppercase tracking-wider ml-1">Terminal — {language || 'output'}</span>
-          </div>
-          <div className="bg-black p-4 font-mono text-[13px] leading-relaxed overflow-x-auto selection:bg-indigo-500/30">
-            <div className="text-green-400/90 mb-1 flex gap-2">
-              <span className="shrink-0 text-indigo-500/70 select-none">🤖 $</span>
-              <span className="whitespace-pre-wrap text-indigo-100/90">{code}</span>
-            </div>
-          </div>
-        </div>
-      )
-    }
-
-    if (!inline && (match || code.includes('\n'))) {
-      return <CollapsibleCode language={language} code={code} />
-    }
-    return (
-      <code className="bg-gray-700 text-pink-300 rounded px-1 py-0.5 text-xs font-mono" {...props}>
-        {children}
-      </code>
-    )
-  },
-  p({ children }) {
-    return <p className="mb-1 last:mb-0"><MentionText>{children}</MentionText></p>
-  },
-  li({ children }) {
-    return <li><MentionText>{children}</MentionText></li>
-  },
-  a({ href, children }) {
-    return <a href={href} target="_blank" rel="noreferrer" className="text-indigo-400 underline hover:text-indigo-300">{children}</a>
-  },
-  blockquote({ children }) {
-    return <blockquote className="border-l-2 border-gray-500 pl-3 text-gray-400 my-1">{children}</blockquote>
-  },
-  ul({ children }) {
-    return <ul className="list-disc list-inside space-y-0.5 my-1">{children}</ul>
-  },
-  ol({ children }) {
-    return <ol className="list-decimal list-inside space-y-0.5 my-1">{children}</ol>
-  },
-  h1({ children }) { return <h1 className="text-base font-bold mt-2 mb-1">{children}</h1> },
-  h2({ children }) { return <h2 className="text-sm font-bold mt-2 mb-1">{children}</h2> },
-  h3({ children }) { return <h3 className="text-sm font-semibold mt-1 mb-0.5">{children}</h3> },
-  table({ children }) {
-    return <div className="overflow-x-auto my-2"><table className="text-xs border-collapse">{children}</table></div>
-  },
-  th({ children }) {
-    return <th className="border border-gray-600 px-2 py-1 bg-gray-700 font-semibold">{children}</th>
-  },
-  td({ children }) {
-    return <td className="border border-gray-600 px-2 py-1">{children}</td>
-  },
-}
+const mdComponentsPlaceholder = null;
 
 function SkillsStrip({ skills }) {
   const { t } = useTranslation()
@@ -219,6 +152,85 @@ function MessageBubble({ msg, isTyping, currentMemberId, members = [], readMap =
   const editRef = useRef(null)
   const isOwn = msg.member_id === currentMemberId
   const closeEmojiPicker = useCallback(() => setShowEmojiPicker(false), [])
+
+  const mdComponents = useMemo(() => ({
+    code({ node, inline, className, children, ...props }) {
+      const match = /language-(\w+)/.exec(className || '')
+      const language = match?.[1] || ''
+      const code = String(children).replace(/\n$/, '')
+      
+      // Point 5: Terminal Aesthetic for Shell Commands
+      if (!inline && (language === 'bash' || language === 'shell' || code.startsWith('exit_code:'))) {
+        return (
+          <div className="my-2 rounded-lg overflow-hidden border border-gray-700 shadow-xl">
+            <div className="bg-gray-800 px-3 py-1.5 flex items-center gap-1.5 border-b border-gray-700">
+              <div className="flex gap-1">
+                <div className="w-2.5 h-2.5 rounded-full bg-red-500/50" />
+                <div className="w-2.5 h-2.5 rounded-full bg-yellow-500/50" />
+                <div className="w-2.5 h-2.5 rounded-full bg-green-500/50" />
+              </div>
+              <span className="text-[10px] text-gray-500 font-mono uppercase tracking-wider ml-1">Terminal — {language || 'output'}</span>
+            </div>
+            <div className="bg-black p-4 font-mono text-[13px] leading-relaxed overflow-x-auto selection:bg-indigo-500/30">
+              <div className="text-green-400/90 mb-1 flex gap-2">
+                <span className="shrink-0 text-indigo-500/70 select-none">🤖 $</span>
+                <span className="whitespace-pre-wrap text-indigo-100/90">{code}</span>
+              </div>
+            </div>
+          </div>
+        )
+      }
+
+      if (!inline && (match || code.includes('\n'))) {
+        return <CollapsibleCode language={language} code={code} />
+      }
+      return (
+        <code className="bg-gray-700 text-pink-300 rounded px-1 py-0.5 text-xs font-mono" {...props}>
+          {children}
+        </code>
+      )
+    },
+    p({ children }) {
+      return <p className="mb-1 last:mb-0"><MentionText>{children}</MentionText></p>
+    },
+    li({ children }) {
+      return <li><MentionText>{children}</MentionText></li>
+    },
+    a({ href, children }) {
+      return <a href={href} target="_blank" rel="noreferrer" className="text-indigo-400 underline hover:text-indigo-300">{children}</a>
+    },
+    blockquote({ children }) {
+      return <blockquote className="border-l-2 border-gray-500 pl-3 text-gray-400 my-1">{children}</blockquote>
+    },
+    ul({ children }) {
+      return <ul className="list-disc list-inside space-y-0.5 my-1">{children}</ul>
+    },
+    ol({ children }) {
+      return <ol className="list-decimal list-inside space-y-0.5 my-1">{children}</ol>
+    },
+    h1({ children }) { return <h1 className="text-base font-bold mt-2 mb-1">{children}</h1> },
+    h2({ children }) { return <h2 className="text-sm font-bold mt-2 mb-1">{children}</h2> },
+    h3({ children }) { return <h3 className="text-sm font-semibold mt-1 mb-0.5">{children}</h3> },
+    table({ children }) {
+      return <div className="overflow-x-auto my-2"><table className="text-xs border-collapse">{children}</table></div>
+    },
+    th({ children }) {
+      return <th className="border border-gray-600 px-2 py-1 bg-gray-700 font-semibold">{children}</th>
+    },
+    td({ children }) {
+      return <td className="border border-gray-600 px-2 py-1">{children}</td>
+    },
+    img({ src, alt }) {
+      return (
+        <img
+          src={src}
+          alt={alt}
+          className="mt-2 w-full max-w-4xl max-h-[600px] rounded-lg object-contain cursor-zoom-in hover:opacity-95 transition-opacity border border-gray-700/50 shadow-md"
+          onClick={() => setLightboxSrc(src)}
+        />
+      )
+    }
+  }), [setLightboxSrc, t, K])
 
   useEffect(() => { if (editing) editRef.current?.focus() }, [editing])
 
@@ -433,7 +445,7 @@ function MessageBubble({ msg, isTyping, currentMemberId, members = [], readMap =
               <img
                 src={msg.file_url}
                 alt={msg.file_name || t(K.message.image)}
-                className="mt-1.5 max-w-xs max-h-64 rounded-lg object-contain cursor-zoom-in hover:opacity-90 transition-opacity"
+                className="mt-1.5 w-full max-w-4xl max-h-[600px] rounded-lg object-contain cursor-zoom-in hover:opacity-90 transition-opacity border border-gray-700/50 shadow-md"
                 onClick={() => setLightboxSrc(msg.file_url)}
               />
             )}
