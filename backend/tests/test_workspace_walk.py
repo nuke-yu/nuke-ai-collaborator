@@ -49,7 +49,7 @@ class TestWalkVisible(unittest.TestCase):
             # 用精确路径成员判断，避免 ".git" 子串误命中 ".gitignore"
             self.assertNotIn("node_modules", rels)            # 重型目录仍剪
             self.assertNotIn("node_modules/a.js", rels)
-            self.assertNotIn(".git", rels)                    # .git 在忽略集，仍剪
+            self.assertIn(".git", rels)                       # .git 作为条目放行
             self.assertNotIn(".git/HEAD", rels)
 
     def test_truncates_at_cap(self):
