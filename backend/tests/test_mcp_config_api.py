@@ -133,3 +133,11 @@ def test_mcp_config_masking(client, temp_mcp_config):
     with open(temp_mcp_config, "r", encoding="utf-8") as f:
         file_data = json.load(f)
     assert file_data["mcpServers"]["test-server"]["env"]["API_KEY"] == "new_secret_key"
+
+
+def test_get_mcp_config_corrupted_json(client, temp_mcp_config):
+    with open(temp_mcp_config, "w", encoding="utf-8") as f:
+        f.write("{invalid_json:}")
+    response = client.get("/api/config/mcp")
+    assert response.status_code == 500
+    assert "corrupted/invalid JSON" in response.json()["detail"]

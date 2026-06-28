@@ -112,8 +112,10 @@ async def get_mcp_config():
         with path.open("r", encoding="utf-8") as f:
             data = json.load(f)
             return _mask_mcp_config(data)
-    except Exception:
-        return {"mcpServers": {}}
+    except json.JSONDecodeError as e:
+        raise HTTPException(500, f"MCP config file is corrupted/invalid JSON: {e}")
+    except Exception as e:
+        raise HTTPException(500, f"Failed to read MCP config: {e}")
 
 
 @router.put("/api/config/mcp")
