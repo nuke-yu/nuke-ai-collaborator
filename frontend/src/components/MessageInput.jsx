@@ -86,7 +86,7 @@ const MessageInput = forwardRef(function MessageInput({ onSend, members = [], di
     setUploadError(null)
     setUploading(true)
     try {
-      const data = await uploadFile(file)
+      const data = await uploadFile(file, groupId)
       setPendingFile(data)
     } catch (err) {
       setUploadError(err.message)
@@ -193,7 +193,7 @@ const MessageInput = forwardRef(function MessageInput({ onSend, members = [], di
         {pendingFile && (
           <div className="flex items-center gap-2 px-4 pt-2.5 pb-2 border-b border-gray-700">
             {pendingFile.type?.startsWith('image/') ? (
-              <img src={pendingFile.url} alt={pendingFile.name} className="h-16 w-16 object-cover rounded-lg flex-shrink-0" />
+              <img src={pendingFile.preview_url || pendingFile.url} alt={pendingFile.name} className="h-16 w-16 object-cover rounded-lg flex-shrink-0" />
             ) : (
               <div className="flex items-center gap-2 bg-gray-700 rounded-lg px-3 py-2">
                 <span className="text-lg">📄</span>

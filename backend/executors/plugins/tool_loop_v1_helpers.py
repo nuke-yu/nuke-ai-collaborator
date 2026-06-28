@@ -1,6 +1,7 @@
 import asyncio
 import uuid
 import sys
+import re
 import json
 import logging
 import aiosqlite
@@ -519,7 +520,9 @@ async def cleanup_and_finalize(runner) -> ExecutionResult:
         "session_id": runner.session_id,
     }
     if attached:
-        save_payload["file_url"] = attached["url"]
+        from core import media as _media
+        # DB stores the canonical ref; the live payload carries a freshly-signed URL.
+        save_payload["file_url"] = _media.presign(attached["url"])
         save_payload["file_name"] = attached["name"]
         save_payload["file_type"] = attached["type"]
 
@@ -814,89 +817,59 @@ async def build_reinject(runner) -> str:
     return "\n\n".join(parts)
 
 
+_MCPSHOT_RE = re.compile(r"__mcpshot__:([A-Za-z0-9._-]+)")
+
+
 def _check_and_attach_file(runner, tool_result: str) -> tuple[str, bool]:
-    """Scans tool_result for image file references.
-    If found, moves/copies the file to UPLOAD_DIR and updates tool_result to use the /uploads/ URL.
-    Returns (updated_tool_result, is_modified).
+    """Promote MCP screenshot markers into the owning group's private media dir.
+
+    The collector stages screenshot bytes (group-agnostic) and emits a
+    ``__mcpshot__:<filename>`` marker. Here, in the group-aware worker, we move
+    each staged file into ``group_<gid>/media/screenshots/`` and record the
+    canonical ``/media/...`` ref as the message attachment (it gets presigned on
+    read). The marker is rewritten to a clean note so the model context stays tidy.
+
+    Only this explicit marker is handled — we deliberately do NOT scan arbitrary
+    tool output for filenames (the previous version copied AND deleted any
+    workspace file whose name appeared in any tool result, which was silent data
+    loss and a cross-group leak).
     """
-    if not isinstance(tool_result, str):
+    if not isinstance(tool_result, str) or "__mcpshot__:" not in tool_result:
         return tool_result, False
-    
-    import re
-    import os
+
     import shutil
-    import uuid
-    from pathlib import Path
-    from api.messages import UPLOAD_DIR
+    from core import media as _media
+    from workspace import layout
 
-    # 1. If it's already an upload URL, just attach and return
-    match_url = re.search(r"(/uploads/mcp-screenshot-[a-zA-Z0-9\-]+\.(?:png|jpg|jpeg|gif|webp))", tool_result)
-    if match_url:
-        img_url = match_url.group(1)
-        filename = img_url.split("/")[-1]
-        ext = filename.split(".")[-1]
-        mime_type = f"image/{ext}"
-        if ext == "jpg":
-            mime_type = "image/jpeg"
-        if "attached_file" not in runner.execution_ctx:
-            runner.execution_ctx["attached_file"] = {
-                "url": img_url,
-                "name": filename,
-                "type": mime_type,
-            }
-        return tool_result, True
+    group_id = runner.ctx.group_id
+    if not group_id:
+        return tool_result, False
 
-    # 2. Check for local filename patterns
-    matches = re.findall(r"([a-zA-Z0-9_\-\./]+\.(?:png|jpg|jpeg|gif|webp))", tool_result)
+    staging = layout.media_staging_dir()
+    dest_dir = layout.group_media_dir(group_id, "screenshots")
     modified = False
-    for m in matches:
-        clean_name = m.lstrip("./").lstrip("/")
-        possible_paths = [
-            Path(clean_name),
-            Path("backend") / clean_name,
-            Path(__file__).parent.parent.parent.parent / clean_name,
-            Path(__file__).parent.parent.parent.parent / "backend" / clean_name
-        ]
-        group_id = runner.ctx.group_id
-        if group_id:
-            from workspace import group_workspace as _group_ws
-            ws_path = _group_ws(group_id)
-            if ws_path:
-                possible_paths.append(Path(ws_path) / clean_name)
-                possible_paths.append(Path(ws_path) / "shared" / clean_name)
-                possible_paths.append(Path(ws_path) / "shared" / "workspace" / clean_name)
-                possible_paths.append(Path(ws_path) / "workspace" / clean_name)
 
-        for p in possible_paths:
-            if p.exists() and p.is_file():
-                try:
-                    ext = p.suffix
-                    new_filename = f"mcp-screenshot-{uuid.uuid4()}{ext}"
-                    dest_path = UPLOAD_DIR / new_filename
-                    shutil.copy2(p, dest_path)
-                    try:
-                        os.remove(p)
-                    except Exception:
-                        pass
-                    
-                    img_url = f"/uploads/{new_filename}"
-                    mime_type = f"image/{ext.lstrip('.')}"
-                    if ext == ".jpg":
-                        mime_type = "image/jpeg"
-                        
-                    if "attached_file" not in runner.execution_ctx:
-                        runner.execution_ctx["attached_file"] = {
-                            "url": img_url,
-                            "name": new_filename,
-                            "type": mime_type,
-                        }
-                    # Replace the reference in the tool_result text so it renders in markdown
-                    tool_result = tool_result.replace(m, img_url)
-                    modified = True
-                    break
-                except Exception as e:
-                    import logging
-                    logging.getLogger(__name__).error(f"Failed to copy local file {p}: {e}")
-            
+    for filename in _MCPSHOT_RE.findall(tool_result):
+        if not _media.is_safe_filename(filename):
+            continue
+        src = staging / filename
+        ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else "png"
+        mime_type = "image/jpeg" if ext == "jpg" else f"image/{ext}"
+        try:
+            if src.exists() and src.is_file():
+                dest_dir.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(src), str(dest_dir / filename))
+            ref = _media.canonical_ref(group_id, "screenshots", filename)
+            if "attached_file" not in runner.execution_ctx:
+                runner.execution_ctx["attached_file"] = {
+                    "url": ref, "name": filename, "type": mime_type,
+                }
+            modified = True
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"Failed to promote MCP screenshot {filename}: {e}")
+
+    # Strip the internal marker from the model-facing text.
+    tool_result = _MCPSHOT_RE.sub("screenshot attached", tool_result)
     return tool_result, modified
 

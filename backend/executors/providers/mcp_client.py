@@ -531,16 +531,20 @@ class McpClientToolProvider(ToolProvider):
                 texts = []
                 import uuid
                 import base64
-                from api.messages import UPLOAD_DIR
                 for block in result.content:
-                    block_type = getattr(block, "type", None)
-                    is_image = block_type == "image" or (hasattr(block, "data") and hasattr(block, "mimeType"))
-                    if is_image:
+                    # MCP ImageContent always carries type=="image"; rely on that
+                    # (a loose hasattr check matches any object incl. mocks).
+                    if getattr(block, "type", None) == "image":
                         try:
+                            # The collector is group-agnostic (MCP single-process
+                            # principle): drop image bytes into a shared staging dir and
+                            # emit a marker; the group-aware worker moves it into the
+                            # owning group's media/screenshots/ and mints the ref.
+                            from workspace import layout
                             data_str = getattr(block, "data", "")
                             mime_type = getattr(block, "mimeType", "image/png")
                             img_data = base64.b64decode(data_str)
-                            
+
                             ext = ".png"
                             if "jpeg" in mime_type or "jpg" in mime_type:
                                 ext = ".jpg"
@@ -548,15 +552,14 @@ class McpClientToolProvider(ToolProvider):
                                 ext = ".gif"
                             elif "webp" in mime_type:
                                 ext = ".webp"
-                                
+
+                            staging = layout.media_staging_dir()
+                            staging.mkdir(parents=True, exist_ok=True)
                             filename = f"mcp-screenshot-{uuid.uuid4()}{ext}"
-                            file_path = UPLOAD_DIR / filename
-                            file_path.write_bytes(img_data)
-                            
-                            url = f"/uploads/{filename}"
-                            texts.append(f"[Screenshot saved to: {url}]")
+                            (staging / filename).write_bytes(img_data)
+                            texts.append(f"[Screenshot captured: __mcpshot__:{filename}]")
                         except Exception as e:
-                            logger.error(f"Failed to save MCP image block: {e}", exc_info=True)
+                            logger.error(f"Failed to stage MCP image block: {e}", exc_info=True)
                             texts.append(f"[Failed to save image: {e}]")
                     else:
                         texts.append(block.text if hasattr(block, "text") else str(block))

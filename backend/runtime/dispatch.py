@@ -47,7 +47,8 @@ async def dispatch_user_message(msg: dict) -> None:
     gid = msg["group_id"]
     sender_id = msg.get("member_id")
     content = (msg.get("content") or "").strip()
-    file_url = msg.get("file_url")
+    from core import media
+    file_url = media.canonicalize(msg.get("file_url"))  # persist stable ref, never a signed URL
     file_name = msg.get("file_name")
     file_size = msg.get("file_size")
     file_type = msg.get("file_type")
@@ -74,6 +75,7 @@ async def dispatch_user_message(msg: dict) -> None:
         saved = next((m for m in recent if m["id"] == msg_id), {})
 
     # echo the user's own message back out (Supervisor fans it to the group)
+    media.presign_message(saved)  # canonical in DB → signed URL on the wire
     await bus.publish(Message(group_id=gid, **{
         k: v for k, v in saved.items() if k in _MESSAGE_FIELDS and k != "group_id"
     }))

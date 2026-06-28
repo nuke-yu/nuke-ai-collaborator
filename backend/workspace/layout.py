@@ -39,6 +39,23 @@ def group_runs_dir(gid: int) -> Path:
     return group_dir(gid) / "runs"
 
 
+def group_media_dir(gid: int, kind: str) -> Path:
+    """Per-group private media (kind ∈ uploads|screenshots).
+
+    Deliberately a sibling of `shared/` — NOT under the workspace — so media
+    never enters git worktrees, promotions, or the bot's file-tree context.
+    Served only via signed /media URLs (see core.media).
+    """
+    return group_dir(gid) / "media" / kind
+
+
+def media_staging_dir() -> Path:
+    """Group-agnostic staging area where the (group-unaware) MCP collector drops
+    screenshot bytes; the worker then moves them into the owning group's
+    `media/screenshots/`. Kept off any group path on purpose."""
+    return _root() / "_media_staging"
+
+
 def group_roles_dir(gid: int) -> Path:
     return group_dir(gid) / "roles"
 

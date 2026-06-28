@@ -30,12 +30,15 @@ async def dispatch_query(msg: dict) -> None:
 
 async def _run_query(gid: int, kind: str, msg: dict):
     if kind == "messages":
+        from core import media
         limit = int(msg.get("limit") or 50)
         async with db.get_db() as conn:
             msgs = await db.get_messages(
                 conn, gid, limit=limit,
                 before_id=msg.get("before_id"), after_id=msg.get("after_id"),
             )
+        for m in msgs:
+            media.presign_message(m)  # canonical /media ref in DB → fresh signed URL on read
         return {"messages": msgs, "has_more": len(msgs) == limit}
 
     if kind == "search":
@@ -68,8 +71,12 @@ async def _run_query(gid: int, kind: str, msg: dict):
             return await db.get_reactions_for_group(conn, gid)
 
     if kind == "pins":
+        from core import media
         async with db.get_db() as conn:
-            return await db.get_pinned_messages(conn, gid)
+            pins = await db.get_pinned_messages(conn, gid)
+        for m in pins:
+            media.presign_message(m)
+        return pins
 
     raise ValueError(f"unknown query kind: {kind!r}")
 

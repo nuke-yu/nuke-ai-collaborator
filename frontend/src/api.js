@@ -90,9 +90,10 @@ export async function saveConfig(data) {
   return res.json()
 }
 
-export async function uploadFile(file) {
+export async function uploadFile(file, groupId) {
   const form = new FormData()
   form.append('file', file)
+  form.append('group_id', groupId)
   const res = await authFetch('/api/upload', { method: 'POST', body: form })
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))

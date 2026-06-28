@@ -31,9 +31,25 @@ from api.workspace import router as workspace_router, preview_router as workspac
 from api.sessions import router as sessions_router
 from api.auth import router as auth_router
 from api.config import router as config_router
+from api.media import router as media_router
 from permissions.routes import router as permissions_router
 from api.skills import router as skills_router
 from executors import registry
+
+async def _media_reaper_loop():
+    """Purge old MCP screenshots + orphaned staging files every 6h. User uploads untouched."""
+    from core import media
+    while True:
+        try:
+            await asyncio.sleep(6 * 3600)
+            removed = await asyncio.to_thread(media.reap_screenshots)
+            if removed:
+                logging.getLogger("main").info("media reaper removed %d screenshot/staging files", removed)
+        except asyncio.CancelledError:
+            break
+        except Exception:
+            logging.getLogger("main").exception("media reaper iteration failed")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -71,10 +87,14 @@ async def lifespan(app: FastAPI):
     
     # 5. Start Global Scheduler
     await scheduler.start()
-    
+
+    # 6. Periodic media reaper (purges old MCP screenshots + orphaned staging; never uploads)
+    media_reaper_task = asyncio.create_task(_media_reaper_loop())
+
     yield
-    
+
     # Teardown
+    media_reaper_task.cancel()
     scheduler.stop()   # sync (returns None); awaiting it raised TypeError on teardown
     await sup.stop()
     from executors.tool_router import router as tool_router
@@ -119,6 +139,9 @@ app.include_router(workspace_router, dependencies=[Depends(auth.get_current_user
 # Preview self-authenticates via the JWT in its URL path (no header), so it must
 # NOT carry the router-level get_current_user dependency.
 app.include_router(workspace_preview_router)
+# Media self-authenticates via the HMAC signature in its query string (an <img>
+# tag can't send a Bearer header), so likewise NO get_current_user dependency.
+app.include_router(media_router)
 app.include_router(sessions_router, dependencies=[Depends(auth.get_current_user)])
 app.include_router(permissions_router, dependencies=[Depends(auth.get_current_user)])
 app.include_router(skills_router, dependencies=[Depends(auth.get_current_user)])
@@ -438,7 +461,7 @@ if _FRONTEND_DIST and os.path.isdir(_FRONTEND_DIST):
     from fastapi.responses import FileResponse
 
     _DIST = _Path(_FRONTEND_DIST).resolve()
-    _NON_SPA_PREFIXES = ("api/", "ws/", "health", "metrics", "uploads", "mcp/")
+    _NON_SPA_PREFIXES = ("api/", "ws/", "health", "metrics", "uploads", "media/", "mcp/")
 
     @app.get("/{full_path:path}", include_in_schema=False)
     async def _serve_spa(full_path: str):

@@ -225,7 +225,7 @@ function MessageBubble({ msg, isTyping, currentMemberId, members = [], readMap =
         <img
           src={src}
           alt={alt}
-          className="mt-2 w-full max-w-full max-h-[85vh] rounded-lg object-contain cursor-zoom-in hover:opacity-95 transition-opacity border border-gray-700/50 shadow-md"
+          className="mt-2 w-full h-auto max-w-full rounded-lg cursor-zoom-in hover:opacity-95 transition-opacity border border-gray-700/50 shadow-md"
           onClick={() => setLightboxSrc(src)}
         />
       )
@@ -445,7 +445,7 @@ function MessageBubble({ msg, isTyping, currentMemberId, members = [], readMap =
               <img
                 src={msg.file_url}
                 alt={msg.file_name || t(K.message.image)}
-                className="mt-1.5 w-full max-w-full max-h-[85vh] rounded-lg object-contain cursor-zoom-in hover:opacity-90 transition-opacity border border-gray-700/50 shadow-md"
+                className="mt-1.5 w-full h-auto max-w-full rounded-lg cursor-zoom-in hover:opacity-90 transition-opacity border border-gray-700/50 shadow-md"
                 onClick={() => setLightboxSrc(msg.file_url)}
               />
             )}
