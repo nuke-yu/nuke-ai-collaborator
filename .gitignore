@@ -25,6 +25,7 @@ logs/
 backend/test_*.db
 backend/test_workspaces/
 backend/test_ws_*/
+backend/test_skills_api_ws/
 
 # API Keys & config
 .env
