@@ -98,7 +98,16 @@ export const useChatStore = create((set, get) => ({
       const finalize = (ms) =>
         ms.map((m) =>
           m.temp_id === data.temp_id
-            ? { ...m, id: data.id, created_at: data.created_at, streaming: false, temp_id: undefined }
+            ? {
+                ...m,
+                id: data.id,
+                created_at: data.created_at,
+                streaming: false,
+                temp_id: undefined,
+                file_url: data.file_url,
+                file_name: data.file_name,
+                file_type: data.file_type
+              }
             : m
         )
       set((s) => ({ messages: finalize(s.messages) }))

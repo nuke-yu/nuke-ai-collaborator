@@ -494,21 +494,36 @@ async def cleanup_and_finalize(runner) -> ExecutionResult:
         await runner.ctx.interaction.update_session_status(runner.session_id, "completed")
         return ExecutionResult(full_text=runner.full_text, msg_id=None, signals=signals)
 
+    attached = runner.execution_ctx.get("attached_file")
+    save_kwargs = {
+        "input_tokens": runner.ai_service.usage.input_tokens or None,
+        "output_tokens": runner.ai_service.usage.output_tokens or None,
+        "cache_read_tokens": runner.ai_service.usage.cache_read_tokens or None,
+        "cache_creation_tokens": runner.ai_service.usage.cache_creation_tokens or None,
+    }
+    if attached:
+        save_kwargs["file_url"] = attached["url"]
+        save_kwargs["file_name"] = attached["name"]
+        save_kwargs["file_type"] = attached["type"]
+
     msg_id = await runner.ctx.interaction.save_message(
         runner.ctx.group_id, runner.bot["id"], runner.full_text,
-        input_tokens=runner.ai_service.usage.input_tokens or None,
-        output_tokens=runner.ai_service.usage.output_tokens or None,
-        cache_read_tokens=runner.ai_service.usage.cache_read_tokens or None,
-        cache_creation_tokens=runner.ai_service.usage.cache_creation_tokens or None,
+        **save_kwargs
     )
 
-    await runner.ctx.interaction.broadcast(runner.ctx.group_id, {
+    save_payload = {
         "type": "stream_end", "temp_id": runner.temp_id, "id": msg_id,
         "member_id": runner.bot["id"], "sender_name": runner.bot["name"],
         "preview": runner.full_text[:100],
         "created_at": "",
         "session_id": runner.session_id,
-    })
+    }
+    if attached:
+        save_payload["file_url"] = attached["url"]
+        save_payload["file_name"] = attached["name"]
+        save_payload["file_type"] = attached["type"]
+
+    await runner.ctx.interaction.broadcast(runner.ctx.group_id, save_payload)
 
     tool_names_called = [
         m["name"] for m in runner.messages
@@ -587,6 +602,7 @@ async def execute_parallel_tools(runner, calls, iteration=None) -> None:
     _duration = round(asyncio.get_event_loop().time() - _t0, 2)
 
     for call, (tool_result, is_error) in zip(calls, raw_results):
+        _check_and_attach_file(runner, tool_result)
         await runner.ctx.interaction.append_session_event(runner.session_id, "tool_result", {
             "tool_call_id": call["id"],
             "tool_name": call["name"],
@@ -647,6 +663,7 @@ async def execute_serial_tools(runner, calls, iteration=None) -> None:
         tool_result, is_error = await dispatch_tool(
             call["name"], call["arguments"], runner.execution_ctx
         )
+        _check_and_attach_file(runner, tool_result)
         _duration = round(asyncio.get_event_loop().time() - _t0, 2)
 
         await runner.ctx.interaction.append_session_event(runner.session_id, "tool_result", {
@@ -795,4 +812,24 @@ async def build_reinject(runner) -> str:
     invoked = build_invoked_skills_block(getattr(runner, "invoked_skills", {}))
     parts = [p for p in [fresh_prefix, invoked, ft_xml, file_contents] if p]
     return "\n\n".join(parts)
+
+
+def _check_and_attach_file(runner, tool_result: str):
+    if not isinstance(tool_result, str):
+        return
+    import re
+    match = re.search(r"(/uploads/mcp-screenshot-[a-zA-Z0-9\-]+\.(?:png|jpg|jpeg|gif|webp))", tool_result)
+    if match:
+        img_url = match.group(1)
+        filename = img_url.split("/")[-1]
+        ext = filename.split(".")[-1]
+        mime_type = f"image/{ext}"
+        if ext == "jpg":
+            mime_type = "image/jpeg"
+        if "attached_file" not in runner.execution_ctx:
+            runner.execution_ctx["attached_file"] = {
+                "url": img_url,
+                "name": filename,
+                "type": mime_type,
+            }
 

@@ -529,8 +529,37 @@ class McpClientToolProvider(ToolProvider):
                     timeout=self._call_timeout,
                 )
                 texts = []
+                import uuid
+                import base64
+                from api.messages import UPLOAD_DIR
                 for block in result.content:
-                    texts.append(block.text if hasattr(block, "text") else str(block))
+                    block_type = getattr(block, "type", None)
+                    is_image = block_type == "image" or (hasattr(block, "data") and hasattr(block, "mimeType"))
+                    if is_image:
+                        try:
+                            data_str = getattr(block, "data", "")
+                            mime_type = getattr(block, "mimeType", "image/png")
+                            img_data = base64.b64decode(data_str)
+                            
+                            ext = ".png"
+                            if "jpeg" in mime_type or "jpg" in mime_type:
+                                ext = ".jpg"
+                            elif "gif" in mime_type:
+                                ext = ".gif"
+                            elif "webp" in mime_type:
+                                ext = ".webp"
+                                
+                            filename = f"mcp-screenshot-{uuid.uuid4()}{ext}"
+                            file_path = UPLOAD_DIR / filename
+                            file_path.write_bytes(img_data)
+                            
+                            url = f"/uploads/{filename}"
+                            texts.append(f"[Screenshot saved to: {url}]")
+                        except Exception as e:
+                            logger.error(f"Failed to save MCP image block: {e}", exc_info=True)
+                            texts.append(f"[Failed to save image: {e}]")
+                    else:
+                        texts.append(block.text if hasattr(block, "text") else str(block))
                 if not future.done():
                     future.set_result(("\n".join(texts) or "完成", False))
             except asyncio.TimeoutError:
