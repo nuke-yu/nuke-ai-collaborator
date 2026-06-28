@@ -343,6 +343,10 @@ class ToolLoopRunner:
                     })
                 except Exception:
                     pass
+            # Note: asyncio.shield is a best-effort soft protection. In case of a second cancellation
+            # (e.g. during a hard process shutdown), the shielded task can still be orphaned and
+            # destroyed. This is acceptable for cleanups, but should not be relied upon for absolute,
+            # crash-proof transaction guarantees.
             await asyncio.shield(_cleanup())
             raise
         except AIError as e:

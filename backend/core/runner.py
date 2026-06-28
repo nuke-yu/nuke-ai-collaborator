@@ -259,6 +259,10 @@ async def _run_unit_body(group_id: int, unit, orch) -> None:
                 except Exception as drain_err:
                     log.exception(f"Failed to execute group promotion drain: {drain_err}")
             
+            # Note: asyncio.shield is a best-effort soft protection. In case of a second cancellation
+            # (e.g. during a hard process shutdown), the shielded task can still be orphaned and
+            # destroyed. This is acceptable for cleanups, but should not be relied upon for absolute,
+            # crash-proof transaction guarantees.
             await asyncio.shield(_cleanup_finally())
     except Exception as e:
         log.exception("Workflow execution failed for group %d", group_id)

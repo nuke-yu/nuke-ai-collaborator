@@ -161,7 +161,10 @@ async def _summarize(messages: list, members: list, group_id: int, *, personal: 
         )
         if extra_context:
             user_message += f"\n\nHere is the current system state (Git changes & Jira tickets status):\n{extra_context}"
-        user_message += "\n\nPlease generate your recap."
+        if personal:
+            user_message += "\n\nPlease generate your recap."
+        else:
+            user_message += "\n\nPlease generate a short 1-3 sentence recap for a returning user."
     else:
         system_prompt = _PERSONAL_SYS if personal else _GROUP_SYS
         user_message = (
@@ -171,7 +174,10 @@ async def _summarize(messages: list, members: list, group_id: int, *, personal: 
         )
         if extra_context:
             user_message += f"\n\n以下是当前系统实际发生的数据变更（Git 代码库与 Jira 任务看板最新状态）：\n{extra_context}"
-        user_message += "\n\n请生成你的「缺席重回」摘要。"
+        if personal:
+            user_message += "\n\n请生成你的「缺席重回」摘要。"
+        else:
+            user_message += "\n\n请为重回项目的用户生成一段 1-3 句的简短“缺席重回”摘要（Recap）。"
 
     res = await call_ai_once(
         system_prompt=system_prompt,

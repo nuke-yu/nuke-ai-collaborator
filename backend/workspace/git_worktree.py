@@ -15,6 +15,27 @@ from workspace import layout
 
 log = logging.getLogger(__name__)
 
+
+def find_nested_git_dirs(workspace_path: Path) -> list[Path]:
+    """Find all nested .git directories while skipping large ignore directories (like node_modules, etc.)."""
+    import os
+    from workspace import _WS_IGNORE_DIRS
+    git_paths = []
+    if not workspace_path.exists():
+        return git_paths
+    workspace_resolved = workspace_path.resolve()
+    for root, dirs, files in os.walk(workspace_path, followlinks=True):
+        keep_dirs = []
+        for d in dirs:
+            if d == ".git":
+                full_path = Path(root) / d
+                if Path(root).resolve() != workspace_resolved:
+                    git_paths.append(full_path)
+            elif d not in _WS_IGNORE_DIRS:
+                keep_dirs.append(d)
+        dirs[:] = keep_dirs
+    return git_paths
+
 # Re-export current_workspace_path for ease of integration
 from workspace.layout import current_workspace_path
 
@@ -237,23 +258,21 @@ async def create_worktree(group_id: int, task_id: str, base_ref: str = "main") -
         # 6. Link heavy dependencies
         link_dependencies(shared_workspace, worktree_workspace)
 
-        # 7. Copy nested .git directories from shared_workspace into worktree_workspace
+        # 7. Copy nested git repositories from shared_workspace into worktree_workspace
         try:
             if shared_workspace.exists():
-                for item in list(shared_workspace.rglob(".git")):
-                    # Make sure it's a directory (nested git repo) and not the root .git
-                    if item.is_dir() and item.parent != shared_workspace:
-                        relative_path = item.relative_to(shared_workspace)
-                        dest = worktree_workspace / relative_path
-                        log.info(f"Hydrating nested .git directory into worktree: {item} -> {dest}")
-                        if dest.exists():
-                            import shutil
-                            shutil.rmtree(dest, ignore_errors=True)
-                        dest.parent.mkdir(parents=True, exist_ok=True)
+                for item in find_nested_git_dirs(shared_workspace):
+                    relative_path = item.parent.relative_to(shared_workspace)
+                    dest = worktree_workspace / relative_path
+                    log.info(f"Hydrating nested repository into worktree: {item.parent} -> {dest}")
+                    if dest.exists():
                         import shutil
-                        shutil.copytree(str(item), str(dest), symlinks=True)
+                        shutil.rmtree(dest, ignore_errors=True)
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    import shutil
+                    shutil.copytree(str(item.parent), str(dest), symlinks=True)
         except Exception as copy_err:
-            log.warning(f"Failed to hydrate nested .git directories: {copy_err}", exc_info=True)
+            log.warning(f"Failed to hydrate nested repositories: {copy_err}", exc_info=True)
 
         return worktree_dir
 
@@ -374,26 +393,24 @@ async def promote_worktree(group_id: int, task_id: str, target_branch: str = "ma
                 except Exception:
                     pass
 
-        # 3. Copy back any nested .git directories from the worktree to the shared workspace
+        # 3. Copy back any nested git repositories from the worktree to the shared workspace
         # before removing the worktree.
         try:
             worktree_workspace = layout.group_dir(group_id) / "worktrees" / f"task_{task_id}" / "workspace"
             shared_workspace = layout.group_shared_dir(group_id) / "workspace"
             if worktree_workspace.exists():
-                for item in list(worktree_workspace.rglob(".git")):
-                    # Make sure it's a directory (nested git repo) and not the parent's worktree .git file/directory
-                    if item.is_dir() and item.parent != worktree_workspace:
-                        relative_path = item.relative_to(worktree_workspace)
-                        dest = shared_workspace / relative_path
-                        log.info(f"Promoting nested .git directory from worktree: {item} -> {dest}")
-                        if dest.exists():
-                            import shutil
-                            shutil.rmtree(dest, ignore_errors=True)
-                        dest.parent.mkdir(parents=True, exist_ok=True)
+                for item in find_nested_git_dirs(worktree_workspace):
+                    relative_path = item.parent.relative_to(worktree_workspace)
+                    dest = shared_workspace / relative_path
+                    log.info(f"Promoting nested repository from worktree: {item.parent} -> {dest}")
+                    if dest.exists():
                         import shutil
-                        shutil.move(str(item), str(dest))
+                        shutil.rmtree(dest, ignore_errors=True)
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    import shutil
+                    shutil.move(str(item.parent), str(dest))
         except Exception as copy_err:
-            log.warning(f"Failed to copy back nested .git directories: {copy_err}", exc_info=True)
+            log.warning(f"Failed to copy back nested repositories: {copy_err}", exc_info=True)
 
         # 4. Clean up the worktree directory and git branch (only reached if merge succeeds)
         await _remove_worktree_nolock(group_id, task_id)

@@ -519,6 +519,9 @@ def walk_visible(root: Path, max_entries: int = _WS_MAX_ENTRIES,
             if skip_hidden:
                 if name.startswith(".") or name in _WS_IGNORE_DIRS:
                     continue
+            else:
+                if name in _WS_IGNORE_DIRS and name != ".git":
+                    continue
             paths.append(base / name)
         for name in sorted(filenames):
             if skip_hidden and name.startswith("."):
