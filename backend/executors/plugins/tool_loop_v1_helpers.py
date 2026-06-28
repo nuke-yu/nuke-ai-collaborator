@@ -602,7 +602,7 @@ async def execute_parallel_tools(runner, calls, iteration=None) -> None:
     _duration = round(asyncio.get_event_loop().time() - _t0, 2)
 
     for call, (tool_result, is_error) in zip(calls, raw_results):
-        _check_and_attach_file(runner, tool_result)
+        tool_result, _ = _check_and_attach_file(runner, tool_result)
         await runner.ctx.interaction.append_session_event(runner.session_id, "tool_result", {
             "tool_call_id": call["id"],
             "tool_name": call["name"],
@@ -663,7 +663,7 @@ async def execute_serial_tools(runner, calls, iteration=None) -> None:
         tool_result, is_error = await dispatch_tool(
             call["name"], call["arguments"], runner.execution_ctx
         )
-        _check_and_attach_file(runner, tool_result)
+        tool_result, _ = _check_and_attach_file(runner, tool_result)
         _duration = round(asyncio.get_event_loop().time() - _t0, 2)
 
         await runner.ctx.interaction.append_session_event(runner.session_id, "tool_result", {
@@ -814,13 +814,25 @@ async def build_reinject(runner) -> str:
     return "\n\n".join(parts)
 
 
-def _check_and_attach_file(runner, tool_result: str):
+def _check_and_attach_file(runner, tool_result: str) -> tuple[str, bool]:
+    """Scans tool_result for image file references.
+    If found, moves/copies the file to UPLOAD_DIR and updates tool_result to use the /uploads/ URL.
+    Returns (updated_tool_result, is_modified).
+    """
     if not isinstance(tool_result, str):
-        return
+        return tool_result, False
+    
     import re
-    match = re.search(r"(/uploads/mcp-screenshot-[a-zA-Z0-9\-]+\.(?:png|jpg|jpeg|gif|webp))", tool_result)
-    if match:
-        img_url = match.group(1)
+    import os
+    import shutil
+    import uuid
+    from pathlib import Path
+    from api.messages import UPLOAD_DIR
+
+    # 1. If it's already an upload URL, just attach and return
+    match_url = re.search(r"(/uploads/mcp-screenshot-[a-zA-Z0-9\-]+\.(?:png|jpg|jpeg|gif|webp))", tool_result)
+    if match_url:
+        img_url = match_url.group(1)
         filename = img_url.split("/")[-1]
         ext = filename.split(".")[-1]
         mime_type = f"image/{ext}"
@@ -832,4 +844,59 @@ def _check_and_attach_file(runner, tool_result: str):
                 "name": filename,
                 "type": mime_type,
             }
+        return tool_result, True
+
+    # 2. Check for local filename patterns
+    matches = re.findall(r"([a-zA-Z0-9_\-\./]+\.(?:png|jpg|jpeg|gif|webp))", tool_result)
+    modified = False
+    for m in matches:
+        clean_name = m.lstrip("./").lstrip("/")
+        possible_paths = [
+            Path(clean_name),
+            Path("backend") / clean_name,
+            Path(__file__).parent.parent.parent.parent / clean_name,
+            Path(__file__).parent.parent.parent.parent / "backend" / clean_name
+        ]
+        group_id = runner.ctx.group_id
+        if group_id:
+            from workspace import group_workspace as _group_ws
+            ws_path = _group_ws(group_id)
+            if ws_path:
+                possible_paths.append(Path(ws_path) / clean_name)
+                possible_paths.append(Path(ws_path) / "shared" / clean_name)
+                possible_paths.append(Path(ws_path) / "shared" / "workspace" / clean_name)
+                possible_paths.append(Path(ws_path) / "workspace" / clean_name)
+
+        for p in possible_paths:
+            if p.exists() and p.is_file():
+                try:
+                    ext = p.suffix
+                    new_filename = f"mcp-screenshot-{uuid.uuid4()}{ext}"
+                    dest_path = UPLOAD_DIR / new_filename
+                    shutil.copy2(p, dest_path)
+                    try:
+                        os.remove(p)
+                    except Exception:
+                        pass
+                    
+                    img_url = f"/uploads/{new_filename}"
+                    mime_type = f"image/{ext.lstrip('.')}"
+                    if ext == ".jpg":
+                        mime_type = "image/jpeg"
+                        
+                    if "attached_file" not in runner.execution_ctx:
+                        runner.execution_ctx["attached_file"] = {
+                            "url": img_url,
+                            "name": new_filename,
+                            "type": mime_type,
+                        }
+                    # Replace the reference in the tool_result text so it renders in markdown
+                    tool_result = tool_result.replace(m, img_url)
+                    modified = True
+                    break
+                except Exception as e:
+                    import logging
+                    logging.getLogger(__name__).error(f"Failed to copy local file {p}: {e}")
+            
+    return tool_result, modified
 
