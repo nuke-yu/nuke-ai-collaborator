@@ -74,3 +74,62 @@ def test_save_mcp_config_validation_error(client, temp_mcp_config):
     response = client.put("/api/config/mcp", json=invalid_config)
     assert response.status_code == 400
     assert "Invalid MCP config format" in response.json()["detail"]
+
+
+def test_mcp_config_masking(client, temp_mcp_config):
+    # 1. Write a config with sensitive info
+    original_config = {
+        "mcpServers": {
+            "test-server": {
+                "command": "node",
+                "args": ["test.js"],
+                "env": {
+                    "API_KEY": "supersecret12345",
+                    "DEBUG": "true"
+                },
+                "headers": {
+                    "Authorization": "Bearer token1234"
+                }
+            }
+        }
+    }
+    with open(temp_mcp_config, "w", encoding="utf-8") as f:
+        json.dump(original_config, f)
+
+    # 2. GET config should return masked values
+    response = client.get("/api/config/mcp")
+    assert response.status_code == 200
+    res_data = response.json()
+    env = res_data["mcpServers"]["test-server"]["env"]
+    headers = res_data["mcpServers"]["test-server"]["headers"]
+    
+    assert env["API_KEY"] == "sup···2345"
+    assert env["DEBUG"] == "****"
+    assert headers["Authorization"] == "Bea···1234"
+
+    # 3. PUT the same masked config back (simulating user saving without editing key)
+    # Let's change args to "test2.js" but keep masked env and headers
+    modified_config = res_data
+    modified_config["mcpServers"]["test-server"]["args"] = ["test2.js"]
+    
+    response = client.put("/api/config/mcp", json=modified_config)
+    assert response.status_code == 200
+    
+    # 4. Check the file on disk: original secrets must be restored, but args should be updated
+    with open(temp_mcp_config, "r", encoding="utf-8") as f:
+        file_data = json.load(f)
+        
+    server_cfg = file_data["mcpServers"]["test-server"]
+    assert server_cfg["args"] == ["test2.js"]
+    assert server_cfg["env"]["API_KEY"] == "supersecret12345"
+    assert server_cfg["env"]["DEBUG"] == "true"
+    assert server_cfg["headers"]["Authorization"] == "Bearer token1234"
+
+    # 5. PUT with modified env key
+    modified_config["mcpServers"]["test-server"]["env"]["API_KEY"] = "new_secret_key"
+    response = client.put("/api/config/mcp", json=modified_config)
+    assert response.status_code == 200
+    
+    with open(temp_mcp_config, "r", encoding="utf-8") as f:
+        file_data = json.load(f)
+    assert file_data["mcpServers"]["test-server"]["env"]["API_KEY"] == "new_secret_key"
