@@ -12,7 +12,22 @@ _failures: dict[str, str] = {}
 PLUGIN_DIR = Path(__file__).parent / "plugins"
 
 
+def get_external_plugins_dir() -> Path | None:
+    import os
+    env_dir = os.environ.get("NUKE_EXTERNAL_PLUGINS_DIR")
+    if env_dir:
+        return Path(env_dir)
+    ws_root = os.environ.get("NUKE_WORKSPACE_ROOT")
+    if ws_root:
+        return Path(ws_root).parent / "plugins"
+    return Path(__file__).parent.parent.parent / "workspaces" / "plugins"
+
+
 def _load_file(path: Path):
+    parent_dir = str(path.parent.resolve())
+    if parent_dir not in sys.path:
+        sys.path.append(parent_dir)
+
     spec = importlib.util.spec_from_file_location(path.stem, path)
     module = importlib.util.module_from_spec(spec)
     # Register in sys.modules BEFORE exec so module-level introspection that
@@ -57,9 +72,19 @@ def discover():
     from executors import tool_executor
     tool_executor.clear_before_hooks()
     tool_executor.clear_after_hooks()
+    
+    # 1. Load built-in plugins
     for f in sorted(PLUGIN_DIR.glob("*.py")):
         if not f.name.startswith("_"):
             _load_file(f)
+            
+    # 2. Load external plugins
+    ext_dir = get_external_plugins_dir()
+    if ext_dir and ext_dir.exists() and ext_dir.is_dir():
+        logger.info(f"Scanning external plugins from: {ext_dir}")
+        for f in sorted(ext_dir.glob("*.py")):
+            if not f.name.startswith("_"):
+                _load_file(f)
 
 
 def failures() -> dict[str, str]:
