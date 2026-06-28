@@ -156,7 +156,7 @@ async def save_mcp_config(data: dict):
         if supervisor:
             await supervisor.send_to_worker_id(
                 ipc.protocol.MCP_COLLECTOR_ID,
-                {"type": "mcp_reload"}
+                {"type": ipc.protocol.MCP_RELOAD}
             )
         else:
             warning = "Supervisor not running, collector reload skipped."

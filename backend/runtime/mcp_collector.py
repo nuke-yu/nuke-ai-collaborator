@@ -324,7 +324,7 @@ class MCPCollector:
                     t.add_done_callback(self._tasks.discard)
                 elif ftype == ipc.protocol.MCP_OAUTH_CALLBACK:
                     self._flows.resolve_callback(frame.get("state"), frame.get("code"))
-                elif ftype == "mcp_reload":
+                elif ftype == ipc.protocol.MCP_RELOAD:
                     t = asyncio.create_task(self._handle_reload())
                     self._tasks.add(t)
                     t.add_done_callback(self._tasks.discard)

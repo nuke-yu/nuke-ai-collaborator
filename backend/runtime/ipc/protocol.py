@@ -34,8 +34,9 @@ MCP_RESULT = "mcp_result"                # collector→sup→worker：工具结�
 MCP_SCHEMAS = "mcp_schemas"             # collector→sup→workers：当前 MCP 工具表快照（push）
 MCP_AUTH_START = "mcp_auth_start"        # worker→sup→collector：为某 server 启动 OAuth（回 MCP_RESULT 带 URL）
 MCP_OAUTH_CALLBACK = "mcp_oauth_callback"  # main→collector：授权码回调（code/state）
+MCP_RELOAD = "mcp_reload"                # main→collector：重新加载 MCP 配置
 
-MCP_BUS = frozenset({MCP_CALL, MCP_RESULT, MCP_SCHEMAS, MCP_AUTH_START, MCP_OAUTH_CALLBACK})
+MCP_BUS = frozenset({MCP_CALL, MCP_RESULT, MCP_SCHEMAS, MCP_AUTH_START, MCP_OAUTH_CALLBACK, MCP_RELOAD})
 
 # ── 控制帧（连接握手，不属于业务上/下行集） ────────────────────────────────
 HELLO = "hello"   # Worker / collector → Supervisor 首帧，自报 worker_id 完成注册
