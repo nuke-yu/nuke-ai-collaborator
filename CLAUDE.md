@@ -56,6 +56,7 @@ main.py (FastAPI / WS 入口)
 - **run_shell guard**：两层——regex 拦截高危命令 + shlex tokenized 层防绕过（base64 -d / curl|bash / eval 等）
 - **输出脱敏**：tool result 进模型上下文前过 `redaction.redact_secrets()`（PEM/JWT/AWS AKID/GitHub token 等）
 - **子 Agent 权限衰减**：`derive_subagent_ruleset()` 确保 bypassPermissions 不向下传播，blanket high-risk allow 被 drop
+- **⚠️ MCP server 配置 = 等价 RCE**：`PUT /api/config/mcp`（`api/config.py`）写的 `mcpServers[].command/args` 就是 Collector 直接 spawn 的进程，**完全绕开 run_shell guard 和 HIL 审批**。当前是任何登录用户可写、且配置全局跨组——这是 trusted-internal 模型下的**有意取舍**（见 memory `dft-082-internal-scope` / `scale-ceiling-and-isolation`），不是 bug，**不要**为它加 RBAC。但若哪天本服务要对外网/不可信用户开放，这扇门必须先收口（限 owner / 仅部署层 env `MCP_SERVERS_CONFIG` 改）。
 
 ### 4. 群组隔离
 - 每个群组有独立的 SQLite group DB（central DB 只存用户/群元数据）
