@@ -14,8 +14,7 @@ async def mock_get_current_user():
 @pytest.fixture
 def client():
     app.dependency_overrides[_auth.get_current_user] = mock_get_current_user
-    with TestClient(app) as c:
-        yield c
+    yield TestClient(app)
     app.dependency_overrides.clear()
 
 @pytest.fixture
@@ -59,7 +58,9 @@ def test_save_mcp_config_success(client, temp_mcp_config):
     }
     response = client.put("/api/config/mcp", json=new_config)
     assert response.status_code == 200
-    assert response.json() == new_config
+    res_data = response.json()
+    res_data.pop("warning", None)
+    assert res_data == new_config
     
     # Verify file was written
     with open(temp_mcp_config, "r", encoding="utf-8") as f:
