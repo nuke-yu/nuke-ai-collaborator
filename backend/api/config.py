@@ -129,13 +129,26 @@ async def save_mcp_config(data: dict):
         except Exception:
             pass
     unmasked_data = _unmask_mcp_config(data, old_config)
+    import tempfile
+    import os
+    import logging
+    logger = logging.getLogger(__name__)
+
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("w", encoding="utf-8") as f:
-            json.dump(unmasked_data, f, indent=2, ensure_ascii=False)
+        fd, temp_path = tempfile.mkstemp(dir=str(path.parent), prefix="mcp_config_tmp_")
+        try:
+            with open(fd, "w", encoding="utf-8") as f:
+                json.dump(unmasked_data, f, indent=2, ensure_ascii=False)
+            os.replace(temp_path, str(path))
+        except Exception:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+            raise
     except Exception as e:
         raise HTTPException(500, f"Failed to save MCP config file: {e}")
 
+    warning = None
     # Notify MCP collector process of the change
     try:
         from runtime.supervisor import supervisor
@@ -145,7 +158,14 @@ async def save_mcp_config(data: dict):
                 ipc.protocol.MCP_COLLECTOR_ID,
                 {"type": "mcp_reload"}
             )
-    except Exception:
-        pass
+        else:
+            warning = "Supervisor not running, collector reload skipped."
+            logger.warning("save_mcp_config: supervisor is None, cannot notify collector.")
+    except Exception as e:
+        warning = f"Failed to notify collector: {e}"
+        logger.warning(f"save_mcp_config: failed to notify collector: {e}")
 
-    return _mask_mcp_config(unmasked_data)
+    res = _mask_mcp_config(unmasked_data)
+    if warning:
+        res["warning"] = warning
+    return res
