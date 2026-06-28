@@ -99,6 +99,27 @@ class TestMCPCollectorRoundTrip(unittest.IsolatedAsyncioTestCase):
             except Exception:
                 pass
 
+    async def test_mcp_reload_is_serialized(self):
+        coll = MCPCollector("dummy")
+        coll._router = MagicMock()
+        coll._router.close_all = AsyncMock()
+        coll._push_schemas = AsyncMock()
+
+        call_order = []
+        async def fake_init():
+            call_order.append("start")
+            await asyncio.sleep(0.1)
+            call_order.append("end")
+
+        coll._init_providers = fake_init
+
+        t1 = asyncio.create_task(coll._handle_reload())
+        t2 = asyncio.create_task(coll._handle_reload())
+        
+        await asyncio.gather(t1, t2)
+        
+        self.assertEqual(call_order, ["start", "end", "start", "end"])
+
 
 class TestCollectorSchemaAnnotation(unittest.TestCase):
     """Per-server HIL config travels to workers: the collector annotates each

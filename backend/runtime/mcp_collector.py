@@ -72,6 +72,7 @@ class MCPCollector:
         self._flows = MCPAuthFlows()
         self._auth_inflight: set = set()       # servers with an in-progress OAuth flow
         self._auth_locks: dict[str, asyncio.Lock] = {}  # per-server lock for OAuth race condition protection
+        self._reload_lock = asyncio.Lock()
 
     async def _init_providers(self) -> None:
         import os
@@ -291,15 +292,16 @@ class MCPCollector:
                     self._auth_inflight.discard(server)   # flow never started → release now
 
     async def _handle_reload(self) -> None:
-        log.info("collector: reloading MCP config and re-initializing providers...")
-        try:
-            if self._router:
-                await self._router.close_all()
-            await self._init_providers()
-            await self._push_schemas()
-            log.info("collector: MCP reload complete, schemas pushed.")
-        except Exception as e:
-            log.exception(f"collector: reload failed: {e}")
+        async with self._reload_lock:
+            log.info("collector: reloading MCP config and re-initializing providers...")
+            try:
+                if self._router:
+                    await self._router.close_all()
+                await self._init_providers()
+                await self._push_schemas()
+                log.info("collector: MCP reload complete, schemas pushed.")
+            except Exception as e:
+                log.exception(f"collector: reload failed: {e}")
 
     async def run(self) -> None:
         await self._init_providers()
