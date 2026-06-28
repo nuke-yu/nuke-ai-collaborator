@@ -512,3 +512,23 @@ class TestGitWorktreeSandbox(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(shared_nested_git.is_dir())
         self.assertTrue((shared_nested_git / "config").exists())
         self.assertEqual((shared_nested_git / "config").read_text(encoding="utf-8"), "[core]\n\trepositoryformatversion = 0")
+
+    def test_find_nested_git_dirs_stops_at_repo_root(self):
+        """find_nested_git_dirs must return the OUTERMOST repo per nested tree and skip ignore dirs.
+
+        Regression: a repo-in-repo previously returned both ancestor and descendant `.git`,
+        which made promote's `shutil.move(parent)` then fail with FileNotFoundError on the
+        descendant (parent already moved away) and abort the rest of the promotion loop.
+        """
+        from workspace.git_worktree import find_nested_git_dirs
+
+        with tempfile.TemporaryDirectory() as tmp:
+            ws = Path(tmp).resolve()
+            (ws / ".git").mkdir()                       # root repo — must be excluded
+            (ws / "proj" / ".git").mkdir(parents=True)  # nested repo
+            (ws / "proj" / "sub" / ".git").mkdir(parents=True)  # repo-in-repo — must NOT be returned
+            (ws / "node_modules" / "pkg" / ".git").mkdir(parents=True)  # under ignore dir — must be skipped
+            (ws / "other" / ".git").mkdir(parents=True)  # sibling nested repo
+
+            found = {p.parent.relative_to(ws).as_posix() for p in find_nested_git_dirs(ws)}
+            self.assertEqual(found, {"proj", "other"})

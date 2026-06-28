@@ -17,7 +17,15 @@ log = logging.getLogger(__name__)
 
 
 def find_nested_git_dirs(workspace_path: Path) -> list[Path]:
-    """Find all nested .git directories while skipping large ignore directories (like node_modules, etc.)."""
+    """Find the outermost nested .git directories, skipping large ignore directories (node_modules, etc.).
+
+    Returns at most one `.git` per nested repository: once a directory is identified as a repo
+    root, its whole subtree is treated as a single unit and not descended into. Callers
+    copy/move the *parent* directory wholesale, so returning a descendant repo (repo-in-repo)
+    would double-copy on hydrate and — worse — break promotion's `shutil.move` when the parent
+    was already moved away (FileNotFoundError aborting the loop). The top-level repo `.git` (at
+    workspace_path itself) is excluded.
+    """
     import os
     from workspace import _WS_IGNORE_DIRS
     git_paths = []
@@ -25,15 +33,13 @@ def find_nested_git_dirs(workspace_path: Path) -> list[Path]:
         return git_paths
     workspace_resolved = workspace_path.resolve()
     for root, dirs, files in os.walk(workspace_path, followlinks=True):
-        keep_dirs = []
-        for d in dirs:
-            if d == ".git":
-                full_path = Path(root) / d
-                if Path(root).resolve() != workspace_resolved:
-                    git_paths.append(full_path)
-            elif d not in _WS_IGNORE_DIRS:
-                keep_dirs.append(d)
-        dirs[:] = keep_dirs
+        if ".git" in dirs and Path(root).resolve() != workspace_resolved:
+            # This directory is a nested repo root: record it and stop descending so any
+            # repo-in-repo stays bundled inside its parent rather than being returned separately.
+            git_paths.append(Path(root) / ".git")
+            dirs[:] = []
+            continue
+        dirs[:] = [d for d in dirs if d != ".git" and d not in _WS_IGNORE_DIRS]
     return git_paths
 
 # Re-export current_workspace_path for ease of integration
@@ -395,6 +401,11 @@ async def promote_worktree(group_id: int, task_id: str, target_branch: str = "ma
 
         # 3. Copy back any nested git repositories from the worktree to the shared workspace
         # before removing the worktree.
+        # NOTE: this does a wholesale rmtree(dest)+move of each nested repo dir. It assumes
+        # the nested repo is NOT tracked by the parent repo (so the earlier git merge produced
+        # nothing for it) and that same-group tasks run serially. If a nested dir's files are
+        # parent-tracked, this clobbers the merge result; under concurrent same-group worktrees
+        # it is last-writer-wins.
         try:
             worktree_workspace = layout.group_dir(group_id) / "worktrees" / f"task_{task_id}" / "workspace"
             shared_workspace = layout.group_shared_dir(group_id) / "workspace"

@@ -495,10 +495,12 @@ def walk_visible(root: Path, max_entries: int = _WS_MAX_ENTRIES,
                  skip_hidden: bool = True) -> tuple[list[Path], bool]:
     """遍历 root，剪枝重型依赖/构建目录（绝不进入 node_modules/.git 等），并对总数封顶。
 
-    重型/已知噪声目录（_WS_IGNORE_DIRS，含 .git/.history）**始终**剪枝；
+    重型/已知噪声目录（_WS_IGNORE_DIRS，含 .git/.history）**始终不递归进去**；
     skip_hidden 额外决定是否过滤其它 dotfile/dotdir：
-      - True（默认，LLM 上下文/工具输出）：隐藏所有 dotfile，避免把 .env 等密钥注入上下文；
-      - False（UI 文件树）：保留 .gitignore 等给人看，但 node_modules/.git 仍被剪。
+      - True（默认，LLM 上下文/工具输出）：隐藏所有 dotfile，且 _WS_IGNORE_DIRS 既不递归也不列出，
+        避免把 .env 等密钥注入上下文；
+      - False（UI 文件树）：保留 .gitignore 等给人看；node_modules 等重目录仍被整体剪掉，但 .git
+        作为条目放行（让人看到仓库存在，仍不递归进去）。
     返回 (排序后的路径列表, 是否因超过 max_entries 被截断)。
     """
     import os

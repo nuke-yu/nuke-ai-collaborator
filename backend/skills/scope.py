@@ -62,9 +62,11 @@ class LearnedScope:
     gid: int
     bot_id: int
     status: str = "active"
+    def __post_init__(self):
+        if self.status not in ("active", "draft"):
+            raise ValueError(f"invalid learned skill status: {self.status!r}")
     def dir(self) -> Path:
-        sub = "active" if self.status == "active" else "draft"
-        return layout.bot_dir(self.gid, self.bot_id) / "skills" / "learned" / sub
+        return layout.bot_dir(self.gid, self.bot_id) / "skills" / "learned" / self.status
 
 
 @dataclass(frozen=True)
