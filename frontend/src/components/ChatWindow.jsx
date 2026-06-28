@@ -16,6 +16,7 @@ import MessageInput from './MessageInput'
 import SearchPanel from './SearchPanel'
 import BotLogPanel from './BotLogPanel'
 import ApiKeyManager from './ApiKeyManager'
+import McpManager from './McpManager'
 import PinnedBar from './PinnedBar'
 import AnnouncementBar from './AnnouncementBar'
 import WorkflowBar from './WorkflowBar'
@@ -94,6 +95,7 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
   // ── Local modal / layout state (stays as useState) ───────────────────────
   const [showTemplates, setShowTemplates] = useState(false)
   const [showApiKeys, setShowApiKeys] = useState(false)
+  const [showMcp, setShowMcp] = useState(false)
   const [showAddMember, setShowAddMember] = useState(false)
   const [editingMember, setEditingMember] = useState(null)
   const [workspaceBot, setWorkspaceBot] = useState(null)
@@ -464,6 +466,7 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
         />
       )}
       {showApiKeys && <ApiKeyManager onClose={() => setShowApiKeys(false)} />}
+      {showMcp && <McpManager onClose={() => setShowMcp(false)} />}
       {showStats && (
         <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center" onClick={() => setShowStats(false)}>
           <div className="bg-gray-800 border border-gray-700 rounded-2xl shadow-2xl w-80 overflow-hidden" onClick={e => e.stopPropagation()}>
@@ -497,6 +500,7 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
         onSelect={(id) => { setActiveGroupId(id); setActiveMemberId(null); setMobileTab('chat') }}
         onOpenTemplates={() => setShowTemplates(true)}
         onOpenApiKeys={() => setShowApiKeys(true)}
+        onOpenMcp={() => setShowMcp(true)}
         theme={theme}
         onThemeChange={onThemeChange}
         currentMemberId={activeMemberId}

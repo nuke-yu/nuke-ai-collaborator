@@ -15,7 +15,7 @@ const THEMES = [
 ]
 
 export default function GroupList({
-  onSelect, onCreateGroup, onDeleteGroup, onOpenTemplates, onOpenApiKeys,
+  onSelect, onCreateGroup, onDeleteGroup, onOpenTemplates, onOpenApiKeys, onOpenMcp,
   membersCache = {}, onOpenAddMember, onRemoveMember, onEditMember, onOpenWorkspace,
   theme = 'default-dark', onThemeChange,
   currentMemberId,
@@ -97,6 +97,7 @@ export default function GroupList({
           </div>
           <span className="text-gray-700 select-none">|</span>
           <button onClick={onOpenApiKeys} className="text-gray-500 hover:text-white text-xs transition-colors" title={t(K.sidebar.apiKeys)}>🔑</button>
+          <button onClick={onOpenMcp} className="text-gray-500 hover:text-white text-xs transition-colors" title={i18n.language?.startsWith('zh') ? "MCP服务器配置" : "MCP Servers Config"}>🔌</button>
           <button onClick={onOpenTemplates} className="text-gray-500 hover:text-white text-xs transition-colors" title={t(K.sidebar.templates)}>⚙️</button>
           <button onClick={toggleLang} className="text-gray-500 hover:text-white text-xs transition-colors font-medium">
             {t(K.sidebar.switchLang)}

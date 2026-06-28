@@ -207,4 +207,18 @@ export async function fetchAiSuggestions(groupId, awaitingConfirm) {
   return res.json()
 }
 
+export async function fetchMcpConfig() {
+  const res = await authFetch('/api/config/mcp')
+  return res.json()
+}
+
+export async function saveMcpConfig(data) {
+  const res = await authFetch('/api/config/mcp', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  return res.json()
+}
+
 

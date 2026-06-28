@@ -290,6 +290,17 @@ class MCPCollector:
                 if not spawned:
                     self._auth_inflight.discard(server)   # flow never started → release now
 
+    async def _handle_reload(self) -> None:
+        log.info("collector: reloading MCP config and re-initializing providers...")
+        try:
+            if self._router:
+                await self._router.close_all()
+            await self._init_providers()
+            await self._push_schemas()
+            log.info("collector: MCP reload complete, schemas pushed.")
+        except Exception as e:
+            log.exception(f"collector: reload failed: {e}")
+
     async def run(self) -> None:
         await self._init_providers()
         await self.connect()
@@ -311,6 +322,10 @@ class MCPCollector:
                     t.add_done_callback(self._tasks.discard)
                 elif ftype == ipc.protocol.MCP_OAUTH_CALLBACK:
                     self._flows.resolve_callback(frame.get("state"), frame.get("code"))
+                elif ftype == "mcp_reload":
+                    t = asyncio.create_task(self._handle_reload())
+                    self._tasks.add(t)
+                    t.add_done_callback(self._tasks.discard)
                 else:
                     log.debug("collector: unhandled frame type=%s", ftype)
         except (asyncio.IncompleteReadError, ConnectionResetError, BrokenPipeError):
