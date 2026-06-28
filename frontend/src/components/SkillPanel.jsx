@@ -462,8 +462,12 @@ function SkillEditorPanel({ bot, groupId, skill, onClose }) {
     if (skill.layer === 'role') return `role:${groupId}:${bot.role}`
     if (skill.layer === 'external_global') return 'external_global'
     if (skill.layer === 'external_group') return `external_group:${groupId}`
+    if (skill.layer === 'learned') {
+      const status = skill.status || 'active'
+      return `learned:${groupId}:${bot.id}:${status}`
+    }
     return `bot:${groupId}:${bot.id}`
-  }, [skill.layer, groupId, bot.role, bot.id])
+  }, [skill.layer, skill.status, groupId, bot.role, bot.id])
 
   const scope = getSkillScope()
 

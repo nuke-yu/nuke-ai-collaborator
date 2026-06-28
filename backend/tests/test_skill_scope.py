@@ -12,6 +12,8 @@ class TestScope(unittest.TestCase):
             self.assertEqual(S.RoleScope(7, "dev").dir(), Path("/ws/group_7/roles/dev/skills"))
             self.assertEqual(S.TemplateScope("en", "PM").dir(), Path("/ws/templates/en/roles/PM/skills"))
             self.assertEqual(S.BotScope(7, 1018).dir(), Path("/ws/group_7/bots/bot_1018/skills/manual"))
+            self.assertEqual(S.LearnedScope(7, 1018, "active").dir(), Path("/ws/group_7/bots/bot_1018/skills/learned/active"))
+            self.assertEqual(S.LearnedScope(7, 1018, "draft").dir(), Path("/ws/group_7/bots/bot_1018/skills/learned/draft"))
             self.assertEqual(S.ExternalGlobalScope().dir(), Path("/ws/external/skills"))
             self.assertEqual(S.ExternalGroupScope(7).dir(), Path("/ws/group_7/external/skills"))
 
@@ -19,6 +21,8 @@ class TestScope(unittest.TestCase):
         self.assertEqual(S.parse_descriptor("group:7"), S.GroupScope(7))
         self.assertEqual(S.parse_descriptor("role:7:dev"), S.RoleScope(7, "dev"))
         self.assertEqual(S.parse_descriptor("bot:7:1018"), S.BotScope(7, 1018))
+        self.assertEqual(S.parse_descriptor("learned:7:1018:active"), S.LearnedScope(7, 1018, "active"))
+        self.assertEqual(S.parse_descriptor("learned:7:1018:draft"), S.LearnedScope(7, 1018, "draft"))
         self.assertEqual(S.parse_descriptor("external_global"), S.ExternalGlobalScope())
         self.assertEqual(S.parse_descriptor("external_group:7"), S.ExternalGroupScope(7))
 

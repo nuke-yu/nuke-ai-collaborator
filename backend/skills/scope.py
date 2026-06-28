@@ -58,6 +58,16 @@ class BotScope:
 
 
 @dataclass(frozen=True)
+class LearnedScope:
+    gid: int
+    bot_id: int
+    status: str = "active"
+    def dir(self) -> Path:
+        sub = "active" if self.status == "active" else "draft"
+        return layout.bot_dir(self.gid, self.bot_id) / "skills" / "learned" / sub
+
+
+@dataclass(frozen=True)
 class ExternalGlobalScope:
     layer: str = "external_global"
     def dir(self) -> Path:
@@ -86,6 +96,9 @@ def parse_descriptor(s: str):
             return TemplateScope(_safe_segment(parts[1]), _safe_segment(parts[2]))
         if kind == "bot":
             return BotScope(int(parts[1]), int(parts[2]))
+        if kind == "learned":
+            status = parts[3] if len(parts) > 3 else "active"
+            return LearnedScope(int(parts[1]), int(parts[2]), _safe_segment(status))
         if kind == "external_global":
             return ExternalGlobalScope()
         if kind == "external_group":
