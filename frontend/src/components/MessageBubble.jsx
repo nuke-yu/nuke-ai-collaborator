@@ -65,18 +65,18 @@ function Lightbox({ src, onClose }) {
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center cursor-zoom-out"
+      className="fixed inset-0 z-50 bg-black/95 overflow-y-auto flex items-start justify-center cursor-zoom-out py-8 px-4"
       onClick={onClose}
     >
       <img
         src={src}
         alt=""
-        className="max-w-[90vw] max-h-[90vh] object-contain rounded-lg shadow-2xl"
+        className="w-full max-w-6xl h-auto rounded-lg shadow-2xl my-auto"
         onClick={(e) => e.stopPropagation()}
       />
       <button
         onClick={onClose}
-        className="absolute top-4 right-4 text-white/70 hover:text-white text-2xl leading-none"
+        className="absolute top-4 right-4 text-white/70 hover:text-white text-2xl leading-none z-50"
       >
         ✕
       </button>
@@ -225,7 +225,7 @@ function MessageBubble({ msg, isTyping, currentMemberId, members = [], readMap =
         <img
           src={src}
           alt={alt}
-          className="mt-2 w-full h-auto max-w-full rounded-lg cursor-zoom-in hover:opacity-95 transition-opacity border border-gray-700/50 shadow-md"
+          className="mt-2 w-full h-auto rounded-lg cursor-zoom-in hover:opacity-95 transition-opacity border border-gray-700/50 shadow-md"
           onClick={() => setLightboxSrc(src)}
         />
       )
@@ -445,7 +445,7 @@ function MessageBubble({ msg, isTyping, currentMemberId, members = [], readMap =
               <img
                 src={msg.file_url}
                 alt={msg.file_name || t(K.message.image)}
-                className="mt-1.5 w-full h-auto max-w-full rounded-lg cursor-zoom-in hover:opacity-90 transition-opacity border border-gray-700/50 shadow-md"
+                className="mt-1.5 w-full h-auto rounded-lg cursor-zoom-in hover:opacity-90 transition-opacity border border-gray-700/50 shadow-md"
                 onClick={() => setLightboxSrc(msg.file_url)}
               />
             )}
