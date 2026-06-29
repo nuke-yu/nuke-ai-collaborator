@@ -6,6 +6,11 @@ WS_SEND_TIMEOUT = 10.0
 SUPERVISOR_SEND_TIMEOUT = 5.0
 IPC_MAX_FRAME_SIZE = 64 * 1024 * 1024  # 64 MiB
 
+# Per-call wall clock for a single MCP tool execution in the collector. A hung or
+# slow MCP server otherwise holds a collector concurrency slot indefinitely;
+# bounding each call stops one bad server from starving the shared pool.
+MCP_CALL_TIMEOUT_SECONDS = float(os.environ.get("NUKE_MCP_CALL_TIMEOUT_SECONDS") or 120)
+
 # --- R&D & Automation ---
 ASK_TIMEOUT_SECONDS = 300
 SPAWN_MAX_DEPTH = 3

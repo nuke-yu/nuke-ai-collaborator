@@ -121,6 +121,39 @@ class TestMCPCollectorRoundTrip(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(call_order, ["start", "end", "start", "end"])
 
 
+class TestCollectorCallTimeout(unittest.IsolatedAsyncioTestCase):
+    """A hung MCP server must not hold a collector slot forever: _handle_call
+    bounds each execution with MCP_CALL_TIMEOUT_SECONDS and returns an error."""
+
+    async def test_slow_call_times_out(self):
+        class _SlowProvider:
+            provider_id = "mcp:slow"
+            def discover_tools(self): return []
+            def can_handle(self, n): return True
+            async def execute(self, n, a, c):
+                await asyncio.sleep(5)          # longer than the patched timeout
+                return ("never", False)
+
+        coll = MCPCollector("x")
+        coll._router = ToolRouter()
+        coll._router.register_provider(_SlowProvider())
+        coll._writer = object()
+
+        sent = []
+        async def fake_send(w, m): sent.append(m)
+        from core import config
+        with patch("runtime.ipc.send_msg", new=fake_send), \
+             patch.object(config, "MCP_CALL_TIMEOUT_SECONDS", 0.05):
+            await coll._handle_call({
+                "request_id": "r1", "origin_worker_id": "w0",
+                "tool": "slow__do", "arguments": {}, "group_id": 1, "trace_id": "t1",
+            })
+        self.assertEqual(len(sent), 1)
+        self.assertTrue(sent[0]["is_error"])
+        self.assertIn("超时", sent[0]["result"])
+        self.assertEqual(sent[0]["request_id"], "r1")
+
+
 class TestCollectorSchemaAnnotation(unittest.TestCase):
     """Per-server HIL config travels to workers: the collector annotates each
     pushed schema with the owning provider's needs_approval flag."""

@@ -296,6 +296,8 @@ class LifecycleManager:
             from permissions import engine as perm_engine
             if hasattr(perm_engine, "cancel_pending_for_group"):
                 perm_engine.cancel_pending_for_group(gid)
+            if hasattr(perm_engine, "clear_once_grants_for_group"):
+                perm_engine.clear_once_grants_for_group(gid)
         except Exception:
             pass
             

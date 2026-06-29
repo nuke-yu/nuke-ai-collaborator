@@ -169,10 +169,21 @@ class MCPCollector:
         tid = frame.get("trace_id")
         async with self._call_sem:
             try:
-                result, is_error = await self._router.execute(
-                    name, arguments,
-                    context={"_pre_authorized": True, "group_id": gid, "trace_id": tid},
+                from core import config
+                result, is_error = await asyncio.wait_for(
+                    self._router.execute(
+                        name, arguments,
+                        context={"_pre_authorized": True, "group_id": gid, "trace_id": tid},
+                    ),
+                    timeout=config.MCP_CALL_TIMEOUT_SECONDS,
                 )
+            except asyncio.TimeoutError:
+                # A hung server must not hold the concurrency slot forever (it was
+                # released by leaving the `async with` on this exception). The
+                # underlying call task is cancelled by wait_for.
+                result = (f"[MCP collector 超时] 工具 '{name}' 超过 "
+                          f"{config.MCP_CALL_TIMEOUT_SECONDS:.0f}s 未返回")
+                is_error = True
             except Exception as e:
                 result, is_error = f"[MCP collector 错误] {e}", True
         try:

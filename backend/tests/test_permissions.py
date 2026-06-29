@@ -388,6 +388,27 @@ class TestCancelPendingForGroup:
         assert r2["action"] == "allow"
 
 
+class TestClearOnceGrantsForGroup:
+    def setup_method(self):
+        engine._once_grants.clear()
+
+    def test_clears_only_target_group(self):
+        h = engine._args_hash({"cmd": "ls"})
+        engine._once_grants[(7, 1)] = [("run_shell", h)]
+        engine._once_grants[(8, 1)] = [("run_shell", h)]
+        engine._once_grants[(7, 2)] = [("run_shell", h)]  # other group, must survive
+
+        n = engine.clear_once_grants_for_group(1)
+
+        assert n == 2
+        assert (7, 1) not in engine._once_grants
+        assert (8, 1) not in engine._once_grants
+        assert engine._once_grants.get((7, 2))  # group 2 untouched
+
+    def test_clear_unknown_group_is_noop(self):
+        assert engine.clear_once_grants_for_group(99) == 0
+
+
 class TestResolveAuthz:
     def setup_method(self):
         engine._once_grants.clear()

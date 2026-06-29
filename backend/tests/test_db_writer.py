@@ -70,6 +70,24 @@ class TestSerialWriter(unittest.IsolatedAsyncioTestCase):
                 (cnt,) = await cur.fetchone()
         self.assertEqual(cnt, 2)
 
+    async def test_rollback_on_exception_no_tx_pollution(self):
+        # A writer that raises after an uncommitted INSERT must NOT leak that
+        # half-open transaction onto the shared persistent connection — the next
+        # writer would otherwise commit it. write_connect rolls back on exit-by-
+        # exception, so the stray row is gone.
+        with self.assertRaises(RuntimeError):
+            async with writer_mod.write_connect() as conn:
+                await conn.execute("INSERT INTO t (v) VALUES (?)", (999,))
+                raise RuntimeError("boom before commit")
+
+        async with writer_mod.write_connect() as conn:
+            await conn.execute("INSERT INTO t (v) VALUES (?)", (1,))
+            await conn.commit()
+        async with writer_mod.write_connect() as conn:
+            async with conn.execute("SELECT v FROM t ORDER BY v") as cur:
+                rows = await cur.fetchall()
+        self.assertEqual([r[0] for r in rows], [1])  # 999 was rolled back
+
     async def test_aclose_resets_connection(self):
         async with writer_mod.write_connect() as c1:
             first = c1

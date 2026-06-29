@@ -90,7 +90,21 @@ async def write_connect(path: str | None = None):
     st = _conn_state(db_path)
     async with st["lock"]:
         conn = await _get_write_conn(st, db_path)
-        yield conn
+        try:
+            yield conn
+        except BaseException:
+            # The write connection is persistent and reused by the next writer
+            # (DFT-053). A query that raises mid-transaction (before its own
+            # commit) would otherwise leave a half-open transaction on the shared
+            # connection, which the next caller's statements join and commit as
+            # one — transactional pollution. Roll back before releasing the lock
+            # so the connection is clean for the next acquirer. BaseException so a
+            # cancelled/aborted task (DFT-027) also leaves no dangling tx.
+            try:
+                await conn.rollback()
+            except Exception:
+                pass
+            raise
 
 
 async def aclose_writer(path: str | None = None) -> None:

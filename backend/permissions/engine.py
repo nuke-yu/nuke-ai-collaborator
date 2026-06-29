@@ -286,6 +286,22 @@ def resolve(request_id: str, approved: bool, persistence: str = "once",
     return req
 
 
+def clear_once_grants_for_group(group_id: int) -> int:
+    """Drop every once-grant belonging to a group; returns how many were removed.
+
+    Mirror of cancel_pending_for_group for the OTHER piece of per-group permission
+    state. Without this, grants keyed by (bot_id, group_id) accumulate in
+    _once_grants as groups are created and evicted over a long-lived worker's
+    lifetime — a slow leak. Called from the eviction path. (A grant is normally
+    consumed on its next matching call, so this only reclaims grants issued but
+    never used before the group went idle.)
+    """
+    keys = [k for k in _once_grants if k[1] == group_id]
+    for k in keys:
+        _once_grants.pop(k, None)
+    return len(keys)
+
+
 def cancel_pending_for_group(group_id: int) -> int:
     """Deny every still-pending ask for a group; returns how many were cancelled.
 
