@@ -123,7 +123,8 @@ class LifecycleManager:
             for gid in to_evict:
                 # Remove from active groups list first to prevent recursive checks
                 self._active_groups.pop(gid, None)
-                await self._do_evict(gid)
+        for gid in to_evict:
+            await self._do_evict(gid)
 
     async def prune_resources(self) -> None:
         """Prune logs and temporary workspace files older than 14 days."""
@@ -255,10 +256,13 @@ class LifecycleManager:
 
     async def evict(self, group_id: int) -> None:
         """Explicitly evict a group (used for CELL-18 lease release)."""
+        should_evict = False
         async with self._lock:
             if group_id in self._active_groups:
                 del self._active_groups[group_id]
-                await self._do_evict(group_id)
+                should_evict = True
+        if should_evict:
+            await self._do_evict(group_id)
 
     async def _do_evict(self, gid: int) -> None:
         log.info("lifecycle: evicting group %d", gid)

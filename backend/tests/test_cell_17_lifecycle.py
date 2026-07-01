@@ -190,5 +190,34 @@ class TestCell17Lifecycle(unittest.IsolatedAsyncioTestCase):
         mock_evict.assert_any_await(2)
         self.assertEqual(lm._active_groups, {})
 
+    async def test_evict_releases_manager_lock_before_cleanup(self):
+        lm = LifecycleManager()
+        lm._active_groups[1] = time.time()
+        lock_states = []
+
+        async def fake_evict(gid):
+            lock_states.append(lm._lock.locked())
+
+        with patch.object(lm, "_do_evict", new=fake_evict):
+            await lm.evict(1)
+
+        self.assertEqual(lock_states, [False])
+        self.assertNotIn(1, lm._active_groups)
+
+    async def test_sweep_releases_manager_lock_before_cleanup(self):
+        lm = LifecycleManager()
+        lm._active_groups[1] = time.time() - 10
+        lock_states = []
+
+        async def fake_evict(gid):
+            lock_states.append(lm._lock.locked())
+
+        with patch.dict(os.environ, {"GROUP_INACTIVITY_TIMEOUT": "0"}):
+            with patch.object(lm, "_do_evict", new=fake_evict):
+                await lm.sweep_inactive_groups()
+
+        self.assertEqual(lock_states, [False])
+        self.assertNotIn(1, lm._active_groups)
+
 if __name__ == "__main__":
     unittest.main()
