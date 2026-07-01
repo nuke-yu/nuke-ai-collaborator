@@ -180,6 +180,16 @@ class TestCell15Routing(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sup._pending_handoffs, {})
         self.assertIsNone(sup._server)
 
+    async def test_stop_cancels_pending_handoffs(self):
+        sup = Supervisor("dummy_addr")
+        fut = asyncio.get_running_loop().create_future()
+        sup._pending_handoffs[7] = fut
+
+        await sup.stop()
+
+        self.assertTrue(fut.cancelled())
+        self.assertEqual(sup._pending_handoffs, {})
+
     async def test_send_to_worker_id_failure_drops_stale_worker_state(self):
         sup = Supervisor("dummy_addr")
         writer = AsyncMock()

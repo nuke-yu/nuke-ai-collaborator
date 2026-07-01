@@ -167,6 +167,9 @@ class Supervisor:
         self._worker_stats.clear()
         self._worker_stats_ts.clear()
         self._routing_cache.clear()
+        for fut in self._pending_handoffs.values():
+            if not fut.done():
+                fut.cancel()
         self._pending_handoffs.clear()
         if self._server:
             self._server.close()
