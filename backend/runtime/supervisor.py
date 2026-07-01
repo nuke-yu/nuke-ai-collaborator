@@ -427,8 +427,11 @@ class Supervisor:
                 log.warning("supervisor: failed to notify %s to release group %d, forcing routing update", old_wid, group_id)
                 return
             # Wait for ACK
-            await asyncio.wait_for(fut, timeout=10.0)
-            log.info("supervisor: handoff of group %d complete", group_id)
+            released = await asyncio.wait_for(fut, timeout=10.0)
+            if released is False:
+                log.warning("supervisor: worker %s disappeared before confirming release of group %d", old_wid, group_id)
+            else:
+                log.info("supervisor: handoff of group %d complete", group_id)
         except asyncio.TimeoutError:
             log.error("supervisor: timeout waiting for %s to release group %d, forcing routing update anyway", old_wid, group_id)
         finally:

@@ -137,6 +137,34 @@ class TestCell18Handoff(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("w1", sup._workers)
         self.assertNotIn(77, sup._routing_cache)
 
+    async def test_handoff_disconnect_result_does_not_log_success(self):
+        sup = Supervisor("dummy_addr")
+
+        class MockDB:
+            async def __aenter__(self): return self
+            async def __aexit__(self, *args): pass
+            async def execute(self, *args): pass
+            async def commit(self): pass
+
+        sup._workers["w1"] = AsyncMock()
+        sup._routing_cache[77] = ("w1", 9999999999.0)
+
+        with patch("db.global_db", return_value=MockDB()):
+            with patch.object(sup, "send_to_worker_id", new=AsyncMock(return_value=True)):
+                with patch("asyncio.wait_for", new=AsyncMock(return_value=False)):
+                    with patch("runtime.supervisor.log.warning") as mock_warning, \
+                         patch("runtime.supervisor.log.info") as mock_info:
+                        await sup.reassign_group(77, "w2")
+
+        mock_warning.assert_any_call(
+            "supervisor: worker %s disappeared before confirming release of group %d",
+            "w1", 77,
+        )
+        self.assertFalse(any(
+            call.args == ("supervisor: handoff of group %d complete", 77)
+            for call in mock_info.call_args_list
+        ))
+
     async def test_eviction_persistence_barrier(self):
         from runtime.lifecycle import LifecycleManager
         mgr = LifecycleManager()
