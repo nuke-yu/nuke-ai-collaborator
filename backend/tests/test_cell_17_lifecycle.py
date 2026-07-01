@@ -190,6 +190,25 @@ class TestCell17Lifecycle(unittest.IsolatedAsyncioTestCase):
         mock_evict.assert_any_await(2)
         self.assertEqual(lm._active_groups, {})
 
+    async def test_shutdown_waits_for_evictor_task_cancellation(self):
+        lm = LifecycleManager()
+        cancelled = asyncio.Event()
+
+        async def _evictor():
+            try:
+                await asyncio.Future()
+            except asyncio.CancelledError:
+                cancelled.set()
+                raise
+
+        lm._evictor_task = asyncio.create_task(_evictor())
+        await asyncio.sleep(0)
+
+        await lm.shutdown()
+
+        self.assertTrue(cancelled.is_set())
+        self.assertIsNone(lm._evictor_task)
+
     async def test_evict_releases_manager_lock_before_cleanup(self):
         lm = LifecycleManager()
         lm._active_groups[1] = time.time()

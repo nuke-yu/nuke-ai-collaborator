@@ -358,12 +358,16 @@ class LifecycleManager:
 
     async def shutdown(self) -> None:
         """Close all active groups."""
+        evictor = None
         async with self._lock:
             if self._evictor_task:
                 self._evictor_task.cancel()
+                evictor = self._evictor_task
                 self._evictor_task = None
             active = list(self._active_groups)
             self._active_groups.clear()
+        if evictor is not None:
+            await asyncio.gather(evictor, return_exceptions=True)
         for gid in active:
             await self._do_evict(gid)
 
