@@ -412,9 +412,12 @@ class Supervisor:
         
         try:
             # Tell old worker to release
-            await ipc.send_msg(old_writer, ipc.protocol.envelope(
+            sent = await self.send_to_worker_id(old_wid, ipc.protocol.envelope(
                 ipc.protocol.RELEASE_LEASE, group_id=group_id
             ))
+            if not sent:
+                log.warning("supervisor: failed to notify %s to release group %d, forcing routing update", old_wid, group_id)
+                return
             # Wait for ACK
             await asyncio.wait_for(fut, timeout=10.0)
             log.info("supervisor: handoff of group %d complete", group_id)

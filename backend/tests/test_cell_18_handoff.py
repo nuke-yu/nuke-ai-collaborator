@@ -76,6 +76,30 @@ class TestCell18Handoff(unittest.IsolatedAsyncioTestCase):
                     # Routing should STILL be updated to avoid being stuck forever
                     self.assertEqual(sup._routing_cache[77][0], "w2")
 
+    async def test_handoff_send_failure_skips_ack_wait_and_updates_route(self):
+        sup = Supervisor("dummy_addr")
+
+        class MockDB:
+            async def __aenter__(self): return self
+            async def __aexit__(self, *args): pass
+            async def execute(self, *args): pass
+            async def commit(self): pass
+
+        sup._workers["w1"] = AsyncMock()
+        sup._routing_cache[77] = ("w1", 9999999999.0)
+
+        with patch("db.global_db", return_value=MockDB()):
+            with patch.object(sup, "send_to_worker_id", new=AsyncMock(return_value=False)) as mock_send:
+                with patch("asyncio.wait_for", new=AsyncMock()) as mock_wait:
+                    await sup.reassign_group(77, "w2")
+
+        mock_send.assert_awaited_once_with("w1", ipc.protocol.envelope(
+            ipc.protocol.RELEASE_LEASE, group_id=77
+        ))
+        mock_wait.assert_not_awaited()
+        self.assertEqual(sup._routing_cache[77][0], "w2")
+        self.assertEqual(sup._pending_handoffs, {})
+
     async def test_eviction_persistence_barrier(self):
         from runtime.lifecycle import LifecycleManager
         mgr = LifecycleManager()
