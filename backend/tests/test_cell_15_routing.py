@@ -112,5 +112,33 @@ class TestCell15Routing(unittest.IsolatedAsyncioTestCase):
             await sup.send_to_worker(7, {"type": "test"})
             mock_send.assert_called_once_with(mock_writer, {"type": "test"})
 
+    async def test_send_to_worker_refreshes_stale_cache_after_reassignment(self):
+        sup = Supervisor("dummy_addr")
+        self.assertEqual(await sup._default_route(7), "w_seven")
+
+        async with db.write_connect() as c:
+            await c.execute("UPDATE groups SET assigned_worker_id='w_new' WHERE id=7")
+            await c.commit()
+
+        mock_writer = AsyncMock()
+        sup._workers["w_new"] = mock_writer
+
+        with patch("runtime.ipc.send_msg", new_callable=AsyncMock) as mock_send:
+            await sup.send_to_worker(7, {"type": "refresh"})
+            mock_send.assert_called_once_with(mock_writer, {"type": "refresh"})
+        self.assertEqual(sup._routing_cache[7][0], "w_new")
+
+    async def test_drop_worker_routes_clears_all_cached_groups_for_worker(self):
+        sup = Supervisor("dummy_addr")
+        sup._routing_cache[7] = ("w1", 9999999999.0)
+        sup._routing_cache[8] = ("w2", 9999999999.0)
+        sup._routing_cache[9] = ("w1", 9999999999.0)
+
+        sup._drop_worker_routes("w1")
+
+        self.assertNotIn(7, sup._routing_cache)
+        self.assertNotIn(9, sup._routing_cache)
+        self.assertEqual(sup._routing_cache[8][0], "w2")
+
 if __name__ == "__main__":
     unittest.main()

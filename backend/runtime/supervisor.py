@@ -53,6 +53,15 @@ class Supervisor:
         # worker connecting later (or after a ToolListChanged) gets the current set.
         self._mcp_schemas: dict | None = None
 
+    def _drop_worker_routes(self, worker_id: str) -> None:
+        stale_groups = [
+            group_id
+            for group_id, (cached_worker_id, _expire_at) in self._routing_cache.items()
+            if cached_worker_id == worker_id
+        ]
+        for group_id in stale_groups:
+            self._routing_cache.pop(group_id, None)
+
     # ── lifecycle ─────────────────────────────────────────────────────────
 
     async def start(self) -> None:
@@ -179,6 +188,9 @@ class Supervisor:
         finally:
             if wid is not None and self._workers.get(wid) is writer:
                 del self._workers[wid]
+                self._drop_worker_routes(wid)
+                self._worker_stats.pop(wid, None)
+                self._worker_stats_ts.pop(wid, None)
                 log.info("supervisor: worker %s disconnected", wid)
 
     
@@ -283,6 +295,10 @@ class Supervisor:
     async def send_to_worker(self, group_id: int, msg: dict) -> None:
         wid = await self._route(group_id)
         writer = self._workers.get(wid)
+        if writer is None:
+            self._routing_cache.pop(group_id, None)
+            wid = await self._route(group_id)
+            writer = self._workers.get(wid)
         if writer is None:
             raise RuntimeError(f"no connected worker for group {group_id} (route -> {wid!r})")
         await ipc.send_msg(writer, msg)
