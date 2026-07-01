@@ -155,12 +155,17 @@ class Supervisor:
         if waiters:
             await asyncio.gather(*waiters, return_exceptions=True)
         self._workers.clear()
+        self._worker_stats.clear()
+        self._worker_stats_ts.clear()
+        self._routing_cache.clear()
+        self._pending_handoffs.clear()
         if self._server:
             self._server.close()
             try:
                 await asyncio.wait_for(self._server.wait_closed(), 2)
             except Exception:
                 pass
+            self._server = None
 
     # ── worker side (IPC) ────────────────────────────────────────────────
     async def _on_worker_conn(self, reader, writer) -> None:

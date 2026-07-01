@@ -163,5 +163,21 @@ class TestCell15Routing(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(writer.waited)
         self.assertEqual(sup._workers, {})
 
+    async def test_stop_clears_supervisor_runtime_state(self):
+        sup = Supervisor("dummy_addr")
+        sup._worker_stats["w1"] = {"worker_id": "w1"}
+        sup._worker_stats_ts["w1"] = 123.0
+        sup._routing_cache[7] = ("w1", 9999999999.0)
+        fut = asyncio.get_running_loop().create_future()
+        sup._pending_handoffs[7] = fut
+
+        await sup.stop()
+
+        self.assertEqual(sup._worker_stats, {})
+        self.assertEqual(sup._worker_stats_ts, {})
+        self.assertEqual(sup._routing_cache, {})
+        self.assertEqual(sup._pending_handoffs, {})
+        self.assertIsNone(sup._server)
+
 if __name__ == "__main__":
     unittest.main()
