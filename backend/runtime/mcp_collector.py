@@ -74,6 +74,16 @@ class MCPCollector:
         self._auth_locks: dict[str, asyncio.Lock] = {}  # per-server lock for OAuth race condition protection
         self._reload_lock = asyncio.Lock()
 
+    def _cleanup_auth_lock(self, server: str, lock: asyncio.Lock | None = None) -> None:
+        current = self._auth_locks.get(server)
+        if current is None:
+            return
+        if lock is not None and current is not lock:
+            return
+        if current.locked() or server in self._auth_inflight:
+            return
+        self._auth_locks.pop(server, None)
+
     async def _init_providers(self) -> None:
         import os
         from executors.tool_router import ToolRouter
@@ -257,6 +267,7 @@ class MCPCollector:
             self._flows.fail(server, str(e))
         finally:
             self._auth_inflight.discard(server)   # flow ended (success or fail)
+            self._cleanup_auth_lock(server)
 
     async def _handle_auth_start(self, frame: dict) -> None:
         rid = frame.get("request_id")
@@ -301,6 +312,7 @@ class MCPCollector:
             finally:
                 if not spawned:
                     self._auth_inflight.discard(server)   # flow never started → release now
+        self._cleanup_auth_lock(server, lock=lock)
 
     async def _handle_reload(self) -> None:
         async with self._reload_lock:

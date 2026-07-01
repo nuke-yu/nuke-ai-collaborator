@@ -253,6 +253,74 @@ class TestCollectorAuth(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(sent[0]["is_error"])
         self.assertIn("进行中", sent[0]["result"])
 
+    async def test_auth_start_same_server_is_serialized_and_lock_is_released(self):
+        from runtime.mcp_collector import MCPCollector
+        coll = MCPCollector("x")
+        coll._writer = object()
+
+        class _P:
+            url = "https://r"
+            provider_id = "mcp:gh"
+            def set_auth(self, auth): self.auth = auth
+            def is_initialized(self): return False
+            async def initialize(self): return None
+
+        prov = _P()
+        coll._find_provider = lambda s: prov
+
+        start_reinit = asyncio.Event()
+        finish_reinit = asyncio.Event()
+
+        async def fake_reinit(_prov, server):
+            start_reinit.set()
+            await finish_reinit.wait()
+            coll._auth_inflight.discard(server)
+            coll._cleanup_auth_lock(server)
+
+        first_url = asyncio.Event()
+        def fake_begin(server):
+            fut = asyncio.get_running_loop().create_future()
+            if not first_url.is_set():
+                first_url.set()
+                async def _resolve():
+                    await start_reinit.wait()
+                    fut.set_result("https://auth/first")
+                asyncio.create_task(_resolve())
+            return fut
+
+        sent = []
+        async def fake_send(_w, msg):
+            sent.append(msg)
+
+        with patch.object(coll, "_build_auth_provider", new=AsyncMock(return_value=object())), \
+             patch.object(coll, "_reinit_with_auth", new=fake_reinit), \
+             patch.object(coll._flows, "begin", new=fake_begin), \
+             patch("runtime.ipc.send_msg", new=fake_send):
+            first = asyncio.create_task(coll._handle_auth_start({
+                "request_id": "a1", "origin_worker_id": "w0", "server": "gh", "group_id": 1,
+            }))
+            await start_reinit.wait()
+            second = asyncio.create_task(coll._handle_auth_start({
+                "request_id": "a2", "origin_worker_id": "w0", "server": "gh", "group_id": 1,
+            }))
+            for _ in range(100):
+                if len(sent) == 2:
+                    break
+                await asyncio.sleep(0.01)
+            self.assertEqual(len(sent), 2)
+            finish_reinit.set()
+            await asyncio.gather(first, second)
+            for _ in range(100):
+                if "gh" not in coll._auth_inflight:
+                    break
+                await asyncio.sleep(0.01)
+
+        self.assertFalse(sent[0]["is_error"])
+        self.assertTrue(sent[1]["is_error"])
+        self.assertIn("进行中", sent[1]["result"])
+        self.assertNotIn("gh", coll._auth_inflight)
+        self.assertNotIn("gh", coll._auth_locks)
+
     async def test_push_schemas_content_aware(self):
         from runtime.mcp_collector import MCPCollector
         coll = MCPCollector("x")
@@ -345,4 +413,3 @@ class TestKillDescendants(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
