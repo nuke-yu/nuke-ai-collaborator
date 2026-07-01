@@ -116,6 +116,48 @@ class TestWorkerLoop(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(asyncio.CancelledError):
                 await task
 
+    async def test_startup_hydration_retries_then_hydrates_assigned_groups(self):
+        worker_bus = EventBus()
+        worker = Worker("w0", "ignored", bus=worker_bus, dispatch=None)
+        calls = {"n": 0}
+        hydrated = []
+
+        class _Cursor:
+            async def __aenter__(self): return self
+            async def __aexit__(self, *args): return False
+            async def fetchall(self): return [(7,), (9,)]
+
+        class _Conn:
+            async def __aenter__(self): return self
+            async def __aexit__(self, *args): return False
+            def execute(self, *_args, **_kwargs): return _Cursor()
+
+        def fake_global_db():
+            calls["n"] += 1
+            if calls["n"] == 1:
+                class _LockedConn:
+                    async def __aenter__(self):
+                        raise sqlite3.OperationalError("database is locked")
+                    async def __aexit__(self, *args):
+                        return False
+                return _LockedConn()
+            return _Conn()
+
+        async def fake_hydrate(gid):
+            hydrated.append(gid)
+            return f"/tmp/group_{gid}.db"
+
+        async def fake_sleep(_delay):
+            return None
+
+        with patch("runtime.worker.db.global_db", new=fake_global_db), \
+             patch("runtime.worker.asyncio.sleep", new=fake_sleep), \
+             patch("runtime.lifecycle.manager.hydrate", new=fake_hydrate):
+            await worker._hydrate_assigned_groups()
+
+        self.assertEqual(calls["n"], 2)
+        self.assertEqual(hydrated, [7, 9])
+
     async def test_user_message_to_upstream_broadcast(self):
         addr = ipc.make_addr(f"worker_loop_{os.getpid()}")
         worker_bus = EventBus()
