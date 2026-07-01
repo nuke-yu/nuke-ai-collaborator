@@ -188,6 +188,50 @@ class TestWorkerLoop(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(hydrated, [7, 9])
 
+    async def test_startup_hydration_does_not_retry_non_transient_db_errors(self):
+        worker_bus = EventBus()
+        worker = Worker("w0", "ignored", bus=worker_bus, dispatch=None)
+        sleeps = []
+
+        class _Conn:
+            async def __aenter__(self):
+                raise sqlite3.OperationalError("disk I/O error")
+            async def __aexit__(self, *args):
+                return False
+
+        async def fake_sleep(delay):
+            sleeps.append(delay)
+
+        with patch("runtime.worker.db.global_db", return_value=_Conn()), \
+             patch("runtime.worker.asyncio.sleep", new=fake_sleep), \
+             patch("runtime.lifecycle.manager.hydrate", new=unittest.mock.AsyncMock()) as mock_hydrate:
+            await worker._hydrate_assigned_groups()
+
+        self.assertEqual(sleeps, [])
+        mock_hydrate.assert_not_awaited()
+
+    async def test_startup_hydration_gives_up_after_retry_budget(self):
+        worker_bus = EventBus()
+        worker = Worker("w0", "ignored", bus=worker_bus, dispatch=None)
+        sleeps = []
+
+        class _Conn:
+            async def __aenter__(self):
+                raise sqlite3.OperationalError("database is locked")
+            async def __aexit__(self, *args):
+                return False
+
+        async def fake_sleep(delay):
+            sleeps.append(delay)
+
+        with patch("runtime.worker.db.global_db", return_value=_Conn()), \
+             patch("runtime.worker.asyncio.sleep", new=fake_sleep), \
+             patch("runtime.lifecycle.manager.hydrate", new=unittest.mock.AsyncMock()) as mock_hydrate:
+            await worker._hydrate_assigned_groups()
+
+        self.assertEqual(len(sleeps), 15)
+        mock_hydrate.assert_not_awaited()
+
     async def test_user_message_to_upstream_broadcast(self):
         addr = ipc.make_addr(f"worker_loop_{os.getpid()}")
         worker_bus = EventBus()
