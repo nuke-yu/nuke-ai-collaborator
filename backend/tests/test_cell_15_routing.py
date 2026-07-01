@@ -11,6 +11,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import db
 import db.writer as _writer
+from runtime import ipc
 from runtime.supervisor import Supervisor
 
 class TestCell15Routing(unittest.IsolatedAsyncioTestCase):
@@ -195,6 +196,32 @@ class TestCell15Routing(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("w1", sup._worker_stats)
         self.assertNotIn("w1", sup._worker_stats_ts)
         self.assertNotIn(7, sup._routing_cache)
+
+    async def test_worker_connect_drops_registration_when_cached_schema_push_fails(self):
+        sup = Supervisor("dummy_addr")
+        sup._mcp_schemas = {"type": ipc.protocol.MCP_SCHEMAS, "payload": {"schemas": []}}
+        writer = AsyncMock()
+        writer.close = unittest.mock.MagicMock()
+        reader = object()
+        recv_frames = iter([
+            {"type": ipc.protocol.HELLO, "worker_id": "w1"},
+        ])
+
+        async def fake_recv(_reader):
+            try:
+                return next(recv_frames)
+            except StopIteration:
+                raise asyncio.IncompleteReadError(b"", None)
+
+        async def fake_send(_writer, _msg):
+            raise BrokenPipeError("boom")
+
+        with patch("runtime.ipc.recv_msg", new=fake_recv), \
+             patch("runtime.ipc.send_msg", new=fake_send):
+            await sup._on_worker_conn(reader, writer)
+
+        self.assertNotIn("w1", sup._workers)
+        writer.close.assert_called_once()
 
 if __name__ == "__main__":
     unittest.main()

@@ -199,7 +199,13 @@ class Supervisor:
                 try:
                     await ipc.send_msg(writer, self._mcp_schemas)
                 except Exception:
+                    self._drop_worker_state(wid, writer=writer)
+                    try:
+                        writer.close()
+                    except Exception:
+                        pass
                     log.warning("supervisor: failed to send cached MCP schemas to %s", wid)
+                    return
             while True:
                 frame = await ipc.recv_msg(reader)
                 await self._on_upstream(frame)
