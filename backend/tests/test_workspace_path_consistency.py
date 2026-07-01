@@ -11,7 +11,7 @@ from db.schema import init_db
 from httpx import AsyncClient
 from main import app
 from core import auth as _auth
-from workspace import layout, write_file, list_file_history, read_file_history_version
+from workspace import layout, write_file, list_file_history, read_file_history_version, archive_run
 
 
 _HERE = Path(__file__).parent.parent
@@ -71,6 +71,20 @@ class TestWorkspacePathConsistency(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertFalse(bot_dir.exists())
+
+    async def test_archive_run_writes_under_group_runs_dir(self):
+        await archive_run(
+            1,
+            "run-12345678",
+            {"id": 10, "name": "Bot", "role": "dev"},
+            user_message="hi",
+            sender_name="Human",
+            reply="done",
+        )
+        runs_dir = layout.group_runs_dir(1)
+        files = list(runs_dir.glob("*.md"))
+        self.assertEqual(len(files), 1)
+        self.assertIn("done", files[0].read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

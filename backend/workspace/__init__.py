@@ -1005,12 +1005,13 @@ async def archive_run(
     model: str = "",
     executor: str = "",
 ):
-    """Write a full execution record to workspaces/group_{id}/runs/.
+    """Write a full execution record to the group's runs directory.
 
     One file per run, named YYYY-MM-DD_HHMMSS_{run_id[:8]}.md.
     tool_records: list of {"name": str, "args": dict, "result": str}.
     """
-    runs_dir = WORKSPACE_ROOT / f"group_{group_id}" / "runs"
+    from workspace import layout
+    runs_dir = layout.group_runs_dir(group_id)
     runs_dir.mkdir(parents=True, exist_ok=True)
 
     now = datetime.now()
