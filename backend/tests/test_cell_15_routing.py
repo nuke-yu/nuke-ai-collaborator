@@ -140,5 +140,28 @@ class TestCell15Routing(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(9, sup._routing_cache)
         self.assertEqual(sup._routing_cache[8][0], "w2")
 
+    async def test_stop_waits_for_worker_connections_to_close(self):
+        sup = Supervisor("dummy_addr")
+
+        class DummyWriter:
+            def __init__(self):
+                self.closed = False
+                self.waited = False
+
+            def close(self):
+                self.closed = True
+
+            async def wait_closed(self):
+                self.waited = True
+
+        writer = DummyWriter()
+        sup._workers["w1"] = writer
+
+        await sup.stop()
+
+        self.assertTrue(writer.closed)
+        self.assertTrue(writer.waited)
+        self.assertEqual(sup._workers, {})
+
 if __name__ == "__main__":
     unittest.main()

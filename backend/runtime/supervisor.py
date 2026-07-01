@@ -146,8 +146,14 @@ class Supervisor:
 
         # 2. Close IPC connections
 
+        waiters = []
         for w in list(self._workers.values()):
             w.close()
+            wait_closed = getattr(w, "wait_closed", None)
+            if callable(wait_closed):
+                waiters.append(wait_closed())
+        if waiters:
+            await asyncio.gather(*waiters, return_exceptions=True)
         self._workers.clear()
         if self._server:
             self._server.close()
