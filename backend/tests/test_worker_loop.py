@@ -293,6 +293,29 @@ class TestWorkerLoop(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(sent), 1)
         self.assertEqual(sent[0]["payload"]["type"], "second")
 
+    async def test_release_lease_evicts_before_ack(self):
+        worker_bus = EventBus()
+        worker = Worker("w0", "ignored", bus=worker_bus, dispatch=None)
+        worker._writer = object()
+        steps = []
+
+        async def fake_evict(gid):
+            steps.append(("evict", gid))
+
+        async def fake_send(_writer, msg):
+            steps.append(("send", msg["type"], msg["group_id"]))
+
+        with patch("runtime.lifecycle.manager.evict", new=fake_evict), \
+             patch("runtime.worker.ipc.send_msg", new=fake_send):
+            await worker._handle(ipc.protocol.envelope(
+                ipc.protocol.RELEASE_LEASE, group_id=7, trace_id="tr"
+            ))
+
+        self.assertEqual(steps, [
+            ("evict", 7),
+            ("send", ipc.protocol.LEASE_RELEASED, 7),
+        ])
+
 
 if __name__ == "__main__":
     unittest.main()
