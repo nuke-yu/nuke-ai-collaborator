@@ -70,7 +70,7 @@ class Supervisor:
         self._workers.pop(worker_id, None)
         stale_groups = self._drop_worker_routes(worker_id)
         for group_id in stale_groups:
-            fut = self._pending_handoffs.get(group_id)
+            fut = self._pending_handoffs.pop(group_id, None)
             if fut and not fut.done():
                 fut.set_result(False)
         self._worker_stats.pop(worker_id, None)

@@ -136,6 +136,7 @@ class TestCell18Handoff(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(fut.result())
         self.assertNotIn("w1", sup._workers)
         self.assertNotIn(77, sup._routing_cache)
+        self.assertNotIn(77, sup._pending_handoffs)
 
     async def test_handoff_disconnect_result_does_not_log_success(self):
         sup = Supervisor("dummy_addr")
