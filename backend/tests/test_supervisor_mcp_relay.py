@@ -74,6 +74,32 @@ class TestSupervisorMcpRelay(unittest.IsolatedAsyncioTestCase):
         self.assertIn(id(sup._workers["w1"]), targets)
         self.assertNotIn(id(sup._workers[COLL]), targets)    # collector does NOT
 
+    async def test_mcp_schema_push_failure_drops_dead_worker_state(self):
+        sup = self._sup_with_workers("w0", "w1", COLL)
+        sup._worker_stats["w1"] = {"worker_id": "w1"}
+        sup._worker_stats_ts["w1"] = 123.0
+        sup._routing_cache[7] = ("w1", 9999999999.0)
+        frame = ipc.protocol.envelope(
+            ipc.protocol.MCP_SCHEMAS, group_id=0,
+            payload={"schemas": [{"function": {"name": "fake__do"}}]},
+        )
+
+        sent = []
+        async def fake_send(writer, msg):
+            if writer is sup._workers["w1"]:
+                raise BrokenPipeError("boom")
+            sent.append((writer, msg))
+
+        with patch("runtime.ipc.send_msg", new=fake_send):
+            await sup._on_upstream(frame)
+
+        self.assertEqual(len(sent), 1)
+        self.assertIs(sent[0][0], sup._workers["w0"])
+        self.assertNotIn("w1", sup._workers)
+        self.assertNotIn("w1", sup._worker_stats)
+        self.assertNotIn("w1", sup._worker_stats_ts)
+        self.assertNotIn(7, sup._routing_cache)
+
     async def test_mcp_call_collector_down_errors_back_to_worker(self):
         sup = self._sup_with_workers("w0")                   # no collector connected
         frame = ipc.protocol.envelope(

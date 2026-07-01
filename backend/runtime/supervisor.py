@@ -264,6 +264,7 @@ class Supervisor:
                         try:
                             await ipc.send_msg(writer, frame)
                         except Exception:
+                            self._drop_worker_state(wid, writer=writer)
                             log.warning("supervisor: failed to push MCP schemas to %s", wid)
                 else:
                     log.debug("supervisor: unhandled upstream type=%s", t)
