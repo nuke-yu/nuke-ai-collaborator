@@ -166,6 +166,31 @@ class TestCell18Handoff(unittest.IsolatedAsyncioTestCase):
             for call in mock_info.call_args_list
         ))
 
+    async def test_handoff_returns_early_when_old_worker_disconnects_mid_wait(self):
+        sup = Supervisor("dummy_addr")
+
+        class MockDB:
+            async def __aenter__(self): return self
+            async def __aexit__(self, *args): pass
+            async def execute(self, *args): pass
+            async def commit(self): pass
+
+        writer = AsyncMock()
+        sup._workers["w1"] = writer
+        sup._routing_cache[77] = ("w1", 9999999999.0)
+
+        with patch("db.global_db", return_value=MockDB()):
+            with patch.object(sup, "send_to_worker_id", new=AsyncMock(return_value=True)):
+                async def disconnect_soon():
+                    await asyncio.sleep(0.01)
+                    sup._drop_worker_state("w1", writer=writer)
+
+                asyncio.create_task(disconnect_soon())
+                await asyncio.wait_for(sup.reassign_group(77, "w2"), timeout=1)
+
+        self.assertEqual(sup._routing_cache[77][0], "w2")
+        self.assertEqual(sup._pending_handoffs, {})
+
     async def test_eviction_persistence_barrier(self):
         from runtime.lifecycle import LifecycleManager
         mgr = LifecycleManager()
