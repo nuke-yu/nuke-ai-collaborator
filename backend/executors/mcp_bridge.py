@@ -62,6 +62,11 @@ class MCPBridge:
         if fut and not fut.done():
             fut.set_result((result, is_error))
 
+    def _finish_pending(self, request_id: str, fut: asyncio.Future) -> None:
+        current = self._pending.get(request_id)
+        if current is fut:
+            self._pending.pop(request_id, None)
+
     async def request(self, name: str, arguments: dict, *, group_id, trace_id,
                       timeout: int = _DEFAULT_TIMEOUT) -> tuple[str, bool]:
         if self._send is None:
@@ -72,14 +77,22 @@ class MCPBridge:
         self._pending[rid] = fut
         try:
             await self._send(rid, name, arguments, group_id, trace_id)
+        except asyncio.CancelledError:
+            self._finish_pending(rid, fut)
+            raise
         except Exception as e:
-            self._pending.pop(rid, None)
+            self._finish_pending(rid, fut)
             return f"[MCP错误] 发送失败: {e}", True
         try:
             return await asyncio.wait_for(asyncio.shield(fut), timeout)
+        except asyncio.CancelledError:
+            self._finish_pending(rid, fut)
+            raise
         except asyncio.TimeoutError:
-            self._pending.pop(rid, None)
+            self._finish_pending(rid, fut)
             return f"[MCP超时] 工具 '{name}' 超过 {timeout} 秒", True
+        finally:
+            self._finish_pending(rid, fut)
 
     async def authenticate(self, server: str, *, group_id, trace_id,
                            timeout: int = 60) -> tuple[str, bool]:
@@ -93,14 +106,22 @@ class MCPBridge:
         self._pending[rid] = fut
         try:
             await self._send_auth(rid, server, group_id, trace_id)
+        except asyncio.CancelledError:
+            self._finish_pending(rid, fut)
+            raise
         except Exception as e:
-            self._pending.pop(rid, None)
+            self._finish_pending(rid, fut)
             return f"[MCP认证错误] 发送失败: {e}", True
         try:
             return await asyncio.wait_for(asyncio.shield(fut), timeout)
+        except asyncio.CancelledError:
+            self._finish_pending(rid, fut)
+            raise
         except asyncio.TimeoutError:
-            self._pending.pop(rid, None)
+            self._finish_pending(rid, fut)
             return f"[MCP认证超时] 服务器 '{server}' 超过 {timeout} 秒", True
+        finally:
+            self._finish_pending(rid, fut)
 
 
 # Per-process singleton.

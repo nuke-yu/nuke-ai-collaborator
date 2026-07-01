@@ -49,6 +49,7 @@ class TestMCPBridge(unittest.IsolatedAsyncioTestCase):
         result, is_error = await b.request("x__y", {}, group_id=1, trace_id="t", timeout=0.05)
         self.assertTrue(is_error)
         self.assertIn("超时", result)
+        self.assertEqual(b._pending, {})
 
     async def test_authenticate_roundtrip(self):
         b = MCPBridge()
@@ -81,6 +82,38 @@ class TestMCPBridge(unittest.IsolatedAsyncioTestCase):
         result, is_error = await task
         self.assertTrue(is_error)
         self.assertIn("总线已断开", result)
+
+    async def test_request_cancellation_cleans_pending(self):
+        b = MCPBridge()
+        blocker = asyncio.Event()
+
+        async def send(*a):
+            await blocker.wait()
+
+        b.install(send, "w0")
+        task = asyncio.create_task(b.request("x__y", {}, group_id=1, trace_id="t", timeout=1))
+        await asyncio.sleep(0)
+        self.assertEqual(len(b._pending), 1)
+
+        task.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await task
+
+        self.assertEqual(b._pending, {})
+        blocker.set()
+
+    async def test_authenticate_timeout_cleans_pending(self):
+        b = MCPBridge()
+
+        async def send_auth(*a):
+            return None
+
+        b.install(AsyncMock(), "w0")
+        b.install_auth(send_auth)
+        result, is_error = await b.authenticate("github", group_id=1, trace_id="t", timeout=0.05)
+        self.assertTrue(is_error)
+        self.assertIn("超时", result)
+        self.assertEqual(b._pending, {})
 
 
 class TestMcpProxyProvider(unittest.IsolatedAsyncioTestCase):
