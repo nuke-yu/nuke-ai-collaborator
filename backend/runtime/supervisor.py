@@ -62,6 +62,15 @@ class Supervisor:
         for group_id in stale_groups:
             self._routing_cache.pop(group_id, None)
 
+    def _drop_worker_state(self, worker_id: str, writer=None) -> None:
+        current = self._workers.get(worker_id)
+        if writer is not None and current is not writer:
+            return
+        self._workers.pop(worker_id, None)
+        self._drop_worker_routes(worker_id)
+        self._worker_stats.pop(worker_id, None)
+        self._worker_stats_ts.pop(worker_id, None)
+
     # ── lifecycle ─────────────────────────────────────────────────────────
 
     async def start(self) -> None:
@@ -197,11 +206,8 @@ class Supervisor:
         except (asyncio.IncompleteReadError, ConnectionResetError, BrokenPipeError):
             pass
         finally:
-            if wid is not None and self._workers.get(wid) is writer:
-                del self._workers[wid]
-                self._drop_worker_routes(wid)
-                self._worker_stats.pop(wid, None)
-                self._worker_stats_ts.pop(wid, None)
+            if wid is not None:
+                self._drop_worker_state(wid, writer=writer)
                 log.info("supervisor: worker %s disconnected", wid)
 
     
@@ -326,6 +332,7 @@ class Supervisor:
             await ipc.send_msg(writer, msg)
             return True
         except Exception:
+            self._drop_worker_state(worker_id, writer=writer)
             log.exception("supervisor: send_to_worker_id failed for %s", worker_id)
             return False
 

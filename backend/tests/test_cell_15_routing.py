@@ -179,5 +179,22 @@ class TestCell15Routing(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sup._pending_handoffs, {})
         self.assertIsNone(sup._server)
 
+    async def test_send_to_worker_id_failure_drops_stale_worker_state(self):
+        sup = Supervisor("dummy_addr")
+        writer = AsyncMock()
+        sup._workers["w1"] = writer
+        sup._worker_stats["w1"] = {"worker_id": "w1"}
+        sup._worker_stats_ts["w1"] = 123.0
+        sup._routing_cache[7] = ("w1", 9999999999.0)
+
+        with patch("runtime.ipc.send_msg", new_callable=AsyncMock, side_effect=BrokenPipeError("boom")):
+            sent = await sup.send_to_worker_id("w1", {"type": "test"})
+
+        self.assertFalse(sent)
+        self.assertNotIn("w1", sup._workers)
+        self.assertNotIn("w1", sup._worker_stats)
+        self.assertNotIn("w1", sup._worker_stats_ts)
+        self.assertNotIn(7, sup._routing_cache)
+
 if __name__ == "__main__":
     unittest.main()
