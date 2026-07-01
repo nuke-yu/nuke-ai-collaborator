@@ -596,13 +596,13 @@ async def execute_parallel_tools(runner, calls, iteration=None) -> None:
             "arguments": call.get("arguments", {}),
         })
 
-    _t0 = asyncio.get_event_loop().time()
+    _t0 = asyncio.get_running_loop().time()
     from executors.tool_dispatch import dispatch_tool
     raw_results = await asyncio.gather(*[
         dispatch_tool(c["name"], c["arguments"], runner.execution_ctx)
         for c in calls
     ])
-    _duration = round(asyncio.get_event_loop().time() - _t0, 2)
+    _duration = round(asyncio.get_running_loop().time() - _t0, 2)
 
     for call, (tool_result, is_error) in zip(calls, raw_results):
         tool_result, _ = _check_and_attach_file(runner, tool_result)
@@ -661,13 +661,13 @@ async def execute_serial_tools(runner, calls, iteration=None) -> None:
             "arguments": call.get("arguments", {}),
         })
 
-        _t0 = asyncio.get_event_loop().time()
+        _t0 = asyncio.get_running_loop().time()
         from executors.tool_dispatch import dispatch_tool
         tool_result, is_error = await dispatch_tool(
             call["name"], call["arguments"], runner.execution_ctx
         )
         tool_result, _ = _check_and_attach_file(runner, tool_result)
-        _duration = round(asyncio.get_event_loop().time() - _t0, 2)
+        _duration = round(asyncio.get_running_loop().time() - _t0, 2)
 
         await runner.ctx.interaction.append_session_event(runner.session_id, "tool_result", {
             "tool_call_id": call["id"],
@@ -872,4 +872,3 @@ def _check_and_attach_file(runner, tool_result: str) -> tuple[str, bool]:
     # Strip the internal marker from the model-facing text.
     tool_result = _MCPSHOT_RE.sub("screenshot attached", tool_result)
     return tool_result, modified
-
