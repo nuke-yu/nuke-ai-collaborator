@@ -17,6 +17,47 @@ from bus.engine import EventBus
 
 
 class TestWorkerLoop(unittest.IsolatedAsyncioTestCase):
+    async def test_close_waits_for_background_tasks_and_writer_shutdown(self):
+        worker_bus = EventBus()
+        worker = Worker("w0", "ignored", bus=worker_bus, dispatch=None)
+
+        cancelled = []
+
+        async def _hold(label):
+            try:
+                await asyncio.Future()
+            except asyncio.CancelledError:
+                cancelled.append(label)
+                raise
+
+        worker._report_task = asyncio.create_task(_hold("report"))
+        worker._upstream_task = asyncio.create_task(_hold("upstream"))
+        worker._recap_task = asyncio.create_task(_hold("recap"))
+        worker._compaction_task = asyncio.create_task(_hold("compaction"))
+        worker._hydration_task = asyncio.create_task(_hold("hydration"))
+        await asyncio.sleep(0)
+
+        class DummyWriter:
+            def __init__(self):
+                self.closed = False
+                self.waited = False
+
+            def close(self):
+                self.closed = True
+
+            async def wait_closed(self):
+                self.waited = True
+
+        writer = DummyWriter()
+        worker._writer = writer
+
+        await worker.close()
+
+        self.assertCountEqual(cancelled, ["report", "upstream", "recap", "compaction", "hydration"])
+        self.assertTrue(writer.closed)
+        self.assertTrue(writer.waited)
+        self.assertIsNone(worker._writer)
+
     async def test_user_message_to_upstream_broadcast(self):
         addr = ipc.make_addr(f"worker_loop_{os.getpid()}")
         worker_bus = EventBus()

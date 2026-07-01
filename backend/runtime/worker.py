@@ -121,23 +121,37 @@ class Worker:
         except Exception:
             pass
 
+        to_cancel = []
         if self._report_task:
             self._report_task.cancel()
-            self._report_task = None
+            to_cancel.append(self._report_task)
         if self._upstream_task:
             self._upstream_task.cancel()
-            self._upstream_task = None
+            to_cancel.append(self._upstream_task)
         if self._recap_task:
             self._recap_task.cancel()
-            self._recap_task = None
+            to_cancel.append(self._recap_task)
         if self._compaction_task:
             self._compaction_task.cancel()
-            self._compaction_task = None
+            to_cancel.append(self._compaction_task)
         if self._hydration_task:
             self._hydration_task.cancel()
-            self._hydration_task = None
+            to_cancel.append(self._hydration_task)
+        self._report_task = None
+        self._upstream_task = None
+        self._recap_task = None
+        self._compaction_task = None
+        self._hydration_task = None
+        if to_cancel:
+            await asyncio.gather(*to_cancel, return_exceptions=True)
         if self._writer:
             self._writer.close()
+            wait_closed = getattr(self._writer, "wait_closed", None)
+            if callable(wait_closed):
+                try:
+                    await wait_closed()
+                except Exception:
+                    pass
             self._writer = None
 
     async def _recap_on_paused(self, gid: int) -> None:
