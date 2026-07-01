@@ -14,6 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from runtime import ipc
 from runtime.worker import Worker
+from executors.mcp_bridge import bridge as global_bridge
 from bus.engine import EventBus
 
 
@@ -79,6 +80,23 @@ class TestWorkerLoop(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(writer.closed)
         self.assertTrue(writer.waited)
         self.assertIsNone(worker._writer)
+
+    async def test_close_resets_mcp_bridge_schemas(self):
+        worker_bus = EventBus()
+        worker = Worker("w0", "ignored", bus=worker_bus, dispatch=None)
+        saved = list(global_bridge.schemas)
+        try:
+            global_bridge.set_schemas([
+                {"function": {"name": "fs__read_file", "description": "", "parameters": {}}}
+            ])
+            self.assertIsNotNone(global_bridge.schema_for("fs__read_file"))
+
+            await worker.close()
+
+            self.assertEqual(global_bridge.schemas, [])
+            self.assertIsNone(global_bridge.schema_for("fs__read_file"))
+        finally:
+            global_bridge.set_schemas(saved)
 
     async def test_user_message_to_upstream_broadcast(self):
         addr = ipc.make_addr(f"worker_loop_{os.getpid()}")
