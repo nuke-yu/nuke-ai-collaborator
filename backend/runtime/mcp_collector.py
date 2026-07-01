@@ -17,6 +17,7 @@ still applies the untrusted-result fence + secret redaction (inside the
 provider) before results cross back over the bus.
 """
 import asyncio
+from contextlib import suppress
 import logging
 from pathlib import Path
 
@@ -386,6 +387,8 @@ class MCPCollector:
             log.info("collector: supervisor connection closed")
         finally:
             repush.cancel()
+            with suppress(asyncio.CancelledError):
+                await repush
             await self.close()
 
 
