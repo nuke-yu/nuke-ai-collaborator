@@ -326,6 +326,35 @@ class MCPCollector:
             except Exception as e:
                 log.exception(f"collector: reload failed: {e}")
 
+    async def close(self) -> None:
+        tasks = list(self._tasks)
+        for task in tasks:
+            task.cancel()
+        self._tasks.clear()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        self._auth_inflight.clear()
+        self._auth_locks.clear()
+        if self._router:
+            await self._router.close_all()
+        if self._writer:
+            self._writer.close()
+            wait_closed = getattr(self._writer, "wait_closed", None)
+            if callable(wait_closed):
+                try:
+                    await wait_closed()
+                except Exception:
+                    pass
+            self._writer = None
+        try:
+            from executors.providers.mcp_oauth_store import aclose_all
+            await aclose_all()            # close shared OAuth token-store connections
+        except Exception:
+            pass
+        swept = _kill_descendants()       # reap orphaned npx/node grandchildren
+        if swept:
+            log.info("collector: swept %d residual subprocess(es) on shutdown", swept)
+
     async def run(self) -> None:
         await self._init_providers()
         await self.connect()
@@ -357,18 +386,7 @@ class MCPCollector:
             log.info("collector: supervisor connection closed")
         finally:
             repush.cancel()
-            if self._router:
-                await self._router.close_all()
-            if self._writer:
-                self._writer.close()
-            try:
-                from executors.providers.mcp_oauth_store import aclose_all
-                await aclose_all()            # close shared OAuth token-store connections
-            except Exception:
-                pass
-            swept = _kill_descendants()       # reap orphaned npx/node grandchildren
-            if swept:
-                log.info("collector: swept %d residual subprocess(es) on shutdown", swept)
+            await self.close()
 
 
 async def run_collector(addr: str) -> None:

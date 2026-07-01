@@ -154,6 +154,55 @@ class TestCollectorCallTimeout(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sent[0]["request_id"], "r1")
 
 
+class TestCollectorClose(unittest.IsolatedAsyncioTestCase):
+
+    async def test_close_cancels_tasks_and_waits_for_writer(self):
+        coll = MCPCollector("x")
+        cancelled = []
+
+        async def _hold(label):
+            try:
+                await asyncio.Future()
+            except asyncio.CancelledError:
+                cancelled.append(label)
+                raise
+
+        coll._tasks = {
+            asyncio.create_task(_hold("call")),
+            asyncio.create_task(_hold("auth")),
+        }
+        await asyncio.sleep(0)
+        coll._auth_inflight.add("gh")
+        coll._auth_locks["gh"] = asyncio.Lock()
+
+        class _Writer:
+            def __init__(self):
+                self.closed = False
+                self.waited = False
+            def close(self):
+                self.closed = True
+            async def wait_closed(self):
+                self.waited = True
+
+        writer = _Writer()
+        coll._writer = writer
+        coll._router = MagicMock()
+        coll._router.close_all = AsyncMock()
+
+        with patch("runtime.mcp_collector._kill_descendants", return_value=0), \
+             patch("executors.providers.mcp_oauth_store.aclose_all", new=AsyncMock()):
+            await coll.close()
+
+        self.assertCountEqual(cancelled, ["call", "auth"])
+        coll._router.close_all.assert_awaited_once()
+        self.assertTrue(writer.closed)
+        self.assertTrue(writer.waited)
+        self.assertEqual(coll._tasks, set())
+        self.assertEqual(coll._auth_inflight, set())
+        self.assertEqual(coll._auth_locks, {})
+        self.assertIsNone(coll._writer)
+
+
 class TestCollectorSchemaAnnotation(unittest.TestCase):
     """Per-server HIL config travels to workers: the collector annotates each
     pushed schema with the owning provider's needs_approval flag."""
