@@ -15,9 +15,8 @@ import sys
 class GroupLock:
     def __init__(self, group_id: int):
         self.fd = None
-        from skills.constants import WORKSPACE_ROOT
-        from pathlib import Path
-        self.lock_file = Path(WORKSPACE_ROOT) / f"group_{group_id}" / "group.lock"
+        from workspace import layout
+        self.lock_file = layout.group_dir(group_id) / "group.lock"
 
     def acquire(self) -> bool:
         self.lock_file.parent.mkdir(parents=True, exist_ok=True)

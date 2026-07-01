@@ -31,6 +31,14 @@ class TestLayoutPhase1(unittest.TestCase):
         self.assertEqual(layout.group_shared_dir(3), _root() / "group_3" / "shared")
         self.assertEqual(layout.group_runs_dir(3), _root() / "group_3" / "runs")
 
+    def test_group_db_path_uses_layout_group_dir(self):
+        from runtime.dbpaths import group_db_path
+        self.assertEqual(group_db_path(3), str(_root() / "group_3" / "chat.db"))
+
+    def test_group_lock_uses_layout_group_dir(self):
+        from runtime.lifecycle import GroupLock
+        self.assertEqual(GroupLock(3).lock_file, _root() / "group_3" / "group.lock")
+
     def test_layout_is_pure_no_mkdir(self):
         # Pure functions: calling them must not create anything on disk.
         with tempfile.TemporaryDirectory() as tmp:

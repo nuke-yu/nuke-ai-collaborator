@@ -31,7 +31,7 @@ def _skills_dir_for_layer(layer: str, bot_id: int,
     if layer == "system":
         return C.SYSTEM_SKILLS_ROOT
     if layer == "group" and group_id:
-        return C.WORKSPACE_ROOT / f"group_{group_id}" / "shared" / "skills"
+        return layout.group_shared_dir(group_id) / "skills"
     if layer == "role" and role and group_id:
         return layout.group_roles_dir(group_id) / role / "skills"
     if layer == "role":

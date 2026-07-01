@@ -2,11 +2,11 @@
 workspace layout; the db layer stays path-agnostic."""
 import os
 
-from skills.constants import WORKSPACE_ROOT
+from workspace import layout
 
 
 def group_db_path(group_id: int) -> str:
-    return os.path.join(str(WORKSPACE_ROOT), f"group_{group_id}", "chat.db")
+    return os.path.join(str(layout.group_dir(group_id)), "chat.db")
 
 
 def central_db_path() -> str:

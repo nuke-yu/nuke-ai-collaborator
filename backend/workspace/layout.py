@@ -20,7 +20,7 @@ current_workspace_path = contextvars.ContextVar("nuke_current_workspace_path", d
 
 def _root() -> Path:
     # 实时读取，避免 import 期缓存导致 WORKSPACE_ROOT 重绑定失效
-    return _const.WORKSPACE_ROOT
+    return Path(_const.WORKSPACE_ROOT)
 
 
 def group_dir(gid: int) -> Path:
