@@ -61,13 +61,18 @@ class Supervisor:
         ]
         for group_id in stale_groups:
             self._routing_cache.pop(group_id, None)
+        return stale_groups
 
     def _drop_worker_state(self, worker_id: str, writer=None) -> None:
         current = self._workers.get(worker_id)
         if writer is not None and current is not writer:
             return
         self._workers.pop(worker_id, None)
-        self._drop_worker_routes(worker_id)
+        stale_groups = self._drop_worker_routes(worker_id)
+        for group_id in stale_groups:
+            fut = self._pending_handoffs.get(group_id)
+            if fut and not fut.done():
+                fut.set_result(False)
         self._worker_stats.pop(worker_id, None)
         self._worker_stats_ts.pop(worker_id, None)
 

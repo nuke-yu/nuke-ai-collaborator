@@ -122,6 +122,21 @@ class TestCell18Handoff(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sup._routing_cache[77][0], "w2")
         self.assertEqual(sup._pending_handoffs, {})
 
+    async def test_drop_worker_state_resolves_pending_handoff_for_stale_group(self):
+        sup = Supervisor("dummy_addr")
+        writer = AsyncMock()
+        sup._workers["w1"] = writer
+        sup._routing_cache[77] = ("w1", 9999999999.0)
+        fut = asyncio.get_running_loop().create_future()
+        sup._pending_handoffs[77] = fut
+
+        sup._drop_worker_state("w1", writer=writer)
+
+        self.assertTrue(fut.done())
+        self.assertFalse(fut.result())
+        self.assertNotIn("w1", sup._workers)
+        self.assertNotIn(77, sup._routing_cache)
+
     async def test_eviction_persistence_barrier(self):
         from runtime.lifecycle import LifecycleManager
         mgr = LifecycleManager()
