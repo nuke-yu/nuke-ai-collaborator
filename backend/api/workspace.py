@@ -4,6 +4,7 @@ import asyncio
 from pathlib import Path
 from core.auth import verify_token
 from db import get_db, get_member
+from workspace import layout
 from workspace import (
     list_workspace_tree, read_file, write_file, make_dir, delete_path, bot_workspace, init_bot_workspace,
     list_file_history, read_file_history_version, group_workspace, walk_visible,
@@ -11,7 +12,7 @@ from workspace import (
 from skills import (
     list_skills_all, update_skill_status, approve_draft_skill, reject_draft_skill,
     skill_path, strip_frontmatter,
-    WORKSPACE_ROOT, SYSTEM_SKILLS_ROOT, ROLES_ROOT, bot_ws as _skills_bot_ws,
+    SYSTEM_SKILLS_ROOT, bot_ws as _skills_bot_ws,
 )
 from ai.client import call_ai_once, AIError
 
@@ -158,10 +159,9 @@ async def test_skill(member_id: int, skill_name: str, body: dict):
     if layer == "system":
         sdir = SYSTEM_SKILLS_ROOT
     elif layer == "group" and group_id:
-        sdir = WORKSPACE_ROOT / f"group_{group_id}" / "shared" / "skills"
+        sdir = layout.group_shared_dir(group_id) / "skills"
     elif layer == "role" and bot.get("role"):
-        from skills.constants import ROLES_ROOT as _ROLES
-        sdir = _ROLES / bot["role"] / "skills"
+        sdir = layout.group_roles_dir(group_id) / bot["role"] / "skills"
     elif layer == "learned":
         sdir = _skills_bot_ws(member_id, bot["group_id"]) / "skills" / "learned" / "active"
     else:
@@ -222,7 +222,7 @@ async def reject_skill(member_id: int, skill_name: str):
 def _resolve_preview_path(group_id: int, file_path: str) -> Path | None:
     """Resolve a preview request to a real file inside the group's shared
     workspace, or None if it escapes (path-traversal guard)."""
-    root = group_workspace(group_id).resolve()
+    root = layout.group_shared_dir(group_id).resolve()
     target = (root / file_path).resolve()
     if not target.is_relative_to(root):
         return None
@@ -262,4 +262,3 @@ async def get_shared_workspace_tree(group_id: int):
             for p in paths
         ]
     return await asyncio.to_thread(_list)
-
