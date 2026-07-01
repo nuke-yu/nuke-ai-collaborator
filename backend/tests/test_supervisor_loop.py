@@ -48,7 +48,7 @@ class TestSupervisorLoop(unittest.IsolatedAsyncioTestCase):
             await worker_bus.broadcast(gid, {"type": "stream_chunk", "temp_id": "t", "delta": "hi"})
             await worker_bus.broadcast(gid, {"type": "stream_end", "temp_id": "t"})
 
-        worker = Worker("w0", addr, bus=worker_bus, dispatch=fake_dispatch)
+        worker = Worker("w0", addr, bus=worker_bus, dispatch=fake_dispatch, hydrate_assigned_groups=False)
         run_task = asyncio.create_task(worker.run())
 
         browser = _FakeBrowser()
@@ -83,7 +83,7 @@ class TestSupervisorLoop(unittest.IsolatedAsyncioTestCase):
         async def dispatch(msg):
             await worker_bus.broadcast(msg["group_id"], {"type": "stream_end", "temp_id": "t"})
 
-        worker = Worker("w0", addr, bus=worker_bus, dispatch=dispatch)
+        worker = Worker("w0", addr, bus=worker_bus, dispatch=dispatch, hydrate_assigned_groups=False)
         run_task = asyncio.create_task(worker.run())
 
         b7, b9 = _FakeBrowser(), _FakeBrowser()

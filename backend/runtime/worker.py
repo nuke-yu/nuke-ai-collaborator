@@ -30,7 +30,8 @@ log = logging.getLogger(__name__)
 
 
 class Worker:
-    def __init__(self, worker_id, addr, *, bus=None, dispatch=None, on_abort=None):
+    def __init__(self, worker_id, addr, *, bus=None, dispatch=None, on_abort=None,
+                 hydrate_assigned_groups: bool = True):
         self.worker_id = worker_id
         self.addr = addr
         if bus is None:
@@ -47,6 +48,7 @@ class Worker:
         self._recap_task = None
         self._compaction_task = None
         self._hydration_task = None
+        self._hydrate_assigned_groups_enabled = hydrate_assigned_groups
 
     async def connect(self) -> None:
         self._reader, self._writer = await ipc.connect(self.addr)
@@ -75,7 +77,8 @@ class Worker:
         self._report_task = asyncio.create_task(self._report_stats_loop())
         self._recap_task = asyncio.create_task(self._pump_recap())
         self._compaction_task = asyncio.create_task(self._pump_compaction())
-        self._hydration_task = asyncio.create_task(self._hydrate_assigned_groups())
+        if self._hydrate_assigned_groups_enabled:
+            self._hydration_task = asyncio.create_task(self._hydrate_assigned_groups())
 
     async def run(self) -> None:
         tracing.setup_structured_logging(log_file=f"logs/worker-{self.worker_id}.log")

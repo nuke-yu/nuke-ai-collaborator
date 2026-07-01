@@ -8,6 +8,7 @@ import asyncio
 import os
 import sys
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -17,6 +18,27 @@ from bus.engine import EventBus
 
 
 class TestWorkerLoop(unittest.IsolatedAsyncioTestCase):
+    async def test_connect_can_skip_startup_group_hydration(self):
+        worker_bus = EventBus()
+        worker = Worker("w0", "ignored", bus=worker_bus, dispatch=None, hydrate_assigned_groups=False)
+
+        class DummyWriter:
+            async def drain(self): pass
+            def close(self): pass
+
+        async def fake_connect(addr):
+            return object(), DummyWriter()
+
+        async def fake_send_msg(writer, msg):
+            return None
+
+        with patch("runtime.worker.ipc.connect", new=fake_connect), \
+             patch("runtime.worker.ipc.send_msg", new=fake_send_msg):
+            await worker.connect()
+
+        self.assertIsNone(worker._hydration_task)
+        await worker.close()
+
     async def test_close_waits_for_background_tasks_and_writer_shutdown(self):
         worker_bus = EventBus()
         worker = Worker("w0", "ignored", bus=worker_bus, dispatch=None)
