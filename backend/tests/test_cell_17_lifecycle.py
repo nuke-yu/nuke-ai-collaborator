@@ -177,5 +177,18 @@ class TestCell17Lifecycle(unittest.IsolatedAsyncioTestCase):
                 except Exception: pass
         await lm.shutdown()
 
+    async def test_shutdown_reuses_full_evict_cleanup(self):
+        lm = LifecycleManager()
+        lm._active_groups[1] = time.time()
+        lm._active_groups[2] = time.time()
+
+        with patch.object(lm, "_do_evict", new_callable=AsyncMock) as mock_evict:
+            await lm.shutdown()
+
+        self.assertEqual(mock_evict.await_count, 2)
+        mock_evict.assert_any_await(1)
+        mock_evict.assert_any_await(2)
+        self.assertEqual(lm._active_groups, {})
+
 if __name__ == "__main__":
     unittest.main()

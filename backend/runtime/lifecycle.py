@@ -330,12 +330,10 @@ class LifecycleManager:
             if self._evictor_task:
                 self._evictor_task.cancel()
                 self._evictor_task = None
-            for gid in list(self._active_groups):
-                await db.aclose_writer(group_db_path(gid))
-                glock = self._locks.pop(gid, None)
-                if glock:
-                    glock.release()
+            active = list(self._active_groups)
             self._active_groups.clear()
+        for gid in active:
+            await self._do_evict(gid)
 
     def stats(self) -> dict:
         return {
