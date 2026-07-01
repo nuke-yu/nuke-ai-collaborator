@@ -66,6 +66,7 @@ class LifecycleManager:
         self.max_groups = max_groups
         # group_id -> last_active_timestamp
         self._active_groups: OrderedDict[int, float] = OrderedDict()
+        self._hydrating: dict[int, asyncio.Future] = {}
         self._lock = asyncio.Lock()
         self._locks: dict[int, GroupLock] = {}
         self._evictor_task: asyncio.Task | None = None
@@ -173,33 +174,45 @@ class LifecycleManager:
         if self._evictor_task is None or self._evictor_task.done():
             self._evictor_task = asyncio.create_task(self._background_loop())
 
+        fut = None
         async with self._lock:
             if group_id in self._active_groups:
                 self._active_groups.move_to_end(group_id)
                 self._active_groups[group_id] = time.time()
                 return path
+            fut = self._hydrating.get(group_id)
+            if fut is None:
+                fut = asyncio.get_running_loop().create_future()
+                self._hydrating[group_id] = fut
+                leader = True
+            else:
+                leader = False
 
+        if not leader:
+            return await asyncio.shield(fut)
+
+        glock = None
+        try:
             # New hydration
             log.info("lifecycle: hydrating group %d", group_id)
-            
+
             # Acquire group file lock to prevent split-brain double worker executions
             glock = GroupLock(group_id)
             if not glock.acquire():
                 raise RuntimeError(f"Failed to acquire lease lock for group {group_id}. Another worker process is likely holding it.")
-            self._locks[group_id] = glock
-            
+
             # Ensure workspace directory exists
             os.makedirs(os.path.dirname(path), exist_ok=True)
-            
+
             # 1. Initialize schema (CELL-05 logic)
             from db.schema_split import init_group_db
             await init_group_db(path)
-            
+
             # 2. Run any pending migrations (CELL-10.1)
             async with db.connect(path) as conn:
                 from db.migrations import run_migrations
                 await run_migrations(conn)
-            
+
             # Steps 3 & 4 read/write GROUP-private tables (tickets / workflow_state /
             # agent_sessions). Bind the group DB so their connect()/get_db() resolve
             # to it — otherwise they hit the central DB, which has no such tables.
@@ -213,7 +226,7 @@ class LifecycleManager:
                         from workspace.git_worktree import promote_worktree, prune_group_worktrees
                         tickets = await get_jira().list_tickets(group_id)
                         status_by_id = {t["ticket_id"]: t["status"] for t in tickets}
-                        
+
                         for item in list(worktrees_dir.iterdir()):
                             if item.is_dir() and item.name.startswith("task_"):
                                 tid = item.name[5:]
@@ -223,7 +236,7 @@ class LifecycleManager:
                                         await promote_worktree(group_id, tid)
                                     except Exception as pe:
                                         log.exception(f"Failed to execute deferred promotion for task {tid} on hydration: {pe}")
-                        
+
                         # Prune remaining stale worktrees
                         await prune_group_worktrees(group_id)
                 except Exception:
@@ -245,13 +258,28 @@ class LifecycleManager:
                 except Exception:
                     log.exception("lifecycle: failed to recover group %d", group_id)
 
-
-            # Evict if over limit
-            if len(self._active_groups) >= self.max_groups:
-                await self._evict_lru()
-                
-            self._active_groups[group_id] = time.time()
+            to_evict = None
+            async with self._lock:
+                self._locks[group_id] = glock
+                glock = None
+                if len(self._active_groups) >= self.max_groups:
+                    to_evict, _ = self._active_groups.popitem(last=False)
+                self._active_groups[group_id] = time.time()
+                fut = self._hydrating.pop(group_id, None)
+                if fut and not fut.done():
+                    fut.set_result(path)
+            if to_evict is not None:
+                await self._do_evict(to_evict)
             return path
+        except Exception as exc:
+            async with self._lock:
+                fut = self._hydrating.pop(group_id, None)
+                if fut and not fut.done():
+                    fut.set_exception(exc)
+            raise
+        finally:
+            if glock is not None:
+                glock.release()
 
 
     async def evict(self, group_id: int) -> None:

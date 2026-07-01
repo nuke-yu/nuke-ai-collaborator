@@ -219,5 +219,51 @@ class TestCell17Lifecycle(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(lock_states, [False])
         self.assertNotIn(1, lm._active_groups)
 
+    async def test_hydrate_releases_manager_lock_before_schema_init(self):
+        lm = LifecycleManager()
+        lock_states = []
+
+        async def fake_init_group_db(path):
+            lock_states.append(lm._lock.locked())
+
+        with patch("db.schema_split.init_group_db", new=fake_init_group_db), \
+             patch("db.migrations.run_migrations", new_callable=AsyncMock), \
+             patch("core.orchestration.rd_manager.rd_manager.check_board", new_callable=AsyncMock), \
+             patch("core.runner.resume_workflows", new_callable=AsyncMock), \
+             patch("sessions.recover_all", new_callable=AsyncMock):
+            await lm.hydrate(1)
+
+        self.assertEqual(lock_states, [False])
+        await lm.shutdown()
+
+    async def test_concurrent_hydrate_same_group_reuses_single_inflight_operation(self):
+        lm = LifecycleManager()
+        started = asyncio.Event()
+        release = asyncio.Event()
+        init_calls = 0
+
+        async def fake_init_group_db(path):
+            nonlocal init_calls
+            init_calls += 1
+            started.set()
+            await release.wait()
+
+        with patch("db.schema_split.init_group_db", new=fake_init_group_db), \
+             patch("db.migrations.run_migrations", new_callable=AsyncMock), \
+             patch("core.orchestration.rd_manager.rd_manager.check_board", new_callable=AsyncMock), \
+             patch("core.runner.resume_workflows", new_callable=AsyncMock), \
+             patch("sessions.recover_all", new_callable=AsyncMock):
+            first = asyncio.create_task(lm.hydrate(1))
+            await started.wait()
+            second = asyncio.create_task(lm.hydrate(1))
+            await asyncio.sleep(0)
+            self.assertEqual(init_calls, 1)
+            release.set()
+            first_path, second_path = await asyncio.gather(first, second)
+
+        self.assertEqual(first_path, second_path)
+        self.assertEqual(init_calls, 1)
+        await lm.shutdown()
+
 if __name__ == "__main__":
     unittest.main()
