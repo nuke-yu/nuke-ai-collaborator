@@ -100,6 +100,28 @@ class TestCell18Handoff(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sup._routing_cache[77][0], "w2")
         self.assertEqual(sup._pending_handoffs, {})
 
+    async def test_reassign_group_cancels_replaced_pending_handoff(self):
+        sup = Supervisor("dummy_addr")
+
+        class MockDB:
+            async def __aenter__(self): return self
+            async def __aexit__(self, *args): pass
+            async def execute(self, *args): pass
+            async def commit(self): pass
+
+        sup._workers["w1"] = AsyncMock()
+        sup._routing_cache[77] = ("w1", 9999999999.0)
+        prev = asyncio.get_running_loop().create_future()
+        sup._pending_handoffs[77] = prev
+
+        with patch("db.global_db", return_value=MockDB()):
+            with patch.object(sup, "send_to_worker_id", new=AsyncMock(return_value=False)):
+                await sup.reassign_group(77, "w2")
+
+        self.assertTrue(prev.cancelled())
+        self.assertEqual(sup._routing_cache[77][0], "w2")
+        self.assertEqual(sup._pending_handoffs, {})
+
     async def test_eviction_persistence_barrier(self):
         from runtime.lifecycle import LifecycleManager
         mgr = LifecycleManager()

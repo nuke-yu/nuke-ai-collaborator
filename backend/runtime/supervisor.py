@@ -408,6 +408,9 @@ class Supervisor:
         # 3. Handoff Protocol
         log.info("supervisor: initiating handoff of group %d from %s to %s", group_id, old_wid, new_worker_id)
         fut = asyncio.get_running_loop().create_future()
+        prev = self._pending_handoffs.get(group_id)
+        if prev and not prev.done():
+            prev.cancel()
         self._pending_handoffs[group_id] = fut
         
         try:
