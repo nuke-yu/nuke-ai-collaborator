@@ -158,6 +158,36 @@ class TestWorkerLoop(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(calls["n"], 2)
         self.assertEqual(hydrated, [7, 9])
 
+    async def test_startup_hydration_continues_after_one_group_fails(self):
+        worker_bus = EventBus()
+        worker = Worker("w0", "ignored", bus=worker_bus, dispatch=None)
+        hydrated = []
+
+        class _Cursor:
+            async def __aenter__(self): return self
+            async def __aexit__(self, *args): return False
+            async def fetchall(self): return [(7,), (9,)]
+
+        class _Conn:
+            async def __aenter__(self): return self
+            async def __aexit__(self, *args): return False
+            def execute(self, *_args, **_kwargs): return _Cursor()
+
+        def fake_global_db():
+            return _Conn()
+
+        async def fake_hydrate(gid):
+            hydrated.append(gid)
+            if gid == 7:
+                raise RuntimeError("boom")
+            return f"/tmp/group_{gid}.db"
+
+        with patch("runtime.worker.db.global_db", new=fake_global_db), \
+             patch("runtime.lifecycle.manager.hydrate", new=fake_hydrate):
+            await worker._hydrate_assigned_groups()
+
+        self.assertEqual(hydrated, [7, 9])
+
     async def test_user_message_to_upstream_broadcast(self):
         addr = ipc.make_addr(f"worker_loop_{os.getpid()}")
         worker_bus = EventBus()
