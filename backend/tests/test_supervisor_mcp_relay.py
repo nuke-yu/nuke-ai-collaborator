@@ -114,6 +114,22 @@ class TestSupervisorMcpRelay(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(msg["type"], ipc.protocol.MCP_RESULT)
         self.assertTrue(msg["is_error"])
         self.assertEqual(msg["request_id"], "r1")
+        self.assertIn("collector 未就绪", msg["result"])
+
+    async def test_mcp_auth_start_collector_down_returns_auth_specific_error(self):
+        sup = self._sup_with_workers("w0")                   # no collector connected
+        frame = ipc.protocol.envelope(
+            ipc.protocol.MCP_AUTH_START, group_id=1, request_id="a1",
+            origin_worker_id="w0", server="github",
+        )
+        sent = await self._capture(sup, frame)
+        self.assertEqual(len(sent), 1)
+        writer, msg = sent[0]
+        self.assertIs(writer, sup._workers["w0"])
+        self.assertEqual(msg["type"], ipc.protocol.MCP_RESULT)
+        self.assertTrue(msg["is_error"])
+        self.assertEqual(msg["request_id"], "a1")
+        self.assertIn("MCP认证错误", msg["result"])
 
 
 if __name__ == "__main__":

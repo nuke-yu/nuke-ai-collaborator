@@ -251,12 +251,15 @@ class Supervisor:
                     # worker → collector. If the collector is down, reply an error
                     # to the origin worker so its awaiting call doesn't hang.
                     if not await self.send_to_worker_id(ipc.protocol.MCP_COLLECTOR_ID, frame):
+                        error_result = "[MCP错误] collector 未就绪"
+                        if t == ipc.protocol.MCP_AUTH_START:
+                            error_result = "[MCP认证错误] collector 未就绪"
                         await self.send_to_worker_id(frame.get("origin_worker_id"),
                             ipc.protocol.envelope(
                                 ipc.protocol.MCP_RESULT, group_id=gid, trace_id=tid,
                                 request_id=frame.get("request_id"),
                                 origin_worker_id=frame.get("origin_worker_id"),
-                                result="[MCP错误] collector 未就绪", is_error=True,
+                                result=error_result, is_error=True,
                             ))
                 elif t == ipc.protocol.MCP_RESULT:
                     # collector → origin worker
