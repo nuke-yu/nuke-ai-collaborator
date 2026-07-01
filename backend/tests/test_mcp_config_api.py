@@ -9,7 +9,7 @@ from core import auth as _auth
 
 # Mock authentication to allow requests in test
 async def mock_get_current_user():
-    return {"uid": 1, "sub": "test"}
+    return {"uid": 1, "sub": "test", "is_operator": True}
 
 @pytest.fixture
 def client():

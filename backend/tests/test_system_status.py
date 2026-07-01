@@ -76,17 +76,22 @@ class TestPermissionStats(unittest.TestCase):
 class TestSystemStatusRoute(unittest.IsolatedAsyncioTestCase):
     async def test_route_aggregates_all_sections(self):
         from main import app
+        from core import auth as _auth
+        app.dependency_overrides[_auth.get_current_user] = lambda: {"uid": 1, "sub": "test", "is_operator": True}
         transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-            resp = await client.get("/api/system/status")
-        self.assertEqual(resp.status_code, 200)
-        body = resp.json()
-        self.assertIn("supervisor", body)
-        self.assertIn("websockets", body)
-        self.assertIn("permissions", body)
-        self.assertIn("active_tasks", body["tasks"])
-        self.assertIn("total_connections", body["websockets"])
-        self.assertIn("pending_requests", body["permissions"])
+        try:
+            async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+                resp = await client.get("/api/system/status")
+            self.assertEqual(resp.status_code, 200)
+            body = resp.json()
+            self.assertIn("supervisor", body)
+            self.assertIn("websockets", body)
+            self.assertIn("permissions", body)
+            self.assertIn("active_tasks", body["tasks"])
+            self.assertIn("total_connections", body["websockets"])
+            self.assertIn("pending_requests", body["permissions"])
+        finally:
+            app.dependency_overrides.pop(_auth.get_current_user, None)
 
 
 if __name__ == "__main__":

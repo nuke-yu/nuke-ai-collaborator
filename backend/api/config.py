@@ -3,12 +3,13 @@
 Keys are stored in backend/app_config.json (git-ignored); get_key() falls back to
 the matching env var (DEEPSEEK_API_KEY, OPENAI_API_KEY, ...) when the file has none.
 """
-from fastapi import APIRouter, HTTPException, Response, Header
+from fastapi import APIRouter, HTTPException, Response, Header, Depends, Request
 import hashlib
 import json
 from pathlib import Path
 
 from config import read_config, write_config, get_key, _preview, FIELDS
+from api.admin_deps import require_operator, audit_control_plane
 
 router = APIRouter()
 
@@ -110,9 +111,10 @@ def _mcp_config_etag(raw: bytes) -> str:
 
 
 @router.get("/api/config/mcp")
-async def get_mcp_config(response: Response):
+async def get_mcp_config(response: Response, request: Request, user=Depends(require_operator)):
     path = resolve_mcp_config_path()
     if not path.exists():
+        audit_control_plane("mcp_config.read", user, request, config_path=str(path))
         return {"mcpServers": {}}
     try:
         raw = path.read_bytes()
@@ -124,11 +126,18 @@ async def get_mcp_config(response: Response):
         raise HTTPException(500, f"MCP config file is corrupted/invalid JSON: {e}")
     # ETag reflects the real on-disk content so PUT can detect concurrent edits.
     response.headers["ETag"] = _mcp_config_etag(raw)
+    audit_control_plane("mcp_config.read", user, request, config_path=str(path))
     return _mask_mcp_config(data)
 
 
 @router.put("/api/config/mcp")
-async def save_mcp_config(data: dict, response: Response, if_match: str | None = Header(default=None)):
+async def save_mcp_config(
+    data: dict,
+    response: Response,
+    request: Request,
+    if_match: str | None = Header(default=None),
+    user=Depends(require_operator),
+):
     path = resolve_mcp_config_path()
     if not isinstance(data, dict) or "mcpServers" not in data:
         raise HTTPException(400, "Invalid MCP config format. Must contain 'mcpServers'.")
@@ -194,4 +203,5 @@ async def save_mcp_config(data: dict, response: Response, if_match: str | None =
     res = _mask_mcp_config(unmasked_data)
     if warning:
         res["warning"] = warning
+    audit_control_plane("mcp_config.write", user, request, config_path=str(path), warning=warning)
     return res

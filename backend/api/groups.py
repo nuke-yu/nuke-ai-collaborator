@@ -278,7 +278,7 @@ async def remove_member(group_id: int, member_id: int):
 
     Data is split across the central DB (member row, permission_rules, cron_jobs,
     role_summaries) and the group's private DB (messages, agent_sessions, reactions,
-    read state); the workspace lives on disk under workspaces/bot_<id>/.
+    read state); the bot workspace path is resolved via workspace.layout.
     """
     # 1. Central DB: FK-referencing rows + member-owned data + the member row.
     async with write_connect() as db:
@@ -301,8 +301,8 @@ async def remove_member(group_id: int, member_id: int):
 
     # 3. Filesystem: the bot's private workspace directory.
     try:
-        from skills.constants import WORKSPACE_ROOT
-        shutil.rmtree(os.path.join(str(WORKSPACE_ROOT), f"bot_{member_id}"), ignore_errors=True)
+        bot_dir = layout.bot_dir(group_id, member_id)
+        shutil.rmtree(bot_dir, ignore_errors=True)
     except Exception:
         log.exception("remove_member: workspace cleanup failed for member %s", member_id)
 
@@ -452,5 +452,4 @@ async def get_suggestions(group_id: int, payload: dict = None):
     awaiting_confirm = payload.get("awaiting_confirm")
     suggestions = await get_ai_suggestions(group_id, awaiting_confirm)
     return {"suggestions": suggestions}
-
 

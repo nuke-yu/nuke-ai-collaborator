@@ -35,6 +35,7 @@ from api.media import router as media_router
 from permissions.routes import router as permissions_router
 from api.skills import router as skills_router
 from executors import registry
+from api.admin_deps import require_operator, audit_control_plane
 
 async def _media_reaper_loop():
     """Purge old MCP screenshots + orphaned staging files every 6h. User uploads untouched."""
@@ -152,16 +153,19 @@ app.include_router(auth_router)
 # ── Metadata APIs ─────────────────────────────────────────────────────────
 
 @app.get("/api/plugins")
-async def list_plugins():
+async def list_plugins(request: Request, user=Depends(require_operator)):
+    audit_control_plane("plugins.list", user, request)
     return registry.all_plugins()
 
 @app.get("/api/plugins/health")
-async def plugins_health():
+async def plugins_health(request: Request, user=Depends(require_operator)):
+    audit_control_plane("plugins.health", user, request)
     return {"loaded": list(registry._registry.keys()), "failures": registry.failures()}
 
 @app.post("/api/plugins/reload")
-async def reload_plugins():
+async def reload_plugins(request: Request, user=Depends(require_operator)):
     loaded = registry.reload()
+    audit_control_plane("plugins.reload", user, request, loaded=loaded)
     return {"loaded": loaded, "failures": registry.failures()}
 
 
@@ -237,11 +241,12 @@ async def readiness():
 
 
 @app.get("/api/system/status")
-async def system_status():
+async def system_status(request: Request, user=Depends(require_operator)):
     """DFT-057: Aggregated metrics from Supervisor and all Workers."""
     from core import bg
     import permissions
     sup_stats = sup_mod.supervisor.get_stats() if sup_mod.supervisor else {}
+    audit_control_plane("system.status", user, request)
     return {
         "tasks": bg.stats(),
         "websockets": manager.stats(),

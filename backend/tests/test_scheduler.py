@@ -387,10 +387,16 @@ class TestSchedulerRouter(unittest.IsolatedAsyncioTestCase):
         # Reset engine state (no live scheduler needed for router tests)
         import scheduler.engine as eng
         eng._scheduler = None
+        from main import app
+        from core import auth as _auth
+        app.dependency_overrides[_auth.get_current_user] = lambda: {"uid": 1, "sub": "test", "is_operator": True}
 
     async def asyncTearDown(self):
         import scheduler.engine as eng
         eng.stop()
+        from main import app
+        from core import auth as _auth
+        app.dependency_overrides.pop(_auth.get_current_user, None)
         _restore_db(self._orig_db)
         if os.path.exists(_TEST_DB):
             os.remove(_TEST_DB)

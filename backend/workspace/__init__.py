@@ -220,7 +220,7 @@ def _save_to_history(ws: Path, p: Path) -> None:
 
 
 def list_file_history(bot_id: int, path: str, group_id: int | None = None) -> list[dict]:
-    ws = bot_workspace(bot_id, group_id)
+    ws, path = _get_effective_ws(bot_id, path, group_id)
     p = _safe_path(ws, path)
     if p is None:
         return []
@@ -232,7 +232,7 @@ def list_file_history(bot_id: int, path: str, group_id: int | None = None) -> li
 
 
 def read_file_history_version(bot_id: int, path: str, ts: str, group_id: int | None = None) -> str:
-    ws = bot_workspace(bot_id, group_id)
+    ws, path = _get_effective_ws(bot_id, path, group_id)
     p = _safe_path(ws, path)
     if p is None:
         return "[错误] 非法路径"

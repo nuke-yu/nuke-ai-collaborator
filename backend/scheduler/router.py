@@ -1,9 +1,10 @@
 """scheduler/router.py — FastAPI endpoints for managing cron jobs."""
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends, Request
 import scheduler.engine as engine
 from scheduler.store import list_jobs, get_job, create_job, update_job, delete_job, toggle_job
+from api.admin_deps import require_operator, audit_control_plane
 
-router = APIRouter(prefix="/api/cron-jobs", tags=["scheduler"])
+router = APIRouter(prefix="/api/cron-jobs", tags=["scheduler"], dependencies=[Depends(require_operator)])
 
 
 def _404(job_id: int):
@@ -16,7 +17,7 @@ async def api_list_jobs(bot_id: int | None = None, group_id: int | None = None):
 
 
 @router.post("")
-async def api_create_job(body: dict):
+async def api_create_job(body: dict, request: Request, user=Depends(require_operator)):
     bot_id    = body.get("bot_id")
     group_id  = body.get("group_id")
     cron_expr = (body.get("cron_expr") or "").strip()
@@ -32,6 +33,7 @@ async def api_create_job(body: dict):
         enabled=bool(body.get("enabled", True)),
     )
     engine.reload_job(job)
+    audit_control_plane("cron_job.create", user, request, job_id=job.get("id"), group_id=job.get("group_id"), bot_id=job.get("bot_id"))
     return job
 
 
@@ -44,7 +46,7 @@ async def api_get_job(job_id: int):
 
 
 @router.put("/{job_id}")
-async def api_update_job(job_id: int, body: dict):
+async def api_update_job(job_id: int, body: dict, request: Request, user=Depends(require_operator)):
     job = await get_job(job_id)
     if not job:
         _404(job_id)
@@ -52,33 +54,37 @@ async def api_update_job(job_id: int, body: dict):
         raise HTTPException(400, f"Invalid cron expression: {body['cron_expr']!r}")
     job = await update_job(job_id, **body)
     engine.reload_job(job)
+    audit_control_plane("cron_job.update", user, request, job_id=job_id, group_id=job.get("group_id"), bot_id=job.get("bot_id"))
     return job
 
 
 @router.delete("/{job_id}")
-async def api_delete_job(job_id: int):
+async def api_delete_job(job_id: int, request: Request, user=Depends(require_operator)):
     job = await get_job(job_id)
     if not job:
         _404(job_id)
     engine.reload_job({**job, "enabled": False})   # pull from scheduler before DB delete
     await delete_job(job_id)
+    audit_control_plane("cron_job.delete", user, request, job_id=job_id, group_id=job.get("group_id"), bot_id=job.get("bot_id"))
     return {"ok": True}
 
 
 @router.post("/{job_id}/toggle")
-async def api_toggle_job(job_id: int):
+async def api_toggle_job(job_id: int, request: Request, user=Depends(require_operator)):
     job = await get_job(job_id)
     if not job:
         _404(job_id)
     job = await toggle_job(job_id)
     engine.reload_job(job)
+    audit_control_plane("cron_job.toggle", user, request, job_id=job_id, group_id=job.get("group_id"), bot_id=job.get("bot_id"), enabled=job.get("enabled"))
     return job
 
 
 @router.post("/{job_id}/run")
-async def api_run_now(job_id: int):
+async def api_run_now(job_id: int, request: Request, user=Depends(require_operator)):
     job = await get_job(job_id)
     if not job:
         _404(job_id)
     await engine.run_now(job)
+    audit_control_plane("cron_job.run_now", user, request, job_id=job_id, group_id=job.get("group_id"), bot_id=job.get("bot_id"))
     return {"ok": True}
