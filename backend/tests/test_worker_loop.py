@@ -9,6 +9,7 @@ import os
 import sys
 import unittest
 from unittest.mock import patch
+import sqlite3
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -97,6 +98,23 @@ class TestWorkerLoop(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(global_bridge.schema_for("fs__read_file"))
         finally:
             global_bridge.set_schemas(saved)
+
+    async def test_startup_hydration_task_cancels_during_retry_sleep(self):
+        worker_bus = EventBus()
+        worker = Worker("w0", "ignored", bus=worker_bus, dispatch=None)
+
+        class _Conn:
+            async def __aenter__(self):
+                raise sqlite3.OperationalError("database is locked")
+            async def __aexit__(self, *args):
+                return False
+
+        with patch("runtime.worker.db.global_db", return_value=_Conn()):
+            task = asyncio.create_task(worker._hydrate_assigned_groups())
+            await asyncio.sleep(0)
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
 
     async def test_user_message_to_upstream_broadcast(self):
         addr = ipc.make_addr(f"worker_loop_{os.getpid()}")
