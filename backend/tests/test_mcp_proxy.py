@@ -76,12 +76,15 @@ class TestMCPBridge(unittest.IsolatedAsyncioTestCase):
         b = MCPBridge()
         async def send(*a): pass
         b.install(send, "w0")
+        b.set_schemas([{"function": {"name": "fs__read_file", "parameters": {}}}])
         task = asyncio.create_task(b.request("x__y", {}, group_id=1, trace_id="t"))
         await asyncio.sleep(0)
         b.reset()
         result, is_error = await task
         self.assertTrue(is_error)
         self.assertIn("总线已断开", result)
+        self.assertEqual(b.schemas, [])
+        self.assertIsNone(b.schema_for("fs__read_file"))
 
     async def test_request_cancellation_cleans_pending(self):
         b = MCPBridge()

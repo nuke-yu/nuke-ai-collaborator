@@ -38,6 +38,7 @@ class MCPBridge:
     def reset(self) -> None:
         self._send = None
         self._send_auth = None
+        self.set_schemas([])
         for fut in self._pending.values():
             if not fut.done():
                 fut.set_result(("[MCP错误] 总线已断开", True))
