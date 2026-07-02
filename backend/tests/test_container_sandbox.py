@@ -10,7 +10,7 @@ import time
 import asyncio
 import unittest
 from pathlib import Path
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -141,6 +141,34 @@ class TestContainerManager(unittest.IsolatedAsyncioTestCase):
             1, cmd="echo hello", cwd="/ws", env={}, timeout=5
         )
         self.assertEqual((rc, out, timed_out), (0, "hello", False))
+
+    async def test_docker_timeout_logs_when_kill_fails(self):
+        mgr = cs.ContainerManager()
+
+        class _Proc:
+            def __init__(self):
+                self.returncode = None
+
+            async def communicate(self):
+                raise asyncio.TimeoutError()
+
+            def kill(self):
+                raise RuntimeError("kill failed")
+
+        async def fake_create_subprocess_exec(*_args, **_kwargs):
+            return _Proc()
+
+        async def fake_wait_for(coro, timeout=None):
+            coro.close()
+            raise asyncio.TimeoutError()
+
+        with patch("executors.plugins.container_sandbox.asyncio.create_subprocess_exec", new=fake_create_subprocess_exec), \
+             patch("executors.plugins.container_sandbox.asyncio.wait_for", new=fake_wait_for), \
+             self.assertLogs("executors.plugins.container_sandbox", level="ERROR") as logs:
+            rc, out, err = await mgr._docker(["docker", "ps"], timeout=1)
+
+        self.assertEqual((rc, out, err), (124, "", "docker call timed out"))
+        self.assertTrue(any("failed to kill timed-out process" in line for line in logs.output))
 
 
 class TestReaper(unittest.IsolatedAsyncioTestCase):

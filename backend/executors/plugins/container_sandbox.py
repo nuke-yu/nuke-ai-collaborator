@@ -115,7 +115,7 @@ class ContainerManager:
             try:
                 proc.kill()
             except Exception:
-                pass
+                log.exception("sandbox docker call: failed to kill timed-out process")
             return 124, "", "docker call timed out"
         return proc.returncode, out.decode(errors="replace"), err.decode(errors="replace")
 
