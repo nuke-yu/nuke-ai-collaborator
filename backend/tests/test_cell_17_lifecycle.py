@@ -120,6 +120,28 @@ class TestCell17Lifecycle(unittest.IsolatedAsyncioTestCase):
         finally:
             bg._group_tasks.pop(1, None)
 
+    async def test_hydrate_can_temporarily_exceed_capacity_when_all_groups_are_active(self):
+        lm = LifecycleManager(max_groups=2)
+        await lm.hydrate(1)
+        await lm.hydrate(2)
+
+        mock_task_1 = MagicMock()
+        mock_task_1.done.return_value = False
+        mock_task_2 = MagicMock()
+        mock_task_2.done.return_value = False
+        from core import bg
+        bg._group_tasks[1] = {mock_task_1}
+        bg._group_tasks[2] = {mock_task_2}
+
+        try:
+            with patch("db.aclose_writer", new_callable=AsyncMock) as mock_close:
+                await lm.hydrate(3)
+                self.assertEqual(set(lm._active_groups), {1, 2, 3})
+                mock_close.assert_not_awaited()
+        finally:
+            bg._group_tasks.pop(1, None)
+            bg._group_tasks.pop(2, None)
+
     async def test_memory_state_cleared_on_eviction(self):
         lm = LifecycleManager(max_groups=1)
         await lm.hydrate(1)
