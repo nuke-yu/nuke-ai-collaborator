@@ -68,8 +68,13 @@ class Supervisor:
         if writer is not None and current is not writer:
             return
         self._workers.pop(worker_id, None)
-        stale_groups = self._drop_worker_routes(worker_id)
-        for group_id in stale_groups:
+        self._drop_worker_routes(worker_id)
+        pending_groups = [
+            group_id
+            for group_id, (releasing_worker_id, _fut) in self._pending_handoffs.items()
+            if releasing_worker_id == worker_id
+        ]
+        for group_id in pending_groups:
             pending = self._pending_handoffs.pop(group_id, None)
             fut = pending[1] if pending else None
             if fut and not fut.done():
