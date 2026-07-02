@@ -537,6 +537,18 @@ class TestCell17Lifecycle(unittest.IsolatedAsyncioTestCase):
         mock_lock.release.assert_called_once_with()
         self.assertNotIn(1, lm._locks)
 
+    async def test_evict_clears_once_grants_even_if_cancel_pending_fails(self):
+        lm = LifecycleManager()
+        perm_engine = MagicMock()
+        perm_engine.cancel_pending_for_group.side_effect = RuntimeError("cancel failed")
+
+        with patch("permissions.engine", perm_engine), \
+             patch("db.aclose_writer", new_callable=AsyncMock):
+            await lm._do_evict(1)
+
+        perm_engine.cancel_pending_for_group.assert_called_once_with(1)
+        perm_engine.clear_once_grants_for_group.assert_called_once_with(1)
+
     async def test_hydrate_waits_for_inflight_eviction_of_same_group(self):
         lm = LifecycleManager()
         lm._active_groups[1] = time.time()

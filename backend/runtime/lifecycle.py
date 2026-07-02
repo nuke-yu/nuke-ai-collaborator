@@ -417,12 +417,19 @@ class LifecycleManager:
 
         try:
             from permissions import engine as perm_engine
-            if hasattr(perm_engine, "cancel_pending_for_group"):
-                perm_engine.cancel_pending_for_group(gid)
-            if hasattr(perm_engine, "clear_once_grants_for_group"):
-                perm_engine.clear_once_grants_for_group(gid)
         except Exception:
-            pass
+            perm_engine = None
+        if perm_engine is not None:
+            try:
+                if hasattr(perm_engine, "cancel_pending_for_group"):
+                    perm_engine.cancel_pending_for_group(gid)
+            except Exception:
+                log.exception("lifecycle: failed to cancel pending permissions for group %d", gid)
+            try:
+                if hasattr(perm_engine, "clear_once_grants_for_group"):
+                    perm_engine.clear_once_grants_for_group(gid)
+            except Exception:
+                log.exception("lifecycle: failed to clear once grants for group %d", gid)
             
         # 3. Clear this group's VFS path locks so they don't accumulate in a
         # long-lived worker (M-5). Group tasks were aborted in step 1, so no
