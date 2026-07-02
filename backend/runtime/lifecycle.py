@@ -84,6 +84,10 @@ class LifecycleManager:
             self._active_groups.move_to_end(group_id)
             self._active_groups[group_id] = time.time()
 
+    def _ensure_evictor_task_locked(self) -> None:
+        if self._evictor_task is None or self._evictor_task.done():
+            self._evictor_task = asyncio.create_task(self._background_loop())
+
     async def _background_loop(self) -> None:
         log.info("lifecycle: starting background eviction and pruning loop")
         last_prune = 0.0
@@ -193,9 +197,6 @@ class LifecycleManager:
     async def hydrate(self, group_id: int) -> str:
         """Ensure a group is ready for work. Returns the DB path."""
         path = group_db_path(group_id)
-        
-        if self._evictor_task is None or self._evictor_task.done():
-            self._evictor_task = asyncio.create_task(self._background_loop())
 
         while True:
             fut = None
@@ -203,6 +204,7 @@ class LifecycleManager:
             async with self._lock:
                 if self._shutting_down:
                     raise RuntimeError("lifecycle manager is shutting down")
+                self._ensure_evictor_task_locked()
                 if group_id in self._active_groups:
                     self._active_groups.move_to_end(group_id)
                     self._active_groups[group_id] = time.time()

@@ -327,6 +327,15 @@ class TestCell17Lifecycle(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(cancelled.is_set())
         self.assertIsNone(lm._evictor_task)
 
+    async def test_hydrate_does_not_restart_evictor_during_shutdown(self):
+        lm = LifecycleManager()
+        lm._shutting_down = True
+
+        with self.assertRaises(RuntimeError):
+            await lm.hydrate(1)
+
+        self.assertIsNone(lm._evictor_task)
+
     async def test_evict_releases_manager_lock_before_cleanup(self):
         lm = LifecycleManager()
         lm._active_groups[1] = time.time()
