@@ -9,6 +9,7 @@ WORKSPACE_ROOT 每次调用时从 skills.constants **实时读取**（不在 imp
 Phase 1：bot_dir 返回当前扁平路径（workspaces/bot_{id}），零行为变化。
 Phase 2：bot_dir(gid, bot_id) → 嵌套 group_{gid}/bots/bot_{id}；gid=None 走过渡垫片。
 """
+import logging
 import contextvars
 from pathlib import Path
 
@@ -16,6 +17,7 @@ import skills.constants as _const
 
 # ContextVar to override the shared workspace directory path.
 current_workspace_path = contextvars.ContextVar("nuke_current_workspace_path", default=None)
+log = logging.getLogger(__name__)
 
 
 def _root() -> Path:
@@ -106,7 +108,7 @@ def get_group_language(group_id: int | None) -> str:
             _GROUP_LANG_CACHE[group_id] = lang
             return lang
         except Exception:
-            pass
+            log.exception("layout: failed to read language file for group %s", group_id)
     _GROUP_LANG_CACHE[group_id] = "zh"
     return "zh"
 
@@ -121,4 +123,4 @@ def set_group_language(group_id: int, lang: str):
         lang_file.parent.mkdir(parents=True, exist_ok=True)
         lang_file.write_text(lang, encoding="utf-8")
     except Exception:
-        pass
+        log.exception("layout: failed to write language file for group %s", group_id)

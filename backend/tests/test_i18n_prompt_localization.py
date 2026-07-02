@@ -42,6 +42,43 @@ class TestI18nPromptLocalization(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(get_group_language(self.group_id), "en")
         self.assertEqual(_GROUP_LANG_CACHE.get(self.group_id), "en")
 
+    def test_get_group_language_logs_when_read_fails(self):
+        lang_file = self.workspace_root / f"group_{self.group_id}" / "lang.txt"
+        lang_file.parent.mkdir(parents=True, exist_ok=True)
+        lang_file.write_text("en", encoding="utf-8")
+        _GROUP_LANG_CACHE.clear()
+
+        orig_read_text = Path.read_text
+
+        def fake_read_text(self, *args, **kwargs):
+            if self == lang_file:
+                raise OSError("read failed")
+            return orig_read_text(self, *args, **kwargs)
+
+        with patch("pathlib.Path.read_text", new=fake_read_text), \
+             self.assertLogs("workspace.layout", level="ERROR") as logs:
+            self.assertEqual(get_group_language(self.group_id), "zh")
+
+        self.assertTrue(any("failed to read language file" in line for line in logs.output))
+
+    def test_set_group_language_logs_when_write_fails(self):
+        lang_file = self.workspace_root / f"group_{self.group_id}" / "lang.txt"
+        _GROUP_LANG_CACHE.clear()
+
+        orig_write_text = Path.write_text
+
+        def fake_write_text(self, *args, **kwargs):
+            if self == lang_file:
+                raise OSError("write failed")
+            return orig_write_text(self, *args, **kwargs)
+
+        with patch("pathlib.Path.write_text", new=fake_write_text), \
+             self.assertLogs("workspace.layout", level="ERROR") as logs:
+            set_group_language(self.group_id, "en")
+
+        self.assertEqual(_GROUP_LANG_CACHE.get(self.group_id), "en")
+        self.assertTrue(any("failed to write language file" in line for line in logs.output))
+
     def test_prompt_compilation_i18n(self):
         bot = {
             "id": 1,
@@ -233,4 +270,3 @@ class TestI18nPromptLocalization(unittest.IsolatedAsyncioTestCase):
             tool_names_false = [s["function"]["name"] for s in runner_false.tool_schemas]
             self.assertNotIn("run_skill", tool_names_false)
             self.assertIn("read_file", tool_names_false)
-
