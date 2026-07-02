@@ -34,8 +34,10 @@ class GroupLock:
         except Exception as e:
             log.warning("Failed to acquire group lock for %s: %s", self.lock_file, e)
             if self.fd:
-                try: self.fd.close()
-                except Exception: pass
+                try:
+                    self.fd.close()
+                except Exception:
+                    log.exception("Failed to close group lock fd after acquire failure for %s", self.lock_file)
                 self.fd = None
             return False
 
@@ -46,16 +48,16 @@ class GroupLock:
                     import fcntl
                     fcntl.flock(self.fd, fcntl.LOCK_UN)
             except Exception:
-                pass
+                log.exception("Failed to unlock group lock for %s", self.lock_file)
             try:
                 self.fd.close()
             except Exception:
-                pass
+                log.exception("Failed to close group lock fd for %s", self.lock_file)
             self.fd = None
             try:
                 self.lock_file.unlink(missing_ok=True)
             except Exception:
-                pass
+                log.exception("Failed to remove group lock file %s", self.lock_file)
 
     def __del__(self):
         self.release()

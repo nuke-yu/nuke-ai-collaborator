@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import db
 import db.writer as _writer
-from runtime.lifecycle import LifecycleManager
+from runtime.lifecycle import GroupLock, LifecycleManager
 
 class TestCell17Lifecycle(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
@@ -37,6 +37,41 @@ class TestCell17Lifecycle(unittest.IsolatedAsyncioTestCase):
         # Cleanup temp dir
         import shutil
         shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_group_lock_release_logs_close_and_unlink_failures(self):
+        glock = object.__new__(GroupLock)
+        fd = MagicMock()
+        fd.close.side_effect = RuntimeError("close failed")
+        glock.fd = fd
+        glock.lock_file = MagicMock()
+        glock.lock_file.unlink.side_effect = RuntimeError("unlink failed")
+
+        with patch("runtime.lifecycle.sys.platform", "win32"), \
+             self.assertLogs("runtime.lifecycle", level="ERROR") as logs:
+            glock.release()
+
+        fd.close.assert_called_once_with()
+        glock.lock_file.unlink.assert_called_once_with(missing_ok=True)
+        self.assertIsNone(glock.fd)
+        self.assertTrue(any("Failed to close group lock fd" in line for line in logs.output))
+        self.assertTrue(any("Failed to remove group lock file" in line for line in logs.output))
+
+    def test_group_lock_acquire_failure_logs_fd_close_failure(self):
+        glock = object.__new__(GroupLock)
+        fd = MagicMock()
+        fd.close.side_effect = RuntimeError("close failed")
+        glock.fd = fd
+        glock.lock_file = MagicMock()
+        glock.lock_file.parent.mkdir.return_value = None
+
+        with patch("builtins.open", side_effect=RuntimeError("open failed")), \
+             self.assertLogs("runtime.lifecycle", level="ERROR") as logs:
+            acquired = glock.acquire()
+
+        self.assertFalse(acquired)
+        fd.close.assert_called_once_with()
+        self.assertIsNone(glock.fd)
+        self.assertTrue(any("Failed to close group lock fd after acquire failure" in line for line in logs.output))
 
     async def test_lazy_hydration_creates_db(self):
         lm = LifecycleManager()
