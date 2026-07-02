@@ -120,6 +120,21 @@ class TestMCPCollectorRoundTrip(unittest.IsolatedAsyncioTestCase):
         
         self.assertEqual(call_order, ["start", "end", "start", "end"])
 
+    async def test_mcp_reload_continues_after_provider_cleanup_failure(self):
+        coll = MCPCollector("dummy")
+        coll._router = MagicMock()
+        coll._router.close_all = AsyncMock(side_effect=RuntimeError("cleanup failed"))
+        coll._init_providers = AsyncMock()
+        coll._push_schemas = AsyncMock()
+
+        with self.assertLogs("runtime.mcp_collector", level="ERROR") as logs:
+            await coll._handle_reload()
+
+        coll._router.close_all.assert_awaited_once()
+        coll._init_providers.assert_awaited_once()
+        coll._push_schemas.assert_awaited_once()
+        self.assertTrue(any("reload provider cleanup failed" in line for line in logs.output))
+
 
 class TestCollectorCallTimeout(unittest.IsolatedAsyncioTestCase):
     """A hung MCP server must not hold a collector slot forever: _handle_call

@@ -13,9 +13,12 @@ No runtime/ipc import here (the Worker injects the IPC-aware send), so executors
 stays free of a runtime import cycle.
 """
 import asyncio
+import logging
 
 # Default per-call timeout for an MCP round-trip over the bus (seconds).
 _DEFAULT_TIMEOUT = 35
+
+log = logging.getLogger(__name__)
 
 
 class MCPBridge:
@@ -60,8 +63,13 @@ class MCPBridge:
 
     def resolve(self, request_id: str, result: str, is_error: bool) -> None:
         fut = self._pending.pop(request_id, None)
-        if fut and not fut.done():
-            fut.set_result((result, is_error))
+        if fut is None:
+            log.warning("MCP bridge received result for unknown request_id=%s", request_id)
+            return
+        if fut.done():
+            log.warning("MCP bridge received result for completed request_id=%s", request_id)
+            return
+        fut.set_result((result, is_error))
 
     def _finish_pending(self, request_id: str, fut: asyncio.Future) -> None:
         current = self._pending.get(request_id)

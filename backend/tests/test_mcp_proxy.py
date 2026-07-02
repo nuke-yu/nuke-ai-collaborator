@@ -51,6 +51,33 @@ class TestMCPBridge(unittest.IsolatedAsyncioTestCase):
         self.assertIn("超时", result)
         self.assertEqual(b._pending, {})
 
+    def test_resolve_unknown_request_logs_and_does_not_mutate_pending(self):
+        b = MCPBridge()
+
+        with self.assertLogs("executors.mcp_bridge", level="WARNING") as logs:
+            b.resolve("missing-rid", "late", False)
+
+        self.assertEqual(b._pending, {})
+        self.assertTrue(any("unknown request_id=missing-rid" in line for line in logs.output))
+
+    async def test_late_result_after_timeout_logs_without_recreating_pending(self):
+        b = MCPBridge()
+        captured = {}
+
+        async def send(rid, *_args):
+            captured["rid"] = rid
+
+        b.install(send, "w0")
+        result, is_error = await b.request("x__y", {}, group_id=1, trace_id="t", timeout=0.05)
+        self.assertTrue(is_error)
+        self.assertEqual(b._pending, {})
+
+        with self.assertLogs("executors.mcp_bridge", level="WARNING") as logs:
+            b.resolve(captured["rid"], "late", False)
+
+        self.assertEqual(b._pending, {})
+        self.assertTrue(any(f"unknown request_id={captured['rid']}" in line for line in logs.output))
+
     async def test_authenticate_roundtrip(self):
         b = MCPBridge()
         captured = {}

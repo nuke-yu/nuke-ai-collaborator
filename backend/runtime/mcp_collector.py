@@ -318,9 +318,12 @@ class MCPCollector:
     async def _handle_reload(self) -> None:
         async with self._reload_lock:
             log.info("collector: reloading MCP config and re-initializing providers...")
-            try:
-                if self._router:
+            if self._router:
+                try:
                     await self._router.close_all()
+                except Exception:
+                    log.exception("collector: reload provider cleanup failed; continuing re-initialization")
+            try:
                 await self._init_providers()
                 await self._push_schemas()
                 log.info("collector: MCP reload complete, schemas pushed.")
