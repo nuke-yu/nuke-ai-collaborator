@@ -429,9 +429,13 @@ class Supervisor:
             prev[1].cancel()
 
         # 1. Update persistent DB
-        async with db.global_db() as cdb:
-            await cdb.execute("UPDATE groups SET assigned_worker_id = ? WHERE id = ?", (new_worker_id, group_id))
-            await cdb.commit()
+        try:
+            async with db.global_db() as cdb:
+                await cdb.execute("UPDATE groups SET assigned_worker_id = ? WHERE id = ?", (new_worker_id, group_id))
+                await cdb.commit()
+        except Exception:
+            self._finish_reassign_version(group_id, reassign_version)
+            raise
             
         # 2. Check who currently owns it in memory
         cached_old = self._routing_cache.get(group_id)

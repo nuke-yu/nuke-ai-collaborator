@@ -265,6 +265,22 @@ class TestCell18Handoff(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(77, sup._reassign_versions)
         self.assertEqual(sup._routing_cache[77][0], "w2")
 
+    async def test_failed_reassign_db_update_clears_reassign_version(self):
+        sup = Supervisor("dummy_addr")
+
+        class FailingDB:
+            async def __aenter__(self): return self
+            async def __aexit__(self, *args): pass
+            async def execute(self, *args): pass
+            async def commit(self): raise RuntimeError("db write failed")
+
+        with patch("db.global_db", return_value=FailingDB()):
+            with self.assertRaisesRegex(RuntimeError, "db write failed"):
+                await sup.reassign_group(77, "w2")
+
+        self.assertNotIn(77, sup._reassign_versions)
+        self.assertEqual(sup._pending_handoffs, {})
+
     async def test_handoff_disconnect_result_does_not_log_success(self):
         sup = Supervisor("dummy_addr")
 
