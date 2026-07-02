@@ -313,6 +313,35 @@ class TestCell18Handoff(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sup._pending_handoffs, {})
         self.assertEqual(sup._routing_cache[77][0], "w2")
 
+    async def test_late_ack_after_timeout_does_not_complete_next_handoff(self):
+        sup = Supervisor("dummy_addr")
+
+        class MockDB:
+            async def __aenter__(self): return self
+            async def __aexit__(self, *args): pass
+            async def execute(self, *args): pass
+            async def commit(self): pass
+
+        sup._workers["w1"] = AsyncMock()
+        sup._workers["w2"] = AsyncMock()
+        sup._routing_cache[77] = ("w1", 9999999999.0)
+
+        with patch("db.global_db", return_value=MockDB()):
+            with patch.object(sup, "send_to_worker_id", new=AsyncMock(return_value=True)):
+                with patch("asyncio.wait_for", side_effect=asyncio.TimeoutError):
+                    await sup.reassign_group(77, "w2")
+
+        self.assertEqual(sup._routing_cache[77][0], "w2")
+
+        next_waiter = asyncio.get_running_loop().create_future()
+        sup._pending_handoffs[77] = ("w2", next_waiter)
+        await sup._on_upstream(ipc.protocol.envelope(
+            ipc.protocol.LEASE_RELEASED, group_id=77, worker_id="w1"
+        ))
+
+        self.assertFalse(next_waiter.done())
+        self.assertEqual(sup._pending_handoffs[77][0], "w2")
+
     async def test_eviction_persistence_barrier(self):
         from runtime.lifecycle import LifecycleManager
         mgr = LifecycleManager()
