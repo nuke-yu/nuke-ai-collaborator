@@ -149,6 +149,26 @@ class RecordEventTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(rows[0]["tool"], "read_file")
         self.assertEqual(json.loads(rows[0]["files_touched"]), ["z.py"])
 
+    async def test_dispatch_tool_logs_if_event_recording_cannot_be_scheduled(self):
+        from executors import tool_dispatch
+        ctx = {"group_id": 42, "bot_id": 5}
+
+        async def fake_execute(*_args, **_kwargs):
+            return "done", False
+
+        def _boom(coro):
+            coro.close()
+            raise RuntimeError("task creation failed")
+
+        with patch.object(tool_dispatch.tool_executor, "has_tool", return_value=True), \
+             patch.object(tool_dispatch.tool_executor, "execute", new=fake_execute), \
+             patch("executors.tool_dispatch.asyncio.create_task", side_effect=_boom), \
+             self.assertLogs("executors.tool_dispatch", level="ERROR") as logs:
+            res, is_err = await tool_dispatch.dispatch_tool("read_file", {"path": "z.py"}, ctx)
+
+        self.assertEqual((res, is_err), ("done", False))
+        self.assertTrue(any("failed to schedule tool event recording" in line for line in logs.output))
+
 
 class RetrievalTest(unittest.IsolatedAsyncioTestCase):
     """L3 — 3-layer retrieval over tool_events."""

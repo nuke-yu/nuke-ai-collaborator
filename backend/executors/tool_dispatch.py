@@ -1,6 +1,9 @@
 import asyncio
+import logging
 
 from executors import tool_executor
+
+log = logging.getLogger(__name__)
 
 # Keep strong refs to fire-and-forget L1 recording tasks so the event loop
 # doesn't GC them mid-flight (asyncio only holds weak refs to bare tasks).
@@ -35,7 +38,7 @@ def _record_event_l1(name: str, arguments: dict, result: str, is_error: bool, co
         _recording_tasks.add(task)
         task.add_done_callback(_recording_tasks.discard)
     except Exception:
-        pass  # scheduling the recorder must never perturb the tool loop
+        log.exception("tool_dispatch: failed to schedule tool event recording")
 
 
 async def dispatch_tool(name: str, arguments: dict, context: dict) -> tuple[str, bool]:
