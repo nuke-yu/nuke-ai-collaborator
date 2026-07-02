@@ -2,12 +2,13 @@ import os
 import sys
 import unittest
 import asyncio
+from pathlib import Path
 from unittest.mock import patch, AsyncMock, MagicMock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from executors.plugins.workspace_tools import (
-    _handle_run_shell, set_shell_backend_for_test,
+    _handle_run_shell, _check_shell_command_paths, set_shell_backend_for_test,
 )
 from executors.plugins.shell_backend import (
     ShellExecResult, ShellBackgroundHandle,
@@ -65,6 +66,49 @@ class TestProcessSandbox(unittest.IsolatedAsyncioTestCase):
                 # Verify it was capped at 300 seconds
                 self.assertIn("300 秒", result)
                 mock_proc.kill.assert_called_once()
+
+    def test_shell_path_validation_logs_when_resolve_fails(self):
+        work_dir = Path("/ws/group_1")
+
+        class BadPath:
+            def __str__(self):
+                return "/Users/nuke/bad"
+
+            def expanduser(self):
+                return self
+
+            def resolve(self):
+                raise RuntimeError("resolve failed")
+
+        with patch("executors.plugins.workspace_tools.re.findall", return_value=["/Users/nuke/bad"]), \
+             patch("executors.plugins.workspace_tools.Path", side_effect=lambda value: BadPath() if value == "/Users/nuke/bad" else Path(value)), \
+             self.assertLogs("executors.plugins.workspace_tools", level="ERROR") as logs:
+            result = _check_shell_command_paths("cat /Users/nuke/bad", work_dir)
+
+        self.assertIsNone(result)
+        self.assertTrue(any("failed to validate shell path candidate" in line for line in logs.output))
+
+    def test_shell_home_path_validation_logs_when_resolve_fails(self):
+        work_dir = Path("/ws/group_1")
+        home = str(Path("~").expanduser().resolve())
+
+        class BadHomePath:
+            def __str__(self):
+                return home
+
+            def expanduser(self):
+                return self
+
+            def resolve(self):
+                raise RuntimeError("resolve failed")
+
+        with patch("executors.plugins.workspace_tools.re.split", return_value=[home]), \
+             patch("executors.plugins.workspace_tools.Path", side_effect=lambda value: BadHomePath() if value == home else Path(value)), \
+             self.assertLogs("executors.plugins.workspace_tools", level="ERROR") as logs:
+            result = _check_shell_command_paths(f"echo {home}", work_dir)
+
+        self.assertIsNone(result)
+        self.assertTrue(any("failed to validate shell home-path candidate" in line for line in logs.output))
 
 class _FakeBackend:
     """Records the request and returns canned outcomes — lets us test the

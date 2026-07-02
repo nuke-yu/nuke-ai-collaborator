@@ -1014,7 +1014,7 @@ def _check_shell_command_paths(cmd: str, work_dir: Path) -> str | None:
             if not resolved.is_relative_to(work_dir.resolve()):
                 return f"工作区沙箱限制：禁止读写工作区外的路径「{match}」"
         except Exception:
-            pass
+            log.exception("workspace_tools: failed to validate shell path candidate %s", match)
 
     # 2. Check direct home directory string references in arguments
     if home_dir_str in cmd:
@@ -1025,7 +1025,7 @@ def _check_shell_command_paths(cmd: str, work_dir: Path) -> str | None:
                     if not resolved.is_relative_to(work_dir.resolve()):
                         return f"工作区沙箱限制：禁止读写工作区外的路径「{word}」"
                 except Exception:
-                    pass
+                    log.exception("workspace_tools: failed to validate shell home-path candidate %s", word)
     return None
 
 
