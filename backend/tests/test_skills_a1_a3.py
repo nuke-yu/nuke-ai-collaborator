@@ -7,6 +7,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import shutil
 import unittest
+import fcntl
+from unittest.mock import patch
 
 from skills.metadata import parse_frontmatter, parse_skill_meta
 from skills.discovery import _list_skills_all_sync
@@ -299,6 +301,29 @@ Please write_file to save the output.""", encoding="utf-8")
         # Verify we can acquire it again.
         with file_lock(test_file):
             self.assertTrue(lock_path.exists())
+
+    def test_file_lock_logs_when_release_fails(self):
+        from skills.lifecycle import file_lock
+        import tempfile
+
+        test_file = _TEST_WS_ROOT / "lock_release_fail.txt"
+        test_file.parent.mkdir(parents=True, exist_ok=True)
+        test_file.write_text("content", encoding="utf-8")
+
+        calls = []
+
+        def fake_flock(fd, op):
+            calls.append(op)
+            if op == fcntl.LOCK_UN:
+                raise OSError("unlock failed")
+
+        with patch("fcntl.flock", side_effect=fake_flock), \
+             self.assertLogs("skills.lifecycle", level="ERROR") as logs:
+            with file_lock(test_file):
+                self.assertTrue(calls)
+
+        self.assertIn(fcntl.LOCK_UN, calls)
+        self.assertTrue(any("failed to release file lock" in line for line in logs.output))
 
     def test_current_stage_role_family_filter_integration(self):
         import core.workflow as wf

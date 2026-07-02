@@ -1,9 +1,12 @@
 import sys
 import time
+import logging
 from pathlib import Path
 from contextlib import contextmanager
 from .constants import LEARNED_DRAFT, LEARNED_ACTIVE, bot_ws
 from .metadata import skill_path, parse_frontmatter, _is_safe_name
+
+log = logging.getLogger(__name__)
 
 
 @contextmanager
@@ -42,11 +45,11 @@ def file_lock(file_path: Path):
                     import fcntl
                     fcntl.flock(fd, fcntl.LOCK_UN)
             except Exception:
-                pass
+                log.exception("skills.lifecycle: failed to release file lock for %s", file_path)
             try:
                 fd.close()
             except Exception:
-                pass
+                log.exception("skills.lifecycle: failed to close file lock for %s", file_path)
 
 
 def write_to_draft(bot_id: int, skill_name: str, content: str, group_id: int | None = None) -> str:
