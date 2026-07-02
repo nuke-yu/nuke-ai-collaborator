@@ -1,5 +1,6 @@
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 from skills.composer import merge_layers
 
 
@@ -38,6 +39,23 @@ class TestComposer(unittest.TestCase):
             group=[], role=[], learned={"active": [], "personal": {}, "draft": []},
         )
         self.assertIsNone(out[0]["injected"])
+
+    def test_draft_diagnostics_logs_when_body_read_fails(self):
+        draft = entry("draft-skill", "personal", path=Path("/tmp/draft-skill.md"))
+        draft["status"] = "draft"
+        draft["allowed_tools"] = ["read_file"]
+
+        with patch("skills.composer.Path.read_text", side_effect=OSError("read failed")), \
+             self.assertLogs("skills.composer", level="WARNING") as logs:
+            out = merge_layers(
+                system=[],
+                group=[],
+                role=[],
+                learned={"active": [], "personal": {}, "draft": [draft]},
+            )
+
+        self.assertEqual(out[0]["status"], "draft")
+        self.assertTrue(any("failed to read draft body for diagnostics" in line for line in logs.output))
 
 
 if __name__ == "__main__":

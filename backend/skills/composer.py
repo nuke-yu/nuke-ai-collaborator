@@ -123,7 +123,7 @@ def _draft_diagnostics(s: SkillEntry, merged: Dict[str, SkillEntry]) -> list:
                 if t in body_text and t not in triggered:
                     triggered.append(t)
         except Exception:
-            pass
+            log.warning("skills.composer: failed to read draft body for diagnostics from %s", s["path"], exc_info=True)
 
     if triggered:
         diagnostics.append({
