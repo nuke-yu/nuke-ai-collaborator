@@ -12,11 +12,13 @@ run in a thread to keep the event loop responsive.
 from __future__ import annotations
 
 import asyncio
+import logging
 from pathlib import Path
 
 from executors.code_intel.engine import Location
 
 _JEDI_AVAILABLE: bool | None = None
+log = logging.getLogger(__name__)
 
 
 def _location(name) -> Location | None:
@@ -38,6 +40,7 @@ class JediEngine:
                 import jedi  # noqa: F401
                 _JEDI_AVAILABLE = True
             except Exception:
+                log.exception("jedi engine: availability check failed")
                 _JEDI_AVAILABLE = False
         return _JEDI_AVAILABLE
 
@@ -74,13 +77,13 @@ class JediEngine:
             if sigs:
                 parts.append(sigs[0].to_string())
         except Exception:
-            pass
+            log.exception("jedi engine: signature lookup failed")
         try:
             doc = n.docstring(raw=True)
             if doc:
                 parts.append(doc)
         except Exception:
-            pass
+            log.exception("jedi engine: docstring lookup failed")
         return "\n".join(p for p in parts if p).strip()
 
     async def document_symbols(self, file, root):

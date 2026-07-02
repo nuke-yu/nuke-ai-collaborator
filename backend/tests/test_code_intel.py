@@ -8,6 +8,7 @@ import sys
 import asyncio
 import tempfile
 import unittest
+import builtins
 from pathlib import Path
 from unittest.mock import patch
 
@@ -41,6 +42,26 @@ class TestJediEngine(unittest.IsolatedAsyncioTestCase):
     async def test_available(self):
         self.assertTrue(self.engine.available())
 
+    def test_available_logs_when_import_fails(self):
+        from executors import code_intel as _ci
+        old = _ci.jedi_engine._JEDI_AVAILABLE
+        _ci.jedi_engine._JEDI_AVAILABLE = None
+        engine = JediEngine()
+        orig_import = builtins.__import__
+
+        def fake_import(name, *args, **kwargs):
+            if name == "jedi":
+                raise ImportError("boom")
+            return orig_import(name, *args, **kwargs)
+
+        try:
+            with patch("builtins.__import__", side_effect=fake_import), \
+                 self.assertLogs("executors.code_intel.jedi_engine", level="ERROR") as logs:
+                self.assertFalse(engine.available())
+            self.assertTrue(any("availability check failed" in line for line in logs.output))
+        finally:
+            _ci.jedi_engine._JEDI_AVAILABLE = old
+
     async def test_definition_cross_file(self):
         # from the usage in main.py → jump to the def in lib.py
         locs = await self.engine.definition(self.root / "main.py", 2, 7, self.root)
@@ -56,6 +77,25 @@ class TestJediEngine(unittest.IsolatedAsyncioTestCase):
     async def test_hover_has_signature(self):
         text = await self.engine.hover(self.root / "main.py", 2, 7, self.root)
         self.assertIn("process_order", text)
+
+    async def test_hover_logs_optional_lookup_failures(self):
+        class _Name:
+            type = "function"
+            name = "demo"
+            description = "demo()"
+            def get_signatures(self):
+                raise RuntimeError("sig failed")
+            def docstring(self, raw=True):
+                raise RuntimeError("doc failed")
+
+        with patch.object(self.engine, "_script") as mock_script, \
+             self.assertLogs("executors.code_intel.jedi_engine", level="ERROR") as logs:
+            mock_script.return_value.help.return_value = [_Name()]
+            text = await self.engine.hover(self.root / "main.py", 2, 7, self.root)
+
+        self.assertIn("demo", text)
+        self.assertTrue(any("signature lookup failed" in line for line in logs.output))
+        self.assertTrue(any("docstring lookup failed" in line for line in logs.output))
 
     async def test_document_symbols(self):
         locs = await self.engine.document_symbols(self.root / "lib.py", self.root)
