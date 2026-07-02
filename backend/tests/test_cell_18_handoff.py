@@ -191,6 +191,23 @@ class TestCell18Handoff(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sup._routing_cache[77][0], "w2")
         self.assertEqual(sup._pending_handoffs, {})
 
+    async def test_late_or_duplicate_release_ack_is_ignored_after_cleanup(self):
+        sup = Supervisor("dummy_addr")
+        fut = asyncio.get_running_loop().create_future()
+        fut.set_result(True)
+        sup._pending_handoffs[77] = fut
+        await sup._on_upstream(ipc.protocol.envelope(
+            ipc.protocol.LEASE_RELEASED, group_id=77
+        ))
+        self.assertTrue(fut.done())
+        self.assertTrue(fut.result())
+
+        sup._pending_handoffs.pop(77, None)
+        await sup._on_upstream(ipc.protocol.envelope(
+            ipc.protocol.LEASE_RELEASED, group_id=77
+        ))
+        self.assertEqual(sup._pending_handoffs, {})
+
     async def test_eviction_persistence_barrier(self):
         from runtime.lifecycle import LifecycleManager
         mgr = LifecycleManager()
