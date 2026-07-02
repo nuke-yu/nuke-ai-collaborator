@@ -1058,7 +1058,7 @@ def _worktree_lock_for(work_dir: Path, group_id) -> "asyncio.Lock | None":
         if work_dir.resolve().is_relative_to(wt_root):
             return _get_worktree_lock(group_id)
     except (OSError, ValueError):
-        pass
+        log.exception("workspace_tools: failed to resolve worktree lock for %s", work_dir)
     return None
 
 

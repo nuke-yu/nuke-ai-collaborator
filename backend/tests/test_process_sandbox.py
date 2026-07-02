@@ -8,7 +8,7 @@ from unittest.mock import patch, AsyncMock, MagicMock
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from executors.plugins.workspace_tools import (
-    _handle_run_shell, _check_shell_command_paths, set_shell_backend_for_test,
+    _handle_run_shell, _check_shell_command_paths, _worktree_lock_for, set_shell_backend_for_test,
 )
 from executors.plugins.shell_backend import (
     ShellExecResult, ShellBackgroundHandle,
@@ -109,6 +109,16 @@ class TestProcessSandbox(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsNone(result)
         self.assertTrue(any("failed to validate shell home-path candidate" in line for line in logs.output))
+
+    def test_worktree_lock_resolution_logs_when_group_workspace_fails(self):
+        work_dir = Path("/ws/group_1/workspace/project")
+
+        with patch("executors.plugins.workspace_tools._ws.group_workspace", side_effect=OSError("workspace unavailable")), \
+             self.assertLogs("executors.plugins.workspace_tools", level="ERROR") as logs:
+            result = _worktree_lock_for(work_dir, group_id=1)
+
+        self.assertIsNone(result)
+        self.assertTrue(any("failed to resolve worktree lock" in line for line in logs.output))
 
 class _FakeBackend:
     """Records the request and returns canned outcomes — lets us test the
