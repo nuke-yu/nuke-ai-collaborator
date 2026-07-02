@@ -145,6 +145,7 @@ class TestCell18Handoff(unittest.IsolatedAsyncioTestCase):
         sup = Supervisor("dummy_addr")
         first_commit_started = asyncio.Event()
         release_first_commit = asyncio.Event()
+        second_finished = asyncio.Event()
         commit_calls = 0
 
         class MockDB:
@@ -161,9 +162,17 @@ class TestCell18Handoff(unittest.IsolatedAsyncioTestCase):
         with patch("db.global_db", return_value=MockDB()):
             first = asyncio.create_task(sup.reassign_group(77, "w2"))
             await first_commit_started.wait()
-            await sup.reassign_group(77, "w3")
+            async def run_second():
+                try:
+                    await sup.reassign_group(77, "w3")
+                finally:
+                    second_finished.set()
+
+            second = asyncio.create_task(run_second())
+            await asyncio.sleep(0)
+            self.assertFalse(second_finished.is_set())
             release_first_commit.set()
-            await first
+            await asyncio.gather(first, second)
 
         self.assertEqual(sup._routing_cache[77][0], "w3")
         self.assertEqual(sup._pending_handoffs, {})
