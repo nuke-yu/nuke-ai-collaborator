@@ -512,6 +512,18 @@ class TestCell17Lifecycle(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(lm._evicting, {})
 
+    async def test_evict_releases_group_lock_even_if_writer_close_fails(self):
+        lm = LifecycleManager()
+        mock_lock = MagicMock()
+        lm._locks[1] = mock_lock
+
+        with patch("db.aclose_writer", new_callable=AsyncMock, side_effect=RuntimeError("close failed")):
+            with self.assertRaisesRegex(RuntimeError, "close failed"):
+                await lm._do_evict(1)
+
+        mock_lock.release.assert_called_once_with()
+        self.assertNotIn(1, lm._locks)
+
     async def test_hydrate_waits_for_inflight_eviction_of_same_group(self):
         lm = LifecycleManager()
         lm._active_groups[1] = time.time()

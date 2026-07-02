@@ -430,13 +430,14 @@ class LifecycleManager:
         except Exception:
             pass
 
-        # 4. Close DB writer
-        await db.aclose_writer(group_db_path(gid))
-
-        # 5. Release file lock
+        # 4. Close DB writer, but never strand the group file lock if that fails.
         glock = self._locks.pop(gid, None)
-        if glock:
-            glock.release()
+        try:
+            await db.aclose_writer(group_db_path(gid))
+        finally:
+            # 5. Release file lock
+            if glock:
+                glock.release()
 
     async def _evict_lru(self) -> None:
         gid = None
