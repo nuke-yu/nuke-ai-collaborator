@@ -437,10 +437,13 @@ class LifecycleManager:
             glock.release()
 
     async def _evict_lru(self) -> None:
-        if not self._active_groups:
-            return
-        gid, _ = self._active_groups.popitem(last=False)
-        await self._evict_once(gid)
+        gid = None
+        async with self._lock:
+            gid = self._pick_lru_evictable_group()
+            if gid is not None:
+                self._active_groups.pop(gid, None)
+        if gid is not None:
+            await self._evict_once(gid)
 
 
     async def shutdown(self) -> None:

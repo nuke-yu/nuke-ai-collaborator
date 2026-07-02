@@ -142,6 +142,26 @@ class TestCell17Lifecycle(unittest.IsolatedAsyncioTestCase):
             bg._group_tasks.pop(1, None)
             bg._group_tasks.pop(2, None)
 
+    async def test_explicit_lru_eviction_skips_group_with_active_tasks(self):
+        lm = LifecycleManager(max_groups=2)
+        await lm.hydrate(1)
+        await lm.hydrate(2)
+
+        mock_task = MagicMock()
+        mock_task.done.return_value = False
+        from core import bg
+        bg._group_tasks[1] = {mock_task}
+
+        try:
+            with patch("db.aclose_writer", new_callable=AsyncMock) as mock_close:
+                await lm._evict_lru()
+                self.assertIn(1, lm._active_groups)
+                self.assertNotIn(2, lm._active_groups)
+                from runtime.dbpaths import group_db_path
+                mock_close.assert_called_with(group_db_path(2))
+        finally:
+            bg._group_tasks.pop(1, None)
+
     async def test_memory_state_cleared_on_eviction(self):
         lm = LifecycleManager(max_groups=1)
         await lm.hydrate(1)
