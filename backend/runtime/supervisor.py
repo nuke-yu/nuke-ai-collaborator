@@ -38,7 +38,7 @@ class Supervisor:
         self._route = route or self._default_route
         self._routing_cache: dict[int, tuple[str, float]] = {}  # group_id -> (worker_id, expire_at)
         self._worker_stats: dict[str, dict] = {} # worker_id -> latest stats
-        self._pending_handoffs: dict[int, asyncio.Future] = {} # group_id -> future
+        self._pending_handoffs: dict[int, tuple[str, asyncio.Future]] = {} # group_id -> (releasing worker_id, future)
         self._on_unread = on_unread              # async (group_id, payload) -> None
         self._server = None
         self._num_workers = kwargs.get("num_workers", 0)
@@ -70,7 +70,8 @@ class Supervisor:
         self._workers.pop(worker_id, None)
         stale_groups = self._drop_worker_routes(worker_id)
         for group_id in stale_groups:
-            fut = self._pending_handoffs.pop(group_id, None)
+            pending = self._pending_handoffs.pop(group_id, None)
+            fut = pending[1] if pending else None
             if fut and not fut.done():
                 fut.set_result(False)
         self._worker_stats.pop(worker_id, None)
@@ -172,7 +173,7 @@ class Supervisor:
         self._worker_stats.clear()
         self._worker_stats_ts.clear()
         self._routing_cache.clear()
-        for fut in self._pending_handoffs.values():
+        for _releasing_worker_id, fut in self._pending_handoffs.values():
             if not fut.done():
                 fut.cancel()
         self._pending_handoffs.clear()
@@ -252,9 +253,11 @@ class Supervisor:
                         self._worker_stats[wid] = payload
                         self._worker_stats_ts[wid] = time.time()  # DFT-032 heartbeat freshness
                 elif t == ipc.protocol.LEASE_RELEASED:
-                    fut = self._pending_handoffs.get(gid)
-                    if fut and not fut.done():
-                        fut.set_result(True)
+                    pending = self._pending_handoffs.get(gid)
+                    if pending:
+                        expected_worker_id, fut = pending
+                        if frame.get("worker_id") == expected_worker_id and not fut.done():
+                            fut.set_result(True)
                 elif t in (ipc.protocol.MCP_CALL, ipc.protocol.MCP_AUTH_START):
                     # worker → collector. If the collector is down, reply an error
                     # to the origin worker so its awaiting call doesn't hang.
@@ -414,9 +417,9 @@ class Supervisor:
         log.info("supervisor: initiating handoff of group %d from %s to %s", group_id, old_wid, new_worker_id)
         fut = asyncio.get_running_loop().create_future()
         prev = self._pending_handoffs.get(group_id)
-        if prev and not prev.done():
-            prev.cancel()
-        self._pending_handoffs[group_id] = fut
+        if prev and not prev[1].done():
+            prev[1].cancel()
+        self._pending_handoffs[group_id] = (old_wid, fut)
         
         try:
             # Tell old worker to release

@@ -170,7 +170,7 @@ class TestCell15Routing(unittest.IsolatedAsyncioTestCase):
         sup._worker_stats_ts["w1"] = 123.0
         sup._routing_cache[7] = ("w1", 9999999999.0)
         fut = asyncio.get_running_loop().create_future()
-        sup._pending_handoffs[7] = fut
+        sup._pending_handoffs[7] = ("w1", fut)
 
         await sup.stop()
 
@@ -183,7 +183,7 @@ class TestCell15Routing(unittest.IsolatedAsyncioTestCase):
     async def test_stop_cancels_pending_handoffs(self):
         sup = Supervisor("dummy_addr")
         fut = asyncio.get_running_loop().create_future()
-        sup._pending_handoffs[7] = fut
+        sup._pending_handoffs[7] = ("w1", fut)
 
         await sup.stop()
 

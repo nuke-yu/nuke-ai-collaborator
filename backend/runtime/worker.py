@@ -272,7 +272,7 @@ class Worker:
                 from runtime.lifecycle import manager as lifecycle
                 await lifecycle.evict(gid)
                 await ipc.send_msg(self._writer, ipc.protocol.envelope(
-                    ipc.protocol.LEASE_RELEASED, group_id=gid, trace_id=tid
+                    ipc.protocol.LEASE_RELEASED, group_id=gid, trace_id=tid, worker_id=self.worker_id
                 ))
                 return
 

@@ -38,7 +38,7 @@ class TestCell18Handoff(unittest.IsolatedAsyncioTestCase):
                 async def simulate_worker_ack():
                     await asyncio.sleep(0.05)
                     await sup._on_upstream(ipc.protocol.envelope(
-                        ipc.protocol.LEASE_RELEASED, group_id=77
+                        ipc.protocol.LEASE_RELEASED, group_id=77, worker_id="w1"
                     ))
                 
                 asyncio.create_task(simulate_worker_ack())
@@ -112,7 +112,7 @@ class TestCell18Handoff(unittest.IsolatedAsyncioTestCase):
         sup._workers["w1"] = AsyncMock()
         sup._routing_cache[77] = ("w1", 9999999999.0)
         prev = asyncio.get_running_loop().create_future()
-        sup._pending_handoffs[77] = prev
+        sup._pending_handoffs[77] = ("w1", prev)
 
         with patch("db.global_db", return_value=MockDB()):
             with patch.object(sup, "send_to_worker_id", new=AsyncMock(return_value=False)):
@@ -128,7 +128,7 @@ class TestCell18Handoff(unittest.IsolatedAsyncioTestCase):
         sup._workers["w1"] = writer
         sup._routing_cache[77] = ("w1", 9999999999.0)
         fut = asyncio.get_running_loop().create_future()
-        sup._pending_handoffs[77] = fut
+        sup._pending_handoffs[77] = ("w1", fut)
 
         sup._drop_worker_state("w1", writer=writer)
 
@@ -195,18 +195,30 @@ class TestCell18Handoff(unittest.IsolatedAsyncioTestCase):
         sup = Supervisor("dummy_addr")
         fut = asyncio.get_running_loop().create_future()
         fut.set_result(True)
-        sup._pending_handoffs[77] = fut
+        sup._pending_handoffs[77] = ("w1", fut)
         await sup._on_upstream(ipc.protocol.envelope(
-            ipc.protocol.LEASE_RELEASED, group_id=77
+            ipc.protocol.LEASE_RELEASED, group_id=77, worker_id="w1"
         ))
         self.assertTrue(fut.done())
         self.assertTrue(fut.result())
 
         sup._pending_handoffs.pop(77, None)
         await sup._on_upstream(ipc.protocol.envelope(
-            ipc.protocol.LEASE_RELEASED, group_id=77
+            ipc.protocol.LEASE_RELEASED, group_id=77, worker_id="w1"
         ))
         self.assertEqual(sup._pending_handoffs, {})
+
+    async def test_release_ack_from_stale_worker_does_not_complete_new_handoff(self):
+        sup = Supervisor("dummy_addr")
+        fut = asyncio.get_running_loop().create_future()
+        sup._pending_handoffs[77] = ("w2", fut)
+
+        await sup._on_upstream(ipc.protocol.envelope(
+            ipc.protocol.LEASE_RELEASED, group_id=77, worker_id="w1"
+        ))
+
+        self.assertFalse(fut.done())
+        self.assertEqual(sup._pending_handoffs[77][0], "w2")
 
     async def test_eviction_persistence_barrier(self):
         from runtime.lifecycle import LifecycleManager
