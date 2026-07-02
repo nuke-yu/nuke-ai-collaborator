@@ -193,6 +193,39 @@ class TestWorkerLoop(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(hydrated, [7, 9])
 
+    async def test_startup_hydration_stops_when_lifecycle_is_shutting_down(self):
+        worker_bus = EventBus()
+        worker = Worker("w0", "ignored", bus=worker_bus, dispatch=None)
+        hydrated = []
+
+        class _Cursor:
+            async def __aenter__(self): return self
+            async def __aexit__(self, *args): return False
+            async def fetchall(self): return [(7,), (9,)]
+
+        class _Conn:
+            async def __aenter__(self): return self
+            async def __aexit__(self, *args): return False
+            def execute(self, *_args, **_kwargs): return _Cursor()
+
+        def fake_global_db():
+            return _Conn()
+
+        async def fake_hydrate(gid):
+            hydrated.append(gid)
+            raise RuntimeError("lifecycle manager is shutting down")
+
+        fake_lifecycle = type("FakeLifecycle", (), {
+            "_shutting_down": True,
+            "hydrate": staticmethod(fake_hydrate),
+        })()
+
+        with patch("runtime.worker.db.global_db", new=fake_global_db), \
+             patch("runtime.lifecycle.manager", new=fake_lifecycle):
+            await worker._hydrate_assigned_groups()
+
+        self.assertEqual(hydrated, [7])
+
     async def test_startup_hydration_does_not_retry_non_transient_db_errors(self):
         worker_bus = EventBus()
         worker = Worker("w0", "ignored", bus=worker_bus, dispatch=None)

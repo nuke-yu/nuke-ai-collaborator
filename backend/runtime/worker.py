@@ -379,4 +379,7 @@ class Worker:
             try:
                 await lifecycle.hydrate(gid)
             except Exception:
+                if getattr(lifecycle, "_shutting_down", False):
+                    log.info("worker %s: stopping startup hydration because lifecycle is shutting down", self.worker_id)
+                    return
                 log.exception("worker %s: failed to hydrate assigned group %d on startup", self.worker_id, gid)
