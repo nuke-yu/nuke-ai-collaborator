@@ -392,10 +392,14 @@ class TestCell18Handoff(unittest.IsolatedAsyncioTestCase):
                          patch("runtime.supervisor.log.info") as mock_info:
                         await sup.reassign_group(77, "w2")
 
-        mock_warning.assert_any_call(
-            "supervisor: worker %s disappeared before confirming release of group %d",
-            "w1", 77,
-        )
+        self.assertTrue(any(
+            call.args == (
+                "supervisor: worker %s disappeared before confirming release of group %d",
+                "w1",
+                77,
+            ) and call.kwargs.get("extra", {}).get("event") == "handoff_disconnect"
+            for call in mock_warning.call_args_list
+        ))
         self.assertFalse(any(
             call.args == ("supervisor: handoff of group %d complete", 77)
             for call in mock_info.call_args_list

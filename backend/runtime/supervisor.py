@@ -57,6 +57,17 @@ class Supervisor:
         # worker connecting later (or after a ToolListChanged) gets the current set.
         self._mcp_schemas: dict | None = None
 
+    def _reassign_log_extra(
+        self, *, group_id: int, new_worker_id: str, reassign_version: int, old_worker_id: str | None = None, event: str
+    ) -> dict:
+        return {
+            "group_id": group_id,
+            "old_worker_id": old_worker_id,
+            "new_worker_id": new_worker_id,
+            "reassign_version": reassign_version,
+            "event": event,
+        }
+
     async def _clear_reassign_version_later(self, group_id: int) -> None:
         await asyncio.sleep(0)
         if group_id not in self._routing_cache and group_id not in self._pending_handoffs:
@@ -484,6 +495,18 @@ class Supervisor:
                 import time
                 self._routing_cache[group_id] = (new_worker_id, time.time() + 3600.0)
                 self._finish_reassign_version(group_id, reassign_version)
+                log.info(
+                    "supervisor: direct reassign of group %d to %s complete",
+                    group_id,
+                    new_worker_id,
+                    extra=self._reassign_log_extra(
+                        group_id=group_id,
+                        old_worker_id=old_wid,
+                        new_worker_id=new_worker_id,
+                        reassign_version=reassign_version,
+                        event="direct_reassign_complete",
+                    ),
+                )
             return
             
         old_writer = self._workers.get(old_wid)
@@ -493,10 +516,34 @@ class Supervisor:
                 import time
                 self._routing_cache[group_id] = (new_worker_id, time.time() + 3600.0)
                 self._finish_reassign_version(group_id, reassign_version)
+                log.warning(
+                    "supervisor: old worker %s missing during reassign of group %d, forcing routing update",
+                    old_wid,
+                    group_id,
+                    extra=self._reassign_log_extra(
+                        group_id=group_id,
+                        old_worker_id=old_wid,
+                        new_worker_id=new_worker_id,
+                        reassign_version=reassign_version,
+                        event="old_worker_missing",
+                    ),
+                )
             return
 
         # 3. Handoff Protocol
-        log.info("supervisor: initiating handoff of group %d from %s to %s", group_id, old_wid, new_worker_id)
+        log.info(
+            "supervisor: initiating handoff of group %d from %s to %s",
+            group_id,
+            old_wid,
+            new_worker_id,
+            extra=self._reassign_log_extra(
+                group_id=group_id,
+                old_worker_id=old_wid,
+                new_worker_id=new_worker_id,
+                reassign_version=reassign_version,
+                event="handoff_start",
+            ),
+        )
         fut = asyncio.get_running_loop().create_future()
         handoff_entry = (old_wid, fut)
         self._pending_handoffs[group_id] = handoff_entry
@@ -508,22 +555,76 @@ class Supervisor:
                 ipc.protocol.RELEASE_LEASE, group_id=group_id
             ))
             if not sent:
-                log.warning("supervisor: failed to notify %s to release group %d, forcing routing update", old_wid, group_id)
+                log.warning(
+                    "supervisor: failed to notify %s to release group %d, forcing routing update",
+                    old_wid,
+                    group_id,
+                    extra=self._reassign_log_extra(
+                        group_id=group_id,
+                        old_worker_id=old_wid,
+                        new_worker_id=new_worker_id,
+                        reassign_version=reassign_version,
+                        event="release_send_failed",
+                    ),
+                )
                 return
             # Wait for ACK
             released = await asyncio.wait_for(fut, timeout=10.0)
             if released is False:
-                log.warning("supervisor: worker %s disappeared before confirming release of group %d", old_wid, group_id)
+                log.warning(
+                    "supervisor: worker %s disappeared before confirming release of group %d",
+                    old_wid,
+                    group_id,
+                    extra=self._reassign_log_extra(
+                        group_id=group_id,
+                        old_worker_id=old_wid,
+                        new_worker_id=new_worker_id,
+                        reassign_version=reassign_version,
+                        event="handoff_disconnect",
+                    ),
+                )
             else:
-                log.info("supervisor: handoff of group %d complete", group_id)
+                log.info(
+                    "supervisor: handoff of group %d complete",
+                    group_id,
+                    extra=self._reassign_log_extra(
+                        group_id=group_id,
+                        old_worker_id=old_wid,
+                        new_worker_id=new_worker_id,
+                        reassign_version=reassign_version,
+                        event="handoff_complete",
+                    ),
+                )
         except asyncio.CancelledError:
             if fut.cancelled():
                 superseded = True
-                log.info("supervisor: handoff of group %d from %s was superseded", group_id, old_wid)
+                log.info(
+                    "supervisor: handoff of group %d from %s was superseded",
+                    group_id,
+                    old_wid,
+                    extra=self._reassign_log_extra(
+                        group_id=group_id,
+                        old_worker_id=old_wid,
+                        new_worker_id=new_worker_id,
+                        reassign_version=reassign_version,
+                        event="handoff_superseded",
+                    ),
+                )
                 return
             raise
         except asyncio.TimeoutError:
-            log.error("supervisor: timeout waiting for %s to release group %d, forcing routing update anyway", old_wid, group_id)
+            log.error(
+                "supervisor: timeout waiting for %s to release group %d, forcing routing update anyway",
+                old_wid,
+                group_id,
+                extra=self._reassign_log_extra(
+                    group_id=group_id,
+                    old_worker_id=old_wid,
+                    new_worker_id=new_worker_id,
+                    reassign_version=reassign_version,
+                    event="handoff_timeout",
+                ),
+            )
         finally:
             current = self._pending_handoffs.get(group_id)
             if (
