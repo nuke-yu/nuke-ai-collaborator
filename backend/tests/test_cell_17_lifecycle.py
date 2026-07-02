@@ -310,6 +310,32 @@ class TestCell17Lifecycle(unittest.IsolatedAsyncioTestCase):
         mock_evict.assert_awaited_once_with(1)
         self.assertNotIn(1, lm._active_groups)
 
+    async def test_concurrent_sweep_and_explicit_evict_share_single_cleanup(self):
+        lm = LifecycleManager()
+        lm._active_groups[1] = time.time() - 10
+        started = asyncio.Event()
+        release = asyncio.Event()
+        evict_calls = 0
+
+        async def fake_evict(gid):
+            nonlocal evict_calls
+            evict_calls += 1
+            started.set()
+            await release.wait()
+
+        with patch.dict(os.environ, {"GROUP_INACTIVITY_TIMEOUT": "0"}):
+            with patch.object(lm, "_do_evict", new=fake_evict):
+                sweep_task = asyncio.create_task(lm.sweep_inactive_groups())
+                await started.wait()
+                evict_task = asyncio.create_task(lm.evict(1))
+                await asyncio.sleep(0)
+                self.assertFalse(evict_task.done())
+                release.set()
+                await asyncio.gather(sweep_task, evict_task)
+
+        self.assertEqual(evict_calls, 1)
+        self.assertNotIn(1, lm._active_groups)
+
     async def test_shutdown_waits_for_inflight_hydration_and_prevents_reactivation(self):
         lm = LifecycleManager()
         started = asyncio.Event()

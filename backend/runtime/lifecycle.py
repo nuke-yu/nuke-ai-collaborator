@@ -67,6 +67,7 @@ class LifecycleManager:
         # group_id -> last_active_timestamp
         self._active_groups: OrderedDict[int, float] = OrderedDict()
         self._hydrating: dict[int, asyncio.Future] = {}
+        self._evicting: dict[int, asyncio.Future] = {}
         self._lock = asyncio.Lock()
         self._locks: dict[int, GroupLock] = {}
         self._evictor_task: asyncio.Task | None = None
@@ -126,7 +127,7 @@ class LifecycleManager:
                 # Remove from active groups list first to prevent recursive checks
                 self._active_groups.pop(gid, None)
         for gid in to_evict:
-            await self._do_evict(gid)
+            await self._evict_once(gid)
 
     async def prune_resources(self) -> None:
         """Prune logs and temporary workspace files older than 14 days."""
@@ -278,7 +279,7 @@ class LifecycleManager:
                 if fut and not fut.done():
                     fut.set_result(path)
             if to_evict is not None:
-                await self._do_evict(to_evict)
+                await self._evict_once(to_evict)
             return path
         except Exception as exc:
             async with self._lock:
@@ -295,12 +296,14 @@ class LifecycleManager:
         """Explicitly evict a group (used for CELL-18 lease release)."""
         should_evict = False
         inflight = None
+        evicting = None
         async with self._lock:
             if group_id in self._active_groups:
                 del self._active_groups[group_id]
                 should_evict = True
             else:
                 inflight = self._hydrating.get(group_id)
+                evicting = self._evicting.get(group_id)
         if inflight is not None:
             try:
                 await asyncio.shield(inflight)
@@ -310,8 +313,42 @@ class LifecycleManager:
                 if group_id in self._active_groups:
                     del self._active_groups[group_id]
                     should_evict = True
+                else:
+                    evicting = self._evicting.get(group_id)
+        if evicting is not None:
+            await asyncio.shield(evicting)
+            return
         if should_evict:
-            await self._do_evict(group_id)
+            await self._evict_once(group_id)
+
+    async def _evict_once(self, gid: int) -> None:
+        fut = None
+        async with self._lock:
+            fut = self._evicting.get(gid)
+            if fut is None:
+                fut = asyncio.get_running_loop().create_future()
+                self._evicting[gid] = fut
+                leader = True
+            else:
+                leader = False
+
+        if not leader:
+            await asyncio.shield(fut)
+            return
+
+        try:
+            await self._do_evict(gid)
+        except Exception as exc:
+            async with self._lock:
+                fut = self._evicting.pop(gid, None)
+                if fut and not fut.done():
+                    fut.set_exception(exc)
+            raise
+        else:
+            async with self._lock:
+                fut = self._evicting.pop(gid, None)
+                if fut and not fut.done():
+                    fut.set_result(None)
 
     async def _do_evict(self, gid: int) -> None:
         log.info("lifecycle: evicting group %d", gid)
@@ -374,7 +411,7 @@ class LifecycleManager:
         if not self._active_groups:
             return
         gid, _ = self._active_groups.popitem(last=False)
-        await self._do_evict(gid)
+        await self._evict_once(gid)
 
 
     async def shutdown(self) -> None:
@@ -395,7 +432,7 @@ class LifecycleManager:
         if inflight:
             await asyncio.gather(*inflight, return_exceptions=True)
         for gid in active:
-            await self._do_evict(gid)
+            await self._evict_once(gid)
 
     def stats(self) -> dict:
         return {
