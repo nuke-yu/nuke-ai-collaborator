@@ -37,6 +37,7 @@ class Supervisor:
         self._browsers: dict[int, set] = {}      # group_id -> {client}
         self._route = route or self._default_route
         self._reassign_locks: dict[int, asyncio.Lock] = {}  # group_id -> serializes DB/state setup for reassign
+        self._reassign_lock_users: dict[int, int] = {}  # group_id -> active/queued reassign callers
         self._routing_cache: dict[int, tuple[str, float]] = {}  # group_id -> (worker_id, expire_at)
         self._reassign_versions: dict[int, int] = {}  # group_id -> latest reassign generation
         self._worker_stats: dict[str, dict] = {} # worker_id -> latest stats
@@ -66,6 +67,9 @@ class Supervisor:
             and group_id not in self._pending_handoffs
         ):
             self._reassign_versions.pop(group_id, None)
+            if self._reassign_lock_users.get(group_id, 0) <= 0:
+                self._reassign_locks.pop(group_id, None)
+                self._reassign_lock_users.pop(group_id, None)
 
     def _drop_worker_routes(self, worker_id: str) -> None:
         stale_groups = [
@@ -210,6 +214,7 @@ class Supervisor:
         self._worker_stats_ts.clear()
         self._routing_cache.clear()
         self._reassign_locks.clear()
+        self._reassign_lock_users.clear()
         self._reassign_versions.clear()
         for _releasing_worker_id, fut in self._pending_handoffs.values():
             if not fut.done():
@@ -431,25 +436,35 @@ class Supervisor:
 
     async def reassign_group(self, group_id: int, new_worker_id: str) -> None:
         """CELL-18: Safely transfer a group to a new worker with clean lease handoff."""
-        async with self._get_reassign_lock(group_id):
-            reassign_version = self._reassign_versions.get(group_id, 0) + 1
-            self._reassign_versions[group_id] = reassign_version
-            prev = self._pending_handoffs.pop(group_id, None)
-            if prev and not prev[1].done():
-                prev[1].cancel()
+        self._reassign_lock_users[group_id] = self._reassign_lock_users.get(group_id, 0) + 1
+        try:
+            async with self._get_reassign_lock(group_id):
+                reassign_version = self._reassign_versions.get(group_id, 0) + 1
+                self._reassign_versions[group_id] = reassign_version
+                prev = self._pending_handoffs.pop(group_id, None)
+                if prev and not prev[1].done():
+                    prev[1].cancel()
 
-            # 1. Update persistent DB
-            try:
-                async with db.global_db() as cdb:
-                    await cdb.execute("UPDATE groups SET assigned_worker_id = ? WHERE id = ?", (new_worker_id, group_id))
-                    await cdb.commit()
-            except Exception:
-                self._finish_reassign_version(group_id, reassign_version)
-                raise
-                
-            # 2. Check who currently owns it in memory
-            cached_old = self._routing_cache.get(group_id)
-            old_wid = cached_old[0] if cached_old else None
+                # 1. Update persistent DB
+                try:
+                    async with db.global_db() as cdb:
+                        await cdb.execute("UPDATE groups SET assigned_worker_id = ? WHERE id = ?", (new_worker_id, group_id))
+                        await cdb.commit()
+                except Exception:
+                    self._finish_reassign_version(group_id, reassign_version)
+                    raise
+                    
+                # 2. Check who currently owns it in memory
+                cached_old = self._routing_cache.get(group_id)
+                old_wid = cached_old[0] if cached_old else None
+        finally:
+            remaining = self._reassign_lock_users.get(group_id, 0) - 1
+            if remaining > 0:
+                self._reassign_lock_users[group_id] = remaining
+            else:
+                self._reassign_lock_users.pop(group_id, None)
+                if group_id not in self._reassign_versions and group_id not in self._pending_handoffs:
+                    self._reassign_locks.pop(group_id, None)
         if not old_wid or old_wid == new_worker_id:
             if self._reassign_versions.get(group_id) == reassign_version:
                 import time

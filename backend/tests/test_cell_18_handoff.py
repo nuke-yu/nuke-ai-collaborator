@@ -219,9 +219,13 @@ class TestCell18Handoff(unittest.IsolatedAsyncioTestCase):
     async def test_stop_clears_reassign_versions(self):
         sup = Supervisor("dummy_addr")
         sup._reassign_versions[77] = 5
+        sup._reassign_locks[77] = asyncio.Lock()
+        sup._reassign_lock_users[77] = 1
         sup._routing_cache[77] = ("w1", 9999999999.0)
         await sup.stop()
         self.assertEqual(sup._reassign_versions, {})
+        self.assertEqual(sup._reassign_locks, {})
+        self.assertEqual(sup._reassign_lock_users, {})
 
     async def test_direct_reassign_clears_completed_reassign_version(self):
         sup = Supervisor("dummy_addr")
@@ -237,6 +241,8 @@ class TestCell18Handoff(unittest.IsolatedAsyncioTestCase):
             await sup.reassign_group(77, "w1")
 
         self.assertNotIn(77, sup._reassign_versions)
+        self.assertNotIn(77, sup._reassign_locks)
+        self.assertNotIn(77, sup._reassign_lock_users)
         self.assertEqual(sup._routing_cache[77][0], "w1")
 
     async def test_completed_handoff_clears_reassign_version(self):
@@ -263,6 +269,8 @@ class TestCell18Handoff(unittest.IsolatedAsyncioTestCase):
             await sup.reassign_group(77, "w2")
 
         self.assertNotIn(77, sup._reassign_versions)
+        self.assertNotIn(77, sup._reassign_locks)
+        self.assertNotIn(77, sup._reassign_lock_users)
         self.assertEqual(sup._routing_cache[77][0], "w2")
 
     async def test_failed_reassign_db_update_clears_reassign_version(self):
@@ -279,6 +287,8 @@ class TestCell18Handoff(unittest.IsolatedAsyncioTestCase):
                 await sup.reassign_group(77, "w2")
 
         self.assertNotIn(77, sup._reassign_versions)
+        self.assertNotIn(77, sup._reassign_locks)
+        self.assertNotIn(77, sup._reassign_lock_users)
         self.assertEqual(sup._pending_handoffs, {})
 
     async def test_concurrent_reassigns_serialize_db_updates_per_group(self):
@@ -326,6 +336,8 @@ class TestCell18Handoff(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(second_execute_started.is_set())
         self.assertEqual(db_calls[:2], [("first", "execute", "w2"), ("first", "commit", None)])
+        self.assertNotIn(77, sup._reassign_locks)
+        self.assertNotIn(77, sup._reassign_lock_users)
         self.assertEqual(sup._routing_cache[77][0], "w3")
 
     async def test_handoff_disconnect_result_does_not_log_success(self):
