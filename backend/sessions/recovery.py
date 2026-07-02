@@ -86,7 +86,10 @@ async def recover_all(dispatcher=None, group_id: int | None = None) -> None:
         try:
             is_wf = wf.is_workflow_participant(session["group_id"], session["bot_id"])
         except Exception:
-            pass
+            log.exception(
+                "recover_all: failed to resolve workflow participation for session %s",
+                session["id"],
+            )
 
         if is_wf:
             sid = session["id"]

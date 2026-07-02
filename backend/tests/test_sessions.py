@@ -10,6 +10,7 @@ import os
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -437,6 +438,25 @@ class TestRecoverAll(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(dispatched), 0)
         row = await get_session("side1")
         self.assertEqual(row["status"], "failed")
+
+    async def test_workflow_lookup_failure_logs_and_fails_closed(self):
+        from sessions.store import create_session, get_session
+        from sessions.recovery import recover_all
+
+        await create_session(
+            session_id="wferr1", bot_id=1, group_id=1,
+            config={"system_prompt": "s", "provider": "deepseek",
+                    "model_name": "deepseek-chat", "temperature": 0.7, "max_tokens": 4096},
+            user_message="hello",
+        )
+
+        with patch("core.workflow.is_workflow_participant", side_effect=RuntimeError("lookup failed")), \
+             self.assertLogs("sessions.recovery", level="ERROR") as logs:
+            await recover_all()
+
+        row = await get_session("wferr1")
+        self.assertEqual(row["status"], "failed")
+        self.assertTrue(any("failed to resolve workflow participation" in line for line in logs.output))
 
 
 if __name__ == "__main__":
