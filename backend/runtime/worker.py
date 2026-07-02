@@ -31,6 +31,11 @@ log = logging.getLogger(__name__)
 _STARTUP_HYDRATION_RETRIES = 15
 
 
+def _is_retryable_startup_db_error(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    return "no such table" in msg or "locked" in msg
+
+
 class Worker:
     def __init__(self, worker_id, addr, *, bus=None, dispatch=None, on_abort=None,
                  hydrate_assigned_groups: bool = True):
@@ -351,7 +356,7 @@ class Worker:
                 break
             except sqlite3.OperationalError as e:
                 # Retry on transient startup errors (e.g. no such table, database is locked)
-                if "no such table" in str(e) or "locked" in str(e):
+                if _is_retryable_startup_db_error(e):
                     log.info("worker %s: central DB not yet initialized or locked (attempt %d/15), retrying in %.2fs...",
                              self.worker_id, attempt + 1, backoff)
                     if attempt + 1 == _STARTUP_HYDRATION_RETRIES:

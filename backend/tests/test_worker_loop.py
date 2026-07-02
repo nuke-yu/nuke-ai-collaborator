@@ -14,12 +14,17 @@ import sqlite3
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from runtime import ipc
-from runtime.worker import Worker
+from runtime.worker import Worker, _is_retryable_startup_db_error
 from executors.mcp_bridge import bridge as global_bridge
 from bus.engine import EventBus
 
 
 class TestWorkerLoop(unittest.IsolatedAsyncioTestCase):
+    def test_retryable_startup_db_error_detection_is_case_insensitive(self):
+        self.assertTrue(_is_retryable_startup_db_error(sqlite3.OperationalError("DATABASE IS LOCKED")))
+        self.assertTrue(_is_retryable_startup_db_error(sqlite3.OperationalError("No Such Table: groups")))
+        self.assertFalse(_is_retryable_startup_db_error(sqlite3.OperationalError("disk I/O error")))
+
     async def test_connect_can_skip_startup_group_hydration(self):
         worker_bus = EventBus()
         worker = Worker("w0", "ignored", bus=worker_bus, dispatch=None, hydrate_assigned_groups=False)
