@@ -189,6 +189,7 @@ class TestCell18Handoff(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(77, sup._reassign_versions)
         self.assertNotIn(77, sup._reassign_locks)
         self.assertNotIn(77, sup._reassign_lock_users)
+        self.assertEqual(sup._cleanup_tasks, set())
 
     async def test_drop_worker_state_resolves_pending_handoffs_without_route_cache(self):
         sup = Supervisor("dummy_addr")
@@ -239,11 +240,16 @@ class TestCell18Handoff(unittest.IsolatedAsyncioTestCase):
         sup._reassign_versions[77] = 5
         sup._reassign_locks[77] = asyncio.Lock()
         sup._reassign_lock_users[77] = 1
+        cleanup_task = asyncio.create_task(asyncio.sleep(10))
+        sup._cleanup_tasks.add(cleanup_task)
+        cleanup_task.add_done_callback(sup._cleanup_tasks.discard)
         sup._routing_cache[77] = ("w1", 9999999999.0)
         await sup.stop()
         self.assertEqual(sup._reassign_versions, {})
         self.assertEqual(sup._reassign_locks, {})
         self.assertEqual(sup._reassign_lock_users, {})
+        self.assertTrue(cleanup_task.cancelled())
+        self.assertEqual(sup._cleanup_tasks, set())
 
     async def test_direct_reassign_clears_completed_reassign_version(self):
         sup = Supervisor("dummy_addr")

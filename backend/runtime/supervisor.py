@@ -52,6 +52,7 @@ class Supervisor:
         self._worker_stats_ts: dict[str, float] = {}   # worker_id -> last STATS_REPORT epoch
         self._stopping = False
         self._monitor_tasks: set[asyncio.Task] = set()
+        self._cleanup_tasks: set[asyncio.Task] = set()
         # Latest MCP tool-schema snapshot pushed by the collector; cached so a
         # worker connecting later (or after a ToolListChanged) gets the current set.
         self._mcp_schemas: dict | None = None
@@ -112,7 +113,9 @@ class Supervisor:
                     self._reassign_locks.pop(group_id, None)
                     self._reassign_lock_users.pop(group_id, None)
         for group_id in resolved_pending_groups:
-            asyncio.create_task(self._clear_reassign_version_later(group_id))
+            t = asyncio.create_task(self._clear_reassign_version_later(group_id))
+            self._cleanup_tasks.add(t)
+            t.add_done_callback(self._cleanup_tasks.discard)
         self._worker_stats.pop(worker_id, None)
         self._worker_stats_ts.pop(worker_id, None)
 
@@ -192,6 +195,11 @@ class Supervisor:
         if self._monitor_tasks:
             await asyncio.gather(*self._monitor_tasks, return_exceptions=True)
         self._monitor_tasks.clear()
+        for t in list(self._cleanup_tasks):
+            t.cancel()
+        if self._cleanup_tasks:
+            await asyncio.gather(*self._cleanup_tasks, return_exceptions=True)
+        self._cleanup_tasks.clear()
 
         # 2. Kill worker processes
         for _label, proc in self._processes:
