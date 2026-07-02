@@ -281,6 +281,53 @@ class TestCell18Handoff(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(77, sup._reassign_versions)
         self.assertEqual(sup._pending_handoffs, {})
 
+    async def test_concurrent_reassigns_serialize_db_updates_per_group(self):
+        sup = Supervisor("dummy_addr")
+        sup._routing_cache[77] = ("w1", 9999999999.0)
+        first_commit_started = asyncio.Event()
+        release_first_commit = asyncio.Event()
+        second_execute_started = asyncio.Event()
+        db_calls = []
+
+        class MockDB:
+            def __init__(self, name):
+                self.name = name
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                pass
+
+            async def execute(self, _sql, params):
+                db_calls.append((self.name, "execute", params[0]))
+                if self.name == "second":
+                    second_execute_started.set()
+
+            async def commit(self):
+                db_calls.append((self.name, "commit", None))
+                if self.name == "first":
+                    first_commit_started.set()
+                    await release_first_commit.wait()
+
+        db_contexts = [MockDB("first"), MockDB("second")]
+
+        def fake_global_db():
+            return db_contexts.pop(0)
+
+        with patch("db.global_db", new=fake_global_db):
+            first = asyncio.create_task(sup.reassign_group(77, "w2"))
+            await first_commit_started.wait()
+            second = asyncio.create_task(sup.reassign_group(77, "w3"))
+            await asyncio.sleep(0)
+            self.assertFalse(second_execute_started.is_set())
+            release_first_commit.set()
+            await asyncio.gather(first, second)
+
+        self.assertTrue(second_execute_started.is_set())
+        self.assertEqual(db_calls[:2], [("first", "execute", "w2"), ("first", "commit", None)])
+        self.assertEqual(sup._routing_cache[77][0], "w3")
+
     async def test_handoff_disconnect_result_does_not_log_success(self):
         sup = Supervisor("dummy_addr")
 

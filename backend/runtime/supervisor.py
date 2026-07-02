@@ -36,6 +36,7 @@ class Supervisor:
         self._workers: dict = {}                 # worker_id -> StreamWriter
         self._browsers: dict[int, set] = {}      # group_id -> {client}
         self._route = route or self._default_route
+        self._reassign_locks: dict[int, asyncio.Lock] = {}  # group_id -> serializes DB/state setup for reassign
         self._routing_cache: dict[int, tuple[str, float]] = {}  # group_id -> (worker_id, expire_at)
         self._reassign_versions: dict[int, int] = {}  # group_id -> latest reassign generation
         self._worker_stats: dict[str, dict] = {} # worker_id -> latest stats
@@ -104,6 +105,13 @@ class Supervisor:
             asyncio.create_task(self._clear_reassign_version_later(group_id))
         self._worker_stats.pop(worker_id, None)
         self._worker_stats_ts.pop(worker_id, None)
+
+    def _get_reassign_lock(self, group_id: int) -> asyncio.Lock:
+        lock = self._reassign_locks.get(group_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._reassign_locks[group_id] = lock
+        return lock
 
     # ── lifecycle ─────────────────────────────────────────────────────────
 
@@ -201,6 +209,7 @@ class Supervisor:
         self._worker_stats.clear()
         self._worker_stats_ts.clear()
         self._routing_cache.clear()
+        self._reassign_locks.clear()
         self._reassign_versions.clear()
         for _releasing_worker_id, fut in self._pending_handoffs.values():
             if not fut.done():
@@ -422,24 +431,25 @@ class Supervisor:
 
     async def reassign_group(self, group_id: int, new_worker_id: str) -> None:
         """CELL-18: Safely transfer a group to a new worker with clean lease handoff."""
-        reassign_version = self._reassign_versions.get(group_id, 0) + 1
-        self._reassign_versions[group_id] = reassign_version
-        prev = self._pending_handoffs.pop(group_id, None)
-        if prev and not prev[1].done():
-            prev[1].cancel()
+        async with self._get_reassign_lock(group_id):
+            reassign_version = self._reassign_versions.get(group_id, 0) + 1
+            self._reassign_versions[group_id] = reassign_version
+            prev = self._pending_handoffs.pop(group_id, None)
+            if prev and not prev[1].done():
+                prev[1].cancel()
 
-        # 1. Update persistent DB
-        try:
-            async with db.global_db() as cdb:
-                await cdb.execute("UPDATE groups SET assigned_worker_id = ? WHERE id = ?", (new_worker_id, group_id))
-                await cdb.commit()
-        except Exception:
-            self._finish_reassign_version(group_id, reassign_version)
-            raise
-            
-        # 2. Check who currently owns it in memory
-        cached_old = self._routing_cache.get(group_id)
-        old_wid = cached_old[0] if cached_old else None
+            # 1. Update persistent DB
+            try:
+                async with db.global_db() as cdb:
+                    await cdb.execute("UPDATE groups SET assigned_worker_id = ? WHERE id = ?", (new_worker_id, group_id))
+                    await cdb.commit()
+            except Exception:
+                self._finish_reassign_version(group_id, reassign_version)
+                raise
+                
+            # 2. Check who currently owns it in memory
+            cached_old = self._routing_cache.get(group_id)
+            old_wid = cached_old[0] if cached_old else None
         if not old_wid or old_wid == new_worker_id:
             if self._reassign_versions.get(group_id) == reassign_version:
                 import time
