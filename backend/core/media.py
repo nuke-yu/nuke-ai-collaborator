@@ -19,10 +19,13 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import logging
 import re
 import time
 
 from core.auth import SECRET_KEY
+
+log = logging.getLogger(__name__)
 
 MEDIA_KINDS = ("uploads", "screenshots")
 DEFAULT_TTL = 3600  # 1h — long enough for a chat session, short enough that leaks rot
@@ -125,7 +128,7 @@ def reap_screenshots(max_age_days: float = 7, max_per_group: int = 50) -> int:
                     f.unlink()
                     removed += 1
             except Exception:
-                pass
+                log.exception("media: failed to reap screenshot %s", f)
     # Orphaned staging files (worker crashed before moving them) — purge after 1h.
     staging = layout.media_staging_dir()
     if staging.is_dir():
@@ -135,7 +138,7 @@ def reap_screenshots(max_age_days: float = 7, max_per_group: int = 50) -> int:
                     f.unlink()
                     removed += 1
             except Exception:
-                pass
+                log.exception("media: failed to reap staging file %s", f)
     return removed
 
 

@@ -1,5 +1,6 @@
 import time
 import unittest
+from unittest.mock import patch
 
 from core import media
 
@@ -91,6 +92,43 @@ class TestReaper(unittest.TestCase):
                 self.assertFalse(old.exists())     # old screenshot purged
                 self.assertTrue(fresh.exists())    # fresh screenshot kept
                 self.assertTrue(upload.exists())   # upload never touched
+            finally:
+                _const.WORKSPACE_ROOT = orig
+
+    def test_reaper_logs_when_screenshot_unlink_fails(self):
+        import os
+        import tempfile
+        import time
+        from pathlib import Path
+        import skills.constants as _const
+        from workspace import layout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            orig = _const.WORKSPACE_ROOT
+            _const.WORKSPACE_ROOT = root
+            try:
+                shots = layout.group_media_dir(7, "screenshots")
+                shots.mkdir(parents=True, exist_ok=True)
+                old = shots / "old.png"
+                old.write_bytes(b"x")
+                stale = time.time() - 30 * 86400
+                os.utime(old, (stale, stale))
+
+                orig_unlink = Path.unlink
+
+                def fake_unlink(self, *args, **kwargs):
+                    if self == old:
+                        raise OSError("unlink failed")
+                    return orig_unlink(self, *args, **kwargs)
+
+                with patch("pathlib.Path.unlink", new=fake_unlink), \
+                     self.assertLogs("core.media", level="ERROR") as logs:
+                    removed = media.reap_screenshots(max_age_days=7, max_per_group=50)
+
+                self.assertEqual(removed, 0)
+                self.assertTrue(old.exists())
+                self.assertTrue(any("failed to reap screenshot" in line for line in logs.output))
             finally:
                 _const.WORKSPACE_ROOT = orig
 
