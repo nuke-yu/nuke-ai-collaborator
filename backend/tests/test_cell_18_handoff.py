@@ -223,6 +223,48 @@ class TestCell18Handoff(unittest.IsolatedAsyncioTestCase):
         await sup.stop()
         self.assertEqual(sup._reassign_versions, {})
 
+    async def test_direct_reassign_clears_completed_reassign_version(self):
+        sup = Supervisor("dummy_addr")
+        sup._routing_cache[77] = ("w1", 9999999999.0)
+
+        class MockDB:
+            async def __aenter__(self): return self
+            async def __aexit__(self, *args): pass
+            async def execute(self, *args): pass
+            async def commit(self): pass
+
+        with patch("db.global_db", return_value=MockDB()):
+            await sup.reassign_group(77, "w1")
+
+        self.assertNotIn(77, sup._reassign_versions)
+        self.assertEqual(sup._routing_cache[77][0], "w1")
+
+    async def test_completed_handoff_clears_reassign_version(self):
+        sup = Supervisor("dummy_addr")
+
+        class MockDB:
+            async def __aenter__(self): return self
+            async def __aexit__(self, *args): pass
+            async def execute(self, *args): pass
+            async def commit(self): pass
+
+        writer = AsyncMock()
+        sup._workers["w1"] = writer
+        sup._routing_cache[77] = ("w1", 9999999999.0)
+
+        async def fake_send_msg(_writer, msg):
+            if msg.get("type") == ipc.protocol.RELEASE_LEASE:
+                await sup._on_upstream(ipc.protocol.envelope(
+                    ipc.protocol.LEASE_RELEASED, group_id=77, worker_id="w1"
+                ))
+
+        with patch("db.global_db", return_value=MockDB()), \
+             patch("runtime.ipc.send_msg", new=fake_send_msg):
+            await sup.reassign_group(77, "w2")
+
+        self.assertNotIn(77, sup._reassign_versions)
+        self.assertEqual(sup._routing_cache[77][0], "w2")
+
     async def test_handoff_disconnect_result_does_not_log_success(self):
         sup = Supervisor("dummy_addr")
 

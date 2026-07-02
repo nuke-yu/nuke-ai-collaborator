@@ -59,6 +59,13 @@ class Supervisor:
         if group_id not in self._routing_cache and group_id not in self._pending_handoffs:
             self._reassign_versions.pop(group_id, None)
 
+    def _finish_reassign_version(self, group_id: int, reassign_version: int) -> None:
+        if (
+            self._reassign_versions.get(group_id) == reassign_version
+            and group_id not in self._pending_handoffs
+        ):
+            self._reassign_versions.pop(group_id, None)
+
     def _drop_worker_routes(self, worker_id: str) -> None:
         stale_groups = [
             group_id
@@ -433,6 +440,7 @@ class Supervisor:
             if self._reassign_versions.get(group_id) == reassign_version:
                 import time
                 self._routing_cache[group_id] = (new_worker_id, time.time() + 3600.0)
+                self._finish_reassign_version(group_id, reassign_version)
             return
             
         old_writer = self._workers.get(old_wid)
@@ -441,6 +449,7 @@ class Supervisor:
             if self._reassign_versions.get(group_id) == reassign_version:
                 import time
                 self._routing_cache[group_id] = (new_worker_id, time.time() + 3600.0)
+                self._finish_reassign_version(group_id, reassign_version)
             return
 
         # 3. Handoff Protocol
@@ -484,6 +493,7 @@ class Supervisor:
                 # 4. Point traffic to new worker
                 import time
                 self._routing_cache[group_id] = (new_worker_id, time.time() + 3600.0)
+                self._finish_reassign_version(group_id, reassign_version)
 
 # Global instance used by the WS shell and Scheduler
 supervisor: 'Supervisor | None' = None
