@@ -576,7 +576,7 @@ def _read_md(path: Path) -> str | None:
         try:
             return path.read_text(encoding="utf-8").strip()
         except Exception:
-            pass
+            log.warning("workspace: failed to read markdown file %s", path, exc_info=True)
     return None
 
 

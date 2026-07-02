@@ -182,6 +182,34 @@ class TestLoadGroupContext(unittest.IsolatedAsyncioTestCase):
             finally:
                 _c.WORKSPACE_ROOT = orig
 
+    async def test_load_group_context_logs_when_markdown_read_fails(self):
+        import tempfile, pathlib
+        from skills import constants as _c
+        orig = _c.WORKSPACE_ROOT
+        with tempfile.TemporaryDirectory() as tmp:
+            _c.WORKSPACE_ROOT = pathlib.Path(tmp)
+            try:
+                import workspace as ws
+                shared = ws.group_workspace(1)
+                board = shared / "BOARD.md"
+                board.write_text("# Board", encoding="utf-8")
+
+                orig_read_text = Path.read_text
+
+                def fake_read_text(self, *args, **kwargs):
+                    if self == board:
+                        raise OSError("read failed")
+                    return orig_read_text(self, *args, **kwargs)
+
+                with patch("pathlib.Path.read_text", new=fake_read_text), \
+                     self.assertLogs("workspace", level="WARNING") as logs:
+                    result = await ws.load_group_context(1)
+
+                self.assertIsInstance(result, str)
+                self.assertTrue(any("failed to read markdown file" in line for line in logs.output))
+            finally:
+                _c.WORKSPACE_ROOT = orig
+
 
 if __name__ == "__main__":
     unittest.main()
