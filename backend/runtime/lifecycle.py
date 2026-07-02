@@ -110,6 +110,12 @@ class LifecycleManager:
             return False
         return any(not t.done() for t in group_tasks)
 
+    def _pick_lru_evictable_group(self) -> int | None:
+        for gid in self._active_groups:
+            if not self._group_has_active_tasks(gid):
+                return gid
+        return None
+
     async def sweep_inactive_groups(self) -> None:
         """Find groups inactive for GROUP_INACTIVITY_TIMEOUT (default 30 mins) and evict them."""
         timeout = float(os.environ.get("GROUP_INACTIVITY_TIMEOUT", 1800))
@@ -294,7 +300,9 @@ class LifecycleManager:
                 self._locks[group_id] = glock
                 glock = None
                 if len(self._active_groups) >= self.max_groups:
-                    to_evict, _ = self._active_groups.popitem(last=False)
+                    to_evict = self._pick_lru_evictable_group()
+                    if to_evict is not None:
+                        self._active_groups.pop(to_evict, None)
                 self._active_groups[group_id] = time.time()
                 fut = self._hydrating.pop(group_id, None)
                 if fut and not fut.done():
