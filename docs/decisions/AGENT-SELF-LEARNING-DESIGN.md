@@ -283,3 +283,47 @@ We still need a concrete answer for:
 - which categories are safe to auto-promote, if any
 
 Those are the right next docs to write after this one.
+
+## 12. Evolution Draft
+
+This section captures the current agreed starting point for implementation planning.
+
+### Sequence
+
+1. **Build the base layer first**
+   - memory
+   - reflection
+   - distillation
+   - orchestration
+   - a document intake window for bot and human input
+
+2. **Write four internal materials**
+   - capability map
+   - data model
+   - learning pipeline
+   - evaluation criteria
+
+3. **Validate one vertical scenario**
+   - start with a narrow, high-frequency workflow
+   - prove the full loop end to end
+
+4. **Expand outward**
+   - add more input sources
+   - add more scenario types
+   - keep the same governed learning loop
+
+### Product rule
+
+We do not start from "fully automatic self-learning".
+We start from a controlled base that can receive materials, process them, and turn repeated patterns into approved capabilities.
+
+### Intake principle
+
+The system must expose a place where humans can provide source material, and a place where the bot can process that material into structured outcomes.
+
+Those two windows should stay distinct:
+
+- one for input
+- one for analysis and conversion
+
+That separation keeps the learning loop auditable and easier to evolve.
