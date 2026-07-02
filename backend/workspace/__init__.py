@@ -268,7 +268,7 @@ async def _commit_text(ws: Path, p: Path, rel: str, path: str, new_text: str, bo
                 if p.read_text(encoding="utf-8") != new_text:
                     _save_to_history(ws, p)
             except Exception:
-                pass
+                log.exception("workspace: failed to save history for %s", p)
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(new_text, encoding="utf-8")
         if action == "write":

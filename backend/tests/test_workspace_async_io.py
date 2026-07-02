@@ -125,6 +125,16 @@ class TestWorkspaceFileOffload(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(ticks, 0)
         await t
 
+    async def test_write_file_logs_when_history_save_fails(self):
+        await ws.write_file(7, "note.md", "v1")
+
+        with patch("workspace._save_to_history", side_effect=RuntimeError("history failed")), \
+             self.assertLogs("workspace", level="ERROR") as logs:
+            result = await ws.write_file(7, "note.md", "v2")
+
+        self.assertIn("已写入", result)
+        self.assertTrue(any("failed to save history" in line for line in logs.output))
+
 
 class TestLoadGroupContext(unittest.IsolatedAsyncioTestCase):
     async def test_returns_shared_tree_and_key_docs(self):
