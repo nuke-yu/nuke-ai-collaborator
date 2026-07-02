@@ -10,11 +10,15 @@ subtract 1 going in and add 1 coming out.
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 from urllib.request import pathname2url
 
 from executors.code_intel.engine import Location
+
+
+log = logging.getLogger(__name__)
 
 
 # --- JSON-RPC framing -------------------------------------------------------
@@ -50,7 +54,7 @@ def iter_frames(buffer: bytes) -> tuple[list[dict], bytes]:
         try:
             messages.append(json.loads(body))
         except ValueError:
-            pass
+            log.warning("lsp_protocol: failed to decode JSON-RPC frame", exc_info=True)
         buffer = buffer[start + length:]
     return messages, buffer
 

@@ -45,6 +45,17 @@ class TestFraming(unittest.TestCase):
         self.assertEqual(msgs, [])
         self.assertEqual(rest, frame[:-3])
 
+    def test_malformed_json_logs_and_skips_frame(self):
+        body = b"{not-json"
+        frame = b"Content-Length: 9\r\n\r\n" + body
+
+        with self.assertLogs("executors.code_intel.lsp_protocol", level="WARNING") as logs:
+            msgs, rest = P.iter_frames(frame)
+
+        self.assertEqual(msgs, [])
+        self.assertEqual(rest, b"")
+        self.assertTrue(any("failed to decode JSON-RPC frame" in line for line in logs.output))
+
 
 class TestUriAndPosition(unittest.TestCase):
     def test_uri_roundtrip(self):
