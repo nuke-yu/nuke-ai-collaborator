@@ -278,12 +278,11 @@ class TestGitWorktreeSandbox(unittest.IsolatedAsyncioTestCase):
         await write_file(bot_id=1, path="workspace/fail.py", content="content Y", group_id=self.group_id)
         
         # 3. Trigger promotion via jira update_ticket and assert it raises RuntimeError (not swallowed silently)
-        with patch("core.runner._post_system_msg") as mock_post:
+        with patch("core.runner._post_system_msg", side_effect=RuntimeError("notify failed")), \
+             self.assertLogs("integrations.jira", level="WARNING") as logs:
             with self.assertRaises(RuntimeError):
                 await jira.update_ticket(self.group_id, ticket_id, status="done")
-            # Verify system warning was posted to chat
-            mock_post.assert_called_once()
-            self.assertIn("自动合并失败", mock_post.call_args[0][2])
+            self.assertTrue(any("failed to post promotion failure notice" in line for line in logs.output))
             
         # Clean up
         await remove_worktree(self.group_id, ticket_id)

@@ -117,7 +117,7 @@ class LocalJiraClient(JiraClient):
                         from core.runner import _post_system_msg
                         await _post_system_msg(group_id, 0, f"⚠️ [工作流系统错误] 工单 {ticket_id} 自动合并失败: {e}。请手动处理冲突。")
                     except Exception:
-                        pass
+                        log.warning("jira: failed to post promotion failure notice for %s", ticket_id, exc_info=True)
                     raise e
         # Read back the final project value (may have been set previously)
         async with get_db() as db:
