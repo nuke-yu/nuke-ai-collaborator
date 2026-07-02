@@ -53,6 +53,7 @@ class SessionInfo:
     created_at: float
     command: str
     status: str  # active, completed, blocked, cancelled
+    query: str = ""
 
 @dataclass
 class Result:
@@ -149,6 +150,24 @@ def resolve_resume_session(sessions: list[SessionInfo], prefix: str) -> tuple[Op
         return None, f"Ambiguous session prefix '{prefix}' matches {len(matches)} sessions:\n{list_str}"
 
     return matches[0], None
+
+
+def resolve_headless_context(args, session_context: Optional[SessionInfo]) -> tuple[str, str]:
+    """Resolve the effective command/query for a headless run.
+
+    When resuming and the caller does not override the command or query, keep
+    using the saved session values instead of dropping back to the parser
+    defaults.
+    """
+    command = args.command
+    if session_context is not None and command == "auto":
+        command = session_context.command
+
+    query = getattr(args, "query", "") or ""
+    if session_context is not None and not query:
+        query = session_context.query or ""
+
+    return command, query
 
 
 # ── Supervisor Connection ───────────────────────────────────────────────────
@@ -387,8 +406,8 @@ async def run_headless_once(args) -> Result:
 
         if session and session.status in ("active", "blocked"):
             session_context = session
-            # Restore any saved context from session
-            # TODO: Implement context restoration
+
+    command, query = resolve_headless_context(args, session_context)
 
     # Create new session record
     session_id = f"headless_{args.group_id}_{args.member_id}_{int(time.time())}"
@@ -397,26 +416,27 @@ async def run_headless_once(args) -> Result:
         group_id=args.group_id,
         member_id=args.member_id,
         created_at=time.time(),
-        command=args.command,
+        command=command,
+        query=query,
         status="active",
     )
     save_session(new_session)
 
     try:
         # Execute the command
-        if args.command in ("auto", "next", "discuss", "plan"):
+        if command in ("auto", "next", "discuss", "plan"):
             result = await run_user_message(
                 group_id=args.group_id,
                 member_id=args.member_id,
-                content=args.query if hasattr(args, 'query') and args.query else "",
-                command=args.command,
+                content=query,
+                command=command,
                 timeout=args.timeout,
             )
         else:
             result = await run_user_message(
                 group_id=args.group_id,
                 member_id=args.member_id,
-                content=args.command,  # Use command as content for custom commands
+                content=command,  # Use command as content for custom commands
                 timeout=args.timeout,
             )
 

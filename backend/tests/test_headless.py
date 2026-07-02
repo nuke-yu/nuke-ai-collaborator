@@ -24,6 +24,7 @@ from headless import (
     save_session,
     delete_session,
     load_session,
+    resolve_headless_context,
     resolve_resume_session,
     should_restart_headless_run,
 )
@@ -263,6 +264,23 @@ class TestResumeSession:
         assert error is not None
         assert "Ambiguous" in error
         assert "session_abc" in error
+
+    def test_resume_context_uses_saved_command_and_query_when_not_overridden(self):
+        args = type("Args", (), {"command": "auto", "query": ""})()
+        session = SessionInfo(
+            id="session_resume",
+            group_id=1,
+            member_id=1,
+            created_at=time.time(),
+            command="next",
+            status="blocked",
+            query="previous prompt",
+        )
+
+        command, query = resolve_headless_context(args, session)
+
+        assert command == "next"
+        assert query == "previous prompt"
 
 
 class TestRestartLogic:
