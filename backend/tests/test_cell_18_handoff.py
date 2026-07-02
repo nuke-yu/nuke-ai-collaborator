@@ -170,6 +170,20 @@ class TestCell18Handoff(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(fut.result())
         self.assertNotIn(77, sup._pending_handoffs)
 
+    async def test_stale_worker_disconnect_does_not_clear_reconnected_handoff_state(self):
+        sup = Supervisor("dummy_addr")
+        old_writer = AsyncMock()
+        new_writer = AsyncMock()
+        sup._workers["w1"] = new_writer
+        fut = asyncio.get_running_loop().create_future()
+        sup._pending_handoffs[77] = ("w1", fut)
+
+        sup._drop_worker_state("w1", writer=old_writer)
+
+        self.assertIs(sup._workers["w1"], new_writer)
+        self.assertFalse(fut.done())
+        self.assertEqual(sup._pending_handoffs[77][0], "w1")
+
     async def test_handoff_disconnect_result_does_not_log_success(self):
         sup = Supervisor("dummy_addr")
 
