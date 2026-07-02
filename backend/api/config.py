@@ -181,7 +181,7 @@ async def save_mcp_config(
     try:
         response.headers["ETag"] = _mcp_config_etag(path.read_bytes())
     except Exception:
-        pass
+        logger.warning("save_mcp_config: failed to compute ETag for %s", path, exc_info=True)
 
     warning = None
     # Notify MCP collector process of the change
