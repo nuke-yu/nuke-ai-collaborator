@@ -60,6 +60,11 @@ class GroupLock:
                 log.exception("Failed to remove group lock file %s", self.lock_file)
 
     def __del__(self):
+        # Interpreter shutdown can tear down logging / import state before
+        # destructors run. Skip best-effort cleanup in that phase to avoid noisy
+        # "sys.meta_path is None" errors during process exit.
+        if getattr(sys, "is_finalizing", None) and sys.is_finalizing():
+            return
         self.release()
 
 

@@ -56,6 +56,15 @@ class TestCell17Lifecycle(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any("Failed to close group lock fd" in line for line in logs.output))
         self.assertTrue(any("Failed to remove group lock file" in line for line in logs.output))
 
+    def test_group_lock_del_skips_release_during_interpreter_shutdown(self):
+        glock = object.__new__(GroupLock)
+        glock.release = MagicMock()
+
+        with patch("runtime.lifecycle.sys.is_finalizing", return_value=True):
+            glock.__del__()
+
+        glock.release.assert_not_called()
+
     def test_group_lock_acquire_failure_logs_fd_close_failure(self):
         glock = object.__new__(GroupLock)
         fd = MagicMock()
