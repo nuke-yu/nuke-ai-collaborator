@@ -229,6 +229,36 @@ class TestGitWorktreeSandbox(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(any("failed to resolve default base_ref" in line for line in logs.output))
 
+    async def test_promote_worktree_logs_when_abort_and_restore_fail(self):
+        shared_workspace = layout.group_shared_dir(self.group_id) / "workspace"
+        shared_workspace.mkdir(parents=True, exist_ok=True)
+        (shared_workspace / ".git").mkdir(parents=True, exist_ok=True)
+        worktree_dir = layout.group_dir(self.group_id) / "worktrees" / "task_demo"
+        (worktree_dir / "workspace").mkdir(parents=True, exist_ok=True)
+
+        async def fake_run_git_cmd(cwd, *args, timeout_s=30):
+            if args == ("status", "--porcelain"):
+                return ""
+            if args == ("rev-parse", "--abbrev-ref", "HEAD"):
+                return "main"
+            if args == ("checkout", "develop"):
+                return ""
+            if args == ("merge", "task_demo", "--no-edit"):
+                raise RuntimeError("merge failed")
+            if args == ("merge", "--abort"):
+                raise RuntimeError("abort failed")
+            if args == ("checkout", "main"):
+                raise RuntimeError("restore failed")
+            return ""
+
+        with patch("workspace.git_worktree._run_git_cmd", new=fake_run_git_cmd), \
+             self.assertLogs("workspace.git_worktree", level="WARNING") as logs:
+            with self.assertRaises(RuntimeError):
+                await promote_worktree(self.group_id, "demo", target_branch="develop")
+
+        self.assertTrue(any("failed to abort merge" in line for line in logs.output))
+        self.assertTrue(any("failed to restore HEAD" in line for line in logs.output))
+
     async def test_self_promotion_mid_run_deferred(self):
         """🔴 #3: Verify self-promotion inside bot run is deferred and does not delete directory mid-run."""
         # Setup Jira mock ticket

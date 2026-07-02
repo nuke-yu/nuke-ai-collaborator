@@ -389,7 +389,7 @@ async def promote_worktree(group_id: int, task_id: str, target_branch: str = "ma
             try:
                 await _run_git_cmd(shared_workspace, "merge", "--abort")
             except Exception:
-                pass
+                log.warning("git_worktree: failed to abort merge for %s", branch_name, exc_info=True)
             raise RuntimeError(f"Git merge conflict occurred while promoting task {task_id}. Merge aborted safely. Details: {merge_err}")
         finally:
             # Restore original HEAD if it was different
@@ -397,7 +397,7 @@ async def promote_worktree(group_id: int, task_id: str, target_branch: str = "ma
                 try:
                     await _run_git_cmd(shared_workspace, "checkout", current_branch)
                 except Exception:
-                    pass
+                    log.warning("git_worktree: failed to restore HEAD to %s after promoting %s", current_branch, branch_name, exc_info=True)
 
         # 3. Copy back any nested git repositories from the worktree to the shared workspace
         # before removing the worktree.
