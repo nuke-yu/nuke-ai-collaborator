@@ -29,7 +29,7 @@ async def _try_exec(conn, sql, params):
     try:
         await conn.execute(sql, params)
     except Exception:
-        pass
+        log.warning("api.groups: best-effort SQL failed for %s", sql, exc_info=True)
 
 
 async def _reconcile_bot_skills(bot_id: int, desired: list[dict]) -> list[dict]:
@@ -452,4 +452,3 @@ async def get_suggestions(group_id: int, payload: dict = None):
     awaiting_confirm = payload.get("awaiting_confirm")
     suggestions = await get_ai_suggestions(group_id, awaiting_confirm)
     return {"suggestions": suggestions}
-

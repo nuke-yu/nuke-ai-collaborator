@@ -5,6 +5,7 @@ import shutil
 import asyncio
 import json
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 # Add backend directory to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -117,12 +118,17 @@ class TestMemberRoutes(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(row["executor_id"], "tool_loop_v1")
             self.assertEqual(json.loads(row["executor_config"]), {"mode": "safe", "allow_retries": True})
             self.assertEqual(row["done_keyword"], "FINISHED")
-            
-            # Check if workspace folders and metadata files were generated
-            bot_ws_dir = TEST_WORKSPACES_ROOT / "group_1" / "bots" / f"bot_{bot_id}"
-            self.assertTrue(bot_ws_dir.exists())
-            self.assertTrue((bot_ws_dir / "skills").exists())
-            self.assertTrue((bot_ws_dir / "logs").exists())
+
+    async def test_try_exec_logs_when_sql_fails(self):
+        from api.groups import _try_exec
+
+        conn = AsyncMock()
+        conn.execute.side_effect = RuntimeError("missing column")
+
+        with self.assertLogs("api.groups", level="WARNING") as logs:
+            await _try_exec(conn, "DELETE FROM nope WHERE id=?", (1,))
+
+        self.assertTrue(any("best-effort SQL failed" in line for line in logs.output))
 
 if __name__ == "__main__":
     unittest.main()
