@@ -70,6 +70,7 @@ class LifecycleManager:
         self._lock = asyncio.Lock()
         self._locks: dict[int, GroupLock] = {}
         self._evictor_task: asyncio.Task | None = None
+        self._shutting_down = False
 
     def is_active(self, group_id: int) -> bool:
         """Is this group currently hydrated/owned by this worker? Public predicate
@@ -176,6 +177,8 @@ class LifecycleManager:
 
         fut = None
         async with self._lock:
+            if self._shutting_down:
+                raise RuntimeError("lifecycle manager is shutting down")
             if group_id in self._active_groups:
                 self._active_groups.move_to_end(group_id)
                 self._active_groups[group_id] = time.time()
@@ -260,6 +263,12 @@ class LifecycleManager:
 
             to_evict = None
             async with self._lock:
+                if self._shutting_down:
+                    fut = self._hydrating.pop(group_id, None)
+                    err = RuntimeError("lifecycle manager is shutting down")
+                    if fut and not fut.done():
+                        fut.set_exception(err)
+                    raise err
                 self._locks[group_id] = glock
                 glock = None
                 if len(self._active_groups) >= self.max_groups:
@@ -371,15 +380,20 @@ class LifecycleManager:
     async def shutdown(self) -> None:
         """Close all active groups."""
         evictor = None
+        inflight = []
         async with self._lock:
+            self._shutting_down = True
             if self._evictor_task:
                 self._evictor_task.cancel()
                 evictor = self._evictor_task
                 self._evictor_task = None
+            inflight = list(self._hydrating.values())
             active = list(self._active_groups)
             self._active_groups.clear()
         if evictor is not None:
             await asyncio.gather(evictor, return_exceptions=True)
+        if inflight:
+            await asyncio.gather(*inflight, return_exceptions=True)
         for gid in active:
             await self._do_evict(gid)
 

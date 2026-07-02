@@ -310,5 +310,32 @@ class TestCell17Lifecycle(unittest.IsolatedAsyncioTestCase):
         mock_evict.assert_awaited_once_with(1)
         self.assertNotIn(1, lm._active_groups)
 
+    async def test_shutdown_waits_for_inflight_hydration_and_prevents_reactivation(self):
+        lm = LifecycleManager()
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def fake_init_group_db(path):
+            started.set()
+            await release.wait()
+
+        with patch("db.schema_split.init_group_db", new=fake_init_group_db), \
+             patch("db.migrations.run_migrations", new_callable=AsyncMock), \
+             patch("core.orchestration.rd_manager.rd_manager.check_board", new_callable=AsyncMock), \
+             patch("core.runner.resume_workflows", new_callable=AsyncMock), \
+             patch("sessions.recover_all", new_callable=AsyncMock):
+            hydrate_task = asyncio.create_task(lm.hydrate(1))
+            await started.wait()
+            shutdown_task = asyncio.create_task(lm.shutdown())
+            await asyncio.sleep(0)
+            self.assertFalse(shutdown_task.done())
+            release.set()
+            with self.assertRaises(RuntimeError):
+                await hydrate_task
+            await shutdown_task
+
+        self.assertNotIn(1, lm._active_groups)
+        self.assertEqual(lm._hydrating, {})
+
 if __name__ == "__main__":
     unittest.main()
