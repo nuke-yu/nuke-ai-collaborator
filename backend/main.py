@@ -61,6 +61,12 @@ async def _cancel_and_wait(task: asyncio.Task | None) -> None:
         await task
 
 
+def _clear_supervisor_ref(sup) -> None:
+    """Drop the global supervisor reference if it still points at `sup`."""
+    if sup_mod.supervisor is sup:
+        sup_mod.supervisor = None
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """CELL-22: Supervisor lifespan. Manages central DB and Worker fleet."""
@@ -107,6 +113,7 @@ async def lifespan(app: FastAPI):
     await _cancel_and_wait(media_reaper_task)
     scheduler.stop()   # sync (returns None); awaiting it raised TypeError on teardown
     await sup.stop()
+    _clear_supervisor_ref(sup)
     from executors.tool_router import router as tool_router
     await tool_router.close_all()
     await ai_client.aclose_client()
