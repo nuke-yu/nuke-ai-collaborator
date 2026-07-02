@@ -84,6 +84,21 @@ class TestCell17Lifecycle(unittest.IsolatedAsyncioTestCase):
             from runtime.dbpaths import group_db_path
             mock_close.assert_called_with(group_db_path(1))
 
+    async def test_touch_refreshes_lru_order(self):
+        lm = LifecycleManager(max_groups=2)
+        await lm.hydrate(1)
+        await lm.hydrate(2)
+
+        lm.touch(1)
+
+        with patch("db.aclose_writer", new_callable=AsyncMock) as mock_close:
+            await lm.hydrate(3)
+            self.assertIn(1, lm._active_groups)
+            self.assertIn(3, lm._active_groups)
+            self.assertNotIn(2, lm._active_groups)
+            from runtime.dbpaths import group_db_path
+            mock_close.assert_called_with(group_db_path(2))
+
     async def test_memory_state_cleared_on_eviction(self):
         lm = LifecycleManager(max_groups=1)
         await lm.hydrate(1)

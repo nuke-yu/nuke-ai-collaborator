@@ -81,6 +81,7 @@ class LifecycleManager:
     def touch(self, group_id: int) -> None:
         """Update last active timestamp for a group."""
         if group_id in self._active_groups:
+            self._active_groups.move_to_end(group_id)
             self._active_groups[group_id] = time.time()
 
     async def _background_loop(self) -> None:
