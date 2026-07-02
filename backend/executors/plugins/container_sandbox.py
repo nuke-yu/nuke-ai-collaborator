@@ -228,6 +228,8 @@ class ContainerManager:
             self._reaper_task.cancel()
             try:
                 await self._reaper_task
-            except (asyncio.CancelledError, Exception):
+            except asyncio.CancelledError:
                 pass
+            except Exception:
+                log.exception("sandbox reaper close failed")
             self._reaper_task = None

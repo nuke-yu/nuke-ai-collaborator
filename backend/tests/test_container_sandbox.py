@@ -212,6 +212,27 @@ class TestReaper(unittest.IsolatedAsyncioTestCase):
         await mgr.close()
         self.assertIsNone(mgr._reaper_task)
 
+    async def test_close_logs_if_reaper_task_fails(self):
+        mgr = cs.ContainerManager()
+
+        class _BadTask:
+            def cancel(self):
+                self.cancelled = True
+
+            def __await__(self):
+                async def _boom():
+                    raise RuntimeError("close failed")
+
+                return _boom().__await__()
+
+        mgr._reaper_task = _BadTask()
+
+        with self.assertLogs("executors.plugins.container_sandbox", level="ERROR") as logs:
+            await mgr.close()
+
+        self.assertIsNone(mgr._reaper_task)
+        self.assertTrue(any("sandbox reaper close failed" in line for line in logs.output))
+
 
 class _FakeManager:
     def __init__(self):
