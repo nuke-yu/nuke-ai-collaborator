@@ -238,7 +238,7 @@ async def _run_unit_body(group_id: int, unit, orch) -> None:
                                 try:
                                     await _post_system_msg(group_id, 0, f"⚠️ [沙箱合并失败] 临时会话自动合并失败: {pe}。请手动处理冲突。")
                                 except Exception:
-                                    pass
+                                    log.warning("runner: failed to post immediate promotion failure message for %s", temp_ticket_id, exc_info=True)
                                     
                         tickets = await get_jira().list_tickets(group_id)
                         status_by_id = {t["ticket_id"]: t["status"] for t in tickets}
@@ -255,7 +255,7 @@ async def _run_unit_body(group_id: int, unit, orch) -> None:
                                         try:
                                             await _post_system_msg(group_id, 0, f"⚠️ [工作流系统错误] 工单 {tid} 自动合并失败: {pe}。请手动处理冲突。")
                                         except Exception:
-                                            pass
+                                            log.warning("runner: failed to post deferred promotion failure message for %s", tid, exc_info=True)
                 except Exception as drain_err:
                     log.exception(f"Failed to execute group promotion drain: {drain_err}")
             
