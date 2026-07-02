@@ -9,6 +9,7 @@ import shutil
 import unittest
 import fcntl
 from unittest.mock import patch
+from contextlib import nullcontext
 
 from skills.metadata import parse_frontmatter, parse_skill_meta
 from skills.discovery import _list_skills_all_sync
@@ -324,6 +325,27 @@ Please write_file to save the output.""", encoding="utf-8")
 
         self.assertIn(fcntl.LOCK_UN, calls)
         self.assertTrue(any("failed to release file lock" in line for line in logs.output))
+
+    def test_update_skill_status_logs_when_active_override_removal_fails(self):
+        from skills.lifecycle import update_skill_status
+
+        skill_dir = _TEST_WS_ROOT / "bot_ws_1" / "skills"
+        skill_dir.mkdir(parents=True, exist_ok=True)
+        override = skill_dir / "demo.md"
+        override.write_text("""---
+name: demo
+layer: personal
+status: disabled
+---""", encoding="utf-8")
+
+        with patch("skills.lifecycle.skill_path", return_value=(override, "md")), \
+             patch("skills.lifecycle.file_lock", return_value=nullcontext()), \
+             patch("pathlib.PosixPath.unlink", side_effect=OSError("unlink failed")), \
+             self.assertLogs("skills.lifecycle", level="ERROR") as logs:
+            result = update_skill_status(bot_id=1, skill_name="demo", new_status="active")
+
+        self.assertIn("demo", result)
+        self.assertTrue(any("failed to remove active override" in line for line in logs.output))
 
     def test_current_stage_role_family_filter_integration(self):
         import core.workflow as wf

@@ -91,7 +91,7 @@ def update_skill_status(bot_id: int, skill_name: str, new_status: str, group_id:
                     path.unlink()
                     return f"已删除覆盖文件，{skill_name} 恢复上层定义（active）"
         except Exception:
-            pass
+            log.exception("skills.lifecycle: failed to remove active override for %s", skill_name)
 
     try:
         with file_lock(path):
