@@ -28,6 +28,8 @@ from core import bg
 
 log = logging.getLogger(__name__)
 
+_STARTUP_HYDRATION_RETRIES = 15
+
 
 class Worker:
     def __init__(self, worker_id, addr, *, bus=None, dispatch=None, on_abort=None,
@@ -341,7 +343,7 @@ class Worker:
         # Retry loop to dynamically gate on database initialization/readiness
         backoff = 0.1
         rows = None
-        for attempt in range(15):
+        for attempt in range(_STARTUP_HYDRATION_RETRIES):
             try:
                 async with db.global_db() as cdb:
                     async with cdb.execute("SELECT id FROM groups WHERE assigned_worker_id = ?", (self.worker_id,)) as cur:
@@ -352,6 +354,8 @@ class Worker:
                 if "no such table" in str(e) or "locked" in str(e):
                     log.info("worker %s: central DB not yet initialized or locked (attempt %d/15), retrying in %.2fs...",
                              self.worker_id, attempt + 1, backoff)
+                    if attempt + 1 == _STARTUP_HYDRATION_RETRIES:
+                        break
                     await asyncio.sleep(backoff)
                     backoff = min(backoff * 2, 2.0)
                     continue

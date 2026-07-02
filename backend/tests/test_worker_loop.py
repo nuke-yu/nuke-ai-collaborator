@@ -229,7 +229,7 @@ class TestWorkerLoop(unittest.IsolatedAsyncioTestCase):
              patch("runtime.lifecycle.manager.hydrate", new=unittest.mock.AsyncMock()) as mock_hydrate:
             await worker._hydrate_assigned_groups()
 
-        self.assertEqual(len(sleeps), 15)
+        self.assertEqual(len(sleeps), 14)
         mock_hydrate.assert_not_awaited()
 
     async def test_user_message_to_upstream_broadcast(self):
