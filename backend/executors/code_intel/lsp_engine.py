@@ -16,6 +16,7 @@ Warm-server design (lazy + reused, mirrors OpenCode's lazy-spawn-by-root):
 from __future__ import annotations
 
 import asyncio
+import logging
 import shutil
 import time
 from pathlib import Path
@@ -32,6 +33,8 @@ _LANGUAGE_ID = {
 }
 
 _REQUEST_TIMEOUT_S = 30
+
+log = logging.getLogger(__name__)
 
 
 class StdioLspClient:
@@ -73,7 +76,7 @@ class StdioLspClient:
         except asyncio.CancelledError:
             raise
         except Exception:
-            pass
+            log.exception("lsp engine: read loop failed")
         finally:
             # server gone → don't let in-flight requests hang until timeout
             self._fail_pending(ConnectionError("lsp server closed"))
@@ -115,18 +118,20 @@ class StdioLspClient:
             if self.alive():
                 await self.notify("exit", {})
         except Exception:
-            pass
+            log.exception("lsp engine: failed to send exit notification")
         if self._reader_task:
             self._reader_task.cancel()
             try:
                 await self._reader_task
-            except (asyncio.CancelledError, Exception):
+            except asyncio.CancelledError:
                 pass
+            except Exception:
+                log.exception("lsp engine: reader task did not shut down cleanly")
         if self._proc and self._proc.returncode is None:
             try:
                 self._proc.kill()
             except Exception:
-                pass
+                log.exception("lsp engine: failed to kill lsp process during close")
 
 
 def _default_factory(cmd: list[str], cwd: str) -> StdioLspClient:
@@ -229,18 +234,23 @@ class LspEngine:
             except asyncio.CancelledError:
                 raise
             except Exception:
-                pass
+                log.exception("lsp engine: idle reap failed")
 
     async def close(self) -> None:
         if self._reaper_task is not None:
             self._reaper_task.cancel()
             try:
                 await self._reaper_task
-            except (asyncio.CancelledError, Exception):
+            except asyncio.CancelledError:
                 pass
+            except Exception:
+                log.exception("lsp engine: reaper task did not shut down cleanly")
             self._reaper_task = None
         for sess in list(self._sessions.values()):
-            await sess.client.close()
+            try:
+                await sess.client.close()
+            except Exception:
+                log.exception("lsp engine: failed to close session client")
         self._sessions.clear()
 
     # --- CodeIntelEngine ops ------------------------------------------------

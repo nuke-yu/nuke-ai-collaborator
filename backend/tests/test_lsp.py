@@ -15,7 +15,7 @@ from unittest.mock import patch
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from executors.code_intel import lsp_protocol as P
-from executors.code_intel.lsp_engine import LspEngine
+from executors.code_intel.lsp_engine import LspEngine, StdioLspClient
 from executors.code_intel import router
 
 
@@ -211,6 +211,37 @@ class TestLspEngine(unittest.IsolatedAsyncioTestCase):
         await eng.hover(f, 1, 1, root)
         self.assertEqual(len(created["clients"]), 2)  # respawned a fresh server
         await eng.close()
+
+    async def test_stdio_client_close_logs_failures(self):
+        client = StdioLspClient(["fake-ls", "--stdio"], cwd="/tmp")
+
+        class _Proc:
+            def __init__(self):
+                self.returncode = None
+
+            def kill(self):
+                raise RuntimeError("kill failed")
+
+        async def _reader():
+            try:
+                await asyncio.Future()
+            except asyncio.CancelledError:
+                raise
+
+        client._proc = _Proc()
+        client._reader_task = asyncio.create_task(_reader())
+        await asyncio.sleep(0)
+
+        async def fake_notify(*_args, **_kwargs):
+            raise RuntimeError("exit failed")
+
+        client.notify = fake_notify
+
+        with self.assertLogs("executors.code_intel.lsp_engine", level="ERROR") as logs:
+            await client.close()
+
+        self.assertTrue(any("failed to send exit notification" in line for line in logs.output))
+        self.assertTrue(any("failed to kill lsp process during close" in line for line in logs.output))
 
 
 # --- router routing ---------------------------------------------------------
