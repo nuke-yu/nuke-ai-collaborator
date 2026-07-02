@@ -753,7 +753,7 @@ async def init_bot_workspace(bot: dict):
                 if actual_target != expected_target:
                     role_link.unlink()
             except Exception:
-                pass
+                log.exception("workspace: failed to reset role skills link for role %s", role)
         if not role_link.exists() and not role_link.is_symlink():
             try:
                 role_link.symlink_to(expected_target)
@@ -765,7 +765,7 @@ async def init_bot_workspace(bot: dict):
             try:
                 role_link.unlink()
             except Exception:
-                pass
+                log.exception("workspace: failed to remove role skills link")
 
 
 

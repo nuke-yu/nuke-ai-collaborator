@@ -51,6 +51,32 @@ class TestProvision(unittest.TestCase):
                 self.assertTrue(
                     (layout.group_roles_dir(5) / "代码助手" / "skills" / "code-review.md").exists())
 
+    def test_init_group_workspace_logs_when_role_link_reset_fails(self):
+        import asyncio
+        from workspace import init_bot_workspace
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with patch("skills.constants.WORKSPACE_ROOT", root):
+                bot = {"id": 1, "group_id": 5, "name": "Bot", "role": "PM"}
+                skills_dir = layout.bot_dir(5, 1) / "skills"
+                skills_dir.mkdir(parents=True, exist_ok=True)
+                bad_link = skills_dir / "role"
+                bad_link.symlink_to("../../../shared/skills")
+
+                orig_unlink = Path.unlink
+
+                def fake_unlink(self, *args, **kwargs):
+                    if self == bad_link:
+                        raise OSError("unlink failed")
+                    return orig_unlink(self, *args, **kwargs)
+
+                with patch("pathlib.Path.unlink", new=fake_unlink), \
+                     self.assertLogs("workspace", level="ERROR") as logs:
+                    asyncio.run(init_bot_workspace(bot))
+
+                self.assertTrue(any("failed to reset role skills link" in line for line in logs.output))
+
 
 if __name__ == "__main__":
     unittest.main()
