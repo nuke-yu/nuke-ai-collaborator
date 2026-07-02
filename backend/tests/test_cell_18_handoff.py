@@ -174,6 +174,7 @@ class TestCell18Handoff(unittest.IsolatedAsyncioTestCase):
         sup._workers["w1"] = writer
         sup._routing_cache[77] = ("w1", 9999999999.0)
         sup._reassign_versions[77] = 3
+        sup._reassign_locks[77] = asyncio.Lock()
         fut = asyncio.get_running_loop().create_future()
         sup._pending_handoffs[77] = ("w1", fut)
 
@@ -186,6 +187,8 @@ class TestCell18Handoff(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(77, sup._routing_cache)
         self.assertNotIn(77, sup._pending_handoffs)
         self.assertNotIn(77, sup._reassign_versions)
+        self.assertNotIn(77, sup._reassign_locks)
+        self.assertNotIn(77, sup._reassign_lock_users)
 
     async def test_drop_worker_state_resolves_pending_handoffs_without_route_cache(self):
         sup = Supervisor("dummy_addr")

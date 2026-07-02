@@ -60,6 +60,9 @@ class Supervisor:
         await asyncio.sleep(0)
         if group_id not in self._routing_cache and group_id not in self._pending_handoffs:
             self._reassign_versions.pop(group_id, None)
+            if self._reassign_lock_users.get(group_id, 0) <= 0:
+                self._reassign_locks.pop(group_id, None)
+                self._reassign_lock_users.pop(group_id, None)
 
     def _finish_reassign_version(self, group_id: int, reassign_version: int) -> None:
         if (
