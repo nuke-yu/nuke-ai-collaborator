@@ -658,8 +658,7 @@ class TestRecapHydrationAndOperationalError(unittest.IsolatedAsyncioTestCase):
         # Create temp dir for WORKSPACE_ROOT
         self.temp_dir = tempfile.mkdtemp()
         self.workspace_patchers = [
-            patch("skills.constants.WORKSPACE_ROOT", Path(self.temp_dir)),
-            patch("runtime.dbpaths.WORKSPACE_ROOT", Path(self.temp_dir))
+            patch("skills.constants.WORKSPACE_ROOT", Path(self.temp_dir))
         ]
         for p in self.workspace_patchers:
             p.start()
