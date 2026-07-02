@@ -3,7 +3,7 @@ import dataclasses
 import asyncio
 import os
 import logging
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -52,6 +52,15 @@ async def _media_reaper_loop():
             logging.getLogger("main").exception("media reaper iteration failed")
 
 
+async def _cancel_and_wait(task: asyncio.Task | None) -> None:
+    """Cancel a background task and wait for it to finish shutting down."""
+    if task is None:
+        return
+    task.cancel()
+    with suppress(asyncio.CancelledError):
+        await task
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """CELL-22: Supervisor lifespan. Manages central DB and Worker fleet."""
@@ -95,7 +104,7 @@ async def lifespan(app: FastAPI):
     yield
 
     # Teardown
-    media_reaper_task.cancel()
+    await _cancel_and_wait(media_reaper_task)
     scheduler.stop()   # sync (returns None); awaiting it raised TypeError on teardown
     await sup.stop()
     from executors.tool_router import router as tool_router
