@@ -284,5 +284,31 @@ class TestCell17Lifecycle(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(init_calls, 1)
         await lm.shutdown()
 
+    async def test_evict_waits_for_inflight_hydration_then_cleans_group(self):
+        lm = LifecycleManager()
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def fake_init_group_db(path):
+            started.set()
+            await release.wait()
+
+        with patch("db.schema_split.init_group_db", new=fake_init_group_db), \
+             patch("db.migrations.run_migrations", new_callable=AsyncMock), \
+             patch("core.orchestration.rd_manager.rd_manager.check_board", new_callable=AsyncMock), \
+             patch("core.runner.resume_workflows", new_callable=AsyncMock), \
+             patch("sessions.recover_all", new_callable=AsyncMock), \
+             patch.object(lm, "_do_evict", new_callable=AsyncMock) as mock_evict:
+            hydrate_task = asyncio.create_task(lm.hydrate(1))
+            await started.wait()
+            evict_task = asyncio.create_task(lm.evict(1))
+            await asyncio.sleep(0)
+            self.assertFalse(evict_task.done())
+            release.set()
+            await asyncio.gather(hydrate_task, evict_task)
+
+        mock_evict.assert_awaited_once_with(1)
+        self.assertNotIn(1, lm._active_groups)
+
 if __name__ == "__main__":
     unittest.main()

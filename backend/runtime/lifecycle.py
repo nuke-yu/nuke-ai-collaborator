@@ -285,10 +285,22 @@ class LifecycleManager:
     async def evict(self, group_id: int) -> None:
         """Explicitly evict a group (used for CELL-18 lease release)."""
         should_evict = False
+        inflight = None
         async with self._lock:
             if group_id in self._active_groups:
                 del self._active_groups[group_id]
                 should_evict = True
+            else:
+                inflight = self._hydrating.get(group_id)
+        if inflight is not None:
+            try:
+                await asyncio.shield(inflight)
+            except Exception:
+                return
+            async with self._lock:
+                if group_id in self._active_groups:
+                    del self._active_groups[group_id]
+                    should_evict = True
         if should_evict:
             await self._do_evict(group_id)
 
