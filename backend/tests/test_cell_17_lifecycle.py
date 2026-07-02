@@ -417,6 +417,23 @@ class TestCell17Lifecycle(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(lock_states, [False])
         await lm.shutdown()
 
+    async def test_hydrate_logs_rd_prescan_failure_and_continues(self):
+        lm = LifecycleManager()
+
+        with patch("db.schema_split.init_group_db", new_callable=AsyncMock), \
+             patch("db.migrations.run_migrations", new_callable=AsyncMock), \
+             patch("core.orchestration.rd_manager.rd_manager.check_board",
+                   new_callable=AsyncMock, side_effect=RuntimeError("prescan failed")), \
+             patch("core.runner.resume_workflows", new_callable=AsyncMock) as mock_resume, \
+             patch("sessions.recover_all", new_callable=AsyncMock) as mock_recover, \
+             self.assertLogs("runtime.lifecycle", level="ERROR") as logs:
+            await lm.hydrate(1)
+
+        mock_resume.assert_awaited_once_with(group_id=1)
+        mock_recover.assert_awaited_once_with(group_id=1)
+        self.assertTrue(any("failed to run RDManager pre-scan for group 1" in line for line in logs.output))
+        await lm.shutdown()
+
     async def test_concurrent_hydrate_same_group_reuses_single_inflight_operation(self):
         lm = LifecycleManager()
         started = asyncio.Event()

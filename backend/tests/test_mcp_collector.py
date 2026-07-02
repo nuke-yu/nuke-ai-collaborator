@@ -275,6 +275,28 @@ class TestCollectorSchemaAnnotation(unittest.TestCase):
         self.assertIs(by["fake__do"], True)
         self.assertIs(by["fake__read"], False)
 
+    def test_schema_approval_flag_failure_is_logged_and_schema_remains(self):
+        from runtime.mcp_collector import MCPCollector
+
+        class _P:
+            provider_id = "mcp:bad"
+            def discover_tools(self):
+                return [ToolDef(name="bad__do", description="", parameters={})]
+            def can_handle(self, n): return n.startswith("bad__")
+            async def execute(self, n, a, c): return ("", False)
+            def approval_flags(self):
+                raise RuntimeError("flags failed")
+
+        coll = MCPCollector("x")
+        coll._router = ToolRouter()
+        coll._router.register_provider(_P())
+
+        with self.assertLogs("runtime.mcp_collector", level="ERROR") as logs:
+            schemas = coll._schemas()
+
+        self.assertEqual(schemas[0]["function"]["name"], "bad__do")
+        self.assertTrue(any("failed to read approval flags from provider mcp:bad" in line for line in logs.output))
+
 
 class TestCollectorAuth(unittest.IsolatedAsyncioTestCase):
 
@@ -500,6 +522,27 @@ class TestKillDescendants(unittest.TestCase):
         c2.terminate.assert_called_once()
         c2.kill.assert_called_once()                      # survivor force-killed
         c1.kill.assert_not_called()
+
+    def test_logs_descendant_terminate_and_kill_failures(self):
+        from runtime import mcp_collector as mc
+        c1, c2 = MagicMock(), MagicMock()
+        c1.pid = 111
+        c2.pid = 222
+        c1.terminate.side_effect = RuntimeError("terminate failed")
+        c2.kill.side_effect = RuntimeError("kill failed")
+
+        with patch("psutil.Process") as P, \
+             patch("psutil.wait_procs", return_value=([], [c2])), \
+             self.assertLogs("runtime.mcp_collector", level="ERROR") as logs:
+            P.return_value.children.return_value = [c1, c2]
+            n = mc._kill_descendants()
+
+        self.assertEqual(n, 2)
+        c1.terminate.assert_called_once()
+        c2.terminate.assert_called_once()
+        c2.kill.assert_called_once()
+        self.assertTrue(any("failed to terminate descendant process 111" in line for line in logs.output))
+        self.assertTrue(any("failed to kill descendant process 222" in line for line in logs.output))
 
     def test_no_children_noop(self):
         from runtime import mcp_collector as mc

@@ -282,7 +282,7 @@ class LifecycleManager:
                     from core.orchestration.rd_manager import rd_manager
                     await rd_manager.check_board(group_id)
                 except Exception:
-                    pass
+                    log.exception("lifecycle: failed to run RDManager pre-scan for group %d", group_id)
 
                 # 4. Resume workflows and recover sessions (CELL-22)
                 try:

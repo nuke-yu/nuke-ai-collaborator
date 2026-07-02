@@ -50,13 +50,13 @@ def _kill_descendants() -> int:
         try:
             c.terminate()
         except Exception:
-            pass
+            log.exception("collector: failed to terminate descendant process %s", getattr(c, "pid", c))
     _gone, alive = psutil.wait_procs(children, timeout=3)
     for c in alive:
         try:
             c.kill()
         except Exception:
-            pass
+            log.exception("collector: failed to kill descendant process %s", getattr(c, "pid", c))
     return len(children)
 
 
@@ -128,7 +128,10 @@ class MCPCollector:
                 try:
                     flags.update(p.approval_flags())
                 except Exception:
-                    pass
+                    log.exception(
+                        "collector: failed to read approval flags from provider %s",
+                        getattr(p, "provider_id", p),
+                    )
         for s in schemas:
             name = s.get("function", {}).get("name")
             if name in flags:
