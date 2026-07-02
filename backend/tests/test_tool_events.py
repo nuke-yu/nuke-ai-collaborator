@@ -169,6 +169,22 @@ class RecordEventTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((res, is_err), ("done", False))
         self.assertTrue(any("failed to schedule tool event recording" in line for line in logs.output))
 
+    async def test_dispatch_tool_logs_if_thread_id_resolution_fails(self):
+        from executors import tool_dispatch
+        ctx = {"group_id": 42, "bot_id": 5}
+
+        async def fake_execute(*_args, **_kwargs):
+            return "done", False
+
+        with patch.object(tool_dispatch.tool_executor, "has_tool", return_value=True), \
+             patch.object(tool_dispatch.tool_executor, "execute", new=fake_execute), \
+             patch("core.workflow.current_thread_id", side_effect=RuntimeError("thread lookup failed")), \
+             self.assertLogs("executors.tool_dispatch", level="WARNING") as logs:
+            res, is_err = await tool_dispatch.dispatch_tool("read_file", {"path": "z.py"}, ctx)
+
+        self.assertEqual((res, is_err), ("done", False))
+        self.assertTrue(any("failed to resolve current thread id" in line for line in logs.output))
+
 
 class RetrievalTest(unittest.IsolatedAsyncioTestCase):
     """L3 — 3-layer retrieval over tool_events."""

@@ -24,7 +24,7 @@ def _record_event_l1(name: str, arguments: dict, result: str, is_error: bool, co
             import core.workflow as _wf
             thread_id = _wf.current_thread_id(group_id)
         except Exception:
-            pass
+            log.warning("tool_dispatch: failed to resolve current thread id for group %s", group_id, exc_info=True)
         from ai.tool_events import record_event
         task = asyncio.create_task(record_event(
             group_id=group_id,
