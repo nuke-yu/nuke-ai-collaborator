@@ -233,7 +233,7 @@ async def create_worktree(group_id: int, task_id: str, base_ref: str = "main") -
             try:
                 base_ref = await _run_git_cmd(shared_workspace, "rev-parse", "--abbrev-ref", "HEAD")
             except Exception:
-                pass
+                log.warning("git_worktree: failed to resolve default base_ref for %s", shared_workspace, exc_info=True)
 
         worktree_dir = group_dir / "worktrees" / f"task_{task_id}"
         worktree_workspace = worktree_dir / "workspace"

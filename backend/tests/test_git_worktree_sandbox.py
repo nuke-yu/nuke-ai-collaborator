@@ -207,6 +207,28 @@ class TestGitWorktreeSandbox(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(any("failed to kill timed-out git process" in line for line in logs.output))
 
+    async def test_create_worktree_logs_when_default_base_ref_resolution_fails(self):
+        shared_workspace = layout.group_shared_dir(self.group_id) / "workspace"
+        shared_workspace.mkdir(parents=True, exist_ok=True)
+        (shared_workspace / ".git").mkdir(parents=True, exist_ok=True)
+
+        async def fake_run_git_cmd(cwd, *args, timeout_s=30):
+            if args[:2] == ("rev-parse", "--abbrev-ref"):
+                raise RuntimeError("rev-parse failed")
+            if args[0] == "status":
+                return ""
+            return ""
+
+        async def fake_ensure(_shared_workspace):
+            return None
+
+        with patch("workspace.git_worktree._ensure_shared_repo_clean_and_committed", new=fake_ensure), \
+             patch("workspace.git_worktree._run_git_cmd", new=fake_run_git_cmd), \
+             self.assertLogs("workspace.git_worktree", level="WARNING") as logs:
+            await create_worktree(self.group_id, "base-ref-fail")
+
+        self.assertTrue(any("failed to resolve default base_ref" in line for line in logs.output))
+
     async def test_self_promotion_mid_run_deferred(self):
         """🔴 #3: Verify self-promotion inside bot run is deferred and does not delete directory mid-run."""
         # Setup Jira mock ticket
