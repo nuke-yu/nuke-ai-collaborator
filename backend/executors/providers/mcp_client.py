@@ -469,7 +469,10 @@ class McpClientToolProvider(ToolProvider):
                 try:
                     self._request_queue.put_nowait(_REFRESH)
                 except Exception:
-                    pass
+                    logger.exception(
+                        "MCP provider '%s' failed to enqueue tool-list refresh",
+                        self.provider_id,
+                    )
 
     async def _session_loop(self) -> None:
         """

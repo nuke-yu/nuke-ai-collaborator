@@ -316,6 +316,19 @@ class TestMcpClientToolProvider(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(p._request_queue.qsize(), before)
         await p.close()
 
+    async def test_tool_list_changed_enqueue_failure_is_logged(self):
+        class BadQueue:
+            def put_nowait(self, _item):
+                raise RuntimeError("queue closed")
+
+        p = McpClientToolProvider("filesystem", "npx", [], approval_tools=set())
+        p._request_queue = BadQueue()
+
+        with self.assertLogs("executors.providers.mcp_client", level="ERROR") as logs:
+            await p._on_message(_make_list_changed_notification())
+
+        self.assertTrue(any("failed to enqueue tool-list refresh" in line for line in logs.output))
+
     async def test_result_secrets_redacted(self):
         """#2 defect: secrets in an MCP result are redacted (MCP bypasses the
         tool_executor after-hooks, so it must redact in its own path)."""

@@ -7,11 +7,14 @@ protocol (get/set tokens + client info), so OAuthClientProvider can persist and
 refresh tokens across collector restarts.
 """
 import asyncio
+import logging
 import time
 import os
 from pathlib import Path
 
 import aiosqlite
+
+log = logging.getLogger(__name__)
 
 # Env-overridable (read-only / container deploys can't write next to the source).
 _DEFAULT_DB = os.environ.get("MCP_OAUTH_DB") or str(
@@ -53,11 +56,11 @@ async def _get_conn(path: str) -> aiosqlite.Connection:
 
 async def aclose_all() -> None:
     """Close all cached connections (collector shutdown / test teardown)."""
-    for c in list(_conns.values()):
+    for path, c in list(_conns.items()):
         try:
             await c.close()
         except Exception:
-            pass
+            log.exception("MCP OAuth store: failed to close cached connection for %s", path)
     _conns.clear()
 
 

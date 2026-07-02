@@ -58,6 +58,21 @@ class TestMCPTokenStorage(unittest.IsolatedAsyncioTestCase):
         c3 = await _get_conn(self.db)
         self.assertIsNot(c3, c1)           # reopened after close
 
+    async def test_aclose_all_logs_close_failures_and_clears_cache(self):
+        from executors.providers.mcp_oauth_store import _conns, aclose_all
+
+        class BadConn:
+            async def close(self):
+                raise RuntimeError("close failed")
+
+        _conns["bad.db"] = BadConn()
+
+        with self.assertLogs("executors.providers.mcp_oauth_store", level="ERROR") as logs:
+            await aclose_all()
+
+        self.assertEqual(_conns, {})
+        self.assertTrue(any("failed to close cached connection for bad.db" in line for line in logs.output))
+
     async def test_clear(self):
         from mcp.shared.auth import OAuthToken
         s = MCPTokenStorage("x", self.db)
