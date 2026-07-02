@@ -220,6 +220,41 @@ class TestCell18Handoff(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(fut.done())
         self.assertEqual(sup._pending_handoffs[77][0], "w2")
 
+    async def test_stale_reassign_does_not_clobber_newer_handoff_route(self):
+        sup = Supervisor("dummy_addr")
+
+        class MockDB:
+            async def __aenter__(self): return self
+            async def __aexit__(self, *args): pass
+            async def execute(self, *args): pass
+            async def commit(self): pass
+
+        sup._workers["w1"] = AsyncMock()
+        sup._routing_cache[77] = ("w1", 9999999999.0)
+        first_send_started = asyncio.Event()
+        release_first_send = asyncio.Event()
+        send_calls = 0
+
+        async def fake_send(worker_id, msg):
+            nonlocal send_calls
+            send_calls += 1
+            if send_calls == 1:
+                first_send_started.set()
+                await release_first_send.wait()
+                return True
+            return False
+
+        with patch("db.global_db", return_value=MockDB()):
+            with patch.object(sup, "send_to_worker_id", new=fake_send):
+                first = asyncio.create_task(sup.reassign_group(77, "w2"))
+                await first_send_started.wait()
+                await sup.reassign_group(77, "w3")
+                release_first_send.set()
+                await first
+
+        self.assertEqual(sup._routing_cache[77][0], "w3")
+        self.assertEqual(sup._pending_handoffs, {})
+
     async def test_eviction_persistence_barrier(self):
         from runtime.lifecycle import LifecycleManager
         mgr = LifecycleManager()

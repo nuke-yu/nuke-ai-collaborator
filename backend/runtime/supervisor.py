@@ -419,7 +419,9 @@ class Supervisor:
         prev = self._pending_handoffs.get(group_id)
         if prev and not prev[1].done():
             prev[1].cancel()
-        self._pending_handoffs[group_id] = (old_wid, fut)
+        handoff_entry = (old_wid, fut)
+        self._pending_handoffs[group_id] = handoff_entry
+        superseded = False
         
         try:
             # Tell old worker to release
@@ -435,13 +437,22 @@ class Supervisor:
                 log.warning("supervisor: worker %s disappeared before confirming release of group %d", old_wid, group_id)
             else:
                 log.info("supervisor: handoff of group %d complete", group_id)
+        except asyncio.CancelledError:
+            if fut.cancelled():
+                superseded = True
+                log.info("supervisor: handoff of group %d from %s was superseded", group_id, old_wid)
+                return
+            raise
         except asyncio.TimeoutError:
             log.error("supervisor: timeout waiting for %s to release group %d, forcing routing update anyway", old_wid, group_id)
         finally:
-            self._pending_handoffs.pop(group_id, None)
-            # 4. Point traffic to new worker
-            import time
-            self._routing_cache[group_id] = (new_worker_id, time.time() + 3600.0)
+            current = self._pending_handoffs.get(group_id)
+            if not superseded and (current is None or current == handoff_entry):
+                if current == handoff_entry:
+                    self._pending_handoffs.pop(group_id, None)
+                # 4. Point traffic to new worker
+                import time
+                self._routing_cache[group_id] = (new_worker_id, time.time() + 3600.0)
 
 # Global instance used by the WS shell and Scheduler
 supervisor: 'Supervisor | None' = None
