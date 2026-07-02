@@ -363,5 +363,27 @@ class TestCell17Lifecycle(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(1, lm._active_groups)
         self.assertEqual(lm._hydrating, {})
 
+    async def test_shutdown_waits_for_inflight_evictions(self):
+        lm = LifecycleManager()
+        lm._active_groups[1] = time.time() - 10
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def fake_evict(gid):
+            started.set()
+            await release.wait()
+
+        with patch.dict(os.environ, {"GROUP_INACTIVITY_TIMEOUT": "0"}):
+            with patch.object(lm, "_do_evict", new=fake_evict):
+                sweep_task = asyncio.create_task(lm.sweep_inactive_groups())
+                await started.wait()
+                shutdown_task = asyncio.create_task(lm.shutdown())
+                await asyncio.sleep(0)
+                self.assertFalse(shutdown_task.done())
+                release.set()
+                await asyncio.gather(sweep_task, shutdown_task)
+
+        self.assertEqual(lm._evicting, {})
+
 if __name__ == "__main__":
     unittest.main()

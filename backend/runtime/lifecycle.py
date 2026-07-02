@@ -418,6 +418,7 @@ class LifecycleManager:
         """Close all active groups."""
         evictor = None
         inflight = []
+        evicting = []
         async with self._lock:
             self._shutting_down = True
             if self._evictor_task:
@@ -425,12 +426,15 @@ class LifecycleManager:
                 evictor = self._evictor_task
                 self._evictor_task = None
             inflight = list(self._hydrating.values())
+            evicting = list(self._evicting.values())
             active = list(self._active_groups)
             self._active_groups.clear()
         if evictor is not None:
             await asyncio.gather(evictor, return_exceptions=True)
         if inflight:
             await asyncio.gather(*inflight, return_exceptions=True)
+        if evicting:
+            await asyncio.gather(*evicting, return_exceptions=True)
         for gid in active:
             await self._evict_once(gid)
 
