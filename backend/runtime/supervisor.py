@@ -398,6 +398,10 @@ class Supervisor:
 
     async def reassign_group(self, group_id: int, new_worker_id: str) -> None:
         """CELL-18: Safely transfer a group to a new worker with clean lease handoff."""
+        prev = self._pending_handoffs.pop(group_id, None)
+        if prev and not prev[1].done():
+            prev[1].cancel()
+
         # 1. Update persistent DB
         async with db.global_db() as cdb:
             await cdb.execute("UPDATE groups SET assigned_worker_id = ? WHERE id = ?", (new_worker_id, group_id))
@@ -421,9 +425,6 @@ class Supervisor:
         # 3. Handoff Protocol
         log.info("supervisor: initiating handoff of group %d from %s to %s", group_id, old_wid, new_worker_id)
         fut = asyncio.get_running_loop().create_future()
-        prev = self._pending_handoffs.get(group_id)
-        if prev and not prev[1].done():
-            prev[1].cancel()
         handoff_entry = (old_wid, fut)
         self._pending_handoffs[group_id] = handoff_entry
         superseded = False

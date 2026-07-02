@@ -122,6 +122,25 @@ class TestCell18Handoff(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sup._routing_cache[77][0], "w2")
         self.assertEqual(sup._pending_handoffs, {})
 
+    async def test_direct_reassign_clears_stale_pending_handoff(self):
+        sup = Supervisor("dummy_addr")
+
+        class MockDB:
+            async def __aenter__(self): return self
+            async def __aexit__(self, *args): pass
+            async def execute(self, *args): pass
+            async def commit(self): pass
+
+        fut = asyncio.get_running_loop().create_future()
+        sup._pending_handoffs[77] = ("w1", fut)
+
+        with patch("db.global_db", return_value=MockDB()):
+            await sup.reassign_group(77, "w2")
+
+        self.assertTrue(fut.cancelled())
+        self.assertEqual(sup._routing_cache[77][0], "w2")
+        self.assertEqual(sup._pending_handoffs, {})
+
     async def test_drop_worker_state_resolves_pending_handoff_for_stale_group(self):
         sup = Supervisor("dummy_addr")
         writer = AsyncMock()
