@@ -7,6 +7,7 @@ intermingle with the AI loop logic (frequently changed).
 """
 import asyncio
 import fnmatch
+import logging
 import os
 import re
 import shlex
@@ -34,6 +35,7 @@ _IS_WINDOWS  = sys.platform == "win32"
 _DEFAULT_SHELL = (
     ["powershell.exe", "-NoProfile", "-Command"] if _IS_WINDOWS else ["/bin/sh", "-c"]
 )
+log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Tool parameter schemas using Pydantic
@@ -1080,7 +1082,7 @@ def _safe_kill(proc) -> None:
     try:
         proc.kill()
     except Exception:
-        pass
+        log.exception("workspace_tools: failed to kill timed-out process")
 
 
 class LocalShellBackend:

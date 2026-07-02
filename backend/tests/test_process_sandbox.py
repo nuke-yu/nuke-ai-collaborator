@@ -34,6 +34,22 @@ class TestProcessSandbox(unittest.IsolatedAsyncioTestCase):
                 # Verify kill was called to prevent zombie process
                 mock_proc.kill.assert_called_once()
 
+    async def test_run_shell_timeout_logs_when_kill_fails(self):
+        ctx = {"bot_id": 1}
+
+        with patch("executors.plugins.workspace_tools._resolve_shell_cwd", return_value=("", "")):
+            mock_proc = MagicMock()
+            mock_proc.communicate = AsyncMock(side_effect=asyncio.TimeoutError())
+            mock_proc.kill = MagicMock(side_effect=RuntimeError("kill failed"))
+
+            with patch("asyncio.create_subprocess_exec", new=AsyncMock(return_value=mock_proc)), \
+                 self.assertLogs("executors.plugins.workspace_tools", level="ERROR") as logs:
+                result = await _handle_run_shell("sleep 10", timeout=1, context=ctx)
+
+            self.assertIn("[安全拦截]", result)
+            self.assertIn("1 秒", result)
+            self.assertTrue(any("failed to kill timed-out process" in line for line in logs.output))
+
     async def test_run_shell_enforces_max_timeout_ceiling(self):
         ctx = {"bot_id": 1}
         
