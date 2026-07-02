@@ -13,6 +13,7 @@ import asyncio
 import logging
 
 from runtime import ipc
+import scheduler
 
 
 def build_worker(worker_id: str, addr: str):
@@ -77,9 +78,13 @@ async def run_supervisor(addr: str, num_workers: int = 0) -> None:
     sup = build_supervisor(addr, num_workers=num_workers)
     await sup.start()
     try:
-        # TODO(CELL-13/WS shell): wire the FastAPI/WebSocket termination shell
-        # and APScheduler into this wait loop when that integration lands.
-        await asyncio.Event().wait()   # run until cancelled or externally stopped
+        await scheduler.start()
+        try:
+            # TODO(CELL-13/WS shell): wire the FastAPI/WebSocket termination shell
+            # into this wait loop when that integration lands.
+            await asyncio.Event().wait()   # run until cancelled or externally stopped
+        finally:
+            scheduler.stop()
     finally:
         await sup.stop()
 

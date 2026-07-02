@@ -167,6 +167,37 @@ class TestEntrySupervisorLifecycle(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(fake.started)
         self.assertTrue(fake.stopped)
 
+    async def test_run_supervisor_stops_scheduler_before_supervisor(self):
+        import runtime.entry as entry
+
+        events = []
+
+        class _FakeSupervisor:
+            async def start(self):
+                events.append("sup.start")
+
+            async def stop(self):
+                events.append("sup.stop")
+
+        fake = _FakeSupervisor()
+
+        async def fake_scheduler_start():
+            events.append("scheduler.start")
+
+        def fake_scheduler_stop():
+            events.append("scheduler.stop")
+
+        with patch.object(entry, "build_supervisor", return_value=fake), \
+             patch.object(entry.scheduler, "start", new=fake_scheduler_start), \
+             patch.object(entry.scheduler, "stop", new=fake_scheduler_stop):
+            task = asyncio.create_task(entry.run_supervisor("/tmp/sup.sock", num_workers=2))
+            await asyncio.sleep(0)
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+
+        self.assertEqual(events, ["sup.start", "scheduler.start", "scheduler.stop", "sup.stop"])
+
 
 if __name__ == "__main__":
     unittest.main()
