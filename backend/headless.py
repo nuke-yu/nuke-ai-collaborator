@@ -166,7 +166,6 @@ async def connect_to_supervisor() -> bool:
     _supervisor_addr = os.getenv("NUPC_ADDR", "ipc:///tmp/nupe-supervisor")
 
     try:
-        from runtime.ipc import serve, recv_msg, send_msg
         # For headless mode, we need to connect as a worker would
         # This is a simplified connection - in production, use the proper IPC channel
         reader, writer = await asyncio.open_unix_connection(
@@ -176,10 +175,10 @@ async def connect_to_supervisor() -> bool:
 
         # Send HELLO frame
         hello = {"type": "hello", "worker_id": "headless-client"}
-        await send_msg(_supervisor_writer, hello)
+        await ipc.send_msg(_supervisor_writer, hello)
 
         # Wait for acknowledgment
-        response = await recv_msg(_supervisor_reader)
+        response = await ipc.recv_msg(_supervisor_reader)
         return response.get("status") == "ok"
     except Exception as e:
         print(f"[headless] Failed to connect to supervisor: {e}", file=sys.stderr)
@@ -192,8 +191,8 @@ async def send_to_supervisor(msg: dict) -> Optional[dict]:
         raise RuntimeError("Not connected to supervisor")
 
     try:
-        await send_msg(_supervisor_writer, msg)
-        response = await asyncio.wait_for(recv_msg(_supervisor_reader), timeout=30.0)
+        await ipc.send_msg(_supervisor_writer, msg)
+        response = await asyncio.wait_for(ipc.recv_msg(_supervisor_reader), timeout=30.0)
         return response
     except asyncio.TimeoutError:
         raise TimeoutError("Supervisor response timeout")

@@ -18,6 +18,7 @@ from headless import (
     ExitCode,
     Result,
     SessionInfo,
+    send_to_supervisor,
     ensure_sessions_dir,
     list_sessions,
     save_session,
@@ -177,6 +178,34 @@ class TestSessionManagement:
             listed_g2 = list_sessions(group_id=2)
             assert len(listed_g2) == 1
             assert listed_g2[0].id == "g2_s1"
+
+    def test_send_to_supervisor_uses_ipc_helpers(self):
+        import headless as headless_mod
+
+        prev_writer = headless_mod._supervisor_writer
+        prev_reader = headless_mod._supervisor_reader
+        headless_mod._supervisor_writer = object()
+        headless_mod._supervisor_reader = object()
+
+        async def fake_send(writer, msg):
+            assert writer is headless_mod._supervisor_writer
+            assert msg == {"type": "ping"}
+
+        async def fake_recv(reader):
+            assert reader is headless_mod._supervisor_reader
+            return {"ok": True}
+
+        async def run():
+            with patch("headless.ipc.send_msg", new=fake_send), \
+                 patch("headless.ipc.recv_msg", new=fake_recv):
+                return await send_to_supervisor({"type": "ping"})
+
+        try:
+            response = asyncio.run(run())
+            assert response == {"ok": True}
+        finally:
+            headless_mod._supervisor_writer = prev_writer
+            headless_mod._supervisor_reader = prev_reader
 
 
 class TestResumeSession:
