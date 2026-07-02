@@ -108,6 +108,9 @@ class Supervisor:
                 and group_id not in resolved_pending_groups
             ):
                 self._reassign_versions.pop(group_id, None)
+                if self._reassign_lock_users.get(group_id, 0) <= 0:
+                    self._reassign_locks.pop(group_id, None)
+                    self._reassign_lock_users.pop(group_id, None)
         for group_id in resolved_pending_groups:
             asyncio.create_task(self._clear_reassign_version_later(group_id))
         self._worker_stats.pop(worker_id, None)

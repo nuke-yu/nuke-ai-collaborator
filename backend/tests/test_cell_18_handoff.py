@@ -203,6 +203,21 @@ class TestCell18Handoff(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(fut.result())
         self.assertNotIn(77, sup._pending_handoffs)
 
+    async def test_drop_worker_state_clears_reassign_lock_for_stale_route_without_handoff(self):
+        sup = Supervisor("dummy_addr")
+        writer = AsyncMock()
+        sup._workers["w1"] = writer
+        sup._routing_cache[77] = ("w1", 9999999999.0)
+        sup._reassign_versions[77] = 2
+        sup._reassign_locks[77] = asyncio.Lock()
+
+        sup._drop_worker_state("w1", writer=writer)
+
+        self.assertNotIn(77, sup._routing_cache)
+        self.assertNotIn(77, sup._reassign_versions)
+        self.assertNotIn(77, sup._reassign_locks)
+        self.assertNotIn(77, sup._reassign_lock_users)
+
     async def test_stale_worker_disconnect_does_not_clear_reconnected_handoff_state(self):
         sup = Supervisor("dummy_addr")
         old_writer = AsyncMock()
