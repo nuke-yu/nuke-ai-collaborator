@@ -76,8 +76,12 @@ async def run_worker(worker_id: str, addr: str) -> None:
 async def run_supervisor(addr: str, num_workers: int = 0) -> None:
     sup = build_supervisor(addr, num_workers=num_workers)
     await sup.start()
-    # TODO(CELL-13/WS shell): start APScheduler + FastAPI WS termination here.
-    await asyncio.Event().wait()   # run until cancelled
+    try:
+        # TODO(CELL-13/WS shell): wire the FastAPI/WebSocket termination shell
+        # and APScheduler into this wait loop when that integration lands.
+        await asyncio.Event().wait()   # run until cancelled or externally stopped
+    finally:
+        await sup.stop()
 
 
 def main(argv=None) -> None:

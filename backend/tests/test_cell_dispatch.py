@@ -140,5 +140,33 @@ class TestEntryFactory(unittest.TestCase):
         self.assertEqual(sup.addr, "/tmp/nuke_y.sock")
 
 
+class TestEntrySupervisorLifecycle(unittest.IsolatedAsyncioTestCase):
+    async def test_run_supervisor_stops_on_cancellation(self):
+        import runtime.entry as entry
+
+        class _FakeSupervisor:
+            def __init__(self):
+                self.started = False
+                self.stopped = False
+
+            async def start(self):
+                self.started = True
+
+            async def stop(self):
+                self.stopped = True
+
+        fake = _FakeSupervisor()
+
+        with patch.object(entry, "build_supervisor", return_value=fake):
+            task = asyncio.create_task(entry.run_supervisor("/tmp/sup.sock", num_workers=2))
+            await asyncio.sleep(0)
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+
+        self.assertTrue(fake.started)
+        self.assertTrue(fake.stopped)
+
+
 if __name__ == "__main__":
     unittest.main()
