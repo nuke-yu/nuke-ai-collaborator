@@ -202,6 +202,39 @@ class TestCollectorClose(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(coll._auth_locks, {})
         self.assertIsNone(coll._writer)
 
+    async def test_close_logs_cleanup_failures_and_continues(self):
+        coll = MCPCollector("x")
+
+        class _Writer:
+            def __init__(self):
+                self.waited = False
+
+            def close(self):
+                raise RuntimeError("writer close failed")
+
+            async def wait_closed(self):
+                self.waited = True
+                raise RuntimeError("writer wait failed")
+
+        writer = _Writer()
+        coll._writer = writer
+        coll._router = MagicMock()
+        coll._router.close_all = AsyncMock(side_effect=RuntimeError("router close failed"))
+
+        with patch("runtime.mcp_collector._kill_descendants", return_value=0) as kill_descendants, \
+             patch("executors.providers.mcp_oauth_store.aclose_all",
+                   new=AsyncMock(side_effect=RuntimeError("oauth close failed"))), \
+             self.assertLogs("runtime.mcp_collector", level="ERROR") as logs:
+            await coll.close()
+
+        self.assertTrue(writer.waited)
+        self.assertIsNone(coll._writer)
+        kill_descendants.assert_called_once()
+        self.assertTrue(any("router close_all failed during shutdown" in line for line in logs.output))
+        self.assertTrue(any("writer close failed during shutdown" in line for line in logs.output))
+        self.assertTrue(any("writer wait_closed failed during shutdown" in line for line in logs.output))
+        self.assertTrue(any("OAuth token-store close failed during shutdown" in line for line in logs.output))
+
 
 class TestCollectorSchemaAnnotation(unittest.TestCase):
     """Per-server HIL config travels to workers: the collector annotates each

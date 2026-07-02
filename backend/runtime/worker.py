@@ -129,7 +129,7 @@ class Worker:
             from executors.mcp_bridge import bridge as _mcp_bridge
             _mcp_bridge.reset()
         except Exception:
-            pass
+            log.exception("worker %s: failed to reset MCP bridge during close", self.worker_id)
 
         to_cancel = []
         if self._report_task:
@@ -161,7 +161,7 @@ class Worker:
                 try:
                     await wait_closed()
                 except Exception:
-                    pass
+                    log.exception("worker %s: writer wait_closed failed during close", self.worker_id)
             self._writer = None
 
     async def _recap_on_paused(self, gid: int) -> None:

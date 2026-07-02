@@ -337,21 +337,27 @@ class MCPCollector:
         self._auth_inflight.clear()
         self._auth_locks.clear()
         if self._router:
-            await self._router.close_all()
+            try:
+                await self._router.close_all()
+            except Exception:
+                log.exception("collector: router close_all failed during shutdown")
         if self._writer:
-            self._writer.close()
+            try:
+                self._writer.close()
+            except Exception:
+                log.exception("collector: writer close failed during shutdown")
             wait_closed = getattr(self._writer, "wait_closed", None)
             if callable(wait_closed):
                 try:
                     await wait_closed()
                 except Exception:
-                    pass
+                    log.exception("collector: writer wait_closed failed during shutdown")
             self._writer = None
         try:
             from executors.providers.mcp_oauth_store import aclose_all
             await aclose_all()            # close shared OAuth token-store connections
         except Exception:
-            pass
+            log.exception("collector: OAuth token-store close failed during shutdown")
         swept = _kill_descendants()       # reap orphaned npx/node grandchildren
         if swept:
             log.info("collector: swept %d residual subprocess(es) on shutdown", swept)

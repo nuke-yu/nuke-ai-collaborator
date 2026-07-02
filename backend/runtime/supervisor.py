@@ -213,27 +213,48 @@ class Supervisor:
         self._cleanup_tasks.clear()
 
         # 2. Kill worker processes
-        for _label, proc in self._processes:
+        for label, proc in self._processes:
             try:
                 proc.terminate()
             except Exception:
-                pass
+                log.exception("supervisor: failed to terminate subprocess %s during stop", label)
 
         if self._processes:
-            await asyncio.gather(*(proc.wait() for _label, proc in self._processes),
-                                 return_exceptions=True)
+            wait_results = await asyncio.gather(
+                *(proc.wait() for _label, proc in self._processes),
+                return_exceptions=True,
+            )
+            for (label, _proc), result in zip(self._processes, wait_results):
+                if isinstance(result, Exception):
+                    log.error(
+                        "supervisor: subprocess %s wait failed during stop",
+                        label,
+                        exc_info=(type(result), result, result.__traceback__),
+                    )
         self._processes.clear()
 
         # 2. Close IPC connections
 
         waiters = []
-        for w in list(self._workers.values()):
-            w.close()
+        waiter_labels = []
+        for wid, w in list(self._workers.items()):
+            try:
+                w.close()
+            except Exception:
+                log.exception("supervisor: failed to close worker %s connection during stop", wid)
             wait_closed = getattr(w, "wait_closed", None)
             if callable(wait_closed):
                 waiters.append(wait_closed())
+                waiter_labels.append(wid)
         if waiters:
-            await asyncio.gather(*waiters, return_exceptions=True)
+            wait_results = await asyncio.gather(*waiters, return_exceptions=True)
+            for wid, result in zip(waiter_labels, wait_results):
+                if isinstance(result, Exception):
+                    log.error(
+                        "supervisor: worker %s wait_closed failed during stop",
+                        wid,
+                        exc_info=(type(result), result, result.__traceback__),
+                    )
         self._workers.clear()
         self._worker_stats.clear()
         self._worker_stats_ts.clear()
@@ -246,11 +267,14 @@ class Supervisor:
                 fut.cancel()
         self._pending_handoffs.clear()
         if self._server:
-            self._server.close()
+            try:
+                self._server.close()
+            except Exception:
+                log.exception("supervisor: server close failed during stop")
             try:
                 await asyncio.wait_for(self._server.wait_closed(), 2)
             except Exception:
-                pass
+                log.exception("supervisor: server wait_closed failed during stop")
             self._server = None
 
     # ── worker side (IPC) ────────────────────────────────────────────────
@@ -266,8 +290,10 @@ class Supervisor:
             # H-6: Close old connection if this worker_id is reconnecting
             old_w = self._workers.get(wid)
             if old_w:
-                try: old_w.close()
-                except Exception: pass
+                try:
+                    old_w.close()
+                except Exception:
+                    log.exception("supervisor: failed to close stale connection for worker %s", wid)
             self._workers[wid] = writer
             log.info("supervisor: worker %s connected", wid)
             # Hand a freshly-connected worker the current MCP schema snapshot so it
@@ -280,7 +306,7 @@ class Supervisor:
                     try:
                         writer.close()
                     except Exception:
-                        pass
+                        log.exception("supervisor: failed to close worker %s after schema push failure", wid)
                     log.warning("supervisor: failed to send cached MCP schemas to %s", wid)
                     return
             while True:

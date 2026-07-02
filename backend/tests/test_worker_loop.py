@@ -104,6 +104,55 @@ class TestWorkerLoop(unittest.IsolatedAsyncioTestCase):
         finally:
             global_bridge.set_schemas(saved)
 
+    async def test_close_logs_mcp_bridge_reset_failure_and_completes(self):
+        worker_bus = EventBus()
+        worker = Worker("w0", "ignored", bus=worker_bus, dispatch=None)
+
+        class DummyWriter:
+            def __init__(self):
+                self.closed = False
+
+            def close(self):
+                self.closed = True
+
+        writer = DummyWriter()
+        worker._writer = writer
+
+        with patch.object(global_bridge, "reset", side_effect=RuntimeError("reset failed")), \
+             self.assertLogs("runtime.worker", level="ERROR") as logs:
+            await worker.close()
+
+        self.assertTrue(writer.closed)
+        self.assertIsNone(worker._writer)
+        self.assertTrue(any("failed to reset MCP bridge during close" in line for line in logs.output))
+
+    async def test_close_logs_writer_wait_closed_failure_and_clears_writer(self):
+        worker_bus = EventBus()
+        worker = Worker("w0", "ignored", bus=worker_bus, dispatch=None)
+
+        class DummyWriter:
+            def __init__(self):
+                self.closed = False
+                self.waited = False
+
+            def close(self):
+                self.closed = True
+
+            async def wait_closed(self):
+                self.waited = True
+                raise RuntimeError("wait failed")
+
+        writer = DummyWriter()
+        worker._writer = writer
+
+        with self.assertLogs("runtime.worker", level="ERROR") as logs:
+            await worker.close()
+
+        self.assertTrue(writer.closed)
+        self.assertTrue(writer.waited)
+        self.assertIsNone(worker._writer)
+        self.assertTrue(any("writer wait_closed failed during close" in line for line in logs.output))
+
     async def test_startup_hydration_task_cancels_during_retry_sleep(self):
         worker_bus = EventBus()
         worker = Worker("w0", "ignored", bus=worker_bus, dispatch=None)

@@ -164,6 +164,73 @@ class TestCell15Routing(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(writer.waited)
         self.assertEqual(sup._workers, {})
 
+    async def test_stop_logs_worker_close_and_wait_failures(self):
+        sup = Supervisor("dummy_addr")
+
+        class DummyWriter:
+            def __init__(self):
+                self.waited = False
+
+            def close(self):
+                raise RuntimeError("close failed")
+
+            async def wait_closed(self):
+                self.waited = True
+                raise RuntimeError("wait failed")
+
+        writer = DummyWriter()
+        sup._workers["w1"] = writer
+
+        with self.assertLogs("runtime.supervisor", level="ERROR") as logs:
+            await sup.stop()
+
+        self.assertTrue(writer.waited)
+        self.assertEqual(sup._workers, {})
+        self.assertTrue(any("failed to close worker w1 connection during stop" in line for line in logs.output))
+        self.assertTrue(any("worker w1 wait_closed failed during stop" in line for line in logs.output))
+
+    async def test_stop_logs_subprocess_terminate_and_wait_failures(self):
+        sup = Supervisor("dummy_addr")
+
+        class DummyProc:
+            def terminate(self):
+                raise RuntimeError("terminate failed")
+
+            async def wait(self):
+                raise RuntimeError("wait failed")
+
+        sup._processes.append(("w1", DummyProc()))
+
+        with self.assertLogs("runtime.supervisor", level="ERROR") as logs:
+            await sup.stop()
+
+        self.assertEqual(sup._processes, [])
+        self.assertTrue(any("failed to terminate subprocess w1 during stop" in line for line in logs.output))
+        self.assertTrue(any("subprocess w1 wait failed during stop" in line for line in logs.output))
+
+    async def test_stop_logs_server_wait_closed_failure(self):
+        sup = Supervisor("dummy_addr")
+
+        class DummyServer:
+            def __init__(self):
+                self.closed = False
+
+            def close(self):
+                self.closed = True
+
+            async def wait_closed(self):
+                raise RuntimeError("server wait failed")
+
+        server = DummyServer()
+        sup._server = server
+
+        with self.assertLogs("runtime.supervisor", level="ERROR") as logs:
+            await sup.stop()
+
+        self.assertTrue(server.closed)
+        self.assertIsNone(sup._server)
+        self.assertTrue(any("server wait_closed failed during stop" in line for line in logs.output))
+
     async def test_stop_clears_supervisor_runtime_state(self):
         sup = Supervisor("dummy_addr")
         sup._worker_stats["w1"] = {"worker_id": "w1"}
@@ -206,6 +273,29 @@ class TestCell15Routing(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("w1", sup._worker_stats)
         self.assertNotIn("w1", sup._worker_stats_ts)
         self.assertNotIn(7, sup._routing_cache)
+
+    async def test_worker_reconnect_logs_stale_connection_close_failure(self):
+        sup = Supervisor("dummy_addr")
+        old_writer = unittest.mock.MagicMock()
+        old_writer.close.side_effect = RuntimeError("old close failed")
+        new_writer = unittest.mock.MagicMock()
+        sup._workers["w1"] = old_writer
+
+        calls = 0
+
+        async def fake_recv(_reader):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                return {"type": ipc.protocol.HELLO, "worker_id": "w1"}
+            raise asyncio.IncompleteReadError(partial=b"", expected=1)
+
+        with patch("runtime.supervisor.ipc.recv_msg", new=fake_recv), \
+             self.assertLogs("runtime.supervisor", level="ERROR") as logs:
+            await sup._on_worker_conn(object(), new_writer)
+
+        self.assertTrue(any("failed to close stale connection for worker w1" in line for line in logs.output))
+        self.assertNotIn("w1", sup._workers)
 
     async def test_worker_connect_drops_registration_when_cached_schema_push_fails(self):
         sup = Supervisor("dummy_addr")
