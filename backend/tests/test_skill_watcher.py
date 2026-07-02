@@ -1,8 +1,9 @@
 """watcher 路径解析：bot 私有技能现位于 group_{gid}/bots/bot_{id}/skills/。"""
 import unittest
+from unittest.mock import patch
 
 import skills.constants as _const
-from skills.watcher import _parse_path
+from skills.watcher import _parse_path, _SkillEventHandler
 
 
 def _root():
@@ -24,6 +25,18 @@ class TestWatcherParse(unittest.TestCase):
         # 旧扁平 bot_{id}/skills 不再被识别为 bot 技能
         abs_p = str(_root() / "bot_7" / "skills" / "foo.md")
         self.assertIsNone(_parse_path(abs_p))
+
+    def test_handle_logs_when_cache_invalidation_fails(self):
+        handler = _SkillEventHandler(loop=object())
+        path = str(_root() / "group_3" / "shared" / "skills" / "bar.md")
+
+        with patch("skills.discovery.invalidate_skills_cache", side_effect=RuntimeError("boom")), \
+             patch.object(handler, "_debounce") as debounce, \
+             self.assertLogs("skills.watcher", level="WARNING") as logs:
+            handler._handle(path)
+
+        debounce.assert_called_once()
+        self.assertTrue(any("failed to invalidate skills cache" in line for line in logs.output))
 
 
 if __name__ == "__main__":

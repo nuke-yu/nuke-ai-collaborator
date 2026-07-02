@@ -104,7 +104,7 @@ class _SkillEventHandler(FileSystemEventHandler):
             from .discovery import invalidate_skills_cache
             invalidate_skills_cache()
         except Exception:
-            pass
+            log.warning("skills.watcher: failed to invalidate skills cache for %s", path, exc_info=True)
         key = f"{info['source']}:{info.get('member_id') or info.get('group_id')}"
         self._debounce(key, info)
 
