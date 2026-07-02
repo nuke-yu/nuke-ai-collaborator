@@ -402,7 +402,10 @@ class LifecycleManager:
 
         # 1. Abort any running tasks
         from core import bg
-        bg.abort_group(gid)
+        try:
+            bg.abort_group(gid)
+        except Exception:
+            log.exception("lifecycle: failed to abort group %d during eviction", gid)
         
         # 2. Clear memory states
         try:
