@@ -176,21 +176,27 @@ class LifecycleManager:
         if self._evictor_task is None or self._evictor_task.done():
             self._evictor_task = asyncio.create_task(self._background_loop())
 
-        fut = None
-        async with self._lock:
-            if self._shutting_down:
-                raise RuntimeError("lifecycle manager is shutting down")
-            if group_id in self._active_groups:
-                self._active_groups.move_to_end(group_id)
-                self._active_groups[group_id] = time.time()
-                return path
-            fut = self._hydrating.get(group_id)
-            if fut is None:
-                fut = asyncio.get_running_loop().create_future()
-                self._hydrating[group_id] = fut
-                leader = True
-            else:
-                leader = False
+        while True:
+            fut = None
+            evicting = None
+            async with self._lock:
+                if self._shutting_down:
+                    raise RuntimeError("lifecycle manager is shutting down")
+                if group_id in self._active_groups:
+                    self._active_groups.move_to_end(group_id)
+                    self._active_groups[group_id] = time.time()
+                    return path
+                evicting = self._evicting.get(group_id)
+                if evicting is None:
+                    fut = self._hydrating.get(group_id)
+                    if fut is None:
+                        fut = asyncio.get_running_loop().create_future()
+                        self._hydrating[group_id] = fut
+                        leader = True
+                    else:
+                        leader = False
+                    break
+            await asyncio.shield(evicting)
 
         if not leader:
             return await asyncio.shield(fut)

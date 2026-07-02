@@ -385,5 +385,37 @@ class TestCell17Lifecycle(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(lm._evicting, {})
 
+    async def test_hydrate_waits_for_inflight_eviction_of_same_group(self):
+        lm = LifecycleManager()
+        lm._active_groups[1] = time.time()
+        evict_started = asyncio.Event()
+        evict_release = asyncio.Event()
+        init_started = asyncio.Event()
+
+        async def fake_evict(gid):
+            evict_started.set()
+            await evict_release.wait()
+
+        async def fake_init_group_db(path):
+            init_started.set()
+
+        with patch.object(lm, "_do_evict", new=fake_evict), \
+             patch("db.schema_split.init_group_db", new=fake_init_group_db), \
+             patch("db.migrations.run_migrations", new_callable=AsyncMock), \
+             patch("core.orchestration.rd_manager.rd_manager.check_board", new_callable=AsyncMock), \
+             patch("core.runner.resume_workflows", new_callable=AsyncMock), \
+             patch("sessions.recover_all", new_callable=AsyncMock):
+            evict_task = asyncio.create_task(lm.evict(1))
+            await evict_started.wait()
+            hydrate_task = asyncio.create_task(lm.hydrate(1))
+            await asyncio.sleep(0)
+            self.assertFalse(hydrate_task.done())
+            self.assertFalse(init_started.is_set())
+            evict_release.set()
+            await asyncio.gather(evict_task, hydrate_task)
+
+        self.assertIn(1, lm._active_groups)
+        await lm.shutdown()
+
 if __name__ == "__main__":
     unittest.main()
