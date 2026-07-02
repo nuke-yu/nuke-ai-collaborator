@@ -13,6 +13,7 @@ import asyncio
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -191,6 +192,34 @@ class TestRunSearchIntegration(unittest.IsolatedAsyncioTestCase):
             out = await _run_search("return False", root, None, context_lines=1)
             self.assertIn("  Line 3: ", out)                 # the match
             self.assertIn("if cond", out)                    # context line above
+
+    async def test_timeout_logs_if_timed_out_process_cannot_be_killed(self):
+        class _Proc:
+            def __init__(self):
+                self.returncode = None
+
+            async def communicate(self):
+                await asyncio.sleep(0)
+                raise asyncio.TimeoutError
+
+            def kill(self):
+                raise RuntimeError("kill failed")
+
+        async def fake_create_subprocess_exec(*_args, **_kwargs):
+            return _Proc()
+
+        async def fake_wait_for(coro, timeout=None):
+            coro.close()
+            raise asyncio.TimeoutError
+
+        with patch("executors.plugins.search_tool.asyncio.create_subprocess_exec",
+                   new=fake_create_subprocess_exec), \
+             patch("executors.plugins.search_tool.asyncio.wait_for", new=fake_wait_for), \
+             self.assertLogs("executors.plugins.search_tool", level="ERROR") as logs:
+            out = await _run_search("foo", Path("."), None)
+
+        self.assertIn("[搜索超时]", out)
+        self.assertTrue(any("failed to kill timed-out rg process" in line for line in logs.output))
 
 
 if __name__ == "__main__":

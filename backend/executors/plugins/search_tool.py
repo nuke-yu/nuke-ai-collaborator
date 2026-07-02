@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import shutil
 from pathlib import Path
 
@@ -29,6 +30,8 @@ from executors.base import ToolDef
 # group-workspace boundary. workspace_tools imports THIS module only lazily
 # (inside register_workspace_tools), so there is no import cycle.
 from executors.plugins.workspace_tools import _resolve_shell_cwd, _sandbox_env
+
+log = logging.getLogger(__name__)
 
 
 _MAX_LINE_LENGTH = 2000       # OpenCode MAX_LINE_LENGTH
@@ -217,7 +220,7 @@ async def _run_search(
             try:
                 proc.kill()
             except Exception:
-                pass
+                log.exception("search tool: failed to kill timed-out rg process")
             return f"[搜索超时] 超过 {_SEARCH_TIMEOUT_S} 秒，请缩小 path 或收紧正则"
     except FileNotFoundError:
         return "[系统错误] 未找到 ripgrep（rg）"
