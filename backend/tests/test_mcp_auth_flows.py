@@ -61,6 +61,18 @@ class TestMCPAuthFlows(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await ca)[0], "codeA")
         self.assertEqual((await cb)[0], "codeB")
 
+    async def test_begin_replaces_previous_pending_flow(self):
+        f = MCPAuthFlows()
+        first = f.begin("github")
+        second = f.begin("github")
+
+        with self.assertRaises(RuntimeError):
+            await first
+
+        self.assertFalse(second.done())
+        await f.redirect_handler_for("github")("https://auth.example.com/authorize?state=ST2")
+        self.assertEqual(await second, "https://auth.example.com/authorize?state=ST2")
+
 
 if __name__ == "__main__":
     unittest.main()

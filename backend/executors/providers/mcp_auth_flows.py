@@ -24,9 +24,25 @@ class MCPAuthFlows:
         self._state_by_server: dict[str, str] = {}         # server -> state
         self._cb_fut: dict[str, asyncio.Future] = {}       # state  -> Future[(code, state)]
 
+    def _abort_server(self, server: str, reason: str) -> None:
+        """Fail any in-flight flow for `server` before starting a replacement.
+
+        This keeps a stale redirect future or callback future from hanging
+        around if the caller retries the same server flow after a timeout or a
+        manual restart."""
+        state = self._state_by_server.pop(server, None)
+        url_fut = self._url_fut.pop(server, None)
+        if url_fut and not url_fut.done():
+            url_fut.set_exception(RuntimeError(reason))
+        if state:
+            cb = self._cb_fut.pop(state, None)
+            if cb and not cb.done():
+                cb.set_exception(RuntimeError(reason))
+
     def begin(self, server: str) -> asyncio.Future:
         """Register intent to authenticate `server`; returns a future that
         resolves to the authorization URL once the SDK produces it."""
+        self._abort_server(server, f"replaced by a new OAuth flow for server '{server}'")
         fut = asyncio.get_running_loop().create_future()
         self._url_fut[server] = fut
         return fut
@@ -67,11 +83,4 @@ class MCPAuthFlows:
 
     def fail(self, server: str, reason: str) -> None:
         """Abort a server's in-flight flow (e.g. timeout / user denial)."""
-        state = self._state_by_server.pop(server, None)
-        url_fut = self._url_fut.pop(server, None)
-        if url_fut and not url_fut.done():
-            url_fut.set_exception(RuntimeError(reason))
-        if state:
-            cb = self._cb_fut.pop(state, None)
-            if cb and not cb.done():
-                cb.set_exception(RuntimeError(reason))
+        self._abort_server(server, reason)
