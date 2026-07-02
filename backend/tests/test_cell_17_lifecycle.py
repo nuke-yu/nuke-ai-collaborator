@@ -549,6 +549,35 @@ class TestCell17Lifecycle(unittest.IsolatedAsyncioTestCase):
         perm_engine.cancel_pending_for_group.assert_called_once_with(1)
         perm_engine.clear_once_grants_for_group.assert_called_once_with(1)
 
+    async def test_evict_still_closes_writer_and_releases_lock_if_rd_cleanup_fails(self):
+        lm = LifecycleManager()
+        mock_lock = MagicMock()
+        lm._locks[1] = mock_lock
+        rd_manager = MagicMock()
+        rd_manager._last_tickets = MagicMock()
+        rd_manager._last_tickets.pop.side_effect = RuntimeError("rd cleanup failed")
+
+        with patch("core.orchestration.rd_manager.rd_manager", rd_manager), \
+             patch("db.aclose_writer", new_callable=AsyncMock) as mock_close_writer:
+            await lm._do_evict(1)
+
+        mock_close_writer.assert_awaited_once()
+        mock_lock.release.assert_called_once_with()
+        self.assertNotIn(1, lm._locks)
+
+    async def test_evict_still_closes_writer_and_releases_lock_if_workspace_cleanup_fails(self):
+        lm = LifecycleManager()
+        mock_lock = MagicMock()
+        lm._locks[1] = mock_lock
+
+        with patch("workspace.clear_group_locks", side_effect=RuntimeError("workspace cleanup failed")), \
+             patch("db.aclose_writer", new_callable=AsyncMock) as mock_close_writer:
+            await lm._do_evict(1)
+
+        mock_close_writer.assert_awaited_once()
+        mock_lock.release.assert_called_once_with()
+        self.assertNotIn(1, lm._locks)
+
     async def test_hydrate_waits_for_inflight_eviction_of_same_group(self):
         lm = LifecycleManager()
         lm._active_groups[1] = time.time()

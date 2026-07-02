@@ -413,7 +413,7 @@ class LifecycleManager:
             if hasattr(rd_manager, "_last_tickets"):
                 rd_manager._last_tickets.pop(gid, None)
         except Exception:
-            pass
+            log.exception("lifecycle: failed to clear rd-manager cache for group %d", gid)
 
         try:
             from permissions import engine as perm_engine
@@ -438,7 +438,7 @@ class LifecycleManager:
             from workspace import clear_group_locks
             clear_group_locks(gid)
         except Exception:
-            pass
+            log.exception("lifecycle: failed to clear workspace locks for group %d", gid)
 
         # 4. Close DB writer, but never strand the group file lock if that fails.
         glock = self._locks.pop(gid, None)
