@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from core import config
 from fastapi import WebSocket
 from typing import Dict, List
@@ -8,6 +9,8 @@ from typing import Dict, List
 # stalling event delivery for the whole app (the bus adapter fans out through
 # here serially). On timeout we treat the client as dead and disconnect it.
 _SEND_TIMEOUT = config.WS_SEND_TIMEOUT
+
+log = logging.getLogger(__name__)
 
 
 class WSManager:
@@ -53,7 +56,7 @@ class WSManager:
             try:
                 await ws.close()
             except Exception:
-                pass
+                log.exception("ws_manager: failed to close websocket for group %s", group_id)
         
         # Disconnect them all and broadcast offline presence
         gone_ids = []

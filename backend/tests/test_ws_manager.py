@@ -80,6 +80,21 @@ class TestWSManager(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(manager.connections[1]), 1)
         self.assertEqual(manager.connections[1][0][0], ws2)
 
+    async def test_close_group_logs_when_websocket_close_fails(self):
+        manager = WSManager()
+
+        ws = MagicMock()
+        ws.accept = AsyncMock()
+        ws.close = AsyncMock(side_effect=RuntimeError("close failed"))
+        ws.send_json = AsyncMock()
+
+        await manager.connect(ws, group_id=1, member_id=10)
+
+        with self.assertLogs("ws_manager", level="ERROR") as logs:
+            await manager.close_group(1)
+
+        self.assertTrue(any("failed to close websocket" in line for line in logs.output))
+
 class _FakeWS:
     """Minimal websocket double: send_json can hang forever (half-open client)."""
 
