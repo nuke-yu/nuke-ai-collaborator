@@ -141,6 +141,33 @@ class TestCell18Handoff(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sup._routing_cache[77][0], "w2")
         self.assertEqual(sup._pending_handoffs, {})
 
+    async def test_stale_direct_reassign_does_not_clobber_newer_route(self):
+        sup = Supervisor("dummy_addr")
+        first_commit_started = asyncio.Event()
+        release_first_commit = asyncio.Event()
+        commit_calls = 0
+
+        class MockDB:
+            async def __aenter__(self): return self
+            async def __aexit__(self, *args): pass
+            async def execute(self, *args): pass
+            async def commit(self):
+                nonlocal commit_calls
+                commit_calls += 1
+                if commit_calls == 1:
+                    first_commit_started.set()
+                    await release_first_commit.wait()
+
+        with patch("db.global_db", return_value=MockDB()):
+            first = asyncio.create_task(sup.reassign_group(77, "w2"))
+            await first_commit_started.wait()
+            await sup.reassign_group(77, "w3")
+            release_first_commit.set()
+            await first
+
+        self.assertEqual(sup._routing_cache[77][0], "w3")
+        self.assertEqual(sup._pending_handoffs, {})
+
     async def test_drop_worker_state_resolves_pending_handoff_for_stale_group(self):
         sup = Supervisor("dummy_addr")
         writer = AsyncMock()
