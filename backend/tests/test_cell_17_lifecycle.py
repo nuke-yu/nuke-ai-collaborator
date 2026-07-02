@@ -157,6 +157,23 @@ class TestCell17Lifecycle(unittest.IsolatedAsyncioTestCase):
             bg._group_tasks.pop(1, None)
         await lm.shutdown()
 
+    async def test_sweep_skips_group_touched_after_candidate_selection(self):
+        lm = LifecycleManager()
+        lm._active_groups[1] = time.time() - 10
+        original = lm._evict_if_still_inactive
+
+        async def touch_before_evict(gid, expected_last_active, now, timeout):
+            lm.touch(gid)
+            return await original(gid, expected_last_active, now, timeout)
+
+        with patch.dict(os.environ, {"GROUP_INACTIVITY_TIMEOUT": "0"}):
+            with patch.object(lm, "_evict_if_still_inactive", new=touch_before_evict):
+                with patch.object(lm, "_do_evict", new_callable=AsyncMock) as mock_evict:
+                    await lm.sweep_inactive_groups()
+
+        self.assertIn(1, lm._active_groups)
+        mock_evict.assert_not_awaited()
+
     async def test_prune_resources(self):
         lm = LifecycleManager()
         

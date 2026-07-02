@@ -114,7 +114,7 @@ class LifecycleManager:
         except Exception:
             tasks_by_group = {}
             
-        to_evict = []
+        candidates = []
         async with self._lock:
             for gid, last_active in list(self._active_groups.items()):
                 # Check if group has active tasks
@@ -122,13 +122,28 @@ class LifecycleManager:
                 has_active_tasks = any(not t.done() for t in group_tasks)
                 
                 if now - last_active > timeout and not has_active_tasks:
-                    to_evict.append(gid)
-                    
-            for gid in to_evict:
-                # Remove from active groups list first to prevent recursive checks
-                self._active_groups.pop(gid, None)
-        for gid in to_evict:
+                    candidates.append((gid, last_active))
+        for gid, last_active in candidates:
+            await self._evict_if_still_inactive(gid, last_active, now, timeout)
+
+    async def _evict_if_still_inactive(
+        self, gid: int, expected_last_active: float, now: float, timeout: float
+    ) -> bool:
+        should_evict = False
+        async with self._lock:
+            current_last_active = self._active_groups.get(gid)
+            if current_last_active is None:
+                return False
+            if current_last_active != expected_last_active:
+                return False
+            if now - current_last_active <= timeout:
+                return False
+            self._active_groups.pop(gid, None)
+            should_evict = True
+        if should_evict:
             await self._evict_once(gid)
+            return True
+        return False
 
     async def prune_resources(self) -> None:
         """Prune logs and temporary workspace files older than 14 days."""
