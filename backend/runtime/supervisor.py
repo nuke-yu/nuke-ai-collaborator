@@ -54,6 +54,11 @@ class Supervisor:
         # worker connecting later (or after a ToolListChanged) gets the current set.
         self._mcp_schemas: dict | None = None
 
+    async def _clear_reassign_version_later(self, group_id: int) -> None:
+        await asyncio.sleep(0)
+        if group_id not in self._routing_cache and group_id not in self._pending_handoffs:
+            self._reassign_versions.pop(group_id, None)
+
     def _drop_worker_routes(self, worker_id: str) -> None:
         stale_groups = [
             group_id
@@ -69,17 +74,27 @@ class Supervisor:
         if writer is not None and current is not writer:
             return
         self._workers.pop(worker_id, None)
-        self._drop_worker_routes(worker_id)
+        stale_groups = self._drop_worker_routes(worker_id)
         pending_groups = [
             group_id
             for group_id, (releasing_worker_id, _fut) in self._pending_handoffs.items()
             if releasing_worker_id == worker_id
         ]
+        resolved_pending_groups = set(pending_groups)
         for group_id in pending_groups:
             pending = self._pending_handoffs.pop(group_id, None)
             fut = pending[1] if pending else None
             if fut and not fut.done():
                 fut.set_result(False)
+        for group_id in stale_groups:
+            if (
+                group_id not in self._routing_cache
+                and group_id not in self._pending_handoffs
+                and group_id not in resolved_pending_groups
+            ):
+                self._reassign_versions.pop(group_id, None)
+        for group_id in resolved_pending_groups:
+            asyncio.create_task(self._clear_reassign_version_later(group_id))
         self._worker_stats.pop(worker_id, None)
         self._worker_stats_ts.pop(worker_id, None)
 
@@ -179,6 +194,7 @@ class Supervisor:
         self._worker_stats.clear()
         self._worker_stats_ts.clear()
         self._routing_cache.clear()
+        self._reassign_versions.clear()
         for _releasing_worker_id, fut in self._pending_handoffs.values():
             if not fut.done():
                 fut.cancel()

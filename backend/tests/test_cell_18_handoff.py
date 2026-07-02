@@ -173,16 +173,19 @@ class TestCell18Handoff(unittest.IsolatedAsyncioTestCase):
         writer = AsyncMock()
         sup._workers["w1"] = writer
         sup._routing_cache[77] = ("w1", 9999999999.0)
+        sup._reassign_versions[77] = 3
         fut = asyncio.get_running_loop().create_future()
         sup._pending_handoffs[77] = ("w1", fut)
 
         sup._drop_worker_state("w1", writer=writer)
+        await asyncio.sleep(0.01)
 
         self.assertTrue(fut.done())
         self.assertFalse(fut.result())
         self.assertNotIn("w1", sup._workers)
         self.assertNotIn(77, sup._routing_cache)
         self.assertNotIn(77, sup._pending_handoffs)
+        self.assertNotIn(77, sup._reassign_versions)
 
     async def test_drop_worker_state_resolves_pending_handoffs_without_route_cache(self):
         sup = Supervisor("dummy_addr")
@@ -202,6 +205,7 @@ class TestCell18Handoff(unittest.IsolatedAsyncioTestCase):
         old_writer = AsyncMock()
         new_writer = AsyncMock()
         sup._workers["w1"] = new_writer
+        sup._reassign_versions[77] = 4
         fut = asyncio.get_running_loop().create_future()
         sup._pending_handoffs[77] = ("w1", fut)
 
@@ -210,6 +214,14 @@ class TestCell18Handoff(unittest.IsolatedAsyncioTestCase):
         self.assertIs(sup._workers["w1"], new_writer)
         self.assertFalse(fut.done())
         self.assertEqual(sup._pending_handoffs[77][0], "w1")
+        self.assertEqual(sup._reassign_versions[77], 4)
+
+    async def test_stop_clears_reassign_versions(self):
+        sup = Supervisor("dummy_addr")
+        sup._reassign_versions[77] = 5
+        sup._routing_cache[77] = ("w1", 9999999999.0)
+        await sup.stop()
+        self.assertEqual(sup._reassign_versions, {})
 
     async def test_handoff_disconnect_result_does_not_log_success(self):
         sup = Supervisor("dummy_addr")
