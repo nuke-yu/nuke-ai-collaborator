@@ -96,7 +96,7 @@ async def _run_git_cmd(cwd: Path, *args: str, timeout_s: int = 30) -> str:
         try:
             proc.kill()
         except Exception:
-            pass
+            log.exception("git_worktree: failed to kill timed-out git process")
         raise RuntimeError(f"Git command timeout: git {' '.join(args)} in {cwd} exceeded {timeout_s}s")
     if proc.returncode != 0:
         err_msg = stderr.decode(errors="replace").strip()

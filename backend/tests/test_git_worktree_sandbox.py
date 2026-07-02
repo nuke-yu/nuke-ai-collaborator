@@ -179,6 +179,34 @@ class TestGitWorktreeSandbox(unittest.IsolatedAsyncioTestCase):
         # Clean up
         await remove_worktree(self.group_id, self.task_id)
 
+    async def test_run_git_cmd_logs_when_kill_fails(self):
+        class _Proc:
+            def __init__(self):
+                self.returncode = None
+
+            async def communicate(self):
+                raise asyncio.TimeoutError()
+
+            def kill(self):
+                raise RuntimeError("kill failed")
+
+        async def fake_create_subprocess_exec(*_args, **_kwargs):
+            return _Proc()
+
+        async def fake_wait_for(coro, timeout=None):
+            coro.close()
+            raise asyncio.TimeoutError()
+
+        shared_workspace = layout.group_shared_dir(self.group_id) / "workspace"
+
+        with patch("workspace.git_worktree.asyncio.create_subprocess_exec", new=fake_create_subprocess_exec), \
+             patch("workspace.git_worktree.asyncio.wait_for", new=fake_wait_for), \
+             self.assertLogs("workspace.git_worktree", level="ERROR") as logs:
+            with self.assertRaises(RuntimeError):
+                await _run_git_cmd(shared_workspace, "status", "--porcelain", timeout_s=1)
+
+        self.assertTrue(any("failed to kill timed-out git process" in line for line in logs.output))
+
     async def test_self_promotion_mid_run_deferred(self):
         """🔴 #3: Verify self-promotion inside bot run is deferred and does not delete directory mid-run."""
         # Setup Jira mock ticket
