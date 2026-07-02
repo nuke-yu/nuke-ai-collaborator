@@ -102,26 +102,23 @@ class LifecycleManager:
             except Exception:
                 log.exception("lifecycle: error in background loop")
 
+    def _group_has_active_tasks(self, gid: int) -> bool:
+        try:
+            from core import bg
+            group_tasks = bg._group_tasks.get(gid, set())
+        except Exception:
+            return False
+        return any(not t.done() for t in group_tasks)
+
     async def sweep_inactive_groups(self) -> None:
         """Find groups inactive for GROUP_INACTIVITY_TIMEOUT (default 30 mins) and evict them."""
         timeout = float(os.environ.get("GROUP_INACTIVITY_TIMEOUT", 1800))
         now = time.time()
-        
-        # Get active background tasks per group
-        try:
-            from core import bg
-            tasks_by_group = bg._group_tasks
-        except Exception:
-            tasks_by_group = {}
             
         candidates = []
         async with self._lock:
             for gid, last_active in list(self._active_groups.items()):
-                # Check if group has active tasks
-                group_tasks = tasks_by_group.get(gid, set())
-                has_active_tasks = any(not t.done() for t in group_tasks)
-                
-                if now - last_active > timeout and not has_active_tasks:
+                if now - last_active > timeout and not self._group_has_active_tasks(gid):
                     candidates.append((gid, last_active))
         for gid, last_active in candidates:
             await self._evict_if_still_inactive(gid, last_active, now, timeout)
@@ -137,6 +134,8 @@ class LifecycleManager:
             if current_last_active != expected_last_active:
                 return False
             if now - current_last_active <= timeout:
+                return False
+            if self._group_has_active_tasks(gid):
                 return False
             self._active_groups.pop(gid, None)
             should_evict = True

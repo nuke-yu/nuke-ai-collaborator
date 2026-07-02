@@ -174,6 +174,29 @@ class TestCell17Lifecycle(unittest.IsolatedAsyncioTestCase):
         self.assertIn(1, lm._active_groups)
         mock_evict.assert_not_awaited()
 
+    async def test_sweep_skips_group_that_gains_active_tasks_before_cleanup(self):
+        lm = LifecycleManager()
+        lm._active_groups[1] = time.time() - 10
+        original = lm._evict_if_still_inactive
+        mock_task = MagicMock()
+        mock_task.done.return_value = False
+
+        async def add_task_before_evict(gid, expected_last_active, now, timeout):
+            from core import bg
+            bg._group_tasks[gid] = {mock_task}
+            try:
+                return await original(gid, expected_last_active, now, timeout)
+            finally:
+                bg._group_tasks.pop(gid, None)
+
+        with patch.dict(os.environ, {"GROUP_INACTIVITY_TIMEOUT": "0"}):
+            with patch.object(lm, "_evict_if_still_inactive", new=add_task_before_evict):
+                with patch.object(lm, "_do_evict", new_callable=AsyncMock) as mock_evict:
+                    await lm.sweep_inactive_groups()
+
+        self.assertIn(1, lm._active_groups)
+        mock_evict.assert_not_awaited()
+
     async def test_prune_resources(self):
         lm = LifecycleManager()
         
