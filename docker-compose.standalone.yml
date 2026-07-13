@@ -4,6 +4,16 @@ version: '3.8'
 # No host directories, no sudo mkdir, no docker.sock mount, no separate sandbox image needed.
 # Just build/pull and run immediately.
 #
+# ⚠️  WARNING: This is a DEV / TRUSTED SINGLE-USER deployment only.
+#    - NUKE_SHELL_EXEC_BACKEND=local means bot shell commands run directly
+#      in the app container with NO per-group sandbox isolation.
+#    - All group workspaces and the central DB share one named volume;
+#      any bot can access any group's data via absolute paths.
+#    - Do NOT use this for multi-group production or any environment
+#      where different human users need group-level security isolation.
+#    - For production multi-group deployment, use docker-compose.yml
+#      with the container sandbox backend.
+#
 # Run:  docker compose -f docker-compose.standalone.yml up -d --build
 # URL:  http://localhost:8080
 
@@ -18,15 +28,21 @@ services:
       # Host 8080 -> container 8000
       - "8080:8000"
     environment:
-      NUKE_ENV: production
+      # No NUKE_ENV=production — standalone is dev/trusted single-user only.
+      # Production deployments must use docker-compose.yml with container sandbox.
       NUKE_DB_PATH: /var/lib/nuke-ai-collaborator/chat.db
       NUKE_WORKSPACE_ROOT: /var/lib/nuke-ai-collaborator/workspaces
       NUKE_WORKERS: 4
-      # Use local shell execution backend to run inside this container
+      # Local shell: no per-group sandbox. See warning above.
       NUKE_SHELL_EXEC_BACKEND: local
     volumes:
       # Automatically managed Docker named volume
       - nuke-data:/var/lib/nuke-ai-collaborator
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/liveness')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
     restart: unless-stopped
 
 volumes:
