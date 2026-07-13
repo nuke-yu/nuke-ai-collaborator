@@ -1,9 +1,19 @@
 import { useEffect, useRef, useCallback, useState } from 'react'
 import * as wsrpc from '../wsrpc'
 
+// Exponential backoff: 3s → 6s → 12s → 24s → cap 30s, with random jitter
+const _BACKOFF_BASE = 3000
+const _BACKOFF_MAX = 30000
+
+function _nextBackoff(attempt) {
+  const delay = Math.min(_BACKOFF_BASE * Math.pow(2, attempt), _BACKOFF_MAX)
+  return delay + Math.random() * 1000 // jitter up to 1s
+}
+
 export function useWebSocket(groupId, memberId, onMessage, onReconnect, token, onAuthError) {
   const ws = useRef(null)
   const retryTimer = useRef(null)
+  const attemptRef = useRef(0)
   const [connected, setConnected] = useState(false)
   const [reconnecting, setReconnecting] = useState(false)
 
@@ -14,7 +24,7 @@ export function useWebSocket(groupId, memberId, onMessage, onReconnect, token, o
     onMessageRef.current = onMessage
     onReconnectRef.current = onReconnect
     onAuthErrorRef.current = onAuthError
-  }, [onMessage, onReconnect])
+  }, [onMessage, onReconnect, onAuthError])
 
   const connect = useCallback(() => {
     if (!groupId || !memberId) return
@@ -30,6 +40,7 @@ export function useWebSocket(groupId, memberId, onMessage, onReconnect, token, o
       }
       setConnected(true)
       setReconnecting(false)
+      attemptRef.current = 0 // reset backoff on successful connection
     }
 
     socket.onmessage = (e) => {
@@ -52,7 +63,9 @@ export function useWebSocket(groupId, memberId, onMessage, onReconnect, token, o
     socket.onclose = () => {
       setConnected(false)
       setReconnecting(true)
-      retryTimer.current = setTimeout(connect, 3000)
+      const delay = _nextBackoff(attemptRef.current)
+      attemptRef.current += 1
+      retryTimer.current = setTimeout(connect, delay)
     }
 
     socket.onerror = () => {
