@@ -11,7 +11,15 @@ log = logging.getLogger(__name__)
 
 _DEFAULT_AUTH_SECRET = "super-secret-key-change-me"
 SECRET_KEY = os.environ.get("AUTH_SECRET", _DEFAULT_AUTH_SECRET)
+_is_production = os.environ.get("NUKE_ENV", "").lower() == "production"
+
 if SECRET_KEY == _DEFAULT_AUTH_SECRET:
+    if _is_production:
+        raise RuntimeError(
+            "FATAL: AUTH_SECRET is not set and NUKE_ENV=production. "
+            "Refusing to start with the built-in default key — all tokens "
+            "would be forgeable. Set AUTH_SECRET to a strong random value."
+        )
     log.critical(
         "AUTH_SECRET is not set — using built-in default key. "
         "All tokens are forgeable by anyone who reads the source code. "
