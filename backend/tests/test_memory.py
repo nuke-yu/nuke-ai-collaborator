@@ -217,6 +217,38 @@ class TestChromaMemoryEnhancements(unittest.IsolatedAsyncioTestCase):
         # 2 个冲突旧 ID 一次性批量删除（即便 > 事实条数）
         mock_col.delete.assert_any_call(ids=["7_0", "9_1"])
 
+    @patch("ai.client.call_ai_once", new_callable=AsyncMock)
+    @patch("ai.memory._get_collection")
+    async def test_fact_ids_differ_across_groups_with_same_message_id(self, mock_get_col, mock_call_once):
+        """Two groups with the same message_id must produce different fact IDs."""
+        mock_col = MagicMock()
+        mock_get_col.return_value = mock_col
+        mock_call_once.return_value = {"type": "text", "content": "fact"}
+        mock_col.query.return_value = {}
+
+        # Group A: message_id=10, bot_id=1, group_id=100
+        await memory.add_to_chroma(
+            message_id=10, content="这是一条足够长的测试内容用于验证", role="assistant",
+            bot_id=1, group_id=100, provider="p", model="m")
+        await asyncio.sleep(0.1)
+        ids_group_a = mock_col.upsert.call_args[1]["ids"]
+
+        mock_col.reset_mock()
+        mock_call_once.return_value = {"type": "text", "content": "fact"}
+        mock_col.query.return_value = {}
+
+        # Group B: same message_id=10, different bot_id=2, group_id=200
+        await memory.add_to_chroma(
+            message_id=10, content="这是一条足够长的测试内容用于验证", role="assistant",
+            bot_id=2, group_id=200, provider="p", model="m")
+        await asyncio.sleep(0.1)
+        ids_group_b = mock_col.upsert.call_args[1]["ids"]
+
+        # IDs must be different despite same message_id
+        self.assertNotEqual(ids_group_a, ids_group_b)
+        self.assertEqual(ids_group_a, ["fact_1_100_10_0"])
+        self.assertEqual(ids_group_b, ["fact_2_200_10_0"])
+
     @patch("ai.memory._get_collection")
     async def test_retrieve_relevant_group_id_filter_and_recency_rerank(self, mock_get_col):
         mock_col = MagicMock()
