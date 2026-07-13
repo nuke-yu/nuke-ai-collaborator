@@ -21,6 +21,7 @@ from runtime import supervisor as sup_mod
 from runtime import ipc
 from ai import client as ai_client
 from core import auth
+from core import config as core_config
 
 # Shared API Routers
 from api.messages import router as message_router, UPLOAD_DIR
@@ -70,6 +71,8 @@ def _clear_supervisor_ref(sup) -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """CELL-22: Supervisor lifespan. Manages central DB and Worker fleet."""
+    core_config.validate_runtime_security()
+
     # 1. Initialize feature flags
     feature_flags.initialize_feature_flags()
 
@@ -311,11 +314,27 @@ class WSClientProxy:
 _group_proxies: dict[int, WSClientProxy] = {}
 
 
-async def _authenticate_websocket(websocket: WebSocket, group_id: int, member_id: int, token: str = None) -> bool:
+_WS_AUTH_PROTOCOL_PREFIX = "nuke.jwt."
+
+
+def _websocket_protocol_auth(websocket: WebSocket) -> tuple[str | None, str | None]:
+    """Extract JWT from the negotiated protocol header without putting it in the URL."""
+    requested = websocket.headers.get("sec-websocket-protocol", "")
+    for value in (item.strip() for item in requested.split(",")):
+        if value.startswith(_WS_AUTH_PROTOCOL_PREFIX):
+            token = value[len(_WS_AUTH_PROTOCOL_PREFIX):]
+            return (token or None), value
+    return None, None
+
+
+async def _authenticate_websocket(
+    websocket: WebSocket, group_id: int, member_id: int, token: str = None,
+    *, subprotocol: str | None = None,
+) -> bool:
     # CELL-Auth: Verify token during handshake
     user_payload = auth.verify_token(token) if token else None
     if not user_payload:
-        await websocket.accept()
+        await websocket.accept(subprotocol=subprotocol)
         await websocket.send_json({"type": "auth_error", "message": "Authentication required"})
         await websocket.close()
         return False
@@ -328,15 +347,18 @@ async def _authenticate_websocket(websocket: WebSocket, group_id: int, member_id
     async with db.global_db() as cdb:
         async with cdb.execute("SELECT 1 FROM members WHERE id = ? AND group_id = ?", (member_id, group_id)) as cur:
             if not await cur.fetchone():
-                await websocket.accept()
+                await websocket.accept(subprotocol=subprotocol)
                 await websocket.send_json({"type": "auth_error", "message": "Unknown member for this group"})
                 await websocket.close()
                 return False
     return True
 
 
-async def _initialize_websocket_session(websocket: WebSocket, group_id: int, member_id: int):
-    await manager.connect(websocket, group_id, member_id)
+async def _initialize_websocket_session(
+    websocket: WebSocket, group_id: int, member_id: int,
+    *, subprotocol: str | None = None,
+):
+    await manager.connect(websocket, group_id, member_id, subprotocol=subprotocol)
     
     # 1. Reuse the group's single fan-out proxy (register it only for the first
     #    connection). One proxy per *connection* would fan every worker event out
@@ -454,10 +476,17 @@ async def _handle_websocket_disconnect(websocket: WebSocket, group_id: int):
 
 @app.websocket("/ws/{group_id}/{member_id}")
 async def websocket_endpoint(websocket: WebSocket, group_id: int, member_id: int, token: str = None):
-    if not await _authenticate_websocket(websocket, group_id, member_id, token):
+    protocol_token, subprotocol = _websocket_protocol_auth(websocket)
+    # Query token is a temporary compatibility fallback for older clients.
+    auth_token = protocol_token or token
+    if not await _authenticate_websocket(
+        websocket, group_id, member_id, auth_token, subprotocol=subprotocol,
+    ):
         return
 
-    await _initialize_websocket_session(websocket, group_id, member_id)
+    await _initialize_websocket_session(
+        websocket, group_id, member_id, subprotocol=subprotocol,
+    )
     
     try:
         while True:

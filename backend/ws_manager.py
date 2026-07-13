@@ -32,8 +32,14 @@ class WSManager:
             return []
         return list({mid for _, mid in self.connections[group_id]})
 
-    async def connect(self, websocket: WebSocket, group_id: int, member_id: int):
-        await websocket.accept()
+    async def connect(
+        self, websocket: WebSocket, group_id: int, member_id: int,
+        *, subprotocol: str | None = None,
+    ):
+        if subprotocol:
+            await websocket.accept(subprotocol=subprotocol)
+        else:
+            await websocket.accept()
         async with self._lock:
             if group_id not in self.connections:
                 self.connections[group_id] = []

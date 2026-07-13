@@ -40,39 +40,151 @@ class _ThreadSpy:
 
 class TestLocalFileOffload(unittest.IsolatedAsyncioTestCase):
 
+    async def asyncSetUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name).resolve()
+        self._patchers = [
+            patch("skills.constants.WORKSPACE_ROOT", self.root),
+            patch.object(ws, "WORKSPACE_ROOT", self.root),
+        ]
+        for patcher in self._patchers:
+            patcher.start()
+
+    async def asyncTearDown(self):
+        for patcher in self._patchers:
+            patcher.stop()
+        self._tmp.cleanup()
+
     async def test_read_local_file_runs_off_loop_thread(self):
         main_tid = threading.get_ident()
-        with tempfile.TemporaryDirectory() as d:
-            f = Path(d) / "x.txt"
-            f.write_text("hello", encoding="utf-8")
-            spy = _ThreadSpy("read_text")
-            ctx = {"group_id": 1, "bot_id": 5}
-            with patch.object(Path, "read_text", spy), \
-                 patch("executors.plugins.workspace_tools._ws") as mock_ws:
-                mock_ws.group_dir.return_value = Path(d).resolve()
-                result = await wt._handle_read_local_file(str(f), context=ctx)
+        f = ws.bot_workspace(5, 1) / "x.txt"
+        f.write_text("hello", encoding="utf-8")
+        called_tid = None
+        original = wt._read_local_file_sync
+
+        def spy(spec):
+            nonlocal called_tid
+            called_tid = threading.get_ident()
+            return original(spec)
+
+        with patch.object(wt, "_read_local_file_sync", side_effect=spy):
+            result = await wt._handle_read_local_file(
+                str(f), context={"group_id": 1, "bot_id": 5},
+            )
         self.assertEqual(result, "hello")
-        self.assertIsNotNone(spy.tid)
-        self.assertNotEqual(spy.tid, main_tid)
+        self.assertIsNotNone(called_tid)
+        self.assertNotEqual(called_tid, main_tid)
 
     async def test_write_local_file_runs_off_loop_thread(self):
         main_tid = threading.get_ident()
-        with tempfile.TemporaryDirectory() as d:
-            # Create a bot private subdir so write scope validation passes
-            bot_dir = Path(d) / "bot_5"
-            bot_dir.mkdir()
-            f = bot_dir / "sub" / "y.txt"
-            spy = _ThreadSpy("write_text")
-            ctx = {"group_id": 1, "bot_id": 5}
-            with patch.object(Path, "write_text", spy), \
-                 patch("executors.plugins.workspace_tools._ws") as mock_ws:
-                mock_ws.group_dir.return_value = Path(d).resolve()
-                mock_ws.bot_workspace.return_value = bot_dir.resolve()
-                mock_ws.group_workspace.return_value = (Path(d) / "shared").resolve()
-                result = await wt._handle_write_local_file(str(f), "data", context=ctx)
-            self.assertIn("已写入", result)
-            self.assertEqual(f.read_text(encoding="utf-8"), "data")
-        self.assertNotEqual(spy.tid, main_tid)
+        f = ws.bot_workspace(5, 1) / "sub" / "y.txt"
+        called_tid = None
+        original = wt._write_local_file_sync
+
+        def spy(spec, content):
+            nonlocal called_tid
+            called_tid = threading.get_ident()
+            return original(spec, content)
+
+        with patch.object(wt, "_write_local_file_sync", side_effect=spy):
+            result = await wt._handle_write_local_file(
+                str(f), "data", context={"group_id": 1, "bot_id": 5},
+            )
+        self.assertIn("已写入", result)
+        self.assertEqual(f.read_text(encoding="utf-8"), "data")
+        self.assertIsNotNone(called_tid)
+        self.assertNotEqual(called_tid, main_tid)
+
+    async def test_read_rejects_other_bot_and_group_run_files(self):
+        other = ws.bot_workspace(6, 1) / "MEMORY.md"
+        other.write_text("private", encoding="utf-8")
+        run_file = self.root / "group_1" / "runs" / "trace.md"
+        run_file.parent.mkdir(parents=True)
+        run_file.write_text("trace", encoding="utf-8")
+        ctx = {"group_id": 1, "bot_id": 5}
+
+        self.assertIn("安全拒绝", await wt._handle_read_local_file(str(other), context=ctx))
+        self.assertIn("安全拒绝", await wt._handle_read_local_file(str(run_file), context=ctx))
+
+    async def test_read_allows_only_explicitly_authorized_skill_root(self):
+        skill_root = self.root / "system" / "skills" / "review"
+        skill_root.mkdir(parents=True)
+        companion = skill_root / "checklist.txt"
+        companion.write_text("checks", encoding="utf-8")
+        ctx = {"group_id": 1, "bot_id": 5}
+
+        self.assertIn("安全拒绝", await wt._handle_read_local_file(str(companion), context=ctx))
+        ctx["authorized_read_roots"] = [str(skill_root)]
+        self.assertEqual(await wt._handle_read_local_file(str(companion), context=ctx), "checks")
+
+    async def test_symlinked_parent_cannot_escape_on_read_or_write(self):
+        outside = self.root / "outside"
+        outside.mkdir()
+        (outside / "secret.txt").write_text("secret", encoding="utf-8")
+        shared = ws.group_workspace(1)
+        (shared / "link").symlink_to(outside, target_is_directory=True)
+        ctx = {"group_id": 1, "bot_id": 5}
+
+        read_result = await wt._handle_read_local_file(str(shared / "link" / "secret.txt"), context=ctx)
+        write_result = await wt._handle_write_local_file(str(shared / "link" / "new.txt"), "bad", context=ctx)
+
+        self.assertIn("安全拒绝", read_result)
+        self.assertIn("安全拒绝", write_result)
+        self.assertFalse((outside / "new.txt").exists())
+
+    async def test_symlinked_allowed_root_cannot_escape(self):
+        outside = self.root / "outside-root"
+        outside.mkdir()
+        shared = ws.group_workspace(1)
+        shared.rmdir()
+        shared.symlink_to(outside, target_is_directory=True)
+
+        result = await wt._handle_write_local_file(
+            str(shared / "new.txt"), "bad",
+            context={"group_id": 1, "bot_id": 5},
+        )
+
+        self.assertIn("安全拒绝", result)
+        self.assertFalse((outside / "new.txt").exists())
+
+    async def test_hard_link_is_rejected_for_read_and_write(self):
+        shared = ws.group_workspace(1)
+        source = shared / "source.txt"
+        linked = shared / "linked.txt"
+        source.write_text("sensitive", encoding="utf-8")
+        os.link(source, linked)
+        ctx = {"group_id": 1, "bot_id": 5}
+
+        read_result = await wt._handle_read_local_file(str(linked), context=ctx)
+        write_result = await wt._handle_write_local_file(str(linked), "changed", context=ctx)
+
+        self.assertIn("安全拒绝", read_result)
+        self.assertIn("安全拒绝", write_result)
+        self.assertEqual(source.read_text(encoding="utf-8"), "sensitive")
+
+    async def test_parent_swap_after_open_cannot_redirect_write(self):
+        outside = self.root / "outside"
+        outside.mkdir()
+        shared = ws.group_workspace(1)
+        target_dir = shared / "target"
+        target_dir.mkdir()
+        original_open_parent = wt._secure_open_parent
+
+        def swap_after_open(root, parts, *, create):
+            result = original_open_parent(root, parts, create=create)
+            target_dir.rename(shared / "held")
+            target_dir.symlink_to(outside, target_is_directory=True)
+            return result
+
+        with patch.object(wt, "_secure_open_parent", side_effect=swap_after_open):
+            result = await wt._handle_write_local_file(
+                str(target_dir / "result.txt"), "safe",
+                context={"group_id": 1, "bot_id": 5},
+            )
+
+        self.assertIn("已写入", result)
+        self.assertEqual((shared / "held" / "result.txt").read_text(), "safe")
+        self.assertFalse((outside / "result.txt").exists())
 
 
 class TestWorkspaceFileOffload(unittest.IsolatedAsyncioTestCase):

@@ -274,6 +274,80 @@ class TestCell15Routing(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("w1", sup._worker_stats_ts)
         self.assertNotIn(7, sup._routing_cache)
 
+    async def test_send_timeout_closes_writer_and_drops_state(self):
+        sup = Supervisor("dummy_addr")
+
+        class Writer:
+            closed = False
+            waited = False
+
+            def close(self):
+                self.closed = True
+
+            async def wait_closed(self):
+                self.waited = True
+
+        writer = Writer()
+        sup._workers["w1"] = writer
+
+        async def blocked_send(_writer, _msg):
+            await asyncio.Event().wait()
+
+        with patch("runtime.ipc.send_msg", new=blocked_send), \
+             patch("runtime.supervisor.config.SUPERVISOR_SEND_TIMEOUT", 0.01):
+            sent = await sup.send_to_worker_id("w1", {"type": "test"})
+
+        self.assertFalse(sent)
+        self.assertTrue(writer.closed)
+        self.assertTrue(writer.waited)
+        self.assertNotIn("w1", sup._workers)
+
+    async def test_cancelled_send_closes_writer_before_propagating(self):
+        sup = Supervisor("dummy_addr")
+        started = asyncio.Event()
+
+        class Writer:
+            closed = False
+            waited = False
+
+            def close(self):
+                self.closed = True
+
+            async def wait_closed(self):
+                self.waited = True
+
+        writer = Writer()
+        sup._workers["w1"] = writer
+
+        async def blocked_send(_writer, _msg):
+            started.set()
+            await asyncio.Event().wait()
+
+        with patch("runtime.ipc.send_msg", new=blocked_send):
+            task = asyncio.create_task(sup.send_to_worker_id("w1", {"type": "test"}))
+            await started.wait()
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+
+        self.assertTrue(writer.closed)
+        self.assertTrue(writer.waited)
+        self.assertNotIn("w1", sup._workers)
+
+    async def test_wait_closed_sync_failure_does_not_mask_send_failure(self):
+        sup = Supervisor("dummy_addr")
+        writer = unittest.mock.MagicMock()
+        writer.wait_closed.side_effect = RuntimeError("transport already gone")
+        sup._workers["w1"] = writer
+
+        with patch("runtime.ipc.send_msg", new_callable=AsyncMock,
+                   side_effect=BrokenPipeError("boom")):
+            sent = await sup.send_to_worker_id("w1", {"type": "test"})
+
+        self.assertFalse(sent)
+        self.assertNotIn("w1", sup._workers)
+        writer.close.assert_called_once()
+
     async def test_worker_reconnect_logs_stale_connection_close_failure(self):
         sup = Supervisor("dummy_addr")
         old_writer = unittest.mock.MagicMock()

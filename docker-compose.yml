@@ -85,7 +85,7 @@ services:
       # AUTH_SECRET: strong random key (≥32 chars) for JWT signing.
       #   Generate: python3 -c "import secrets; print(secrets.token_urlsafe(48))"
       #   App refuses to start without it in production mode.
-      AUTH_SECRET: ${AUTH_SECRET:?Set AUTH_SECRET (≥32 chars): python3 -c "import secrets; print(secrets.token_urlsafe(48))"}
+      AUTH_SECRET: "${AUTH_SECRET:?Set AUTH_SECRET (minimum 32 chars; generate with python3 secrets.token_urlsafe)}"
       # NUKE_OPERATOR_USERS: comma-separated usernames that get operator privileges.
       #   Required for managing API keys (/api/config) and MCP servers.
       #   Without this, all control-plane endpoints return 403.

@@ -11,6 +11,7 @@ import logging
 import os
 import re
 import shlex
+import stat as stat_module
 import sys
 from pathlib import Path
 
@@ -18,6 +19,7 @@ from executors.base import ExecutionContext, ExecutionResult, ToolDef
 from core import config
 from executors import tool_executor, registry as _executor_registry
 import workspace as _ws
+from workspace import layout as _layout
 import editing
 from skills import run_skill
 import executors.compact as compact
@@ -166,13 +168,13 @@ _WORKSPACE_TOOLS = [
     ),
     ToolDef(
         name="read_local_file",
-        description="读取本地任意路径的文件（工作区外）",
+        description="按绝对路径读取当前 Bot 私有区、群组共享区或已调用技能的附件文件",
         parameters=ReadLocalFileParams,
         concurrency_safe=True,
     ),
     ToolDef(
         name="write_local_file",
-        description="写入本地任意路径的文件（自动创建父目录）",
+        description="按绝对路径写入当前 Bot 私有区或群组共享区（自动创建父目录）",
         parameters=WriteLocalFileParams,
     ),
     ToolDef(
@@ -1255,130 +1257,170 @@ async def _handle_run_shell(
         return f"[系统错误] {e}"
 
 
-def _check_symlink_chain(path: Path, root: Path) -> str | None:
-    """Walk from path upward to root; reject if any component is a symlink."""
-    check = path if path.is_symlink() else path.parent
-    while True:
+def _local_file_roots(context: dict, *, allow_write: bool) -> list[Path]:
+    """Return identity-scoped roots; invoked skill roots are read-only."""
+    group_id = context["group_id"]
+    bot_id = context["bot_id"]
+    roots = [
+        _layout.bot_dir(group_id, bot_id),
+        _layout.group_shared_dir(group_id),
+    ]
+    if not allow_write:
+        roots.extend(Path(p) for p in context.get("authorized_read_roots", ()))
+    return roots
+
+
+def _lexical_relative_to_root(path: str, roots: list[Path]) -> tuple[Path, tuple[str, ...]] | None:
+    """Select an allowed root without resolving any user-controlled component."""
+    requested = Path(os.path.abspath(os.path.expanduser(path)))
+    matches: list[tuple[Path, tuple[str, ...]]] = []
+    for root in roots:
+        declared_root = Path(os.path.abspath(str(root.expanduser())))
         try:
-            check.relative_to(root)
+            relative = requested.relative_to(declared_root)
         except ValueError:
-            break
-        if check.is_symlink():
-            return f"[安全拒绝] 路径包含符号链接组件：{path}"
-        if check == root:
-            break
-        check = check.parent
-    return None
+            continue
+        parts = tuple(part for part in relative.parts if part not in ("", "."))
+        if any(part == ".." for part in parts):
+            continue
+        matches.append((root, parts))
+    return max(matches, key=lambda item: len(item[0].parts), default=None)
 
 
-def _validate_path_in_group_workspace(path: str, context: dict | None, *, allow_write: bool = False) -> tuple[Path | None, str | None]:
-    """Validate that a resolved path is within the current group's allowed workspace.
-
-    Read scope:  entire group_dir (shared + all bots + runs)
-    Write scope: current bot's private dir (bot_dir) + group shared dir only
-
-    Returns (resolved_path, None) on success or (None, error_message) on failure.
-    Uses Path.resolve() for normalization and relative_to() for boundary check —
-    never string prefix matching.
-    """
+def _validate_path_in_group_workspace(
+    path: str, context: dict | None, *, allow_write: bool = False,
+) -> tuple[tuple[Path, tuple[str, ...]] | None, str | None]:
+    """Validate lexical scope; secure open performs the authoritative check."""
     ctx = context or {}
     group_id = ctx.get("group_id")
     bot_id = ctx.get("bot_id")
     if group_id is None:
         return None, "[安全拒绝] 无法确定群组上下文，拒绝文件访问"
+    if bot_id is None:
+        return None, "[安全拒绝] 无法确定 bot_id，拒绝文件访问"
+    selected = _lexical_relative_to_root(path, _local_file_roots(ctx, allow_write=allow_write))
+    if selected is None:
+        action = "写入" if allow_write else "读取"
+        return None, f"[安全拒绝] {action}路径不在当前 bot 的授权目录内：{path}"
+    if not selected[1]:
+        return None, f"[安全拒绝] 文件路径不能是目录根：{path}"
+    return selected, None
 
+
+def _secure_open_root(root: Path) -> int:
+    """Open an allowed root beneath WORKSPACE_ROOT without following its components."""
+    if (not hasattr(os, "O_NOFOLLOW") or not hasattr(os, "O_DIRECTORY")
+            or os.open not in os.supports_dir_fd or os.mkdir not in os.supports_dir_fd):
+        raise OSError("当前平台不支持安全的 dir_fd/O_NOFOLLOW 文件访问")
+    declared_base = Path(os.path.abspath(str(_layout._root().expanduser())))
+    declared_root = Path(os.path.abspath(str(root.expanduser())))
     try:
-        resolved = Path(path).expanduser().resolve()
-    except (OSError, RuntimeError):
-        return None, f"[安全拒绝] 无法解析路径：{path}"
+        relative_root = declared_root.relative_to(declared_base)
+    except ValueError as exc:
+        raise OSError("授权目录不在工作区根目录内") from exc
 
-    group_root = _ws.group_dir(group_id).resolve()
-
-    # Boundary check: must be within group root
+    # WORKSPACE_ROOT is operator configuration, so resolving that anchor is safe;
+    # every group/bot/skill component below it is opened with O_NOFOLLOW.
+    canonical = declared_base.resolve(strict=True)
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    fd = os.open(canonical.anchor, flags)
     try:
-        resolved.relative_to(group_root)
-    except ValueError:
-        return None, f"[安全拒绝] 路径不在当前群组工作区内：{path}"
+        for part in canonical.parts[1:]:
+            next_fd = os.open(part, flags, dir_fd=fd)
+            os.close(fd)
+            fd = next_fd
+        for part in relative_root.parts:
+            next_fd = os.open(part, flags, dir_fd=fd)
+            os.close(fd)
+            fd = next_fd
+        return fd
+    except Exception:
+        os.close(fd)
+        raise
 
-    # Symlink component check (both read and write)
-    err = _check_symlink_chain(resolved, group_root)
-    if err:
-        return err
 
-    # Write scope: restrict to bot private + shared (not other bots, not runs)
-    if allow_write:
-        if bot_id is None:
-            return None, "[安全拒绝] 无法确定 bot_id，拒绝文件写入"
-        bot_root = _ws.bot_workspace(bot_id, group_id).resolve()
-        shared_root = _ws.group_workspace(group_id).resolve()
+def _secure_open_parent(root: Path, parts: tuple[str, ...], *, create: bool) -> tuple[int, str]:
+    """Return a held fd for the target parent, traversing each directory safely."""
+    fd = _secure_open_root(root)
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    try:
+        for part in parts[:-1]:
+            if create:
+                try:
+                    os.mkdir(part, 0o755, dir_fd=fd)
+                except FileExistsError:
+                    pass
+            next_fd = os.open(part, flags, dir_fd=fd)
+            os.close(fd)
+            fd = next_fd
+        return fd, parts[-1]
+    except Exception:
+        os.close(fd)
+        raise
+
+
+def _read_local_file_sync(spec: tuple[Path, tuple[str, ...]]) -> str:
+    root, parts = spec
+    parent_fd, name = _secure_open_parent(root, parts, create=False)
+    try:
+        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=parent_fd)
+    finally:
+        os.close(parent_fd)
+    with open(fd, "r", encoding="utf-8", closefd=True) as stream:
+        file_stat = os.fstat(stream.fileno())
+        if not stat_module.S_ISREG(file_stat.st_mode) or file_stat.st_nlink != 1:
+            raise OSError("拒绝读取非普通文件或硬链接文件")
+        return stream.read()
+
+
+def _write_local_file_sync(spec: tuple[Path, tuple[str, ...]], content: str) -> None:
+    root, parts = spec
+    parent_fd, name = _secure_open_parent(root, parts, create=True)
+    fd = None
+    try:
         try:
-            resolved.relative_to(bot_root)
-        except ValueError:
-            try:
-                resolved.relative_to(shared_root)
-            except ValueError:
-                return None, f"[安全拒绝] 写入路径不在当前 bot 私有目录或共享目录内：{path}"
-        # Reject if target already exists and is a symlink
-        if resolved.is_symlink():
-            return None, f"[安全拒绝] 拒绝写入符号链接目标：{path}"
-
-    return resolved, None
+            fd = os.open(name, os.O_WRONLY | os.O_NOFOLLOW, dir_fd=parent_fd)
+        except FileNotFoundError:
+            fd = os.open(
+                name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                0o644, dir_fd=parent_fd,
+            )
+        file_stat = os.fstat(fd)
+        if not stat_module.S_ISREG(file_stat.st_mode) or file_stat.st_nlink != 1:
+            raise OSError("拒绝写入非普通文件或硬链接文件")
+        os.ftruncate(fd, 0)
+        with open(fd, "w", encoding="utf-8", closefd=True) as stream:
+            fd = None
+            stream.write(content)
+    finally:
+        if fd is not None:
+            os.close(fd)
+        os.close(parent_fd)
 
 
 async def _handle_read_local_file(path: str, context: dict = None) -> str:
-    resolved, err = _validate_path_in_group_workspace(path, context)
+    spec, err = _validate_path_in_group_workspace(path, context)
     if err:
         return err
     try:
-        return await asyncio.to_thread(resolved.read_text, encoding="utf-8")
+        return await asyncio.to_thread(_read_local_file_sync, spec)
     except FileNotFoundError:
         return f"[文件不存在] {path}"
+    except (NotADirectoryError, OSError) as e:
+        return f"[安全拒绝] 无法安全读取路径：{e}"
     except Exception as e:
         return f"[读取错误] {e}"
 
 
 async def _handle_write_local_file(path: str, content: str, context: dict = None) -> str:
-    resolved, err = _validate_path_in_group_workspace(path, context, allow_write=True)
+    spec, err = _validate_path_in_group_workspace(path, context, allow_write=True)
     if err:
         return err
     try:
-        def _do_write() -> str:
-            resolved.parent.mkdir(parents=True, exist_ok=True)
-            # Post-mkdir TOCTOU check: re-resolve and verify still within allowed root
-            group_id = (context or {}).get("group_id")
-            bot_id = (context or {}).get("bot_id")
-            re_resolved = resolved.resolve()
-            group_root = _ws.group_dir(group_id).resolve()
-            try:
-                re_resolved.relative_to(group_root)
-            except ValueError:
-                return f"[安全拒绝] 路径在创建后被重定向到群组工作区外：{path}"
-            bot_root = _ws.bot_workspace(bot_id, group_id).resolve()
-            shared_root = _ws.group_workspace(group_id).resolve()
-            try:
-                re_resolved.relative_to(bot_root)
-            except ValueError:
-                try:
-                    re_resolved.relative_to(shared_root)
-                except ValueError:
-                    return f"[安全拒绝] 路径在创建后被重定向到允许写入区外：{path}"
-            # O_NOFOLLOW on final open to prevent symlink TOCTOU
-            import os as _os
-            fd = _os.open(str(re_resolved), _os.O_WRONLY | _os.O_CREAT | _os.O_TRUNC | _os.O_NOFOLLOW, 0o644)
-            try:
-                with open(fd, "w", encoding="utf-8") as f:
-                    f.write(content)
-            except Exception:
-                _os.close(fd)
-                raise
-            return f"已写入 {path}（{len(content)} 字符）"
-
-        result = await asyncio.to_thread(_do_write)
-        if result.startswith("[安全拒绝]"):
-            return result
-        return result
-    except FileExistsError:
-        return f"[安全拒绝] 拒绝写入符号链接目标：{path}"
+        await asyncio.to_thread(_write_local_file_sync, spec, content)
+        return f"已写入 {path}（{len(content)} 字符）"
+    except (FileExistsError, NotADirectoryError, OSError) as e:
+        return f"[安全拒绝] 无法安全写入路径：{e}"
     except Exception as e:
         return f"[写入错误] {e}"
 

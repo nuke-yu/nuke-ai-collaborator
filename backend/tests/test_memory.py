@@ -250,6 +250,39 @@ class TestChromaMemoryEnhancements(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ids_group_b, ["fact_2_200_10_0"])
 
     @patch("ai.memory._get_collection")
+    async def test_migrate_legacy_fact_ids_preserves_group_scope_and_newer_rows(self, mock_get_col):
+        collection = MagicMock()
+        mock_get_col.return_value = collection
+        collection.get.return_value = {
+            "ids": ["12_0", "13_0", "fact_5_9_13_0", "14_0"],
+            "documents": ["group nine", "legacy duplicate", "newer", "unknown"],
+            "metadatas": [
+                {"bot_id": 5, "group_id": 9, "mem_type": "fact"},
+                {"bot_id": 5, "group_id": 9, "mem_type": "fact"},
+                {"bot_id": 5, "group_id": 9, "mem_type": "fact"},
+                {"bot_id": 5, "mem_type": "fact"},
+            ],
+        }
+
+        stats = await memory.migrate_legacy_chroma_fact_ids()
+
+        self.assertEqual(stats, {
+            "scanned": 4,
+            "legacy": 3,
+            "migrated": 1,
+            "deduplicated": 1,
+            "missing_scope": 1,
+        })
+        self.assertEqual(collection.upsert.call_args.kwargs["ids"], ["fact_5_9_12_0"])
+        self.assertEqual(collection.upsert.call_args.kwargs["documents"], ["group nine"])
+        collection.delete.assert_called_once_with(ids=["12_0", "13_0"])
+
+    def test_scoped_fact_identity_rejects_legacy_and_keeps_group_dimension(self):
+        self.assertEqual(memory.scoped_fact_identity("fact_5_9_12_0"), (9, 5, 12))
+        self.assertEqual(memory.scoped_fact_identity("fact_5_10_12_0"), (10, 5, 12))
+        self.assertIsNone(memory.scoped_fact_identity("12_0"))
+
+    @patch("ai.memory._get_collection")
     async def test_retrieve_relevant_group_id_filter_and_recency_rerank(self, mock_get_col):
         mock_col = MagicMock()
         mock_get_col.return_value = mock_col
@@ -1205,4 +1238,3 @@ class TestMemoryTopicScoping(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

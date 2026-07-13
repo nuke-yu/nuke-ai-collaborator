@@ -468,7 +468,7 @@ class QueryRewriter:
 
 async def add_to_chroma(message_id: int, content: str, role: str, bot_id: int, group_id: int | None = None,
                         provider: str = "deepseek", model: str = "deepseek-chat",
-                        thread_id: str | None = None):
+                        thread_id: str | None = None, timestamp: float | None = None):
     # 1. 噪声快筛与事实提取
     facts = await FactExtractor.extract(content, provider, model)
     if not facts:
@@ -484,7 +484,7 @@ async def add_to_chroma(message_id: int, content: str, role: str, bot_id: int, g
         metadata = {
             "bot_id": bot_id,
             "role": role or "",
-            "timestamp": time.time(),
+            "timestamp": time.time() if timestamp is None else timestamp,
             "importance": score,       # 存入重要性分数，供检索三因子加权 (Problem 2)
             "mem_type": "fact",        # 区分情景/原子事实 vs 反思洞察 (P1 巩固层)
             "scored_by_model": f"{provider}/{model}",  # 打分模型来源，供将来换模型时按刻度归一化重标
@@ -980,6 +980,99 @@ async def get_memory_context(bot_id: int, role: str, query: str, group_id: int |
 
 
 # ── 8. Migration Utilities ── 历史遗留数据升级迁移脚本 (向后兼容)
+
+_LEGACY_FACT_ID_RE = re.compile(r"^(?P<message_id>\d+)_(?P<index>\d+)$")
+_SCOPED_FACT_ID_RE = re.compile(
+    r"^fact_(?P<bot_id>\d+)_(?P<group_id>\d+)_(?P<message_id>\d+)_(?P<index>\d+)$"
+)
+
+
+def scoped_fact_identity(item_id: str) -> tuple[int, int, int] | None:
+    """Return (group_id, bot_id, message_id) for a namespaced fact ID."""
+    match = _SCOPED_FACT_ID_RE.fullmatch(item_id)
+    if not match:
+        return None
+    return (
+        int(match.group("group_id")),
+        int(match.group("bot_id")),
+        int(match.group("message_id")),
+    )
+
+
+async def migrate_legacy_chroma_fact_ids(dry_run: bool = False) -> dict:
+    """Rename surviving ``<message_id>_<index>`` facts into group-scoped IDs.
+
+    This is idempotent. It can preserve the surviving side of a historic ID
+    collision; overwritten facts require ``scripts.rebuild_chroma_fact_ids`` to
+    re-extract them from the owning group database.
+    """
+    loop = asyncio.get_running_loop()
+    stats = {
+        "scanned": 0, "legacy": 0, "migrated": 0,
+        "deduplicated": 0, "missing_scope": 0,
+    }
+
+    def _read_sync():
+        return ChromaStore.get_collection().get(include=["documents", "metadatas"])
+
+    try:
+        rows = await loop.run_in_executor(None, _read_sync)
+    except Exception:
+        log.exception("migrate_legacy_chroma_fact_ids: failed to read collection")
+        return stats
+
+    ids = (rows or {}).get("ids") or []
+    documents = (rows or {}).get("documents") or []
+    metadatas = (rows or {}).get("metadatas") or []
+    stats["scanned"] = len(ids)
+
+    all_ids = {str(item_id) for item_id in ids}
+    moves: list[tuple[str, str, str, dict]] = []
+    delete_ids: list[str] = []
+    for pos, old_id in enumerate(ids):
+        match = _LEGACY_FACT_ID_RE.fullmatch(str(old_id))
+        if not match:
+            continue
+        stats["legacy"] += 1
+        metadata = dict(metadatas[pos]) if pos < len(metadatas) and metadatas[pos] else {}
+        group_id = metadata.get("group_id")
+        bot_id = metadata.get("bot_id")
+        if group_id is None or bot_id is None:
+            stats["missing_scope"] += 1
+            continue
+        new_id = (
+            f"fact_{int(bot_id)}_{int(group_id)}_"
+            f"{match.group('message_id')}_{match.group('index')}"
+        )
+        delete_ids.append(str(old_id))
+        if new_id in all_ids:
+            stats["deduplicated"] += 1
+            continue
+        document = documents[pos] if pos < len(documents) else ""
+        moves.append((str(old_id), new_id, document, metadata))
+
+    stats["migrated"] = len(moves)
+    if dry_run or not delete_ids:
+        return stats
+
+    def _move_sync(batch: list[tuple[str, str, str, dict]]):
+        col = ChromaStore.get_collection()
+        col.upsert(
+            ids=[item[1] for item in batch],
+            documents=[item[2] for item in batch],
+            metadatas=[item[3] for item in batch],
+        )
+
+    for offset in range(0, len(moves), 500):
+        await loop.run_in_executor(None, partial(_move_sync, moves[offset:offset + 500]))
+
+    def _delete_batch_sync(batch: list[str]):
+        ChromaStore.get_collection().delete(ids=batch)
+
+    for offset in range(0, len(delete_ids), 500):
+        batch_ids = delete_ids[offset:offset + 500]
+        await loop.run_in_executor(None, partial(_delete_batch_sync, batch_ids))
+    return stats
 
 def _parse_created_at(created_str: str) -> float | None:
     """把 SQLite CURRENT_TIMESTAMP（UTC，'%Y-%m-%d %H:%M:%S'）解析为 UTC epoch 秒，

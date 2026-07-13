@@ -42,6 +42,37 @@ def test_system_status_allows_operator():
         app.dependency_overrides.clear()
 
 
+def test_api_config_requires_authentication():
+    client = _client_with_user()
+    try:
+        response = client.get("/api/config")
+        assert response.status_code == 401
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_api_config_rejects_non_operator():
+    client = _client_with_user({"uid": 1, "sub": "user"})
+    try:
+        response = client.get("/api/config")
+        assert response.status_code == 403
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_api_config_allows_operator_without_returning_secret_values(monkeypatch):
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "secret-value-that-must-not-be-returned")
+    client = _client_with_user({"uid": 1, "sub": "ops", "is_operator": True})
+    try:
+        response = client.get("/api/config")
+        assert response.status_code == 200
+        body = response.json()
+        assert body["deepseek_api_key"]["configured"] is True
+        assert "secret-value-that-must-not-be-returned" not in response.text
+    finally:
+        app.dependency_overrides.clear()
+
+
 def test_mcp_config_rejects_non_operator():
     fd, path = tempfile.mkstemp(suffix=".json")
     os.close(fd)

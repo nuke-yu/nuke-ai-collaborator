@@ -43,7 +43,11 @@ class TestEventDispatch(unittest.IsolatedAsyncioTestCase):
         # hands an OrchestratorStep to wf.apply via bg.spawn_group. Patch both so
         # we capture the dispatched step without actually running the workflow.
         m = "core.orchestration.plugins.rd_automation."
-        with patch(m + "wf.apply") as mock_apply, patch(m + "bg.spawn_group"):
+        def discard_spawned(_group_id, coroutine):
+            coroutine.close()
+
+        with patch(m + "wf.apply") as mock_apply, \
+             patch(m + "bg.spawn_group", side_effect=discard_spawned):
             ev = TicketCreated(group_id=1, ticket_id="JIRA-101",
                                title="Fix Bug", description="...")
             await _on_ticket_created(dataclasses.asdict(ev))

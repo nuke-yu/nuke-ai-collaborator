@@ -29,6 +29,17 @@ SHELL_MEMORY_LIMIT_BYTES = 512 * 1024 * 1024  # 512 MB
 # Production should set NUKE_SHELL_EXEC_BACKEND=container so isolation is mandatory.
 SHELL_EXEC_BACKEND = (os.environ.get("NUKE_SHELL_EXEC_BACKEND") or "local").lower()
 
+
+def validate_runtime_security() -> None:
+    """Reject production configurations that permit host-local shell execution."""
+    if os.environ.get("NUKE_ENV", "").lower() != "production":
+        return
+    if SHELL_EXEC_BACKEND != "container":
+        raise RuntimeError(
+            "NUKE_ENV=production requires NUKE_SHELL_EXEC_BACKEND=container; "
+            f"got {SHELL_EXEC_BACKEND!r}"
+        )
+
 # Per-group execution sandbox (container backend). One long-lived container per
 # active group; only that group's workspace is bind-mounted in → group isolation
 # is a mount fact. See deploy/sandbox/Dockerfile.

@@ -18,6 +18,7 @@ engine is testable without a real WebSocket. Group→worker assignment is a
 pluggable `route`; the persistent assigned_worker_id table is CELL-15.
 """
 import asyncio
+import inspect
 import sys
 import logging
 
@@ -40,6 +41,7 @@ class Supervisor:
         self._reassign_lock_users: dict[int, int] = {}  # group_id -> active/queued reassign callers
         self._routing_cache: dict[int, tuple[str, float]] = {}  # group_id -> (worker_id, expire_at)
         self._reassign_versions: dict[int, int] = {}  # group_id -> latest reassign generation
+        self._active_handoffs: set[tuple[int, int]] = set()
         self._worker_stats: dict[str, dict] = {} # worker_id -> latest stats
         self._pending_handoffs: dict[int, tuple[str, asyncio.Future]] = {} # group_id -> (releasing worker_id, future)
         self._on_unread = on_unread              # async (group_id, payload) -> None
@@ -70,11 +72,15 @@ class Supervisor:
 
     async def _clear_reassign_version_later(self, group_id: int) -> None:
         await asyncio.sleep(0)
-        if group_id not in self._routing_cache and group_id not in self._pending_handoffs:
+        if (
+            self._reassign_lock_users.get(group_id, 0) <= 0
+            and not any(gid == group_id for gid, _version in self._active_handoffs)
+            and group_id not in self._routing_cache
+            and group_id not in self._pending_handoffs
+        ):
             self._reassign_versions.pop(group_id, None)
-            if self._reassign_lock_users.get(group_id, 0) <= 0:
-                self._reassign_locks.pop(group_id, None)
-                self._reassign_lock_users.pop(group_id, None)
+            self._reassign_locks.pop(group_id, None)
+            self._reassign_lock_users.pop(group_id, None)
 
     def _finish_reassign_version(self, group_id: int, reassign_version: int) -> None:
         if (
@@ -129,6 +135,77 @@ class Supervisor:
             t.add_done_callback(self._cleanup_tasks.discard)
         self._worker_stats.pop(worker_id, None)
         self._worker_stats_ts.pop(worker_id, None)
+
+    async def _close_writer(self, writer, *, label: str) -> None:
+        """Close an IPC writer and bound transport shutdown."""
+        try:
+            close_result = writer.close()
+            if inspect.isawaitable(close_result):
+                await close_result
+        except Exception:
+            log.exception("supervisor: failed to close %s", label)
+        wait_closed = getattr(writer, "wait_closed", None)
+        if not callable(wait_closed):
+            return
+        try:
+            wait_result = wait_closed()
+        except Exception:
+            log.exception("supervisor: %s wait_closed failed", label)
+            return
+        if not inspect.isawaitable(wait_result):
+            return
+        wait_task = asyncio.ensure_future(wait_result)
+        try:
+            await asyncio.wait_for(wait_task, config.SUPERVISOR_SEND_TIMEOUT)
+        except asyncio.TimeoutError:
+            wait_task.cancel()
+            await asyncio.gather(wait_task, return_exceptions=True)
+            log.warning(
+                "supervisor: %s wait_closed timed out (timeout=%ss)",
+                label, config.SUPERVISOR_SEND_TIMEOUT,
+            )
+        except Exception:
+            if not wait_task.done():
+                wait_task.cancel()
+                await asyncio.gather(wait_task, return_exceptions=True)
+            log.exception("supervisor: %s wait_closed failed", label)
+
+    async def _discard_writer(self, worker_id: str, writer, *, reason: str) -> None:
+        """Atomically make a writer unroutable, then close its transport."""
+        self._drop_worker_state(worker_id, writer=writer)
+        await self._close_writer(writer, label=f"worker {worker_id} connection ({reason})")
+
+    async def _send_worker_frame(self, worker_id: str, writer, frame: dict) -> bool:
+        """Bound one send; a failed/cancelled writer is never reused."""
+        send_task = asyncio.create_task(ipc.send_msg(writer, frame))
+        try:
+            await asyncio.wait_for(
+                send_task, config.SUPERVISOR_SEND_TIMEOUT,
+            )
+            return True
+        except asyncio.CancelledError:
+            send_task.cancel()
+            await asyncio.gather(send_task, return_exceptions=True)
+            await asyncio.shield(
+                self._discard_writer(worker_id, writer, reason="send cancelled")
+            )
+            raise
+        except asyncio.TimeoutError:
+            send_task.cancel()
+            await asyncio.gather(send_task, return_exceptions=True)
+            await self._discard_writer(worker_id, writer, reason="send timeout")
+            log.warning(
+                "supervisor: send timed out for %s (timeout=%ss)",
+                worker_id, config.SUPERVISOR_SEND_TIMEOUT,
+            )
+            return False
+        except Exception:
+            if not send_task.done():
+                send_task.cancel()
+                await asyncio.gather(send_task, return_exceptions=True)
+            await self._discard_writer(worker_id, writer, reason="send failure")
+            log.exception("supervisor: send failed for %s", worker_id)
+            return False
 
     def _get_reassign_lock(self, group_id: int) -> asyncio.Lock:
         lock = self._reassign_locks.get(group_id)
@@ -289,6 +366,7 @@ class Supervisor:
         self._reassign_locks.clear()
         self._reassign_lock_users.clear()
         self._reassign_versions.clear()
+        self._active_handoffs.clear()
         for _releasing_worker_id, fut in self._pending_handoffs.values():
             if not fut.done():
                 fut.cancel()
@@ -311,29 +389,19 @@ class Supervisor:
             hello = await ipc.recv_msg(reader)
             if hello.get("type") != ipc.protocol.HELLO:
                 log.warning("supervisor: first frame not HELLO, dropping")
-                writer.close()
+                await self._close_writer(writer, label="unidentified worker connection")
                 return
             wid = hello["worker_id"]
             # H-6: Close old connection if this worker_id is reconnecting
             old_w = self._workers.get(wid)
             if old_w:
-                try:
-                    old_w.close()
-                except Exception:
-                    log.exception("supervisor: failed to close stale connection for worker %s", wid)
+                await self._close_writer(old_w, label=f"stale connection for worker {wid}")
             self._workers[wid] = writer
             log.info("supervisor: worker %s connected", wid)
             # Hand a freshly-connected worker the current MCP schema snapshot so it
             # can advertise MCP tools without a round-trip (collector pushes updates).
             if wid != ipc.protocol.MCP_COLLECTOR_ID and self._mcp_schemas is not None:
-                try:
-                    await ipc.send_msg(writer, self._mcp_schemas)
-                except Exception:
-                    self._drop_worker_state(wid, writer=writer)
-                    try:
-                        writer.close()
-                    except Exception:
-                        log.exception("supervisor: failed to close worker %s after schema push failure", wid)
+                if not await self._send_worker_frame(wid, writer, self._mcp_schemas):
                     log.warning("supervisor: failed to send cached MCP schemas to %s", wid)
                     return
             while True:
@@ -342,8 +410,8 @@ class Supervisor:
         except (asyncio.IncompleteReadError, ConnectionResetError, BrokenPipeError):
             pass
         finally:
-            if wid is not None:
-                self._drop_worker_state(wid, writer=writer)
+            if wid is not None and self._workers.get(wid) is writer:
+                await self._discard_writer(wid, writer, reason="disconnected")
                 log.info("supervisor: worker %s disconnected", wid)
 
     
@@ -399,15 +467,11 @@ class Supervisor:
                 elif t == ipc.protocol.MCP_SCHEMAS:
                     # collector pushed a new snapshot → cache + fan out to all workers
                     self._mcp_schemas = frame
-                    _timeout = config.SUPERVISOR_SEND_TIMEOUT
                     for wid, writer in list(self._workers.items()):
                         if wid == ipc.protocol.MCP_COLLECTOR_ID:
                             continue
-                        try:
-                            await asyncio.wait_for(ipc.send_msg(writer, frame), _timeout)
-                        except (asyncio.TimeoutError, Exception):
-                            self._drop_worker_state(wid, writer=writer)
-                            log.warning("supervisor: failed to push MCP schemas to %s (timeout=%ss)", wid, _timeout)
+                        if not await self._send_worker_frame(wid, writer, frame):
+                            log.warning("supervisor: failed to push MCP schemas to %s", wid)
                 else:
                     log.debug("supervisor: unhandled upstream type=%s", t)
         except Exception:
@@ -461,7 +525,9 @@ class Supervisor:
             writer = self._workers.get(wid)
         if writer is None:
             raise RuntimeError(f"no connected worker for group {group_id} (route -> {wid!r})")
-        await asyncio.wait_for(ipc.send_msg(writer, msg), config.SUPERVISOR_SEND_TIMEOUT)
+        if not await self._send_worker_frame(wid, writer, msg):
+            self._routing_cache.pop(group_id, None)
+            raise ConnectionError(f"worker {wid} connection failed while routing group {group_id}")
 
     async def send_to_worker_id(self, worker_id: str, msg: dict) -> bool:
         """Send directly to a connection by worker_id (collector + MCP_RESULT relay,
@@ -471,17 +537,7 @@ class Supervisor:
             log.warning("supervisor: no connection for worker_id=%s, dropping %s",
                         worker_id, msg.get("type"))
             return False
-        try:
-            await asyncio.wait_for(ipc.send_msg(writer, msg), config.SUPERVISOR_SEND_TIMEOUT)
-            return True
-        except asyncio.TimeoutError:
-            self._drop_worker_state(worker_id, writer=writer)
-            log.warning("supervisor: send_to_worker_id timed out for %s (timeout=%ss)", worker_id, config.SUPERVISOR_SEND_TIMEOUT)
-            return False
-        except Exception:
-            self._drop_worker_state(worker_id, writer=writer)
-            log.exception("supervisor: send_to_worker_id failed for %s", worker_id)
-            return False
+        return await self._send_worker_frame(worker_id, writer, msg)
 
 
     def _default_worker_for(self, group_id: int) -> str:
@@ -605,6 +661,7 @@ class Supervisor:
         fut = asyncio.get_running_loop().create_future()
         handoff_entry = (old_wid, fut)
         self._pending_handoffs[group_id] = handoff_entry
+        self._active_handoffs.add((group_id, reassign_version))
         superseded = False
         
         try:
@@ -696,6 +753,7 @@ class Supervisor:
                 import time
                 self._routing_cache[group_id] = (new_worker_id, time.time() + 3600.0)
                 self._finish_reassign_version(group_id, reassign_version)
+            self._active_handoffs.discard((group_id, reassign_version))
 
 # Global instance used by the WS shell and Scheduler
 supervisor: 'Supervisor | None' = None

@@ -18,13 +18,13 @@ export async function fetchAllGroups() {
   return res.json()
 }
 
-export async function fetchGroupInfo(groupId) {
-  const res = await authFetch(`/api/groups/${groupId}`)
+export async function fetchGroupInfo(groupId, { signal } = {}) {
+  const res = await authFetch(`/api/groups/${groupId}`, { signal })
   return res.json()
 }
 
-export async function fetchReactions(groupId) {
-  return wsrpc.request({ query: 'reactions', group_id: groupId })
+export async function fetchReactions(groupId, { signal } = {}) {
+  return wsrpc.request({ query: 'reactions', group_id: groupId }, { signal })
 }
 
 export async function toggleReaction(msgId, memberId, emoji) {
@@ -42,12 +42,12 @@ export async function fetchUnreadCounts(memberId) {
   return res.json()
 }
 
-export async function fetchMessages(groupId, { beforeId, afterId } = {}) {
+export async function fetchMessages(groupId, { beforeId, afterId, signal } = {}) {
   return wsrpc.request({
     query: 'messages', group_id: groupId, limit: 50,
     ...(beforeId ? { before_id: beforeId } : {}),
     ...(afterId ? { after_id: afterId } : {}),
-  }) // resolves to { messages, has_more }
+  }, { signal }) // resolves to { messages, has_more }
 }
 
 export async function createGroup(name) {
@@ -64,8 +64,8 @@ export async function deleteGroup(groupId) {
   return res.json()
 }
 
-export async function fetchPins(groupId) {
-  return wsrpc.request({ query: 'pins', group_id: groupId })
+export async function fetchPins(groupId, { signal } = {}) {
+  return wsrpc.request({ query: 'pins', group_id: groupId }, { signal })
 }
 
 export async function pinMessage(groupId, msgId) {
@@ -121,7 +121,7 @@ export function exportGroupUrl(groupId, format = 'markdown') {
 }
 
 export async function addMember(groupId, payload, type = 'human', role = null, system_prompt = null, avatar_color = '#f59e0b', model_provider = 'deepseek', model_name = 'deepseek-chat') {
-  let bodyObj = {};
+  let bodyObj;
   if (typeof payload === 'string') {
     bodyObj = {
       name: payload,
@@ -241,5 +241,3 @@ export async function saveMcpConfig(data, etag) {
   const config = await res.json()
   return { config, etag: newEtag }
 }
-
-

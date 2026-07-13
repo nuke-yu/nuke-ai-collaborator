@@ -62,6 +62,14 @@ class TestRunUnitSerialization(unittest.IsolatedAsyncioTestCase):
             patch("core.runner.get_members", new=AsyncMock(return_value=[])),
             patch("core.runner.get_messages", new=AsyncMock(return_value=[])),
             patch("core.runner.exec_registry.get", new=MagicMock(return_value=probe)),
+            # This suite verifies run-lock behavior, not Git worktree setup. Real
+            # per-group repositories have order-dependent state in the full suite
+            # and can stagger executor entry enough to invalidate the concurrency
+            # probe without changing lock semantics.
+            patch(
+                "workspace.git_worktree.create_worktree",
+                new=AsyncMock(side_effect=RuntimeError("worktree disabled in lock test")),
+            ),
         ):
             stack.enter_context(p)
         return stack

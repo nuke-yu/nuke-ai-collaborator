@@ -155,6 +155,10 @@ async def run_skill(bot_id: int, name: str, args: str = "", ctx: dict | None = N
 
     # Executor side-effects (read from merged entry to support overrides in personal stubs)
     if ctx is not None:
+        roots = ctx.setdefault("authorized_read_roots", [])
+        skill_root = str(skill_dir.resolve())
+        if skill_root not in roots:
+            roots.append(skill_root)
         if skill_entry.get("max_iterations"):
             ctx["skill_max_iterations"] = skill_entry["max_iterations"]
         if skill_entry.get("learns"):

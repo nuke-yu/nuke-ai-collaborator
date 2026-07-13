@@ -11,11 +11,16 @@
 #
 #   # 3. open http://localhost:8000  →  set model API keys via the 🔑 button
 #
-# The per-group sandbox image is pulled automatically by the app the first time it
-# spawns a sandbox (it's referenced by its full ghcr.io path below). The default
+# Compose pulls the per-group sandbox image before the app starts. The default
 # group + BA/Dev/QA bots are seeded on first boot. Keys live in the UI — never bake
 # them into this file; if you must inject via env, uncomment the lines below.
 services:
+  sandbox-image:
+    image: ghcr.io/nuke-yu/nuke-sandbox:latest
+    pull_policy: always
+    entrypoint: ["/bin/true"]
+    restart: "no"
+
   docker-proxy:
     image: tecnativa/docker-socket-proxy:latest
     container_name: nuke-docker-proxy
@@ -52,7 +57,10 @@ services:
     container_name: nuke-app
     pull_policy: always
     depends_on:
-      - docker-proxy
+      docker-proxy:
+        condition: service_started
+      sandbox-image:
+        condition: service_completed_successfully
     ports:
       - "8000:8000"
     environment:

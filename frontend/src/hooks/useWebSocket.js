@@ -20,6 +20,8 @@ export function useWebSocket(groupId, memberId, onMessage, onReconnect, token, o
   const [connected, setConnected] = useState(false)
   const [reconnecting, setReconnecting] = useState(false)
   const reconnectingRef = useRef(false)
+  const identityRef = useRef(null)
+  const connectRef = useRef(null)
 
   const onMessageRef = useRef(onMessage)
   const onReconnectRef = useRef(onReconnect)
@@ -32,12 +34,19 @@ export function useWebSocket(groupId, memberId, onMessage, onReconnect, token, o
 
   const connect = useCallback(() => {
     if (!groupId || !memberId) return
+    const identity = `${groupId}:${memberId}:${token}`
+    if (identityRef.current !== identity) {
+      identityRef.current = identity
+      attemptRef.current = 0
+      reconnectingRef.current = false
+    }
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const host = window.location.host || 'localhost:8000'
-    const url = protocol + '//' + host + '/ws/' + groupId + '/' + memberId + '?token=' + token
-    const socket = new WebSocket(url)
+    const url = protocol + '//' + host + '/ws/' + groupId + '/' + memberId
+    const socket = new WebSocket(url, token ? [`nuke.jwt.${token}`] : undefined)
 
     socket.onopen = () => {
+      if (ws.current !== socket) return
       wsrpc.setSocket(socket)
       if (reconnectingRef.current) {
         onReconnectRef.current?.()
@@ -53,10 +62,12 @@ export function useWebSocket(groupId, memberId, onMessage, onReconnect, token, o
     }
 
     socket.onmessage = (e) => {
+      if (ws.current !== socket) return
       const data = JSON.parse(e.data)
       if (data.type === 'auth_error') {
         onAuthErrorRef.current?.(data.message)
-        if (ws.current) ws.current.onclose = null // prevent retry
+        socket.onclose = null // prevent retry
+        socket.close()
         return
       }
       if (wsrpc.handleFrame(data)) return
@@ -70,21 +81,28 @@ export function useWebSocket(groupId, memberId, onMessage, onReconnect, token, o
     }
 
     socket.onclose = () => {
+      if (ws.current !== socket) return
+      wsrpc.setSocket(null)
       clearTimeout(stableTimer.current)
       setConnected(false)
       setReconnecting(true)
       reconnectingRef.current = true
       const delay = _nextBackoff(attemptRef.current)
       attemptRef.current += 1
-      retryTimer.current = setTimeout(connect, delay)
+      retryTimer.current = setTimeout(() => connectRef.current?.(), delay)
     }
 
     socket.onerror = () => {
+      if (ws.current !== socket) return
       socket.close()
     }
 
     ws.current = socket
   }, [groupId, memberId, token])
+
+  useEffect(() => {
+    connectRef.current = connect
+  }, [connect])
 
   useEffect(() => {
     connect()
@@ -93,7 +111,9 @@ export function useWebSocket(groupId, memberId, onMessage, onReconnect, token, o
       clearTimeout(stableTimer.current)
       if (ws.current) {
         ws.current.onclose = null
+        wsrpc.setSocket(null)
         ws.current.close()
+        ws.current = null
       }
     }
   }, [connect])

@@ -1,11 +1,13 @@
 [Unit]
 Description=Nuke AI Collaborator Supervisor Service
-After=network.target
+After=network.target docker.service
+Requires=docker.service
 
 [Service]
 Type=simple
 User=nuke
 Group=nuke
+SupplementaryGroups=docker
 WorkingDirectory=/opt/nuke-ai-collaborator/backend
 
 # Environment configuration
@@ -13,6 +15,9 @@ Environment=NUKE_DB_PATH=/var/lib/nuke-ai-collaborator/chat.db
 Environment=NUKE_WORKSPACE_ROOT=/var/lib/nuke-ai-collaborator/workspaces
 Environment=NUKE_WORKERS=4
 Environment=NUKE_ENV=production
+Environment=NUKE_SHELL_EXEC_BACKEND=container
+Environment=NUKE_SANDBOX_IMAGE=nuke-sandbox:latest
+Environment=DOCKER_HOST=unix:///var/run/docker.sock
 Environment=PORT=8000
 Environment=HOST=0.0.0.0
 

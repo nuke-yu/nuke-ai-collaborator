@@ -60,8 +60,6 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
   const awaySummary = useChatStore((s) => s.awaySummary)
   const skillDraftBots = useChatStore((s) => s.skillDraftBots)
   const error = useChatStore((s) => s.error)
-  const messagesCache = useChatStore((s) => s.messagesCache)
-  const reactionCache = useChatStore((s) => s.reactionCache)
   const hasMore = useChatStore((s) => s.hasMore)
   const loadingMore = useChatStore((s) => s.loadingMore)
   const {
@@ -100,7 +98,6 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
   const [editingMember, setEditingMember] = useState(null)
   const [workspaceBot, setWorkspaceBot] = useState(null)
   const [showWorkflowStart, setShowWorkflowStart] = useState(false)
-  const [wfBotOrder, setWfBotOrder] = useState([])
   const [showSearch, setShowSearch] = useState(false)
   const [showBotLogs, setShowBotLogs] = useState(false)
   const [replyingTo, setReplyingTo] = useState(null)
@@ -112,37 +109,42 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
   const [stats, setStats] = useState([])
   const [personalSummary, setPersonalSummary] = useState(null)
   const [loadingRecap, setLoadingRecap] = useState(false)
-  const [aiSuggestions, setAiSuggestions] = useState([])
-  const [suggestionsLoading, setSuggestionsLoading] = useState(false)
+  const [aiSuggestionResult, setAiSuggestionResult] = useState({ contextKey: '', suggestions: [] })
+  const [suggestionLoadingContext, setSuggestionLoadingContext] = useState('')
+  const latestMessageId = messages[messages.length - 1]?.id || ''
+  const suggestionContextKey = `${activeGroupId}:${messages.length}:${latestMessageId}:${workflow?.active}:${workflow?.awaiting_confirm || ''}`
+  const aiSuggestions = aiSuggestionResult.contextKey === suggestionContextKey
+    ? aiSuggestionResult.suggestions
+    : []
+  const suggestionsLoading = suggestionLoadingContext === suggestionContextKey
 
   const personalRecapAt = useRef({})
   // 每群「当前这条 personal recap 实际覆盖到的最新消息 id」——点 ✕ ack 时回传，
   // 让水位线钉在 recap 覆盖点而非点击时刻的 MAX(id)（TOCTOU）。
   const personalCoveredId = useRef({})
-  // Tracks current active group to validate async responses still belong to it
-  const activeGroupIdRef = useRef(activeGroupId)
-  useEffect(() => { activeGroupIdRef.current = activeGroupId }, [activeGroupId])
+  const groupRequestGeneration = useRef(0)
+  const loadMoreAbortRef = useRef(null)
+  const reconnectAbortRef = useRef(null)
   const { notify } = useNotifications()
   const bottomRef = useRef(null)
 
   const handleFetchAiSuggestions = async () => {
     if (!activeGroupId || suggestionsLoading) return
-    setSuggestionsLoading(true)
+    const groupIdAtCall = activeGroupId
+    const contextKeyAtCall = suggestionContextKey
+    setSuggestionLoadingContext(contextKeyAtCall)
     try {
-      const data = await fetchAiSuggestions(activeGroupId, workflow?.awaiting_confirm || null)
-      setAiSuggestions(data.suggestions || [])
+      const data = await fetchAiSuggestions(groupIdAtCall, workflow?.awaiting_confirm || null)
+      if (useGroupStore.getState().activeGroupId === groupIdAtCall) {
+        setAiSuggestionResult({ contextKey: contextKeyAtCall, suggestions: data.suggestions || [] })
+      }
     } catch (err) {
       console.error('Failed to fetch AI suggestions:', err)
       notify(t(K.chat.errors.fetchSuggestionsFailed), 'error')
     } finally {
-      setSuggestionsLoading(false)
+      setSuggestionLoadingContext(current => current === contextKeyAtCall ? '' : current)
     }
   }
-
-  // Auto-clear AI suggestions on message addition or workflow transition
-  useEffect(() => {
-    setAiSuggestions([])
-  }, [activeGroupId, messages.length, workflow?.active, workflow?.awaiting_confirm])
 
   const loadRecap = useCallback(async (groupId) => {
     if (!groupId) return
@@ -150,14 +152,14 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
     try {
       const data = await fetchGroupRecap(groupId)
       // Validate response still belongs to current group before setting state
-      if (activeGroupIdRef.current !== groupId) return
+      if (useGroupStore.getState().activeGroupId !== groupId) return
       if (!useChatStore.getState().recapDismissed) {
         setAwaySummary(data?.away_summary || null)
       }
     } catch (err) {
       console.error('Failed to fetch group recap:', err)
     }
-  }, [])
+  }, [setAwaySummary])
 
   // 方案 1：按需拉「我」错过的 per-user recap；10s 内不重复触发（每次都现算 LLM）。
   const loadPersonalRecap = useCallback(async (groupId) => {
@@ -168,7 +170,7 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
     try {
       const data = await fetchPersonalRecap(groupId, memberId)
       // Validate response still belongs to current group before setting state
-      if (activeGroupIdRef.current !== groupId) return
+      if (useGroupStore.getState().activeGroupId !== groupId) return
       setPersonalSummary(data?.unread_count > 0 ? (data.summary || null) : null)
       personalCoveredId.current[groupId] = data?.covered_through_id || 0
     } catch (err) {
@@ -226,7 +228,7 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange)
     }
-  }, [activeGroupId, loadRecap, loadPersonalRecap])
+  }, [activeGroupId, loadRecap, loadPersonalRecap, resetRecapDismissed])
 
   const scrollRef = useRef(null)
   const messageInputRef = useRef(null)
@@ -238,7 +240,7 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
       if (gs.length > 0) setActiveGroupId(gs[0].id)
     })
     fetchUnreadCounts(memberId).then(setUnreadCounts)
-  }, [])
+  }, [memberId, setActiveGroupId, setGroups, setUnreadCounts])
 
   useEffect(() => {
     const handler = (e) => {
@@ -253,8 +255,23 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
 
   useEffect(() => {
     if (!activeGroupId) return
+    const groupId = activeGroupId
+    const generation = ++groupRequestGeneration.current
+    const controller = new AbortController()
+    const { signal } = controller
+    const isCurrent = () => (
+      !signal.aborted
+      && groupRequestGeneration.current === generation
+      && useGroupStore.getState().activeGroupId === groupId
+    )
+    const logRequestError = (label, err) => {
+      if (err?.name !== 'AbortError') console.error(`${label}:`, err)
+    }
+
     resetRecapDismissed()   // switching group = new context, allow recap to show again
-    let active = true
+    loadMoreAbortRef.current?.abort()
+    reconnectAbortRef.current?.abort()
+    setLoadingMore(false)
     useChatStore.getState().setThoughtBlocks({})
     useChatStore.getState().setToolProgressBlocks({})
     setTyping(null)
@@ -262,22 +279,24 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
     setUnreadCounts(prev => ({ ...prev, [activeGroupId]: 0 }))
 
     // 有缓存时立即显示，无缓存时清空等待
-    const cachedMsgs = messagesCache[activeGroupId]
+    const currentChatState = useChatStore.getState()
+    const cachedMsgs = currentChatState.messagesCache[groupId]
     if (cachedMsgs) {
       setMessages(cachedMsgs.messages)
       setHasMore(cachedMsgs.hasMore)
-      setReactionMap(reactionCache[activeGroupId] || {})
+      setReactionMap(currentChatState.reactionCache[groupId] || {})
       setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'instant' }), 0)
     } else {
       setMessages([])
       setHasMore(false)
+      setReactionMap({})
     }
 
-    fetchPins(activeGroupId).then(data => {
-      if (active) setPins(data)
-    })
-    fetchGroupInfo(activeGroupId).then(async ({ group, members }) => {
-      if (!active) return
+    fetchPins(groupId, { signal }).then(data => {
+      if (isCurrent()) setPins(data)
+    }).catch(err => logRequestError('Failed to fetch pins', err))
+    fetchGroupInfo(groupId, { signal }).then(async ({ group, members }) => {
+      if (!isCurrent()) return
       const currentUser = JSON.parse(localStorage.getItem('user'))
       const currentUsername = currentUser?.username || 'Guest'
       let userMember = members.find(m => m.type === 'human' && m.name === currentUsername)
@@ -286,7 +305,8 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
       if (!userMember) {
         // Automatically join the group if the user is not a member yet
         try {
-          const newMember = await addMember(activeGroupId, currentUsername)
+          const newMember = await addMember(groupId, currentUsername)
+          if (!isCurrent()) return
           userMember = newMember
           finalMembers = [...members, { ...newMember, avatar_color: '#f59e0b' }]
         } catch (e) {
@@ -294,12 +314,12 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
         }
       }
 
-      if (active) {
+      if (isCurrent()) {
         setGroup(group)
         setMembers(finalMembers)
-        setMembersCache(prev => ({ ...prev, [activeGroupId]: finalMembers }))
+        setMembersCache(prev => ({ ...prev, [groupId]: finalMembers }))
         setGroups(prev => prev.map(g =>
-          g.id === activeGroupId ? { ...g, member_count: finalMembers.length } : g
+          g.id === groupId ? { ...g, member_count: finalMembers.length } : g
         ))
         if (userMember) {
           setActiveMemberId(userMember.id)
@@ -307,59 +327,81 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
           setActiveMemberId(memberId) // Fallback
         }
       }
-    })
-    fetchReactions(activeGroupId).then(data => {
-      if (active) {
+    }).catch(err => logRequestError('Failed to fetch group info', err))
+    fetchReactions(groupId, { signal }).then(data => {
+      if (isCurrent()) {
         setReactionMap(data)
-        setReactionCache(prev => ({ ...prev, [activeGroupId]: data }))
+        setReactionCache(prev => ({ ...prev, [groupId]: data }))
       }
-    })
-    fetchMessages(activeGroupId).then(({ messages, has_more }) => {
-      if (active) {
+    }).catch(err => logRequestError('Failed to fetch reactions', err))
+    fetchMessages(groupId, { signal }).then(({ messages, has_more }) => {
+      if (isCurrent()) {
         setMessages(messages)
         setHasMore(has_more)
-        setMessagesCache(prev => ({ ...prev, [activeGroupId]: { messages, hasMore: has_more } }))
+        setMessagesCache(prev => ({ ...prev, [groupId]: { messages, hasMore: has_more } }))
         setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'instant' }), 0)
       }
-    })
-    fetch(`/api/groups/${activeGroupId}/workflow`, {
+    }).catch(err => logRequestError('Failed to fetch messages', err))
+    fetch(`/api/groups/${groupId}/workflow`, {
       headers: { Authorization: 'Bearer ' + localStorage.getItem('token') },
+      signal,
     }).then(r => r.json()).then(data => {
-      if (active) setWorkflow(data)
-    })
-    loadRecap(activeGroupId)
-    loadPersonalRecap(activeGroupId)
+      if (isCurrent()) setWorkflow(data)
+    }).catch(err => logRequestError('Failed to fetch workflow', err))
+    loadRecap(groupId)
+    loadPersonalRecap(groupId)
 
     return () => {
-      active = false
+      controller.abort()
     }
-  }, [activeGroupId])
+  }, [
+    activeGroupId, loadPersonalRecap, loadRecap, memberId, resetRecapDismissed,
+    setActiveMemberId, setGroup, setGroups, setHasMore, setLoadingMore,
+    setMembers, setMembersCache, setMessages, setMessagesCache, setPins,
+    setReactionCache, setReactionMap, setTyping, setUnreadCounts, setWorkflow,
+  ])
 
   const loadMore = useCallback(async () => {
-    if (loadingMore || !hasMore || messages.length === 0) return
-    const groupIdAtCall = activeGroupIdRef.current
+    if (!activeGroupId || loadingMore || !hasMore || messages.length === 0) return
+    const groupIdAtCall = activeGroupId
+    const generation = groupRequestGeneration.current
+    const controller = new AbortController()
+    loadMoreAbortRef.current?.abort()
+    loadMoreAbortRef.current = controller
     setLoadingMore(true)
     const oldestId = messages[0].id
     const container = scrollRef.current
     const prevScrollHeight = container?.scrollHeight ?? 0
 
-    const { messages: older, has_more } = await fetchMessages(groupIdAtCall, { beforeId: oldestId })
-    // Validate response still belongs to current group before setting state
-    if (activeGroupIdRef.current !== groupIdAtCall) {
-      setLoadingMore(false)
-      return
-    }
-    setMessages(prev => [...older, ...prev])
-    setHasMore(has_more)
-    setLoadingMore(false)
+    const isCurrent = () => (
+      !controller.signal.aborted
+      && groupRequestGeneration.current === generation
+      && useGroupStore.getState().activeGroupId === groupIdAtCall
+    )
+    try {
+      const { messages: older, has_more } = await fetchMessages(groupIdAtCall, {
+        beforeId: oldestId,
+        signal: controller.signal,
+      })
+      if (!isCurrent()) return
+      setMessages(prev => [...older, ...prev])
+      setHasMore(has_more)
 
-    // 保持滚动位置：新增内容在上方，补偿高度差
-    requestAnimationFrame(() => {
-      if (container) {
-        container.scrollTop = container.scrollHeight - prevScrollHeight
+      // 保持滚动位置：新增内容在上方，补偿高度差
+      requestAnimationFrame(() => {
+        if (isCurrent() && container) {
+          container.scrollTop = container.scrollHeight - prevScrollHeight
+        }
+      })
+    } catch (err) {
+      if (err?.name !== 'AbortError') console.error('Failed to load older messages:', err)
+    } finally {
+      if (isCurrent()) setLoadingMore(false)
+      if (loadMoreAbortRef.current === controller) {
+        loadMoreAbortRef.current = null
       }
-    })
-  }, [loadingMore, hasMore, messages, activeGroupId])
+    }
+  }, [activeGroupId, hasMore, loadingMore, messages, setHasMore, setLoadingMore, setMessages])
 
   const handleScroll = useCallback(() => {
     if ((scrollRef.current?.scrollTop ?? 1) < 80) {
@@ -373,30 +415,47 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
 
   const handleReconnect = useCallback(async () => {
     if (!activeGroupId || messages.length === 0) return
+    const groupIdAtCall = activeGroupId
+    const generation = groupRequestGeneration.current
     const lastId = messages[messages.length - 1]?.id
     if (!lastId || typeof lastId !== 'number') return
+    const controller = new AbortController()
+    reconnectAbortRef.current?.abort()
+    reconnectAbortRef.current = controller
+    const isCurrent = () => (
+      !controller.signal.aborted
+      && groupRequestGeneration.current === generation
+      && useGroupStore.getState().activeGroupId === groupIdAtCall
+    )
 
-    loadRecap(activeGroupId)
+    loadRecap(groupIdAtCall)
 
     try {
-      const { messages: newer } = await fetchMessages(activeGroupId, { afterId: lastId })
-      if (newer && newer.length > 0) {
+      const { messages: newer } = await fetchMessages(groupIdAtCall, {
+        afterId: lastId,
+        signal: controller.signal,
+      })
+      if (isCurrent() && newer && newer.length > 0) {
         setMessages(prev => {
           // Filter out any duplicates just in case
           const existingIds = new Set(prev.map(m => m.id))
           const uniqueNewer = newer.filter(m => !existingIds.has(m.id))
           return [...prev, ...uniqueNewer]
         })
-        useChatStore.getState().syncCache(activeGroupId, (msgs) => {
+        useChatStore.getState().syncCache(groupIdAtCall, (msgs) => {
           const existingIds = new Set(msgs.map(m => m.id))
           const uniqueNewer = newer.filter(m => !existingIds.has(m.id))
           return [...msgs, ...uniqueNewer]
         })
       }
     } catch (e) {
-      console.error('Failed to catch up messages after reconnect:', e)
+      if (e?.name !== 'AbortError') console.error('Failed to catch up messages after reconnect:', e)
+    } finally {
+      if (reconnectAbortRef.current === controller) {
+        reconnectAbortRef.current = null
+      }
     }
-  }, [activeGroupId, messages])
+  }, [activeGroupId, loadRecap, messages, setMessages])
 
   // Stable ref so MessageInput's [groupId, onDraftSave] effect doesn't re-run (and
   // re-fire its draft-save cleanup → setDrafts → re-render) on every render — that
@@ -623,40 +682,6 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
           onShowBotLogs={() => { setShowBotLogs(s => !s); setShowSearch(false); }}
           onShowStats={(s) => { setStats(s); setShowStats(true); }}
           onShowWorkflowStart={() => {
-            const defaultKeyword = (m) => {
-              if (m.done_keyword) return m.done_keyword
-              const role = m.role || m.name
-              if (role.includes('需求')) return '需求确认完毕'
-              if (role.includes('架构')) return '架构设计完毕'
-              if (role.includes('前端')) return '前端开发完毕'
-              if (role.includes('后端') || role.includes('开发') || role.includes('工程师')) return '开发完毕'
-              if (role.includes('测试')) return '测试完成'
-              if (role.includes('运维')) return '运维完毕'
-              return `${m.name}完毕`
-            }
-            const isDevBot = (m) => {
-              const t = (m.role || m.name || '').toLowerCase()
-              return t.includes('开发') || t.includes('工程师') || t.includes('developer') || t.includes('engineer')
-            }
-            const bots = members.filter(m => m.type === 'bot')
-            const devBots = bots.filter(isDevBot)
-            const stages = []
-            let poolAdded = false
-            for (const m of bots) {
-              if (isDevBot(m)) {
-                if (!poolAdded) {
-                  if (devBots.length > 1) {
-                    stages.push({ stage_type: 'pool', bots: devBots.map(b => ({...b})), done_keyword: '开发完毕' })
-                  } else {
-                    stages.push({ stage_type: 'single', ...m, done_keyword: defaultKeyword(m) })
-                  }
-                  poolAdded = true
-                }
-              } else {
-                stages.push({ stage_type: 'single', ...m, done_keyword: defaultKeyword(m) })
-              }
-            }
-            setWfBotOrder(stages)
             setShowWorkflowStart(true)
           }}
         />
