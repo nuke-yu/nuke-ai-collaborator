@@ -18,12 +18,53 @@
 #     resolved by the host daemon — paths must line up.
 
 services:
+  # Socket proxy: limits which Docker API sections the app can access.
+  # Stage 1 defense — blocks build/swarm/secrets/plugins/volumes/networks.
+  # Residual risk: container create API is allowed, so an attacker who
+  # compromises the app container could still craft a container with
+  # host bind mounts. Stage 2 (authorization plugin or rootless daemon)
+  # is needed to fully close host-root risk.
+  docker-proxy:
+    image: tecnativa/docker-socket-proxy:latest
+    container_name: nuke-docker-proxy
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      # Allow only what the sandbox executor needs
+      CONTAINERS: 1    # create, inspect, exec, stop sandbox containers
+      EXEC: 1          # exec into running containers
+      POST: 1          # required for create/exec API calls
+      # Block everything else
+      BUILD: 0
+      COMMIT: 0
+      CONFIGS: 0
+      DISTRIBUTION: 0
+      EVENTS: 0
+      GRPC: 0
+      IMAGES: 0
+      INFO: 0
+      NETWORKS: 0
+      NODES: 0
+      PING: 0
+      PLUGINS: 0
+      SECRETS: 0
+      SERVICES: 0
+      SESSION: 0
+      SWARM: 0
+      SYSTEM: 0
+      TASKS: 0
+      VERSION: 0
+      VOLUMES: 0
+    restart: unless-stopped
+
   app:
     build:
       context: .
       dockerfile: Dockerfile
     image: nuke-ai-collaborator:latest
     container_name: nuke-app
+    depends_on:
+      - docker-proxy
     ports:
       # Host 8080 → container 8000. Kept off 8000 so the Docker deploy stack stays
       # physically separate from a local dev backend (uvicorn on 127.0.0.1:8000).
@@ -38,14 +79,21 @@ services:
       # enable the per-group container sandbox (default is "local" = no isolation)
       NUKE_SHELL_EXEC_BACKEND: container
       NUKE_SANDBOX_IMAGE: nuke-sandbox:latest
+      # Point the Docker client at the proxy instead of the raw socket
+      DOCKER_HOST: tcp://docker-proxy:2375
       # API keys: pass here (bootstrap_from_env migrates them into app_config.json),
       # or mount app_config.json (see volumes note below).
       # DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       # OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       # ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
+      # No raw docker.sock mount — app talks to docker-proxy via DOCKER_HOST
       - /var/lib/nuke-ai-collaborator:/var/lib/nuke-ai-collaborator
       # Persist API keys across restarts (optional — else pass keys via env above):
       # - ./backend/app_config.json:/app/backend/app_config.json
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/liveness')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
     restart: unless-stopped
