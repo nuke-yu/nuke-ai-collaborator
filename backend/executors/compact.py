@@ -84,6 +84,26 @@ _TOKEN_CACHE_MAX = 32
 _PER_MESSAGE_OVERHEAD = 8  # rough allowance for role/keys/braces structure
 
 
+def _count_cjk(text: str) -> int:
+    """Count CJK characters (each ≈ 1-1.5 tokens, not 0.25 like English)."""
+    return sum(1 for ch in text if '一' <= ch <= '鿿'
+               or '㐀' <= ch <= '䶿'
+               or '豈' <= ch <= '﫿'
+               or '\U00020000' <= ch <= '\U0002a6df'
+               or '　' <= ch <= '〿'  # CJK punctuation
+               or '぀' <= ch <= 'ヿ'  # Hiragana + Katakana
+               or '가' <= ch <= '힯')  # Hangul
+
+
+def _content_cjk(content) -> int:
+    """CJK char count for message content."""
+    if content is None:
+        return 0
+    if isinstance(content, str):
+        return _count_cjk(content)
+    return _count_cjk(str(content))
+
+
 def _content_chars(content) -> int:
     if content is None:
         return 0
@@ -131,8 +151,24 @@ def _message_chars(m: dict) -> int:
     return _content_chars(m.get("content")) + len(m.get("name") or "") + _PER_MESSAGE_OVERHEAD
 
 
+def _message_cjk(m: dict) -> int:
+    """CJK char count for one message."""
+    return _content_cjk(m.get("content")) + _count_cjk(m.get("name") or "")
+
+
+def _chars_to_tokens(total_chars: int, cjk_chars: int) -> int:
+    """Convert char counts to a token estimate.
+
+    English: ~4 chars/token.  CJK: ~1.3 chars/token.
+    Formula: (total_chars + cjk_chars * 2) / 4
+      pure English → total/4 (unchanged)
+      pure CJK     → 3*total/4 ≈ total/1.33
+    """
+    return (total_chars + cjk_chars * 2) // 4
+
+
 def estimate_tokens(messages: list[dict]) -> int:
-    """Coarse token estimate ≈ serialised char length / 4.
+    """Coarse token estimate with CJK-aware scaling.
 
     Uses an incremental cache keyed by list identity + length. When the same
     list grows by one message (the common case each tool-loop iteration), only
@@ -145,26 +181,28 @@ def estimate_tokens(messages: list[dict]) -> int:
     n = len(messages)
     cached = _token_cache.get(key)
     if cached is not None:
-        cached_n, cached_chars, cached_ver = cached
+        cached_n, cached_chars, cached_cjk, cached_ver = cached
         if cached_n == n:
             curr_ver = _msg_verifier(messages[-1]) if n > 0 else ""
             if curr_ver == cached_ver:
-                return cached_chars // 4
+                return _chars_to_tokens(cached_chars, cached_cjk)
         elif cached_n == n - 1:
             # One message appended: verify the previous last element is unchanged
             prev_ver = _msg_verifier(messages[-2]) if n >= 2 else ""
             if prev_ver == cached_ver:
                 new_chars = cached_chars + _message_chars(messages[-1])
-                _token_cache[key] = (n, new_chars, _msg_verifier(messages[-1]))
-                return new_chars // 4
+                new_cjk = cached_cjk + _message_cjk(messages[-1])
+                _token_cache[key] = (n, new_chars, new_cjk, _msg_verifier(messages[-1]))
+                return _chars_to_tokens(new_chars, new_cjk)
 
     total_chars = sum(_message_chars(m) for m in messages)
+    total_cjk = sum(_message_cjk(m) for m in messages)
     if len(_token_cache) >= _TOKEN_CACHE_MAX:
         for k in list(_token_cache)[: _TOKEN_CACHE_MAX // 2]:
             del _token_cache[k]
     ver = _msg_verifier(messages[-1]) if messages else ""
-    _token_cache[key] = (n, total_chars, ver)
-    return total_chars // 4
+    _token_cache[key] = (n, total_chars, total_cjk, ver)
+    return _chars_to_tokens(total_chars, total_cjk)
 
 
 def inject_context_after_compact(
