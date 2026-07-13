@@ -119,6 +119,9 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
   // 每群「当前这条 personal recap 实际覆盖到的最新消息 id」——点 ✕ ack 时回传，
   // 让水位线钉在 recap 覆盖点而非点击时刻的 MAX(id)（TOCTOU）。
   const personalCoveredId = useRef({})
+  // Tracks current active group to validate async responses still belong to it
+  const activeGroupIdRef = useRef(activeGroupId)
+  useEffect(() => { activeGroupIdRef.current = activeGroupId }, [activeGroupId])
   const { notify } = useNotifications()
   const bottomRef = useRef(null)
 
@@ -146,6 +149,8 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
     if (useChatStore.getState().recapDismissed) return
     try {
       const data = await fetchGroupRecap(groupId)
+      // Validate response still belongs to current group before setting state
+      if (activeGroupIdRef.current !== groupId) return
       if (!useChatStore.getState().recapDismissed) {
         setAwaySummary(data?.away_summary || null)
       }
@@ -162,6 +167,8 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
     personalRecapAt.current[groupId] = now
     try {
       const data = await fetchPersonalRecap(groupId, memberId)
+      // Validate response still belongs to current group before setting state
+      if (activeGroupIdRef.current !== groupId) return
       setPersonalSummary(data?.unread_count > 0 ? (data.summary || null) : null)
       personalCoveredId.current[groupId] = data?.covered_through_id || 0
     } catch (err) {
@@ -330,12 +337,18 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
 
   const loadMore = useCallback(async () => {
     if (loadingMore || !hasMore || messages.length === 0) return
+    const groupIdAtCall = activeGroupIdRef.current
     setLoadingMore(true)
     const oldestId = messages[0].id
     const container = scrollRef.current
     const prevScrollHeight = container?.scrollHeight ?? 0
 
-    const { messages: older, has_more } = await fetchMessages(activeGroupId, { beforeId: oldestId })
+    const { messages: older, has_more } = await fetchMessages(groupIdAtCall, { beforeId: oldestId })
+    // Validate response still belongs to current group before setting state
+    if (activeGroupIdRef.current !== groupIdAtCall) {
+      setLoadingMore(false)
+      return
+    }
     setMessages(prev => [...older, ...prev])
     setHasMore(has_more)
     setLoadingMore(false)
