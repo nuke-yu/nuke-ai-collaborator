@@ -1255,18 +1255,35 @@ async def _handle_run_shell(
         return f"[系统错误] {e}"
 
 
+def _check_symlink_chain(path: Path, root: Path) -> str | None:
+    """Walk from path upward to root; reject if any component is a symlink."""
+    check = path if path.is_symlink() else path.parent
+    while True:
+        try:
+            check.relative_to(root)
+        except ValueError:
+            break
+        if check.is_symlink():
+            return f"[安全拒绝] 路径包含符号链接组件：{path}"
+        if check == root:
+            break
+        check = check.parent
+    return None
+
+
 def _validate_path_in_group_workspace(path: str, context: dict | None, *, allow_write: bool = False) -> tuple[Path | None, str | None]:
-    """Validate that a resolved path is within the current group's workspace root.
+    """Validate that a resolved path is within the current group's allowed workspace.
+
+    Read scope:  entire group_dir (shared + all bots + runs)
+    Write scope: current bot's private dir (bot_dir) + group shared dir only
 
     Returns (resolved_path, None) on success or (None, error_message) on failure.
     Uses Path.resolve() for normalization and relative_to() for boundary check —
     never string prefix matching.
-
-    For writes, additionally rejects paths where the final component is a symlink
-    (TOCTOU prevention between validation and open).
     """
     ctx = context or {}
     group_id = ctx.get("group_id")
+    bot_id = ctx.get("bot_id")
     if group_id is None:
         return None, "[安全拒绝] 无法确定群组上下文，拒绝文件访问"
 
@@ -1275,32 +1292,39 @@ def _validate_path_in_group_workspace(path: str, context: dict | None, *, allow_
     except (OSError, RuntimeError):
         return None, f"[安全拒绝] 无法解析路径：{path}"
 
-    # Compute allowed root: the entire group directory tree
     group_root = _ws.group_dir(group_id).resolve()
 
+    # Boundary check: must be within group root
     try:
         resolved.relative_to(group_root)
     except ValueError:
         return None, f"[安全拒绝] 路径不在当前群组工作区内：{path}"
 
-    # Symlink checks for write operations
+    # Symlink component check (both read and write)
+    err = _check_symlink_chain(resolved, group_root)
+    if err:
+        return err
+
+    # Write scope: restrict to bot private + shared (not other bots, not runs)
     if allow_write:
+        if bot_id is None:
+            return None, "[安全拒绝] 无法确定 bot_id，拒绝文件写入"
+        bot_root = _ws.bot_workspace(bot_id, group_id).resolve()
+        shared_root = _ws.group_workspace(group_id).resolve()
+        try:
+            resolved.relative_to(bot_root)
+        except ValueError:
+            try:
+                resolved.relative_to(shared_root)
+            except ValueError:
+                return None, f"[安全拒绝] 写入路径不在当前 bot 私有目录或共享目录内：{path}"
         # Reject if target already exists and is a symlink
         if resolved.is_symlink():
             return None, f"[安全拒绝] 拒绝写入符号链接目标：{path}"
-        # Check parent directory for symlink in any component (except the group root itself)
-        # Walk from resolved upward; if any ancestor between group_root and resolved is a
-        # symlink, an attacker could redirect it after our check.
-        check = resolved.parent
-        while check != group_root and len(str(check)) > len(str(group_root)):
-            if check.is_symlink():
-                return None, f"[安全拒绝] 路径包含符号链接组件：{path}"
-            check = check.parent
 
     return resolved, None
 
 
-# Note: _is_sensitive_path only covers read_file/write_file; run_shell commands can still access these paths.
 async def _handle_read_local_file(path: str, context: dict = None) -> str:
     resolved, err = _validate_path_in_group_workspace(path, context)
     if err:
@@ -1318,23 +1342,42 @@ async def _handle_write_local_file(path: str, content: str, context: dict = None
     if err:
         return err
     try:
-        def _do_write() -> None:
+        def _do_write() -> str:
             resolved.parent.mkdir(parents=True, exist_ok=True)
-            # Use O_NOFOLLOW on final open to prevent symlink TOCTOU between
-            # validation and actual write.
+            # Post-mkdir TOCTOU check: re-resolve and verify still within allowed root
+            group_id = (context or {}).get("group_id")
+            bot_id = (context or {}).get("bot_id")
+            re_resolved = resolved.resolve()
+            group_root = _ws.group_dir(group_id).resolve()
+            try:
+                re_resolved.relative_to(group_root)
+            except ValueError:
+                return f"[安全拒绝] 路径在创建后被重定向到群组工作区外：{path}"
+            bot_root = _ws.bot_workspace(bot_id, group_id).resolve()
+            shared_root = _ws.group_workspace(group_id).resolve()
+            try:
+                re_resolved.relative_to(bot_root)
+            except ValueError:
+                try:
+                    re_resolved.relative_to(shared_root)
+                except ValueError:
+                    return f"[安全拒绝] 路径在创建后被重定向到允许写入区外：{path}"
+            # O_NOFOLLOW on final open to prevent symlink TOCTOU
             import os as _os
-            fd = _os.open(str(resolved), _os.O_WRONLY | _os.O_CREAT | _os.O_TRUNC | _os.O_NOFOLLOW, 0o644)
+            fd = _os.open(str(re_resolved), _os.O_WRONLY | _os.O_CREAT | _os.O_TRUNC | _os.O_NOFOLLOW, 0o644)
             try:
                 with open(fd, "w", encoding="utf-8") as f:
                     f.write(content)
             except Exception:
                 _os.close(fd)
                 raise
+            return f"已写入 {path}（{len(content)} 字符）"
 
-        await asyncio.to_thread(_do_write)
-        return f"已写入 {path}（{len(content)} 字符）"
+        result = await asyncio.to_thread(_do_write)
+        if result.startswith("[安全拒绝]"):
+            return result
+        return result
     except FileExistsError:
-        # O_NOFOLLOW raises FileExistsError when target is a symlink
         return f"[安全拒绝] 拒绝写入符号链接目标：{path}"
     except Exception as e:
         return f"[写入错误] {e}"

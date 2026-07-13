@@ -46,10 +46,9 @@ class TestLocalFileOffload(unittest.IsolatedAsyncioTestCase):
             f = Path(d) / "x.txt"
             f.write_text("hello", encoding="utf-8")
             spy = _ThreadSpy("read_text")
-            ctx = {"group_id": 1}
+            ctx = {"group_id": 1, "bot_id": 5}
             with patch.object(Path, "read_text", spy), \
                  patch("executors.plugins.workspace_tools._ws") as mock_ws:
-                # Mock group_dir to return the temp dir so path validation passes
                 mock_ws.group_dir.return_value = Path(d).resolve()
                 result = await wt._handle_read_local_file(str(f), context=ctx)
         self.assertEqual(result, "hello")
@@ -59,13 +58,17 @@ class TestLocalFileOffload(unittest.IsolatedAsyncioTestCase):
     async def test_write_local_file_runs_off_loop_thread(self):
         main_tid = threading.get_ident()
         with tempfile.TemporaryDirectory() as d:
-            f = Path(d) / "sub" / "y.txt"
+            # Create a bot private subdir so write scope validation passes
+            bot_dir = Path(d) / "bot_5"
+            bot_dir.mkdir()
+            f = bot_dir / "sub" / "y.txt"
             spy = _ThreadSpy("write_text")
-            ctx = {"group_id": 1}
+            ctx = {"group_id": 1, "bot_id": 5}
             with patch.object(Path, "write_text", spy), \
                  patch("executors.plugins.workspace_tools._ws") as mock_ws:
-                # Mock group_dir to return the temp dir so path validation passes
                 mock_ws.group_dir.return_value = Path(d).resolve()
+                mock_ws.bot_workspace.return_value = bot_dir.resolve()
+                mock_ws.group_workspace.return_value = (Path(d) / "shared").resolve()
                 result = await wt._handle_write_local_file(str(f), "data", context=ctx)
             self.assertIn("已写入", result)
             self.assertEqual(f.read_text(encoding="utf-8"), "data")
