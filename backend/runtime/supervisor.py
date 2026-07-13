@@ -222,13 +222,22 @@ class Supervisor:
         if self._processes:
             _KILL_TIMEOUT = 10.0
             try:
-                await asyncio.wait_for(
+                wait_results = await asyncio.wait_for(
                     asyncio.gather(
                         *(proc.wait() for _label, proc in self._processes),
                         return_exceptions=True,
                     ),
                     timeout=_KILL_TIMEOUT,
                 )
+                # Log individual wait failures (gather with return_exceptions
+                # returns exceptions as values, not raised)
+                for (label, _proc), result in zip(self._processes, wait_results):
+                    if isinstance(result, Exception):
+                        log.error(
+                            "supervisor: subprocess %s wait failed during stop",
+                            label,
+                            exc_info=(type(result), result, result.__traceback__),
+                        )
             except asyncio.TimeoutError:
                 # Escalate: SIGKILL any process that didn't exit within timeout
                 for label, proc in self._processes:
@@ -238,11 +247,17 @@ class Supervisor:
                             proc.kill()
                         except Exception:
                             pass
-                # Wait briefly for SIGKILL to take effect
-                await asyncio.gather(
-                    *(proc.wait() for _label, proc in self._processes),
-                    return_exceptions=True,
-                )
+                # Wait briefly for SIGKILL to take effect (with timeout)
+                try:
+                    await asyncio.wait_for(
+                        asyncio.gather(
+                            *(proc.wait() for _label, proc in self._processes),
+                            return_exceptions=True,
+                        ),
+                        timeout=5.0,
+                    )
+                except asyncio.TimeoutError:
+                    log.error("supervisor: processes still alive after SIGKILL + 5s")
         self._processes.clear()
 
         # 2. Close IPC connections
@@ -457,8 +472,12 @@ class Supervisor:
                         worker_id, msg.get("type"))
             return False
         try:
-            await ipc.send_msg(writer, msg)
+            await asyncio.wait_for(ipc.send_msg(writer, msg), config.SUPERVISOR_SEND_TIMEOUT)
             return True
+        except asyncio.TimeoutError:
+            self._drop_worker_state(worker_id, writer=writer)
+            log.warning("supervisor: send_to_worker_id timed out for %s (timeout=%ss)", worker_id, config.SUPERVISOR_SEND_TIMEOUT)
+            return False
         except Exception:
             self._drop_worker_state(worker_id, writer=writer)
             log.exception("supervisor: send_to_worker_id failed for %s", worker_id)

@@ -46,8 +46,12 @@ class TestLocalFileOffload(unittest.IsolatedAsyncioTestCase):
             f = Path(d) / "x.txt"
             f.write_text("hello", encoding="utf-8")
             spy = _ThreadSpy("read_text")
-            with patch.object(Path, "read_text", spy):
-                result = await wt._handle_read_local_file(str(f))
+            ctx = {"group_id": 1}
+            with patch.object(Path, "read_text", spy), \
+                 patch("executors.plugins.workspace_tools._ws") as mock_ws:
+                # Mock group_dir to return the temp dir so path validation passes
+                mock_ws.group_dir.return_value = Path(d).resolve()
+                result = await wt._handle_read_local_file(str(f), context=ctx)
         self.assertEqual(result, "hello")
         self.assertIsNotNone(spy.tid)
         self.assertNotEqual(spy.tid, main_tid)
@@ -57,8 +61,12 @@ class TestLocalFileOffload(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as d:
             f = Path(d) / "sub" / "y.txt"
             spy = _ThreadSpy("write_text")
-            with patch.object(Path, "write_text", spy):
-                result = await wt._handle_write_local_file(str(f), "data")
+            ctx = {"group_id": 1}
+            with patch.object(Path, "write_text", spy), \
+                 patch("executors.plugins.workspace_tools._ws") as mock_ws:
+                # Mock group_dir to return the temp dir so path validation passes
+                mock_ws.group_dir.return_value = Path(d).resolve()
+                result = await wt._handle_write_local_file(str(f), "data", context=ctx)
             self.assertIn("已写入", result)
             self.assertEqual(f.read_text(encoding="utf-8"), "data")
         self.assertNotEqual(spy.tid, main_tid)
