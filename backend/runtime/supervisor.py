@@ -220,17 +220,29 @@ class Supervisor:
                 log.exception("supervisor: failed to terminate subprocess %s during stop", label)
 
         if self._processes:
-            wait_results = await asyncio.gather(
-                *(proc.wait() for _label, proc in self._processes),
-                return_exceptions=True,
-            )
-            for (label, _proc), result in zip(self._processes, wait_results):
-                if isinstance(result, Exception):
-                    log.error(
-                        "supervisor: subprocess %s wait failed during stop",
-                        label,
-                        exc_info=(type(result), result, result.__traceback__),
-                    )
+            _KILL_TIMEOUT = 10.0
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(
+                        *(proc.wait() for _label, proc in self._processes),
+                        return_exceptions=True,
+                    ),
+                    timeout=_KILL_TIMEOUT,
+                )
+            except asyncio.TimeoutError:
+                # Escalate: SIGKILL any process that didn't exit within timeout
+                for label, proc in self._processes:
+                    if proc.returncode is None:
+                        log.warning("supervisor: subprocess %s did not exit within %ss, sending SIGKILL", label, _KILL_TIMEOUT)
+                        try:
+                            proc.kill()
+                        except Exception:
+                            pass
+                # Wait briefly for SIGKILL to take effect
+                await asyncio.gather(
+                    *(proc.wait() for _label, proc in self._processes),
+                    return_exceptions=True,
+                )
         self._processes.clear()
 
         # 2. Close IPC connections
@@ -372,14 +384,15 @@ class Supervisor:
                 elif t == ipc.protocol.MCP_SCHEMAS:
                     # collector pushed a new snapshot → cache + fan out to all workers
                     self._mcp_schemas = frame
+                    _timeout = config.SUPERVISOR_SEND_TIMEOUT
                     for wid, writer in list(self._workers.items()):
                         if wid == ipc.protocol.MCP_COLLECTOR_ID:
                             continue
                         try:
-                            await ipc.send_msg(writer, frame)
-                        except Exception:
+                            await asyncio.wait_for(ipc.send_msg(writer, frame), _timeout)
+                        except (asyncio.TimeoutError, Exception):
                             self._drop_worker_state(wid, writer=writer)
-                            log.warning("supervisor: failed to push MCP schemas to %s", wid)
+                            log.warning("supervisor: failed to push MCP schemas to %s (timeout=%ss)", wid, _timeout)
                 else:
                     log.debug("supervisor: unhandled upstream type=%s", t)
         except Exception:
@@ -433,7 +446,7 @@ class Supervisor:
             writer = self._workers.get(wid)
         if writer is None:
             raise RuntimeError(f"no connected worker for group {group_id} (route -> {wid!r})")
-        await ipc.send_msg(writer, msg)
+        await asyncio.wait_for(ipc.send_msg(writer, msg), config.SUPERVISOR_SEND_TIMEOUT)
 
     async def send_to_worker_id(self, worker_id: str, msg: dict) -> bool:
         """Send directly to a connection by worker_id (collector + MCP_RESULT relay,
