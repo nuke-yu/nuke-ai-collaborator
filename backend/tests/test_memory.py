@@ -165,7 +165,7 @@ class TestChromaMemoryEnhancements(unittest.IsolatedAsyncioTestCase):
 
         mock_col.upsert.assert_called_once()
         kwargs = mock_col.upsert.call_args[1]
-        self.assertEqual(kwargs["ids"], ["42_0"])
+        self.assertEqual(kwargs["ids"], ["fact_5_9_42_0"])
         self.assertEqual(kwargs["documents"], ["Hello world memory"])
         self.assertEqual(kwargs["metadatas"][0]["bot_id"], 5)
         self.assertEqual(kwargs["metadatas"][0]["group_id"], 9)
@@ -213,7 +213,7 @@ class TestChromaMemoryEnhancements(unittest.IsolatedAsyncioTestCase):
 
         # 1 条新事实写入
         mock_col.upsert.assert_called_once()
-        self.assertEqual(mock_col.upsert.call_args[1]["ids"], ["50_0"])
+        self.assertEqual(mock_col.upsert.call_args[1]["ids"], ["fact_5_9_50_0"])
         # 2 个冲突旧 ID 一次性批量删除（即便 > 事实条数）
         mock_col.delete.assert_any_call(ids=["7_0", "9_1"])
 

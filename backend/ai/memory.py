@@ -493,7 +493,7 @@ async def add_to_chroma(message_id: int, content: str, role: str, bot_id: int, g
         if group_id is not None:
             metadata["group_id"] = group_id
 
-        fact_id = f"{message_id}_{idx}"
+        fact_id = f"fact_{bot_id}_{group_id}_{message_id}_{idx}"
         await loop.run_in_executor(
             None,
             partial(ChromaStore.write_fact_sync, fact_id, fact, metadata)
