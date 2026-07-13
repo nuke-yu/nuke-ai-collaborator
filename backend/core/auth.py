@@ -9,7 +9,14 @@ from typing import Optional
 
 log = logging.getLogger(__name__)
 
-SECRET_KEY = os.environ.get("AUTH_SECRET", "super-secret-key-change-me")
+_DEFAULT_AUTH_SECRET = "super-secret-key-change-me"
+SECRET_KEY = os.environ.get("AUTH_SECRET", _DEFAULT_AUTH_SECRET)
+if SECRET_KEY == _DEFAULT_AUTH_SECRET:
+    log.critical(
+        "AUTH_SECRET is not set — using built-in default key. "
+        "All tokens are forgeable by anyone who reads the source code. "
+        "Set AUTH_SECRET env var before deploying to any non-dev environment."
+    )
 TOKEN_TTL = 86400 * 7 # 1 week
 
 
