@@ -25,12 +25,13 @@ def _status() -> dict:
 
 
 @router.get("/api/config")
-async def get_config():
+async def get_config(request: Request, user=Depends(require_operator)):
+    audit_control_plane("api_config.read", user, request)
     return _status()
 
 
 @router.put("/api/config")
-async def save_config(data: dict):
+async def save_config(data: dict, request: Request, user=Depends(require_operator)):
     cfg = read_config()
     for field in FIELDS:
         if field in data:                      # only touch fields the client sent
@@ -40,6 +41,7 @@ async def save_config(data: dict):
             else:
                 cfg.pop(field, None)           # empty value clears the key
     write_config(cfg)
+    audit_control_plane("api_config.write", user, request, fields=list(data.keys()))
     return _status()
 
 
