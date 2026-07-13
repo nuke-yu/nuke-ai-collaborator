@@ -99,6 +99,9 @@ The literature and open-source projects we reviewed point to four complementary 
 - [LangGraph](https://github.com/langchain-ai/langgraph)  
   Useful for building a controllable graph of memory, reflection, extraction, and approval states.
 
+- [OpenWiki](https://github.com/langchain-ai/openwiki)  
+  Useful as a reference for turning codebase experience into maintained agent-facing documentation. OpenWiki is a CLI that writes and refreshes repository documentation for agents, can update docs from repository changes, and appends guidance to `AGENTS.md` / `CLAUDE.md` so coding agents know to consult that documentation. For this project, the relevant lesson is not memory storage itself, but the "experience -> maintained documentation -> future agent context" loop.
+
 ### 4.5 Why we are not copying these literally
 
 The common failure mode in the literature is to treat self-learning as either:
@@ -327,3 +330,36 @@ Those two windows should stay distinct:
 - one for analysis and conversion
 
 That separation keeps the learning loop auditable and easier to evolve.
+
+## 13. Antigravity Review & Hardening Recommendations (2026-07-03)
+
+Following a comprehensive architectural review, the following enhancements are recommended to harden the security, performance, and usability of the self-learning loop:
+
+### 13.1 Strict Group Isolation (No Cross-Group Contamination)
+*   **Context**: The design defines `person`, `project`, `group`, and `global` scopes for learned capabilities.
+*   **Risk**: Under the system's runtime architecture, groups are strictly isolated. If a bot learns a pattern in Group A (e.g., proprietary API endpoints, credentials, or internal conventions) and auto-promotes it globally, this information could leak to Group B.
+*   **Recommendation**: In the physical implementation, all draft and active skills must remain located within the group's isolated workspaces. `project` and `global` scopes must only dictate visibility *internally* to bots within the same group. Cross-group skill sharing must never happen automatically; it must go through an admin-controlled export/import gate.
+
+### 13.2 Confidence Accumulation & Cooldown (Mitigating Approval Fatigue)
+*   **Risk**: LLMs are prone to overfitting from a single successful user interaction (e.g., a user temporarily asking for 2-space indentation). If every small preference triggers a draft notification, users will experience approval fatigue and blindly accept dangerous rules.
+*   **Recommendation**:
+    *   **Evidence Count Threshold**: Passive observations must recur across multiple distinct sessions ($N \ge 3$) before generating a draft, unless the user explicitly triggers learning via a command (e.g. `/learn`).
+    *   **Rejection Cooldown / Decay**: If a user rejects a candidate draft, the pattern should be blacklisted for a cooldown period (e.g., 7 days) to prevent the bot from repeatedly suggesting it.
+
+### 13.3 Storage Tiering (Separating Memory from Skills)
+*   **Risk**: Storing micro-observations (e.g., "User X prefers concise summaries") as individual files under `skills/learned/` will quickly clutter the filesystem and cause major performance bottlenecks during worker hydration and layout walks.
+*   **Recommendation**:
+    *   **Memory (High-frequency, granular)**: Store descriptive facts in a relational SQLite table (e.g., a `bot_memories` table in the group database) or Zep/Chroma vector databases.
+    *   **Skills (Low-frequency, executable)**: Only rules containing prompt instructions, tool definitions, or file overrides should be written to the `skills/learned/` directories as `SKILL.md` markdown files.
+
+### 13.4 Static Compliance Scanning (Preventing Prompt Injection Privilege Escalation)
+*   **Risk**: A bot's context can be poisoned by external untrusted inputs (e.g., a malicious README file). The prompt injection could instruct the bot to generate a draft skill containing `bypassPermissions: true` or a hidden backdoor command. If the user accepts it, they grant the hacker full Remote Code Execution (RCE).
+*   **Recommendation**: All drafts under `learned/draft/` must pass a static analysis check before being presented to the user:
+    *   Block the inclusion of `bypassPermissions: true` or command-bypass configurations.
+    *   Scan for suspicious prompt injection signatures and raw shell execute patterns.
+
+### 13.5 WebSocket Control Frame Protocol for Human-in-the-Loop Gate
+*   **Recommendation**: Standardize the WebSocket frame schema for human approval:
+    *   When a draft is written, the Worker pushes `SKILL_DRAFT_PENDING` to the Supervisor, which relays it to the browser.
+    *   The frontend renders the diff card, allowing the user to `Approve` (moves the file to `learned/active/`), `Reject` (clears draft), or `Edit` (sends modified content back).
+    *   Once actioned, the Supervisor notifies the Worker, which hot-reloads its active skills in-memory without requiring a process restart.

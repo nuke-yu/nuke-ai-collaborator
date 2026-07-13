@@ -16,32 +16,61 @@
 # group + BA/Dev/QA bots are seeded on first boot. Keys live in the UI — never bake
 # them into this file; if you must inject via env, uncomment the lines below.
 services:
+  docker-proxy:
+    image: tecnativa/docker-socket-proxy:latest
+    container_name: nuke-docker-proxy
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      CONTAINERS: 1
+      EXEC: 1
+      POST: 1
+      PING: 1
+      VERSION: 1
+      BUILD: 0
+      COMMIT: 0
+      CONFIGS: 0
+      DISTRIBUTION: 0
+      EVENTS: 0
+      GRPC: 0
+      IMAGES: 0
+      INFO: 0
+      NETWORKS: 0
+      NODES: 0
+      PLUGINS: 0
+      SECRETS: 0
+      SERVICES: 0
+      SESSION: 0
+      SWARM: 0
+      SYSTEM: 0
+      TASKS: 0
+      VOLUMES: 0
+    restart: unless-stopped
+
   app:
     image: ghcr.io/nuke-yu/nuke-ai-collaborator:latest
     container_name: nuke-app
-    pull_policy: always          # always grab the newest :latest on `up`
+    pull_policy: always
+    depends_on:
+      - docker-proxy
     ports:
       - "8000:8000"
     environment:
       NUKE_ENV: production
       NUKE_DB_PATH: /var/lib/nuke-ai-collaborator/chat.db
       NUKE_WORKSPACE_ROOT: /var/lib/nuke-ai-collaborator/workspaces
-      # Worker processes serving group shards. Default 4. Set ≈ host CPU cores.
-      # NOTE: only helps if groups are spread across workers (see group routing).
       NUKE_WORKERS: 6
-      # per-group container sandbox (default "local" = no isolation)
       NUKE_SHELL_EXEC_BACKEND: container
       NUKE_SANDBOX_IMAGE: ghcr.io/nuke-yu/nuke-sandbox:latest
-      # Optional: inject keys via env (bootstrap_from_env imports them once into
-      # app_config.json). Prefer configuring in the UI instead.
-      # DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
-      # OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      # ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      DOCKER_HOST: tcp://docker-proxy:2375
+      # ── REQUIRED: security credentials ──
+      AUTH_SECRET: ${AUTH_SECRET:?Set AUTH_SECRET (≥32 chars)}
+      NUKE_OPERATOR_USERS: ${NUKE_OPERATOR_USERS:?Set NUKE_OPERATOR_USERS to at least one admin username}
     volumes:
-      # docker.sock: lets the app dispatch sandbox containers (≈ host root — in
-      # production front it with a socket-proxy allowing only run/exec/stop).
-      - /var/run/docker.sock:/var/run/docker.sock
-      # Same path inside and out: sibling sandbox containers' bind mounts are
-      # resolved by the HOST daemon, so the paths must line up.
       - /var/lib/nuke-ai-collaborator:/var/lib/nuke-ai-collaborator
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/liveness')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
     restart: unless-stopped

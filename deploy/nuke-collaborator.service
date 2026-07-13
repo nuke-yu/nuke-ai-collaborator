@@ -16,6 +16,13 @@ Environment=NUKE_ENV=production
 Environment=PORT=8000
 Environment=HOST=0.0.0.0
 
+# REQUIRED: security credentials (load from protected file)
+# Create /etc/nuke-ai-collaborator/env with:
+#   AUTH_SECRET=<strong random key ≥32 chars>
+#   NUKE_OPERATOR_USERS=<admin username>
+# chmod 600 /etc/nuke-ai-collaborator/env
+EnvironmentFile=/etc/nuke-ai-collaborator/env
+
 # Execution
 ExecStart=/opt/nuke-ai-collaborator/backend/venv/bin/python -m uvicorn main:app --host ${HOST} --port ${PORT}
 Restart=always

@@ -4,6 +4,8 @@ import * as wsrpc from '../wsrpc'
 // Exponential backoff: 3s → 6s → 12s → 24s → cap 30s, with random jitter
 const _BACKOFF_BASE = 3000
 const _BACKOFF_MAX = 30000
+// Only reset backoff after connection has been stable this long
+const _STABLE_CONNECTION_MS = 30000
 
 function _nextBackoff(attempt) {
   const delay = Math.min(_BACKOFF_BASE * Math.pow(2, attempt), _BACKOFF_MAX)
@@ -13,9 +15,11 @@ function _nextBackoff(attempt) {
 export function useWebSocket(groupId, memberId, onMessage, onReconnect, token, onAuthError) {
   const ws = useRef(null)
   const retryTimer = useRef(null)
+  const stableTimer = useRef(null)
   const attemptRef = useRef(0)
   const [connected, setConnected] = useState(false)
   const [reconnecting, setReconnecting] = useState(false)
+  const reconnectingRef = useRef(false)
 
   const onMessageRef = useRef(onMessage)
   const onReconnectRef = useRef(onReconnect)
@@ -35,12 +39,17 @@ export function useWebSocket(groupId, memberId, onMessage, onReconnect, token, o
 
     socket.onopen = () => {
       wsrpc.setSocket(socket)
-      if (reconnecting) {
+      if (reconnectingRef.current) {
         onReconnectRef.current?.()
       }
       setConnected(true)
       setReconnecting(false)
-      attemptRef.current = 0 // reset backoff on successful connection
+      reconnectingRef.current = false
+      // Only reset backoff after connection is stable for _STABLE_CONNECTION_MS
+      clearTimeout(stableTimer.current)
+      stableTimer.current = setTimeout(() => {
+        attemptRef.current = 0
+      }, _STABLE_CONNECTION_MS)
     }
 
     socket.onmessage = (e) => {
@@ -61,8 +70,10 @@ export function useWebSocket(groupId, memberId, onMessage, onReconnect, token, o
     }
 
     socket.onclose = () => {
+      clearTimeout(stableTimer.current)
       setConnected(false)
       setReconnecting(true)
+      reconnectingRef.current = true
       const delay = _nextBackoff(attemptRef.current)
       attemptRef.current += 1
       retryTimer.current = setTimeout(connect, delay)
@@ -73,12 +84,13 @@ export function useWebSocket(groupId, memberId, onMessage, onReconnect, token, o
     }
 
     ws.current = socket
-  }, [groupId, memberId])
+  }, [groupId, memberId, token])
 
   useEffect(() => {
     connect()
     return () => {
       clearTimeout(retryTimer.current)
+      clearTimeout(stableTimer.current)
       if (ws.current) {
         ws.current.onclose = null
         ws.current.close()

@@ -10,16 +10,19 @@ from typing import Optional
 log = logging.getLogger(__name__)
 
 _DEFAULT_AUTH_SECRET = "super-secret-key-change-me"
+_MIN_SECRET_LENGTH = 32
 SECRET_KEY = os.environ.get("AUTH_SECRET", _DEFAULT_AUTH_SECRET)
 _is_production = os.environ.get("NUKE_ENV", "").lower() == "production"
+_secret_is_default = SECRET_KEY == _DEFAULT_AUTH_SECRET
+_secret_is_weak = not SECRET_KEY or len(SECRET_KEY.strip()) < _MIN_SECRET_LENGTH
 
-if SECRET_KEY == _DEFAULT_AUTH_SECRET:
-    if _is_production:
-        raise RuntimeError(
-            "FATAL: AUTH_SECRET is not set and NUKE_ENV=production. "
-            "Refusing to start with the built-in default key — all tokens "
-            "would be forgeable. Set AUTH_SECRET to a strong random value."
-        )
+if _is_production and (_secret_is_default or _secret_is_weak):
+    raise RuntimeError(
+        f"FATAL: AUTH_SECRET is {'not set' if _secret_is_default else 'too short (minimum ' + str(_MIN_SECRET_LENGTH) + ' chars)'} "
+        f"and NUKE_ENV=production. Refusing to start — all tokens would be "
+        f"forgeable. Set AUTH_SECRET to a strong random value (≥{_MIN_SECRET_LENGTH} chars)."
+    )
+if _secret_is_default:
     log.critical(
         "AUTH_SECRET is not set — using built-in default key. "
         "All tokens are forgeable by anyone who reads the source code. "

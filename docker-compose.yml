@@ -45,7 +45,7 @@ services:
       INFO: 0
       NETWORKS: 0
       NODES: 0
-      PING: 0
+      PING: 1          # required by Docker client for connectivity check
       PLUGINS: 0
       SECRETS: 0
       SERVICES: 0
@@ -53,7 +53,7 @@ services:
       SWARM: 0
       SYSTEM: 0
       TASKS: 0
-      VERSION: 0
+      VERSION: 1       # required by Docker client for API version negotiation
       VOLUMES: 0
     restart: unless-stopped
 
@@ -81,6 +81,15 @@ services:
       NUKE_SANDBOX_IMAGE: nuke-sandbox:latest
       # Point the Docker client at the proxy instead of the raw socket
       DOCKER_HOST: tcp://docker-proxy:2375
+      # ── REQUIRED: security credentials ──────────────────────────────
+      # AUTH_SECRET: strong random key (≥32 chars) for JWT signing.
+      #   Generate: python3 -c "import secrets; print(secrets.token_urlsafe(48))"
+      #   App refuses to start without it in production mode.
+      AUTH_SECRET: ${AUTH_SECRET:?Set AUTH_SECRET (≥32 chars): python3 -c "import secrets; print(secrets.token_urlsafe(48))"}
+      # NUKE_OPERATOR_USERS: comma-separated usernames that get operator privileges.
+      #   Required for managing API keys (/api/config) and MCP servers.
+      #   Without this, all control-plane endpoints return 403.
+      NUKE_OPERATOR_USERS: ${NUKE_OPERATOR_USERS:?Set NUKE_OPERATOR_USERS to at least one admin username}
       # API keys: pass here (bootstrap_from_env migrates them into app_config.json),
       # or mount app_config.json (see volumes note below).
       # DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
