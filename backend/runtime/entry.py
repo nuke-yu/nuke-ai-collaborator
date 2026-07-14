@@ -64,6 +64,21 @@ async def run_worker(worker_id: str, addr: str) -> None:
     # that MCP lives in the collector, so it's safe to do before connecting.
     _init_tool_router()
 
+    # Install GitHub client if gh CLI is available (R-4 fix).
+    # This must happen in each Worker process because the GitClient singleton
+    # is per-process and doesn't cross the Supervisor→Worker boundary.
+    import os
+    if os.getenv("NUKE_GITHUB_ENABLED", "").lower() in ("1", "true", "yes"):
+        try:
+            from integrations.github_client import install_github_client, is_gh_available
+            if is_gh_available():
+                install_github_client()
+                logging.getLogger(__name__).info("GitHub client installed (gh CLI available)")
+            else:
+                logging.getLogger(__name__).warning("NUKE_GITHUB_ENABLED set but gh CLI not found")
+        except Exception:
+            logging.getLogger(__name__).warning("Failed to install GitHub client", exc_info=True)
+
     from skills.watcher import watcher
     watcher.start(asyncio.get_running_loop())
     try:

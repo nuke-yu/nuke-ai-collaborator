@@ -220,6 +220,33 @@ class TestGitHubClient(unittest.IsolatedAsyncioTestCase):
                 await client.create_pr(group_id=1, title="test")
             self.assertIn("No git repository", str(ctx.exception))
 
+    async def test_create_pr_gh_failure_raises(self):
+        """When gh pr create fails, raises RuntimeError (fail closed, no silent fallback)."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            workspace = self._setup_workspace(tmp_dir)
+            client = GitHubClient(workspace_path=workspace)
+
+            mock_results = [
+                (b"feature/x\n", b"", 0),          # rev-parse branch
+                (b" M file.py\n", b"", 0),          # status → changes
+                (b"", b"", 0),                       # add
+                (b"", b"", 0),                       # commit
+                (b"", b"", 0),                       # push
+                (b"refs/remotes/origin/main\n", b"", 0),  # symbolic-ref
+                (b"", b"GraphQL: Could not resolve to a Repository\n", 1),  # gh FAILS
+            ]
+            procs = [_mock_proc(*r) for r in mock_results]
+
+            with patch("asyncio.create_subprocess_exec", side_effect=procs):
+                with self.assertRaises(RuntimeError) as ctx:
+                    await client.create_pr(
+                        group_id=1,
+                        title="test",
+                        description="",
+                    )
+            self.assertIn("PR creation failed", str(ctx.exception))
+
 
 class TestIsGhAvailable(unittest.TestCase):
 

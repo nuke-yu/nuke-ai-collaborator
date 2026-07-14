@@ -235,13 +235,10 @@ class GitHubClient(GitClient):
 
         except RuntimeError as e:
             log.error("GitHubClient: PR creation failed for group %d: %s", group_id, e)
-            # Fall back to local PR record
-            from integrations.git import LocalGitClient
-            fallback = LocalGitClient()
-            result = await fallback.create_pr(group_id, title, description, ticket_ids)
-            result["url"] = f"github://failed/{result['pr_id']}"
-            result["error"] = str(e)
-            return result
+            # Fail closed: do NOT silently fall back to LocalGitClient.
+            # The caller must handle the error explicitly. Silent fallback masks
+            # real GitHub failures and presents them as successful PR submissions.
+            raise RuntimeError(f"GitHub PR creation failed: {e}") from e
 
 
 def install_github_client(workspace_path: str | Path | None = None) -> GitHubClient:
