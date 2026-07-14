@@ -391,6 +391,81 @@ class TestCreateTaskAtomicity(unittest.IsolatedAsyncioTestCase):
             mock_rollback.assert_not_called()
             self.assertEqual(result["status"], "dispatched")
 
+    async def test_worker_id_binds_before_dispatch(self):
+        """When worker_id is provided, group is bound to worker before dispatch."""
+        adapter = MagicMock()
+        orch = TaskOrchestrator(adapter=adapter)
+
+        call_order = []
+
+        async def track_bind(group_id, worker_id):
+            call_order.append("bind")
+
+        async def track_dispatch(group_id, bot_id, req, cmd):
+            call_order.append("dispatch")
+
+        with patch.object(orch, "_preflight_check_repo", new_callable=AsyncMock), \
+             patch.object(orch, "_create_group", new_callable=AsyncMock, return_value=42), \
+             patch.object(orch, "_add_bot", new_callable=AsyncMock, return_value=7), \
+             patch.object(orch, "_clone_repo", new_callable=AsyncMock), \
+             patch.object(orch, "_bind_group_to_worker", new_callable=AsyncMock,
+                          side_effect=track_bind) as mock_bind, \
+             patch.object(orch, "_dispatch_agent", new_callable=AsyncMock,
+                          side_effect=track_dispatch):
+
+            await orch.create_task(
+                repo_url="https://github.com/user/repo.git",
+                requirements="test",
+                worker_id="w2",
+            )
+
+        # Bind must happen BEFORE dispatch
+        mock_bind.assert_called_once_with(42, "w2")
+        self.assertEqual(call_order, ["bind", "dispatch"])
+
+    async def test_no_worker_id_skips_bind(self):
+        """When worker_id is None, bind is skipped (uses default modulo routing)."""
+        adapter = MagicMock()
+        orch = TaskOrchestrator(adapter=adapter)
+
+        with patch.object(orch, "_preflight_check_repo", new_callable=AsyncMock), \
+             patch.object(orch, "_create_group", new_callable=AsyncMock, return_value=42), \
+             patch.object(orch, "_add_bot", new_callable=AsyncMock, return_value=7), \
+             patch.object(orch, "_clone_repo", new_callable=AsyncMock), \
+             patch.object(orch, "_bind_group_to_worker", new_callable=AsyncMock) as mock_bind, \
+             patch.object(orch, "_dispatch_agent", new_callable=AsyncMock):
+
+            await orch.create_task(
+                repo_url="https://github.com/user/repo.git",
+                requirements="test",
+                worker_id=None,
+            )
+
+        mock_bind.assert_not_called()
+
+
+class TestBindGroupToWorker(unittest.IsolatedAsyncioTestCase):
+
+    async def test_binds_group_in_db(self):
+        """_bind_group_to_worker updates assigned_worker_id in central DB."""
+        mock_db = AsyncMock()
+        mock_db.execute = AsyncMock()
+        mock_db.commit = AsyncMock()
+
+        mock_wc = AsyncMock()
+        mock_wc.__aenter__ = AsyncMock(return_value=mock_db)
+        mock_wc.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("db.write_connect", return_value=mock_wc):
+            orch = TaskOrchestrator()
+            await orch._bind_group_to_worker(42, "w3")
+
+        # Verify the UPDATE statement was called
+        mock_db.execute.assert_called_once()
+        args = mock_db.execute.call_args[0]
+        self.assertIn("UPDATE groups SET assigned_worker_id", args[0])
+        self.assertEqual(args[1], ("w3", 42))
+
 
 class TestOrphanWorktreeCleanup(unittest.IsolatedAsyncioTestCase):
 

@@ -114,6 +114,14 @@ async def create_task(req: CreateTaskRequest):
         raise HTTPException(503, "Agent orchestrator not initialized")
 
     try:
+        # Pick least-loaded worker BEFORE creating the task.
+        # The worker_id is passed to create_task so the group is bound to this
+        # worker before dispatch, preventing the dispatch-then-reassign race
+        # where eviction cancels the just-started task.
+        worker_id = None
+        if _host:
+            worker_id = _host.pick_worker("least_loaded")
+
         record = await _orchestrator.create_task(
             repo_url=req.repo_url,
             requirements=req.requirements,
@@ -122,13 +130,8 @@ async def create_task(req: CreateTaskRequest):
             github_token=req.github_token,
             model=req.model,
             max_iterations=req.max_iterations,
+            worker_id=worker_id,
         )
-
-        # Assign to least-loaded worker
-        if _host:
-            worker_id = _host.pick_worker("least_loaded")
-            if worker_id:
-                await _host.reassign_group(record["group_id"], worker_id)
 
         return TaskResponse(
             task_id=record["task_id"],

@@ -85,11 +85,18 @@ class TaskOrchestrator:
         github_token: Optional[str] = None,
         model: str = "deepseek-chat",
         max_iterations: int = 100,
+        worker_id: Optional[str] = None,
     ) -> dict:
         """Create and dispatch a new coding agent task.
 
         Atomic: if any step fails, all partially created resources are cleaned up.
         Pre-flight: validates repo_url reachability before creating any resources.
+
+        Args:
+            worker_id: Pre-selected worker for this group. If provided, the group
+                      is bound to this worker BEFORE dispatch, preventing the
+                      dispatch-then-reassign race that cancels the just-started task.
+                      If None, the group uses default modulo routing.
 
         Returns:
             dict with task_id, group_id, status
@@ -113,11 +120,17 @@ class TaskOrchestrator:
             # 3. Clone repo into workspace
             await self._clone_repo(group_id, repo_url, base_branch)
 
-            # 4. Register with progress adapter
+            # 4. Bind group to selected worker BEFORE dispatch.
+            # This prevents the race where dispatch goes to the default-routed worker,
+            # then a subsequent reassign evicts that group (cancelling the just-started task).
+            if worker_id:
+                await self._bind_group_to_worker(group_id, worker_id)
+
+            # 5. Register with progress adapter
             if self._adapter:
                 self._adapter.register_task(group_id, task_id)
 
-            # 5. Dispatch the coding agent
+            # 6. Dispatch the coding agent
             await self._dispatch_agent(group_id, bot_id, requirements, test_command)
 
         except Exception as e:
@@ -269,6 +282,35 @@ class TaskOrchestrator:
                             log.warning("TaskOrchestrator: failed to clean unknown worktree %s: %s", tid, e)
 
         return cleaned
+
+    async def _bind_group_to_worker(self, group_id: int, worker_id: str) -> None:
+        """Persistently bind a group to a specific worker via assigned_worker_id.
+
+        This must happen BEFORE dispatch so the Supervisor routes the START_WORKFLOW
+        frame to the correct worker. Without this, the default modulo routing may
+        send the dispatch to a different worker, and a later reassign would evict
+        (and abort) the just-started task.
+        """
+        from db import write_connect
+
+        async with write_connect() as db:
+            await db.execute(
+                "UPDATE groups SET assigned_worker_id = ? WHERE id = ?",
+                (worker_id, group_id),
+            )
+            await db.commit()
+
+        # Invalidate the supervisor's routing cache so the next route lookup
+        # picks up the new assignment immediately.
+        try:
+            from runtime import supervisor as sup_mod
+            sup = sup_mod.supervisor
+            if sup:
+                sup._routing_cache.pop(group_id, None)
+        except Exception:
+            pass  # best-effort; cache expires in 60s anyway
+
+        log.info("TaskOrchestrator: bound group %d to worker %s", group_id, worker_id)
 
     # ── Resilience: pre-flight + rollback ────────────────────────────
 
