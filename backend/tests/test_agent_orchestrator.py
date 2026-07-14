@@ -173,7 +173,7 @@ class TestDispatchAgent(unittest.IsolatedAsyncioTestCase):
         original_sup = sup_module.supervisor
         sup_module.supervisor = mock_sup
 
-        mock_envelope = MagicMock(return_value={"type": "user_message"})
+        mock_envelope = MagicMock(return_value={"type": "start_workflow"})
         with patch.object(sup_module.ipc.protocol, "envelope", mock_envelope):
             try:
                 await orch._dispatch_agent(
@@ -186,6 +186,9 @@ class TestDispatchAgent(unittest.IsolatedAsyncioTestCase):
                 sup_module.supervisor = original_sup
 
         mock_sup.send_to_worker.assert_called_once()
+        # Verify START_WORKFLOW is used (not USER_MESSAGE)
+        call_args = mock_sup.send_to_worker.call_args
+        self.assertEqual(call_args[0][0], 10)  # group_id
 
 
 class TestSystemPrompt(unittest.TestCase):

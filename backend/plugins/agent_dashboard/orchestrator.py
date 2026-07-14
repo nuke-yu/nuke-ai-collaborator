@@ -344,27 +344,35 @@ class TaskOrchestrator:
         return workspace
 
     async def _dispatch_agent(self, group_id: int, bot_id: int, requirements: str, test_command: str) -> None:
-        """Dispatch the coding agent via the Supervisor → Worker message path."""
+        """Dispatch the coding agent via START_WORKFLOW.
+
+        Uses the CodingAgentOrchestrator (coding_agent_v1) which provides:
+          - State persistence via workflow_store (survives restart)
+          - Crash recovery via resume_workflows() (auto-resume in-flight tasks)
+          - WorkflowPaused events on AI failures (provider_unavailable handling)
+        """
         from runtime import supervisor as sup_mod
         from runtime import ipc
 
-        # Build the trigger message
-        message = f"Please implement the following feature:\n\n{requirements}"
-        if test_command:
-            message += f"\n\nTest command to verify: `{test_command}`"
-
-        # Send as a USER_MESSAGE to the worker via Supervisor
         sup = sup_mod.supervisor
-        if sup:
-            await sup.send_to_worker(
-                group_id,
-                ipc.protocol.envelope(
-                    ipc.protocol.USER_MESSAGE,
-                    group_id=group_id,
-                    member_id=bot_id,
-                    content=message,
-                ),
-            )
+        if not sup:
+            raise RuntimeError("Supervisor not available")
+
+        # Send START_WORKFLOW with the coding_agent_v1 orchestrator
+        body = {
+            "orchestrator_id": "coding_agent_v1",
+            "bot_id": bot_id,
+            "requirements": requirements,
+            "test_command": test_command,
+        }
+        await sup.send_to_worker(
+            group_id,
+            ipc.protocol.envelope(
+                ipc.protocol.START_WORKFLOW,
+                group_id=group_id,
+                body=body,
+            ),
+        )
 
     @staticmethod
     def _resolve_provider(model: str) -> str:

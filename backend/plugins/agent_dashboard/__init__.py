@@ -42,12 +42,17 @@ async def register(host):
     from .progress import ProgressAdapter
     from .stuck_detector import StuckDetector
     from .orchestrator import TaskOrchestrator
+    from .coding_agent_orchestrator import CodingAgentOrchestrator
     from . import websocket as ws_module
     from . import api as api_module
 
     log.info("agent_dashboard: registering plugin...")
 
-    # 1. Create shared components
+    # 1. Register the CodingAgentOrchestrator in the global orchestrator registry
+    from core.orchestration.registry import _register as orch_register
+    orch_register(CodingAgentOrchestrator())
+
+    # 2. Create shared components
     adapter = ProgressAdapter()
     detector = StuckDetector(adapter)
     orchestrator = TaskOrchestrator(adapter=adapter)
