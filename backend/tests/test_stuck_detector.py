@@ -12,7 +12,7 @@ from plugins.agent_dashboard.stuck_detector import StuckDetector, STUCK_TIMEOUT_
 from plugins.agent_dashboard.progress import ProgressAdapter, TaskProgress
 
 
-class TestStuckDetection(unittest.TestCase):
+class TestStuckDetection(unittest.IsolatedAsyncioTestCase):
 
     def _make_adapter_with_task(self, group_id=1, status="running", idle_sec=0):
         """Create adapter with a task in a given state."""
@@ -22,59 +22,59 @@ class TestStuckDetection(unittest.TestCase):
         state.last_event_at = time.time() - idle_sec
         return adapter
 
-    def test_stuck_after_timeout(self):
+    async def test_stuck_after_timeout(self):
         """Task with no events for > STUCK_TIMEOUT_SEC is marked stuck."""
         adapter = self._make_adapter_with_task(idle_sec=STUCK_TIMEOUT_SEC + 10)
         detector = StuckDetector(adapter)
-        detector._check_all()
+        await detector._check_all()
 
         state = adapter._states[1]
         self.assertEqual(state.status, "stuck")
         self.assertIn("卡死检测", state.detail)
 
-    def test_not_stuck_within_timeout(self):
+    async def test_not_stuck_within_timeout(self):
         """Task with recent events is NOT marked stuck."""
         adapter = self._make_adapter_with_task(idle_sec=10)
         detector = StuckDetector(adapter)
-        detector._check_all()
+        await detector._check_all()
 
         state = adapter._states[1]
         self.assertEqual(state.status, "running")
 
-    def test_done_tasks_skipped(self):
+    async def test_done_tasks_skipped(self):
         """Tasks in 'done' status are not checked."""
         adapter = self._make_adapter_with_task(status="done", idle_sec=STUCK_TIMEOUT_SEC + 100)
         detector = StuckDetector(adapter)
-        detector._check_all()
+        await detector._check_all()
 
         state = adapter._states[1]
         self.assertEqual(state.status, "done")  # unchanged
 
-    def test_error_tasks_skipped(self):
+    async def test_error_tasks_skipped(self):
         """Tasks in 'error' status are not checked."""
         adapter = self._make_adapter_with_task(status="error", idle_sec=STUCK_TIMEOUT_SEC + 100)
         detector = StuckDetector(adapter)
-        detector._check_all()
+        await detector._check_all()
 
         state = adapter._states[1]
         self.assertEqual(state.status, "error")  # unchanged
 
-    def test_aborted_tasks_skipped(self):
+    async def test_aborted_tasks_skipped(self):
         adapter = self._make_adapter_with_task(status="aborted", idle_sec=STUCK_TIMEOUT_SEC + 100)
         detector = StuckDetector(adapter)
-        detector._check_all()
+        await detector._check_all()
 
         self.assertEqual(adapter._states[1].status, "aborted")
 
-    def test_already_stuck_tasks_skipped(self):
+    async def test_already_stuck_tasks_skipped(self):
         """Already stuck tasks are not re-flagged."""
         adapter = self._make_adapter_with_task(status="stuck", idle_sec=STUCK_TIMEOUT_SEC + 100)
         detector = StuckDetector(adapter)
-        detector._check_all()
+        await detector._check_all()
 
         self.assertEqual(adapter._states[1].status, "stuck")  # unchanged
 
-    def test_multiple_tasks_independent(self):
+    async def test_multiple_tasks_independent(self):
         """Multiple tasks are checked independently."""
         adapter = ProgressAdapter()
         # Task 1: recent (not stuck)
@@ -85,7 +85,7 @@ class TestStuckDetection(unittest.TestCase):
         s2.last_event_at = time.time() - STUCK_TIMEOUT_SEC - 10
 
         detector = StuckDetector(adapter)
-        detector._check_all()
+        await detector._check_all()
 
         self.assertEqual(adapter._states[1].status, "running")
         self.assertEqual(adapter._states[2].status, "stuck")
@@ -149,3 +149,123 @@ class TestStuckDetectorLoop(unittest.IsolatedAsyncioTestCase):
             await task
         except asyncio.CancelledError:
             pass
+
+
+class TestAutoRetry(unittest.IsolatedAsyncioTestCase):
+
+    async def test_auto_retry_triggers_on_stuck(self):
+        """When orchestrator is provided, stuck task triggers auto-retry."""
+        from unittest.mock import MagicMock, AsyncMock
+        adapter = ProgressAdapter()
+        state = adapter.register_task(1, "task_1")
+        state.last_event_at = time.time() - STUCK_TIMEOUT_SEC - 10
+
+        mock_orch = MagicMock()
+        mock_orch.retry_task = AsyncMock(return_value={"status": "restarted"})
+
+        detector = StuckDetector(adapter, orchestrator=mock_orch, max_auto_retries=3)
+        await detector._check_all()
+
+        self.assertEqual(state.status, "retrying")
+        self.assertIn("自动重试", state.detail)
+        self.assertEqual(detector._retry_counts[1], 1)
+        # Let the background task complete
+        import asyncio
+        await asyncio.sleep(0.01)
+
+    async def test_auto_retry_increments_count(self):
+        """Each stuck detection increments the retry counter."""
+        from unittest.mock import MagicMock, AsyncMock
+        adapter = ProgressAdapter()
+        state = adapter.register_task(1, "task_1")
+        state.last_event_at = time.time() - STUCK_TIMEOUT_SEC - 10
+
+        mock_orch = MagicMock()
+        mock_orch.retry_task = AsyncMock(return_value={"status": "restarted"})
+
+        detector = StuckDetector(adapter, orchestrator=mock_orch, max_auto_retries=3)
+        # Simulate 3 stuck checks
+        await detector._check_all()
+        state.status = "running"  # reset (simulates retry succeeded briefly)
+        state.last_event_at = time.time() - STUCK_TIMEOUT_SEC - 10  # stuck again
+        await detector._check_all()
+        state.status = "running"
+        state.last_event_at = time.time() - STUCK_TIMEOUT_SEC - 10  # stuck again
+        await detector._check_all()
+
+        self.assertEqual(detector._retry_counts[1], 3)
+
+    async def test_auto_retry_gives_up_at_max(self):
+        """When max retries exceeded, marks as stuck_permanently."""
+        from unittest.mock import MagicMock, AsyncMock
+        adapter = ProgressAdapter()
+        state = adapter.register_task(1, "task_1")
+        state.last_event_at = time.time() - STUCK_TIMEOUT_SEC - 10
+
+        mock_orch = MagicMock()
+        mock_orch.retry_task = AsyncMock(return_value={"status": "restarted"})
+
+        detector = StuckDetector(adapter, orchestrator=mock_orch, max_auto_retries=2)
+        detector._retry_counts[1] = 2  # already at max
+
+        await detector._check_all()
+        self.assertEqual(state.status, "stuck_permanently")
+        self.assertIn("永久卡死", state.detail)
+
+    async def test_no_auto_retry_without_orchestrator(self):
+        """Without orchestrator, falls back to manual retry (status=stuck)."""
+        adapter = ProgressAdapter()
+        state = adapter.register_task(1, "task_1")
+        state.last_event_at = time.time() - STUCK_TIMEOUT_SEC - 10
+
+        detector = StuckDetector(adapter)  # no orchestrator
+        await detector._check_all()
+
+        self.assertEqual(state.status, "stuck")
+
+    async def test_no_auto_retry_when_disabled(self):
+        """With max_auto_retries=0, auto-retry is disabled."""
+        from unittest.mock import MagicMock
+        adapter = ProgressAdapter()
+        state = adapter.register_task(1, "task_1")
+        state.last_event_at = time.time() - STUCK_TIMEOUT_SEC - 10
+
+        mock_orch = MagicMock()
+        detector = StuckDetector(adapter, orchestrator=mock_orch, max_auto_retries=0)
+        await detector._check_all()
+
+        self.assertEqual(state.status, "stuck")
+        mock_orch.retry_task.assert_not_called()
+
+
+class TestAutoRetryAsync(unittest.IsolatedAsyncioTestCase):
+
+    async def test_auto_retry_calls_orchestrator(self):
+        """_auto_retry calls orchestrator.retry_task and resets counter on success."""
+        from unittest.mock import MagicMock, AsyncMock
+        adapter = ProgressAdapter()
+        adapter.register_task(1, "task_1")
+
+        mock_orch = MagicMock()
+        mock_orch.retry_task = AsyncMock(return_value={"status": "restarted"})
+
+        detector = StuckDetector(adapter, orchestrator=mock_orch)
+        detector._retry_counts[1] = 2
+
+        await detector._auto_retry(1, "task_1")
+
+        mock_orch.retry_task.assert_called_once_with("task_1")
+        self.assertNotIn(1, detector._retry_counts)  # reset on success
+
+    async def test_auto_retry_handles_failure(self):
+        """_auto_retry logs error but doesn't crash when retry fails."""
+        from unittest.mock import MagicMock, AsyncMock
+        adapter = ProgressAdapter()
+        adapter.register_task(1, "task_1")
+
+        mock_orch = MagicMock()
+        mock_orch.retry_task = AsyncMock(side_effect=RuntimeError("retry failed"))
+
+        detector = StuckDetector(adapter, orchestrator=mock_orch)
+        # Should not raise
+        await detector._auto_retry(1, "task_1")

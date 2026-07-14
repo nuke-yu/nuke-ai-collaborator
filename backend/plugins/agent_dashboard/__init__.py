@@ -54,8 +54,8 @@ async def register(host):
 
     # 2. Create shared components
     adapter = ProgressAdapter()
-    detector = StuckDetector(adapter)
     orchestrator = TaskOrchestrator(adapter=adapter)
+    detector = StuckDetector(adapter, orchestrator=orchestrator)
 
     # 2. Inject dependencies into sub-modules
     ws_module.set_adapter(adapter)
