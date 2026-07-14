@@ -38,62 +38,37 @@ class TestBegin(unittest.TestCase):
 
 class TestObserve(unittest.TestCase):
 
-    def test_observe_done_keyword(self):
-        """observe() marks done only with explicit completion signal."""
+    def test_observe_signal_stage_done(self):
+        """observe() marks done only with signal_stage_done."""
         orch = CodingAgentOrchestrator()
         bot = {"id": 5, "name": "Agent"}
         orch.begin(1, {"bots": [bot], "requirements": "test", "test_command": ""})
 
-        step = orch.observe(1, 5, "All done! [[AGENT_DONE]]")
+        step = orch.observe(1, 5, "All done!",
+                            signals=[{"name": "signal_stage_done", "arguments": {"reason": "completed"}}])
         self.assertTrue(step.done)
 
-    def test_observe_no_signal_keeps_active(self):
-        """Without completion signal, workflow stays active."""
+    def test_observe_no_signal_pauses(self):
+        """Without completion signal, workflow publishes WorkflowPaused."""
         orch = CodingAgentOrchestrator()
         bot = {"id": 5, "name": "Agent"}
         orch.begin(1, {"bots": [bot], "requirements": "test", "test_command": ""})
 
         step = orch.observe(1, 5, "I've written some code but haven't tested yet.")
         self.assertFalse(step.done)
-
-    def test_observe_failure_signal_keeps_active(self):
-        """Failure signals keep workflow active for retry."""
-        orch = CodingAgentOrchestrator()
-        bot = {"id": 5, "name": "Agent"}
-        orch.begin(1, {"bots": [bot], "requirements": "test", "test_command": ""})
-
-        step = orch.observe(1, 5, "测试失败，无法修复这个 bug。[[AGENT_FAIL]]")
-        self.assertFalse(step.done)
-
-    def test_observe_signal_stage_done_tool(self):
-        """signal_stage_done tool call marks done."""
-        orch = CodingAgentOrchestrator()
-        bot = {"id": 5, "name": "Agent"}
-        orch.begin(1, {"bots": [bot], "requirements": "test", "test_command": ""})
-
-        step = orch.observe(1, 5, "Finished implementation.",
-                            signals=[{"tool": "signal_stage_done", "reason": "done"}])
-        self.assertTrue(step.done)
+        self.assertIsNotNone(step.workflow_paused)
+        self.assertEqual(step.workflow_paused.reason, "completion_signal_missing")
 
     def test_observe_signal_rework_keeps_active(self):
-        """signal_rework tool call keeps workflow active."""
+        """signal_rework keeps workflow active for retry."""
         orch = CodingAgentOrchestrator()
         bot = {"id": 5, "name": "Agent"}
         orch.begin(1, {"bots": [bot], "requirements": "test", "test_command": ""})
 
         step = orch.observe(1, 5, "Need to rework.",
-                            signals=[{"tool": "signal_rework", "reason": "tests failing"}])
+                            signals=[{"name": "signal_rework", "arguments": {"reason": "tests failing"}}])
         self.assertFalse(step.done)
-
-    def test_observe_error_patterns(self):
-        """Error patterns in response keep workflow active."""
-        orch = CodingAgentOrchestrator()
-        bot = {"id": 5, "name": "Agent"}
-        orch.begin(1, {"bots": [bot], "requirements": "test", "test_command": ""})
-
-        step = orch.observe(1, 5, "PR 创建失败，请检查权限。")
-        self.assertFalse(step.done)
-
+        self.assertIsNone(step.workflow_paused)
 
 class TestParseSpec(unittest.TestCase):
 
@@ -143,7 +118,8 @@ class TestPersistence(unittest.TestCase):
         orch = CodingAgentOrchestrator()
         bot = {"id": 5, "name": "Agent"}
         orch.begin(1, {"bots": [bot], "requirements": "test", "test_command": ""})
-        orch.observe(1, 5, "[[AGENT_DONE]]")
+        orch.observe(1, 5, "Done",
+                     signals=[{"name": "signal_stage_done", "arguments": {"reason": "completed"}}])
 
         units = orch.resume_units(1)
         self.assertEqual(len(units), 0)

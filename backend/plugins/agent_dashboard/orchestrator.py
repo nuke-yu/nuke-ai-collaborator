@@ -52,12 +52,18 @@ When running tests:
 3. If tests fail → read the error output, identify the failing test, fix the code, re-run
 4. Repeat until all tests pass or you've tried 5 times
 
-## Completion
+## Completion (CRITICAL)
 
-When all tests pass and code is committed:
-1. Push your branch
-2. Create a PR with: title, description of changes, list of modified files
-3. Report the PR URL as your final output
+You MUST call one of these tools to signal completion:
+
+**Success path** (all tests pass, PR created):
+- Call `signal_stage_done(reason="Brief description of what was implemented and PR URL")`
+
+**Failure path** (cannot complete after 3-5 attempts):
+- Call `signal_rework(reason="Detailed description of what failed and why you cannot fix it")`
+
+Do NOT just describe completion in text. The workflow system requires these explicit tool calls.
+Without them, the task will be marked as incomplete and may be retried automatically.
 """
 
 

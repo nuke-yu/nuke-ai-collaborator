@@ -208,18 +208,11 @@ class ProgressAdapter:
         state.detail = f"{tool} 完成 ({duration:.1f}s)"
 
     def _handle_stream_end(self, state: TaskProgress, payload: dict) -> None:
-        # stream_end from the bot means the run is finishing
+        # stream_end only indicates a model output finished, NOT task completion.
+        # Task completion is determined solely by WorkflowUpdate(done=True).
+        # Do NOT use text heuristics to infer completion.
         if state.phase not in ("done", "error", "stuck"):
-            # Check if this looks like a final completion
-            preview = payload.get("preview", "")
-            if state.phase == "creating_pr":
-                self._advance_phase(state, "done")
-                state.status = "done"
-            elif "完成" in preview or "done" in preview.lower() or "PR" in preview:
-                self._advance_phase(state, "done")
-                state.status = "done"
-            else:
-                state.detail = "Bot 回复完成"
+            state.detail = "Bot 回复完成"
 
     def _handle_stream_aborted(self, state: TaskProgress, payload: dict) -> None:
         state.status = "aborted"

@@ -104,12 +104,14 @@ class TestPhaseDetection:
 
 class TestStatusTransitions:
 
-    def test_stream_end_completes_task_from_creating_pr(self, active_adapter):
+    def test_stream_end_does_not_complete_task(self, active_adapter):
+        """stream_end only indicates model output finished, NOT task completion."""
         active_adapter.on_event(1, {"type": "tool_call", "tool_name": "create_pr", "tool_input": {}})
         active_adapter.on_event(1, {"type": "stream_end", "preview": "done"})
         state = active_adapter._states[1]
-        assert state.phase == "done"
-        assert state.status == "done"
+        # Task stays in creating_pr phase - only workflow_update(done=True) completes it
+        assert state.phase == "creating_pr"
+        assert state.status == "running"
 
     def test_stream_aborted_sets_aborted(self, active_adapter):
         active_adapter.on_event(1, {"type": "stream_aborted"})

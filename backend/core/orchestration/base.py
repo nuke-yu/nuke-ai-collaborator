@@ -40,6 +40,8 @@ class OrchestratorStep:
     confirm_gate: dict | None = None                    # 人确认门：runner 广播一张内联确认卡片并挂起，
                                                         # 等用户 confirm() 才推进。形如
                                                         # {gate_id, label, bot_id, stage_name}
+    workflow_paused: object | None = None               # WorkflowPaused event to publish
+                                                        # (e.g., completion_signal_missing)
 
 
 class Orchestrator(ABC):

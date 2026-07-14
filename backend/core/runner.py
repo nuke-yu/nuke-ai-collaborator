@@ -112,6 +112,10 @@ async def apply_step(group_id: int, orch, step) -> None:
         reason = "gate" if step.confirm_gate else "done"
         bg.spawn(bus.publish(WorkflowPaused(group_id=group_id, reason=reason)))
 
+    # Handle explicit workflow_paused event (e.g., completion_signal_missing)
+    if step.workflow_paused:
+        bg.spawn(bus.publish(step.workflow_paused))
+
     for unit in step.next_units:
         # DFT-025/027: hold a reference (no GC) + register to the group so a
         # user abort cancels the whole workflow chain, not just the dispatch.

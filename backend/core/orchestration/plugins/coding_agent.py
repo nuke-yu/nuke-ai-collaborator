@@ -12,19 +12,24 @@ Lifecycle:
 Unlike the BA→Dev→QA pipeline:
   - No human confirmation gates (fully autonomous)
   - No stage transitions (single stage)
-  - Completion requires signal_stage_done tool call or done keyword
+  - Completion requires signal_stage_done or signal_rework tool call
+  - No completion signal → WorkflowPaused(reason="completion_signal_missing")
 """
 import datetime
 import logging
-import re
 
 from core.orchestration.base import Orchestrator, OrchestratorStep, WorkUnit
+from core.orchestration.signals import (
+    WorkflowSignal,
+    SIGNAL_STAGE_DONE,
+    SIGNAL_REWORK,
+    is_signal_done,
+    is_signal_rework,
+    has_completion_signal,
+)
+from bus.events import WorkflowPaused
 
 log = logging.getLogger(__name__)
-
-# Completion signals: tool call signal_stage_done or text sentinel
-_DONE_KEYWORDS = ("[[AGENT_DONE]]", "[[CODING_DONE]]")
-_FAIL_KEYWORDS = ("[[AGENT_FAIL]]", "[[CODING_FAIL]]")
 
 
 class CodingAgentOrchestrator(Orchestrator):
@@ -92,75 +97,45 @@ class CodingAgentOrchestrator(Orchestrator):
 
     def observe(self, group_id: int, bot_id: int, response: str,
                 signals: list[dict] | None = None) -> OrchestratorStep:
-        """Check if the bot's run completed successfully.
+        """Check if the bot's run completed via structured completion signals.
 
-        Completion requires one of:
-          1. signal_stage_done tool call (in signals list)
-          2. [[AGENT_DONE]] or [[CODING_DONE]] sentinel in response text
-          3. Explicit success indicators in the response
+        Completion protocol:
+          - signal_stage_done → workflow done
+          - signal_rework → workflow stays active (for retry)
+          - No completion signal → WorkflowPaused(reason="completion_signal_missing")
 
-        If the bot reports failure (signal_rework, [[AGENT_FAIL]], or
-        error indicators), the workflow is NOT marked done — it stays
-        active for retry.
+        Text heuristics are NOT used. Only WorkflowSignal schema is authoritative.
         """
         s = self._state.get(group_id)
         if not s or s.get("done"):
             return OrchestratorStep()
 
-        # Check for failure signals first
-        if self._has_failure_signal(response, signals):
-            log.info("coding_agent_v1: group %d reported failure, keeping active", group_id)
-            return OrchestratorStep(broadcast_state=True)
-
-        # Check for success signals
-        if self._has_success_signal(response, signals):
-            s["done"] = True
-            self.end(group_id)
-            return OrchestratorStep(done=True, broadcast_state=True)
-
-        # No clear signal — keep workflow active (don't auto-complete)
-        return OrchestratorStep()
-
-    def _has_success_signal(self, response: str, signals: list[dict] | None) -> bool:
-        """Check for explicit completion signals."""
-        # Tool call: signal_stage_done
+        # Check for completion signals (using unified WorkflowSignal schema)
         if signals:
             for sig in signals:
-                if sig.get("tool") == "signal_stage_done":
-                    return True
+                if is_signal_done(sig):
+                    s["done"] = True
+                    self.end(group_id)
+                    return OrchestratorStep(done=True, broadcast_state=True)
+                if is_signal_rework(sig):
+                    log.info("coding_agent_v1: group %d reported rework needed", group_id)
+                    return OrchestratorStep(broadcast_state=True)
 
-        # Text sentinel
-        response_upper = response.upper()
-        for kw in _DONE_KEYWORDS:
-            if kw.replace("[", "").replace("]", "") in response_upper:
-                return True
-
-        return False
-
-    def _has_failure_signal(self, response: str, signals: list[dict] | None) -> bool:
-        """Check for explicit failure signals."""
-        # Tool call: signal_rework
-        if signals:
-            for sig in signals:
-                if sig.get("tool") == "signal_rework":
-                    return True
-
-        # Text sentinel
-        response_upper = response.upper()
-        for kw in _FAIL_KEYWORDS:
-            if kw.replace("[", "").replace("]", "") in response_upper:
-                return True
-
-        # Error indicators in response
-        error_patterns = [
-            r"测试失败", r"test.*fail", r"error.*cannot.*fix",
-            r"无法修复", r"PR.*创建失败", r"PR.*creation.*failed",
-        ]
-        for pattern in error_patterns:
-            if re.search(pattern, response, re.IGNORECASE):
-                return True
-
-        return False
+        # No completion signal — this is an incomplete run
+        # Publish WorkflowPaused to signal the missing completion signal
+        log.warning(
+            "coding_agent_v1: group %d completed without completion signal, "
+            "publishing WorkflowPaused",
+            group_id,
+        )
+        return OrchestratorStep(
+            broadcast_state=True,
+            workflow_paused=WorkflowPaused(
+                group_id=group_id,
+                reason="completion_signal_missing",
+                details="Bot run completed without calling signal_stage_done or signal_rework",
+            ),
+        )
 
     def end(self, group_id: int) -> None:
         self._state.pop(group_id, None)
