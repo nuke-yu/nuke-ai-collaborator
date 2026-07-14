@@ -88,28 +88,46 @@ class TaskOrchestrator:
     ) -> dict:
         """Create and dispatch a new coding agent task.
 
+        Atomic: if any step fails, all partially created resources are cleaned up.
+        Pre-flight: validates repo_url reachability before creating any resources.
+
         Returns:
             dict with task_id, group_id, status
+
+        Raises:
+            RuntimeError: if pre-flight check fails or resource creation fails
         """
         task_id = f"agent_{int(time.time())}_{len(self._tasks)}"
 
-        # 1. Create group
-        group_id = await self._create_group(task_id)
+        # Pre-flight: validate repo URL is reachable before creating any resources
+        await self._preflight_check_repo(repo_url, base_branch)
 
-        # 2. Add coding agent bot
-        bot_id = await self._add_bot(group_id, model, max_iterations)
+        group_id = None
+        try:
+            # 1. Create group
+            group_id = await self._create_group(task_id)
 
-        # 3. Clone repo into workspace
-        workspace_path = await self._clone_repo(group_id, repo_url, base_branch)
+            # 2. Add coding agent bot
+            bot_id = await self._add_bot(group_id, model, max_iterations)
 
-        # 4. Register with progress adapter
-        if self._adapter:
-            self._adapter.register_task(group_id, task_id)
+            # 3. Clone repo into workspace
+            await self._clone_repo(group_id, repo_url, base_branch)
 
-        # 5. Dispatch the coding agent
-        await self._dispatch_agent(group_id, bot_id, requirements, test_command)
+            # 4. Register with progress adapter
+            if self._adapter:
+                self._adapter.register_task(group_id, task_id)
 
-        # 6. Record task
+            # 5. Dispatch the coding agent
+            await self._dispatch_agent(group_id, bot_id, requirements, test_command)
+
+        except Exception as e:
+            # Compensate: clean up any partially created resources
+            log.error("TaskOrchestrator: create_task failed at step, rolling back group %s: %s",
+                       group_id, e)
+            await self._rollback_group(group_id)
+            raise RuntimeError(f"Task creation failed: {e}") from e
+
+        # 6. Record task (only after all steps succeed)
         record = {
             "task_id": task_id,
             "group_id": group_id,
@@ -192,6 +210,74 @@ class TaskOrchestrator:
 
         record["status"] = "aborted"
         return record
+
+    # ── Resilience: pre-flight + rollback ────────────────────────────
+
+    async def _preflight_check_repo(self, repo_url: str, branch: str = "") -> None:
+        """Validate repo URL is reachable before creating any resources.
+
+        Uses `git ls-remote` which is lightweight (no clone) and fails fast
+        on invalid URLs, auth issues, or unreachable hosts.
+        """
+        import asyncio
+
+        args = ["git", "ls-remote", "--exit-code", repo_url]
+        if branch:
+            args.extend(["--heads", branch])
+
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
+            if proc.returncode != 0:
+                err = stderr.decode(errors="replace").strip()
+                raise RuntimeError(
+                    f"Repository not reachable or branch '{branch}' not found: {err}"
+                )
+        except asyncio.TimeoutError:
+            raise RuntimeError(f"Repository reachability check timed out: {repo_url}")
+
+    async def _rollback_group(self, group_id: Optional[int]) -> None:
+        """Clean up a partially created group: remove DB rows + workspace dir.
+
+        Best-effort: logs errors but doesn't raise (we're already in an exception handler).
+        """
+        if group_id is None:
+            return
+
+        # 1. Remove workspace directory
+        try:
+            from workspace import layout as ws_layout
+            group_dir = ws_layout.group_dir(group_id)
+            if group_dir.exists():
+                import shutil
+                shutil.rmtree(group_dir, ignore_errors=True)
+                log.info("TaskOrchestrator: rolled back workspace %s", group_dir)
+        except Exception as e:
+            log.warning("TaskOrchestrator: workspace rollback failed for group %d: %s", group_id, e)
+
+        # 2. Remove group DB file
+        try:
+            from runtime.dbpaths import group_db_path
+            db_path = group_db_path(group_id)
+            if Path(db_path).exists():
+                Path(db_path).unlink()
+        except Exception as e:
+            log.warning("TaskOrchestrator: DB file rollback failed for group %d: %s", group_id, e)
+
+        # 3. Remove members and group row from central DB
+        try:
+            from db import write_connect
+            async with write_connect() as db:
+                await db.execute("DELETE FROM members WHERE group_id = ?", (group_id,))
+                await db.execute("DELETE FROM groups WHERE id = ?", (group_id,))
+                await db.commit()
+            log.info("TaskOrchestrator: rolled back DB for group %d", group_id)
+        except Exception as e:
+            log.warning("TaskOrchestrator: DB rollback failed for group %d: %s", group_id, e)
 
     # ── Internal helpers ──────────────────────────────────────────────
 
