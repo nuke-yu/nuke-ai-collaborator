@@ -17,6 +17,7 @@ The coding agent system prompt drives autonomous behavior:
 import asyncio
 import logging
 import time
+import uuid
 from pathlib import Path
 from typing import Optional
 
@@ -104,7 +105,7 @@ class TaskOrchestrator:
         Raises:
             RuntimeError: if pre-flight check fails or resource creation fails
         """
-        task_id = f"agent_{int(time.time())}_{len(self._tasks)}"
+        task_id = f"agent_{uuid.uuid4().hex[:12]}"
 
         # Pre-flight: validate repo URL is reachable before creating any resources
         await self._preflight_check_repo(repo_url, base_branch)

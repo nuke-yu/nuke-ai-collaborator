@@ -52,7 +52,9 @@ class TestCreateTask(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["group_id"], 42)
         self.assertEqual(result["bot_id"], 7)
         self.assertEqual(result["status"], "dispatched")
-        self.assertIn("agent_", result["task_id"])
+        self.assertTrue(result["task_id"].startswith("agent_"))
+        # UUID-based: agent_ + 12 hex chars
+        self.assertEqual(len(result["task_id"]), len("agent_") + 12)
         mock_preflight.assert_called_once_with("https://github.com/user/repo.git", "main")
         mock_group.assert_called_once()
         mock_bot.assert_called_once_with(42, "deepseek-chat", 100)
@@ -482,6 +484,26 @@ class TestCreateTaskAtomicity(unittest.IsolatedAsyncioTestCase):
             )
 
         mock_bind.assert_not_called()
+
+    async def test_task_ids_no_collision_under_concurrency(self):
+        """Concurrent create_task calls produce unique task IDs (UUID-based)."""
+        orch = TaskOrchestrator()
+        ids = set()
+
+        for _ in range(50):
+            with patch.object(orch, "_preflight_check_repo", new_callable=AsyncMock), \
+                 patch.object(orch, "_create_group", new_callable=AsyncMock, return_value=1), \
+                 patch.object(orch, "_add_bot", new_callable=AsyncMock, return_value=1), \
+                 patch.object(orch, "_clone_repo", new_callable=AsyncMock), \
+                 patch.object(orch, "_dispatch_agent", new_callable=AsyncMock):
+
+                result = await orch.create_task(
+                    repo_url="https://github.com/user/repo.git",
+                    requirements="test",
+                )
+                ids.add(result["task_id"])
+
+        self.assertEqual(len(ids), 50)  # All unique
 
 
 class TestBindGroupToWorker(unittest.IsolatedAsyncioTestCase):
