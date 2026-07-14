@@ -268,6 +268,13 @@ class Worker:
                     bg.abort_group(gid)
                 return
 
+            if t == ipc.protocol.ABORT_REQUEST:
+                # P0-2: Abort with ACK protocol
+                request_id = msg.get("request_id", "")
+                mode = msg.get("mode", "abort")
+                await self._handle_abort_request(gid, request_id, mode, tid)
+                return
+
             if t == ipc.protocol.RELEASE_LEASE:
                 from runtime.lifecycle import manager as lifecycle
                 await lifecycle.evict(gid)
@@ -332,7 +339,92 @@ class Worker:
                 else:
                     log.debug("worker %s: unhandled downstream type=%s", self.worker_id, t)
 
+    async def _handle_abort_request(self, gid: int, request_id: str, mode: str, tid: str) -> None:
+        """P0-2: Handle ABORT_REQUEST with ACK protocol.
 
+        Steps:
+          1. Cancel the group's tasks via bg.abort_group()
+          2. Wait for cancelled tasks to complete cleanup (gather with return_exceptions)
+          3. Send ABORT_ACK back to Supervisor with result
+
+        Args:
+            gid: Group ID
+            request_id: Request ID for tracking
+            mode: "abort" or "retry"
+            tid: Trace ID for logging
+        """
+        cancelled_count = 0
+        cleanup_status = "success"
+        error = None
+
+        try:
+            # Step 1: Cancel tasks
+            if self._on_abort:
+                self._on_abort(gid)
+            else:
+                cancelled_count = bg.abort_group(gid)
+
+            log.info(
+                "worker %s: abort_request group=%d request_id=%s cancelled=%d",
+                self.worker_id, gid, request_id, cancelled_count,
+            )
+
+            # Step 2: Wait for cancelled tasks to complete cleanup
+            # bg.abort_group() cancels tasks, but we need to wait for their finally blocks
+            # to run (worktree cleanup, etc.)
+            tasks = bg._group_tasks.get(gid, set())
+            if tasks:
+                # Wait up to 5 seconds for cleanup to complete
+                try:
+                    await asyncio.wait_for(
+                        asyncio.gather(*tasks, return_exceptions=True),
+                        timeout=5.0,
+                    )
+                except asyncio.TimeoutError:
+                    log.warning(
+                        "worker %s: abort_request cleanup timeout for group %d",
+                        self.worker_id, gid,
+                    )
+                    cleanup_status = "partial"
+
+            # Step 3: Send ACK
+            await ipc.send_msg(
+                self._writer,
+                ipc.protocol.envelope(
+                    ipc.protocol.ABORT_ACK,
+                    group_id=gid,
+                    trace_id=tid,
+                    request_id=request_id,
+                    cancelled_count=cancelled_count,
+                    cleanup_status=cleanup_status,
+                    error=error,
+                ),
+            )
+
+        except Exception as e:
+            # Fail closed: send ACK with error status
+            log.exception(
+                "worker %s: abort_request failed for group %d: %s",
+                self.worker_id, gid, e,
+            )
+            try:
+                await ipc.send_msg(
+                    self._writer,
+                    ipc.protocol.envelope(
+                        ipc.protocol.ABORT_ACK,
+                        group_id=gid,
+                        trace_id=tid,
+                        request_id=request_id,
+                        cancelled_count=0,
+                        cleanup_status="failed",
+                        error=str(e),
+                    ),
+                )
+            except Exception as send_err:
+                log.error(
+                    "worker %s: failed to send ABORT_ACK for group %d: %s",
+                    self.worker_id, gid, send_err,
+                )
 
     async def _default_dispatch(self, msg: dict) -> None:
         raise NotImplementedError(

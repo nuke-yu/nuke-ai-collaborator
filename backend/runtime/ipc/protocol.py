@@ -5,6 +5,7 @@ from typing import Any, Dict, Optional, List
 # ── 下行 (Supervisor → Worker) ────────────────────────────────────────────
 USER_MESSAGE = "user_message"            # 用户消息
 ABORT = "abort"                          # 中止该群在跑任务
+ABORT_REQUEST = "abort_request"          # P0-2: Abort with ACK protocol (request_id, group_id, mode)
 PERMISSION_RESPONSE = "permission_response"  # 权限审批回复
 CONFIRM = "confirm"                      # 人在工作流确认门点了「确认」
 START_WORKFLOW = "start_workflow"        # 启动 RD 人确认流水线
@@ -15,7 +16,7 @@ RELEASE_LEASE = "release_lease"          # CELL-18: Request worker to release gr
 QUERY = "query"                          # 读 group 域数据，worker 查群库后经 bus 回 query_result
 MUTATE = "mutate"                        # 写 group 域数据（反应/置顶/编辑/撤回），worker 写群库并广播更新
 
-DOWNSTREAM = frozenset({USER_MESSAGE, ABORT, PERMISSION_RESPONSE, CONFIRM,
+DOWNSTREAM = frozenset({USER_MESSAGE, ABORT, ABORT_REQUEST, PERMISSION_RESPONSE, CONFIRM,
                         START_WORKFLOW, WORKFLOW_NEXT, WORKFLOW_END,
                         WAKE_TRIGGER, RELEASE_LEASE, QUERY, MUTATE})
 
@@ -24,8 +25,9 @@ BROADCAST = "broadcast"                  # 包裹任一 bus 事件，供 Supervi
 UNREAD_DELTA = "unread_delta"            # 未读增量（Supervisor 落中心库，§10.1/3）
 STATS_REPORT = "stats_report"            # 可观测性聚合（DFT-057 跨 worker）
 LEASE_RELEASED = "lease_released"        # CELL-18: Worker ACK that group is closed
+ABORT_ACK = "abort_ack"                  # P0-2: Worker ACK for abort_request (request_id, cancelled_count, cleanup_status, error)
 
-UPSTREAM = frozenset({BROADCAST, UNREAD_DELTA, STATS_REPORT, LEASE_RELEASED})
+UPSTREAM = frozenset({BROADCAST, UNREAD_DELTA, STATS_REPORT, LEASE_RELEASED, ABORT_ACK})
 
 # ── MCP collector 总线（跨群组单例进程，经 Supervisor 作 bus 中继）────────────
 MCP_COLLECTOR_ID = "mcp-collector"       # collector 连接的 well-known worker_id
@@ -129,6 +131,29 @@ class UserMessageFrame(BaseFrame):
 @dataclass(eq=False)
 class AbortFrame(BaseFrame):
     pass
+
+@register_frame_type(ABORT_REQUEST)
+@dataclass(eq=False)
+class AbortRequestFrame(BaseFrame):
+    """P0-2: Abort request with ACK protocol.
+
+    Supervisor sends this to Worker, Worker must respond with ABORT_ACK
+    after cancelling tasks and completing cleanup.
+    """
+    request_id: str = ""
+    mode: str = "abort"  # "abort" or "retry"
+
+@register_frame_type(ABORT_ACK)
+@dataclass(eq=False)
+class AbortAckFrame(BaseFrame):
+    """P0-2: Worker ACK for abort_request.
+
+    Worker sends this after cancelling tasks and completing cleanup.
+    """
+    request_id: str = ""
+    cancelled_count: int = 0
+    cleanup_status: str = "success"  # "success", "partial", "failed"
+    error: Optional[str] = None
 
 @register_frame_type(PERMISSION_RESPONSE)
 @dataclass(eq=False)

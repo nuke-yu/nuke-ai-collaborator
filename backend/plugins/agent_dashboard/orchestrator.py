@@ -170,11 +170,13 @@ class TaskOrchestrator:
         return record
 
     async def retry_task(self, task_id: str) -> dict:
-        """Retry a stuck/failed task: abort via IPC → wait → re-dispatch.
+        """Retry a stuck/failed task: abort via IPC ACK → re-dispatch.
 
-        R2-3: Worktree cleanup is NOT done here. The Worker's _cleanup_finally()
-        handles worktree promotion/removal when the task is cancelled. Cleaning
-        from the Supervisor would race with the Worker's finally block.
+        P0-2: Uses ABORT_REQUEST/ABORT_ACK protocol. Only re-dispatches after
+        receiving successful ACK from Worker. Fail closed on timeout/error.
+
+        Worktree cleanup is handled by Worker's _cleanup_finally() when tasks
+        are cancelled.
         """
         record = self._tasks.get(task_id)
         if not record:
@@ -182,19 +184,15 @@ class TaskOrchestrator:
 
         group_id = record["group_id"]
 
-        # 1. Abort via IPC to Worker process
-        await self._send_abort(group_id)
+        # 1. Abort via IPC ACK protocol (raises on timeout/error - fail closed)
+        ack = await self._send_abort(group_id, mode="retry")
 
-        # 2. Wait for Worker to process the abort and run its cleanup.
-        # The Worker's _cleanup_finally() handles worktree promotion/removal.
-        await asyncio.sleep(2.0)
-
-        # 3. Reset progress
+        # 2. Reset progress (only after successful ACK)
         if self._adapter:
             self._adapter.unregister_task(group_id)
             self._adapter.register_task(group_id, task_id)
 
-        # 4. Re-dispatch
+        # 3. Re-dispatch (only after successful ACK)
         await self._dispatch_agent(
             group_id,
             record["bot_id"],
@@ -207,17 +205,24 @@ class TaskOrchestrator:
         return record
 
     async def abort_task(self, task_id: str) -> dict:
-        """Abort a task via IPC. Worktree cleanup handled by Worker."""
+        """Abort a task via IPC ACK protocol.
+
+        P0-2: Uses ABORT_REQUEST/ABORT_ACK protocol. Only writes terminal state
+        after receiving successful ACK from Worker. Fail closed on timeout/error.
+
+        Worktree cleanup is handled by Worker's _cleanup_finally() when tasks
+        are cancelled.
+        """
         record = self._tasks.get(task_id)
         if not record:
             raise ValueError(f"Task {task_id} not found")
 
         group_id = record["group_id"]
 
-        # Abort via IPC to Worker process. Worker's _cleanup_finally() handles
-        # worktree cleanup — don't do it here to avoid races.
-        await self._send_abort(group_id)
+        # 1. Abort via IPC ACK protocol (raises on timeout/error - fail closed)
+        ack = await self._send_abort(group_id, mode="abort")
 
+        # 2. Write terminal state (only after successful ACK)
         if self._adapter:
             self._adapter.unregister_task(group_id)
 
@@ -263,31 +268,47 @@ class TaskOrchestrator:
 
     # ── Cross-process abort + worktree cleanup ───────────────────────
 
-    async def _send_abort(self, group_id: int) -> None:
-        """Send ABORT IPC frame to the Worker process owning this group.
+    async def _send_abort(self, group_id: int, mode: str = "abort", timeout: float = 10.0) -> dict:
+        """P0-2: Send ABORT_REQUEST and wait for ABORT_ACK from Worker.
 
-        Unlike calling bg.abort_group() directly (which only works in the same
-        process), this sends the abort signal across the IPC boundary to the
-        Worker where the actual asyncio tasks are running.
+        Unlike the old fire-and-forget ABORT, this uses the ACK protocol:
+          1. Send ABORT_REQUEST via Supervisor.request_abort()
+          2. Wait for Worker to cancel tasks and complete cleanup
+          3. Receive ABORT_ACK with result
+
+        Args:
+            group_id: Group to abort
+            mode: "abort" or "retry"
+            timeout: Seconds to wait for ACK (fail closed on timeout)
+
+        Returns:
+            ABORT_ACK dict with cancelled_count, cleanup_status, error
+
+        Raises:
+            TimeoutError: If Worker doesn't respond within timeout
+            RuntimeError: If Worker disconnected or send fails
         """
-        try:
-            from runtime import supervisor as sup_mod
-            from runtime import ipc
+        from runtime import supervisor as sup_mod
 
-            sup = sup_mod.supervisor
-            if sup:
-                await sup.send_to_worker(
-                    group_id,
-                    ipc.protocol.envelope(
-                        ipc.protocol.ABORT,
-                        group_id=group_id,
-                    ),
-                )
-                log.info("TaskOrchestrator: sent ABORT IPC for group %d", group_id)
-        except Exception as e:
-            log.warning("TaskOrchestrator: failed to send ABORT IPC for group %d: %s", group_id, e)
-        except Exception as e:
-            log.warning("TaskOrchestrator: worktree cleanup failed for group %d: %s", group_id, e)
+        sup = sup_mod.supervisor
+        if not sup:
+            raise RuntimeError("Supervisor not available")
+
+        ack = await sup.request_abort(group_id, mode=mode, timeout=timeout)
+
+        # Check ACK status
+        cleanup_status = ack.get("cleanup_status", "unknown")
+        if cleanup_status == "failed":
+            error = ack.get("error", "Unknown error")
+            raise RuntimeError(f"Worker cleanup failed for group {group_id}: {error}")
+
+        log.info(
+            "TaskOrchestrator: abort ACK received for group %d: cancelled=%d status=%s",
+            group_id,
+            ack.get("cancelled_count", 0),
+            cleanup_status,
+        )
+        return ack
 
     # ── Resilience: pre-flight + rollback ────────────────────────────
 

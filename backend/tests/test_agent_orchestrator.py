@@ -99,7 +99,7 @@ class TestRetryTask(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result["status"], "restarted")
         self.assertIn("restarted_at", result)
-        mock_abort.assert_called_once_with(10)
+        mock_abort.assert_called_once_with(10, mode="retry")
         mock_dispatch.assert_called_once_with(10, 5, "Add feature", "pytest")
         adapter.unregister_task.assert_called_once_with(10)
         adapter.register_task.assert_called_once_with(10, "task_1")
@@ -128,7 +128,7 @@ class TestAbortTask(unittest.IsolatedAsyncioTestCase):
             result = await orch.abort_task("task_1")
 
         self.assertEqual(result["status"], "aborted")
-        mock_abort.assert_called_once_with(10)
+        mock_abort.assert_called_once_with(10, mode="abort")
         adapter.unregister_task.assert_called_once_with(10)
 
     async def test_abort_unknown_task_raises(self):
@@ -140,36 +140,42 @@ class TestAbortTask(unittest.IsolatedAsyncioTestCase):
 class TestSendAbort(unittest.IsolatedAsyncioTestCase):
 
     async def test_send_abort_via_ipc(self):
-        """_send_abort sends ABORT frame to Worker via Supervisor."""
+        """_send_abort calls Supervisor.request_abort() and returns ACK."""
         mock_sup = MagicMock()
-        mock_sup.send_to_worker = AsyncMock()
+        mock_sup.request_abort = AsyncMock(return_value={
+            "cancelled_count": 2,
+            "cleanup_status": "success",
+            "error": None,
+        })
 
         from runtime import supervisor as sup_module
         original_sup = sup_module.supervisor
         sup_module.supervisor = mock_sup
 
-        mock_envelope = MagicMock(return_value={"type": "abort"})
-        with patch.object(sup_module.ipc.protocol, "envelope", mock_envelope):
-            try:
-                orch = TaskOrchestrator()
-                await orch._send_abort(42)
-            finally:
-                sup_module.supervisor = original_sup
+        try:
+            orch = TaskOrchestrator()
+            ack = await orch._send_abort(42, mode="abort")
+        finally:
+            sup_module.supervisor = original_sup
 
-        mock_sup.send_to_worker.assert_called_once()
-        # Verify group_id is passed correctly
-        call_args = mock_sup.send_to_worker.call_args
-        self.assertEqual(call_args[0][0], 42)
+        # Verify request_abort was called with correct parameters
+        mock_sup.request_abort.assert_called_once_with(42, mode="abort", timeout=10.0)
+
+        # Verify ACK is returned
+        self.assertEqual(ack["cancelled_count"], 2)
+        self.assertEqual(ack["cleanup_status"], "success")
 
     async def test_send_abort_no_supervisor(self):
-        """_send_abort is a no-op when supervisor is not available."""
+        """_send_abort raises RuntimeError when supervisor is not available (fail closed)."""
         from runtime import supervisor as sup_module
         original_sup = sup_module.supervisor
         sup_module.supervisor = None
 
         try:
             orch = TaskOrchestrator()
-            await orch._send_abort(42)  # should not raise
+            with self.assertRaises(RuntimeError) as ctx:
+                await orch._send_abort(42)
+            self.assertIn("Supervisor not available", str(ctx.exception))
         finally:
             sup_module.supervisor = original_sup
 

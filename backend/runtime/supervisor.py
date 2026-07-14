@@ -62,6 +62,9 @@ class Supervisor:
         # Observers are fire-and-forget: they must push to a queue and return
         # immediately. Slow observers never block _fanout or upstream IPC.
         self._event_observers: dict[str, callable] = {}
+        # P0-2: Abort request tracking: request_id → Future for ABORT_ACK protocol.
+        # Supervisor sends ABORT_REQUEST, Worker responds with ABORT_ACK.
+        self._abort_requests: dict[str, asyncio.Future] = {}
         # Latest MCP tool-schema snapshot pushed by the collector; cached so a
         # worker connecting later (or after a ToolListChanged) gets the current set.
         self._mcp_schemas: dict | None = None
@@ -458,6 +461,14 @@ class Supervisor:
                         expected_worker_id, fut = pending
                         if frame.get("worker_id") == expected_worker_id and not fut.done():
                             fut.set_result(True)
+                elif t == ipc.protocol.ABORT_ACK:
+                    # P0-2: Worker ACK for abort_request
+                    request_id = frame.get("request_id")
+                    fut = self._abort_requests.pop(request_id, None)
+                    if fut and not fut.done():
+                        fut.set_result(frame)
+                    else:
+                        log.warning("supervisor: received ABORT_ACK for unknown/expired request_id=%s", request_id)
                 elif t in (ipc.protocol.MCP_CALL, ipc.protocol.MCP_AUTH_START):
                     # worker → collector. If the collector is down, reply an error
                     # to the origin worker so its awaiting call doesn't hang.
@@ -573,6 +584,63 @@ class Supervisor:
             return False
         return await self._send_worker_frame(worker_id, writer, msg)
 
+    async def request_abort(self, group_id: int, mode: str = "abort", timeout: float = 10.0) -> dict:
+        """P0-2: Send ABORT_REQUEST and wait for ABORT_ACK from Worker.
+
+        Args:
+            group_id: Group to abort
+            mode: "abort" or "retry"
+            timeout: Seconds to wait for ACK (fail closed on timeout)
+
+        Returns:
+            ABORT_ACK frame dict with cancelled_count, cleanup_status, error
+
+        Raises:
+            TimeoutError: If Worker doesn't respond within timeout (fail closed)
+            RuntimeError: If Worker disconnected or send fails
+        """
+        import uuid
+        request_id = str(uuid.uuid4())
+
+        # Create Future to wait for ACK
+        fut = asyncio.get_event_loop().create_future()
+        self._abort_requests[request_id] = fut
+
+        try:
+            # Send ABORT_REQUEST
+            await self.send_to_worker(
+                group_id,
+                ipc.protocol.envelope(
+                    ipc.protocol.ABORT_REQUEST,
+                    group_id=group_id,
+                    request_id=request_id,
+                    mode=mode,
+                ),
+            )
+
+            # Wait for ACK with timeout
+            try:
+                ack_frame = await asyncio.wait_for(fut, timeout=timeout)
+                log.info(
+                    "supervisor: abort ACK received for group %d: cancelled=%d status=%s",
+                    group_id,
+                    ack_frame.get("cancelled_count", 0),
+                    ack_frame.get("cleanup_status", "unknown"),
+                )
+                return ack_frame
+            except asyncio.TimeoutError:
+                # Fail closed: timeout means we don't know if abort succeeded
+                self._abort_requests.pop(request_id, None)
+                raise TimeoutError(
+                    f"Worker did not respond to ABORT_REQUEST for group {group_id} within {timeout}s"
+                )
+        except TimeoutError:
+            # Re-raise TimeoutError without wrapping
+            raise
+        except Exception as e:
+            # Fail closed: any error means abort didn't complete
+            self._abort_requests.pop(request_id, None)
+            raise RuntimeError(f"Failed to send ABORT_REQUEST for group {group_id}: {e}") from e
 
     def _default_worker_for(self, group_id: int) -> str:
         """Deterministic, stateless spread for an unassigned group. Same group_id
