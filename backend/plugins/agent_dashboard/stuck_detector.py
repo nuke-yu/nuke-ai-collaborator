@@ -72,8 +72,13 @@ class StuckDetector:
             if not state:
                 continue
 
-            # Skip tasks that are already in a terminal state
-            if state.status in ("done", "error", "aborted", "stuck"):
+            # Task completed successfully — clear retry counter
+            if state.status == "done":
+                self._retry_counts.pop(group_id, None)
+                continue
+
+            # Skip tasks that are in other terminal states
+            if state.status in ("error", "aborted", "stuck", "stuck_permanently"):
                 continue
 
             # Check timeout: no events for STUCK_TIMEOUT_SEC
@@ -113,13 +118,17 @@ class StuckDetector:
                     self._adapter._push_update(group_id, state)
 
     async def _auto_retry(self, group_id: int, task_id: str):
-        """Execute an automatic retry via the orchestrator."""
+        """Execute an automatic retry via the orchestrator.
+
+        Note: the retry counter is NOT cleared here. It's only cleared when
+        the task actually completes (detected in _check_all via status="done").
+        Clearing on dispatch success would allow infinite retries since each
+        re-dispatch resets the counter.
+        """
         try:
             if self._orchestrator:
                 await self._orchestrator.retry_task(task_id)
-                log.info("StuckDetector: auto-retry succeeded for task %s", task_id)
-                # Reset retry count on success (the new run starts fresh)
-                self._retry_counts.pop(group_id, None)
+                log.info("StuckDetector: auto-retry dispatched for task %s", task_id)
         except Exception as e:
             log.error("StuckDetector: auto-retry failed for task %s: %s", task_id, e)
 

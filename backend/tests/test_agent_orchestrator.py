@@ -93,7 +93,6 @@ class TestRetryTask(unittest.IsolatedAsyncioTestCase):
         }
 
         with patch.object(orch, "_send_abort", new_callable=AsyncMock) as mock_abort, \
-             patch.object(orch, "_cleanup_group_worktrees", new_callable=AsyncMock) as mock_clean, \
              patch.object(orch, "_dispatch_agent", new_callable=AsyncMock) as mock_dispatch:
 
             result = await orch.retry_task("task_1")
@@ -101,7 +100,6 @@ class TestRetryTask(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["status"], "restarted")
         self.assertIn("restarted_at", result)
         mock_abort.assert_called_once_with(10)
-        mock_clean.assert_called_once_with(10)
         mock_dispatch.assert_called_once_with(10, 5, "Add feature", "pytest")
         adapter.unregister_task.assert_called_once_with(10)
         adapter.register_task.assert_called_once_with(10, "task_1")
@@ -125,8 +123,7 @@ class TestAbortTask(unittest.IsolatedAsyncioTestCase):
             "status": "running",
         }
 
-        with patch.object(orch, "_send_abort", new_callable=AsyncMock) as mock_abort, \
-             patch.object(orch, "_cleanup_group_worktrees", new_callable=AsyncMock):
+        with patch.object(orch, "_send_abort", new_callable=AsyncMock) as mock_abort:
 
             result = await orch.abort_task("task_1")
 
@@ -529,89 +526,3 @@ class TestBindGroupToWorker(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(args[1], ("w3", 42))
 
 
-class TestOrphanWorktreeCleanup(unittest.IsolatedAsyncioTestCase):
-
-    async def test_cleanup_skips_running_tasks(self):
-        """Running/dispatched tasks are not cleaned up."""
-        orch = TaskOrchestrator()
-        orch._tasks["task_1"] = {
-            "task_id": "task_1", "group_id": 1, "status": "dispatched",
-        }
-
-        with patch("workspace.layout.group_dir") as mock_gd:
-            from pathlib import Path
-            mock_wt = Path("/tmp/fake/worktrees")
-            mock_gd.return_value = Path("/tmp/fake")
-            mock_wt.mkdir(parents=True, exist_ok=True)
-
-            with patch("workspace.git_worktree.remove_worktree", new_callable=AsyncMock) as mock_rm:
-                cleaned = await orch.cleanup_orphan_worktrees()
-                mock_rm.assert_not_called()
-                self.assertEqual(cleaned, 0)
-
-    async def test_cleanup_removes_done_task_worktree(self):
-        """Worktrees for done tasks are cleaned up."""
-        orch = TaskOrchestrator()
-        orch._tasks["task_1"] = {
-            "task_id": "task_1", "group_id": 1, "status": "done",
-        }
-
-        import tempfile
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            from pathlib import Path
-            group_dir = Path(tmp_dir)
-            wt_dir = group_dir / "worktrees" / "task_task_1"
-            wt_dir.mkdir(parents=True)
-
-            with patch("workspace.layout.group_dir", return_value=group_dir), \
-                 patch("workspace.git_worktree.remove_worktree", new_callable=AsyncMock) as mock_rm:
-
-                cleaned = await orch.cleanup_orphan_worktrees()
-                mock_rm.assert_called_once_with(1, "task_1")
-                self.assertEqual(cleaned, 1)
-
-    async def test_cleanup_removes_unknown_worktrees(self):
-        """Worktrees not belonging to any known task are cleaned up."""
-        orch = TaskOrchestrator()
-        orch._tasks["task_1"] = {
-            "task_id": "task_1", "group_id": 1, "status": "done",
-        }
-
-        import tempfile
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            from pathlib import Path
-            group_dir = Path(tmp_dir)
-            wt_dir = group_dir / "worktrees"
-            (wt_dir / "task_task_1").mkdir(parents=True)
-            (wt_dir / "task_unknown_99").mkdir(parents=True)  # unknown worktree
-
-            with patch("workspace.layout.group_dir", return_value=group_dir), \
-                 patch("workspace.git_worktree.remove_worktree", new_callable=AsyncMock) as mock_rm:
-
-                cleaned = await orch.cleanup_orphan_worktrees()
-                # Should clean both: task_1 (done) + unknown_99 (orphan)
-                self.assertEqual(cleaned, 2)
-                self.assertEqual(mock_rm.call_count, 2)
-
-    async def test_cleanup_no_worktrees_dir(self):
-        """No crash when worktrees directory doesn't exist."""
-        orch = TaskOrchestrator()
-        orch._tasks["task_1"] = {
-            "task_id": "task_1", "group_id": 1, "status": "done",
-        }
-
-        import tempfile
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            from pathlib import Path
-            group_dir = Path(tmp_dir)
-            # No worktrees dir created
-
-            with patch("workspace.layout.group_dir", return_value=group_dir):
-                cleaned = await orch.cleanup_orphan_worktrees()
-                self.assertEqual(cleaned, 0)
-
-    async def test_cleanup_empty_tasks(self):
-        """No tasks registered → nothing to clean."""
-        orch = TaskOrchestrator()
-        cleaned = await orch.cleanup_orphan_worktrees()
-        self.assertEqual(cleaned, 0)

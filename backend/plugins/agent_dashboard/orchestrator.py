@@ -119,7 +119,7 @@ class TaskOrchestrator:
             bot_id = await self._add_bot(group_id, model, max_iterations)
 
             # 3. Clone repo into workspace
-            await self._clone_repo(group_id, repo_url, base_branch)
+            await self._clone_repo(group_id, repo_url, base_branch, github_token or "")
 
             # 4. Bind group to selected worker BEFORE dispatch.
             # This prevents the race where dispatch goes to the default-routed worker,
@@ -138,6 +138,10 @@ class TaskOrchestrator:
             # Compensate: clean up any partially created resources
             log.error("TaskOrchestrator: create_task failed at step, rolling back group %s: %s",
                        group_id, e)
+            # R2-9: Unregister from progress adapter to prevent ghost progress + stuck detector
+            # from retrying a task that no longer exists.
+            if self._adapter and group_id is not None:
+                self._adapter.unregister_task(group_id)
             await self._rollback_group(group_id)
             raise RuntimeError(f"Task creation failed: {e}") from e
 
@@ -160,20 +164,24 @@ class TaskOrchestrator:
         return record
 
     async def retry_task(self, task_id: str) -> dict:
-        """Retry a stuck/failed task: abort via IPC → cleanup → re-dispatch."""
+        """Retry a stuck/failed task: abort via IPC → wait → re-dispatch.
+
+        R2-3: Worktree cleanup is NOT done here. The Worker's _cleanup_finally()
+        handles worktree promotion/removal when the task is cancelled. Cleaning
+        from the Supervisor would race with the Worker's finally block.
+        """
         record = self._tasks.get(task_id)
         if not record:
             raise ValueError(f"Task {task_id} not found")
 
         group_id = record["group_id"]
 
-        # 1. Abort via IPC to Worker process (not direct bg.abort_group which
-        # only works in the same process — the actual tasks run in Worker)
+        # 1. Abort via IPC to Worker process
         await self._send_abort(group_id)
 
-        # 2. Clean up ALL worktrees for this group (runner uses chat_<uuid> IDs
-        # internally, not just the task_id)
-        await self._cleanup_group_worktrees(group_id)
+        # 2. Wait for Worker to process the abort and run its cleanup.
+        # The Worker's _cleanup_finally() handles worktree promotion/removal.
+        await asyncio.sleep(2.0)
 
         # 3. Reset progress
         if self._adapter:
@@ -193,18 +201,16 @@ class TaskOrchestrator:
         return record
 
     async def abort_task(self, task_id: str) -> dict:
-        """Abort and clean up a task via IPC."""
+        """Abort a task via IPC. Worktree cleanup handled by Worker."""
         record = self._tasks.get(task_id)
         if not record:
             raise ValueError(f"Task {task_id} not found")
 
         group_id = record["group_id"]
 
-        # Abort via IPC to Worker process
+        # Abort via IPC to Worker process. Worker's _cleanup_finally() handles
+        # worktree cleanup — don't do it here to avoid races.
         await self._send_abort(group_id)
-
-        # Clean up all worktrees for this group
-        await self._cleanup_group_worktrees(group_id)
 
         if self._adapter:
             self._adapter.unregister_task(group_id)
@@ -212,64 +218,13 @@ class TaskOrchestrator:
         record["status"] = "aborted"
         return record
 
-    async def cleanup_orphan_worktrees(self) -> int:
-        """Scan for and remove orphan worktrees from completed/aborted tasks.
-
-        This is a periodic maintenance task that cleans up worktrees left behind
-        by tasks that finished or were aborted without proper cleanup (e.g., due
-        to a crash during the cleanup phase).
-
-        Returns:
-            Number of worktrees cleaned up.
-        """
-        from workspace import layout as ws_layout
-        from workspace.git_worktree import remove_worktree
-        import shutil
-
-        cleaned = 0
-        for task_id, record in list(self._tasks.items()):
-            if record["status"] not in ("done", "aborted", "stuck_permanently"):
-                continue
-
-            group_id = record["group_id"]
-            group_dir = ws_layout.group_dir(group_id)
-            worktrees_dir = group_dir / "worktrees"
-
-            if not worktrees_dir.exists():
-                continue
-
-            # Check for worktree dirs matching this task
-            task_wt = worktrees_dir / f"task_{task_id}"
-            if task_wt.exists():
-                try:
-                    await remove_worktree(group_id, task_id)
-                    cleaned += 1
-                    log.info("TaskOrchestrator: cleaned orphan worktree for task %s", task_id)
-                except Exception as e:
-                    log.warning("TaskOrchestrator: failed to clean worktree for task %s: %s", task_id, e)
-
-        # Also scan for worktrees that don't belong to any known task
-        for task_id, record in list(self._tasks.items()):
-            group_id = record["group_id"]
-            group_dir = ws_layout.group_dir(group_id)
-            worktrees_dir = group_dir / "worktrees"
-
-            if not worktrees_dir.exists():
-                continue
-
-            for item in list(worktrees_dir.iterdir()):
-                if item.is_dir() and item.name.startswith("task_"):
-                    tid = item.name[5:]
-                    if tid not in self._tasks:
-                        # Unknown worktree — orphan from a previous run
-                        try:
-                            await remove_worktree(group_id, tid)
-                            cleaned += 1
-                            log.info("TaskOrchestrator: cleaned unknown worktree task_%s in group %d", tid, group_id)
-                        except Exception as e:
-                            log.warning("TaskOrchestrator: failed to clean unknown worktree %s: %s", tid, e)
-
-        return cleaned
+    # Note: cleanup_orphan_worktrees removed (R2-2). The previous implementation
+    # was dangerous: it swept for "unknown" worktrees (tid not in self._tasks),
+    # but runner creates chat_<uuid> worktrees that would be incorrectly flagged
+    # and deleted while still in use. Worktree lifecycle is managed by:
+    #   - runner._cleanup_finally() promotes/removes on task completion
+    #   - prune_group_worktrees() cleans stale worktrees on group hydration
+    # These are the correct owners of worktree cleanup.
 
     async def _bind_group_to_worker(self, group_id: int, worker_id: str) -> None:
         """Persistently bind a group to a specific worker via assigned_worker_id.
@@ -325,30 +280,6 @@ class TaskOrchestrator:
                 log.info("TaskOrchestrator: sent ABORT IPC for group %d", group_id)
         except Exception as e:
             log.warning("TaskOrchestrator: failed to send ABORT IPC for group %d: %s", group_id, e)
-
-    async def _cleanup_group_worktrees(self, group_id: int) -> None:
-        """Remove ALL worktrees for a group (not just by task_id).
-
-        Runner may create worktrees with chat_<uuid> IDs internally, so we
-        sweep the entire worktrees/ directory for the group.
-        """
-        try:
-            from workspace import layout as ws_layout
-            from workspace.git_worktree import remove_worktree
-
-            group_dir = ws_layout.group_dir(group_id)
-            worktrees_dir = group_dir / "worktrees"
-
-            if not worktrees_dir.exists():
-                return
-
-            for item in list(worktrees_dir.iterdir()):
-                if item.is_dir() and item.name.startswith("task_"):
-                    tid = item.name[5:]
-                    try:
-                        await remove_worktree(group_id, tid)
-                    except Exception as e:
-                        log.warning("TaskOrchestrator: failed to remove worktree %s: %s", tid, e)
         except Exception as e:
             log.warning("TaskOrchestrator: worktree cleanup failed for group %d: %s", group_id, e)
 
@@ -475,13 +406,14 @@ class TaskOrchestrator:
 
         return bot_id
 
-    async def _clone_repo(self, group_id: int, repo_url: str, branch: str) -> Path:
+    async def _clone_repo(self, group_id: int, repo_url: str, branch: str,
+                          github_token: str = "") -> Path:
         """Clone the repository into the group's workspace."""
         from workspace import layout as ws_layout
         from integrations.github_client import clone_repo
 
         workspace = ws_layout.group_shared_dir(group_id) / "workspace"
-        await clone_repo(repo_url, workspace, branch=branch)
+        await clone_repo(repo_url, workspace, branch=branch, github_token=github_token)
         return workspace
 
     async def _dispatch_agent(self, group_id: int, bot_id: int, requirements: str, test_command: str) -> None:

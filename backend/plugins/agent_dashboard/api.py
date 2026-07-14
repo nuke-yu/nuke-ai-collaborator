@@ -16,17 +16,11 @@ from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field, field_validator
 from typing import Optional
 
+from api.admin_deps import require_operator
+
 log = logging.getLogger(__name__)
 
 router = APIRouter()
-
-# ── Auth dependency ──────────────────────────────────────────────────
-
-def _require_operator(user=Depends(None)):
-    """Placeholder for operator-level auth. The actual auth dependency
-    is injected at mount time via host.mount_router(dependencies=[...]).
-    Write endpoints below add explicit operator checks where needed."""
-    return user
 
 # Module-level reference to shared state (set by __init__.register)
 _adapter = None
@@ -104,7 +98,7 @@ class RetryResponse(BaseModel):
 # ── Endpoints ─────────────────────────────────────────────────────────
 
 @router.post("/tasks", response_model=TaskResponse)
-async def create_task(req: CreateTaskRequest):
+async def create_task(req: CreateTaskRequest, user=Depends(require_operator)):
     """Create a new coding agent task.
 
     Uses the TaskOrchestrator to: create group → add bot → clone repo → dispatch agent.
@@ -187,7 +181,7 @@ async def get_task(task_id: str):
 
 
 @router.post("/tasks/{task_id}/retry", response_model=RetryResponse)
-async def retry_task(task_id: str):
+async def retry_task(task_id: str, user=Depends(require_operator)):
     """Retry a stuck or failed task via the orchestrator."""
     if not _orchestrator:
         raise HTTPException(503, "Agent orchestrator not initialized")
@@ -207,7 +201,7 @@ async def retry_task(task_id: str):
 
 
 @router.delete("/tasks/{task_id}")
-async def abort_task(task_id: str):
+async def abort_task(task_id: str, user=Depends(require_operator)):
     """Abort and clean up a task via the orchestrator."""
     if not _orchestrator:
         raise HTTPException(503, "Agent orchestrator not initialized")

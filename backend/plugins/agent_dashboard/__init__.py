@@ -42,17 +42,16 @@ async def register(host):
     from .progress import ProgressAdapter
     from .stuck_detector import StuckDetector
     from .orchestrator import TaskOrchestrator
-    from .coding_agent_orchestrator import CodingAgentOrchestrator
     from . import websocket as ws_module
     from . import api as api_module
 
     log.info("agent_dashboard: registering plugin...")
 
-    # 1. Register the CodingAgentOrchestrator in the global orchestrator registry
-    from core.orchestration.registry import _register as orch_register
-    orch_register(CodingAgentOrchestrator())
+    # Note: CodingAgentOrchestrator is registered via core/orchestration/plugins/coding_agent.py
+    # so that Worker processes discover it via registry.discover(). Registering it here
+    # (Supervisor process only) would make it unavailable to Workers.
 
-    # 2. Create shared components
+    # 1. Create shared components
     adapter = ProgressAdapter()
     orchestrator = TaskOrchestrator(adapter=adapter)
     detector = StuckDetector(adapter, orchestrator=orchestrator)
@@ -61,8 +60,11 @@ async def register(host):
     ws_module.set_adapter(adapter)
     api_module.set_context(adapter, host, detector, orchestrator=orchestrator)
 
-    # 3. Mount REST API routes (require operator-level auth for write ops, user auth for reads)
+    # 3. Mount REST API routes
+    # Write operations (create/retry/abort) require operator-level auth.
+    # Read operations (list/get/workers) require user-level auth.
     from core import auth
+    from api.admin_deps import require_operator
     from fastapi import Depends
     host.mount_router(api_module.router, prefix="/api/agent",
                       dependencies=[Depends(auth.get_current_user)])
@@ -77,19 +79,9 @@ async def register(host):
     host.start_background(detector.run())
     host.start_background(ws_module.consumer_loop(adapter))
 
-    # 7. Periodic orphan worktree cleanup (every 30 minutes)
-    async def _worktree_cleanup_loop():
-        import asyncio
-        while True:
-            await asyncio.sleep(1800)  # 30 minutes
-            try:
-                cleaned = await orchestrator.cleanup_orphan_worktrees()
-                if cleaned:
-                    log.info("agent_dashboard: cleaned %d orphan worktrees", cleaned)
-            except Exception:
-                log.exception("agent_dashboard: worktree cleanup error")
-
-    host.start_background(_worktree_cleanup_loop())
+    # Note: Periodic worktree cleanup removed (R2-2). Runner creates chat_<uuid>
+    # worktrees that would be incorrectly flagged as orphans. Worktree cleanup
+    # is handled by the existing prune_group_worktrees() on group hydration.
 
     log.info("agent_dashboard: plugin registered successfully")
     log.info("  REST: /api/agent/tasks, /api/agent/workers")

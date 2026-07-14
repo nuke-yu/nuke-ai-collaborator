@@ -24,14 +24,18 @@ log = logging.getLogger(__name__)
 _CMD_TIMEOUT = 60
 
 
-async def _run_cmd(*args: str, cwd: str | Path | None = None, timeout: int = _CMD_TIMEOUT) -> tuple[str, str, int]:
+async def _run_cmd(*args: str, cwd: str | Path | None = None, timeout: int = _CMD_TIMEOUT,
+                   extra_env: dict | None = None) -> tuple[str, str, int]:
     """Run a command asynchronously. Returns (stdout, stderr, returncode)."""
+    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
+    if extra_env:
+        env.update(extra_env)
     proc = await asyncio.create_subprocess_exec(
         *args,
         cwd=str(cwd) if cwd else None,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
-        env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+        env=env,
     )
     try:
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
@@ -57,9 +61,14 @@ async def _git(*args: str, cwd: str | Path | None = None) -> str:
     return stdout
 
 
-async def _gh(*args: str, cwd: str | Path | None = None) -> str:
-    """Run a gh CLI command, raising on failure."""
-    stdout, stderr, rc = await _run_cmd("gh", *args, cwd=cwd)
+async def _gh(*args: str, cwd: str | Path | None = None, github_token: str = "") -> str:
+    """Run a gh CLI command, raising on failure.
+
+    If github_token is provided, it's passed via GITHUB_TOKEN env var
+    for authentication with private repos.
+    """
+    extra_env = {"GITHUB_TOKEN": github_token} if github_token else None
+    stdout, stderr, rc = await _run_cmd("gh", *args, cwd=cwd, extra_env=extra_env)
     if rc != 0:
         raise RuntimeError(f"gh {' '.join(args)} failed (rc={rc}): {stderr}")
     return stdout
@@ -70,13 +79,16 @@ def is_gh_available() -> bool:
     return shutil.which("gh") is not None
 
 
-async def clone_repo(repo_url: str, dest: str | Path, branch: str = "") -> Path:
+async def clone_repo(repo_url: str, dest: str | Path, branch: str = "",
+                     github_token: str = "") -> Path:
     """Clone a git repository to the destination directory.
 
     Args:
         repo_url: Git repository URL (HTTPS or SSH)
         dest: Destination directory path
         branch: Optional branch to checkout after clone
+        github_token: Optional GitHub token for private repo authentication.
+                      Embedded in HTTPS URLs as https://<token>@github.com/...
 
     Returns:
         Path to the cloned repository
@@ -86,10 +98,16 @@ async def clone_repo(repo_url: str, dest: str | Path, branch: str = "") -> Path:
         shutil.rmtree(dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
 
+    # Inject token into HTTPS URL for private repo access
+    clone_url = repo_url
+    if github_token and repo_url.startswith("https://"):
+        # https://github.com/user/repo.git → https://<token>@github.com/user/repo.git
+        clone_url = repo_url.replace("https://", f"https://{github_token}@", 1)
+
     args = ["clone", "--depth", "1"]
     if branch:
         args.extend(["--branch", branch])
-    args.extend([repo_url, str(dest)])
+    args.extend([clone_url, str(dest)])
 
     await _git(*args)
     return dest
@@ -113,9 +131,27 @@ async def ensure_branch(cwd: str | Path, branch_name: str, base: str = "main") -
     return branch_name
 
 
-async def push_branch(cwd: str | Path, branch_name: str, remote: str = "origin") -> None:
-    """Push a branch to the remote."""
-    await _git("push", "-u", remote, branch_name, cwd=str(cwd))
+async def push_branch(cwd: str | Path, branch_name: str, remote: str = "origin",
+                      github_token: str = "") -> None:
+    """Push a branch to the remote.
+
+    If github_token is provided, configures a temporary credential helper
+    so git push can authenticate to private repos.
+    """
+    cwd = Path(cwd)
+    if github_token:
+        # Configure credential helper to use the token for this push
+        await _git("config", "credential.helper",
+                   f"!f() {{ echo 'password={github_token}'; }}; f", cwd=cwd)
+    try:
+        await _git("push", "-u", remote, branch_name, cwd=str(cwd))
+    finally:
+        if github_token:
+            # Remove the temporary credential helper
+            try:
+                await _git("config", "--unset", "credential.helper", cwd=cwd)
+            except Exception:
+                pass
 
 
 async def commit_all(cwd: str | Path, message: str) -> bool:
@@ -154,6 +190,7 @@ class GitHubClient(GitClient):
         title: str,
         description: str = "",
         ticket_ids: list[str] | None = None,
+        github_token: str = "",
     ) -> dict:
         """Create a PR on GitHub.
 
@@ -197,12 +234,8 @@ class GitHubClient(GitClient):
         if not had_changes:
             log.info("GitHubClient: no changes to commit for group %d", group_id)
 
-        # Push branch
-        try:
-            await push_branch(workspace, branch)
-        except RuntimeError as e:
-            log.warning("GitHubClient: push failed for group %d: %s", group_id, e)
-            # Continue to try PR creation (branch might already be pushed)
+        # Push branch (fail closed — don't create PR against stale remote branch)
+        await push_branch(workspace, branch, github_token=github_token)
 
         # Build PR body
         body_parts = [description]
@@ -221,7 +254,7 @@ class GitHubClient(GitClient):
             except Exception:
                 pass  # gh will use the repo's default
 
-            pr_url = await _gh(*gh_args, cwd=workspace)
+            pr_url = await _gh(*gh_args, cwd=workspace, github_token=github_token)
 
             # Extract PR number from URL
             pr_id = pr_url.rstrip("/").split("/")[-1] if pr_url else "unknown"

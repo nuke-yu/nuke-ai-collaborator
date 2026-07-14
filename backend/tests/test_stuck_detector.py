@@ -241,7 +241,7 @@ class TestAutoRetry(unittest.IsolatedAsyncioTestCase):
 class TestAutoRetryAsync(unittest.IsolatedAsyncioTestCase):
 
     async def test_auto_retry_calls_orchestrator(self):
-        """_auto_retry calls orchestrator.retry_task and resets counter on success."""
+        """_auto_retry calls orchestrator.retry_task. Counter NOT cleared on dispatch."""
         from unittest.mock import MagicMock, AsyncMock
         adapter = ProgressAdapter()
         adapter.register_task(1, "task_1")
@@ -255,7 +255,8 @@ class TestAutoRetryAsync(unittest.IsolatedAsyncioTestCase):
         await detector._auto_retry(1, "task_1")
 
         mock_orch.retry_task.assert_called_once_with("task_1")
-        self.assertNotIn(1, detector._retry_counts)  # reset on success
+        # Counter NOT cleared on dispatch — only cleared on task completion
+        self.assertEqual(detector._retry_counts.get(1), 2)
 
     async def test_auto_retry_handles_failure(self):
         """_auto_retry logs error but doesn't crash when retry fails."""
@@ -269,3 +270,32 @@ class TestAutoRetryAsync(unittest.IsolatedAsyncioTestCase):
         detector = StuckDetector(adapter, orchestrator=mock_orch)
         # Should not raise
         await detector._auto_retry(1, "task_1")
+
+
+class TestRetryCounterClearedOnCompletion(unittest.IsolatedAsyncioTestCase):
+
+    async def test_counter_cleared_when_task_done(self):
+        """Retry counter is cleared when task reaches 'done' status, not on dispatch."""
+        adapter = ProgressAdapter()
+        state = adapter.register_task(1, "task_1")
+        state.status = "done"  # task completed
+        state.last_event_at = time.time()
+
+        detector = StuckDetector(adapter)
+        detector._retry_counts[1] = 3  # had 3 retries
+
+        await detector._check_all()
+        self.assertNotIn(1, detector._retry_counts)  # cleared on completion
+
+    async def test_counter_not_cleared_on_running(self):
+        """Retry counter persists while task is still running."""
+        adapter = ProgressAdapter()
+        state = adapter.register_task(1, "task_1")
+        state.status = "running"
+        state.last_event_at = time.time() - 5  # recent
+
+        detector = StuckDetector(adapter)
+        detector._retry_counts[1] = 2
+
+        await detector._check_all()
+        self.assertEqual(detector._retry_counts.get(1), 2)  # not cleared
