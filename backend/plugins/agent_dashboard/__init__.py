@@ -61,10 +61,13 @@ async def register(host):
     ws_module.set_adapter(adapter)
     api_module.set_context(adapter, host, detector, orchestrator=orchestrator)
 
-    # 3. Mount REST API routes
-    host.mount_router(api_module.router, prefix="/api/agent")
+    # 3. Mount REST API routes (require operator-level auth for write ops, user auth for reads)
+    from core import auth
+    from fastapi import Depends
+    host.mount_router(api_module.router, prefix="/api/agent",
+                      dependencies=[Depends(auth.get_current_user)])
 
-    # 4. Mount Dashboard WebSocket routes
+    # 4. Mount Dashboard WebSocket routes (JWT validated inside endpoint)
     host.mount_router(ws_module.router)
 
     # 5. Subscribe to Supervisor broadcast events

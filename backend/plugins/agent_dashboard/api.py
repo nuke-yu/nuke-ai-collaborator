@@ -10,14 +10,23 @@ Provides REST endpoints for the dashboard frontend:
   GET    /api/agent/workers         — Get worker load stats (for monitoring)
 """
 import logging
+import re
 import time
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, HTTPException, Depends
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional
 
 log = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# ── Auth dependency ──────────────────────────────────────────────────
+
+def _require_operator(user=Depends(None)):
+    """Placeholder for operator-level auth. The actual auth dependency
+    is injected at mount time via host.mount_router(dependencies=[...]).
+    Write endpoints below add explicit operator checks where needed."""
+    return user
 
 # Module-level reference to shared state (set by __init__.register)
 _adapter = None
@@ -44,7 +53,39 @@ class CreateTaskRequest(BaseModel):
     test_command: str = Field("", description="Test command to run (e.g. 'pytest -x')")
     github_token: Optional[str] = Field(None, description="GitHub token for PR creation")
     model: str = Field("deepseek-chat", description="AI model to use")
-    max_iterations: int = Field(100, description="Max tool loop iterations")
+    max_iterations: int = Field(100, description="Max tool loop iterations", ge=1, le=500)
+
+    @field_validator("repo_url")
+    @classmethod
+    def validate_repo_url(cls, v: str) -> str:
+        """Only allow HTTPS git URLs from known hosts."""
+        allowed_pattern = re.compile(
+            r'^https://(github\.com|gitlab\.com|bitbucket\.org)/[\w\-./]+\.git$'
+        )
+        if not allowed_pattern.match(v):
+            raise ValueError(
+                "repo_url must be an HTTPS git URL from github.com, gitlab.com, or bitbucket.org"
+            )
+        return v
+
+    @field_validator("requirements")
+    @classmethod
+    def validate_requirements(cls, v: str) -> str:
+        if len(v.strip()) < 10:
+            raise ValueError("requirements must be at least 10 characters")
+        if len(v) > 10000:
+            raise ValueError("requirements must be under 10000 characters")
+        return v
+
+    @field_validator("test_command")
+    @classmethod
+    def validate_test_command(cls, v: str) -> str:
+        """Block dangerous shell constructs in test commands."""
+        dangerous = ["|", ";", "&&", "||", "`", "$(", "> ", "< ", "curl", "wget", "eval", "bash"]
+        for d in dangerous:
+            if d in v:
+                raise ValueError(f"test_command contains disallowed construct: {d}")
+        return v
 
 
 class TaskResponse(BaseModel):

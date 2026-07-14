@@ -66,9 +66,38 @@ _connections: dict[int, set[DashboardConnection]] = {}  # group_id → {connecti
 _all_connections: set[DashboardConnection] = set()       # subscribed to all
 
 
+async def _authenticate_ws(ws: WebSocket) -> bool:
+    """Validate JWT from query parameter or protocol header. Returns True if valid."""
+    from core import auth
+
+    # Try protocol-based auth first (same as main WS endpoint)
+    token = None
+    for value in ws.headers.getlist("sec-websocket-protocol"):
+        if value.startswith("nuke.jwt."):
+            token = value[len("nuke.jwt."):]
+            break
+
+    # Fallback to query parameter
+    if not token:
+        token = ws.query_params.get("token")
+
+    if not token:
+        await ws.close(code=4001, reason="Missing authentication token")
+        return False
+
+    user_payload = auth.verify_token(token)
+    if not user_payload:
+        await ws.close(code=4001, reason="Invalid authentication token")
+        return False
+
+    return True
+
+
 @router.websocket("/ws/agent/{group_id}")
 async def dashboard_ws(ws: WebSocket, group_id: int):
-    """WebSocket endpoint for a specific task's progress."""
+    """WebSocket endpoint for a specific task's progress. Requires JWT auth."""
+    if not await _authenticate_ws(ws):
+        return
     await ws.accept()
     conn = DashboardConnection(ws, group_filter=group_id)
 
@@ -102,7 +131,9 @@ async def dashboard_ws(ws: WebSocket, group_id: int):
 
 @router.websocket("/ws/agent/all")
 async def dashboard_all_ws(ws: WebSocket):
-    """WebSocket endpoint for all active tasks' progress."""
+    """WebSocket endpoint for all active tasks' progress. Requires JWT auth."""
+    if not await _authenticate_ws(ws):
+        return
     await ws.accept()
     conn = DashboardConnection(ws, group_filter=None)
     _all_connections.add(conn)
