@@ -74,6 +74,20 @@ async def register(host):
     host.start_background(detector.run())
     host.start_background(ws_module.consumer_loop(adapter))
 
+    # 7. Periodic orphan worktree cleanup (every 30 minutes)
+    async def _worktree_cleanup_loop():
+        import asyncio
+        while True:
+            await asyncio.sleep(1800)  # 30 minutes
+            try:
+                cleaned = await orchestrator.cleanup_orphan_worktrees()
+                if cleaned:
+                    log.info("agent_dashboard: cleaned %d orphan worktrees", cleaned)
+            except Exception:
+                log.exception("agent_dashboard: worktree cleanup error")
+
+    host.start_background(_worktree_cleanup_loop())
+
     log.info("agent_dashboard: plugin registered successfully")
     log.info("  REST: /api/agent/tasks, /api/agent/workers")
     log.info("  WS:   /ws/agent/{group_id}, /ws/agent/all")

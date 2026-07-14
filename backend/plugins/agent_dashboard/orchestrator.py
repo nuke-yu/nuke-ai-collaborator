@@ -211,6 +211,65 @@ class TaskOrchestrator:
         record["status"] = "aborted"
         return record
 
+    async def cleanup_orphan_worktrees(self) -> int:
+        """Scan for and remove orphan worktrees from completed/aborted tasks.
+
+        This is a periodic maintenance task that cleans up worktrees left behind
+        by tasks that finished or were aborted without proper cleanup (e.g., due
+        to a crash during the cleanup phase).
+
+        Returns:
+            Number of worktrees cleaned up.
+        """
+        from workspace import layout as ws_layout
+        from workspace.git_worktree import remove_worktree
+        import shutil
+
+        cleaned = 0
+        for task_id, record in list(self._tasks.items()):
+            if record["status"] not in ("done", "aborted", "stuck_permanently"):
+                continue
+
+            group_id = record["group_id"]
+            group_dir = ws_layout.group_dir(group_id)
+            worktrees_dir = group_dir / "worktrees"
+
+            if not worktrees_dir.exists():
+                continue
+
+            # Check for worktree dirs matching this task
+            task_wt = worktrees_dir / f"task_{task_id}"
+            if task_wt.exists():
+                try:
+                    await remove_worktree(group_id, task_id)
+                    cleaned += 1
+                    log.info("TaskOrchestrator: cleaned orphan worktree for task %s", task_id)
+                except Exception as e:
+                    log.warning("TaskOrchestrator: failed to clean worktree for task %s: %s", task_id, e)
+
+        # Also scan for worktrees that don't belong to any known task
+        for task_id, record in list(self._tasks.items()):
+            group_id = record["group_id"]
+            group_dir = ws_layout.group_dir(group_id)
+            worktrees_dir = group_dir / "worktrees"
+
+            if not worktrees_dir.exists():
+                continue
+
+            for item in list(worktrees_dir.iterdir()):
+                if item.is_dir() and item.name.startswith("task_"):
+                    tid = item.name[5:]
+                    if tid not in self._tasks:
+                        # Unknown worktree — orphan from a previous run
+                        try:
+                            await remove_worktree(group_id, tid)
+                            cleaned += 1
+                            log.info("TaskOrchestrator: cleaned unknown worktree task_%s in group %d", tid, group_id)
+                        except Exception as e:
+                            log.warning("TaskOrchestrator: failed to clean unknown worktree %s: %s", tid, e)
+
+        return cleaned
+
     # ── Resilience: pre-flight + rollback ────────────────────────────
 
     async def _preflight_check_repo(self, repo_url: str, branch: str = "") -> None:
