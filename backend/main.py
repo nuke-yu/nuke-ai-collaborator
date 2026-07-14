@@ -107,12 +107,18 @@ async def lifespan(app: FastAPI):
     # 5. Start Global Scheduler
     await scheduler.start()
 
-    # 6. Periodic media reaper (purges old MCP screenshots + orphaned staging; never uploads)
+    # 6. Load plugins (auto-discovery from NUKE_PLUGINS_DIR or plugins/ directory)
+    from plugins.host import PluginHost
+    plugin_host = PluginHost(app, sup)
+    await plugin_host.discover_and_load()
+
+    # 7. Periodic media reaper (purges old MCP screenshots + orphaned staging; never uploads)
     media_reaper_task = asyncio.create_task(_media_reaper_loop())
 
     yield
 
     # Teardown
+    await plugin_host.unload_all()
     await _cancel_and_wait(media_reaper_task)
     scheduler.stop()   # sync (returns None); awaiting it raised TypeError on teardown
     await sup.stop()

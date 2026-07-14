@@ -58,6 +58,10 @@ class Supervisor:
         self._stopping = False
         self._monitor_tasks: set[asyncio.Task] = set()
         self._cleanup_tasks: set[asyncio.Task] = set()
+        # Plugin observer registry: name → sync callback(group_id, payload).
+        # Observers are fire-and-forget: they must push to a queue and return
+        # immediately. Slow observers never block _fanout or upstream IPC.
+        self._event_observers: dict[str, callable] = {}
         # Latest MCP tool-schema snapshot pushed by the collector; cached so a
         # worker connecting later (or after a ToolListChanged) gets the current set.
         self._mcp_schemas: dict | None = None
@@ -431,6 +435,7 @@ class Supervisor:
                 if t == ipc.protocol.BROADCAST:
                     payload = frame.get("payload", {})
                     await self._fanout(gid, payload)
+                    self._emit_to_observers(gid, payload)
                     # Maintain the central unread projection: a newly-posted chat
                     # message bumps unread for offline members (their 'read' resets it).
                     if (self._on_unread and gid is not None
@@ -483,6 +488,29 @@ class Supervisor:
         except Exception:
             log.exception("supervisor: error processing upstream frame type=%s", t)
 
+
+    # ── plugin observers ────────────────────────────────────────────────
+    # Observers receive every BROADCAST event from workers. They are sync
+    # callables that MUST be non-blocking (push to a queue, return immediately).
+    # A slow or broken observer never affects _fanout or upstream IPC processing.
+
+    def register_observer(self, name: str, callback) -> None:
+        """Register a plugin observer. callback signature: (group_id: int, payload: dict) -> None"""
+        self._event_observers[name] = callback
+        log.info("supervisor: registered observer %s", name)
+
+    def unregister_observer(self, name: str) -> None:
+        """Remove a plugin observer."""
+        self._event_observers.pop(name, None)
+        log.info("supervisor: unregistered observer %s", name)
+
+    def _emit_to_observers(self, group_id: int, payload: dict) -> None:
+        """Fire-and-forget: notify all observers. Exceptions are logged, never propagated."""
+        for name, cb in self._event_observers.items():
+            try:
+                cb(group_id, payload)
+            except Exception:
+                log.warning("supervisor: observer %s raised, skipping", name, exc_info=True)
 
     # ── browser side ─────────────────────────────────────────────────────
     def register_browser(self, group_id: int, client) -> None:
