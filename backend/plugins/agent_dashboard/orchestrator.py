@@ -159,27 +159,20 @@ class TaskOrchestrator:
         return record
 
     async def retry_task(self, task_id: str) -> dict:
-        """Retry a stuck/failed task: abort → cleanup → re-dispatch."""
+        """Retry a stuck/failed task: abort via IPC → cleanup → re-dispatch."""
         record = self._tasks.get(task_id)
         if not record:
             raise ValueError(f"Task {task_id} not found")
 
         group_id = record["group_id"]
 
-        # 1. Abort current run
-        try:
-            from core.bg import abort_group
-            cancelled = abort_group(group_id)
-            log.info("TaskOrchestrator: aborted %d tasks for group %d", cancelled, group_id)
-        except Exception as e:
-            log.warning("TaskOrchestrator: abort failed: %s", e)
+        # 1. Abort via IPC to Worker process (not direct bg.abort_group which
+        # only works in the same process — the actual tasks run in Worker)
+        await self._send_abort(group_id)
 
-        # 2. Clean up worktree
-        try:
-            from workspace.git_worktree import remove_worktree
-            await remove_worktree(group_id, task_id)
-        except Exception as e:
-            log.warning("TaskOrchestrator: worktree cleanup failed: %s", e)
+        # 2. Clean up ALL worktrees for this group (runner uses chat_<uuid> IDs
+        # internally, not just the task_id)
+        await self._cleanup_group_worktrees(group_id)
 
         # 3. Reset progress
         if self._adapter:
@@ -199,24 +192,18 @@ class TaskOrchestrator:
         return record
 
     async def abort_task(self, task_id: str) -> dict:
-        """Abort and clean up a task."""
+        """Abort and clean up a task via IPC."""
         record = self._tasks.get(task_id)
         if not record:
             raise ValueError(f"Task {task_id} not found")
 
         group_id = record["group_id"]
 
-        try:
-            from core.bg import abort_group
-            abort_group(group_id)
-        except Exception:
-            pass
+        # Abort via IPC to Worker process
+        await self._send_abort(group_id)
 
-        try:
-            from workspace.git_worktree import remove_worktree
-            await remove_worktree(group_id, task_id)
-        except Exception:
-            pass
+        # Clean up all worktrees for this group
+        await self._cleanup_group_worktrees(group_id)
 
         if self._adapter:
             self._adapter.unregister_task(group_id)
@@ -311,6 +298,58 @@ class TaskOrchestrator:
             pass  # best-effort; cache expires in 60s anyway
 
         log.info("TaskOrchestrator: bound group %d to worker %s", group_id, worker_id)
+
+    # ── Cross-process abort + worktree cleanup ───────────────────────
+
+    async def _send_abort(self, group_id: int) -> None:
+        """Send ABORT IPC frame to the Worker process owning this group.
+
+        Unlike calling bg.abort_group() directly (which only works in the same
+        process), this sends the abort signal across the IPC boundary to the
+        Worker where the actual asyncio tasks are running.
+        """
+        try:
+            from runtime import supervisor as sup_mod
+            from runtime import ipc
+
+            sup = sup_mod.supervisor
+            if sup:
+                await sup.send_to_worker(
+                    group_id,
+                    ipc.protocol.envelope(
+                        ipc.protocol.ABORT,
+                        group_id=group_id,
+                    ),
+                )
+                log.info("TaskOrchestrator: sent ABORT IPC for group %d", group_id)
+        except Exception as e:
+            log.warning("TaskOrchestrator: failed to send ABORT IPC for group %d: %s", group_id, e)
+
+    async def _cleanup_group_worktrees(self, group_id: int) -> None:
+        """Remove ALL worktrees for a group (not just by task_id).
+
+        Runner may create worktrees with chat_<uuid> IDs internally, so we
+        sweep the entire worktrees/ directory for the group.
+        """
+        try:
+            from workspace import layout as ws_layout
+            from workspace.git_worktree import remove_worktree
+
+            group_dir = ws_layout.group_dir(group_id)
+            worktrees_dir = group_dir / "worktrees"
+
+            if not worktrees_dir.exists():
+                return
+
+            for item in list(worktrees_dir.iterdir()):
+                if item.is_dir() and item.name.startswith("task_"):
+                    tid = item.name[5:]
+                    try:
+                        await remove_worktree(group_id, tid)
+                    except Exception as e:
+                        log.warning("TaskOrchestrator: failed to remove worktree %s: %s", tid, e)
+        except Exception as e:
+            log.warning("TaskOrchestrator: worktree cleanup failed for group %d: %s", group_id, e)
 
     # ── Resilience: pre-flight + rollback ────────────────────────────
 

@@ -90,14 +90,16 @@ class TestRetryTask(unittest.IsolatedAsyncioTestCase):
             "status": "stuck",
         }
 
-        with patch("core.bg.abort_group", return_value=2), \
-             patch("workspace.git_worktree.remove_worktree", new_callable=AsyncMock), \
+        with patch.object(orch, "_send_abort", new_callable=AsyncMock) as mock_abort, \
+             patch.object(orch, "_cleanup_group_worktrees", new_callable=AsyncMock) as mock_clean, \
              patch.object(orch, "_dispatch_agent", new_callable=AsyncMock) as mock_dispatch:
 
             result = await orch.retry_task("task_1")
 
         self.assertEqual(result["status"], "restarted")
         self.assertIn("restarted_at", result)
+        mock_abort.assert_called_once_with(10)
+        mock_clean.assert_called_once_with(10)
         mock_dispatch.assert_called_once_with(10, 5, "Add feature", "pytest")
         adapter.unregister_task.assert_called_once_with(10)
         adapter.register_task.assert_called_once_with(10, "task_1")
@@ -121,18 +123,56 @@ class TestAbortTask(unittest.IsolatedAsyncioTestCase):
             "status": "running",
         }
 
-        with patch("core.bg.abort_group", return_value=1), \
-             patch("workspace.git_worktree.remove_worktree", new_callable=AsyncMock):
+        with patch.object(orch, "_send_abort", new_callable=AsyncMock) as mock_abort, \
+             patch.object(orch, "_cleanup_group_worktrees", new_callable=AsyncMock):
 
             result = await orch.abort_task("task_1")
 
         self.assertEqual(result["status"], "aborted")
+        mock_abort.assert_called_once_with(10)
         adapter.unregister_task.assert_called_once_with(10)
 
     async def test_abort_unknown_task_raises(self):
         orch = TaskOrchestrator()
         with self.assertRaises(ValueError):
             await orch.abort_task("nonexistent")
+
+
+class TestSendAbort(unittest.IsolatedAsyncioTestCase):
+
+    async def test_send_abort_via_ipc(self):
+        """_send_abort sends ABORT frame to Worker via Supervisor."""
+        mock_sup = MagicMock()
+        mock_sup.send_to_worker = AsyncMock()
+
+        from runtime import supervisor as sup_module
+        original_sup = sup_module.supervisor
+        sup_module.supervisor = mock_sup
+
+        mock_envelope = MagicMock(return_value={"type": "abort"})
+        with patch.object(sup_module.ipc.protocol, "envelope", mock_envelope):
+            try:
+                orch = TaskOrchestrator()
+                await orch._send_abort(42)
+            finally:
+                sup_module.supervisor = original_sup
+
+        mock_sup.send_to_worker.assert_called_once()
+        # Verify group_id is passed correctly
+        call_args = mock_sup.send_to_worker.call_args
+        self.assertEqual(call_args[0][0], 42)
+
+    async def test_send_abort_no_supervisor(self):
+        """_send_abort is a no-op when supervisor is not available."""
+        from runtime import supervisor as sup_module
+        original_sup = sup_module.supervisor
+        sup_module.supervisor = None
+
+        try:
+            orch = TaskOrchestrator()
+            await orch._send_abort(42)  # should not raise
+        finally:
+            sup_module.supervisor = original_sup
 
 
 class TestCreateGroup(unittest.IsolatedAsyncioTestCase):
