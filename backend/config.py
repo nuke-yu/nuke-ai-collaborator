@@ -2,7 +2,10 @@ import json
 import os
 from pathlib import Path
 
-CONFIG_PATH = Path(__file__).parent / "app_config.json"
+CONFIG_PATH = Path(
+    os.environ.get("NUKE_APP_CONFIG_PATH")
+    or Path(__file__).parent / "app_config.json"
+)
 
 FIELDS = {
     "deepseek_api_key": "DEEPSEEK_API_KEY",

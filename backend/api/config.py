@@ -1,7 +1,7 @@
 """API-key / provider config endpoints (backs the frontend ApiKeyManager).
 
-Keys are stored in backend/app_config.json (git-ignored); get_key() falls back to
-the matching env var (DEEPSEEK_API_KEY, OPENAI_API_KEY, ...) when the file has none.
+Keys are stored in backend/app_config.json (git-ignored). Environment-provided
+keys are migrated there once during application startup.
 """
 from fastapi import APIRouter, HTTPException, Response, Header, Depends, Request
 import hashlib
@@ -15,8 +15,8 @@ router = APIRouter()
 
 
 def _status() -> dict:
-    # Reflect the EFFECTIVE value (file first, then env var) so the UI shows a key
-    # as configured even when it's provided via the environment.
+    # Environment values have already been migrated by bootstrap_from_env(), so
+    # status always reflects the authoritative config file.
     out = {}
     for field in FIELDS:
         val = get_key(field)

@@ -21,6 +21,7 @@ import asyncio
 import inspect
 import sys
 import logging
+from pathlib import Path
 
 from core import config
 from runtime import tracing
@@ -29,6 +30,8 @@ import db
 from db import queries
 
 log = logging.getLogger(__name__)
+
+_BACKEND_DIR = Path(__file__).resolve().parent.parent
 
 
 class Supervisor:
@@ -251,7 +254,10 @@ class Supervisor:
         while not self._stopping:
             proc = None
             try:
-                proc = await asyncio.create_subprocess_exec(*cmd)
+                proc = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    cwd=str(_BACKEND_DIR),
+                )
                 entry = (label, proc)
                 self._processes.append(entry)
                 log.info("supervisor: started %s (pid=%d)", label, proc.pid)

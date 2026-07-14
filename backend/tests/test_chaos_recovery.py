@@ -9,6 +9,7 @@ from pathlib import Path
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
 import json
+from unittest.mock import patch
 
 # Ensure the backend directory is in the path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -74,17 +75,32 @@ class TestChaosRecovery(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         # 1. Setup temp dirs and environment variables
         self.tmpdir = os.path.realpath(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmpdir, ignore_errors=True)
         self.test_db = os.path.realpath(os.path.join(self.tmpdir, "test_chaos_recovery.db"))
         self.workspace_root = os.path.realpath(os.path.join(self.tmpdir, "workspaces"))
+        self.plugins_dir = Path(self.tmpdir) / "plugins"
+        self.flags_dir = Path(self.tmpdir) / "flags"
+        self.config_file = Path(self.tmpdir) / "app_config.json"
         os.makedirs(self.workspace_root, exist_ok=True)
+        self.plugins_dir.mkdir()
+        self.flags_dir.mkdir()
         
         self._orig_db = _db_mod.DB_PATH
         self._orig_writer = _writer_mod.DB_PATH
-        self._orig_ws = os.environ.get("NUKE_WORKSPACE_ROOT")
-        self._orig_db_env = os.environ.get("NUKE_DB_PATH")
-        
-        os.environ["NUKE_DB_PATH"] = self.test_db
-        os.environ["NUKE_WORKSPACE_ROOT"] = self.workspace_root
+        self.addCleanup(self._restore_db_paths)
+
+        self._env = patch.dict(os.environ, {
+            "NUKE_DB_PATH": self.test_db,
+            "NUKE_WORKSPACE_ROOT": self.workspace_root,
+            "NUKE_EXTERNAL_PLUGINS_DIR": str(self.plugins_dir),
+            "NUKE_APP_CONFIG_PATH": str(self.config_file),
+            "NUKE_CHAOS_FLAG_DIR": str(self.flags_dir),
+            "NUKE_IDEMPOTENT_TOOLS": "mock_blocking_tool",
+            "MCP_SERVERS_CONFIG": str(Path(self.tmpdir) / "missing-mcp-servers.json"),
+        })
+        self._env.start()
+        self.addCleanup(self._env.stop)
+
         _db_mod.DB_PATH = self.test_db
         _writer_mod.DB_PATH = self.test_db
         
@@ -106,18 +122,20 @@ class TestChaosRecovery(unittest.IsolatedAsyncioTestCase):
             await db.commit()
             
         # 3. Write temp plugin file to register mock_blocking_tool
-        self.plugin_file = Path(__file__).parent.parent / "executors" / "plugins" / "chaos_mock_tool.py"
+        self.plugin_file = self.plugins_dir / "chaos_mock_tool.py"
         plugin_code = """import os
 import time
+from pathlib import Path
 from executors import tool_executor
 from executors.base import ToolDef
 
 def mock_blocking_tool(arguments: dict = None, context: dict = None) -> tuple[str, bool]:
-    if not os.path.exists("second_run.txt"):
-        with open("tool_started.txt", "w") as f:
-            f.write("started")
-        with open("second_run.txt", "w") as f:
-            f.write("run2")
+    flag_dir = Path(os.environ["NUKE_CHAOS_FLAG_DIR"])
+    started_flag = flag_dir / "tool_started.txt"
+    second_run_flag = flag_dir / "second_run.txt"
+    if not second_run_flag.exists():
+        started_flag.write_text("started", encoding="utf-8")
+        second_run_flag.write_text("run2", encoding="utf-8")
         time.sleep(30)
         return "blocked_and_done", False
     return "completed_successfully", False
@@ -128,73 +146,38 @@ tool_executor.register(
 )
 """
         self.plugin_file.write_text(plugin_code, encoding="utf-8")
-        
-        # 4. Write mock app_config.json
-        self.config_file = Path(__file__).parent.parent / "app_config.json"
-        self._orig_config_exists = self.config_file.exists()
-        if self._orig_config_exists:
-            self._orig_config_data = self.config_file.read_text(encoding="utf-8")
-        self.config_file.write_text(json.dumps({"ollama_base_url": "http://127.0.0.1:8089"}), encoding="utf-8")
-        
-        # 5. Start mock LLM HTTP server
-        self.http_server = HTTPServer(('127.0.0.1', 8089), MockLLMHandler)
+
+        # 4. Start a mock LLM server on an OS-assigned port, then point the
+        # isolated app config at it.
+        self.http_server = HTTPServer(('127.0.0.1', 0), MockLLMHandler)
+        self.addCleanup(self.http_server.server_close)
+        port = self.http_server.server_address[1]
+        self.config_file.write_text(
+            json.dumps({"ollama_base_url": f"http://127.0.0.1:{port}"}),
+            encoding="utf-8",
+        )
         self.http_thread = threading.Thread(target=self.http_server.serve_forever, daemon=True)
         self.http_thread.start()
-        
-        # Cleanup any leftover flag files
-        for f in ["tool_started.txt", "second_run.txt"]:
-            if os.path.exists(f):
-                os.unlink(f)
-
-        # Set environment variable so child worker processes inherit the idempotent tools list
-        os.environ["NUKE_IDEMPOTENT_TOOLS"] = "mock_blocking_tool"
+        self.addCleanup(self._stop_http_server)
 
         # Also monkeypatch the local process for recovery calls running in-process
         import sessions.recovery
         self._orig_idempotent_tools = sessions.recovery.IDEMPOTENT_TOOLS
+        self.addCleanup(
+            setattr,
+            sessions.recovery,
+            "IDEMPOTENT_TOOLS",
+            self._orig_idempotent_tools,
+        )
         sessions.recovery.IDEMPOTENT_TOOLS = sessions.recovery.IDEMPOTENT_TOOLS.union({"mock_blocking_tool"})
 
-    async def asyncTearDown(self):
-        # 1. Stop HTTP server
+    def _stop_http_server(self):
         self.http_server.shutdown()
-        self.http_server.server_close()
         self.http_thread.join(timeout=2)
-        
-        # 2. Delete flags
-        for f in ["tool_started.txt", "second_run.txt"]:
-            if os.path.exists(f):
-                try: os.unlink(f)
-                except Exception: pass
-                
-        # 3. Restore app_config.json
-        if self._orig_config_exists:
-            self.config_file.write_text(self._orig_config_data, encoding="utf-8")
-        else:
-            self.config_file.unlink(missing_ok=True)
-            
-        # 4. Delete temp plugin
-        self.plugin_file.unlink(missing_ok=True)
-        
-        # 5. Restore DB and env
+
+    def _restore_db_paths(self):
         _db_mod.DB_PATH = self._orig_db
         _writer_mod.DB_PATH = self._orig_writer
-        if self._orig_ws is not None:
-            os.environ["NUKE_WORKSPACE_ROOT"] = self._orig_ws
-        else:
-            os.environ.pop("NUKE_WORKSPACE_ROOT", None)
-            
-        if self._orig_db_env is not None:
-            os.environ["NUKE_DB_PATH"] = self._orig_db_env
-        else:
-            os.environ.pop("NUKE_DB_PATH", None)
-            
-        # Restore sessions.recovery.IDEMPOTENT_TOOLS and env var
-        import sessions.recovery
-        sessions.recovery.IDEMPOTENT_TOOLS = self._orig_idempotent_tools
-        os.environ.pop("NUKE_IDEMPOTENT_TOOLS", None)
-
-        # 6. Cleanup temp dir
-        shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     async def test_worker_sigkill_recovery(self):
         addr = ipc.make_addr(f"chaos_recovery_{os.getpid()}")
@@ -253,15 +236,17 @@ tool_executor.register(
                 ipc.protocol.USER_MESSAGE, group_id=9, content="Please start", member_id=2, trace_id="tr-user", online_ids=[2]
             ))
             
+            started_flag = self.flags_dir / "tool_started.txt"
+
             # Wait for mock_blocking_tool to write tool_started.txt
             for _ in range(150):
-                if os.path.exists("tool_started.txt"):
+                if started_flag.exists():
                     break
                 await asyncio.sleep(0.1)
                 
-            if not os.path.exists("tool_started.txt"):
+            if not started_flag.exists():
                 print(f"\n[TestChaosRecovery] tool_started.txt not found. browser.messages: {browser.messages}\n", flush=True)
-            self.assertTrue(os.path.exists("tool_started.txt"), "mock_blocking_tool failed to start")
+            self.assertTrue(started_flag.exists(), "mock_blocking_tool failed to start")
             
             # SIGKILL the worker process!
             worker_proc = None
@@ -274,8 +259,7 @@ tool_executor.register(
             
             worker_proc.kill()
             
-            if os.path.exists("tool_started.txt"):
-                os.unlink("tool_started.txt")
+            started_flag.unlink(missing_ok=True)
                 
             # Wait for completion (allow time for process detect + restart + recovery)
             await asyncio.wait_for(browser.done_event.wait(), 15)

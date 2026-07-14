@@ -5,6 +5,7 @@ import tempfile
 from fastapi.testclient import TestClient
 
 from main import app
+import config as app_config
 from core import auth as _auth
 
 
@@ -60,8 +61,10 @@ def test_api_config_rejects_non_operator():
         app.dependency_overrides.clear()
 
 
-def test_api_config_allows_operator_without_returning_secret_values(monkeypatch):
+def test_api_config_allows_operator_without_returning_secret_values(monkeypatch, tmp_path):
+    monkeypatch.setattr(app_config, "CONFIG_PATH", tmp_path / "app_config.json")
     monkeypatch.setenv("DEEPSEEK_API_KEY", "secret-value-that-must-not-be-returned")
+    app_config.bootstrap_from_env()
     client = _client_with_user({"uid": 1, "sub": "ops", "is_operator": True})
     try:
         response = client.get("/api/config")

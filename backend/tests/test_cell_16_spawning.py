@@ -4,6 +4,7 @@ import os
 import sys
 import unittest
 import tempfile
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 # Ensure the backend directory is in the path
@@ -76,6 +77,30 @@ class TestCell16Spawning(unittest.IsolatedAsyncioTestCase):
             await sup.stop()
             self.assertEqual(len(sup._processes), 0)
             self.assertEqual(len(sup._monitor_tasks), 0)
+
+    async def test_subprocess_uses_backend_working_directory(self):
+        sup = Supervisor(self.addr)
+
+        class Process:
+            pid = 123
+            returncode = 0
+
+            async def wait(self):
+                sup._stopping = True
+
+        with patch(
+            "runtime.supervisor.asyncio.create_subprocess_exec",
+            return_value=Process(),
+        ) as spawn:
+            await sup._run_process_loop("w0", [sys.executable, "-m", "runtime.entry"])
+
+        expected_cwd = Path(__file__).resolve().parent.parent
+        spawn.assert_awaited_once_with(
+            sys.executable,
+            "-m",
+            "runtime.entry",
+            cwd=str(expected_cwd),
+        )
 
 if __name__ == "__main__":
     unittest.main()
