@@ -1,0 +1,294 @@
+"""
+plugins/agent_dashboard/orchestrator.py — Task Orchestration
+
+Wires up the coding agent task lifecycle:
+  1. Create a dedicated group for the task
+  2. Add a "Coding Agent" bot member
+  3. Clone the target repo into the workspace
+  4. Dispatch the coding agent via workflow message
+  5. Track the task via ProgressAdapter
+
+This module uses the existing group/member/workflow APIs internally,
+so it doesn't duplicate any business logic.
+
+The coding agent system prompt drives autonomous behavior:
+  clone → explore code → write code → run tests → fix if failed → commit → push → create PR
+"""
+import asyncio
+import logging
+import time
+from pathlib import Path
+from typing import Optional
+
+log = logging.getLogger(__name__)
+
+# Default coding agent system prompt
+CODING_AGENT_SYSTEM_PROMPT = """You are an autonomous coding agent. Your task is to implement the requested feature, test it, and submit a PR.
+
+## Your Workflow
+
+1. **Explore**: Read the existing codebase to understand the structure, conventions, and relevant files.
+2. **Plan**: Briefly outline your implementation approach.
+3. **Implement**: Write/edit the necessary files. Use edit_file for modifications, write_file only for new files.
+4. **Test**: Run the test suite. If tests fail, fix the issues and re-run until all tests pass.
+5. **Commit & Push**: Stage all changes, commit with a descriptive message, and push the branch.
+6. **Create PR**: Create a pull request with a clear description of the changes.
+
+## Rules
+
+- NEVER skip testing. If the test command is provided, run it. If not, look for test configuration and run whatever test framework exists.
+- If tests fail, you MUST fix them before creating a PR. Iterate up to 5 times.
+- Use edit_file (not write_file) for modifying existing files — it sends only the diff.
+- Keep commits focused and atomic.
+- Write clean, well-documented code following the project's existing conventions.
+- If you encounter an error you cannot fix after 3 attempts, describe the issue clearly and stop.
+
+## Test Loop
+
+When running tests:
+1. Run the test command
+2. If tests pass → proceed to commit
+3. If tests fail → read the error output, identify the failing test, fix the code, re-run
+4. Repeat until all tests pass or you've tried 5 times
+
+## Completion
+
+When all tests pass and code is committed:
+1. Push your branch
+2. Create a PR with: title, description of changes, list of modified files
+3. Report the PR URL as your final output
+"""
+
+
+class TaskOrchestrator:
+    """Manages the full lifecycle of coding agent tasks."""
+
+    def __init__(self, adapter=None):
+        """
+        Args:
+            adapter: ProgressAdapter instance for progress tracking (optional)
+        """
+        self._adapter = adapter
+        self._tasks: dict[str, dict] = {}  # task_id → task record
+
+    @property
+    def tasks(self) -> dict:
+        """Read-only access to task registry."""
+        return dict(self._tasks)
+
+    async def create_task(
+        self,
+        repo_url: str,
+        requirements: str,
+        base_branch: str = "main",
+        test_command: str = "",
+        github_token: Optional[str] = None,
+        model: str = "deepseek-chat",
+        max_iterations: int = 100,
+    ) -> dict:
+        """Create and dispatch a new coding agent task.
+
+        Returns:
+            dict with task_id, group_id, status
+        """
+        task_id = f"agent_{int(time.time())}_{len(self._tasks)}"
+
+        # 1. Create group
+        group_id = await self._create_group(task_id)
+
+        # 2. Add coding agent bot
+        bot_id = await self._add_bot(group_id, model, max_iterations)
+
+        # 3. Clone repo into workspace
+        workspace_path = await self._clone_repo(group_id, repo_url, base_branch)
+
+        # 4. Register with progress adapter
+        if self._adapter:
+            self._adapter.register_task(group_id, task_id)
+
+        # 5. Dispatch the coding agent
+        await self._dispatch_agent(group_id, bot_id, requirements, test_command)
+
+        # 6. Record task
+        record = {
+            "task_id": task_id,
+            "group_id": group_id,
+            "bot_id": bot_id,
+            "repo_url": repo_url,
+            "requirements": requirements,
+            "base_branch": base_branch,
+            "test_command": test_command,
+            "model": model,
+            "created_at": time.time(),
+            "status": "dispatched",
+        }
+        self._tasks[task_id] = record
+
+        log.info("TaskOrchestrator: task %s dispatched (group=%d, bot=%d)", task_id, group_id, bot_id)
+        return record
+
+    async def retry_task(self, task_id: str) -> dict:
+        """Retry a stuck/failed task: abort → cleanup → re-dispatch."""
+        record = self._tasks.get(task_id)
+        if not record:
+            raise ValueError(f"Task {task_id} not found")
+
+        group_id = record["group_id"]
+
+        # 1. Abort current run
+        try:
+            from core.bg import abort_group
+            cancelled = abort_group(group_id)
+            log.info("TaskOrchestrator: aborted %d tasks for group %d", cancelled, group_id)
+        except Exception as e:
+            log.warning("TaskOrchestrator: abort failed: %s", e)
+
+        # 2. Clean up worktree
+        try:
+            from workspace.git_worktree import remove_worktree
+            await remove_worktree(group_id, task_id)
+        except Exception as e:
+            log.warning("TaskOrchestrator: worktree cleanup failed: %s", e)
+
+        # 3. Reset progress
+        if self._adapter:
+            self._adapter.unregister_task(group_id)
+            self._adapter.register_task(group_id, task_id)
+
+        # 4. Re-dispatch
+        await self._dispatch_agent(
+            group_id,
+            record["bot_id"],
+            record["requirements"],
+            record.get("test_command", ""),
+        )
+
+        record["status"] = "restarted"
+        record["restarted_at"] = time.time()
+        return record
+
+    async def abort_task(self, task_id: str) -> dict:
+        """Abort and clean up a task."""
+        record = self._tasks.get(task_id)
+        if not record:
+            raise ValueError(f"Task {task_id} not found")
+
+        group_id = record["group_id"]
+
+        try:
+            from core.bg import abort_group
+            abort_group(group_id)
+        except Exception:
+            pass
+
+        try:
+            from workspace.git_worktree import remove_worktree
+            await remove_worktree(group_id, task_id)
+        except Exception:
+            pass
+
+        if self._adapter:
+            self._adapter.unregister_task(group_id)
+
+        record["status"] = "aborted"
+        return record
+
+    # ── Internal helpers ──────────────────────────────────────────────
+
+    async def _create_group(self, task_id: str) -> int:
+        """Create a dedicated group for the coding agent task."""
+        from db import write_connect
+
+        group_name = f"Coding Agent: {task_id}"
+        async with write_connect() as db:
+            async with db.execute(
+                "INSERT INTO groups (name, assigned_worker_id) VALUES (?, NULL)",
+                (group_name,),
+            ) as cur:
+                group_id = cur.lastrowid
+            await db.commit()
+
+        # Initialize workspace
+        from workspace import init_group_workspace
+        await init_group_workspace(group_id, group_name)
+
+        return group_id
+
+    async def _add_bot(self, group_id: int, model: str, max_iterations: int) -> int:
+        """Add a coding agent bot to the group."""
+        from db import write_connect
+        from workspace import init_bot_workspace
+        import json
+
+        system_prompt = CODING_AGENT_SYSTEM_PROMPT
+        config = json.dumps({"max_iterations": max_iterations})
+
+        async with write_connect() as db:
+            async with db.execute(
+                """INSERT INTO members (
+                    group_id, name, type, role, system_prompt, avatar_color,
+                    model_provider, model_name, temperature, max_tokens,
+                    personality_prompt, executor_id, executor_config, done_keyword
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (group_id, "Coding Agent", "bot", "developer", system_prompt, "#10b981",
+                 self._resolve_provider(model), model, 0.3, 8192,
+                 None, "tool_loop_v1", config, None),
+            ) as cur:
+                await db.commit()
+                bot_id = cur.lastrowid
+
+        await init_bot_workspace({
+            "id": bot_id,
+            "group_id": group_id,
+            "name": "Coding Agent",
+            "role": "developer",
+            "system_prompt": system_prompt,
+            "personality_prompt": "",
+        })
+
+        return bot_id
+
+    async def _clone_repo(self, group_id: int, repo_url: str, branch: str) -> Path:
+        """Clone the repository into the group's workspace."""
+        from workspace import layout as ws_layout
+        from integrations.github_client import clone_repo
+
+        workspace = ws_layout.group_shared_dir(group_id) / "workspace"
+        await clone_repo(repo_url, workspace, branch=branch)
+        return workspace
+
+    async def _dispatch_agent(self, group_id: int, bot_id: int, requirements: str, test_command: str) -> None:
+        """Dispatch the coding agent via the Supervisor → Worker message path."""
+        from runtime import supervisor as sup_mod
+        from runtime import ipc
+
+        # Build the trigger message
+        message = f"Please implement the following feature:\n\n{requirements}"
+        if test_command:
+            message += f"\n\nTest command to verify: `{test_command}`"
+
+        # Send as a USER_MESSAGE to the worker via Supervisor
+        sup = sup_mod.supervisor
+        if sup:
+            await sup.send_to_worker(
+                group_id,
+                ipc.protocol.envelope(
+                    ipc.protocol.USER_MESSAGE,
+                    group_id=group_id,
+                    member_id=bot_id,
+                    content=message,
+                ),
+            )
+
+    @staticmethod
+    def _resolve_provider(model: str) -> str:
+        """Resolve model name to provider."""
+        model_lower = model.lower()
+        if "gpt" in model_lower or "o1" in model_lower or "o3" in model_lower:
+            return "openai"
+        elif "claude" in model_lower:
+            return "anthropic"
+        elif "deepseek" in model_lower:
+            return "deepseek"
+        else:
+            return "deepseek"  # default

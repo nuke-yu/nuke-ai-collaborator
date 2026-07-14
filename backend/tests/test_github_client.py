@@ -1,0 +1,232 @@
+"""tests/test_github_client.py — GitHubClient unit tests.
+
+Tests the GitHub integration logic using mocked subprocess calls.
+No real git/gh commands are executed.
+"""
+import asyncio
+import os
+import unittest
+from pathlib import Path
+from unittest.mock import patch, AsyncMock, MagicMock
+
+from integrations.github_client import (
+    GitHubClient,
+    _run_cmd,
+    _git,
+    _gh,
+    clone_repo,
+    ensure_branch,
+    commit_all,
+    is_gh_available,
+)
+
+
+def _mock_proc(stdout=b"", stderr=b"", rc=0):
+    """Create a mock subprocess with given stdout/stderr/returncode."""
+    p = AsyncMock()
+    p.communicate = AsyncMock(return_value=(stdout, stderr))
+    p.returncode = rc
+    p.kill = MagicMock()
+    return p
+
+
+class TestRunCmd(unittest.IsolatedAsyncioTestCase):
+
+    async def test_success(self):
+        with patch("asyncio.create_subprocess_exec", return_value=_mock_proc(b"hello\n", b"", 0)):
+            stdout, stderr, rc = await _run_cmd("echo", "hello")
+            self.assertEqual(stdout, "hello")
+            self.assertEqual(rc, 0)
+
+    async def test_failure(self):
+        with patch("asyncio.create_subprocess_exec", return_value=_mock_proc(b"", b"error msg", 1)):
+            stdout, stderr, rc = await _run_cmd("false")
+            self.assertEqual(rc, 1)
+            self.assertEqual(stderr, "error msg")
+
+    async def test_timeout(self):
+        proc = _mock_proc()
+        proc.communicate = AsyncMock(side_effect=asyncio.TimeoutError())
+
+        with patch("asyncio.create_subprocess_exec", return_value=proc):
+            with self.assertRaises(RuntimeError) as ctx:
+                await _run_cmd("sleep", "100", timeout=1)
+            self.assertIn("timed out", str(ctx.exception))
+
+
+class TestGitHelper(unittest.IsolatedAsyncioTestCase):
+
+    async def test_success(self):
+        with patch("asyncio.create_subprocess_exec", return_value=_mock_proc(b"main\n", b"", 0)):
+            result = await _git("rev-parse", "--abbrev-ref", "HEAD")
+            self.assertEqual(result, "main")
+
+    async def test_failure_raises(self):
+        with patch("asyncio.create_subprocess_exec", return_value=_mock_proc(b"", b"fatal: not a git repo", 128)):
+            with self.assertRaises(RuntimeError) as ctx:
+                await _git("status")
+            self.assertIn("not a git repo", str(ctx.exception))
+
+
+class TestGhHelper(unittest.IsolatedAsyncioTestCase):
+
+    async def test_success(self):
+        with patch("asyncio.create_subprocess_exec",
+                    return_value=_mock_proc(b"https://github.com/user/repo/pull/42\n", b"", 0)):
+            result = await _gh("pr", "create", "--title", "test")
+            self.assertIn("pull/42", result)
+
+    async def test_failure_raises(self):
+        with patch("asyncio.create_subprocess_exec",
+                    return_value=_mock_proc(b"", b"not authenticated", 1)):
+            with self.assertRaises(RuntimeError) as ctx:
+                await _gh("pr", "create")
+            self.assertIn("not authenticated", str(ctx.exception))
+
+
+class TestCloneRepo(unittest.IsolatedAsyncioTestCase):
+
+    async def test_clone_with_branch(self):
+        with patch("asyncio.create_subprocess_exec", return_value=_mock_proc()) as mock_exec:
+            with patch("shutil.rmtree"):
+                dest = Path("/tmp/test_clone_dest")
+                await clone_repo("https://github.com/user/repo.git", dest, branch="develop")
+                call_args = mock_exec.call_args[0]
+                self.assertIn("clone", call_args)
+                self.assertIn("--branch", call_args)
+                self.assertIn("develop", call_args)
+
+    async def test_clone_without_branch(self):
+        with patch("asyncio.create_subprocess_exec", return_value=_mock_proc()) as mock_exec:
+            with patch("shutil.rmtree"):
+                dest = Path("/tmp/test_clone_dest")
+                await clone_repo("https://github.com/user/repo.git", dest)
+                call_args = mock_exec.call_args[0]
+                self.assertNotIn("--branch", call_args)
+
+
+class TestEnsureBranch(unittest.IsolatedAsyncioTestCase):
+
+    async def test_new_branch(self):
+        procs = [
+            _mock_proc(b"", b"", 0),   # branch --list → empty
+            _mock_proc(b"", b"", 0),   # checkout -b → success
+        ]
+        with patch("asyncio.create_subprocess_exec", side_effect=procs):
+            branch = await ensure_branch("/tmp/repo", "feature/test", "main")
+            self.assertEqual(branch, "feature/test")
+
+    async def test_existing_branch(self):
+        procs = [
+            _mock_proc(b"  feature/test\n", b"", 0),  # branch --list → found
+            _mock_proc(b"", b"", 0),                   # checkout → success
+        ]
+        with patch("asyncio.create_subprocess_exec", side_effect=procs):
+            branch = await ensure_branch("/tmp/repo", "feature/test")
+            self.assertEqual(branch, "feature/test")
+
+
+class TestCommitAll(unittest.IsolatedAsyncioTestCase):
+
+    async def test_with_changes(self):
+        procs = [
+            _mock_proc(b" M file.py\n", b"", 0),  # status → has changes
+            _mock_proc(b"", b"", 0),               # add
+            _mock_proc(b"", b"", 0),               # commit
+        ]
+        with patch("asyncio.create_subprocess_exec", side_effect=procs):
+            result = await commit_all("/tmp/repo", "test commit")
+            self.assertTrue(result)
+
+    async def test_no_changes(self):
+        with patch("asyncio.create_subprocess_exec", return_value=_mock_proc(b"", b"", 0)):
+            result = await commit_all("/tmp/repo", "test commit")
+            self.assertFalse(result)
+
+
+class TestGitHubClient(unittest.IsolatedAsyncioTestCase):
+
+    def _setup_workspace(self, tmp_dir):
+        """Create a fake workspace with .git directory."""
+        workspace = Path(tmp_dir) / "workspace"
+        workspace.mkdir(parents=True, exist_ok=True)
+        (workspace / ".git").mkdir()
+        return workspace
+
+    async def test_create_pr_success(self):
+        """Full PR creation flow succeeds."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            workspace = self._setup_workspace(tmp_dir)
+            client = GitHubClient(workspace_path=workspace)
+
+            mock_results = [
+                (b"feature/task-1\n", b"", 0),   # rev-parse branch
+                (b" M main.py\n", b"", 0),        # status → changes
+                (b"", b"", 0),                     # add
+                (b"", b"", 0),                     # commit
+                (b"", b"", 0),                     # push
+                (b"refs/remotes/origin/main\n", b"", 0),  # symbolic-ref
+                (b"https://github.com/user/repo/pull/42\n", b"", 0),  # gh pr create
+            ]
+            procs = [_mock_proc(*r) for r in mock_results]
+
+            with patch("asyncio.create_subprocess_exec", side_effect=procs):
+                result = await client.create_pr(
+                    group_id=1,
+                    title="Add feature X",
+                    description="Implements feature X",
+                    ticket_ids=["DFT-1", "DFT-2"],
+                )
+
+            self.assertEqual(result["pr_id"], "PR-42")
+            self.assertIn("pull/42", result["url"])
+            self.assertEqual(result["title"], "Add feature X")
+            self.assertEqual(result["tickets"], ["DFT-1", "DFT-2"])
+
+    async def test_create_pr_no_changes(self):
+        """PR creation with no uncommitted changes still works."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            workspace = self._setup_workspace(tmp_dir)
+            client = GitHubClient(workspace_path=workspace)
+
+            mock_results = [
+                (b"main\n", b"", 0),          # rev-parse branch
+                (b"", b"", 0),                 # status → no changes
+                (b"", b"", 0),                 # push
+                (b"refs/remotes/origin/main\n", b"", 0),  # symbolic-ref
+                (b"https://github.com/user/repo/pull/7\n", b"", 0),  # gh pr create
+            ]
+            procs = [_mock_proc(*r) for r in mock_results]
+
+            with patch("asyncio.create_subprocess_exec", side_effect=procs):
+                result = await client.create_pr(
+                    group_id=1,
+                    title="Minor fix",
+                    description="",
+                )
+
+            self.assertIn("pull/7", result["url"])
+
+    async def test_create_pr_no_git_repo(self):
+        """Raises when workspace has no .git directory."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            workspace = Path(tmp_dir) / "empty"
+            workspace.mkdir()
+            client = GitHubClient(workspace_path=workspace)
+            with self.assertRaises(RuntimeError) as ctx:
+                await client.create_pr(group_id=1, title="test")
+            self.assertIn("No git repository", str(ctx.exception))
+
+
+class TestIsGhAvailable(unittest.TestCase):
+
+    def test_available(self):
+        with patch("shutil.which", return_value="/usr/bin/gh"):
+            self.assertTrue(is_gh_available())
+
+    def test_not_available(self):
+        with patch("shutil.which", return_value=None):
+            self.assertFalse(is_gh_available())

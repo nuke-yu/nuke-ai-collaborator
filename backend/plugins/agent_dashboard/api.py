@@ -23,17 +23,16 @@ router = APIRouter()
 _adapter = None
 _host = None
 _stuck_detector = None
-
-# Task registry: task_id → {group_id, spec, created_at, status}
-_task_registry: dict[str, dict] = {}
+_orchestrator = None
 
 
-def set_context(adapter, host, stuck_detector):
+def set_context(adapter, host, stuck_detector, orchestrator=None):
     """Called by plugin __init__ to inject dependencies."""
-    global _adapter, _host, _stuck_detector
+    global _adapter, _host, _stuck_detector, _orchestrator
     _adapter = adapter
     _host = host
     _stuck_detector = stuck_detector
+    _orchestrator = orchestrator
 
 
 # ── Request/Response Models ───────────────────────────────────────────
@@ -67,53 +66,48 @@ class RetryResponse(BaseModel):
 async def create_task(req: CreateTaskRequest):
     """Create a new coding agent task.
 
-    Creates a dedicated group, clones the repo, and dispatches the coding agent.
+    Uses the TaskOrchestrator to: create group → add bot → clone repo → dispatch agent.
     Returns the task_id and group_id for tracking.
     """
-    # Generate task ID
-    task_id = f"agent_{int(time.time())}_{len(_task_registry)}"
+    if not _orchestrator:
+        raise HTTPException(503, "Agent orchestrator not initialized")
 
-    # Create a dedicated group for this task
-    # TODO: Implement group creation via core API
-    # For now, use a placeholder group_id (will be implemented in Phase 2)
-    group_id = _allocate_group_id()
+    try:
+        record = await _orchestrator.create_task(
+            repo_url=req.repo_url,
+            requirements=req.requirements,
+            base_branch=req.base_branch,
+            test_command=req.test_command,
+            github_token=req.github_token,
+            model=req.model,
+            max_iterations=req.max_iterations,
+        )
 
-    # Register task
-    _task_registry[task_id] = {
-        "group_id": group_id,
-        "spec": req.model_dump(),
-        "created_at": time.time(),
-        "status": "queued",
-    }
+        # Assign to least-loaded worker
+        if _host:
+            worker_id = _host.pick_worker("least_loaded")
+            if worker_id:
+                await _host.reassign_group(record["group_id"], worker_id)
 
-    # Register with progress adapter
-    if _adapter:
-        _adapter.register_task(group_id, task_id)
-
-    # Pick least-loaded worker and assign
-    if _host:
-        worker_id = _host.pick_worker("least_loaded")
-        if worker_id:
-            await _host.reassign_group(group_id, worker_id)
-            log.info("agent_dashboard: task %s assigned to worker %s", task_id, worker_id)
-
-    # TODO: Dispatch the actual coding agent work
-    # This will be implemented when integrating with the tool_loop
-    log.info("agent_dashboard: task %s created for group %d", task_id, group_id)
-
-    return TaskResponse(
-        task_id=task_id,
-        group_id=group_id,
-        status="queued",
-        created_at=_task_registry[task_id]["created_at"],
-    )
+        return TaskResponse(
+            task_id=record["task_id"],
+            group_id=record["group_id"],
+            status=record["status"],
+            created_at=record["created_at"],
+        )
+    except Exception as e:
+        log.exception("agent_dashboard: task creation failed")
+        raise HTTPException(500, f"Task creation failed: {e}")
 
 
 @router.get("/tasks")
 async def list_tasks():
     """List all active tasks with current progress."""
+    if not _orchestrator:
+        return {"tasks": []}
+
     result = []
-    for task_id, record in _task_registry.items():
+    for task_id, record in _orchestrator.tasks.items():
         progress = _adapter.get_progress(record["group_id"]) if _adapter else None
         result.append({
             "task_id": task_id,
@@ -128,7 +122,10 @@ async def list_tasks():
 @router.get("/tasks/{task_id}")
 async def get_task(task_id: str):
     """Get detailed progress for a specific task."""
-    record = _task_registry.get(task_id)
+    if not _orchestrator:
+        raise HTTPException(404, "Task not found")
+
+    record = _orchestrator.tasks.get(task_id)
     if not record:
         raise HTTPException(status_code=404, detail="Task not found")
 
@@ -139,91 +136,43 @@ async def get_task(task_id: str):
         "group_id": record["group_id"],
         "status": record["status"],
         "created_at": record["created_at"],
-        "spec": record["spec"],
+        "repo_url": record.get("repo_url", ""),
+        "requirements": record.get("requirements", ""),
         "progress": progress,
     }
 
 
 @router.post("/tasks/{task_id}/retry", response_model=RetryResponse)
 async def retry_task(task_id: str):
-    """Retry a stuck or failed task.
+    """Retry a stuck or failed task via the orchestrator."""
+    if not _orchestrator:
+        raise HTTPException(503, "Agent orchestrator not initialized")
 
-    Steps:
-      1. Abort current run
-      2. Clean up worktree sandbox
-      3. Reset progress state
-      4. Re-dispatch the task
-    """
-    record = _task_registry.get(task_id)
-    if not record:
-        raise HTTPException(status_code=404, detail="Task not found")
-
-    group_id = record["group_id"]
-
-    # 1. Abort current run
     try:
-        from core.bg import abort_group
-        cancelled = abort_group(group_id)
-        log.info("agent_dashboard: aborted %d tasks for group %d", cancelled, group_id)
+        record = await _orchestrator.retry_task(task_id)
+        return RetryResponse(
+            task_id=task_id,
+            status=record["status"],
+            message=f"Task {task_id} has been restarted",
+        )
+    except ValueError:
+        raise HTTPException(404, "Task not found")
     except Exception as e:
-        log.warning("agent_dashboard: abort failed for group %d: %s", group_id, e)
-
-    # 2. Clean up worktree
-    try:
-        from workspace.git_worktree import remove_worktree
-        await remove_worktree(group_id, task_id)
-    except Exception as e:
-        log.warning("agent_dashboard: worktree cleanup failed: %s", e)
-
-    # 3. Reset progress state
-    if _adapter:
-        _adapter.unregister_task(group_id)
-        _adapter.register_task(group_id, task_id)
-
-    # 4. Update task record
-    record["status"] = "restarted"
-    record["restarted_at"] = time.time()
-
-    # TODO: Re-dispatch the coding agent work
-    log.info("agent_dashboard: task %s restarted", task_id)
-
-    return RetryResponse(
-        task_id=task_id,
-        status="restarted",
-        message=f"Task {task_id} has been aborted and restarted",
-    )
+        log.exception("agent_dashboard: retry failed for %s", task_id)
+        raise HTTPException(500, f"Retry failed: {e}")
 
 
 @router.delete("/tasks/{task_id}")
 async def abort_task(task_id: str):
-    """Abort and clean up a task."""
-    record = _task_registry.get(task_id)
-    if not record:
-        raise HTTPException(status_code=404, detail="Task not found")
+    """Abort and clean up a task via the orchestrator."""
+    if not _orchestrator:
+        raise HTTPException(503, "Agent orchestrator not initialized")
 
-    group_id = record["group_id"]
-
-    # Abort
     try:
-        from core.bg import abort_group
-        abort_group(group_id)
-    except Exception:
-        pass
-
-    # Clean up worktree
-    try:
-        from workspace.git_worktree import remove_worktree
-        await remove_worktree(group_id, task_id)
-    except Exception:
-        pass
-
-    # Update state
-    if _adapter:
-        _adapter.unregister_task(group_id)
-
-    record["status"] = "aborted"
-
-    return {"task_id": task_id, "status": "aborted"}
+        record = await _orchestrator.abort_task(task_id)
+        return {"task_id": task_id, "status": record["status"]}
+    except ValueError:
+        raise HTTPException(404, "Task not found")
 
 
 @router.get("/workers")
@@ -233,7 +182,6 @@ async def get_workers():
         return {"workers": {}}
 
     stats = _host.get_worker_stats()
-    # Enrich with load score
     result = {}
     for wid, s in stats.items():
         bg = s.get("bg", {})
@@ -243,18 +191,3 @@ async def get_workers():
             "tasks_by_group": bg.get("tasks_by_group", {}),
         }
     return {"workers": result}
-
-
-# ── Helpers ───────────────────────────────────────────────────────────
-
-_group_counter = 10000  # Start from a high number to avoid conflicts
-
-def _allocate_group_id() -> int:
-    """Allocate a new group ID for a coding agent task.
-
-    TODO: Replace with actual group creation via core API.
-    For now, uses a counter to generate unique IDs.
-    """
-    global _group_counter
-    _group_counter += 1
-    return _group_counter

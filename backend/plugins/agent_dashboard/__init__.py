@@ -41,6 +41,7 @@ async def register(host):
     """
     from .progress import ProgressAdapter
     from .stuck_detector import StuckDetector
+    from .orchestrator import TaskOrchestrator
     from . import websocket as ws_module
     from . import api as api_module
 
@@ -49,10 +50,11 @@ async def register(host):
     # 1. Create shared components
     adapter = ProgressAdapter()
     detector = StuckDetector(adapter)
+    orchestrator = TaskOrchestrator(adapter=adapter)
 
     # 2. Inject dependencies into sub-modules
     ws_module.set_adapter(adapter)
-    api_module.set_context(adapter, host, detector)
+    api_module.set_context(adapter, host, detector, orchestrator=orchestrator)
 
     # 3. Mount REST API routes
     host.mount_router(api_module.router, prefix="/api/agent")
