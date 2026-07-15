@@ -312,9 +312,23 @@ class ProgressAdapter:
         elif reason in ("gate", "pause"):
             state.status = "paused"
             state.detail = f"暂停: {reason}"
-        elif reason == "provider_unavailable":
-            error = payload.get("details", "AI provider unavailable")
-            self.set_status(state.group_id, "error", error_message=error)
+        elif reason in {
+            "provider_unavailable",
+            "completion_signal_missing",
+            "rework_requested",
+        }:
+            defaults = {
+                "provider_unavailable": "AI provider unavailable",
+                "completion_signal_missing": "Agent did not report a completion signal",
+                "rework_requested": "Agent requested rework",
+            }
+            error = payload.get("details") or defaults[reason]
+            self.set_status(
+                state.group_id,
+                "error",
+                detail=f"任务失败: {error[:80]}",
+                error_message=error,
+            )
 
     # Handler dispatch table
     _HANDLERS = {

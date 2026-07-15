@@ -133,8 +133,17 @@ class CodingAgentOrchestrator(Orchestrator):
                     )
                 if is_signal_rework(sig):
                     log.info("coding_agent_v1: group %d reported rework needed", group_id)
+                    reason = str(
+                        (sig.get("arguments") or {}).get("reason")
+                        or "Coding agent requested rework"
+                    )
                     return OrchestratorStep(
                         broadcast_state=True,
+                        workflow_paused=WorkflowPaused(
+                            group_id=group_id,
+                            reason="rework_requested",
+                            details=reason,
+                        ),
                         workspace_action="discard",  # Failure: discard changes
                     )
 

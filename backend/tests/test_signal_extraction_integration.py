@@ -47,6 +47,8 @@ class TestSignalExtractionIntegration(unittest.TestCase):
         step = orch.observe(1, 5, "Cannot fix the failing tests.", signals=signals)
         self.assertFalse(step.done)
         self.assertTrue(step.broadcast_state)
+        self.assertEqual(step.workflow_paused.reason, "rework_requested")
+        self.assertIn("AssertionError", step.workflow_paused.details)
 
     def test_no_signal_from_tool_call(self):
         """No completion signal extracted → WorkflowPaused."""

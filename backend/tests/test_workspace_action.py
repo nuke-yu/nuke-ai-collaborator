@@ -40,6 +40,7 @@ class TestCodingAgentWorkspaceAction(unittest.TestCase):
         )
         self.assertFalse(step.done)
         self.assertEqual(step.workspace_action, "discard")
+        self.assertEqual(step.workflow_paused.reason, "rework_requested")
 
     def test_missing_signal_discards_and_pauses(self):
         self._begin()

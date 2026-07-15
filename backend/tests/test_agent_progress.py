@@ -183,6 +183,24 @@ class TestStatusTransitions:
         assert state.status == "error"
         assert "DeepSeek down" in state.error_message
 
+    @pytest.mark.parametrize(
+        "reason,details",
+        [
+            ("completion_signal_missing", "No completion signal"),
+            ("rework_requested", "Tests are still failing"),
+        ],
+    )
+    def test_workflow_failure_reason_is_terminal(self, active_adapter, reason, details):
+        active_adapter.on_event(
+            1,
+            {"type": "workflow_paused", "reason": reason, "details": details},
+        )
+
+        state = active_adapter._states[1]
+        assert state.status == "error"
+        assert state.error_message == details
+        assert 1 not in active_adapter._active_groups
+
 
 class TestIterationTracking:
 

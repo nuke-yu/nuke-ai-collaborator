@@ -68,7 +68,9 @@ class TestObserve(unittest.TestCase):
         step = orch.observe(1, 5, "Need to rework.",
                             signals=[{"name": "signal_rework", "arguments": {"reason": "tests failing"}}])
         self.assertFalse(step.done)
-        self.assertIsNone(step.workflow_paused)
+        self.assertIsNotNone(step.workflow_paused)
+        self.assertEqual(step.workflow_paused.reason, "rework_requested")
+        self.assertEqual(step.workflow_paused.details, "tests failing")
 
 class TestParseSpec(unittest.TestCase):
 
