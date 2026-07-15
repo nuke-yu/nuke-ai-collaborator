@@ -11,6 +11,7 @@ Provides REST endpoints for the dashboard frontend:
 """
 import logging
 import re
+import shlex
 import time
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field, field_validator
@@ -19,6 +20,14 @@ from typing import Optional
 from api.admin_deps import require_operator
 
 log = logging.getLogger(__name__)
+
+_TEST_RUNNERS = {
+    "pytest", "python", "python3", "npm", "npx", "pnpm", "yarn", "bun",
+    "cargo", "go", "dotnet", "mvn", "mvnw", "gradle", "gradlew", "make",
+    "bundle", "rspec", "php", "composer",
+}
+_SAFE_TEST_ARG = re.compile(r"^[A-Za-z0-9_./:@%+=,\-]+$")
+_SHELL_CONTROL_CHARS = frozenset("|;&`$<>\n\r\0")
 
 router = APIRouter()
 
@@ -74,12 +83,32 @@ class CreateTaskRequest(BaseModel):
     @field_validator("test_command")
     @classmethod
     def validate_test_command(cls, v: str) -> str:
-        """Block dangerous shell constructs in test commands."""
-        dangerous = ["|", ";", "&&", "||", "`", "$(", "> ", "< ", "curl", "wget", "eval", "bash"]
-        for d in dangerous:
-            if d in v:
-                raise ValueError(f"test_command contains disallowed construct: {d}")
-        return v
+        """Accept one shell-free argv command using a known test runner."""
+        command = v.strip()
+        if not command:
+            return ""
+        if len(command) > 1000:
+            raise ValueError("test_command must be at most 1000 characters")
+        if any(char in _SHELL_CONTROL_CHARS for char in command):
+            raise ValueError("test_command must not contain shell control characters")
+
+        try:
+            argv = shlex.split(command, posix=True)
+        except ValueError as exc:
+            raise ValueError(f"test_command is not valid argv syntax: {exc}") from exc
+        if not argv or len(argv) > 64:
+            raise ValueError("test_command must contain 1 to 64 arguments")
+
+        executable = argv[0].rsplit("/", 1)[-1]
+        if executable not in _TEST_RUNNERS:
+            raise ValueError(f"test_command runner is not allowed: {executable}")
+        if executable in {"python", "python3"} and any(
+            arg in {"-c", "--command"} for arg in argv[1:]
+        ):
+            raise ValueError("inline Python commands are not allowed")
+        if any(not _SAFE_TEST_ARG.fullmatch(arg) for arg in argv):
+            raise ValueError("test_command arguments contain unsupported characters")
+        return command
 
 
 class TaskResponse(BaseModel):

