@@ -5,7 +5,7 @@ from typing import Any, Dict, Optional, List
 # ── 下行 (Supervisor → Worker) ────────────────────────────────────────────
 USER_MESSAGE = "user_message"            # 用户消息
 ABORT = "abort"                          # 中止该群在跑任务
-ABORT_REQUEST = "abort_request"          # P0-2: Abort with ACK protocol (request_id, group_id, mode)
+ABORT_REQUEST = "abort_request"          # Abort with task-scoped cleanup ACK
 PERMISSION_RESPONSE = "permission_response"  # 权限审批回复
 CONFIRM = "confirm"                      # 人在工作流确认门点了「确认」
 START_WORKFLOW = "start_workflow"        # 启动 RD 人确认流水线
@@ -25,7 +25,7 @@ BROADCAST = "broadcast"                  # 包裹任一 bus 事件，供 Supervi
 UNREAD_DELTA = "unread_delta"            # 未读增量（Supervisor 落中心库，§10.1/3）
 STATS_REPORT = "stats_report"            # 可观测性聚合（DFT-057 跨 worker）
 LEASE_RELEASED = "lease_released"        # CELL-18: Worker ACK that group is closed
-ABORT_ACK = "abort_ack"                  # P0-2: Worker ACK for abort_request (request_id, cancelled_count, cleanup_status, error)
+ABORT_ACK = "abort_ack"                  # Worker proof of task-scoped cleanup
 
 UPSTREAM = frozenset({BROADCAST, UNREAD_DELTA, STATS_REPORT, LEASE_RELEASED, ABORT_ACK})
 
@@ -142,6 +142,7 @@ class AbortRequestFrame(BaseFrame):
     """
     request_id: str = ""
     mode: str = "abort"  # "abort" or "retry"
+    task_id: str = ""
 
 @register_frame_type(ABORT_ACK)
 @dataclass(eq=False)
@@ -151,8 +152,12 @@ class AbortAckFrame(BaseFrame):
     Worker sends this after cancelling tasks and completing cleanup.
     """
     request_id: str = ""
+    task_id: str = ""
+    mode: str = "abort"
     cancelled_count: int = 0
-    cleanup_status: str = "success"  # "success", "partial", "failed"
+    cleanup_status: str = "failed"
+    workspace_action: str = "discard"
+    workspace_cleaned: bool = False
     error: Optional[str] = None
 
 @register_frame_type(PERMISSION_RESPONSE)
@@ -297,4 +302,3 @@ def parse_frame(data: dict) -> BaseFrame:
 def envelope(msg_type: str, *, group_id: int, trace_id: str | None = None, **fields) -> BaseFrame:
     """构造带统一路由/追踪头的隧道消息（§10.2）。"""
     return parse_frame({"v": PROTOCOL_VERSION, "type": msg_type, "group_id": group_id, "trace_id": trace_id, **fields})
-

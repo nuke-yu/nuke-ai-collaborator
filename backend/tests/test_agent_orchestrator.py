@@ -169,7 +169,7 @@ class TestRetryTask(DatabaseTestBase):
             result = await orch.retry_task("task_1")
 
         self.assertEqual(result["status"], "restarted")
-        mock_abort.assert_called_once_with(10, mode="retry")
+        mock_abort.assert_called_once_with(10, "task_1", mode="retry")
         mock_dispatch.assert_called_once_with(10, 5, "Add feature", "pytest", task_id="task_1")
         adapter.reset_for_retry.assert_called_once_with(10)
 
@@ -216,7 +216,7 @@ class TestAbortTask(DatabaseTestBase):
             result = await orch.abort_task("task_1")
 
         self.assertEqual(result["status"], "aborted")
-        mock_abort.assert_called_once_with(10, mode="abort")
+        mock_abort.assert_called_once_with(10, "task_1", mode="abort")
         adapter.mark_aborted.assert_called_once_with(10)
 
     async def test_abort_unknown_task_raises(self):
@@ -231,8 +231,12 @@ class TestSendAbort(DatabaseTestBase):
         """_send_abort calls Supervisor.request_abort() and returns ACK."""
         mock_sup = MagicMock()
         mock_sup.request_abort = AsyncMock(return_value={
+            "task_id": "task_1",
+            "mode": "abort",
             "cancelled_count": 2,
             "cleanup_status": "success",
+            "workspace_action": "discard",
+            "workspace_cleaned": True,
             "error": None,
         })
 
@@ -242,12 +246,14 @@ class TestSendAbort(DatabaseTestBase):
 
         try:
             orch = TaskOrchestrator()
-            ack = await orch._send_abort(42, mode="abort")
+            ack = await orch._send_abort(42, "task_1", mode="abort")
         finally:
             sup_module.supervisor = original_sup
 
         # Verify request_abort was called with correct parameters
-        mock_sup.request_abort.assert_called_once_with(42, mode="abort", timeout=10.0)
+        mock_sup.request_abort.assert_called_once_with(
+            42, task_id="task_1", mode="abort", timeout=10.0
+        )
 
         # Verify ACK is returned
         self.assertEqual(ack["cancelled_count"], 2)
@@ -262,7 +268,7 @@ class TestSendAbort(DatabaseTestBase):
         try:
             orch = TaskOrchestrator()
             with self.assertRaises(RuntimeError) as ctx:
-                await orch._send_abort(42)
+                await orch._send_abort(42, "task_1")
             self.assertIn("Supervisor not available", str(ctx.exception))
         finally:
             sup_module.supervisor = original_sup
@@ -636,5 +642,3 @@ class TestBindGroupToWorker(DatabaseTestBase):
         args = mock_db.execute.call_args[0]
         self.assertIn("UPDATE groups SET assigned_worker_id", args[0])
         self.assertEqual(args[1], ("w3", 42))
-
-

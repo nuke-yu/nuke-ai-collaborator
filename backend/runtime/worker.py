@@ -269,10 +269,12 @@ class Worker:
                 return
 
             if t == ipc.protocol.ABORT_REQUEST:
-                # P0-2: Abort with ACK protocol
                 request_id = msg.get("request_id", "")
                 mode = msg.get("mode", "abort")
-                await self._handle_abort_request(gid, request_id, mode, tid)
+                task_id = msg.get("task_id", "")
+                await self._handle_abort_request(
+                    gid, request_id, mode, task_id, tid
+                )
                 return
 
             if t == ipc.protocol.RELEASE_LEASE:
@@ -339,26 +341,21 @@ class Worker:
                 else:
                     log.debug("worker %s: unhandled downstream type=%s", self.worker_id, t)
 
-    async def _handle_abort_request(self, gid: int, request_id: str, mode: str, tid: str) -> None:
-        """P0-2: Handle ABORT_REQUEST with ACK protocol.
-
-        Steps:
-          1. Cancel the group's tasks via bg.abort_group()
-          2. Wait for cancelled tasks to complete cleanup (gather with return_exceptions)
-          3. Send ABORT_ACK back to Supervisor with result
-
-        Args:
-            gid: Group ID
-            request_id: Request ID for tracking
-            mode: "abort" or "retry"
-            tid: Trace ID for logging
-        """
+    async def _handle_abort_request(
+        self, gid: int, request_id: str, mode: str, task_id: str, tid: str
+    ) -> None:
+        """Cancel a group run and prove the requested task workspace is gone."""
         cancelled_count = 0
-        cleanup_status = "success"
-        error = None
 
         try:
-            # Step 1: Cancel tasks
+            if not request_id or not task_id:
+                raise ValueError("abort request requires request_id and task_id")
+            if mode not in {"abort", "retry"}:
+                raise ValueError(f"unsupported abort mode: {mode}")
+
+            # Snapshot before cancellation: done callbacks remove tasks from the
+            # registry, so reading the bucket afterwards can falsely look clean.
+            tasks = list(bg._group_tasks.get(gid, set()))
             if self._on_abort:
                 self._on_abort(gid)
             else:
@@ -369,25 +366,23 @@ class Worker:
                 self.worker_id, gid, request_id, cancelled_count,
             )
 
-            # Step 2: Wait for cancelled tasks to complete cleanup
-            # bg.abort_group() cancels tasks, but we need to wait for their finally blocks
-            # to run (worktree cleanup, etc.)
-            tasks = bg._group_tasks.get(gid, set())
             if tasks:
-                # Wait up to 5 seconds for cleanup to complete
-                try:
-                    await asyncio.wait_for(
-                        asyncio.gather(*tasks, return_exceptions=True),
-                        timeout=5.0,
-                    )
-                except asyncio.TimeoutError:
-                    log.warning(
-                        "worker %s: abort_request cleanup timeout for group %d",
-                        self.worker_id, gid,
-                    )
-                    cleanup_status = "partial"
+                await asyncio.wait_for(
+                    asyncio.gather(*tasks, return_exceptions=True), timeout=5.0
+                )
 
-            # Step 3: Send ACK
+            # Runner cancellation normally performs this cleanup.  Repeating it
+            # here is intentional and idempotent: the ACK is based on verified
+            # filesystem state, not on assumptions about task-finally ordering.
+            from workspace import layout
+            from workspace.git_worktree import remove_worktree
+
+            await remove_worktree(gid, task_id)
+            worktree = layout.group_dir(gid) / "worktrees" / f"task_{task_id}"
+            workspace_cleaned = not worktree.exists()
+            if not workspace_cleaned:
+                raise RuntimeError(f"worktree still exists after cleanup: {worktree}")
+
             await ipc.send_msg(
                 self._writer,
                 ipc.protocol.envelope(
@@ -395,9 +390,13 @@ class Worker:
                     group_id=gid,
                     trace_id=tid,
                     request_id=request_id,
+                    task_id=task_id,
+                    mode=mode,
                     cancelled_count=cancelled_count,
-                    cleanup_status=cleanup_status,
-                    error=error,
+                    cleanup_status="success",
+                    workspace_action="discard",
+                    workspace_cleaned=True,
+                    error=None,
                 ),
             )
 
@@ -415,8 +414,12 @@ class Worker:
                         group_id=gid,
                         trace_id=tid,
                         request_id=request_id,
+                        task_id=task_id,
+                        mode=mode,
                         cancelled_count=0,
                         cleanup_status="failed",
+                        workspace_action="discard",
+                        workspace_cleaned=False,
                         error=str(e),
                     ),
                 )

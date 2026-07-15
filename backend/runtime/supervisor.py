@@ -584,7 +584,9 @@ class Supervisor:
             return False
         return await self._send_worker_frame(worker_id, writer, msg)
 
-    async def request_abort(self, group_id: int, mode: str = "abort", timeout: float = 10.0) -> dict:
+    async def request_abort(
+        self, group_id: int, task_id: str, mode: str = "abort", timeout: float = 10.0
+    ) -> dict:
         """P0-2: Send ABORT_REQUEST and wait for ABORT_ACK from Worker.
 
         Args:
@@ -603,7 +605,12 @@ class Supervisor:
         request_id = str(uuid.uuid4())
 
         # Create Future to wait for ACK
-        fut = asyncio.get_event_loop().create_future()
+        if not task_id:
+            raise ValueError("request_abort requires task_id")
+        if mode not in {"abort", "retry"}:
+            raise ValueError(f"unsupported abort mode: {mode}")
+
+        fut = asyncio.get_running_loop().create_future()
         self._abort_requests[request_id] = fut
 
         try:
@@ -615,12 +622,31 @@ class Supervisor:
                     group_id=group_id,
                     request_id=request_id,
                     mode=mode,
+                    task_id=task_id,
                 ),
             )
 
             # Wait for ACK with timeout
             try:
                 ack_frame = await asyncio.wait_for(fut, timeout=timeout)
+                self._abort_requests.pop(request_id, None)
+                expected = {
+                    "group_id": group_id,
+                    "task_id": task_id,
+                    "mode": mode,
+                    "cleanup_status": "success",
+                    "workspace_action": "discard",
+                    "workspace_cleaned": True,
+                }
+                mismatches = {
+                    key: (value, ack_frame.get(key))
+                    for key, value in expected.items()
+                    if ack_frame.get(key) != value
+                }
+                if mismatches:
+                    raise RuntimeError(
+                        f"invalid ABORT_ACK for task {task_id}: {mismatches}"
+                    )
                 log.info(
                     "supervisor: abort ACK received for group %d: cancelled=%d status=%s",
                     group_id,

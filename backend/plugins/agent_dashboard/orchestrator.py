@@ -205,16 +205,10 @@ class TaskOrchestrator:
         group_id = record["group_id"]
 
         # 1. Abort via IPC ACK protocol (raises on timeout/error - fail closed)
-        ack = await self._send_abort(group_id, mode="retry")
+        await self._send_abort(group_id, task_id, mode="retry")
 
-        # 2. Reset progress for retry (only after successful ACK)
-        if self._adapter:
-            self._adapter.reset_for_retry(group_id)
-
-        # 3. Update status to restarted
-        await self._task_store.update_status(task_id, "restarted")
-
-        # 4. Re-dispatch (only after successful ACK)
+        # Re-dispatch before changing visible state.  A transport failure leaves
+        # the prior state intact and is therefore safely retryable.
         await self._dispatch_agent(
             group_id,
             record["bot_id"],
@@ -222,6 +216,10 @@ class TaskOrchestrator:
             record.get("test_command", ""),
             task_id=task_id,
         )
+
+        if self._adapter:
+            self._adapter.reset_for_retry(group_id)
+        await self._task_store.update_status(task_id, "restarted")
 
         # P1-1: Fetch updated record from database
         return await self._task_store.get_task(task_id)
@@ -243,7 +241,7 @@ class TaskOrchestrator:
         group_id = record["group_id"]
 
         # 1. Abort via IPC ACK protocol (raises on timeout/error - fail closed)
-        ack = await self._send_abort(group_id, mode="abort")
+        await self._send_abort(group_id, task_id, mode="abort")
 
         # 2. Write terminal state (only after successful ACK)
         if self._adapter:
@@ -294,7 +292,9 @@ class TaskOrchestrator:
 
     # ── Cross-process abort + worktree cleanup ───────────────────────
 
-    async def _send_abort(self, group_id: int, mode: str = "abort", timeout: float = 10.0) -> dict:
+    async def _send_abort(
+        self, group_id: int, task_id: str, mode: str = "abort", timeout: float = 10.0
+    ) -> dict:
         """P0-2: Send ABORT_REQUEST and wait for ABORT_ACK from Worker.
 
         Unlike the old fire-and-forget ABORT, this uses the ACK protocol:
@@ -320,13 +320,22 @@ class TaskOrchestrator:
         if not sup:
             raise RuntimeError("Supervisor not available")
 
-        ack = await sup.request_abort(group_id, mode=mode, timeout=timeout)
+        ack = await sup.request_abort(
+            group_id, task_id=task_id, mode=mode, timeout=timeout
+        )
 
-        # Check ACK status
-        cleanup_status = ack.get("cleanup_status", "unknown")
-        if cleanup_status == "failed":
+        cleanup_status = ack.get("cleanup_status")
+        if (
+            cleanup_status != "success"
+            or ack.get("task_id") != task_id
+            or ack.get("mode") != mode
+            or ack.get("workspace_action") != "discard"
+            or ack.get("workspace_cleaned") is not True
+        ):
             error = ack.get("error", "Unknown error")
-            raise RuntimeError(f"Worker cleanup failed for group {group_id}: {error}")
+            raise RuntimeError(
+                f"Worker cleanup was not proven for task {task_id}: {error}"
+            )
 
         log.info(
             "TaskOrchestrator: abort ACK received for group %d: cancelled=%d status=%s",

@@ -7,6 +7,7 @@ Tests the ABORT_REQUEST/ABORT_ACK protocol:
 """
 import asyncio
 import unittest
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from runtime.supervisor import Supervisor
@@ -31,16 +32,23 @@ class TestAbortAckProtocol(unittest.IsolatedAsyncioTestCase):
             fut = sup._abort_requests[request_id]
             fut.set_result({
                 "type": "abort_ack",
+                "group_id": 10,
                 "request_id": request_id,
+                "task_id": "task_1",
+                "mode": "abort",
                 "cancelled_count": 2,
                 "cleanup_status": "success",
+                "workspace_action": "discard",
+                "workspace_cleaned": True,
                 "error": None,
             })
 
         asyncio.create_task(simulate_ack())
 
         # Request abort
-        ack = await sup.request_abort(group_id=10, mode="abort", timeout=5.0)
+        ack = await sup.request_abort(
+            group_id=10, task_id="task_1", mode="abort", timeout=5.0
+        )
 
         # Verify ACK received
         self.assertEqual(ack["cancelled_count"], 2)
@@ -55,7 +63,9 @@ class TestAbortAckProtocol(unittest.IsolatedAsyncioTestCase):
 
         # Request abort with short timeout
         with self.assertRaises(TimeoutError) as ctx:
-            await sup.request_abort(group_id=10, mode="abort", timeout=0.1)
+            await sup.request_abort(
+                group_id=10, task_id="task_1", mode="abort", timeout=0.1
+            )
 
         self.assertIn("did not respond", str(ctx.exception))
         # Verify request was cleaned up
@@ -70,10 +80,35 @@ class TestAbortAckProtocol(unittest.IsolatedAsyncioTestCase):
         sup.send_to_worker = AsyncMock(side_effect=RuntimeError("Worker disconnected"))
 
         with self.assertRaises(RuntimeError) as ctx:
-            await sup.request_abort(group_id=10, mode="abort", timeout=5.0)
-
+            await sup.request_abort(
+                group_id=10, task_id="task_1", mode="abort", timeout=5.0
+            )
         self.assertIn("Failed to send ABORT_REQUEST", str(ctx.exception))
-        # Verify request was cleaned up
+        self.assertEqual(len(sup._abort_requests), 0)
+
+    async def test_request_abort_rejects_partial_or_mismatched_ack(self):
+        sup = Supervisor("dummy_addr", num_workers=1)
+        sup.send_to_worker = AsyncMock()
+
+        async def simulate_partial_ack():
+            while not sup._abort_requests:
+                await asyncio.sleep(0)
+            request_id, fut = next(iter(sup._abort_requests.items()))
+            fut.set_result({
+                "type": "abort_ack",
+                "group_id": 10,
+                "request_id": request_id,
+                "task_id": "another_task",
+                "mode": "abort",
+                "cleanup_status": "partial",
+                "workspace_action": "discard",
+                "workspace_cleaned": False,
+            })
+
+        asyncio.create_task(simulate_partial_ack())
+        with self.assertRaisesRegex(RuntimeError, "invalid ABORT_ACK"):
+            await sup.request_abort(10, task_id="task_1", timeout=1)
+
         self.assertEqual(len(sup._abort_requests), 0)
 
     async def test_abort_ack_received_by_supervisor(self):
@@ -141,7 +176,9 @@ class TestWorkerAbortRequestHandling(unittest.IsolatedAsyncioTestCase):
         worker._writer = MagicMock()
 
         # Mock bg.abort_group to return cancelled count
-        with patch("core.bg.abort_group", return_value=2):
+        with patch("core.bg.abort_group", return_value=2), \
+             patch("workspace.git_worktree.remove_worktree", new_callable=AsyncMock), \
+             patch("workspace.layout.group_dir", return_value=Path("/tmp/nuke-abort-test")):
             # Mock ipc.send_msg to capture the ACK
             sent_messages = []
             async def capture_send(writer, msg):
@@ -152,6 +189,7 @@ class TestWorkerAbortRequestHandling(unittest.IsolatedAsyncioTestCase):
                     gid=10,
                     request_id="test-req-456",
                     mode="abort",
+                    task_id="task_1",
                     tid="trace-789",
                 )
 
@@ -162,6 +200,36 @@ class TestWorkerAbortRequestHandling(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ack["request_id"], "test-req-456")
         self.assertEqual(ack["cancelled_count"], 2)
         self.assertEqual(ack["cleanup_status"], "success")
+        self.assertEqual(ack["task_id"], "task_1")
+        self.assertEqual(ack["workspace_action"], "discard")
+        self.assertIs(ack["workspace_cleaned"], True)
+
+    async def test_worker_timeout_is_failed_not_partial(self):
+        from runtime.worker import Worker
+
+        worker = Worker("w0", "dummy_addr")
+        worker._writer = MagicMock()
+        pending = asyncio.get_running_loop().create_future()
+        sent_messages = []
+
+        async def capture_send(_writer, msg):
+            sent_messages.append(msg)
+
+        with patch.dict("core.bg._group_tasks", {10: {pending}}, clear=True), \
+             patch("core.bg.abort_group", return_value=1), \
+             patch("runtime.worker.asyncio.wait_for", new=AsyncMock(side_effect=asyncio.TimeoutError)), \
+             patch("runtime.ipc.send_msg", side_effect=capture_send):
+            await worker._handle_abort_request(
+                gid=10,
+                request_id="timeout-req",
+                mode="abort",
+                task_id="task_1",
+                tid="trace-timeout",
+            )
+
+        self.assertEqual(sent_messages[0]["cleanup_status"], "failed")
+        self.assertIs(sent_messages[0]["workspace_cleaned"], False)
+        pending.cancel()
 
     async def test_worker_sends_ack_on_error(self):
         """Worker sends ABORT_ACK with error status if cleanup fails."""
@@ -180,6 +248,7 @@ class TestWorkerAbortRequestHandling(unittest.IsolatedAsyncioTestCase):
                     gid=10,
                     request_id="test-req-789",
                     mode="abort",
+                    task_id="task_1",
                     tid="trace-101",
                 )
 
@@ -276,7 +345,7 @@ class TestOrchestratorAbortIntegration(unittest.IsolatedAsyncioTestCase):
             result = await orch.retry_task("task_1")
 
         # Verify abort was called with mode="retry"
-        mock_abort.assert_called_once_with(10, mode="retry")
+        mock_abort.assert_called_once_with(10, "task_1", mode="retry")
 
         # Verify dispatch happened AFTER abort
         mock_dispatch.assert_called_once()
@@ -303,7 +372,7 @@ class TestOrchestratorAbortIntegration(unittest.IsolatedAsyncioTestCase):
             result = await orch.abort_task("task_1")
 
         # Verify abort was called with mode="abort"
-        mock_abort.assert_called_once_with(10, mode="abort")
+        mock_abort.assert_called_once_with(10, "task_1", mode="abort")
 
         # Verify terminal state written
         self.assertEqual(result["status"], "aborted")
@@ -329,6 +398,24 @@ class TestOrchestratorAbortIntegration(unittest.IsolatedAsyncioTestCase):
         mock_dispatch.assert_not_called()
 
         # Verify status NOT updated (fetch from DB)
+        task = await orch._task_store.get_task("task_1")
+        self.assertEqual(task["status"], "stuck")
+
+    async def test_retry_dispatch_failure_keeps_previous_status(self):
+        from plugins.agent_dashboard.orchestrator import TaskOrchestrator
+
+        orch = TaskOrchestrator()
+        await self._create_test_task(orch, "task_1", 10, 5, status="stuck")
+
+        with patch.object(orch, "_send_abort", new=AsyncMock()), \
+             patch.object(
+                 orch,
+                 "_dispatch_agent",
+                 new=AsyncMock(side_effect=RuntimeError("worker disconnected")),
+             ):
+            with self.assertRaisesRegex(RuntimeError, "worker disconnected"):
+                await orch.retry_task("task_1")
+
         task = await orch._task_store.get_task("task_1")
         self.assertEqual(task["status"], "stuck")
 
