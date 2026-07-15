@@ -172,10 +172,10 @@ class TaskOrchestrator:
             # Compensate: clean up any partially created resources
             log.error("TaskOrchestrator: create_task failed at step, rolling back group %s: %s",
                        group_id, e)
-            # R2-9: Unregister from progress adapter to prevent ghost progress + stuck detector
+            # R2-9: Remove from progress adapter to prevent ghost progress + stuck detector
             # from retrying a task that no longer exists.
             if self._adapter and group_id is not None:
-                self._adapter.unregister_task(group_id)
+                self._adapter.remove_task(group_id)
             # P1-1: Delete task from database if it was created
             if bot_id is not None:
                 await self._task_store.delete_task(task_id)
@@ -207,10 +207,9 @@ class TaskOrchestrator:
         # 1. Abort via IPC ACK protocol (raises on timeout/error - fail closed)
         ack = await self._send_abort(group_id, mode="retry")
 
-        # 2. Reset progress (only after successful ACK)
+        # 2. Reset progress for retry (only after successful ACK)
         if self._adapter:
-            self._adapter.unregister_task(group_id)
-            self._adapter.register_task(group_id, task_id)
+            self._adapter.reset_for_retry(group_id)
 
         # 3. Update status to restarted
         await self._task_store.update_status(task_id, "restarted")
@@ -248,7 +247,7 @@ class TaskOrchestrator:
 
         # 2. Write terminal state (only after successful ACK)
         if self._adapter:
-            self._adapter.unregister_task(group_id)
+            self._adapter.mark_aborted(group_id)
 
         # P1-1: Update status in database
         await self._task_store.update_status(task_id, "aborted")

@@ -35,11 +35,42 @@ class TestTaskRegistration:
         assert state.status == "running"
         assert 1 in adapter._active_groups
 
-    def test_unregister_task(self, adapter):
+    def test_remove_task(self, adapter):
+        """remove_task completely removes task from tracking (rollback scenario)."""
         adapter.register_task(1, "task_1")
-        adapter.unregister_task(1)
+        adapter.remove_task(1)
+        assert 1 not in adapter._active_groups
+        assert 1 not in adapter._states
+
+    def test_mark_aborted(self, adapter):
+        """mark_aborted marks task as aborted and removes from active."""
+        adapter.register_task(1, "task_1")
+        adapter.mark_aborted(1)
+        assert 1 not in adapter._active_groups
+        assert adapter._states[1].status == "aborted"
+
+    def test_mark_succeeded(self, adapter):
+        """mark_succeeded marks task as done with 100% progress."""
+        adapter.register_task(1, "task_1")
+        adapter.mark_succeeded(1)
         assert 1 not in adapter._active_groups
         assert adapter._states[1].status == "done"
+        assert adapter._states[1].phase == "done"
+        assert adapter._states[1].percent == 100
+
+    def test_reset_for_retry(self, adapter):
+        """reset_for_retry resets state but keeps tracking active."""
+        adapter.register_task(1, "task_1")
+        # Advance to coding phase
+        adapter.on_event(1, {"type": "tool_call", "tool_name": "write_file", "tool_input": {"file_path": "api.py"}})
+        assert adapter._states[1].phase == "coding"
+
+        # Reset for retry
+        adapter.reset_for_retry(1)
+        assert 1 in adapter._active_groups  # Still active
+        assert adapter._states[1].phase == "queued"
+        assert adapter._states[1].percent == 0
+        assert adapter._states[1].status == "running"
 
     def test_get_progress(self, active_adapter):
         progress = active_adapter.get_progress(1)

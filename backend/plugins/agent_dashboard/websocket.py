@@ -67,7 +67,7 @@ _all_connections: set[DashboardConnection] = set()       # subscribed to all
 
 
 async def _authenticate_ws(ws: WebSocket) -> bool:
-    """Validate JWT from query parameter or protocol header. Returns True if valid."""
+    """Validate JWT from query parameter or protocol header. Returns True if valid and user is operator."""
     from core import auth
 
     # Try protocol-based auth first (same as main WS endpoint)
@@ -88,6 +88,11 @@ async def _authenticate_ws(ws: WebSocket) -> bool:
     user_payload = auth.verify_token(token)
     if not user_payload:
         await ws.close(code=4001, reason="Invalid authentication token")
+        return False
+
+    # P1-3: Check if user is operator (agent dashboard is control plane)
+    if not auth.is_operator(user_payload):
+        await ws.close(code=4003, reason="Operator privileges required")
         return False
 
     return True

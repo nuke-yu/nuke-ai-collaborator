@@ -171,8 +171,7 @@ class TestRetryTask(DatabaseTestBase):
         self.assertEqual(result["status"], "restarted")
         mock_abort.assert_called_once_with(10, mode="retry")
         mock_dispatch.assert_called_once_with(10, 5, "Add feature", "pytest", task_id="task_1")
-        adapter.unregister_task.assert_called_once_with(10)
-        adapter.register_task.assert_called_once_with(10, "task_1")
+        adapter.reset_for_retry.assert_called_once_with(10)
 
     async def test_retry_unknown_task_raises(self):
         orch = TaskOrchestrator()
@@ -218,7 +217,7 @@ class TestAbortTask(DatabaseTestBase):
 
         self.assertEqual(result["status"], "aborted")
         mock_abort.assert_called_once_with(10, mode="abort")
-        adapter.unregister_task.assert_called_once_with(10)
+        adapter.mark_aborted.assert_called_once_with(10)
 
     async def test_abort_unknown_task_raises(self):
         orch = TaskOrchestrator()

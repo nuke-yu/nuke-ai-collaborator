@@ -112,13 +112,44 @@ class ProgressAdapter:
         self._push_update(group_id, state)
         return state
 
-    def unregister_task(self, group_id: int) -> None:
-        """Stop tracking a task."""
+    def remove_task(self, group_id: int) -> None:
+        """Completely remove a task from tracking (e.g., on rollback)."""
         self._active_groups.discard(group_id)
-        # Keep state for history but mark as inactive
+        self._states.pop(group_id, None)
+        # No push_update since task is removed
+
+    def mark_aborted(self, group_id: int) -> None:
+        """Mark a task as aborted."""
+        self._active_groups.discard(group_id)
+        state = self._states.get(group_id)
+        if state:
+            state.status = "aborted"
+            self._push_update(group_id, state)
+
+    def mark_succeeded(self, group_id: int) -> None:
+        """Mark a task as successfully completed."""
+        self._active_groups.discard(group_id)
         state = self._states.get(group_id)
         if state:
             state.status = "done"
+            state.phase = "done"
+            state.percent = 100
+            self._push_update(group_id, state)
+
+    def reset_for_retry(self, group_id: int) -> None:
+        """Reset task state for retry (keeps tracking active)."""
+        state = self._states.get(group_id)
+        if state:
+            state.phase = "queued"
+            state.percent = 0
+            state.status = "running"
+            state.detail = ""
+            state.iteration = 0
+            state.files_modified = []
+            state.tools_called = []
+            state.error_message = ""
+            state.started_at = time.time()
+            state.last_event_at = time.time()
             self._push_update(group_id, state)
 
     def get_progress(self, group_id: int) -> Optional[dict]:

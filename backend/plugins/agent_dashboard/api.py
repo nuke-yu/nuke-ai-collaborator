@@ -138,7 +138,7 @@ async def create_task(req: CreateTaskRequest, user=Depends(require_operator)):
 
 
 @router.get("/tasks")
-async def list_tasks():
+async def list_tasks(user=Depends(require_operator)):
     """List all active tasks with current progress."""
     if not _orchestrator:
         return {"tasks": []}
@@ -160,7 +160,7 @@ async def list_tasks():
 
 
 @router.get("/tasks/{task_id}")
-async def get_task(task_id: str):
+async def get_task(task_id: str, user=Depends(require_operator)):
     """Get detailed progress for a specific task."""
     if not _orchestrator:
         raise HTTPException(404, "Task not found")
@@ -218,7 +218,7 @@ async def abort_task(task_id: str, user=Depends(require_operator)):
 
 
 @router.get("/workers")
-async def get_workers():
+async def get_workers(user=Depends(require_operator)):
     """Get worker load stats for monitoring and routing decisions."""
     if not _host:
         return {"workers": {}}
