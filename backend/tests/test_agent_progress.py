@@ -26,6 +26,36 @@ def active_adapter(adapter):
 
 class TestTaskRegistration:
 
+    def test_hydrate_restores_active_and_terminal_tasks(self, adapter):
+        adapter.hydrate(
+            [
+                {
+                    "task_id": "active",
+                    "group_id": 1,
+                    "status": "dispatched",
+                    "max_iterations": 50,
+                    "created_at": "2026-07-15T10:00:00Z",
+                    "updated_at": "2026-07-15T10:01:00Z",
+                },
+                {
+                    "task_id": "finished",
+                    "group_id": 2,
+                    "status": "completed",
+                    "max_iterations": 100,
+                    "created_at": "2026-07-15T09:00:00Z",
+                    "updated_at": "2026-07-15T09:02:00Z",
+                },
+            ]
+        )
+
+        assert adapter._states[1].status == "running"
+        assert adapter._states[1].max_iter == 50
+        assert adapter._states[1].elapsed_sec == 60
+        assert 1 in adapter._active_groups
+        assert adapter._states[2].status == "done"
+        assert adapter._states[2].percent == 100
+        assert 2 not in adapter._active_groups
+
     def test_register_task(self, adapter):
         state = adapter.register_task(1, "task_1")
         assert state.group_id == 1

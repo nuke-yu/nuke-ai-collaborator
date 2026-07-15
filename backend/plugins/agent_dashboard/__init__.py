@@ -42,6 +42,7 @@ async def register(host):
     from .progress import ProgressAdapter
     from .stuck_detector import StuckDetector
     from .orchestrator import TaskOrchestrator
+    from .task_store import TaskStateProjector, TaskStore
     from . import websocket as ws_module
     from . import api as api_module
 
@@ -52,8 +53,11 @@ async def register(host):
     # (Supervisor process only) would make it unavailable to Workers.
 
     # 1. Create shared components
-    adapter = ProgressAdapter()
-    orchestrator = TaskOrchestrator(adapter=adapter)
+    task_store = TaskStore()
+    projector = TaskStateProjector(task_store)
+    adapter = ProgressAdapter(projector=projector)
+    adapter.hydrate(await task_store.list_tasks(limit=1000))
+    orchestrator = TaskOrchestrator(adapter=adapter, task_store=task_store)
     detector = StuckDetector(adapter, orchestrator=orchestrator)
 
     # 2. Inject dependencies into sub-modules
@@ -76,6 +80,7 @@ async def register(host):
     host.observe_events("agent_dashboard", adapter.on_event)
 
     # 6. Start background tasks
+    host.start_background(projector.run())
     host.start_background(detector.run())
     host.start_background(ws_module.consumer_loop(adapter))
 

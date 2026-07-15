@@ -10,7 +10,12 @@ from unittest.mock import patch, AsyncMock, MagicMock
 from integrations.github_client import GitHubIntegrationUnavailable
 from plugins.agent_dashboard.api import TaskResponse
 from plugins.agent_dashboard.orchestrator import TaskOrchestrator, CODING_AGENT_SYSTEM_PROMPT
-from plugins.agent_dashboard.task_store import IdempotencyConflict, TaskStore
+from plugins.agent_dashboard.progress import ProgressAdapter
+from plugins.agent_dashboard.task_store import (
+    IdempotencyConflict,
+    TaskStateProjector,
+    TaskStore,
+)
 
 
 class DatabaseTestBase(unittest.IsolatedAsyncioTestCase):
@@ -231,6 +236,84 @@ class TestTaskStoreIdempotency(DatabaseTestBase):
         self.assertFalse(replay["owner"])
         self.assertEqual(replay["state"], "completed")
         self.assertEqual(replay["task_id"], "agent_one")
+
+
+class TestTaskStateProjection(DatabaseTestBase):
+
+    async def test_progress_events_persist_terminal_state_and_pr_url(self):
+        store = TaskStore()
+        import db
+        async with db.write_connect() as conn:
+            await conn.execute("INSERT INTO groups (id, name) VALUES (1, 'test-group')")
+            await conn.execute(
+                "INSERT INTO members (id, group_id, name, type, role) "
+                "VALUES (2, 1, 'test-bot', 'bot', 'developer')"
+            )
+            await conn.commit()
+        await store.create_task(
+            task_id="agent_one",
+            group_id=1,
+            bot_id=2,
+            repo_url="https://github.com/user/repo.git",
+            requirements="Implement durable lifecycle projection",
+        )
+        await store.update_status("agent_one", "dispatched")
+
+        projector = TaskStateProjector(store)
+        adapter = ProgressAdapter(projector=projector)
+        adapter.register_task(1, "agent_one")
+        consumer = asyncio.create_task(projector.run())
+        try:
+            adapter.on_event(
+                1,
+                {
+                    "type": "tool_result",
+                    "tool_name": "create_pr",
+                    "result": (
+                        "Created https://github.com/user/repo/pull/42，"
+                        "ready for review"
+                    ),
+                },
+            )
+            adapter.on_event(1, {"type": "workflow_update", "done": True})
+            await projector.flush()
+
+            record = await store.get_task("agent_one")
+            self.assertEqual(record["status"], "completed")
+            self.assertEqual(
+                record["pr_url"], "https://github.com/user/repo/pull/42"
+            )
+
+            # A delayed activity event cannot regress an already completed task.
+            projector.enqueue_status("agent_one", "running")
+            await projector.flush()
+            record = await store.get_task("agent_one")
+            self.assertEqual(record["status"], "completed")
+        finally:
+            consumer.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await consumer
+
+
+class TestTaskStateProjectorRetry(unittest.IsolatedAsyncioTestCase):
+
+    async def test_transient_write_failure_is_retried(self):
+        store = MagicMock()
+        store.update_status = AsyncMock(
+            side_effect=[RuntimeError("database busy"), True]
+        )
+        projector = TaskStateProjector(store)
+        consumer = asyncio.create_task(projector.run())
+        try:
+            projector.enqueue_status("agent_one", "completed")
+            await asyncio.wait_for(projector.flush(), timeout=1)
+        finally:
+            consumer.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await consumer
+
+        self.assertEqual(store.update_status.await_count, 2)
+        self.assertNotIn("agent_one", projector._last_status)
 
 
 class TestRetryTask(DatabaseTestBase):

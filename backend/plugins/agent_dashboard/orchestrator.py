@@ -72,7 +72,7 @@ Without them, the task will be marked as incomplete and may be retried automatic
 class TaskOrchestrator:
     """Manages the full lifecycle of coding agent tasks."""
 
-    def __init__(self, adapter=None):
+    def __init__(self, adapter=None, task_store=None):
         """
         Args:
             adapter: ProgressAdapter instance for progress tracking (optional)
@@ -80,7 +80,7 @@ class TaskOrchestrator:
         self._adapter = adapter
         # P1-1: Use database-backed storage instead of in-memory dict
         from plugins.agent_dashboard.task_store import TaskStore
-        self._task_store = TaskStore()
+        self._task_store = task_store or TaskStore()
 
     @property
     async def tasks(self) -> dict:

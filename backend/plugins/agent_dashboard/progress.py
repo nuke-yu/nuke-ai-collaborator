@@ -17,8 +17,10 @@ Percent is computed from phase base + iteration progress within the phase.
 """
 import asyncio
 import logging
+import re
 import time
 from dataclasses import dataclass, field, asdict
+from datetime import datetime, timezone
 from typing import Optional
 
 log = logging.getLogger(__name__)
@@ -53,6 +55,48 @@ _CODE_TOOLS = {
 _TEST_KEYWORDS = {"pytest", "npm test", "npm run test", "jest", "vitest", "go test", "cargo test"}
 
 TERMINAL_STATUSES = frozenset({"done", "error", "aborted", "stuck_permanently"})
+
+_PERSISTED_STATUS = {
+    "running": "running",
+    "paused": "paused",
+    "retrying": "retrying",
+    "stuck": "stuck",
+    "stuck_permanently": "stuck_permanently",
+    "done": "completed",
+    "error": "failed",
+    "aborted": "aborted",
+}
+_LOCAL_STATUS = {
+    "created": "running",
+    "dispatched": "running",
+    "running": "running",
+    "restarted": "running",
+    "paused": "paused",
+    # A process restart means no retry coroutine is still owned locally. Resume
+    # monitoring instead of hydrating a permanently skipped "retrying" state.
+    "retrying": "running",
+    "stuck": "stuck",
+    "stuck_permanently": "stuck_permanently",
+    "completed": "done",
+    "failed": "error",
+    "aborted": "aborted",
+}
+_ACTIVITY_EVENTS = frozenset({
+    "ai_thought_start", "tool_call", "tool_result", "tool_progress_running",
+    "tool_progress_end", "stream_end",
+})
+_PR_URL_RE = re.compile(r"https://github\.com/[^\s，,)]+/pull/\d+")
+
+
+def _timestamp_epoch(value, fallback: float) -> float:
+    try:
+        text = str(value).replace("Z", "+00:00").replace(" ", "T")
+        parsed = datetime.fromisoformat(text)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.timestamp()
+    except (TypeError, ValueError):
+        return fallback
 
 
 @dataclass
@@ -99,13 +143,50 @@ class ProgressAdapter:
     via get_progress() which returns a snapshot copy.
     """
 
-    def __init__(self):
+    def __init__(self, projector=None):
         self._states: dict[int, TaskProgress] = {}
         # Queue for pushing progress updates to dashboard WS clients
         self._update_queue: asyncio.Queue = asyncio.Queue(maxsize=5000)
         # Groups being tracked as coding agent tasks
         self._active_groups: set[int] = set()
         self._cleanup_callbacks: list = []
+        self._projector = projector
+
+    def hydrate(self, records: list[dict]) -> None:
+        """Rebuild dashboard state from the durable registry after restart."""
+        for record in records:
+            group_id = record["group_id"]
+            status = _LOCAL_STATUS.get(record.get("status"), "error")
+            state = TaskProgress(
+                group_id=group_id,
+                task_id=record["task_id"],
+                status=status,
+                max_iter=record.get("max_iterations", 100),
+                error_message=record.get("error_message") or "",
+            )
+            state.started_at = _timestamp_epoch(
+                record.get("created_at"), state.started_at
+            )
+            state.last_event_at = _timestamp_epoch(
+                record.get("updated_at"), state.last_event_at
+            )
+            state.elapsed_sec = max(0.0, state.last_event_at - state.started_at)
+            if status == "done":
+                state.phase = "done"
+                state.percent = 100
+            self._states[group_id] = state
+            if status not in TERMINAL_STATUSES:
+                self._active_groups.add(group_id)
+
+    def _project_status(self, state: TaskProgress) -> None:
+        if self._projector:
+            persisted = _PERSISTED_STATUS.get(state.status)
+            if persisted:
+                self._projector.enqueue_status(
+                    state.task_id,
+                    persisted,
+                    state.error_message or None,
+                )
 
     def add_cleanup_callback(self, callback) -> None:
         """Register cleanup invoked whenever a task leaves active tracking."""
@@ -123,6 +204,11 @@ class ProgressAdapter:
                     exc_info=True,
                 )
 
+    def retire_if_terminal(self, group_id: int) -> None:
+        state = self._states.get(group_id)
+        if state and state.status in TERMINAL_STATUSES:
+            self._retire(group_id)
+
     def set_status(
         self,
         group_id: int,
@@ -130,6 +216,7 @@ class ProgressAdapter:
         *,
         detail: Optional[str] = None,
         error_message: Optional[str] = None,
+        push: bool = True,
     ) -> None:
         """Apply a local status transition and enforce terminal cleanup."""
         state = self._states.get(group_id)
@@ -143,9 +230,11 @@ class ProgressAdapter:
             state.detail = detail
         if error_message is not None:
             state.error_message = error_message
+        self._project_status(state)
         if status in TERMINAL_STATUSES:
             self._retire(group_id)
-        self._push_update(group_id, state)
+        if push:
+            self._push_update(group_id, state)
 
     def register_task(self, group_id: int, task_id: str = "") -> TaskProgress:
         """Register a new coding agent task for progress tracking."""
@@ -223,6 +312,11 @@ class ProgressAdapter:
         state.elapsed_sec = state.last_event_at - state.started_at
 
         event_type = payload.get("type", "")
+        if event_type in _ACTIVITY_EVENTS:
+            if state.status == "paused":
+                self.set_status(group_id, "running", push=False)
+            elif state.status == "running":
+                self._project_status(state)
         handler = self._HANDLERS.get(event_type)
         if handler:
             handler(self, state, payload)
@@ -265,6 +359,10 @@ class ProgressAdapter:
         if payload.get("error"):
             tool = payload.get("tool_name", "")
             state.detail = f"⚠️ {tool} 执行出错"
+        elif payload.get("tool_name") == "create_pr" and self._projector:
+            match = _PR_URL_RE.search(str(payload.get("result", "")))
+            if match:
+                self._projector.enqueue_pr_url(state.task_id, match.group(0))
 
     def _handle_tool_progress_running(self, state: TaskProgress, payload: dict) -> None:
         tool = payload.get("tool_name", "")
@@ -301,8 +399,17 @@ class ProgressAdapter:
             self._advance_phase(state, "done")
             self.set_status(state.group_id, "done")
         elif payload.get("awaiting_confirm"):
-            state.status = "paused"
-            state.detail = "等待确认"
+            self.set_status(
+                state.group_id, "paused", detail="等待确认", push=False
+            )
+        elif payload.get("active") is False:
+            error = payload.get("error") or "Workflow ended without success"
+            self.set_status(
+                state.group_id,
+                "error",
+                detail=f"任务失败: {error[:80]}",
+                error_message=error,
+            )
 
     def _handle_workflow_paused(self, state: TaskProgress, payload: dict) -> None:
         reason = payload.get("reason", "")
@@ -310,8 +417,12 @@ class ProgressAdapter:
             self._advance_phase(state, "done")
             self.set_status(state.group_id, "done")
         elif reason in ("gate", "pause"):
-            state.status = "paused"
-            state.detail = f"暂停: {reason}"
+            self.set_status(
+                state.group_id,
+                "paused",
+                detail=f"暂停: {reason}",
+                push=False,
+            )
         elif reason in {
             "provider_unavailable",
             "completion_signal_missing",

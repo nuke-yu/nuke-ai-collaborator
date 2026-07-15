@@ -87,7 +87,7 @@ class StuckDetector:
                 continue
 
             if state.status in TERMINAL_STATUSES:
-                self._adapter._retire(group_id)
+                self._adapter.retire_if_terminal(group_id)
                 continue
 
             # Stuck tasks wait for manual retry; retrying tasks already have one
@@ -107,9 +107,14 @@ class StuckDetector:
                         "StuckDetector: group %d stuck (%.0fs idle), auto-retry %d/%d",
                         group_id, idle_sec, retry_count + 1, self._max_auto_retries,
                     )
-                    state.status = "retrying"
-                    state.detail = f"卡死自动重试 ({retry_count + 1}/{self._max_auto_retries})"
-                    self._adapter._push_update(group_id, state)
+                    self._adapter.set_status(
+                        group_id,
+                        "retrying",
+                        detail=(
+                            f"卡死自动重试 "
+                            f"({retry_count + 1}/{self._max_auto_retries})"
+                        ),
+                    )
                     # Fire-and-forget retry (don't block the check loop)
                     task_id = state.task_id
                     task = asyncio.create_task(self._auto_retry(group_id, task_id))
@@ -134,10 +139,14 @@ class StuckDetector:
                             "StuckDetector: group %d stuck (no events for %.0fs, phase=%s)",
                             group_id, idle_sec, state.phase,
                         )
-                        state.status = "stuck"
-                        state.detail = f"卡死检测: {idle_sec:.0f}s 无新事件（阶段: {state.phase}）"
-                    if state.status != "stuck_permanently":
-                        self._adapter._push_update(group_id, state)
+                        self._adapter.set_status(
+                            group_id,
+                            "stuck",
+                            detail=(
+                                f"卡死检测: {idle_sec:.0f}s 无新事件"
+                                f"（阶段: {state.phase}）"
+                            ),
+                        )
 
     async def _auto_retry(self, group_id: int, task_id: str):
         """Execute an automatic retry via the orchestrator.
@@ -171,8 +180,10 @@ class StuckDetector:
 
         idle_sec = time.time() - state.last_event_at
         if idle_sec > STUCK_TIMEOUT_SEC:
-            state.status = "stuck"
-            state.detail = f"卡死检测: {idle_sec:.0f}s 无新事件"
-            self._adapter._push_update(group_id, state)
+            self._adapter.set_status(
+                group_id,
+                "stuck",
+                detail=f"卡死检测: {idle_sec:.0f}s 无新事件",
+            )
             return True
         return False

@@ -13,11 +13,37 @@ Usage:
     task = await store.get_task(task_id)
     await store.update_status(task_id, "running")
 """
+import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Optional
 
 log = logging.getLogger(__name__)
+
+
+_ALLOWED_TRANSITIONS = {
+    "created": {
+        "dispatched", "running", "paused", "stuck", "retrying",
+        "completed", "failed", "aborted", "stuck_permanently",
+    },
+    "dispatched": {
+        "running", "paused", "stuck", "retrying", "completed", "failed", "aborted",
+    },
+    "running": {"paused", "stuck", "retrying", "completed", "failed", "aborted"},
+    "paused": {"running", "stuck", "retrying", "completed", "failed", "aborted"},
+    "stuck": {"retrying", "restarted", "failed", "aborted", "stuck_permanently"},
+    "retrying": {"running", "restarted", "failed", "aborted", "stuck_permanently"},
+    "restarted": {
+        "running", "paused", "stuck", "retrying", "completed", "failed", "aborted",
+    },
+    "failed": {"restarted", "aborted"},
+    "aborted": {"restarted"},
+    "stuck_permanently": {"restarted", "aborted"},
+    "completed": set(),
+}
+_PERSISTED_TERMINAL_STATUSES = frozenset(
+    {"completed", "failed", "aborted", "stuck_permanently"}
+)
 
 
 class IdempotencyConflict(RuntimeError):
@@ -201,16 +227,51 @@ class TaskStore:
         from db import write_connect
 
         async with write_connect() as db:
+            current_cur = await db.execute(
+                "SELECT status FROM agent_tasks WHERE task_id = ?",
+                (task_id,),
+            )
+            current_row = await current_cur.fetchone()
+            if current_row is None:
+                return False
+            current = current_row[0]
+            if current != status and status not in _ALLOWED_TRANSITIONS.get(current, set()):
+                log.warning(
+                    "TaskStore: rejected task transition %s -> %s for %s",
+                    current,
+                    status,
+                    task_id,
+                )
+                return False
+
             cur = await db.execute(
                 """
                 UPDATE agent_tasks
                 SET status = ?,
                     pr_url = COALESCE(?, pr_url),
-                    error_message = COALESCE(?, error_message),
+                    error_message = CASE
+                        WHEN ? IN ('failed', 'stuck', 'stuck_permanently')
+                        THEN COALESCE(?, error_message)
+                        ELSE NULL
+                    END,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE task_id = ?
                 """,
-                (status, pr_url, error_message, task_id),
+                (status, pr_url, status, error_message, task_id),
+            )
+            await db.commit()
+            return cur.rowcount > 0
+
+    async def update_pr_url(self, task_id: str, pr_url: str) -> bool:
+        """Persist a verified PR URL without changing lifecycle status."""
+        from db import write_connect
+
+        async with write_connect() as db:
+            cur = await db.execute(
+                """UPDATE agent_tasks
+                   SET pr_url = ?, updated_at = CURRENT_TIMESTAMP
+                   WHERE task_id = ?""",
+                (pr_url, task_id),
             )
             await db.commit()
             return cur.rowcount > 0
@@ -317,3 +378,77 @@ class TaskStore:
             if cur.rowcount != 1:
                 raise RuntimeError("Idempotency request is not pending")
             await db.commit()
+
+
+class TaskStateProjector:
+    """Serialize dashboard lifecycle events into the durable task registry."""
+
+    def __init__(self, store: TaskStore):
+        self._store = store
+        self._queue: asyncio.Queue = asyncio.Queue()
+        self._last_status: dict[str, str] = {}
+
+    def enqueue_status(
+        self, task_id: str, status: str, error_message: Optional[str] = None
+    ) -> None:
+        if not task_id or self._last_status.get(task_id) == status:
+            return
+        self._last_status[task_id] = status
+        self._queue.put_nowait(("status", task_id, status, error_message))
+
+    def enqueue_pr_url(self, task_id: str, pr_url: str) -> None:
+        if task_id and pr_url:
+            self._queue.put_nowait(("pr_url", task_id, pr_url, None))
+
+    async def _apply(self, item: tuple) -> None:
+        kind, task_id, value, error = item
+        if kind == "status":
+            updated = await self._store.update_status(
+                task_id, value, error_message=error
+            )
+        else:
+            updated = await self._store.update_pr_url(task_id, value)
+        if not updated:
+            if kind == "status":
+                self._last_status.pop(task_id, None)
+            log.warning(
+                "TaskStateProjector: rejected %s update for task %s",
+                kind,
+                task_id,
+            )
+        elif kind == "status" and value in _PERSISTED_TERMINAL_STATUSES:
+            self._last_status.pop(task_id, None)
+
+    async def run(self) -> None:
+        """Consume projections until cancelled, draining queued terminal events."""
+        try:
+            while True:
+                item = await self._queue.get()
+                try:
+                    await self._apply(item)
+                except Exception:
+                    log.exception(
+                        "TaskStateProjector: failed to persist task %s", item[1]
+                    )
+                    # Retry transient database failures. The task state machine
+                    # prevents a delayed event from regressing a terminal state.
+                    self._queue.put_nowait(item)
+                    await asyncio.sleep(0.1)
+                finally:
+                    self._queue.task_done()
+        except asyncio.CancelledError:
+            while not self._queue.empty():
+                item = self._queue.get_nowait()
+                try:
+                    await self._apply(item)
+                except Exception:
+                    log.exception(
+                        "TaskStateProjector: failed to drain task %s", item[1]
+                    )
+                finally:
+                    self._queue.task_done()
+            raise
+
+    async def flush(self) -> None:
+        """Wait until all events queued before this call have been persisted."""
+        await self._queue.join()
