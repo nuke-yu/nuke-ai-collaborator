@@ -51,6 +51,8 @@ class TestSchemaSplit(unittest.IsolatedAsyncioTestCase):
         tables = await _tables(self.central)
         self.assertTrue(CENTRAL_TABLES <= tables, CENTRAL_TABLES - tables)
         self.assertFalse(GROUP_TABLES & tables, GROUP_TABLES & tables)
+        self.assertIn("agent_tasks", tables)
+        self.assertIn("agent_task_requests", tables)
 
     async def test_group_has_only_group_tables(self):
         tables = await _tables(self.group)

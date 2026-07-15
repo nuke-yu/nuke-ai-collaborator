@@ -18,7 +18,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import db as database
 from db.migrations import (
-    run_migrations, migration_001, migration_002, migration_023, MIGRATIONS, _safe_add_column,
+    run_migrations, migration_001, migration_002, migration_023, migration_029,
+    MIGRATIONS, _safe_add_column,
 )
 from db.schema import init_db
 
@@ -619,6 +620,26 @@ class TestMigration023(MigrationTestCase):
             self.assertFalse(await _has_table(conn, "reflection_state_old"))
             cur = await conn.execute("SELECT bot_id, group_id, thread_id, covered_through_ts FROM reflection_state")
             self.assertEqual(await cur.fetchall(), [(5, 9, "", 123.5)])
+
+
+class TestMigration029(MigrationTestCase):
+    async def test_creates_durable_task_request_reservations(self):
+        async with self._connect() as conn:
+            await migration_029(conn)
+            self.assertTrue(await _has_table(conn, "agent_task_requests"))
+            columns = set(await _table_columns(conn, "agent_task_requests"))
+            self.assertEqual(
+                columns,
+                {
+                    "idempotency_key",
+                    "request_hash",
+                    "task_id",
+                    "state",
+                    "error_message",
+                    "created_at",
+                    "updated_at",
+                },
+            )
 
 
 if __name__ == "__main__":

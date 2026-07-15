@@ -13,9 +13,10 @@ import logging
 import re
 import shlex
 import time
-from fastapi import APIRouter, HTTPException, Depends
+from datetime import datetime
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field, field_validator
-from typing import Optional
+from typing import Annotated, Optional
 
 from api.admin_deps import require_operator
 
@@ -115,7 +116,7 @@ class TaskResponse(BaseModel):
     task_id: str
     group_id: int
     status: str
-    created_at: float
+    created_at: datetime
 
 
 class RetryResponse(BaseModel):
@@ -127,7 +128,19 @@ class RetryResponse(BaseModel):
 # ── Endpoints ─────────────────────────────────────────────────────────
 
 @router.post("/tasks", response_model=TaskResponse)
-async def create_task(req: CreateTaskRequest, user=Depends(require_operator)):
+async def create_task(
+    req: CreateTaskRequest,
+    idempotency_key: Annotated[
+        str,
+        Header(
+            alias="Idempotency-Key",
+            min_length=8,
+            max_length=128,
+            pattern=r"^[A-Za-z0-9._:-]+$",
+        ),
+    ],
+    user=Depends(require_operator),
+):
     """Create a new coding agent task.
 
     Uses the TaskOrchestrator to: create group → add bot → clone repo → dispatch agent.
@@ -153,6 +166,7 @@ async def create_task(req: CreateTaskRequest, user=Depends(require_operator)):
             model=req.model,
             max_iterations=req.max_iterations,
             worker_id=worker_id,
+            idempotency_key=idempotency_key,
         )
 
         return TaskResponse(
@@ -163,8 +177,17 @@ async def create_task(req: CreateTaskRequest, user=Depends(require_operator)):
         )
     except Exception as e:
         from integrations.github_client import GitHubIntegrationUnavailable
+        from plugins.agent_dashboard.task_store import (
+            IdempotencyConflict,
+            PreviousTaskCreationFailed,
+            TaskCreationInProgress,
+        )
         if isinstance(e, GitHubIntegrationUnavailable):
             raise HTTPException(503, str(e))
+        if isinstance(e, (IdempotencyConflict, TaskCreationInProgress)):
+            raise HTTPException(409, str(e))
+        if isinstance(e, PreviousTaskCreationFailed):
+            raise HTTPException(422, str(e))
         log.exception("agent_dashboard: task creation failed")
         raise HTTPException(500, f"Task creation failed: {e}")
 

@@ -29,7 +29,8 @@ log = logging.getLogger(__name__)
 # ── table → domain ────────────────────────────────────────────────────────
 CENTRAL_TABLES = frozenset({
     "users", "groups", "members", "role_templates", "permission_rules", "cron_jobs",
-    "unread_counts", "bot_skills", "external_skills",
+    "unread_counts", "bot_skills", "external_skills", "agent_tasks",
+    "agent_task_requests",
 })
 GROUP_TABLES = frozenset({
     "messages", "role_summaries", "message_embeddings", "member_read",
@@ -155,6 +156,34 @@ _CENTRAL_DDL = [
         imported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         status      TEXT    NOT NULL DEFAULT 'active',
         UNIQUE(scope_kind, group_id, name)
+    )""",
+    """CREATE TABLE IF NOT EXISTS agent_tasks (
+        task_id        TEXT PRIMARY KEY,
+        group_id       INTEGER NOT NULL,
+        bot_id         INTEGER NOT NULL,
+        repo_url       TEXT NOT NULL,
+        requirements   TEXT NOT NULL,
+        base_branch    TEXT NOT NULL DEFAULT 'main',
+        test_command   TEXT NOT NULL DEFAULT '',
+        model          TEXT NOT NULL DEFAULT 'deepseek-chat',
+        max_iterations INTEGER NOT NULL DEFAULT 100,
+        status         TEXT NOT NULL DEFAULT 'created',
+        created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        pr_url         TEXT DEFAULT NULL,
+        error_message  TEXT DEFAULT NULL,
+        FOREIGN KEY (group_id) REFERENCES groups(id),
+        FOREIGN KEY (bot_id) REFERENCES members(id)
+    )""",
+    """CREATE TABLE IF NOT EXISTS agent_task_requests (
+        idempotency_key TEXT PRIMARY KEY,
+        request_hash    TEXT NOT NULL,
+        task_id         TEXT NOT NULL UNIQUE,
+        state           TEXT NOT NULL DEFAULT 'pending'
+                        CHECK(state IN ('pending', 'completed', 'failed')),
+        error_message   TEXT DEFAULT NULL,
+        created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )""",
 ]
 
@@ -410,4 +439,3 @@ async def ensure_group_db_ready(path: str) -> None:
     async with _db.connect(path) as conn:
         await run_migrations(conn)
     _ready_group_dbs.add(path)
-

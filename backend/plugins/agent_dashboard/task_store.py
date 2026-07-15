@@ -14,9 +14,57 @@ Usage:
     await store.update_status(task_id, "running")
 """
 import logging
+from datetime import datetime, timezone
 from typing import Optional
 
 log = logging.getLogger(__name__)
+
+
+class IdempotencyConflict(RuntimeError):
+    pass
+
+
+class TaskCreationInProgress(RuntimeError):
+    pass
+
+
+class PreviousTaskCreationFailed(RuntimeError):
+    pass
+
+
+def _utc_iso(value) -> str:
+    """Normalize SQLite timestamps to an explicit UTC API contract."""
+    if isinstance(value, (int, float)):
+        parsed = datetime.fromtimestamp(value, tz=timezone.utc)
+    elif isinstance(value, datetime):
+        parsed = value
+    else:
+        text = str(value or "").strip().replace(" ", "T")
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        parsed = datetime.fromisoformat(text)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _row_to_task(row) -> dict:
+    return {
+        "task_id": row[0],
+        "group_id": row[1],
+        "bot_id": row[2],
+        "repo_url": row[3],
+        "requirements": row[4],
+        "base_branch": row[5],
+        "test_command": row[6],
+        "model": row[7],
+        "max_iterations": row[8],
+        "status": row[9],
+        "created_at": _utc_iso(row[10]),
+        "updated_at": _utc_iso(row[11]),
+        "pr_url": row[12],
+        "error_message": row[13],
+    }
 
 
 class TaskStore:
@@ -83,22 +131,7 @@ class TaskStore:
         if not row:
             return None
 
-        return {
-            "task_id": row[0],
-            "group_id": row[1],
-            "bot_id": row[2],
-            "repo_url": row[3],
-            "requirements": row[4],
-            "base_branch": row[5],
-            "test_command": row[6],
-            "model": row[7],
-            "max_iterations": row[8],
-            "status": row[9],
-            "created_at": row[10],
-            "updated_at": row[11],
-            "pr_url": row[12],
-            "error_message": row[13],
-        }
+        return _row_to_task(row)
 
     async def list_tasks(
         self,
@@ -145,25 +178,7 @@ class TaskStore:
             cur = await db.execute(query, params)
             rows = await cur.fetchall()
 
-        return [
-            {
-                "task_id": row[0],
-                "group_id": row[1],
-                "bot_id": row[2],
-                "repo_url": row[3],
-                "requirements": row[4],
-                "base_branch": row[5],
-                "test_command": row[6],
-                "model": row[7],
-                "max_iterations": row[8],
-                "status": row[9],
-                "created_at": row[10],
-                "updated_at": row[11],
-                "pr_url": row[12],
-                "error_message": row[13],
-            }
-            for row in rows
-        ]
+        return [_row_to_task(row) for row in rows]
 
     async def update_status(
         self,
@@ -215,3 +230,90 @@ class TaskStore:
             )
             await db.commit()
             return cur.rowcount > 0
+
+    async def reserve_request(
+        self, idempotency_key: str, request_hash: str, task_id: str
+    ) -> dict:
+        """Atomically reserve a task ID or return the prior request outcome."""
+        from db import write_connect
+
+        async with write_connect() as db:
+            insert = await db.execute(
+                """INSERT INTO agent_task_requests
+                   (idempotency_key, request_hash, task_id)
+                   VALUES (?, ?, ?)
+                   ON CONFLICT(idempotency_key) DO NOTHING""",
+                (idempotency_key, request_hash, task_id),
+            )
+            if insert.rowcount == 1:
+                await db.commit()
+                return {"owner": True, "task_id": task_id, "state": "pending"}
+
+            cur = await db.execute(
+                """SELECT request_hash, task_id, state, error_message
+                   FROM agent_task_requests WHERE idempotency_key = ?""",
+                (idempotency_key,),
+            )
+            row = await cur.fetchone()
+            if row is None:
+                raise RuntimeError("Idempotency reservation conflict was not recoverable")
+
+            existing_hash, existing_task_id, state, error = row
+            if existing_hash != request_hash:
+                raise IdempotencyConflict(
+                    "Idempotency-Key was already used with a different request"
+                )
+
+            # Recover a completion-marker write lost after successful dispatch.
+            if state == "pending":
+                task_cur = await db.execute(
+                    "SELECT status FROM agent_tasks WHERE task_id = ?",
+                    (existing_task_id,),
+                )
+                task_row = await task_cur.fetchone()
+                if task_row and task_row[0] != "created":
+                    state = "completed"
+                    await db.execute(
+                        """UPDATE agent_task_requests
+                           SET state = 'completed', updated_at = CURRENT_TIMESTAMP
+                           WHERE idempotency_key = ?""",
+                        (idempotency_key,),
+                    )
+                    await db.commit()
+
+            return {
+                "owner": False,
+                "task_id": existing_task_id,
+                "state": state,
+                "error_message": error,
+            }
+
+    async def complete_request(self, idempotency_key: str) -> None:
+        from db import write_connect
+
+        async with write_connect() as db:
+            cur = await db.execute(
+                """UPDATE agent_task_requests
+                   SET state = 'completed', error_message = NULL,
+                       updated_at = CURRENT_TIMESTAMP
+                   WHERE idempotency_key = ? AND state = 'pending'""",
+                (idempotency_key,),
+            )
+            if cur.rowcount != 1:
+                raise RuntimeError("Idempotency request is not pending")
+            await db.commit()
+
+    async def fail_request(self, idempotency_key: str, error: str) -> None:
+        from db import write_connect
+
+        async with write_connect() as db:
+            cur = await db.execute(
+                """UPDATE agent_task_requests
+                   SET state = 'failed', error_message = ?,
+                       updated_at = CURRENT_TIMESTAMP
+                   WHERE idempotency_key = ? AND state = 'pending'""",
+                (error[:2000], idempotency_key),
+            )
+            if cur.rowcount != 1:
+                raise RuntimeError("Idempotency request is not pending")
+            await db.commit()

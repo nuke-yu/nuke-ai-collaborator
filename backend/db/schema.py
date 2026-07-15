@@ -215,6 +215,18 @@ async def init_db():
                 FOREIGN KEY (bot_id) REFERENCES members(id)
             )
         """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS agent_task_requests (
+                idempotency_key TEXT PRIMARY KEY,
+                request_hash    TEXT NOT NULL,
+                task_id         TEXT NOT NULL UNIQUE,
+                state           TEXT NOT NULL DEFAULT 'pending'
+                                CHECK(state IN ('pending', 'completed', 'failed')),
+                error_message   TEXT DEFAULT NULL,
+                created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
         await conn.commit()
         await run_migrations(conn)
         await _seed_templates(conn)

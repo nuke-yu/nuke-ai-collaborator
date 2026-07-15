@@ -7,7 +7,10 @@ import asyncio
 import os
 import unittest
 from unittest.mock import patch, AsyncMock, MagicMock
+from integrations.github_client import GitHubIntegrationUnavailable
+from plugins.agent_dashboard.api import TaskResponse
 from plugins.agent_dashboard.orchestrator import TaskOrchestrator, CODING_AGENT_SYSTEM_PROMPT
+from plugins.agent_dashboard.task_store import IdempotencyConflict, TaskStore
 
 
 class DatabaseTestBase(unittest.IsolatedAsyncioTestCase):
@@ -131,6 +134,103 @@ class TestCreateTask(DatabaseTestBase):
         stored_task = await orch._task_store.get_task(result["task_id"])
         self.assertIsNotNone(stored_task)
         self.assertEqual(stored_task["requirements"], "Fix bug")
+        self.assertRegex(stored_task["created_at"], r"^\d{4}-\d{2}-\d{2}T.*Z$")
+        response = TaskResponse(**stored_task)
+        self.assertIsNotNone(response.created_at.tzinfo)
+
+    async def test_same_idempotency_key_returns_original_task(self):
+        adapter = MagicMock()
+        orch = TaskOrchestrator(adapter=adapter)
+
+        import db
+        async with db.write_connect() as conn:
+            await conn.execute("INSERT INTO groups (id, name) VALUES (42, 'test-group')")
+            await conn.execute(
+                "INSERT INTO members (id, group_id, name, type, role) "
+                "VALUES (7, 42, 'test-bot', 'bot', 'developer')"
+            )
+            await conn.commit()
+
+        with patch.object(orch, "_preflight_check_repo", new_callable=AsyncMock) as preflight, \
+             patch.object(orch, "_create_group", new_callable=AsyncMock, return_value=42) as create_group, \
+             patch.object(orch, "_add_bot", new_callable=AsyncMock, return_value=7) as add_bot, \
+             patch.object(orch, "_clone_repo", new_callable=AsyncMock) as clone, \
+             patch.object(orch, "_dispatch_agent", new_callable=AsyncMock) as dispatch:
+            first = await orch.create_task(
+                repo_url="https://github.com/user/repo.git",
+                requirements="Implement durable task creation",
+                idempotency_key="request-123",
+            )
+            second = await orch.create_task(
+                repo_url="https://github.com/user/repo.git",
+                requirements="Implement durable task creation",
+                idempotency_key="request-123",
+            )
+
+        self.assertEqual(second["task_id"], first["task_id"])
+        preflight.assert_awaited_once()
+        create_group.assert_awaited_once()
+        add_bot.assert_awaited_once()
+        clone.assert_awaited_once()
+        dispatch.assert_awaited_once()
+        adapter.register_task.assert_called_once()
+
+    async def test_idempotency_key_rejects_different_request(self):
+        orch = TaskOrchestrator()
+        reservation = await orch._task_store.reserve_request(
+            "request-123", "original-hash", "agent_original"
+        )
+        self.assertTrue(reservation["owner"])
+
+        with patch("plugins.agent_dashboard.orchestrator.hashlib.sha256") as digest:
+            digest.return_value.hexdigest.return_value = "different-hash"
+            with self.assertRaises(IdempotencyConflict):
+                await orch.create_task(
+                    repo_url="https://github.com/user/repo.git",
+                    requirements="A different task request",
+                    idempotency_key="request-123",
+                )
+
+
+class TestTaskStoreIdempotency(DatabaseTestBase):
+
+    async def test_concurrent_reservation_has_one_owner(self):
+        store = TaskStore()
+        results = await asyncio.gather(
+            store.reserve_request("request-123", "same-hash", "agent_one"),
+            store.reserve_request("request-123", "same-hash", "agent_two"),
+        )
+
+        self.assertEqual(sum(result["owner"] for result in results), 1)
+        self.assertEqual({result["task_id"] for result in results}, {results[0]["task_id"]})
+
+    async def test_pending_reservation_self_heals_after_dispatch(self):
+        store = TaskStore()
+        await store.reserve_request("request-123", "same-hash", "agent_one")
+
+        import db
+        async with db.write_connect() as conn:
+            await conn.execute("INSERT INTO groups (id, name) VALUES (1, 'test-group')")
+            await conn.execute(
+                "INSERT INTO members (id, group_id, name, type, role) "
+                "VALUES (2, 1, 'test-bot', 'bot', 'developer')"
+            )
+            await conn.commit()
+        await store.create_task(
+            task_id="agent_one",
+            group_id=1,
+            bot_id=2,
+            repo_url="https://github.com/user/repo.git",
+            requirements="Implement durable task creation",
+        )
+        await store.update_status("agent_one", "dispatched")
+
+        replay = await store.reserve_request(
+            "request-123", "same-hash", "agent_unused"
+        )
+        self.assertFalse(replay["owner"])
+        self.assertEqual(replay["state"], "completed")
+        self.assertEqual(replay["task_id"], "agent_one")
 
 
 class TestRetryTask(DatabaseTestBase):
@@ -522,6 +622,24 @@ class TestCreateTaskAtomicity(DatabaseTestBase):
                 )
             mock_create.assert_not_called()
             mock_rollback.assert_not_called()
+
+    async def test_github_unavailable_preserves_typed_failure(self):
+        orch = TaskOrchestrator()
+
+        with patch.object(
+            orch,
+            "_preflight_check_repo",
+            new_callable=AsyncMock,
+            side_effect=GitHubIntegrationUnavailable("GitHub integration is disabled"),
+        ), patch.object(orch, "_create_group", new_callable=AsyncMock) as create_group:
+            with self.assertRaises(GitHubIntegrationUnavailable):
+                await orch.create_task(
+                    repo_url="https://github.com/user/repo.git",
+                    requirements="Implement durable task creation",
+                    idempotency_key="request-123",
+                )
+
+        create_group.assert_not_awaited()
 
     async def test_add_bot_failure_rolls_back_group(self):
         """If bot creation fails, group is rolled back."""

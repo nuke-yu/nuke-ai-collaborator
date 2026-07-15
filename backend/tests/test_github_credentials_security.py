@@ -200,7 +200,11 @@ class TestWorkerFailsClosed(unittest.IsolatedAsyncioTestCase):
                 requirements="Implement a sufficiently detailed feature",
             )
             with self.assertRaises(HTTPException) as ctx:
-                await api.create_task(request, user={"username": "operator"})
+                await api.create_task(
+                    request,
+                    idempotency_key="request-123",
+                    user={"username": "operator"},
+                )
         finally:
             api._orchestrator = previous
 

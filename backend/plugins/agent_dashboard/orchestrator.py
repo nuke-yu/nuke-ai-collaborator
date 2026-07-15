@@ -15,6 +15,8 @@ The coding agent system prompt drives autonomous behavior:
   clone → explore code → write code → run tests → fix if failed → commit → push → create PR
 """
 import asyncio
+import hashlib
+import json
 import logging
 import time
 import uuid
@@ -95,6 +97,7 @@ class TaskOrchestrator:
         model: str = "deepseek-chat",
         max_iterations: int = 100,
         worker_id: Optional[str] = None,
+        idempotency_key: Optional[str] = None,
     ) -> dict:
         """Create and dispatch a new coding agent task.
 
@@ -123,13 +126,49 @@ class TaskOrchestrator:
             RuntimeError: if pre-flight check fails or resource creation fails
         """
         task_id = f"agent_{uuid.uuid4().hex[:12]}"
-
-        # Pre-flight: validate repo URL is reachable before creating any resources
-        await self._preflight_check_repo(repo_url, base_branch)
+        if idempotency_key:
+            request_payload = {
+                "repo_url": repo_url,
+                "requirements": requirements,
+                "base_branch": base_branch,
+                "test_command": test_command,
+                "model": model,
+                "max_iterations": max_iterations,
+                "worker_id": worker_id,
+            }
+            request_hash = hashlib.sha256(
+                json.dumps(
+                    request_payload, sort_keys=True, separators=(",", ":")
+                ).encode("utf-8")
+            ).hexdigest()
+            reservation = await self._task_store.reserve_request(
+                idempotency_key, request_hash, task_id
+            )
+            task_id = reservation["task_id"]
+            if not reservation["owner"]:
+                if reservation["state"] == "completed":
+                    record = await self._task_store.get_task(task_id)
+                    if record:
+                        return record
+                from plugins.agent_dashboard.task_store import (
+                    PreviousTaskCreationFailed,
+                    TaskCreationInProgress,
+                )
+                if reservation["state"] == "failed":
+                    raise PreviousTaskCreationFailed(
+                        reservation.get("error_message")
+                        or "The previous task creation attempt failed"
+                    )
+                raise TaskCreationInProgress(
+                    f"Task creation is already in progress for {idempotency_key}"
+                )
 
         group_id = None
         bot_id = None
         try:
+            # Validate reachability before creating project resources.
+            await self._preflight_check_repo(repo_url, base_branch)
+
             # 1. Create group
             group_id = await self._create_group(task_id)
 
@@ -162,11 +201,9 @@ class TaskOrchestrator:
             if self._adapter:
                 self._adapter.register_task(group_id, task_id)
 
-            # 7. Update status to dispatched
-            await self._task_store.update_status(task_id, "dispatched")
-
-            # 8. Dispatch the coding agent
+            # 7. Dispatch before exposing the dispatched state.
             await self._dispatch_agent(group_id, bot_id, requirements, test_command, task_id=task_id)
+            await self._task_store.update_status(task_id, "dispatched")
 
         except Exception as e:
             # Compensate: clean up any partially created resources
@@ -179,11 +216,33 @@ class TaskOrchestrator:
             # P1-1: Delete task from database if it was created
             if bot_id is not None:
                 await self._task_store.delete_task(task_id)
-            await self._rollback_group(group_id)
+            if group_id is not None:
+                await self._rollback_group(group_id)
+            if idempotency_key:
+                try:
+                    await self._task_store.fail_request(idempotency_key, str(e))
+                except Exception:
+                    log.exception(
+                        "TaskOrchestrator: failed to persist idempotency failure"
+                    )
+            from integrations.github_client import GitHubIntegrationUnavailable
+            if isinstance(e, GitHubIntegrationUnavailable):
+                raise
             raise RuntimeError(f"Task creation failed: {e}") from e
 
         # P1-1: Fetch the persisted task record from database
         record = await self._task_store.get_task(task_id)
+        if record is None:
+            raise RuntimeError(f"Persisted task {task_id} disappeared after dispatch")
+        if idempotency_key:
+            try:
+                await self._task_store.complete_request(idempotency_key)
+            except Exception:
+                # The reservation can self-heal from the dispatched task row on
+                # the next request; do not roll back a workflow already sent.
+                log.exception(
+                    "TaskOrchestrator: failed to mark idempotency request complete"
+                )
 
         log.info("TaskOrchestrator: task %s dispatched (group=%d, bot=%d)", task_id, group_id, bot_id)
         return record
