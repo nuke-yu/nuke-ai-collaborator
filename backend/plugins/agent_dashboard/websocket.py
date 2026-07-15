@@ -98,6 +98,35 @@ async def _authenticate_ws(ws: WebSocket) -> bool:
     return True
 
 
+@router.websocket("/ws/agent/all")
+async def dashboard_all_ws(ws: WebSocket):
+    """WebSocket endpoint for all active tasks' progress. Requires JWT auth."""
+    if not await _authenticate_ws(ws):
+        return
+    await ws.accept()
+    conn = DashboardConnection(ws, group_filter=None)
+    _all_connections.add(conn)
+
+    # Send current state of all active tasks
+    if _adapter:
+        for state in _adapter.get_all_active():
+            await conn.send(state)
+
+    try:
+        while True:
+            try:
+                data = await ws.receive_text()
+                msg = json.loads(data)
+                if msg.get("type") == "ping":
+                    await ws.send_json({"type": "pong"})
+            except WebSocketDisconnect:
+                break
+            except json.JSONDecodeError:
+                pass
+    finally:
+        _all_connections.discard(conn)
+
+
 @router.websocket("/ws/agent/{group_id}")
 async def dashboard_ws(ws: WebSocket, group_id: int):
     """WebSocket endpoint for a specific task's progress. Requires JWT auth."""
@@ -132,35 +161,6 @@ async def dashboard_ws(ws: WebSocket, group_id: int):
         _connections.get(group_id, set()).discard(conn)
         if not _connections.get(group_id):
             _connections.pop(group_id, None)
-
-
-@router.websocket("/ws/agent/all")
-async def dashboard_all_ws(ws: WebSocket):
-    """WebSocket endpoint for all active tasks' progress. Requires JWT auth."""
-    if not await _authenticate_ws(ws):
-        return
-    await ws.accept()
-    conn = DashboardConnection(ws, group_filter=None)
-    _all_connections.add(conn)
-
-    # Send current state of all active tasks
-    if _adapter:
-        for state in _adapter.get_all_active():
-            await conn.send(state)
-
-    try:
-        while True:
-            try:
-                data = await ws.receive_text()
-                msg = json.loads(data)
-                if msg.get("type") == "ping":
-                    await ws.send_json({"type": "pong"})
-            except WebSocketDisconnect:
-                break
-            except json.JSONDecodeError:
-                pass
-    finally:
-        _all_connections.discard(conn)
 
 
 async def push_to_clients(update: dict):
