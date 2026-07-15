@@ -44,6 +44,28 @@ class TestRunCmd(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(rc, 1)
             self.assertEqual(stderr, "error msg")
 
+    async def test_parent_credentials_are_not_inherited(self):
+        proc = _mock_proc()
+        with patch.dict(
+            os.environ,
+            {
+                "GITHUB_TOKEN": "github-secret",
+                "GH_TOKEN": "gh-secret",
+                "AWS_SECRET_ACCESS_KEY": "aws-secret",
+                "PATH": "/usr/bin",
+            },
+            clear=True,
+        ):
+            with patch("asyncio.create_subprocess_exec", return_value=proc) as mock_exec:
+                await _run_cmd("git", "status")
+
+        child_env = mock_exec.call_args.kwargs["env"]
+        self.assertEqual(child_env["PATH"], "/usr/bin")
+        self.assertEqual(child_env["GIT_TERMINAL_PROMPT"], "0")
+        self.assertNotIn("GITHUB_TOKEN", child_env)
+        self.assertNotIn("GH_TOKEN", child_env)
+        self.assertNotIn("AWS_SECRET_ACCESS_KEY", child_env)
+
     async def test_timeout(self):
         proc = _mock_proc()
         proc.communicate = AsyncMock(side_effect=asyncio.TimeoutError())
@@ -69,21 +91,55 @@ class TestGitHelper(unittest.IsolatedAsyncioTestCase):
                 await _git("status")
             self.assertIn("not a git repo", str(ctx.exception))
 
+    async def test_authenticated_git_receives_only_explicit_github_token(self):
+        with patch.dict(
+            os.environ,
+            {
+                "GITHUB_TOKEN": "github-secret",
+                "UNRELATED_SECRET": "do-not-inherit",
+            },
+            clear=True,
+        ):
+            with patch(
+                "asyncio.create_subprocess_exec",
+                return_value=_mock_proc(),
+            ) as mock_exec:
+                await _git("push", authenticated=True)
+
+        child_env = mock_exec.call_args.kwargs["env"]
+        self.assertEqual(child_env["GITHUB_TOKEN"], "github-secret")
+        self.assertIn("GIT_ASKPASS", child_env)
+        self.assertNotIn("GH_TOKEN", child_env)
+        self.assertNotIn("UNRELATED_SECRET", child_env)
+
 
 class TestGhHelper(unittest.IsolatedAsyncioTestCase):
 
     async def test_success(self):
-        with patch("asyncio.create_subprocess_exec",
-                    return_value=_mock_proc(b"https://github.com/user/repo/pull/42\n", b"", 0)):
-            result = await _gh("pr", "create", "--title", "test")
-            self.assertIn("pull/42", result)
+        with patch.dict(os.environ, {"GITHUB_TOKEN": "github-secret"}, clear=True):
+            with patch("asyncio.create_subprocess_exec",
+                        return_value=_mock_proc(b"https://github.com/user/repo/pull/42\n", b"", 0)) as mock_exec:
+                result = await _gh("pr", "create", "--title", "test")
+                self.assertIn("pull/42", result)
+
+        child_env = mock_exec.call_args.kwargs["env"]
+        self.assertEqual(child_env["GH_TOKEN"], "github-secret")
+        self.assertNotIn("GITHUB_TOKEN", child_env)
 
     async def test_failure_raises(self):
-        with patch("asyncio.create_subprocess_exec",
-                    return_value=_mock_proc(b"", b"not authenticated", 1)):
-            with self.assertRaises(RuntimeError) as ctx:
-                await _gh("pr", "create")
-            self.assertIn("not authenticated", str(ctx.exception))
+        with patch.dict(os.environ, {"GITHUB_TOKEN": "github-secret"}, clear=True):
+            with patch("asyncio.create_subprocess_exec",
+                        return_value=_mock_proc(b"", b"not authenticated", 1)):
+                with self.assertRaises(RuntimeError) as ctx:
+                    await _gh("pr", "create")
+                self.assertIn("not authenticated", str(ctx.exception))
+
+    async def test_missing_token_fails_before_spawning(self):
+        with patch.dict(os.environ, {}, clear=True):
+            with patch("asyncio.create_subprocess_exec") as mock_exec:
+                with self.assertRaisesRegex(RuntimeError, "GITHUB_TOKEN"):
+                    await _gh("pr", "create")
+        mock_exec.assert_not_called()
 
 
 class TestCloneRepo(unittest.IsolatedAsyncioTestCase):

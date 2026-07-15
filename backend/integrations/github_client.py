@@ -23,6 +23,29 @@ log = logging.getLogger(__name__)
 _CMD_TIMEOUT = 60
 _TRUE_VALUES = {"1", "true", "yes"}
 _ASKPASS_PATH = Path(__file__).with_name("git_askpass.sh")
+_SUBPROCESS_ENV_KEYS = {
+    "ALL_PROXY",
+    "GIT_AUTHOR_EMAIL",
+    "GIT_AUTHOR_NAME",
+    "GIT_COMMITTER_EMAIL",
+    "GIT_COMMITTER_NAME",
+    "HOME",
+    "HTTPS_PROXY",
+    "HTTP_PROXY",
+    "LANG",
+    "LC_ALL",
+    "NO_PROXY",
+    "PATH",
+    "SSL_CERT_DIR",
+    "SSL_CERT_FILE",
+    "TEMP",
+    "TMP",
+    "TMPDIR",
+    "all_proxy",
+    "https_proxy",
+    "http_proxy",
+    "no_proxy",
+}
 
 
 class GitHubIntegrationUnavailable(RuntimeError):
@@ -62,6 +85,7 @@ def _github_auth_env(*, require_token: bool = False) -> dict[str, str]:
     env = {"GIT_TERMINAL_PROMPT": "0"}
     if token:
         env.update({
+            "GITHUB_TOKEN": token,
             "GIT_ASKPASS": str(_ASKPASS_PATH),
             "GIT_CONFIG_COUNT": "1",
             "GIT_CONFIG_KEY_0": "credential.username",
@@ -70,12 +94,32 @@ def _github_auth_env(*, require_token: bool = False) -> dict[str, str]:
     return env
 
 
+def _github_cli_auth_env() -> dict[str, str]:
+    """Return the one credential variable exposed to an authenticated gh call."""
+    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+    if not token:
+        raise GitHubIntegrationUnavailable("GITHUB_TOKEN is required")
+    return {"GH_TOKEN": token}
+
+
+def _subprocess_env(extra_env: dict[str, str] | None = None) -> dict[str, str]:
+    """Build a minimal child environment; credentials require explicit injection."""
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if key in _SUBPROCESS_ENV_KEYS
+    }
+    env.setdefault("PATH", os.defpath)
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    if extra_env:
+        env.update(extra_env)
+    return env
+
+
 async def _run_cmd(*args: str, cwd: str | Path | None = None, timeout: int = _CMD_TIMEOUT,
                    extra_env: dict | None = None) -> tuple[str, str, int]:
     """Run a command asynchronously. Returns (stdout, stderr, returncode)."""
-    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
-    if extra_env:
-        env.update(extra_env)
+    env = _subprocess_env(extra_env)
     proc = await asyncio.create_subprocess_exec(
         *args,
         cwd=str(cwd) if cwd else None,
@@ -119,13 +163,10 @@ async def _git(
 
 
 async def _gh(*args: str, cwd: str | Path | None = None) -> str:
-    """Run a gh CLI command, raising on failure.
-
-    P0-4: GITHUB_TOKEN is read from environment variable, not passed as parameter.
-    The gh CLI automatically uses GITHUB_TOKEN env var for authentication.
-    """
-    # gh CLI automatically reads GITHUB_TOKEN from environment
-    stdout, stderr, rc = await _run_cmd("gh", *args, cwd=cwd)
+    """Run an authenticated gh CLI command, raising on failure."""
+    stdout, stderr, rc = await _run_cmd(
+        "gh", *args, cwd=cwd, extra_env=_github_cli_auth_env()
+    )
     if rc != 0:
         raise RuntimeError(f"gh {' '.join(args)} failed (rc={rc}): {stderr}")
     return stdout
