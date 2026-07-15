@@ -52,6 +52,8 @@ _CODE_TOOLS = {
 # Shell commands that indicate testing
 _TEST_KEYWORDS = {"pytest", "npm test", "npm run test", "jest", "vitest", "go test", "cargo test"}
 
+TERMINAL_STATUSES = frozenset({"done", "error", "aborted", "stuck_permanently"})
+
 
 @dataclass
 class TaskProgress:
@@ -103,6 +105,47 @@ class ProgressAdapter:
         self._update_queue: asyncio.Queue = asyncio.Queue(maxsize=5000)
         # Groups being tracked as coding agent tasks
         self._active_groups: set[int] = set()
+        self._cleanup_callbacks: list = []
+
+    def add_cleanup_callback(self, callback) -> None:
+        """Register cleanup invoked whenever a task leaves active tracking."""
+        self._cleanup_callbacks.append(callback)
+
+    def _retire(self, group_id: int) -> None:
+        self._active_groups.discard(group_id)
+        for callback in list(self._cleanup_callbacks):
+            try:
+                callback(group_id)
+            except Exception:
+                log.warning(
+                    "agent_dashboard: task cleanup callback failed for group %d",
+                    group_id,
+                    exc_info=True,
+                )
+
+    def set_status(
+        self,
+        group_id: int,
+        status: str,
+        *,
+        detail: Optional[str] = None,
+        error_message: Optional[str] = None,
+    ) -> None:
+        """Apply a local status transition and enforce terminal cleanup."""
+        state = self._states.get(group_id)
+        if state is None:
+            return
+        state.status = status
+        if status == "done":
+            state.phase = "done"
+            state.percent = 100
+        if detail is not None:
+            state.detail = detail
+        if error_message is not None:
+            state.error_message = error_message
+        if status in TERMINAL_STATUSES:
+            self._retire(group_id)
+        self._push_update(group_id, state)
 
     def register_task(self, group_id: int, task_id: str = "") -> TaskProgress:
         """Register a new coding agent task for progress tracking."""
@@ -114,32 +157,27 @@ class ProgressAdapter:
 
     def remove_task(self, group_id: int) -> None:
         """Completely remove a task from tracking (e.g., on rollback)."""
-        self._active_groups.discard(group_id)
+        self._retire(group_id)
         self._states.pop(group_id, None)
         # No push_update since task is removed
 
     def mark_aborted(self, group_id: int) -> None:
         """Mark a task as aborted."""
-        self._active_groups.discard(group_id)
-        state = self._states.get(group_id)
-        if state:
-            state.status = "aborted"
-            self._push_update(group_id, state)
+        self.set_status(group_id, "aborted")
 
     def mark_succeeded(self, group_id: int) -> None:
         """Mark a task as successfully completed."""
-        self._active_groups.discard(group_id)
         state = self._states.get(group_id)
         if state:
-            state.status = "done"
             state.phase = "done"
             state.percent = 100
-            self._push_update(group_id, state)
+            self.set_status(group_id, "done")
 
     def reset_for_retry(self, group_id: int) -> None:
         """Reset task state for retry (keeps tracking active)."""
         state = self._states.get(group_id)
         if state:
+            self._active_groups.add(group_id)
             state.phase = "queued"
             state.percent = 0
             state.status = "running"
@@ -188,7 +226,8 @@ class ProgressAdapter:
         handler = self._HANDLERS.get(event_type)
         if handler:
             handler(self, state, payload)
-            self._push_update(group_id, state)
+            if group_id in self._active_groups:
+                self._push_update(group_id, state)
 
     # ── Event handlers ────────────────────────────────────────────────
 
@@ -246,18 +285,21 @@ class ProgressAdapter:
             state.detail = "Bot 回复完成"
 
     def _handle_stream_aborted(self, state: TaskProgress, payload: dict) -> None:
-        state.status = "aborted"
-        state.detail = "任务已中止"
+        self.set_status(state.group_id, "aborted", detail="任务已中止")
 
     def _handle_stream_error(self, state: TaskProgress, payload: dict) -> None:
-        state.status = "error"
-        state.error_message = payload.get("message", "Unknown error")
-        state.detail = f"错误: {state.error_message[:80]}"
+        error = payload.get("message", "Unknown error")
+        self.set_status(
+            state.group_id,
+            "error",
+            detail=f"错误: {error[:80]}",
+            error_message=error,
+        )
 
     def _handle_workflow_update(self, state: TaskProgress, payload: dict) -> None:
         if payload.get("done"):
             self._advance_phase(state, "done")
-            state.status = "done"
+            self.set_status(state.group_id, "done")
         elif payload.get("awaiting_confirm"):
             state.status = "paused"
             state.detail = "等待确认"
@@ -266,13 +308,13 @@ class ProgressAdapter:
         reason = payload.get("reason", "")
         if reason == "done":
             self._advance_phase(state, "done")
-            state.status = "done"
+            self.set_status(state.group_id, "done")
         elif reason in ("gate", "pause"):
             state.status = "paused"
             state.detail = f"暂停: {reason}"
         elif reason == "provider_unavailable":
-            state.status = "error"
-            state.error_message = payload.get("details", "AI provider unavailable")
+            error = payload.get("details", "AI provider unavailable")
+            self.set_status(state.group_id, "error", error_message=error)
 
     # Handler dispatch table
     _HANDLERS = {

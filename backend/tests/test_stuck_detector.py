@@ -211,6 +211,8 @@ class TestAutoRetry(unittest.IsolatedAsyncioTestCase):
         await detector._check_all()
         self.assertEqual(state.status, "stuck_permanently")
         self.assertIn("永久卡死", state.detail)
+        self.assertNotIn(1, adapter._active_groups)
+        self.assertNotIn(1, detector._retry_counts)
 
     async def test_no_auto_retry_without_orchestrator(self):
         """Without orchestrator, falls back to manual retry (status=stuck)."""
@@ -270,9 +272,36 @@ class TestAutoRetryAsync(unittest.IsolatedAsyncioTestCase):
         detector = StuckDetector(adapter, orchestrator=mock_orch)
         # Should not raise
         await detector._auto_retry(1, "task_1")
+        self.assertEqual(adapter._states[1].status, "stuck")
 
 
 class TestRetryCounterClearedOnCompletion(unittest.IsolatedAsyncioTestCase):
+
+    async def test_counter_cleared_immediately_on_terminal_event(self):
+        for event in (
+            {"type": "workflow_update", "done": True},
+            {"type": "stream_error", "message": "provider failed"},
+            {"type": "stream_aborted"},
+        ):
+            adapter = ProgressAdapter()
+            adapter.register_task(1, "task_1")
+            detector = StuckDetector(adapter)
+            detector._retry_counts[1] = 2
+
+            adapter.on_event(1, event)
+
+            self.assertNotIn(1, detector._retry_counts)
+            self.assertNotIn(1, adapter._active_groups)
+
+    async def test_counter_cleared_when_task_is_removed(self):
+        adapter = ProgressAdapter()
+        adapter.register_task(1, "task_1")
+        detector = StuckDetector(adapter)
+        detector._retry_counts[1] = 2
+
+        adapter.remove_task(1)
+
+        self.assertNotIn(1, detector._retry_counts)
 
     async def test_counter_cleared_when_task_done(self):
         """Retry counter is cleared when task reaches 'done' status, not on dispatch."""

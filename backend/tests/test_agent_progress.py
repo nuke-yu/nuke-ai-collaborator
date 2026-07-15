@@ -72,6 +72,15 @@ class TestTaskRegistration:
         assert adapter._states[1].percent == 0
         assert adapter._states[1].status == "running"
 
+    def test_reset_for_retry_reactivates_terminal_task(self, adapter):
+        adapter.register_task(1, "task_1")
+        adapter.mark_aborted(1)
+        assert 1 not in adapter._active_groups
+
+        adapter.reset_for_retry(1)
+        assert 1 in adapter._active_groups
+        assert adapter._states[1].status == "running"
+
     def test_get_progress(self, active_adapter):
         progress = active_adapter.get_progress(1)
         assert progress is not None
@@ -147,18 +156,22 @@ class TestStatusTransitions:
     def test_stream_aborted_sets_aborted(self, active_adapter):
         active_adapter.on_event(1, {"type": "stream_aborted"})
         assert active_adapter._states[1].status == "aborted"
+        assert 1 not in active_adapter._active_groups
 
     def test_stream_error_sets_error(self, active_adapter):
         active_adapter.on_event(1, {"type": "stream_error", "message": "API rate limit"})
         state = active_adapter._states[1]
         assert state.status == "error"
         assert "API rate limit" in state.error_message
+        assert 1 not in active_adapter._active_groups
 
     def test_workflow_done_completes_task(self, active_adapter):
         active_adapter.on_event(1, {"type": "workflow_update", "done": True})
         state = active_adapter._states[1]
         assert state.phase == "done"
         assert state.status == "done"
+        assert state.percent == 100
+        assert 1 not in active_adapter._active_groups
 
     def test_workflow_paused_gate(self, active_adapter):
         active_adapter.on_event(1, {"type": "workflow_paused", "reason": "gate"})
