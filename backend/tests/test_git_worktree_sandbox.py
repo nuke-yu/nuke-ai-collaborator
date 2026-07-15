@@ -259,8 +259,8 @@ class TestGitWorktreeSandbox(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any("failed to abort merge" in line for line in logs.output))
         self.assertTrue(any("failed to restore HEAD" in line for line in logs.output))
 
-    async def test_self_promotion_mid_run_deferred(self):
-        """🔴 #3: Verify self-promotion inside bot run is deferred and does not delete directory mid-run."""
+    async def test_jira_done_does_not_authorize_promotion(self):
+        """A mutable Jira status is not an authoritative completion signal."""
         # Setup Jira mock ticket
         jira = get_jira()
         ticket = await jira.create_ticket(self.group_id, title="Test Ticket")
@@ -305,13 +305,11 @@ class TestGitWorktreeSandbox(unittest.IsolatedAsyncioTestCase):
         finally:
             exec_registry._registry.pop("mock_tool_loop", None)
         
-        # Verify that promotion was executed AFTER the run completed and directories were removed
-        self.assertFalse(worktree_dir.exists())
-        
-        # Verify files were merged successfully
+        # The worktree remains until an orchestrator emits a structured decision.
+        self.assertTrue(worktree_dir.exists())
+
         shared_file = layout.group_shared_dir(self.group_id) / "workspace" / "some_code.py"
-        self.assertTrue(shared_file.exists())
-        self.assertEqual(shared_file.read_text(encoding="utf-8"), "some content")
+        self.assertFalse(shared_file.exists())
 
     async def test_silent_failure_surface_error(self):
         """🔴 #2 & 🟡 #9: Verify that promotion errors are surfaced and do not fail silently."""
@@ -339,10 +337,8 @@ class TestGitWorktreeSandbox(unittest.IsolatedAsyncioTestCase):
         # Clean up
         await remove_worktree(self.group_id, ticket_id)
 
-    async def test_cross_ticket_deferred_promotion_drain(self):
-        """Verify that a deferred promotion of ticket Y is successfully drained
-        when the run for ticket X completes.
-        """
+    async def test_one_task_never_drains_another_task_worktree(self):
+        """Completing X must not inspect or mutate Y's worktree."""
         jira = get_jira()
         
         # 1. Create tickets X and Y
@@ -367,7 +363,7 @@ class TestGitWorktreeSandbox(unittest.IsolatedAsyncioTestCase):
             # Verify Y's worktree still exists (promotion deferred)
             self.assertTrue(wt_y.exists())
 
-        # 4. Now run unit for X. When it finishes, its post-execution drain should promote Y.
+        # 4. Run X. Y must remain untouched.
         async def mock_run(ctx):
             from executors.base import ExecutionResult
             return ExecutionResult(full_text="run x completed", msg_id=None)
@@ -389,11 +385,9 @@ class TestGitWorktreeSandbox(unittest.IsolatedAsyncioTestCase):
         finally:
             exec_registry._registry.pop("mock_tool_loop", None)
             
-        # 5. Verify Y is promoted (its worktree is removed, and its changes are merged to main)
-        self.assertFalse(wt_y.exists())
+        self.assertTrue(wt_y.exists())
         shared_y_file = layout.group_shared_dir(self.group_id) / "workspace" / "y_code.py"
-        self.assertTrue(shared_y_file.exists())
-        self.assertEqual(shared_y_file.read_text(encoding="utf-8"), "y value")
+        self.assertFalse(shared_y_file.exists())
         
         # Clean up X's worktree
         await remove_worktree(self.group_id, tx_id)
@@ -564,7 +558,7 @@ class TestGitWorktreeSandbox(unittest.IsolatedAsyncioTestCase):
             bot={"id": 1, "name": "dev"},
             trigger_msg="create nested git",
             executor_id="mock_exec",
-            tag={},
+            tag={"ticket_id": "nested-git"},
         )
         
         class MockStep:
@@ -575,7 +569,7 @@ class TestGitWorktreeSandbox(unittest.IsolatedAsyncioTestCase):
                 self.done = True
                 self.next_units = []
                 self.workflow_paused = None
-                self.workspace_action = None
+                self.workspace_action = "promote"
 
         class MockOrch:
             def participant_count(self, group_id):

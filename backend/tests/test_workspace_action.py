@@ -1,231 +1,216 @@
-"""tests/test_workspace_action.py — P0-3: Worktree lifecycle management tests.
+"""Task-scoped worktree lifecycle tests."""
 
-Tests the workspace_action field in OrchestratorStep:
-  - CodingAgentOrchestrator sets workspace_action based on completion signal
-  - runner._handle_workspace_action performs promote/discard/retain
-  - CancelledError path skips promotion
-"""
 import asyncio
 import unittest
+from contextlib import nullcontext
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from core.orchestration.base import WorkUnit
 from core.orchestration.plugins.coding_agent import CodingAgentOrchestrator
-from core.orchestration.base import OrchestratorStep
 
 
 class TestCodingAgentWorkspaceAction(unittest.TestCase):
-    """Test CodingAgentOrchestrator sets workspace_action correctly."""
+    def setUp(self):
+        self.orch = CodingAgentOrchestrator()
+        self.bot = {"id": 5, "name": "Agent"}
 
-    def test_signal_stage_done_sets_promote(self):
-        """signal_stage_done → workspace_action='promote' (merge changes)."""
-        orch = CodingAgentOrchestrator()
-        bot = {"id": 5, "name": "Agent"}
-        orch.begin(1, {"bots": [bot], "requirements": "test", "test_command": "", "task_id": "task_123"})
+    def _begin(self):
+        return self.orch.begin(
+            1,
+            {
+                "bots": [self.bot],
+                "requirements": "test",
+                "task_id": "agent_123",
+            },
+        )
 
-        signals = [{"name": "signal_stage_done", "arguments": {"reason": "completed"}}]
-        step = orch.observe(1, 5, "Done", signals=signals)
-
+    def test_signal_stage_done_promotes(self):
+        self._begin()
+        step = self.orch.observe(
+            1, 5, "Done", signals=[{"name": "signal_stage_done", "arguments": {}}]
+        )
         self.assertTrue(step.done)
         self.assertEqual(step.workspace_action, "promote")
 
-    def test_signal_rework_sets_discard(self):
-        """signal_rework → workspace_action='discard' (delete without merging)."""
-        orch = CodingAgentOrchestrator()
-        bot = {"id": 5, "name": "Agent"}
-        orch.begin(1, {"bots": [bot], "requirements": "test", "test_command": "", "task_id": "task_123"})
-
-        signals = [{"name": "signal_rework", "arguments": {"reason": "tests failing"}}]
-        step = orch.observe(1, 5, "Need rework", signals=signals)
-
+    def test_signal_rework_discards(self):
+        self._begin()
+        step = self.orch.observe(
+            1, 5, "Rework", signals=[{"name": "signal_rework", "arguments": {}}]
+        )
         self.assertFalse(step.done)
         self.assertEqual(step.workspace_action, "discard")
 
-    def test_no_signal_sets_discard(self):
-        """No completion signal → workspace_action='discard' (incomplete run)."""
-        orch = CodingAgentOrchestrator()
-        bot = {"id": 5, "name": "Agent"}
-        orch.begin(1, {"bots": [bot], "requirements": "test", "test_command": "", "task_id": "task_123"})
-
-        step = orch.observe(1, 5, "No signal", signals=[])
-
+    def test_missing_signal_discards_and_pauses(self):
+        self._begin()
+        step = self.orch.observe(1, 5, "No signal", signals=[])
         self.assertFalse(step.done)
         self.assertEqual(step.workspace_action, "discard")
-        self.assertIsNotNone(step.workflow_paused)
+        self.assertEqual(step.workflow_paused.reason, "completion_signal_missing")
 
 
-class TestTaskIdInWorkUnit(unittest.TestCase):
-    """Test task_id is passed through WorkUnit.tag['ticket_id']."""
+class TestTaskIdPropagation(unittest.TestCase):
+    def setUp(self):
+        self.orch = CodingAgentOrchestrator()
+        self.bot = {"id": 5, "name": "Agent"}
 
     def test_begin_sets_ticket_id(self):
-        """begin() sets WorkUnit.tag['ticket_id'] from spec.task_id."""
-        orch = CodingAgentOrchestrator()
-        bot = {"id": 5, "name": "Agent"}
-        step = orch.begin(1, {"bots": [bot], "requirements": "test", "test_command": "", "task_id": "task_123"})
+        step = self.orch.begin(
+            1, {"bots": [self.bot], "requirements": "test", "task_id": "agent_123"}
+        )
+        self.assertEqual(step.next_units[0].tag, {"ticket_id": "agent_123"})
 
-        self.assertEqual(len(step.next_units), 1)
-        unit = step.next_units[0]
-        self.assertEqual(unit.tag.get("ticket_id"), "task_123")
+    def test_parse_spec_preserves_task_id(self):
+        spec = self.orch.parse_spec(
+            {"bot_id": 5, "requirements": "test", "task_id": "agent_123"},
+            {5: self.bot},
+        )
+        self.assertEqual(spec["task_id"], "agent_123")
 
-    def test_begin_without_task_id(self):
-        """begin() without task_id sets empty tag."""
-        orch = CodingAgentOrchestrator()
-        bot = {"id": 5, "name": "Agent"}
-        step = orch.begin(1, {"bots": [bot], "requirements": "test", "test_command": ""})
-
-        unit = step.next_units[0]
-        self.assertEqual(unit.tag, {})
+    def test_resume_preserves_task_id(self):
+        self.orch.begin(
+            1, {"bots": [self.bot], "requirements": "test", "task_id": "agent_123"}
+        )
+        self.assertEqual(
+            self.orch.resume_units(1)[0].tag, {"ticket_id": "agent_123"}
+        )
 
 
 class TestHandleWorkspaceAction(unittest.IsolatedAsyncioTestCase):
-    """Test runner._handle_workspace_action."""
-
-    async def test_promote_calls_promote_worktree(self):
-        """workspace_action='promote' calls promote_worktree for each worktree."""
+    async def test_promote_targets_exact_task(self):
         from core import runner
 
-        with patch("workspace.layout.group_dir") as mock_group_dir, \
-             patch("workspace.git_worktree.promote_worktree", new_callable=AsyncMock) as mock_promote:
+        with patch(
+            "workspace.git_worktree.promote_worktree", new_callable=AsyncMock
+        ) as promote:
+            await runner._handle_workspace_action(1, "agent_123", "promote")
+        promote.assert_awaited_once_with(1, "agent_123")
 
-            from pathlib import Path
-            import tempfile
-            with tempfile.TemporaryDirectory() as tmp_dir:
-                group_dir = Path(tmp_dir)
-                worktrees_dir = group_dir / "worktrees"
-                worktrees_dir.mkdir()
-                (worktrees_dir / "task_task_123").mkdir()
-                (worktrees_dir / "task_task_456").mkdir()
-
-                mock_group_dir.return_value = group_dir
-
-                await runner._handle_workspace_action(1, "promote")
-
-                # Should promote both worktrees
-                self.assertEqual(mock_promote.call_count, 2)
-
-    async def test_discard_calls_remove_worktree(self):
-        """workspace_action='discard' calls remove_worktree for each worktree."""
+    async def test_discard_targets_exact_task(self):
         from core import runner
 
-        with patch("workspace.layout.group_dir") as mock_group_dir, \
-             patch("workspace.git_worktree.remove_worktree", new_callable=AsyncMock) as mock_remove:
+        with patch(
+            "workspace.git_worktree.remove_worktree", new_callable=AsyncMock
+        ) as remove:
+            await runner._handle_workspace_action(1, "agent_123", "discard")
+        remove.assert_awaited_once_with(1, "agent_123")
 
-            from pathlib import Path
-            import tempfile
-            with tempfile.TemporaryDirectory() as tmp_dir:
-                group_dir = Path(tmp_dir)
-                worktrees_dir = group_dir / "worktrees"
-                worktrees_dir.mkdir()
-                (worktrees_dir / "task_task_123").mkdir()
-
-                mock_group_dir.return_value = group_dir
-
-                await runner._handle_workspace_action(1, "discard")
-
-                mock_remove.assert_called_once_with(1, "task_123")
-
-    async def test_retain_does_nothing(self):
-        """workspace_action='retain' does not call any worktree operations."""
+    async def test_mutating_action_requires_task_id(self):
         from core import runner
 
-        with patch("workspace.layout.group_dir") as mock_group_dir, \
-             patch("workspace.git_worktree.promote_worktree", new_callable=AsyncMock) as mock_promote, \
-             patch("workspace.git_worktree.remove_worktree", new_callable=AsyncMock) as mock_remove:
+        with self.assertRaisesRegex(ValueError, "requires a task_id"):
+            await runner._handle_workspace_action(1, "", "promote")
 
-            await runner._handle_workspace_action(1, "retain")
 
-            mock_promote.assert_not_called()
-            mock_remove.assert_not_called()
+class TestRunnerWorktreeLifecycle(unittest.IsolatedAsyncioTestCase):
+    def _db_cm(self):
+        cm = MagicMock()
+        cm.__aenter__ = AsyncMock(return_value=MagicMock())
+        cm.__aexit__ = AsyncMock(return_value=False)
+        return cm
 
-    async def test_no_worktrees_dir(self):
-        """No worktrees directory → no operations."""
+    async def test_real_cancellation_discards_only_current_task(self):
         from core import runner
 
-        with patch("workspace.layout.group_dir") as mock_group_dir:
-            from pathlib import Path
-            import tempfile
-            with tempfile.TemporaryDirectory() as tmp_dir:
-                group_dir = Path(tmp_dir)
-                # No worktrees directory created
+        started = asyncio.Event()
 
-                mock_group_dir.return_value = group_dir
+        class BlockingExecutor:
+            async def run(self, _ctx):
+                started.set()
+                await asyncio.Event().wait()
 
-                # Should not raise
-                await runner._handle_workspace_action(1, "promote")
+        unit = WorkUnit(
+            bot={"id": 5, "name": "Agent"},
+            executor_id="blocking",
+            trigger_msg="go",
+            tag={"ticket_id": "agent_123"},
+        )
+        cm = self._db_cm()
 
+        class StubOrchestrator:
+            def start_time(self, _group_id):
+                return None
 
-class TestCancelledErrorSkipsPromotion(unittest.IsolatedAsyncioTestCase):
-    """Test that CancelledError path skips worktree promotion."""
+        with patch.object(runner.asyncio, "sleep", new=AsyncMock()), \
+             patch.object(runner, "get_members", new=AsyncMock(return_value=[])), \
+             patch.object(runner, "get_messages", new=AsyncMock(return_value=[])), \
+             patch.object(runner, "global_db", return_value=cm), \
+             patch.object(runner, "get_db", return_value=cm), \
+             patch.object(runner.exec_registry, "get", return_value=BlockingExecutor()), \
+             patch("workspace.git_worktree.create_worktree", new=AsyncMock(return_value=Path("/tmp/task_agent_123"))), \
+             patch("workspace.git_worktree.use_worktree", return_value=nullcontext()), \
+             patch("workspace.git_worktree.remove_worktree", new_callable=AsyncMock) as remove, \
+             patch("workspace.git_worktree.promote_worktree", new_callable=AsyncMock) as promote:
+            task = asyncio.create_task(
+                runner._run_unit_body(1, unit, StubOrchestrator())
+            )
+            await started.wait()
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
 
-    async def test_cancelled_task_skips_promotion(self):
-        """When task is cancelled, _cleanup_finally skips promotion."""
+        remove.assert_awaited_once_with(1, "agent_123")
+        promote.assert_not_called()
+
+    async def test_workspace_is_promoted_before_done_is_published(self):
+        from bus.events import WorkflowUpdate
         from core import runner
+        from core.orchestration.base import OrchestratorStep
 
-        # Create a mock task that's cancelled
-        mock_task = MagicMock()
-        mock_task.cancelled.return_value = True
+        events = []
 
-        with patch("asyncio.current_task", return_value=mock_task), \
-             patch("workspace.layout.group_dir") as mock_group_dir, \
-             patch("workspace.git_worktree.promote_worktree", new_callable=AsyncMock) as mock_promote:
+        async def promote(_group_id, _task_id):
+            events.append("promote")
 
-            from pathlib import Path
-            import tempfile
-            with tempfile.TemporaryDirectory() as tmp_dir:
-                group_dir = Path(tmp_dir)
-                worktrees_dir = group_dir / "worktrees"
-                worktrees_dir.mkdir()
-                (worktrees_dir / "task_task_123").mkdir()
+        async def publish(event):
+            if isinstance(event, WorkflowUpdate) and event.done:
+                events.append("done")
 
-                mock_group_dir.return_value = group_dir
+        orch = MagicMock()
+        orch.serialize.return_value = None
+        with patch("workspace.git_worktree.promote_worktree", new=promote), \
+             patch.object(runner.bus, "publish", new=publish), \
+             patch.object(runner.workflow_store, "clear_state", new=AsyncMock()):
+            await runner.apply_step(
+                1,
+                orch,
+                OrchestratorStep(done=True, workspace_action="promote"),
+                workspace_task_id="agent_123",
+            )
 
-                # Simulate the finally block
-                async def _cleanup_finally():
-                    current_task = asyncio.current_task()
-                    if current_task and current_task.cancelled():
-                        return  # Skip promotion
+        self.assertEqual(events, ["promote", "done"])
 
-                    # Would normally promote here
-                    from workspace.git_worktree import promote_worktree
-                    await promote_worktree(1, "task_123")
 
-                await _cleanup_finally()
+class TestRealDispatchTaskId(unittest.IsolatedAsyncioTestCase):
+    async def test_start_workflow_preserves_task_id_into_spawned_unit(self):
+        from runtime import dispatch
 
-                # Promotion should be skipped
-                mock_promote.assert_not_called()
+        bot = {"id": 5, "name": "Agent", "type": "bot"}
+        applied = []
 
-    async def test_normal_task_promotes(self):
-        """When task is not cancelled, _cleanup_finally promotes worktree."""
-        from core import runner
+        async def capture_apply(_group_id, step):
+            applied.append(step)
 
-        # Create a mock task that's NOT cancelled
-        mock_task = MagicMock()
-        mock_task.cancelled.return_value = False
+        cm = MagicMock()
+        cm.__aenter__ = AsyncMock(return_value=MagicMock())
+        cm.__aexit__ = AsyncMock(return_value=False)
+        with patch.object(dispatch.db, "global_db", return_value=cm), \
+             patch.object(dispatch.db, "get_members", new=AsyncMock(return_value=[bot])), \
+             patch("core.workflow.apply", new=capture_apply):
+            await dispatch.dispatch_start_workflow(
+                {
+                    "group_id": 1,
+                    "body": {
+                        "orchestrator_id": "coding_agent_v1",
+                        "bot_id": 5,
+                        "requirements": "test",
+                        "task_id": "agent_123",
+                    },
+                }
+            )
 
-        with patch("asyncio.current_task", return_value=mock_task), \
-             patch("workspace.layout.group_dir") as mock_group_dir, \
-             patch("workspace.git_worktree.promote_worktree", new_callable=AsyncMock) as mock_promote:
+        self.assertEqual(applied[0].next_units[0].tag, {"ticket_id": "agent_123"})
 
-            from pathlib import Path
-            import tempfile
-            with tempfile.TemporaryDirectory() as tmp_dir:
-                group_dir = Path(tmp_dir)
-                worktrees_dir = group_dir / "worktrees"
-                worktrees_dir.mkdir()
-                (worktrees_dir / "task_task_123").mkdir()
 
-                mock_group_dir.return_value = group_dir
-
-                # Simulate the finally block
-                async def _cleanup_finally():
-                    current_task = asyncio.current_task()
-                    if current_task and current_task.cancelled():
-                        return  # Skip promotion
-
-                    # Promote
-                    from workspace.git_worktree import promote_worktree
-                    await promote_worktree(1, "task_123")
-
-                await _cleanup_finally()
-
-                # Promotion should happen
-                mock_promote.assert_called_once_with(1, "task_123")
+if __name__ == "__main__":
+    unittest.main()

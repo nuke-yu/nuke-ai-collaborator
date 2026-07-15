@@ -91,52 +91,31 @@ async def _publish_workflow_state(group_id: int, orch) -> None:
     await bus.publish(WorkflowUpdate(group_id=group_id, **snap))
 
 
-async def _handle_workspace_action(group_id: int, action: str) -> None:
-    """P0-3: Handle worktree lifecycle actions after task completion.
-
-    Args:
-        group_id: Group ID
-        action: One of "promote", "discard", "retain"
-            - "promote": Merge worktree changes into main branch
-            - "discard": Delete worktree without merging
-            - "retain": Keep worktree for manual inspection (no action)
-    """
+async def _handle_workspace_action(group_id: int, task_id: str, action: str) -> None:
+    """Apply a lifecycle decision to exactly one task worktree."""
     if action == "retain":
-        log.info("runner: workspace_action=retain for group %d, keeping worktree", group_id)
+        log.info(
+            "runner: retaining worktree %s for group %d", task_id, group_id
+        )
         return
+    if not task_id:
+        raise ValueError("workspace_action requires a task_id")
+    if action not in {"promote", "discard"}:
+        raise ValueError(f"unknown workspace_action: {action}")
 
-    from workspace import layout as ws_layout
     from workspace.git_worktree import promote_worktree, remove_worktree
 
-    group_dir = ws_layout.group_dir(group_id)
-    worktrees_dir = group_dir / "worktrees"
-
-    if not worktrees_dir.exists():
-        log.debug("runner: no worktrees directory for group %d", group_id)
-        return
-
-    # Find all worktrees for this group
-    for item in list(worktrees_dir.iterdir()):
-        if not item.is_dir() or not item.name.startswith("task_"):
-            continue
-
-        task_id = item.name[5:]  # Remove "task_" prefix
-
-        try:
-            if action == "promote":
-                log.info("runner: promoting worktree %s for group %d", task_id, group_id)
-                await promote_worktree(group_id, task_id)
-            elif action == "discard":
-                log.info("runner: discarding worktree %s for group %d", task_id, group_id)
-                await remove_worktree(group_id, task_id)
-            else:
-                log.warning("runner: unknown workspace_action=%s for group %d", action, group_id)
-        except Exception as e:
-            log.exception("runner: failed to %s worktree %s for group %d: %s",
-                         action, task_id, group_id, e)
+    if action == "promote":
+        log.info("runner: promoting worktree %s for group %d", task_id, group_id)
+        await promote_worktree(group_id, task_id)
+    else:
+        log.info("runner: discarding worktree %s for group %d", task_id, group_id)
+        await remove_worktree(group_id, task_id)
 
 
-async def apply_step(group_id: int, orch, step) -> None:
+async def apply_step(
+    group_id: int, orch, step, *, workspace_task_id: str | None = None
+) -> None:
     """把 OrchestratorStep 翻译成副作用。编排层决定，runner 执行。"""
     for ann in step.announcements:
         await _post_system_msg(group_id, ann.sender_bot_id, ann.text)
@@ -148,6 +127,13 @@ async def apply_step(group_id: int, orch, step) -> None:
         if blob is not None:
             await workflow_store.save_state(
                 group_id, getattr(orch, "orchestrator_id", "workflow_v1"), blob)
+    # Worktree disposition is part of the task transaction.  It must finish
+    # before clients are told that the workflow is complete.
+    if step.workspace_action:
+        await _handle_workspace_action(
+            group_id, workspace_task_id or "", step.workspace_action
+        )
+
     if step.done:
         await bus.publish(WorkflowUpdate(group_id=group_id, active=False, done=True))
         await workflow_store.clear_state(group_id)
@@ -160,10 +146,6 @@ async def apply_step(group_id: int, orch, step) -> None:
     # Handle explicit workflow_paused event (e.g., completion_signal_missing)
     if step.workflow_paused:
         bg.spawn(bus.publish(step.workflow_paused))
-
-    # P0-3: Handle workspace_action for worktree lifecycle
-    if step.workspace_action:
-        bg.spawn(_handle_workspace_action(group_id, step.workspace_action))
 
     for unit in step.next_units:
         # DFT-025/027: hold a reference (no GC) + register to the group so a
@@ -235,11 +217,6 @@ async def _run_unit_body(group_id: int, unit, orch) -> None:
             recent = await compress_history(recent, viewpoints_summary, members, all_bots, pc)
 
     ticket_id = unit.tag.get("ticket_id") if isinstance(unit.tag, dict) else None
-    temp_ticket_id = None
-    if not ticket_id:
-        import uuid
-        temp_ticket_id = f"chat_{uuid.uuid4().hex[:8]}"
-        ticket_id = temp_ticket_id
 
     ctx = ExecutionContext(
         bot=unit.bot, group_id=group_id, user_message=unit.trigger_msg,
@@ -255,76 +232,39 @@ async def _run_unit_body(group_id: int, unit, orch) -> None:
     )
     use_sandbox = False
     try:
-        try:
-            if ticket_id:
-                from workspace.git_worktree import create_worktree, use_worktree
-                try:
-                    worktree_path = await create_worktree(group_id, ticket_id)
-                    use_sandbox = True
-                except Exception as w_err:
-                    log.warning(f"Failed to create worktree sandbox for {ticket_id}, falling back to direct workspace: {w_err}")
-                    ctx.active_ticket_id = None
-                    use_sandbox = False
+        if ticket_id:
+            from workspace.git_worktree import create_worktree, use_worktree
+            try:
+                worktree_path = await create_worktree(group_id, ticket_id)
+                use_sandbox = True
+            except Exception as w_err:
+                raise RuntimeError(
+                    f"failed to create isolated worktree for task {ticket_id}"
+                ) from w_err
 
-                if use_sandbox:
-                    with use_worktree(group_id, worktree_path):
-                        result = await exec_registry.get(unit.executor_id).run(ctx)
-                else:
-                    result = await exec_registry.get(unit.executor_id).run(ctx)
-            else:
+            with use_worktree(group_id, worktree_path):
                 result = await exec_registry.get(unit.executor_id).run(ctx)
-        finally:
-            async def _cleanup_finally():
-                # P0-3: Check if task was cancelled - if so, skip promotion
-                # CancelledError means abort/retry, worktree should be discarded by workspace_action
-                current_task = asyncio.current_task()
-                if current_task and current_task.cancelled():
-                    log.info(f"runner: task cancelled for group {group_id}, skipping worktree promotion")
-                    return
-
-                try:
-                    from workspace import layout
-                    worktrees_dir = layout.group_dir(group_id) / "worktrees"
-                    if worktrees_dir.exists() and use_sandbox:
-                        from integrations.jira import get_jira
-                        from workspace.git_worktree import promote_worktree
-
-                        if temp_ticket_id:
-                            log.info(f"Promoting temporary chat worktree {temp_ticket_id} for group {group_id}")
-                            try:
-                                await promote_worktree(group_id, temp_ticket_id)
-                            except Exception as pe:
-                                log.exception(f"Failed to execute immediate promotion for temp chat {temp_ticket_id}: {pe}")
-                                try:
-                                    await _post_system_msg(group_id, 0, f"⚠️ [沙箱合并失败] 临时会话自动合并失败: {pe}。请手动处理冲突。")
-                                except Exception:
-                                    log.warning("runner: failed to post immediate promotion failure message for %s", temp_ticket_id, exc_info=True)
-
-                        tickets = await get_jira().list_tickets(group_id)
-                        status_by_id = {t["ticket_id"]: t["status"] for t in tickets}
-
-                        for item in list(worktrees_dir.iterdir()):
-                            if item.is_dir() and item.name.startswith("task_"):
-                                tid = item.name[5:]
-                                if status_by_id.get(tid) == "done":
-                                    log.info(f"Draining deferred promotion for task {tid} in group {group_id}")
-                                    try:
-                                        await promote_worktree(group_id, tid)
-                                    except Exception as pe:
-                                        log.exception(f"Failed to execute deferred promotion for task {tid}: {pe}")
-                                        try:
-                                            await _post_system_msg(group_id, 0, f"⚠️ [工作流系统错误] 工单 {tid} 自动合并失败: {pe}。请手动处理冲突。")
-                                        except Exception:
-                                            log.warning("runner: failed to post deferred promotion failure message for %s", tid, exc_info=True)
-                except Exception as drain_err:
-                    log.exception(f"Failed to execute group promotion drain: {drain_err}")
-
-            # Note: asyncio.shield is a best-effort soft protection. In case of a second cancellation
-            # (e.g. during a hard process shutdown), the shielded task can still be orphaned and
-            # destroyed. This is acceptable for cleanups, but should not be relied upon for absolute,
-            # crash-proof transaction guarantees.
-            await asyncio.shield(_cleanup_finally())
+        else:
+            result = await exec_registry.get(unit.executor_id).run(ctx)
+    except asyncio.CancelledError:
+        if use_sandbox and ticket_id:
+            try:
+                await asyncio.shield(
+                    _handle_workspace_action(group_id, ticket_id, "discard")
+                )
+            except Exception:
+                log.exception(
+                    "runner: failed to discard cancelled task worktree %s", ticket_id
+                )
+        raise
     except Exception as e:
+        if use_sandbox and ticket_id:
+            try:
+                await _handle_workspace_action(group_id, ticket_id, "discard")
+            except Exception:
+                log.exception(
+                    "runner: failed to discard failed task worktree %s", ticket_id
+                )
         log.exception("Workflow execution failed for group %d", group_id)
         from ai.client import AIError
         if isinstance(e, AIError):
@@ -348,7 +288,12 @@ async def _run_unit_body(group_id: int, unit, orch) -> None:
         step = orch.observe(group_id, unit.bot["id"], result.full_text, signals=getattr(result, "signals", None))
     except TypeError:
         step = orch.observe(group_id, unit.bot["id"], result.full_text)
-    await apply_step(group_id, orch, step)
+    await apply_step(
+        group_id,
+        orch,
+        step,
+        workspace_task_id=ticket_id if use_sandbox else None,
+    )
 
 
 async def resume_workflows(group_id: int | None = None) -> None:

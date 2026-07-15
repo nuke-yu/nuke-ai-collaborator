@@ -196,6 +196,7 @@ class CodingAgentOrchestrator(Orchestrator):
             executor_id=bot.get("executor_id", "tool_loop_v1"),
             trigger_msg="Resume your coding task (previous run was interrupted). Continue from where you left off.",
             is_workflow=True,
+            tag={"ticket_id": s["task_id"]} if s.get("task_id") else {},
         )]
 
     def start_time(self, group_id: int) -> str | None:
@@ -205,7 +206,8 @@ class CodingAgentOrchestrator(Orchestrator):
     def parse_spec(self, body: dict, all_bots: dict[int, dict]) -> dict:
         """Parse START_WORKFLOW body into spec.
 
-        body = {"bot_id": int, "requirements": str, "test_command": str}
+        body = {"bot_id": int, "requirements": str, "test_command": str,
+                "task_id": str}
         Returns spec with "bots" key to pass dispatch_start_workflow validation.
         """
         bot_id = body.get("bot_id")
@@ -214,4 +216,5 @@ class CodingAgentOrchestrator(Orchestrator):
             "bots": [bot] if bot else [],
             "requirements": body.get("requirements", ""),
             "test_command": body.get("test_command", ""),
+            "task_id": body.get("task_id", ""),
         }
