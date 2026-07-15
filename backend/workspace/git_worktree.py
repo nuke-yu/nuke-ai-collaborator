@@ -8,6 +8,7 @@ import logging
 import os
 import shutil
 import threading
+import uuid
 from pathlib import Path
 import contextlib
 
@@ -32,7 +33,7 @@ def find_nested_git_dirs(workspace_path: Path) -> list[Path]:
     if not workspace_path.exists():
         return git_paths
     workspace_resolved = workspace_path.resolve()
-    for root, dirs, files in os.walk(workspace_path, followlinks=True):
+    for root, dirs, files in os.walk(workspace_path, followlinks=False):
         if ".git" in dirs and Path(root).resolve() != workspace_resolved:
             # This directory is a nested repo root: record it and stop descending so any
             # repo-in-repo stays bundled inside its parent rather than being returned separately.
@@ -41,6 +42,72 @@ def find_nested_git_dirs(workspace_path: Path) -> list[Path]:
             continue
         dirs[:] = [d for d in dirs if d != ".git" and d not in _WS_IGNORE_DIRS]
     return git_paths
+
+
+def _require_contained_path(path: Path, root: Path, label: str) -> None:
+    """Reject paths whose resolved location escapes an expected workspace root."""
+    try:
+        path.resolve().relative_to(root.resolve())
+    except ValueError as exc:
+        raise RuntimeError(f"{label} escapes workspace root: {path}") from exc
+
+
+def _promote_nested_repository(source: Path, dest: Path, *, source_root: Path,
+                               dest_root: Path) -> None:
+    """Copy a nested repository into place without destroying its prior version.
+
+    The staging and backup directories live beside ``dest`` so all directory swaps
+    are same-filesystem renames. The source remains intact until the caller removes
+    the worktree after every nested repository has been promoted successfully.
+    """
+    if source.is_symlink() or not source.is_dir():
+        raise RuntimeError(f"Nested repository source is not a real directory: {source}")
+    _require_contained_path(source, source_root, "Nested repository source")
+
+    try:
+        relative_dest = dest.relative_to(dest_root)
+    except ValueError as exc:
+        raise RuntimeError(f"Nested repository destination escapes workspace: {dest}") from exc
+    if not relative_dest.parts:
+        raise RuntimeError("Refusing to replace the shared workspace root")
+
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    _require_contained_path(dest.parent, dest_root, "Nested repository destination")
+    if dest.is_symlink():
+        raise RuntimeError(f"Nested repository destination is a symlink: {dest}")
+
+    nonce = uuid.uuid4().hex
+    staging = dest.parent / f".{dest.name}.promote-{nonce}.tmp"
+    backup = dest.parent / f".{dest.name}.promote-{nonce}.bak"
+    replaced_existing = False
+
+    try:
+        shutil.copytree(source, staging, symlinks=True)
+        if not (staging / ".git").is_dir():
+            raise RuntimeError(f"Staged nested repository has no .git directory: {source}")
+
+        if dest.exists():
+            os.replace(dest, backup)
+            replaced_existing = True
+        try:
+            os.replace(staging, dest)
+        except Exception:
+            if replaced_existing and backup.exists():
+                os.replace(backup, dest)
+            raise
+
+        if replaced_existing:
+            try:
+                shutil.rmtree(backup)
+            except Exception:
+                log.warning(
+                    "Nested repository promoted but backup cleanup failed: %s",
+                    backup,
+                    exc_info=True,
+                )
+    finally:
+        if staging.exists():
+            shutil.rmtree(staging, ignore_errors=True)
 
 # Re-export current_workspace_path for ease of integration
 from workspace.layout import current_workspace_path
@@ -399,29 +466,23 @@ async def promote_worktree(group_id: int, task_id: str, target_branch: str = "ma
                 except Exception:
                     log.warning("git_worktree: failed to restore HEAD to %s after promoting %s", current_branch, branch_name, exc_info=True)
 
-        # 3. Copy back any nested git repositories from the worktree to the shared workspace
-        # before removing the worktree.
-        # NOTE: this does a wholesale rmtree(dest)+move of each nested repo dir. It assumes
-        # the nested repo is NOT tracked by the parent repo (so the earlier git merge produced
-        # nothing for it) and that same-group tasks run serially. If a nested dir's files are
-        # parent-tracked, this clobbers the merge result; under concurrent same-group worktrees
-        # it is last-writer-wins.
-        try:
-            worktree_workspace = layout.group_dir(group_id) / "worktrees" / f"task_{task_id}" / "workspace"
-            shared_workspace = layout.group_shared_dir(group_id) / "workspace"
-            if worktree_workspace.exists():
-                for item in find_nested_git_dirs(worktree_workspace):
-                    relative_path = item.parent.relative_to(worktree_workspace)
-                    dest = shared_workspace / relative_path
-                    log.info(f"Promoting nested repository from worktree: {item.parent} -> {dest}")
-                    if dest.exists():
-                        import shutil
-                        shutil.rmtree(dest, ignore_errors=True)
-                    dest.parent.mkdir(parents=True, exist_ok=True)
-                    import shutil
-                    shutil.move(str(item.parent), str(dest))
-        except Exception as copy_err:
-            log.warning(f"Failed to copy back nested repositories: {copy_err}", exc_info=True)
+        # 3. Stage and atomically replace nested repositories before removing the
+        # worktree. Any failure propagates so the intact source worktree is retained.
+        if worktree_workspace.exists():
+            for item in find_nested_git_dirs(worktree_workspace):
+                relative_path = item.parent.relative_to(worktree_workspace)
+                dest = shared_workspace / relative_path
+                log.info(
+                    "Promoting nested repository from worktree: %s -> %s",
+                    item.parent,
+                    dest,
+                )
+                _promote_nested_repository(
+                    item.parent,
+                    dest,
+                    source_root=worktree_workspace,
+                    dest_root=shared_workspace,
+                )
 
         # 4. Clean up the worktree directory and git branch (only reached if merge succeeds)
         await _remove_worktree_nolock(group_id, task_id)

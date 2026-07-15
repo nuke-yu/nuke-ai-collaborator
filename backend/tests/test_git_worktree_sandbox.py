@@ -10,7 +10,14 @@ import skills.constants as _const
 import db as _database
 import db.writer as _db_writer
 from workspace import init_group_workspace, write_file, read_file, layout
-from workspace.git_worktree import create_worktree, remove_worktree, promote_worktree, use_worktree, _run_git_cmd
+from workspace.git_worktree import (
+    _promote_nested_repository,
+    _run_git_cmd,
+    create_worktree,
+    promote_worktree,
+    remove_worktree,
+    use_worktree,
+)
 from integrations.jira import get_jira
 from core.runner import run_unit
 from core.orchestration.base import WorkUnit
@@ -67,6 +74,62 @@ class TestGitWorktreeSandbox(unittest.IsolatedAsyncioTestCase):
         # 2. Remove worktree
         await remove_worktree(self.group_id, self.task_id)
         self.assertFalse(worktree_dir.exists())
+
+    async def test_nested_repository_promotion_replaces_destination(self):
+        source_root = self.workspace_root / "source"
+        dest_root = self.workspace_root / "dest"
+        source = source_root / "service"
+        dest = dest_root / "service"
+        (source / ".git").mkdir(parents=True)
+        (source / "new.txt").write_text("new", encoding="utf-8")
+        dest.mkdir(parents=True)
+        (dest / "old.txt").write_text("old", encoding="utf-8")
+
+        _promote_nested_repository(
+            source, dest, source_root=source_root, dest_root=dest_root
+        )
+
+        self.assertEqual((dest / "new.txt").read_text(encoding="utf-8"), "new")
+        self.assertFalse((dest / "old.txt").exists())
+        self.assertTrue((source / "new.txt").exists())
+        self.assertEqual(list(dest_root.glob(".service.promote-*")), [])
+
+    async def test_nested_repository_promotion_preserves_destination_on_copy_failure(self):
+        source_root = self.workspace_root / "source"
+        dest_root = self.workspace_root / "dest"
+        source = source_root / "service"
+        dest = dest_root / "service"
+        (source / ".git").mkdir(parents=True)
+        dest.mkdir(parents=True)
+        (dest / "old.txt").write_text("old", encoding="utf-8")
+
+        with patch(
+            "workspace.git_worktree.shutil.copytree",
+            side_effect=OSError("disk full"),
+        ):
+            with self.assertRaisesRegex(OSError, "disk full"):
+                _promote_nested_repository(
+                    source, dest, source_root=source_root, dest_root=dest_root
+                )
+
+        self.assertEqual((dest / "old.txt").read_text(encoding="utf-8"), "old")
+
+    async def test_nested_repository_promotion_rejects_symlink_source(self):
+        source_root = self.workspace_root / "source"
+        dest_root = self.workspace_root / "dest"
+        external = self.workspace_root / "external"
+        (external / ".git").mkdir(parents=True)
+        source_root.mkdir()
+        source = source_root / "service"
+        source.symlink_to(external, target_is_directory=True)
+
+        with self.assertRaisesRegex(RuntimeError, "not a real directory"):
+            _promote_nested_repository(
+                source,
+                dest_root / "service",
+                source_root=source_root,
+                dest_root=dest_root,
+            )
 
     async def test_dependency_symlinking(self):
         group_dir = layout.group_dir(self.group_id)
