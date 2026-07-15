@@ -143,8 +143,11 @@ async def list_tasks():
     if not _orchestrator:
         return {"tasks": []}
 
+    # P1-1: Fetch tasks from database (async property)
+    tasks = await _orchestrator.tasks
+
     result = []
-    for task_id, record in _orchestrator.tasks.items():
+    for task_id, record in tasks.items():
         progress = _adapter.get_progress(record["group_id"]) if _adapter else None
         result.append({
             "task_id": task_id,
@@ -162,7 +165,9 @@ async def get_task(task_id: str):
     if not _orchestrator:
         raise HTTPException(404, "Task not found")
 
-    record = _orchestrator.tasks.get(task_id)
+    # P1-1: Fetch tasks from database (async property)
+    tasks = await _orchestrator.tasks
+    record = tasks.get(task_id)
     if not record:
         raise HTTPException(status_code=404, detail="Task not found")
 

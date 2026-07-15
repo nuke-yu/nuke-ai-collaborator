@@ -9,6 +9,35 @@ from unittest.mock import patch, AsyncMock, MagicMock
 from plugins.agent_dashboard.orchestrator import TaskOrchestrator, CODING_AGENT_SYSTEM_PROMPT
 
 
+class DatabaseTestBase(unittest.IsolatedAsyncioTestCase):
+    """Base class for tests that need an isolated test database."""
+
+    async def asyncSetUp(self):
+        """Set up isolated test database with migrations."""
+        import tempfile
+        from pathlib import Path
+        import db as _database
+        import db.writer as _db_writer
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.workspace_root = Path(self._tmp.name).resolve()
+
+        # Pin the DB path globals to an isolated temp DB and build its full schema
+        self._db_file = str(self.workspace_root / "test_agent_orch.db")
+        self._orig_db_paths = (_database.DB_PATH, _db_writer.DB_PATH)
+        _database.DB_PATH = self._db_file
+        _db_writer.DB_PATH = self._db_file
+        await _database.init_db()
+
+    async def asyncTearDown(self):
+        """Clean up test database."""
+        import db as _database
+        import db.writer as _db_writer
+
+        _database.DB_PATH, _db_writer.DB_PATH = self._orig_db_paths
+        self._tmp.cleanup()
+
+
 class TestResolveProvider(unittest.TestCase):
 
     def test_openai_models(self):
@@ -28,12 +57,23 @@ class TestResolveProvider(unittest.TestCase):
         self.assertEqual(TaskOrchestrator._resolve_provider("unknown-model"), "deepseek")
 
 
-class TestCreateTask(unittest.IsolatedAsyncioTestCase):
+class TestCreateTask(DatabaseTestBase):
 
     async def test_create_task_full_flow(self):
         """create_task creates group, adds bot, clones repo, dispatches agent."""
         adapter = MagicMock()
         orch = TaskOrchestrator(adapter=adapter)
+
+        # Pre-create group and bot in database (mocked methods return these IDs)
+        import db
+        async with db.write_connect() as conn:
+            await conn.execute(
+                "INSERT INTO groups (id, name) VALUES (42, 'test-group')"
+            )
+            await conn.execute(
+                "INSERT INTO members (id, group_id, name, type, role) VALUES (7, 42, 'test-bot', 'bot', 'developer')"
+            )
+            await conn.commit()
 
         with patch.object(orch, "_preflight_check_repo", new_callable=AsyncMock) as mock_preflight, \
              patch.object(orch, "_create_group", new_callable=AsyncMock, return_value=42) as mock_group, \
@@ -64,6 +104,18 @@ class TestCreateTask(unittest.IsolatedAsyncioTestCase):
 
     async def test_create_task_stored_in_registry(self):
         orch = TaskOrchestrator()
+
+        # Pre-create group and bot in database (mocked methods return these IDs)
+        import db
+        async with db.write_connect() as conn:
+            await conn.execute(
+                "INSERT INTO groups (id, name) VALUES (1, 'test-group')"
+            )
+            await conn.execute(
+                "INSERT INTO members (id, group_id, name, type, role) VALUES (2, 1, 'test-bot', 'bot', 'developer')"
+            )
+            await conn.commit()
+
         with patch.object(orch, "_preflight_check_repo", new_callable=AsyncMock), \
              patch.object(orch, "_create_group", new_callable=AsyncMock, return_value=1), \
              patch.object(orch, "_add_bot", new_callable=AsyncMock, return_value=2), \
@@ -74,23 +126,42 @@ class TestCreateTask(unittest.IsolatedAsyncioTestCase):
                 requirements="Fix bug",
             )
 
-        self.assertIn(result["task_id"], orch.tasks)
-        self.assertEqual(orch.tasks[result["task_id"]]["requirements"], "Fix bug")
+        # Verify task is stored in database
+        stored_task = await orch._task_store.get_task(result["task_id"])
+        self.assertIsNotNone(stored_task)
+        self.assertEqual(stored_task["requirements"], "Fix bug")
 
 
-class TestRetryTask(unittest.IsolatedAsyncioTestCase):
+class TestRetryTask(DatabaseTestBase):
 
     async def test_retry_known_task(self):
         adapter = MagicMock()
         orch = TaskOrchestrator(adapter=adapter)
-        orch._tasks["task_1"] = {
-            "task_id": "task_1",
-            "group_id": 10,
-            "bot_id": 5,
-            "requirements": "Add feature",
-            "test_command": "pytest",
-            "status": "stuck",
-        }
+
+        # Pre-create group and bot in database
+        import db
+        async with db.write_connect() as conn:
+            await conn.execute(
+                "INSERT INTO groups (id, name) VALUES (10, 'test-group')"
+            )
+            await conn.execute(
+                "INSERT INTO members (id, group_id, name, type, role) VALUES (5, 10, 'test-bot', 'bot', 'developer')"
+            )
+            await conn.commit()
+
+        # Create test data in database
+        await orch._task_store.create_task(
+            task_id="task_1",
+            group_id=10,
+            bot_id=5,
+            repo_url="https://github.com/test/repo.git",
+            requirements="Add feature",
+            base_branch="main",
+            test_command="pytest",
+            model="deepseek-chat",
+            max_iterations=100,
+        )
+        await orch._task_store.update_status("task_1", "stuck")
 
         with patch.object(orch, "_send_abort", new_callable=AsyncMock) as mock_abort, \
              patch.object(orch, "_dispatch_agent", new_callable=AsyncMock) as mock_dispatch:
@@ -98,7 +169,6 @@ class TestRetryTask(unittest.IsolatedAsyncioTestCase):
             result = await orch.retry_task("task_1")
 
         self.assertEqual(result["status"], "restarted")
-        self.assertIn("restarted_at", result)
         mock_abort.assert_called_once_with(10, mode="retry")
         mock_dispatch.assert_called_once_with(10, 5, "Add feature", "pytest", task_id="task_1")
         adapter.unregister_task.assert_called_once_with(10)
@@ -111,17 +181,36 @@ class TestRetryTask(unittest.IsolatedAsyncioTestCase):
         self.assertIn("not found", str(ctx.exception))
 
 
-class TestAbortTask(unittest.IsolatedAsyncioTestCase):
+class TestAbortTask(DatabaseTestBase):
 
     async def test_abort_known_task(self):
         adapter = MagicMock()
         orch = TaskOrchestrator(adapter=adapter)
-        orch._tasks["task_1"] = {
-            "task_id": "task_1",
-            "group_id": 10,
-            "bot_id": 5,
-            "status": "running",
-        }
+
+        # Pre-create group and bot in database
+        import db
+        async with db.write_connect() as conn:
+            await conn.execute(
+                "INSERT INTO groups (id, name) VALUES (10, 'test-group')"
+            )
+            await conn.execute(
+                "INSERT INTO members (id, group_id, name, type, role) VALUES (5, 10, 'test-bot', 'bot', 'developer')"
+            )
+            await conn.commit()
+
+        # Create test data in database
+        await orch._task_store.create_task(
+            task_id="task_1",
+            group_id=10,
+            bot_id=5,
+            repo_url="https://github.com/test/repo.git",
+            requirements="Test task",
+            base_branch="main",
+            test_command="pytest",
+            model="deepseek-chat",
+            max_iterations=100,
+        )
+        await orch._task_store.update_status("task_1", "running")
 
         with patch.object(orch, "_send_abort", new_callable=AsyncMock) as mock_abort:
 
@@ -137,7 +226,7 @@ class TestAbortTask(unittest.IsolatedAsyncioTestCase):
             await orch.abort_task("nonexistent")
 
 
-class TestSendAbort(unittest.IsolatedAsyncioTestCase):
+class TestSendAbort(DatabaseTestBase):
 
     async def test_send_abort_via_ipc(self):
         """_send_abort calls Supervisor.request_abort() and returns ACK."""
@@ -180,7 +269,7 @@ class TestSendAbort(unittest.IsolatedAsyncioTestCase):
             sup_module.supervisor = original_sup
 
 
-class TestCreateGroup(unittest.IsolatedAsyncioTestCase):
+class TestCreateGroup(DatabaseTestBase):
 
     async def test_creates_group_in_db(self):
         orch = TaskOrchestrator()
@@ -205,7 +294,7 @@ class TestCreateGroup(unittest.IsolatedAsyncioTestCase):
         mock_init.assert_called_once_with(99, "Coding Agent: agent_123")
 
 
-class TestDispatchAgent(unittest.IsolatedAsyncioTestCase):
+class TestDispatchAgent(DatabaseTestBase):
 
     async def test_dispatches_via_supervisor(self):
         orch = TaskOrchestrator()
@@ -255,7 +344,7 @@ class TestSystemPrompt(unittest.TestCase):
         self.assertIn("edit_file", CODING_AGENT_SYSTEM_PROMPT)
 
 
-class TestPreflightCheck(unittest.IsolatedAsyncioTestCase):
+class TestPreflightCheck(DatabaseTestBase):
 
     async def test_preflight_success(self):
         """Valid repo passes pre-flight check."""
@@ -304,7 +393,7 @@ class TestPreflightCheck(unittest.IsolatedAsyncioTestCase):
             self.assertIn("not found", str(ctx.exception))
 
 
-class TestRollback(unittest.IsolatedAsyncioTestCase):
+class TestRollback(DatabaseTestBase):
 
     async def test_rollback_none_group(self):
         """Rollback with None group_id is a no-op."""
@@ -362,11 +451,24 @@ class TestRollback(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any("DELETE FROM groups" in c for c in calls))
 
 
-class TestCreateTaskAtomicity(unittest.IsolatedAsyncioTestCase):
+class TestCreateTaskAtomicity(DatabaseTestBase):
+
+    async def _setup_test_group_and_bot(self, group_id=42, bot_id=7):
+        """Helper to create test group and bot in database."""
+        import db
+        async with db.write_connect() as conn:
+            await conn.execute(
+                f"INSERT INTO groups (id, name) VALUES ({group_id}, 'test-group')"
+            )
+            await conn.execute(
+                f"INSERT INTO members (id, group_id, name, type, role) VALUES ({bot_id}, {group_id}, 'test-bot', 'bot', 'developer')"
+            )
+            await conn.commit()
 
     async def test_clone_failure_rolls_back_group(self):
         """If clone fails, group is rolled back (no orphan resources)."""
         orch = TaskOrchestrator()
+        await self._setup_test_group_and_bot()
 
         with patch.object(orch, "_preflight_check_repo", new_callable=AsyncMock), \
              patch.object(orch, "_create_group", new_callable=AsyncMock, return_value=42), \
@@ -403,6 +505,7 @@ class TestCreateTaskAtomicity(unittest.IsolatedAsyncioTestCase):
     async def test_add_bot_failure_rolls_back_group(self):
         """If bot creation fails, group is rolled back."""
         orch = TaskOrchestrator()
+        await self._setup_test_group_and_bot()
 
         with patch.object(orch, "_preflight_check_repo", new_callable=AsyncMock), \
              patch.object(orch, "_create_group", new_callable=AsyncMock, return_value=42), \
@@ -421,6 +524,7 @@ class TestCreateTaskAtomicity(unittest.IsolatedAsyncioTestCase):
         """Successful create_task does NOT trigger rollback."""
         adapter = MagicMock()
         orch = TaskOrchestrator(adapter=adapter)
+        await self._setup_test_group_and_bot()
 
         with patch.object(orch, "_preflight_check_repo", new_callable=AsyncMock), \
              patch.object(orch, "_create_group", new_callable=AsyncMock, return_value=42), \
@@ -440,6 +544,7 @@ class TestCreateTaskAtomicity(unittest.IsolatedAsyncioTestCase):
         """When worker_id is provided, group is bound to worker before dispatch."""
         adapter = MagicMock()
         orch = TaskOrchestrator(adapter=adapter)
+        await self._setup_test_group_and_bot()
 
         call_order = []
 
@@ -472,6 +577,7 @@ class TestCreateTaskAtomicity(unittest.IsolatedAsyncioTestCase):
         """When worker_id is None, bind is skipped (uses default modulo routing)."""
         adapter = MagicMock()
         orch = TaskOrchestrator(adapter=adapter)
+        await self._setup_test_group_and_bot()
 
         with patch.object(orch, "_preflight_check_repo", new_callable=AsyncMock), \
              patch.object(orch, "_create_group", new_callable=AsyncMock, return_value=42), \
@@ -491,6 +597,7 @@ class TestCreateTaskAtomicity(unittest.IsolatedAsyncioTestCase):
     async def test_task_ids_no_collision_under_concurrency(self):
         """Concurrent create_task calls produce unique task IDs (UUID-based)."""
         orch = TaskOrchestrator()
+        await self._setup_test_group_and_bot(group_id=1, bot_id=1)
         ids = set()
 
         for _ in range(50):
@@ -509,7 +616,7 @@ class TestCreateTaskAtomicity(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(ids), 50)  # All unique
 
 
-class TestBindGroupToWorker(unittest.IsolatedAsyncioTestCase):
+class TestBindGroupToWorker(DatabaseTestBase):
 
     async def test_binds_group_in_db(self):
         """_bind_group_to_worker updates assigned_worker_id in central DB."""

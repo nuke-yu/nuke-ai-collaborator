@@ -76,12 +76,15 @@ class TaskOrchestrator:
             adapter: ProgressAdapter instance for progress tracking (optional)
         """
         self._adapter = adapter
-        self._tasks: dict[str, dict] = {}  # task_id → task record
+        # P1-1: Use database-backed storage instead of in-memory dict
+        from plugins.agent_dashboard.task_store import TaskStore
+        self._task_store = TaskStore()
 
     @property
-    def tasks(self) -> dict:
-        """Read-only access to task registry."""
-        return dict(self._tasks)
+    async def tasks(self) -> dict:
+        """Read-only access to task registry (from database)."""
+        task_list = await self._task_store.list_tasks(limit=1000)
+        return {t["task_id"]: t for t in task_list}
 
     async def create_task(
         self,
@@ -125,6 +128,7 @@ class TaskOrchestrator:
         await self._preflight_check_repo(repo_url, base_branch)
 
         group_id = None
+        bot_id = None
         try:
             # 1. Create group
             group_id = await self._create_group(task_id)
@@ -141,11 +145,27 @@ class TaskOrchestrator:
             if worker_id:
                 await self._bind_group_to_worker(group_id, worker_id)
 
-            # 5. Register with progress adapter
+            # 5. Persist task to database (P1-1)
+            await self._task_store.create_task(
+                task_id=task_id,
+                group_id=group_id,
+                bot_id=bot_id,
+                repo_url=repo_url,
+                requirements=requirements,
+                base_branch=base_branch,
+                test_command=test_command,
+                model=model,
+                max_iterations=max_iterations,
+            )
+
+            # 6. Register with progress adapter
             if self._adapter:
                 self._adapter.register_task(group_id, task_id)
 
-            # 6. Dispatch the coding agent
+            # 7. Update status to dispatched
+            await self._task_store.update_status(task_id, "dispatched")
+
+            # 8. Dispatch the coding agent
             await self._dispatch_agent(group_id, bot_id, requirements, test_command, task_id=task_id)
 
         except Exception as e:
@@ -156,23 +176,14 @@ class TaskOrchestrator:
             # from retrying a task that no longer exists.
             if self._adapter and group_id is not None:
                 self._adapter.unregister_task(group_id)
+            # P1-1: Delete task from database if it was created
+            if bot_id is not None:
+                await self._task_store.delete_task(task_id)
             await self._rollback_group(group_id)
             raise RuntimeError(f"Task creation failed: {e}") from e
 
-        # 6. Record task (only after all steps succeed)
-        record = {
-            "task_id": task_id,
-            "group_id": group_id,
-            "bot_id": bot_id,
-            "repo_url": repo_url,
-            "requirements": requirements,
-            "base_branch": base_branch,
-            "test_command": test_command,
-            "model": model,
-            "created_at": time.time(),
-            "status": "dispatched",
-        }
-        self._tasks[task_id] = record
+        # P1-1: Fetch the persisted task record from database
+        record = await self._task_store.get_task(task_id)
 
         log.info("TaskOrchestrator: task %s dispatched (group=%d, bot=%d)", task_id, group_id, bot_id)
         return record
@@ -186,7 +197,8 @@ class TaskOrchestrator:
         Worktree cleanup is handled by Worker's _cleanup_finally() when tasks
         are cancelled.
         """
-        record = self._tasks.get(task_id)
+        # P1-1: Fetch task from database
+        record = await self._task_store.get_task(task_id)
         if not record:
             raise ValueError(f"Task {task_id} not found")
 
@@ -200,7 +212,10 @@ class TaskOrchestrator:
             self._adapter.unregister_task(group_id)
             self._adapter.register_task(group_id, task_id)
 
-        # 3. Re-dispatch (only after successful ACK)
+        # 3. Update status to restarted
+        await self._task_store.update_status(task_id, "restarted")
+
+        # 4. Re-dispatch (only after successful ACK)
         await self._dispatch_agent(
             group_id,
             record["bot_id"],
@@ -209,9 +224,8 @@ class TaskOrchestrator:
             task_id=task_id,
         )
 
-        record["status"] = "restarted"
-        record["restarted_at"] = time.time()
-        return record
+        # P1-1: Fetch updated record from database
+        return await self._task_store.get_task(task_id)
 
     async def abort_task(self, task_id: str) -> dict:
         """Abort a task via IPC ACK protocol.
@@ -222,7 +236,8 @@ class TaskOrchestrator:
         Worktree cleanup is handled by Worker's _cleanup_finally() when tasks
         are cancelled.
         """
-        record = self._tasks.get(task_id)
+        # P1-1: Fetch task from database
+        record = await self._task_store.get_task(task_id)
         if not record:
             raise ValueError(f"Task {task_id} not found")
 
@@ -235,8 +250,11 @@ class TaskOrchestrator:
         if self._adapter:
             self._adapter.unregister_task(group_id)
 
-        record["status"] = "aborted"
-        return record
+        # P1-1: Update status in database
+        await self._task_store.update_status(task_id, "aborted")
+
+        # P1-1: Fetch updated record from database
+        return await self._task_store.get_task(task_id)
 
     # Note: cleanup_orphan_worktrees removed (R2-2). The previous implementation
     # was dangerous: it swept for "unknown" worktrees (tid not in self._tasks),

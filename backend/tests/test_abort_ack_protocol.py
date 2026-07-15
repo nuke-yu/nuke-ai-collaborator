@@ -194,20 +194,73 @@ class TestWorkerAbortRequestHandling(unittest.IsolatedAsyncioTestCase):
 class TestOrchestratorAbortIntegration(unittest.IsolatedAsyncioTestCase):
     """Test orchestrator's use of abort ACK protocol."""
 
+    async def asyncSetUp(self):
+        """Set up isolated test database with migrations."""
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        import db as _database
+        import db.writer as _db_writer
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.workspace_root = Path(self._tmp.name).resolve()
+
+        # Pin the DB path globals to an isolated temp DB and build its full schema
+        self._db_file = str(self.workspace_root / "test_abort_ack.db")
+        self._orig_db_paths = (_database.DB_PATH, _db_writer.DB_PATH)
+        _database.DB_PATH = self._db_file
+        _db_writer.DB_PATH = self._db_file
+        await _database.init_db()
+
+    async def asyncTearDown(self):
+        """Clean up test database."""
+        import db as _database
+        import db.writer as _db_writer
+
+        _database.DB_PATH, _db_writer.DB_PATH = self._orig_db_paths
+        self._tmp.cleanup()
+
+    async def _create_test_task(self, orch, task_id, group_id, bot_id, status="running", **kwargs):
+        """Helper to create a test task in the database.
+
+        Also creates the necessary group and bot if they don't exist.
+        """
+        import db
+
+        # Create group if it doesn't exist
+        async with db.write_connect() as conn:
+            await conn.execute(
+                "INSERT OR IGNORE INTO groups (id, name) VALUES (?, ?)",
+                (group_id, f"Test Group {group_id}")
+            )
+            # Create bot if it doesn't exist
+            await conn.execute(
+                "INSERT OR IGNORE INTO members (id, group_id, name, type) VALUES (?, ?, ?, ?)",
+                (bot_id, group_id, f"Test Bot {bot_id}", "bot")
+            )
+            await conn.commit()
+
+        await orch._task_store.create_task(
+            task_id=task_id,
+            group_id=group_id,
+            bot_id=bot_id,
+            repo_url=kwargs.get("repo_url", "https://github.com/user/repo.git"),
+            requirements=kwargs.get("requirements", "Test requirements"),
+            base_branch=kwargs.get("base_branch", "main"),
+            test_command=kwargs.get("test_command", "pytest"),
+            model=kwargs.get("model", "deepseek-chat"),
+            max_iterations=kwargs.get("max_iterations", 100),
+        )
+        if status != "created":
+            await orch._task_store.update_status(task_id, status)
+
     async def test_retry_waits_for_ack_before_redispatch(self):
         """retry_task only re-dispatches after receiving successful ACK."""
         from plugins.agent_dashboard.orchestrator import TaskOrchestrator
 
         adapter = MagicMock()
         orch = TaskOrchestrator(adapter=adapter)
-        orch._tasks["task_1"] = {
-            "task_id": "task_1",
-            "group_id": 10,
-            "bot_id": 5,
-            "requirements": "Fix bug",
-            "test_command": "pytest",
-            "status": "stuck",
-        }
+        await self._create_test_task(orch, "task_1", 10, 5, status="stuck", requirements="Fix bug")
 
         # Mock _send_abort to return ACK
         mock_abort = AsyncMock(return_value={
@@ -237,12 +290,7 @@ class TestOrchestratorAbortIntegration(unittest.IsolatedAsyncioTestCase):
 
         adapter = MagicMock()
         orch = TaskOrchestrator(adapter=adapter)
-        orch._tasks["task_1"] = {
-            "task_id": "task_1",
-            "group_id": 10,
-            "bot_id": 5,
-            "status": "running",
-        }
+        await self._create_test_task(orch, "task_1", 10, 5, status="running")
 
         # Mock _send_abort to return ACK
         mock_abort = AsyncMock(return_value={
@@ -265,14 +313,7 @@ class TestOrchestratorAbortIntegration(unittest.IsolatedAsyncioTestCase):
         from plugins.agent_dashboard.orchestrator import TaskOrchestrator
 
         orch = TaskOrchestrator()
-        orch._tasks["task_1"] = {
-            "task_id": "task_1",
-            "group_id": 10,
-            "bot_id": 5,
-            "requirements": "Fix bug",
-            "test_command": "pytest",
-            "status": "stuck",
-        }
+        await self._create_test_task(orch, "task_1", 10, 5, status="stuck", requirements="Fix bug")
 
         # Mock _send_abort to raise TimeoutError
         mock_abort = AsyncMock(side_effect=TimeoutError("Worker did not respond"))
@@ -287,20 +328,16 @@ class TestOrchestratorAbortIntegration(unittest.IsolatedAsyncioTestCase):
         # Verify dispatch was NOT called (fail closed)
         mock_dispatch.assert_not_called()
 
-        # Verify status NOT updated
-        self.assertEqual(orch._tasks["task_1"]["status"], "stuck")
+        # Verify status NOT updated (fetch from DB)
+        task = await orch._task_store.get_task("task_1")
+        self.assertEqual(task["status"], "stuck")
 
     async def test_abort_fails_closed_on_cleanup_failure(self):
         """abort_task raises RuntimeError if Worker cleanup fails (fail closed)."""
         from plugins.agent_dashboard.orchestrator import TaskOrchestrator
 
         orch = TaskOrchestrator()
-        orch._tasks["task_1"] = {
-            "task_id": "task_1",
-            "group_id": 10,
-            "bot_id": 5,
-            "status": "running",
-        }
+        await self._create_test_task(orch, "task_1", 10, 5, status="running")
 
         # Mock _send_abort to raise RuntimeError (cleanup failed)
         mock_abort = AsyncMock(side_effect=RuntimeError("Worker cleanup failed"))
@@ -312,5 +349,6 @@ class TestOrchestratorAbortIntegration(unittest.IsolatedAsyncioTestCase):
         # Verify error message
         self.assertIn("cleanup failed", str(ctx.exception))
 
-        # Verify status NOT updated (fail closed)
-        self.assertEqual(orch._tasks["task_1"]["status"], "running")
+        # Verify status NOT updated (fetch from DB, fail closed)
+        task = await orch._task_store.get_task("task_1")
+        self.assertEqual(task["status"], "running")

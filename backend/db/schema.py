@@ -194,6 +194,27 @@ async def init_db():
                 FOREIGN KEY (bot_id) REFERENCES members(id)
             )
         """)
+        # P1-1: Persistent state model for agent tasks
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS agent_tasks (
+                task_id        TEXT PRIMARY KEY,
+                group_id       INTEGER NOT NULL,
+                bot_id         INTEGER NOT NULL,
+                repo_url       TEXT NOT NULL,
+                requirements   TEXT NOT NULL,
+                base_branch    TEXT NOT NULL DEFAULT 'main',
+                test_command   TEXT NOT NULL DEFAULT '',
+                model          TEXT NOT NULL DEFAULT 'deepseek-chat',
+                max_iterations INTEGER NOT NULL DEFAULT 100,
+                status         TEXT NOT NULL DEFAULT 'created',
+                created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                pr_url         TEXT DEFAULT NULL,
+                error_message  TEXT DEFAULT NULL,
+                FOREIGN KEY (group_id) REFERENCES groups(id),
+                FOREIGN KEY (bot_id) REFERENCES members(id)
+            )
+        """)
         await conn.commit()
         await run_migrations(conn)
         await _seed_templates(conn)
