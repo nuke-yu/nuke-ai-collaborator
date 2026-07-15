@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field, field_validator
 from typing import Annotated, Optional
 
 from api.admin_deps import require_operator
+from integrations.repository_policy import DEFAULT_REPOSITORY_ADMISSION_POLICY
 
 log = logging.getLogger(__name__)
 
@@ -61,16 +62,8 @@ class CreateTaskRequest(BaseModel):
     @field_validator("repo_url")
     @classmethod
     def validate_repo_url(cls, v: str) -> str:
-        """Only allow HTTPS git URLs from github.com (P0-4: GitHub-only for now)."""
-        allowed_pattern = re.compile(
-            r'^https://github\.com/[\w\-./]+\.git$'
-        )
-        if not allowed_pattern.match(v):
-            raise ValueError(
-                "repo_url must be an HTTPS git URL from github.com "
-                "(GitLab/Bitbucket not yet supported)"
-            )
-        return v
+        """Admit URLs through the repository integration policy."""
+        return DEFAULT_REPOSITORY_ADMISSION_POLICY.validate(v)
 
     @field_validator("requirements")
     @classmethod

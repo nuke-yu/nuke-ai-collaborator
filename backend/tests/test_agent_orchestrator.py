@@ -643,7 +643,9 @@ class TestPreflightCheck(DatabaseTestBase):
         with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
             orch = TaskOrchestrator()
             with self.assertRaises(RuntimeError) as ctx:
-                await orch._preflight_check_repo("https://slow-server/repo.git")
+                await orch._preflight_check_repo(
+                    "https://github.com/slow-server/repo.git"
+                )
             self.assertIn("timed out", str(ctx.exception))
 
     async def test_preflight_branch_not_found(self):

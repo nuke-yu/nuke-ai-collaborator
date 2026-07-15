@@ -8,6 +8,7 @@ Tests the security boundary:
 """
 import unittest
 from pydantic import ValidationError
+from integrations.repository_policy import HostedGitProvider, RepositoryAdmissionPolicy
 from plugins.agent_dashboard.api import CreateTaskRequest
 
 
@@ -68,6 +69,45 @@ class TestRepoUrlValidation(unittest.TestCase):
                 repo_url="http://github.com/user/repo.git",
                 requirements="Build a REST API for user management",
             )
+
+    def test_reject_credentials_in_url(self):
+        with self.assertRaises(ValidationError) as ctx:
+            CreateTaskRequest(
+                repo_url="https://token@github.com/user/repo.git",
+                requirements="Build a REST API for user management",
+            )
+        self.assertIn("credentials", str(ctx.exception))
+
+    def test_reject_query_and_fragment(self):
+        for suffix in ("?token=secret", "#main"):
+            with self.subTest(suffix=suffix):
+                with self.assertRaises(ValidationError):
+                    CreateTaskRequest(
+                        repo_url=f"https://github.com/user/repo.git{suffix}",
+                        requirements="Build a REST API for user management",
+                    )
+
+    def test_reject_path_traversal(self):
+        with self.assertRaises(ValidationError):
+            CreateTaskRequest(
+                repo_url="https://github.com/../repo.git",
+                requirements="Build a REST API for user management",
+            )
+
+    def test_provider_registry_is_extensible_without_changing_api_validation(self):
+        policy = RepositoryAdmissionPolicy(
+            (
+                HostedGitProvider(
+                    name="GitLab",
+                    hosts=("gitlab.example.com",),
+                    min_path_segments=2,
+                    max_path_segments=None,
+                ),
+            )
+        )
+
+        url = "https://gitlab.example.com/platform/team/project.git"
+        self.assertEqual(policy.validate(url), url)
 
 
 class TestRequirementsValidation(unittest.TestCase):

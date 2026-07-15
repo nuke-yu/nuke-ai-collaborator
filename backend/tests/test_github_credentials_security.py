@@ -9,6 +9,7 @@ Tests that GitHub credentials are handled securely:
   - Worker fails closed when NUKE_GITHUB_ENABLED=true but gh/token missing
 """
 import os
+import subprocess
 import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -139,6 +140,39 @@ class TestGitHubTokenNotInURLs(unittest.IsolatedAsyncioTestCase):
                     await clone_repo("https://github.com/user/repo.git", dest)
                 self.assertIn("Security violation", str(ctx.exception))
                 self.assertIn("credentials", str(ctx.exception))
+
+    async def test_askpass_rejects_non_github_prompt(self):
+        from integrations import github_client
+
+        result = subprocess.run(
+            [
+                str(github_client._ASKPASS_PATH),
+                "Password for 'https://x-access-token@evil.example': ",
+            ],
+            capture_output=True,
+            check=False,
+            env={"GITHUB_TOKEN": "secret123", "PATH": os.defpath},
+            text=True,
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "")
+
+    async def test_askpass_releases_token_only_for_github_prompt(self):
+        from integrations import github_client
+
+        result = subprocess.run(
+            [
+                str(github_client._ASKPASS_PATH),
+                "Password for 'https://x-access-token@github.com': ",
+            ],
+            capture_output=True,
+            check=True,
+            env={"GITHUB_TOKEN": "secret123", "PATH": os.defpath},
+            text=True,
+        )
+
+        self.assertEqual(result.stdout, "secret123\n")
 
 
 class TestWorkerFailsClosed(unittest.IsolatedAsyncioTestCase):

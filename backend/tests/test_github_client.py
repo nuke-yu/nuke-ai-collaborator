@@ -18,6 +18,7 @@ from integrations.github_client import (
     ensure_branch,
     commit_all,
     is_gh_available,
+    push_branch,
 )
 
 
@@ -200,6 +201,40 @@ class TestCloneRepo(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("Security violation", str(ctx.exception))
                 self.assertIn("credentials", str(ctx.exception))
 
+    async def test_clone_rejects_untrusted_host_before_spawning(self):
+        with patch("asyncio.create_subprocess_exec") as mock_exec:
+            with self.assertRaisesRegex(ValueError, "not yet supported"):
+                await clone_repo(
+                    "https://gitlab.com/user/repo.git", "/tmp/test_clone_dest"
+                )
+        mock_exec.assert_not_called()
+
+
+class TestPushBranch(unittest.IsolatedAsyncioTestCase):
+
+    async def test_push_pins_validated_remote_url(self):
+        procs = [
+            _mock_proc(b"https://github.com/user/repo.git\n", b"", 0),
+            _mock_proc(),
+        ]
+        with patch.dict(os.environ, {"GITHUB_TOKEN": "github-secret"}, clear=True):
+            with patch("asyncio.create_subprocess_exec", side_effect=procs) as mock_exec:
+                remote_url = await push_branch("/tmp/repo", "feature/test")
+
+        self.assertEqual(remote_url, "https://github.com/user/repo.git")
+        push_args = mock_exec.call_args_list[1].args
+        self.assertIn(
+            "remote.origin.url=https://github.com/user/repo.git", push_args
+        )
+
+    async def test_push_rejects_untrusted_remote_before_auth_command(self):
+        proc = _mock_proc(b"https://evil.example/user/repo.git\n", b"", 0)
+        with patch("asyncio.create_subprocess_exec", return_value=proc) as mock_exec:
+            with self.assertRaisesRegex(RuntimeError, "untrusted remote"):
+                await push_branch("/tmp/repo", "feature/test")
+
+        self.assertEqual(mock_exec.call_count, 1)
+
 
 class TestEnsureBranch(unittest.IsolatedAsyncioTestCase):
 
@@ -266,6 +301,7 @@ class TestGitHubClient(unittest.IsolatedAsyncioTestCase):
                 (b" M main.py\n", b"", 0),        # status → changes
                 (b"", b"", 0),                     # add
                 (b"", b"", 0),                     # commit
+                (b"https://github.com/user/repo.git\n", b"", 0),  # remote URL
                 (b"", b"", 0),                     # push
                 (b"refs/remotes/origin/main\n", b"", 0),  # symbolic-ref
                 (b"https://github.com/user/repo/pull/42\n", b"", 0),  # gh pr create
@@ -295,6 +331,7 @@ class TestGitHubClient(unittest.IsolatedAsyncioTestCase):
             mock_results = [
                 (b"main\n", b"", 0),          # rev-parse branch
                 (b"", b"", 0),                 # status → no changes
+                (b"https://github.com/user/repo.git\n", b"", 0),  # remote URL
                 (b"", b"", 0),                 # push
                 (b"refs/remotes/origin/main\n", b"", 0),  # symbolic-ref
                 (b"https://github.com/user/repo/pull/7\n", b"", 0),  # gh pr create
@@ -333,6 +370,7 @@ class TestGitHubClient(unittest.IsolatedAsyncioTestCase):
                 (b" M file.py\n", b"", 0),          # status → changes
                 (b"", b"", 0),                       # add
                 (b"", b"", 0),                       # commit
+                (b"https://github.com/user/repo.git\n", b"", 0),  # remote URL
                 (b"", b"", 0),                       # push
                 (b"refs/remotes/origin/main\n", b"", 0),  # symbolic-ref
                 (b"", b"GraphQL: Could not resolve to a Repository\n", 1),  # gh FAILS

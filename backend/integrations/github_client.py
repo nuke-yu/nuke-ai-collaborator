@@ -14,8 +14,10 @@ import logging
 import os
 import shutil
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from integrations.git import GitClient, set_git
+from integrations.repository_policy import DEFAULT_REPOSITORY_ADMISSION_POLICY
 
 log = logging.getLogger(__name__)
 
@@ -195,6 +197,7 @@ async def clone_repo(repo_url: str, dest: str | Path, branch: str = "") -> Path:
     Raises:
         RuntimeError: if clone fails or if remote URL contains credentials (security check)
     """
+    DEFAULT_REPOSITORY_ADMISSION_POLICY.validate(repo_url)
     dest = Path(dest)
     if dest.exists():
         shutil.rmtree(dest)
@@ -215,13 +218,13 @@ async def clone_repo(repo_url: str, dest: str | Path, branch: str = "") -> Path:
 
     # P0-4 Security assertion: verify remote URL doesn't contain credentials
     remote_url = await _git("remote", "get-url", "origin", cwd=dest)
-    if "@" in remote_url and "://" in remote_url:
-        # URL format: https://user:pass@host or https://token@host
-        # This is a security violation - credentials should not be in the URL
+    try:
+        DEFAULT_REPOSITORY_ADMISSION_POLICY.validate(remote_url)
+    except ValueError as exc:
         shutil.rmtree(dest, ignore_errors=True)
         raise RuntimeError(
-            f"Security violation: git remote URL contains credentials: {remote_url[:20]}..."
-        )
+            f"Security violation: cloned repository has an invalid origin URL: {exc}"
+        ) from exc
 
     return dest
 
@@ -244,20 +247,45 @@ async def ensure_branch(cwd: str | Path, branch_name: str, base: str = "main") -
     return branch_name
 
 
-async def push_branch(cwd: str | Path, branch_name: str, remote: str = "origin") -> None:
+async def push_branch(
+    cwd: str | Path, branch_name: str, remote: str = "origin"
+) -> str:
     """Push a branch to the remote.
 
-    P0-4: GITHUB_TOKEN is read from environment variable, not passed as parameter.
-    Git automatically uses GITHUB_TOKEN env var for HTTPS authentication.
+    P0-4: GITHUB_TOKEN is injected only into the validated push subprocess.
     """
     cwd = Path(cwd)
-    await _git(
-        "push", "-u", remote, branch_name, cwd=str(cwd), authenticated=True
+    valid_remote_chars = (
+        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-"
     )
+    if not remote or any(char not in valid_remote_chars for char in remote):
+        raise ValueError(f"Invalid git remote name: {remote}")
+    remote_url = await _git("remote", "get-url", remote, cwd=cwd)
+    try:
+        DEFAULT_REPOSITORY_ADMISSION_POLICY.validate(remote_url)
+    except ValueError as exc:
+        raise RuntimeError(
+            f"Refusing authenticated push to untrusted remote {remote}: {exc}"
+        ) from exc
+
+    # Pin this invocation to the validated URL so a concurrent config rewrite
+    # cannot redirect the credential-bearing push to another host.
+    await _git(
+        "-c",
+        f"remote.{remote}.url={remote_url}",
+        "push",
+        "-u",
+        remote,
+        branch_name,
+        cwd=str(cwd),
+        authenticated=True,
+    )
+    return remote_url
 
 
 async def ls_remote(repo_url: str, branch: str = "", timeout: int = 30) -> None:
     """Verify repository/branch reachability using the shared auth contract."""
+    DEFAULT_REPOSITORY_ADMISSION_POLICY.validate(repo_url)
     args = ["ls-remote", "--exit-code", repo_url]
     if branch:
         args.extend(["--heads", branch])
@@ -356,7 +384,7 @@ class GitHubClient(GitClient):
             log.info("GitHubClient: no changes to commit for group %d", group_id)
 
         # Push branch (fail closed — don't create PR against stale remote branch)
-        await push_branch(workspace, branch)
+        remote_url = await push_branch(workspace, branch)
 
         # Build PR body
         body_parts = [description]
@@ -375,7 +403,10 @@ class GitHubClient(GitClient):
             except Exception:
                 pass  # gh will use the repo's default
 
-            pr_url = await _gh(*gh_args, cwd=workspace)
+            repository = (
+                urlsplit(remote_url).path.removeprefix("/").removesuffix(".git")
+            )
+            pr_url = await _gh(*gh_args, "--repo", repository, cwd=workspace)
 
             # Extract PR number from URL
             pr_id = pr_url.rstrip("/").split("/")[-1] if pr_url else "unknown"
