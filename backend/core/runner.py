@@ -282,17 +282,18 @@ async def _run_unit_body(group_id: int, unit, orch) -> None:
         await workflow_store.clear_state(group_id)
         return
 
-    if not result.full_text:
+    signals = getattr(result, "signals", None) or []
+    if not result.full_text and not signals:
         return
     try:
         step = orch.observe(
             group_id,
             unit.bot["id"],
-            result.full_text,
-            signals=getattr(result, "signals", None) or [],
+            result.full_text or "",
+            signals=signals,
         )
     except TypeError:
-        step = orch.observe(group_id, unit.bot["id"], result.full_text)
+        step = orch.observe(group_id, unit.bot["id"], result.full_text or "")
     await apply_step(
         group_id,
         orch,

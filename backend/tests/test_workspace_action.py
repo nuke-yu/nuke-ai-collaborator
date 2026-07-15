@@ -180,6 +180,50 @@ class TestRunnerWorktreeLifecycle(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(events, ["promote", "done"])
 
+    async def test_signal_only_result_still_promotes_exact_task(self):
+        from core import runner
+        from executors.base import ExecutionResult
+
+        class SignalOnlyExecutor:
+            async def run(self, _ctx):
+                return ExecutionResult(
+                    full_text="",
+                    msg_id=None,
+                    signals=[
+                        {
+                            "name": "signal_stage_done",
+                            "arguments": {"reason": "tests passed"},
+                        }
+                    ],
+                )
+
+        bot = {"id": 5, "name": "Agent"}
+        orch = CodingAgentOrchestrator()
+        step = orch.begin(
+            1,
+            {"bots": [bot], "requirements": "test", "task_id": "agent_123"},
+        )
+        unit = step.next_units[0]
+        cm = self._db_cm()
+
+        with patch.object(runner.asyncio, "sleep", new=AsyncMock()), \
+             patch.object(runner, "get_members", new=AsyncMock(return_value=[bot])), \
+             patch.object(runner, "get_messages", new=AsyncMock(return_value=[])), \
+             patch.object(runner, "global_db", return_value=cm), \
+             patch.object(runner, "get_db", return_value=cm), \
+             patch.object(runner.exec_registry, "get", return_value=SignalOnlyExecutor()), \
+             patch("workspace.git_worktree.create_worktree", new=AsyncMock(return_value=Path("/tmp/task_agent_123"))), \
+             patch("workspace.git_worktree.use_worktree", return_value=nullcontext()), \
+             patch("workspace.git_worktree.promote_worktree", new_callable=AsyncMock) as promote, \
+             patch("workspace.git_worktree.remove_worktree", new_callable=AsyncMock) as remove, \
+             patch.object(runner.bus, "publish", new_callable=AsyncMock), \
+             patch.object(runner.workflow_store, "clear_state", new_callable=AsyncMock), \
+             patch.object(runner.workflow_store, "save_state", new_callable=AsyncMock):
+            await runner._run_unit_body(1, unit, orch)
+
+        promote.assert_awaited_once_with(1, "agent_123")
+        remove.assert_not_awaited()
+
 
 class TestRealDispatchTaskId(unittest.IsolatedAsyncioTestCase):
     async def test_start_workflow_preserves_task_id_into_spawned_unit(self):
