@@ -158,7 +158,7 @@ class ExecutionContext:
 class ExecutionResult:
     full_text: str
     msg_id: int | None
-    signals: list[dict] = None
+    signals: list[dict] = field(default_factory=list)
 
 
 class ToolProvider(ABC):
@@ -271,4 +271,3 @@ def build_group_section(ctx: "ExecutionContext") -> str:
         if bots:
             lines.append(f"{L['ai_members']}{', '.join(bots)}")
     return "\n".join(lines)
-

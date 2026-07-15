@@ -140,7 +140,8 @@ class DeclarativeOrchestrator(Orchestrator):
         if ctx is None:
             return OrchestratorStep()
         
-        # If we have structured tool signals, prioritize them over free-text matches
+        # Structured tool calls are the only external control plane.  Stage text
+        # can mention keywords or historical sentinels without changing state.
         if signals:
             for sig in signals:
                 if sig["name"] == "signal_stage_done":
@@ -172,8 +173,24 @@ class DeclarativeOrchestrator(Orchestrator):
                         
                     if target_idx is not None:
                         return self._raise_gate(ctx, reason, rework_to=target_idx)
-                        
-        return stage_handler(ctx.stage).observe(ctx, bot_id, response)
+
+        # Compatibility for direct, pre-signal Python callers.  Runtime always
+        # supplies a list (including []), enforced by ExecutionResult + runner.
+        if signals is None:
+            return stage_handler(ctx.stage).observe(ctx, bot_id, response)
+
+        from bus.events import WorkflowPaused
+        return OrchestratorStep(
+            broadcast_state=True,
+            workflow_paused=WorkflowPaused(
+                group_id=group_id,
+                reason="completion_signal_missing",
+                details=(
+                    "Bot run completed without calling signal_stage_done "
+                    "or signal_rework"
+                ),
+            ),
+        )
 
     def advance(self, group_id: int, prev_output: str = "") -> OrchestratorStep:
         """手动推进（API /next 用）。"""
@@ -377,4 +394,3 @@ class DeclarativeOrchestrator(Orchestrator):
                     stage_dict["done_keyword"] = cfg.get("done_keyword", "完毕")
                     ordered.append(stage_dict)
         return {"stages": ordered}
-

@@ -45,6 +45,16 @@ class TestOrchestratorFlow(unittest.TestCase):
         self.assertTrue(step.broadcast_state)
         self.assertEqual(len(step.next_units), 1)
         self.assertEqual(step.next_units[0].bot["id"], 2)
+
+    def test_runtime_empty_signal_list_never_accepts_text_sentinel(self):
+        self.orch.begin(1, [self._gated(1, "A"), self._single(2, "B")])
+
+        step = self.orch.observe(1, 1, "ordinary text\n完毕", signals=[])
+
+        self.assertIsNone(step.confirm_gate)
+        self.assertEqual(step.next_units, [])
+        self.assertEqual(step.workflow_paused.reason, "completion_signal_missing")
+        self.assertEqual(self.orch.get(1)["current"], 0)
         self.assertFalse(step.done)
 
     def test_single_no_keyword_no_advance(self):
