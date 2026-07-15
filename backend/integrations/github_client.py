@@ -61,14 +61,14 @@ async def _git(*args: str, cwd: str | Path | None = None) -> str:
     return stdout
 
 
-async def _gh(*args: str, cwd: str | Path | None = None, github_token: str = "") -> str:
+async def _gh(*args: str, cwd: str | Path | None = None) -> str:
     """Run a gh CLI command, raising on failure.
 
-    If github_token is provided, it's passed via GITHUB_TOKEN env var
-    for authentication with private repos.
+    P0-4: GITHUB_TOKEN is read from environment variable, not passed as parameter.
+    The gh CLI automatically uses GITHUB_TOKEN env var for authentication.
     """
-    extra_env = {"GITHUB_TOKEN": github_token} if github_token else None
-    stdout, stderr, rc = await _run_cmd("gh", *args, cwd=cwd, extra_env=extra_env)
+    # gh CLI automatically reads GITHUB_TOKEN from environment
+    stdout, stderr, rc = await _run_cmd("gh", *args, cwd=cwd)
     if rc != 0:
         raise RuntimeError(f"gh {' '.join(args)} failed (rc={rc}): {stderr}")
     return stdout
@@ -79,37 +79,68 @@ def is_gh_available() -> bool:
     return shutil.which("gh") is not None
 
 
-async def clone_repo(repo_url: str, dest: str | Path, branch: str = "",
-                     github_token: str = "") -> Path:
+async def clone_repo(repo_url: str, dest: str | Path, branch: str = "") -> Path:
     """Clone a git repository to the destination directory.
 
+    P0-4: GitHub credentials are read from GITHUB_TOKEN environment variable,
+    not passed as parameters. Uses GIT_ASKPASS for authentication instead of
+    embedding token in URL.
+
     Args:
-        repo_url: Git repository URL (HTTPS or SSH)
+        repo_url: Git repository URL (HTTPS)
         dest: Destination directory path
         branch: Optional branch to checkout after clone
-        github_token: Optional GitHub token for private repo authentication.
-                      Embedded in HTTPS URLs as https://<token>@github.com/...
 
     Returns:
         Path to the cloned repository
+
+    Raises:
+        RuntimeError: if clone fails or if remote URL contains credentials (security check)
     """
     dest = Path(dest)
     if dest.exists():
         shutil.rmtree(dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
 
-    # Inject token into HTTPS URL for private repo access
-    clone_url = repo_url
-    if github_token and repo_url.startswith("https://"):
-        # https://github.com/user/repo.git → https://<token>@github.com/user/repo.git
-        clone_url = repo_url.replace("https://", f"https://{github_token}@", 1)
+    # P0-4: Use GIT_ASKPASS for authentication instead of embedding token in URL.
+    # GIT_ASKPASS is a git config that points to a script that outputs the password.
+    # This keeps the token out of the git remote URL and process arguments.
+    # The GITHUB_TOKEN env var is already set in the Worker process.
+    github_token = os.environ.get("GITHUB_TOKEN", "")
+    extra_env = None
+    if github_token:
+        # Create a temporary askpass script that outputs the token
+        askpass_script = dest.parent / ".git_askpass.sh"
+        askpass_script.write_text(f"#!/bin/sh\necho '{github_token}'\n")
+        askpass_script.chmod(0o700)
+        extra_env = {
+            "GIT_ASKPASS": str(askpass_script),
+            "GIT_TERMINAL_PROMPT": "0",
+        }
 
     args = ["clone", "--depth", "1"]
     if branch:
         args.extend(["--branch", branch])
-    args.extend([clone_url, str(dest)])
+    args.extend([repo_url, str(dest)])
 
-    await _git(*args)
+    try:
+        await _run_cmd("git", *args, cwd=None, extra_env=extra_env)
+    finally:
+        # Clean up askpass script
+        if extra_env and "GIT_ASKPASS" in extra_env:
+            askpass_path = Path(extra_env["GIT_ASKPASS"])
+            if askpass_path.exists():
+                askpass_path.unlink()
+
+    # P0-4 Security assertion: verify remote URL doesn't contain credentials
+    remote_url = await _git("remote", "get-url", "origin", cwd=dest)
+    if "@" in remote_url and "://" in remote_url:
+        # URL format: https://user:pass@host or https://token@host
+        # This is a security violation - credentials should not be in the URL
+        raise RuntimeError(
+            f"Security violation: git remote URL contains credentials: {remote_url[:20]}..."
+        )
+
     return dest
 
 
@@ -131,27 +162,15 @@ async def ensure_branch(cwd: str | Path, branch_name: str, base: str = "main") -
     return branch_name
 
 
-async def push_branch(cwd: str | Path, branch_name: str, remote: str = "origin",
-                      github_token: str = "") -> None:
+async def push_branch(cwd: str | Path, branch_name: str, remote: str = "origin") -> None:
     """Push a branch to the remote.
 
-    If github_token is provided, configures a temporary credential helper
-    so git push can authenticate to private repos.
+    P0-4: GITHUB_TOKEN is read from environment variable, not passed as parameter.
+    Git automatically uses GITHUB_TOKEN env var for HTTPS authentication.
     """
     cwd = Path(cwd)
-    if github_token:
-        # Configure credential helper to use the token for this push
-        await _git("config", "credential.helper",
-                   f"!f() {{ echo 'password={github_token}'; }}; f", cwd=cwd)
-    try:
-        await _git("push", "-u", remote, branch_name, cwd=str(cwd))
-    finally:
-        if github_token:
-            # Remove the temporary credential helper
-            try:
-                await _git("config", "--unset", "credential.helper", cwd=cwd)
-            except Exception:
-                pass
+    # Git automatically uses GITHUB_TOKEN from environment for HTTPS auth
+    await _git("push", "-u", remote, branch_name, cwd=str(cwd))
 
 
 async def commit_all(cwd: str | Path, message: str) -> bool:
@@ -190,9 +209,11 @@ class GitHubClient(GitClient):
         title: str,
         description: str = "",
         ticket_ids: list[str] | None = None,
-        github_token: str = "",
     ) -> dict:
         """Create a PR on GitHub.
+
+        P0-4: GITHUB_TOKEN is read from environment variable, not passed as parameter.
+        The gh CLI automatically uses GITHUB_TOKEN env var for authentication.
 
         Steps:
           1. Commit any uncommitted changes
@@ -235,7 +256,7 @@ class GitHubClient(GitClient):
             log.info("GitHubClient: no changes to commit for group %d", group_id)
 
         # Push branch (fail closed — don't create PR against stale remote branch)
-        await push_branch(workspace, branch, github_token=github_token)
+        await push_branch(workspace, branch)
 
         # Build PR body
         body_parts = [description]
@@ -254,7 +275,7 @@ class GitHubClient(GitClient):
             except Exception:
                 pass  # gh will use the repo's default
 
-            pr_url = await _gh(*gh_args, cwd=workspace, github_token=github_token)
+            pr_url = await _gh(*gh_args, cwd=workspace)
 
             # Extract PR number from URL
             pr_id = pr_url.rstrip("/").split("/")[-1] if pr_url else "unknown"

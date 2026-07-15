@@ -20,19 +20,25 @@ class TestRepoUrlValidation(unittest.TestCase):
         )
         self.assertEqual(req.repo_url, "https://github.com/user/repo.git")
 
-    def test_valid_gitlab_https(self):
-        req = CreateTaskRequest(
-            repo_url="https://gitlab.com/org/project.git",
-            requirements="Build a REST API for user management",
-        )
-        self.assertEqual(req.repo_url, "https://gitlab.com/org/project.git")
+    def test_reject_gitlab_https(self):
+        """P0-4: GitLab not yet supported, only github.com."""
+        with self.assertRaises(ValidationError) as ctx:
+            CreateTaskRequest(
+                repo_url="https://gitlab.com/org/project.git",
+                requirements="Build a REST API for user management",
+            )
+        self.assertIn("github.com", str(ctx.exception))
+        self.assertIn("not yet supported", str(ctx.exception))
 
-    def test_valid_bitbucket_https(self):
-        req = CreateTaskRequest(
-            repo_url="https://bitbucket.org/team/repo.git",
-            requirements="Build a REST API for user management",
-        )
-        self.assertEqual(req.repo_url, "https://bitbucket.org/team/repo.git")
+    def test_reject_bitbucket_https(self):
+        """P0-4: Bitbucket not yet supported, only github.com."""
+        with self.assertRaises(ValidationError) as ctx:
+            CreateTaskRequest(
+                repo_url="https://bitbucket.org/team/repo.git",
+                requirements="Build a REST API for user management",
+            )
+        self.assertIn("github.com", str(ctx.exception))
+        self.assertIn("not yet supported", str(ctx.exception))
 
     def test_reject_ssh_url(self):
         with self.assertRaises(ValidationError) as ctx:

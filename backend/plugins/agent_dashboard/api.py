@@ -45,20 +45,20 @@ class CreateTaskRequest(BaseModel):
     requirements: str = Field(..., description="Task requirements / feature description")
     base_branch: str = Field("main", description="Base branch to work from")
     test_command: str = Field("", description="Test command to run (e.g. 'pytest -x')")
-    github_token: Optional[str] = Field(None, description="GitHub token for PR creation")
     model: str = Field("deepseek-chat", description="AI model to use")
     max_iterations: int = Field(100, description="Max tool loop iterations", ge=1, le=500)
 
     @field_validator("repo_url")
     @classmethod
     def validate_repo_url(cls, v: str) -> str:
-        """Only allow HTTPS git URLs from known hosts."""
+        """Only allow HTTPS git URLs from github.com (P0-4: GitHub-only for now)."""
         allowed_pattern = re.compile(
-            r'^https://(github\.com|gitlab\.com|bitbucket\.org)/[\w\-./]+\.git$'
+            r'^https://github\.com/[\w\-./]+\.git$'
         )
         if not allowed_pattern.match(v):
             raise ValueError(
-                "repo_url must be an HTTPS git URL from github.com, gitlab.com, or bitbucket.org"
+                "repo_url must be an HTTPS git URL from github.com "
+                "(GitLab/Bitbucket not yet supported)"
             )
         return v
 
@@ -121,7 +121,6 @@ async def create_task(req: CreateTaskRequest, user=Depends(require_operator)):
             requirements=req.requirements,
             base_branch=req.base_branch,
             test_command=req.test_command,
-            github_token=req.github_token,
             model=req.model,
             max_iterations=req.max_iterations,
             worker_id=worker_id,

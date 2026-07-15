@@ -89,7 +89,6 @@ class TaskOrchestrator:
         requirements: str,
         base_branch: str = "main",
         test_command: str = "",
-        github_token: Optional[str] = None,
         model: str = "deepseek-chat",
         max_iterations: int = 100,
         worker_id: Optional[str] = None,
@@ -99,7 +98,16 @@ class TaskOrchestrator:
         Atomic: if any step fails, all partially created resources are cleaned up.
         Pre-flight: validates repo_url reachability before creating any resources.
 
+        P0-4: GitHub credentials are NOT passed as parameters. They are read from
+        the Worker process's GITHUB_TOKEN environment variable by github_client.py.
+
         Args:
+            repo_url: Git repository URL to clone (github.com only)
+            requirements: Task requirements / feature description
+            base_branch: Base branch to work from
+            test_command: Test command to run
+            model: AI model to use
+            max_iterations: Max tool loop iterations
             worker_id: Pre-selected worker for this group. If provided, the group
                       is bound to this worker BEFORE dispatch, preventing the
                       dispatch-then-reassign race that cancels the just-started task.
@@ -125,7 +133,7 @@ class TaskOrchestrator:
             bot_id = await self._add_bot(group_id, model, max_iterations)
 
             # 3. Clone repo into workspace
-            await self._clone_repo(group_id, repo_url, base_branch, github_token or "")
+            await self._clone_repo(group_id, repo_url, base_branch)
 
             # 4. Bind group to selected worker BEFORE dispatch.
             # This prevents the race where dispatch goes to the default-routed worker,
@@ -434,14 +442,17 @@ class TaskOrchestrator:
 
         return bot_id
 
-    async def _clone_repo(self, group_id: int, repo_url: str, branch: str,
-                          github_token: str = "") -> Path:
-        """Clone the repository into the group's workspace."""
+    async def _clone_repo(self, group_id: int, repo_url: str, branch: str) -> Path:
+        """Clone the repository into the group's workspace.
+
+        P0-4: GitHub credentials are NOT passed as parameters. They are read from
+        the Worker process's GITHUB_TOKEN environment variable by github_client.py.
+        """
         from workspace import layout as ws_layout
         from integrations.github_client import clone_repo
 
         workspace = ws_layout.group_shared_dir(group_id) / "workspace"
-        await clone_repo(repo_url, workspace, branch=branch, github_token=github_token)
+        await clone_repo(repo_url, workspace, branch=branch)
         return workspace
 
     async def _dispatch_agent(self, group_id: int, bot_id: int, requirements: str, test_command: str, task_id: str = "") -> None:

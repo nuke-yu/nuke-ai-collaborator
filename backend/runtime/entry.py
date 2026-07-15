@@ -64,20 +64,31 @@ async def run_worker(worker_id: str, addr: str) -> None:
     # that MCP lives in the collector, so it's safe to do before connecting.
     _init_tool_router()
 
-    # Install GitHub client if gh CLI is available (R-4 fix).
+    # P0-4: Install GitHub client if NUKE_GITHUB_ENABLED=true.
     # This must happen in each Worker process because the GitClient singleton
     # is per-process and doesn't cross the Supervisor→Worker boundary.
+    # Fail closed: if NUKE_GITHUB_ENABLED=true but gh or GITHUB_TOKEN is missing,
+    # the Worker startup fails (no silent fallback to LocalGitClient).
     import os
     if os.getenv("NUKE_GITHUB_ENABLED", "").lower() in ("1", "true", "yes"):
-        try:
-            from integrations.github_client import install_github_client, is_gh_available
-            if is_gh_available():
-                install_github_client()
-                logging.getLogger(__name__).info("GitHub client installed (gh CLI available)")
-            else:
-                logging.getLogger(__name__).warning("NUKE_GITHUB_ENABLED set but gh CLI not found")
-        except Exception:
-            logging.getLogger(__name__).warning("Failed to install GitHub client", exc_info=True)
+        from integrations.github_client import install_github_client, is_gh_available
+
+        # Check gh CLI availability
+        if not is_gh_available():
+            raise RuntimeError(
+                "NUKE_GITHUB_ENABLED=true but gh CLI not found. "
+                "Install gh or set NUKE_GITHUB_ENABLED=false."
+            )
+
+        # Check GITHUB_TOKEN availability
+        if not os.environ.get("GITHUB_TOKEN"):
+            raise RuntimeError(
+                "NUKE_GITHUB_ENABLED=true but GITHUB_TOKEN not set. "
+                "Set GITHUB_TOKEN env var or set NUKE_GITHUB_ENABLED=false."
+            )
+
+        install_github_client()
+        logging.getLogger(__name__).info("GitHub client installed (gh CLI + GITHUB_TOKEN available)")
 
     from skills.watcher import watcher
     watcher.start(asyncio.get_running_loop())

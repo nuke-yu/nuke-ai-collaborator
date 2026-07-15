@@ -87,22 +87,60 @@ class TestGhHelper(unittest.IsolatedAsyncioTestCase):
 class TestCloneRepo(unittest.IsolatedAsyncioTestCase):
 
     async def test_clone_with_branch(self):
-        with patch("asyncio.create_subprocess_exec", return_value=_mock_proc()) as mock_exec:
+        # P0-4: clone_repo now makes two git calls: clone + security assertion
+        procs = [
+            _mock_proc(b"", b"", 0),   # git clone
+            _mock_proc(b"https://github.com/user/repo.git\n", b"", 0),  # git remote get-url
+        ]
+        with patch("asyncio.create_subprocess_exec", side_effect=procs) as mock_exec:
             with patch("shutil.rmtree"):
                 dest = Path("/tmp/test_clone_dest")
                 await clone_repo("https://github.com/user/repo.git", dest, branch="develop")
-                call_args = mock_exec.call_args[0]
-                self.assertIn("clone", call_args)
-                self.assertIn("--branch", call_args)
-                self.assertIn("develop", call_args)
+                # First call should be clone
+                first_call_args = mock_exec.call_args_list[0][0]
+                self.assertIn("clone", first_call_args)
+                self.assertIn("--branch", first_call_args)
+                self.assertIn("develop", first_call_args)
 
     async def test_clone_without_branch(self):
-        with patch("asyncio.create_subprocess_exec", return_value=_mock_proc()) as mock_exec:
+        # P0-4: clone_repo now makes two git calls: clone + security assertion
+        procs = [
+            _mock_proc(b"", b"", 0),   # git clone
+            _mock_proc(b"https://github.com/user/repo.git\n", b"", 0),  # git remote get-url
+        ]
+        with patch("asyncio.create_subprocess_exec", side_effect=procs) as mock_exec:
             with patch("shutil.rmtree"):
                 dest = Path("/tmp/test_clone_dest")
                 await clone_repo("https://github.com/user/repo.git", dest)
-                call_args = mock_exec.call_args[0]
-                self.assertNotIn("--branch", call_args)
+                # First call should be clone
+                first_call_args = mock_exec.call_args_list[0][0]
+                self.assertNotIn("--branch", first_call_args)
+
+    async def test_clone_security_assertion_passes(self):
+        """P0-4: Security assertion passes when remote URL has no credentials."""
+        procs = [
+            _mock_proc(b"", b"", 0),   # git clone
+            _mock_proc(b"https://github.com/user/repo.git\n", b"", 0),  # git remote get-url
+        ]
+        with patch("asyncio.create_subprocess_exec", side_effect=procs):
+            with patch("shutil.rmtree"):
+                dest = Path("/tmp/test_clone_dest")
+                # Should not raise
+                await clone_repo("https://github.com/user/repo.git", dest)
+
+    async def test_clone_security_assertion_fails_with_credentials(self):
+        """P0-4: Security assertion fails when remote URL contains credentials."""
+        procs = [
+            _mock_proc(b"", b"", 0),   # git clone
+            _mock_proc(b"https://token123@github.com/user/repo.git\n", b"", 0),  # git remote get-url
+        ]
+        with patch("asyncio.create_subprocess_exec", side_effect=procs):
+            with patch("shutil.rmtree"):
+                dest = Path("/tmp/test_clone_dest")
+                with self.assertRaises(RuntimeError) as ctx:
+                    await clone_repo("https://github.com/user/repo.git", dest)
+                self.assertIn("Security violation", str(ctx.exception))
+                self.assertIn("credentials", str(ctx.exception))
 
 
 class TestEnsureBranch(unittest.IsolatedAsyncioTestCase):
