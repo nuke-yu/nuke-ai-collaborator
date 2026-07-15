@@ -15,6 +15,8 @@ Usage:
 """
 import asyncio
 import logging
+import random
+from collections import OrderedDict
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -383,22 +385,97 @@ class TaskStore:
 class TaskStateProjector:
     """Serialize dashboard lifecycle events into the durable task registry."""
 
-    def __init__(self, store: TaskStore):
+    def __init__(
+        self,
+        store: TaskStore,
+        *,
+        max_pending_events: int = 4096,
+        retry_base_delay: float = 0.1,
+        retry_max_delay: float = 5.0,
+        flush_timeout: float = 30.0,
+        shutdown_drain_timeout: float = 2.0,
+    ):
+        if max_pending_events < 1:
+            raise ValueError("max_pending_events must be positive")
         self._store = store
-        self._queue: asyncio.Queue = asyncio.Queue()
+        self._max_pending_events = max_pending_events
+        self._retry_base_delay = retry_base_delay
+        self._retry_max_delay = retry_max_delay
+        self._flush_timeout = flush_timeout
+        self._shutdown_drain_timeout = shutdown_drain_timeout
+        self._pending: OrderedDict[tuple[str, str], tuple] = OrderedDict()
         self._last_status: dict[str, str] = {}
+        self._wake = asyncio.Event()
+        self._idle = asyncio.Event()
+        self._idle.set()
+        self._inflight: tuple | None = None
+        self._dropped_events = 0
+
+    @property
+    def backlog_size(self) -> int:
+        return len(self._pending) + (1 if self._inflight is not None else 0)
+
+    @property
+    def dropped_events(self) -> int:
+        return self._dropped_events
+
+    @staticmethod
+    def _is_critical(item: tuple) -> bool:
+        kind, _, value, _ = item
+        return kind == "pr_url" or value in _PERSISTED_TERMINAL_STATUSES
+
+    def _discard_oldest_noncritical(self) -> bool:
+        for key, item in list(self._pending.items()):
+            if self._is_critical(item):
+                continue
+            self._pending.pop(key)
+            if item[0] == "status" and self._last_status.get(item[1]) == item[2]:
+                self._last_status.pop(item[1], None)
+            self._dropped_events += 1
+            log.error(
+                "TaskStateProjector: evicted non-terminal event for task %s; "
+                "backlog capacity=%d",
+                item[1],
+                self._max_pending_events,
+            )
+            return True
+        return False
+
+    def _enqueue(self, item: tuple) -> bool:
+        key = (item[0], item[1])
+        if key in self._pending:
+            self._pending[key] = item
+            self._pending.move_to_end(key)
+        else:
+            if len(self._pending) >= self._max_pending_events:
+                if not self._discard_oldest_noncritical():
+                    self._dropped_events += 1
+                    log.critical(
+                        "TaskStateProjector: rejected critical event for task %s; "
+                        "backlog contains only critical events (capacity=%d)",
+                        item[1],
+                        self._max_pending_events,
+                    )
+                    return False
+            self._pending[key] = item
+        self._idle.clear()
+        self._wake.set()
+        return True
 
     def enqueue_status(
         self, task_id: str, status: str, error_message: Optional[str] = None
-    ) -> None:
+    ) -> bool:
         if not task_id or self._last_status.get(task_id) == status:
-            return
-        self._last_status[task_id] = status
-        self._queue.put_nowait(("status", task_id, status, error_message))
+            return bool(task_id)
+        accepted = self._enqueue(("status", task_id, status, error_message))
+        if accepted:
+            self._last_status[task_id] = status
+        return accepted
 
-    def enqueue_pr_url(self, task_id: str, pr_url: str) -> None:
+    def enqueue_pr_url(self, task_id: str, pr_url: str) -> bool:
         if task_id and pr_url:
-            self._queue.put_nowait(("pr_url", task_id, pr_url, None))
+            return self._enqueue(("pr_url", task_id, pr_url, None))
+        return False
 
     async def _apply(self, item: tuple) -> None:
         kind, task_id, value, error = item
@@ -409,46 +486,80 @@ class TaskStateProjector:
         else:
             updated = await self._store.update_pr_url(task_id, value)
         if not updated:
-            if kind == "status":
+            if kind == "status" and self._last_status.get(task_id) == value:
                 self._last_status.pop(task_id, None)
             log.warning(
                 "TaskStateProjector: rejected %s update for task %s",
                 kind,
                 task_id,
             )
-        elif kind == "status" and value in _PERSISTED_TERMINAL_STATUSES:
+        elif (
+            kind == "status"
+            and value in _PERSISTED_TERMINAL_STATUSES
+            and self._last_status.get(task_id) == value
+        ):
             self._last_status.pop(task_id, None)
 
     async def run(self) -> None:
-        """Consume projections until cancelled, draining queued terminal events."""
+        """Consume projections with bounded coalescing and exponential retry."""
+        current_key = None
         try:
             while True:
-                item = await self._queue.get()
-                try:
-                    await self._apply(item)
-                except Exception:
-                    log.exception(
-                        "TaskStateProjector: failed to persist task %s", item[1]
-                    )
-                    # Retry transient database failures. The task state machine
-                    # prevents a delayed event from regressing a terminal state.
-                    self._queue.put_nowait(item)
-                    await asyncio.sleep(0.1)
-                finally:
-                    self._queue.task_done()
+                await self._wake.wait()
+                while self._pending:
+                    current_key, self._inflight = self._pending.popitem(last=False)
+                    attempt = 0
+                    while True:
+                        try:
+                            await self._apply(self._inflight)
+                            break
+                        except Exception:
+                            attempt += 1
+                            if attempt == 1 or attempt & (attempt - 1) == 0:
+                                log.exception(
+                                    "TaskStateProjector: failed to persist task %s "
+                                    "(attempt %d)",
+                                    self._inflight[1],
+                                    attempt,
+                                )
+                            delay = min(
+                                self._retry_base_delay * (2 ** min(attempt - 1, 16)),
+                                self._retry_max_delay,
+                            )
+                            await asyncio.sleep(random.uniform(delay / 2, delay))
+                    current_key = None
+                    self._inflight = None
+
+                self._wake.clear()
+                self._idle.set()
         except asyncio.CancelledError:
-            while not self._queue.empty():
-                item = self._queue.get_nowait()
-                try:
-                    await self._apply(item)
-                except Exception:
-                    log.exception(
-                        "TaskStateProjector: failed to drain task %s", item[1]
-                    )
-                finally:
-                    self._queue.task_done()
+            if current_key is not None and current_key not in self._pending:
+                self._pending[current_key] = self._inflight
+                self._pending.move_to_end(current_key, last=False)
+            self._inflight = None
+            try:
+                async with asyncio.timeout(self._shutdown_drain_timeout):
+                    while self._pending:
+                        _, item = self._pending.popitem(last=False)
+                        try:
+                            await self._apply(item)
+                        except Exception:
+                            log.exception(
+                                "TaskStateProjector: failed to drain task %s", item[1]
+                            )
+            except TimeoutError:
+                log.error(
+                    "TaskStateProjector: shutdown drain timed out with %d events",
+                    len(self._pending),
+                )
+            finally:
+                self._pending.clear()
+                self._idle.set()
             raise
 
-    async def flush(self) -> None:
+    async def flush(self, timeout: float | None = None) -> None:
         """Wait until all events queued before this call have been persisted."""
-        await self._queue.join()
+        await asyncio.wait_for(
+            self._idle.wait(),
+            timeout=self._flush_timeout if timeout is None else timeout,
+        )

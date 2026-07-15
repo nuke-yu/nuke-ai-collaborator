@@ -315,6 +315,68 @@ class TestTaskStateProjectorRetry(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(store.update_status.await_count, 2)
         self.assertNotIn("agent_one", projector._last_status)
 
+    async def test_pending_updates_are_coalesced_per_task(self):
+        store = MagicMock()
+        store.update_status = AsyncMock(return_value=True)
+        projector = TaskStateProjector(store, max_pending_events=2)
+
+        projector.enqueue_status("agent_one", "running")
+        projector.enqueue_status("agent_one", "stuck", "no progress")
+        projector.enqueue_status("agent_one", "completed")
+
+        self.assertEqual(projector.backlog_size, 1)
+        consumer = asyncio.create_task(projector.run())
+        try:
+            await projector.flush(timeout=1)
+        finally:
+            consumer.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await consumer
+
+        store.update_status.assert_awaited_once_with(
+            "agent_one", "completed", error_message=None
+        )
+
+    async def test_backlog_is_bounded_and_prefers_terminal_events(self):
+        store = MagicMock()
+        projector = TaskStateProjector(store, max_pending_events=2)
+
+        projector.enqueue_status("agent_one", "running")
+        projector.enqueue_status("agent_two", "completed")
+        projector.enqueue_status("agent_three", "failed", "test failed")
+
+        self.assertEqual(projector.backlog_size, 2)
+        self.assertEqual(projector.dropped_events, 1)
+        self.assertNotIn("agent_one", projector._last_status)
+        self.assertEqual(projector._last_status["agent_two"], "completed")
+        self.assertEqual(projector._last_status["agent_three"], "failed")
+
+    async def test_flush_times_out_without_consumer(self):
+        projector = TaskStateProjector(MagicMock(), flush_timeout=0.01)
+        projector.enqueue_status("agent_one", "running")
+
+        with self.assertRaises(asyncio.TimeoutError):
+            await projector.flush()
+
+    async def test_persistent_failure_does_not_grow_backlog(self):
+        store = MagicMock()
+        store.update_status = AsyncMock(side_effect=RuntimeError("database offline"))
+        projector = TaskStateProjector(
+            store,
+            max_pending_events=2,
+            retry_base_delay=0.001,
+            retry_max_delay=0.005,
+            shutdown_drain_timeout=0.01,
+        )
+        projector.enqueue_status("agent_one", "completed")
+        consumer = asyncio.create_task(projector.run())
+        await asyncio.sleep(0.02)
+
+        self.assertEqual(projector.backlog_size, 1)
+        consumer.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await consumer
+
 
 class TestRetryTask(DatabaseTestBase):
 
