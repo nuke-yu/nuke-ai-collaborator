@@ -69,26 +69,15 @@ async def run_worker(worker_id: str, addr: str) -> None:
     # is per-process and doesn't cross the Supervisor→Worker boundary.
     # Fail closed: if NUKE_GITHUB_ENABLED=true but gh or GITHUB_TOKEN is missing,
     # the Worker startup fails (no silent fallback to LocalGitClient).
-    import os
-    if os.getenv("NUKE_GITHUB_ENABLED", "").lower() in ("1", "true", "yes"):
-        from integrations.github_client import install_github_client, is_gh_available
-
-        # Check gh CLI availability
-        if not is_gh_available():
-            raise RuntimeError(
-                "NUKE_GITHUB_ENABLED=true but gh CLI not found. "
-                "Install gh or set NUKE_GITHUB_ENABLED=false."
-            )
-
-        # Check GITHUB_TOKEN availability
-        if not os.environ.get("GITHUB_TOKEN"):
-            raise RuntimeError(
-                "NUKE_GITHUB_ENABLED=true but GITHUB_TOKEN not set. "
-                "Set GITHUB_TOKEN env var or set NUKE_GITHUB_ENABLED=false."
-            )
-
+    from integrations.github_client import (
+        github_integration_enabled,
+        install_github_client,
+        require_github_integration,
+    )
+    if github_integration_enabled():
+        require_github_integration()
         install_github_client()
-        logging.getLogger(__name__).info("GitHub client installed (gh CLI + GITHUB_TOKEN available)")
+        logging.getLogger(__name__).info("GitHub client installed and ready")
 
     from skills.watcher import watcher
     watcher.start(asyncio.get_running_loop())

@@ -1,8 +1,7 @@
 """integrations/github_client.py — Real GitHub integration via `gh` CLI.
 
 Implements GitClient ABC from integrations/git.py using the GitHub CLI (`gh`)
-for branch management, push, and PR creation. Falls back gracefully when `gh`
-is not installed or not authenticated.
+for branch management, push, and PR creation. Missing capabilities fail closed.
 
 Design choices:
   - Uses `gh` CLI instead of PyGithub to avoid extra dependencies
@@ -22,6 +21,53 @@ log = logging.getLogger(__name__)
 
 # Default timeout for git/gh commands
 _CMD_TIMEOUT = 60
+_TRUE_VALUES = {"1", "true", "yes"}
+_ASKPASS_PATH = Path(__file__).with_name("git_askpass.sh")
+
+
+class GitHubIntegrationUnavailable(RuntimeError):
+    """The deployment cannot provide real GitHub repository/PR operations."""
+
+
+def github_integration_enabled() -> bool:
+    return os.getenv("NUKE_GITHUB_ENABLED", "").lower() in _TRUE_VALUES
+
+
+def require_github_integration() -> None:
+    """Validate the complete capability needed by coding-agent tasks."""
+    if not github_integration_enabled():
+        raise GitHubIntegrationUnavailable(
+            "GitHub integration is disabled; set NUKE_GITHUB_ENABLED=true"
+        )
+    if not os.environ.get("GITHUB_TOKEN"):
+        raise GitHubIntegrationUnavailable(
+            "GitHub integration is unavailable: GITHUB_TOKEN is not set"
+        )
+    if not is_gh_available():
+        raise GitHubIntegrationUnavailable(
+            "GitHub integration is unavailable: gh CLI is not installed"
+        )
+    if not _ASKPASS_PATH.is_file() or not os.access(_ASKPASS_PATH, os.X_OK):
+        raise GitHubIntegrationUnavailable(
+            f"GitHub askpass helper is unavailable: {_ASKPASS_PATH}"
+        )
+
+
+def _github_auth_env(*, require_token: bool = False) -> dict[str, str]:
+    """Return non-interactive GitHub auth settings without writing credentials."""
+    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+    if require_token and not token:
+        raise GitHubIntegrationUnavailable("GITHUB_TOKEN is required")
+
+    env = {"GIT_TERMINAL_PROMPT": "0"}
+    if token:
+        env.update({
+            "GIT_ASKPASS": str(_ASKPASS_PATH),
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "credential.username",
+            "GIT_CONFIG_VALUE_0": "x-access-token",
+        })
+    return env
 
 
 async def _run_cmd(*args: str, cwd: str | Path | None = None, timeout: int = _CMD_TIMEOUT,
@@ -43,7 +89,11 @@ async def _run_cmd(*args: str, cwd: str | Path | None = None, timeout: int = _CM
         try:
             proc.kill()
         except Exception:
-            pass
+            log.exception("Failed to kill timed-out command: %s", args[0])
+        try:
+            await proc.wait()
+        except Exception:
+            log.exception("Failed to reap timed-out command: %s", args[0])
         raise RuntimeError(f"Command timed out after {timeout}s: {' '.join(args)}")
 
     return (
@@ -53,9 +103,16 @@ async def _run_cmd(*args: str, cwd: str | Path | None = None, timeout: int = _CM
     )
 
 
-async def _git(*args: str, cwd: str | Path | None = None) -> str:
+async def _git(
+    *args: str,
+    cwd: str | Path | None = None,
+    authenticated: bool = False,
+) -> str:
     """Run a git command, raising on failure."""
-    stdout, stderr, rc = await _run_cmd("git", *args, cwd=cwd)
+    auth_env = _github_auth_env(require_token=True) if authenticated else None
+    stdout, stderr, rc = await _run_cmd(
+        "git", *args, cwd=cwd, extra_env=auth_env
+    )
     if rc != 0:
         raise RuntimeError(f"git {' '.join(args)} failed (rc={rc}): {stderr}")
     return stdout
@@ -102,41 +159,25 @@ async def clone_repo(repo_url: str, dest: str | Path, branch: str = "") -> Path:
         shutil.rmtree(dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
 
-    # P0-4: Use GIT_ASKPASS for authentication instead of embedding token in URL.
-    # GIT_ASKPASS is a git config that points to a script that outputs the password.
-    # This keeps the token out of the git remote URL and process arguments.
-    # The GITHUB_TOKEN env var is already set in the Worker process.
-    github_token = os.environ.get("GITHUB_TOKEN", "")
-    extra_env = None
-    if github_token:
-        # Create a temporary askpass script that outputs the token
-        askpass_script = dest.parent / ".git_askpass.sh"
-        askpass_script.write_text(f"#!/bin/sh\necho '{github_token}'\n")
-        askpass_script.chmod(0o700)
-        extra_env = {
-            "GIT_ASKPASS": str(askpass_script),
-            "GIT_TERMINAL_PROMPT": "0",
-        }
-
     args = ["clone", "--depth", "1"]
     if branch:
         args.extend(["--branch", branch])
     args.extend([repo_url, str(dest)])
 
-    try:
-        await _run_cmd("git", *args, cwd=None, extra_env=extra_env)
-    finally:
-        # Clean up askpass script
-        if extra_env and "GIT_ASKPASS" in extra_env:
-            askpass_path = Path(extra_env["GIT_ASKPASS"])
-            if askpass_path.exists():
-                askpass_path.unlink()
+    _, stderr, rc = await _run_cmd(
+        "git", *args, cwd=None, extra_env=_github_auth_env()
+    )
+    if rc != 0:
+        if dest.exists():
+            shutil.rmtree(dest, ignore_errors=True)
+        raise RuntimeError(f"git clone failed (rc={rc}): {stderr}")
 
     # P0-4 Security assertion: verify remote URL doesn't contain credentials
     remote_url = await _git("remote", "get-url", "origin", cwd=dest)
     if "@" in remote_url and "://" in remote_url:
         # URL format: https://user:pass@host or https://token@host
         # This is a security violation - credentials should not be in the URL
+        shutil.rmtree(dest, ignore_errors=True)
         raise RuntimeError(
             f"Security violation: git remote URL contains credentials: {remote_url[:20]}..."
         )
@@ -169,8 +210,26 @@ async def push_branch(cwd: str | Path, branch_name: str, remote: str = "origin")
     Git automatically uses GITHUB_TOKEN env var for HTTPS authentication.
     """
     cwd = Path(cwd)
-    # Git automatically uses GITHUB_TOKEN from environment for HTTPS auth
-    await _git("push", "-u", remote, branch_name, cwd=str(cwd))
+    await _git(
+        "push", "-u", remote, branch_name, cwd=str(cwd), authenticated=True
+    )
+
+
+async def ls_remote(repo_url: str, branch: str = "", timeout: int = 30) -> None:
+    """Verify repository/branch reachability using the shared auth contract."""
+    args = ["ls-remote", "--exit-code", repo_url]
+    if branch:
+        args.extend(["--heads", branch])
+    _, stderr, rc = await _run_cmd(
+        "git",
+        *args,
+        timeout=timeout,
+        extra_env=_github_auth_env(require_token=True),
+    )
+    if rc != 0:
+        raise RuntimeError(
+            f"Repository not reachable or branch '{branch}' not found: {stderr}"
+        )
 
 
 async def commit_all(cwd: str | Path, message: str) -> bool:

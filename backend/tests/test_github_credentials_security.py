@@ -4,12 +4,13 @@ Tests that GitHub credentials are handled securely:
   - github_token removed from API body and orchestrator parameters
   - GITHUB_TOKEN read from environment variable only
   - Token not embedded in git remote URLs
-  - GIT_ASKPASS used for authentication instead of URL embedding
+  - static GIT_ASKPASS helper reads credentials only from process environment
   - Security assertion rejects URLs with credentials
   - Worker fails closed when NUKE_GITHUB_ENABLED=true but gh/token missing
 """
 import os
 import unittest
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from pydantic import ValidationError
@@ -112,6 +113,12 @@ class TestGitHubTokenNotInURLs(unittest.IsolatedAsyncioTestCase):
                     self.assertNotIn("secret123", url_arg)
                     self.assertEqual(url_arg, "https://github.com/user/repo.git")
 
+                    child_env = mock_exec.call_args_list[0].kwargs["env"]
+                    askpass = child_env["GIT_ASKPASS"]
+                    self.assertNotIn("secret123", askpass)
+                    self.assertNotIn("secret123", Path(askpass).read_text(encoding="utf-8"))
+                    self.assertFalse(os.path.exists("/tmp/.git_askpass.sh"))
+
     async def test_security_assertion_rejects_url_with_credentials(self):
         """Security assertion rejects if git remote URL contains credentials."""
         from integrations.github_client import clone_repo
@@ -138,58 +145,72 @@ class TestWorkerFailsClosed(unittest.IsolatedAsyncioTestCase):
     """Test that Worker fails closed when NUKE_GITHUB_ENABLED=true but gh/token missing."""
 
     async def test_worker_fails_when_github_enabled_but_gh_missing(self):
-        """Worker startup fails when NUKE_GITHUB_ENABLED=true but gh CLI not found."""
-        from integrations.github_client import is_gh_available
+        from integrations.github_client import require_github_integration
 
-        with patch.dict(os.environ, {"NUKE_GITHUB_ENABLED": "true"}, clear=False):
+        with patch.dict(
+            os.environ,
+            {"NUKE_GITHUB_ENABLED": "true", "GITHUB_TOKEN": "secret123"},
+            clear=False,
+        ):
             with patch("shutil.which", return_value=None):
-                # Simulate the check in runtime/entry.py
-                if os.getenv("NUKE_GITHUB_ENABLED", "").lower() in ("1", "true", "yes"):
-                    if not is_gh_available():
-                        with self.assertRaises(RuntimeError) as ctx:
-                            raise RuntimeError(
-                                "NUKE_GITHUB_ENABLED=true but gh CLI not found. "
-                                "Install gh or set NUKE_GITHUB_ENABLED=false."
-                            )
-                        self.assertIn("gh CLI not found", str(ctx.exception))
+                with self.assertRaisesRegex(RuntimeError, "gh CLI"):
+                    require_github_integration()
 
     async def test_worker_fails_when_github_enabled_but_token_missing(self):
         """Worker startup fails when NUKE_GITHUB_ENABLED=true but GITHUB_TOKEN not set."""
-        from integrations.github_client import is_gh_available
+        from integrations.github_client import require_github_integration
 
-        with patch.dict(os.environ, {"NUKE_GITHUB_ENABLED": "true"}, clear=False):
-            # Remove GITHUB_TOKEN if it exists
-            env = os.environ.copy()
-            env.pop("GITHUB_TOKEN", None)
-
-            with patch("shutil.which", return_value="/usr/bin/gh"):
-                with patch.dict(os.environ, env, clear=True):
-                    # Simulate the check in runtime/entry.py
-                    if os.getenv("NUKE_GITHUB_ENABLED", "").lower() in ("1", "true", "yes"):
-                        if is_gh_available():
-                            if not os.environ.get("GITHUB_TOKEN"):
-                                with self.assertRaises(RuntimeError) as ctx:
-                                    raise RuntimeError(
-                                        "NUKE_GITHUB_ENABLED=true but GITHUB_TOKEN not set. "
-                                        "Set GITHUB_TOKEN env var or set NUKE_GITHUB_ENABLED=false."
-                                    )
-                                self.assertIn("GITHUB_TOKEN not set", str(ctx.exception))
+        with patch.dict(os.environ, {"NUKE_GITHUB_ENABLED": "true"}, clear=True), \
+             patch("shutil.which", return_value="/usr/bin/gh"):
+            with self.assertRaisesRegex(RuntimeError, "GITHUB_TOKEN"):
+                require_github_integration()
 
     async def test_worker_succeeds_when_github_enabled_with_gh_and_token(self):
         """Worker startup succeeds when NUKE_GITHUB_ENABLED=true with gh and GITHUB_TOKEN."""
-        from integrations.github_client import is_gh_available
+        from integrations.github_client import require_github_integration
 
         with patch.dict(os.environ, {
             "NUKE_GITHUB_ENABLED": "true",
             "GITHUB_TOKEN": "secret123",
         }, clear=False):
             with patch("shutil.which", return_value="/usr/bin/gh"):
-                # Simulate the check in runtime/entry.py
-                if os.getenv("NUKE_GITHUB_ENABLED", "").lower() in ("1", "true", "yes"):
-                    if is_gh_available():
-                        if os.environ.get("GITHUB_TOKEN"):
-                            # Should succeed (no exception)
-                            pass
+                require_github_integration()
+
+    async def test_disabled_integration_fails_closed(self):
+        from integrations.github_client import require_github_integration
+
+        with patch.dict(os.environ, {}, clear=True):
+            with self.assertRaisesRegex(RuntimeError, "disabled"):
+                require_github_integration()
+
+    async def test_task_api_returns_503_when_integration_is_unavailable(self):
+        from fastapi import HTTPException
+        from integrations.github_client import GitHubIntegrationUnavailable
+        from plugins.agent_dashboard import api
+
+        orchestrator = MagicMock()
+        orchestrator.create_task = AsyncMock(
+            side_effect=GitHubIntegrationUnavailable("GitHub integration is disabled")
+        )
+        previous = api._orchestrator
+        api._orchestrator = orchestrator
+        try:
+            request = api.CreateTaskRequest(
+                repo_url="https://github.com/user/repo.git",
+                requirements="Implement a sufficiently detailed feature",
+            )
+            with self.assertRaises(HTTPException) as ctx:
+                await api.create_task(request, user={"username": "operator"})
+        finally:
+            api._orchestrator = previous
+
+        self.assertEqual(ctx.exception.status_code, 503)
+
+    async def test_production_default_never_creates_local_stub_pr(self):
+        from integrations.git import UnavailableGitClient, _default_client
+
+        with patch.dict(os.environ, {"NUKE_ENV": "production"}, clear=False):
+            self.assertIsInstance(_default_client(), UnavailableGitClient)
 
 
 class TestGitHubOnlyForNow(unittest.TestCase):

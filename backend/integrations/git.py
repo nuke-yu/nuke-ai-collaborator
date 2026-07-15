@@ -3,6 +3,7 @@
 LocalGitClient 把 PR 产出成一个工作区文件(prs/PR-N.md)并返回 stub 的 pr_id/url。
 真 Git/平台接入时实现一个调用 Git API 的 GitClient 子类并 set_git() 即可。
 """
+import os
 from abc import ABC, abstractmethod
 
 from workspace import write_file
@@ -38,7 +39,21 @@ class LocalGitClient(GitClient):
                 "title": title, "tickets": tickets}
 
 
-_client: GitClient = LocalGitClient()
+class UnavailableGitClient(GitClient):
+    """Fail-closed client used when production has no real Git integration."""
+
+    async def create_pr(self, group_id: int, title: str,
+                        description: str = "", ticket_ids: list[str] | None = None) -> dict:
+        raise RuntimeError("Real Git integration is not configured")
+
+
+def _default_client() -> GitClient:
+    if os.getenv("NUKE_ENV", "").lower() == "production":
+        return UnavailableGitClient()
+    return LocalGitClient()
+
+
+_client: GitClient = _default_client()
 
 
 def get_git() -> GitClient:

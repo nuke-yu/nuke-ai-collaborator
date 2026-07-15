@@ -133,6 +133,9 @@ async def create_task(req: CreateTaskRequest, user=Depends(require_operator)):
             created_at=record["created_at"],
         )
     except Exception as e:
+        from integrations.github_client import GitHubIntegrationUnavailable
+        if isinstance(e, GitHubIntegrationUnavailable):
+            raise HTTPException(503, str(e))
         log.exception("agent_dashboard: task creation failed")
         raise HTTPException(500, f"Task creation failed: {e}")
 

@@ -74,6 +74,8 @@ services:
       # ── REQUIRED: security credentials ──
       AUTH_SECRET: ${AUTH_SECRET:?Set AUTH_SECRET (≥32 chars)}
       NUKE_OPERATOR_USERS: ${NUKE_OPERATOR_USERS:?Set NUKE_OPERATOR_USERS to at least one admin username}
+      NUKE_GITHUB_ENABLED: "true"
+      GITHUB_TOKEN: ${GITHUB_TOKEN:?Set GITHUB_TOKEN for repository and pull-request access}
     volumes:
       - /var/lib/nuke-ai-collaborator:/var/lib/nuke-ai-collaborator
     healthcheck:

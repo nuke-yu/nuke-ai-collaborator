@@ -48,7 +48,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update && apt-get install -y --no-install-recommends \
-        ripgrep git libstdc++6 ca-certificates
+        ripgrep git gh libstdc++6 ca-certificates
 
 # node runtime + the JS/TS language server, reused from the frontend stage.
 COPY --from=frontend /usr/local/bin/node /usr/local/bin/node

@@ -4,6 +4,7 @@ Tests the coding agent task lifecycle with mocked dependencies.
 No real git operations, DB writes, or Supervisor calls are made.
 """
 import asyncio
+import os
 import unittest
 from unittest.mock import patch, AsyncMock, MagicMock
 from plugins.agent_dashboard.orchestrator import TaskOrchestrator, CODING_AGENT_SYSTEM_PROMPT
@@ -350,6 +351,21 @@ class TestSystemPrompt(unittest.TestCase):
 
 
 class TestPreflightCheck(DatabaseTestBase):
+
+    async def asyncSetUp(self):
+        await super().asyncSetUp()
+        self._github_env = patch.dict(
+            os.environ,
+            {"NUKE_GITHUB_ENABLED": "true", "GITHUB_TOKEN": "test-token"},
+        )
+        self._github_env.start()
+        self._gh = patch("shutil.which", return_value="/usr/bin/gh")
+        self._gh.start()
+
+    async def asyncTearDown(self):
+        self._gh.stop()
+        self._github_env.stop()
+        await super().asyncTearDown()
 
     async def test_preflight_success(self):
         """Valid repo passes pre-flight check."""

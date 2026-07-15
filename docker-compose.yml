@@ -90,6 +90,8 @@ services:
       #   Required for managing API keys (/api/config) and MCP servers.
       #   Without this, all control-plane endpoints return 403.
       NUKE_OPERATOR_USERS: ${NUKE_OPERATOR_USERS:?Set NUKE_OPERATOR_USERS to at least one admin username}
+      NUKE_GITHUB_ENABLED: "true"
+      GITHUB_TOKEN: ${GITHUB_TOKEN:?Set GITHUB_TOKEN for repository and pull-request access}
       # API keys: pass here (bootstrap_from_env migrates them into app_config.json),
       # or mount app_config.json (see volumes note below).
       # DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}

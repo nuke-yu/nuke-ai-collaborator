@@ -52,6 +52,8 @@ class TestRunCmd(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(RuntimeError) as ctx:
                 await _run_cmd("sleep", "100", timeout=1)
             self.assertIn("timed out", str(ctx.exception))
+            proc.kill.assert_called_once()
+            proc.wait.assert_awaited_once()
 
 
 class TestGitHelper(unittest.IsolatedAsyncioTestCase):
@@ -183,6 +185,11 @@ class TestCommitAll(unittest.IsolatedAsyncioTestCase):
 
 
 class TestGitHubClient(unittest.IsolatedAsyncioTestCase):
+
+    def setUp(self):
+        self._env = patch.dict(os.environ, {"GITHUB_TOKEN": "test-token"})
+        self._env.start()
+        self.addCleanup(self._env.stop)
 
     def _setup_workspace(self, tmp_dir):
         """Create a fake workspace with .git directory."""

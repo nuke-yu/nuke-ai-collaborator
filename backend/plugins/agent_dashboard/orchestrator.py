@@ -353,26 +353,10 @@ class TaskOrchestrator:
         Uses `git ls-remote` which is lightweight (no clone) and fails fast
         on invalid URLs, auth issues, or unreachable hosts.
         """
-        import asyncio
+        from integrations.github_client import ls_remote, require_github_integration
 
-        args = ["git", "ls-remote", "--exit-code", repo_url]
-        if branch:
-            args.extend(["--heads", branch])
-
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                *args,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            _, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
-            if proc.returncode != 0:
-                err = stderr.decode(errors="replace").strip()
-                raise RuntimeError(
-                    f"Repository not reachable or branch '{branch}' not found: {err}"
-                )
-        except asyncio.TimeoutError:
-            raise RuntimeError(f"Repository reachability check timed out: {repo_url}")
+        require_github_integration()
+        await ls_remote(repo_url, branch=branch, timeout=30)
 
     async def _rollback_group(self, group_id: Optional[int]) -> None:
         """Clean up a partially created group: remove DB rows + workspace dir.
