@@ -138,7 +138,7 @@ class TaskOrchestrator:
                 self._adapter.register_task(group_id, task_id)
 
             # 6. Dispatch the coding agent
-            await self._dispatch_agent(group_id, bot_id, requirements, test_command)
+            await self._dispatch_agent(group_id, bot_id, requirements, test_command, task_id=task_id)
 
         except Exception as e:
             # Compensate: clean up any partially created resources
@@ -198,6 +198,7 @@ class TaskOrchestrator:
             record["bot_id"],
             record["requirements"],
             record.get("test_command", ""),
+            task_id=task_id,
         )
 
         record["status"] = "restarted"
@@ -443,13 +444,17 @@ class TaskOrchestrator:
         await clone_repo(repo_url, workspace, branch=branch, github_token=github_token)
         return workspace
 
-    async def _dispatch_agent(self, group_id: int, bot_id: int, requirements: str, test_command: str) -> None:
+    async def _dispatch_agent(self, group_id: int, bot_id: int, requirements: str, test_command: str, task_id: str = "") -> None:
         """Dispatch the coding agent via START_WORKFLOW.
 
         Uses the CodingAgentOrchestrator (coding_agent_v1) which provides:
           - State persistence via workflow_store (survives restart)
           - Crash recovery via resume_workflows() (auto-resume in-flight tasks)
           - WorkflowPaused events on AI failures (provider_unavailable handling)
+
+        P0-3: task_id is passed via START_WORKFLOW body so the orchestrator
+        can set WorkUnit.tag["ticket_id"], ensuring worktree is named after
+        the task, not chat_<uuid>.
         """
         from runtime import supervisor as sup_mod
         from runtime import ipc
@@ -464,6 +469,7 @@ class TaskOrchestrator:
             "bot_id": bot_id,
             "requirements": requirements,
             "test_command": test_command,
+            "task_id": task_id,  # P0-3: Pass task_id for worktree naming
         }
         await sup.send_to_worker(
             group_id,

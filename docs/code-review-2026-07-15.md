@@ -1,207 +1,210 @@
 # 架构师审查报告 (2026-07-15)
 
-## 编排与近期 Commit 深度多维度评估
+## 编排与近期 Commit 深度多维度评估（Aligned Final Version）
 
-本报告由架构师对 2026-07-15 近期提交的 8 个 Commit 进行多维度深度审查后整理归档。
+- **评审范围（Reviewed Range）**: `20d472f` 至 `098de0b` （近期 8 个 Commit）
+- **工作区状态（Worktree State）**: Dirty（包含 `backend/core/runner.py`、`backend/plugins/agent_dashboard/orchestrator.py` 等文件的未暂存修改）
+- **评审基线时间**: 2026-07-15 08:00
+- **当前状态截至**: Commit `098de0b`
 
 ---
 
-## 核心发现一览 (Critical Findings)
+## 一、 核心发现一览 (Critical/High Findings)
 
 | 编号 | 严重级别 | 维度 | 缺陷描述 | 潜在后果 |
 | :--- | :--- | :--- | :--- | :--- |
-| **01** | 🔴 Critical | 安全与并发 | `git config` 写入明文 Token，存在多任务覆盖竞态与物理泄漏风险 | GITHUB_TOKEN 泄漏；并发推送认证交叉污染 |
-| **02** | 🔴 Critical | 鲁棒性与功能 | 私有仓库预检（Pre-flight）未注入 Token 且未禁用终端交互 | 私有仓库任务创建 100% 失败或 hang 挂起 |
-| **03** | 🟡 Major | 资源与生命周期| `StuckDetector` 计数器在非 `done` 终态下不清理，引发内存泄漏 | 守护进程内存持续增长，长周期运行 OOM |
-| **04** | 🟡 Major | 业务边界/可靠性| `CodingAgentOrchestrator` 正则过于脆弱，成功测试日志会被误判为失败 | 任务陷入无限重做（Rework）死循环 |
-| **05** | 🟡 Major | ASGI 规范合规 | WebSocket 握手未 Accept 即调用 Close，违反 Starlette 状态机规范 | ASGI 服务器抛出 AssertionError 或客户端静默断开 |
-| **06** | 🟡 Major | 安全与输入校验 | REST API 过滤规则极易通过换行符、无空格重定向绕过 | 恶意测试命令注入，执行任意 Shell 脚本 |
-| **07** | 🔵 Minor | 健壮性 | 简单字符串替换处理 URL，当输入包含 Username 时生成畸形 URL | 克隆私有仓库失败 |
+| **01** | 🔴 Critical | 安全 | `github_client.py` 写入明文 Token 到共享的 `credential.helper`，或使用 `git -c argv` 传输 | Token 物理残留；进程 argv 被窃听嗅探 |
+| **02** | 🔴 Critical | 数据一致性 | `runner.py` 在 CancelledError 终态下仍盲目执行 `promote_worktree` | Abort 或 Retry 取消后，半成品代码被强行合并到主分支 |
+| **03** | 🔴 Critical | 安全/多租户 | REST 读接口与 WebSocket 未做 Group 成员鉴权与 Operator 角色限制 | 任意合法 JWT 可以订阅/查询任意隔离群组的对话及任务状态 |
+| **04** | 🟡 High | 鲁棒性与功能 | Preflight 预检超时不会自动杀死子进程，且未带凭证注入 | 子进程僵尸残留；私有仓库任务无法通过预检 |
+| **05** | 🟡 High | 可靠性/架构 | 任务列表 `_tasks` 和 Adapter 状态未持久化，重启后全部丢失 | 后台进程重启后，仪表盘任务瞬间“蒸发” |
+| **06** | 🟡 High | 功能完整性 | GitHub Token 传递中断，未真正到达 `rd_tools.create_pr()` 工具调用处 | PR 自动创建步骤 100% 鉴权失败 |
+| **07** | 🟡 High | 部署/环境 | 生产环境 Docker 镜像中未安装 `gh` CLI 客户端 | 镜像中运行 PR 创建直接报错或退化到 fake url |
+| **08** | 🟡 High | 可靠性 | Abort/Rollback 回滚中错误调用 `unregister_task()` 会向前端推送 done 信号 | 仪表盘显示状态与真实生命周期发生严重冲突 |
+| **09** | 🟡 High | 可靠性 | 任务记录的 status 状态不会随实际 Worker 端的 Workflow 运行状态同步 | 仪表盘状态永远卡在 "dispatched" 或 "restarted" |
+| **10** | 🟡 High | 业务边界 | API 允许接收 GitLab/Bitbucket，但底层实现逻辑完全硬编码 GitHub (gh CLI) | 非 GitHub 仓库任务创建后由于缺少实现工具直接崩溃 |
 
 ---
 
-## 深度技术剖析 (Detailed Analysis)
+## 二、 深度技术剖析与修复对齐
 
-### 01. 🔴 安全与并发：`git config credential.helper` 导致明文 Token 泄漏及竞态
-* **关联代码**: [github_client.py](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/integrations/github_client.py#L134-L155)
-* **分析**:
-  代码在推送分支时，为了支持私有仓库认证，动态修改了 Git 配置：
-  ```python
-  if github_token:
-      await _git("config", "credential.helper",
-                 f"!f() {{ echo 'password={github_token}'; }}; f", cwd=cwd)
-  ```
-  这存在两个严重的系统级问题：
-  1. **多 worktree 竞态风险**: 
-     在 Git 中，默认情况下多个 worktree **共享同一个** `.git/config`（除非显式开启 `extensions.worktreeConfig` 并使用 `git config --worktree`）。若不同 Group 的 Worker 进程在同一父仓库的 worktree 中并发执行 push，它们会激烈地抢占、覆写 `.git/config` 中的 `credential.helper`。这会导致 A 任务使用 B 任务的 Token 进行推送，产生严重的跨租户鉴权污染。
-  2. **物理文件残留与 Token 泄漏**:
-     如果 Worker 进程在 `finally` 块执行前遭遇不可抗力崩溃（如 OOM 被系统 OOM-killer 强杀、主机掉电、容器强收缩等），该凭证助手将**永久残留在磁盘 `.git/config` 中**。任何拥有容器/宿主机只读权限的实体都可以直接窃取该明文 `GITHUB_TOKEN`。
-* **架构改进建议**:
-  绝不能通过持久化修改磁盘配置文件来传递单次会话的凭证。应当使用 Git 命令行参数 `-c` 动态覆盖配置，生命周期仅局限于该次 push 进程：
-  ```python
-  # 改进后：配置只留在进程内存中，不落地磁盘，不存在竞态
-  await _git("-c", f"credential.helper=!f() {{ echo 'password={github_token}'; }}; f", "push", "-u", remote, branch_name, cwd=cwd)
-  ```
+### 01. 🔴 Critical: Token 传输与落盘安全性缺陷
+* **当前状态**: 
+  `github_client.py` 曾将 GITHUB_TOKEN 写入 `.git/config` 的 `credential.helper` 中（在 worktree 共享配置场景下有极高的竞态泄漏风险）。即使使用 `-c credential.helper` 命令行参数覆盖，Token 也会进入进程 `argv` 列表，极易被 `ps aux`、系统审计（如 `auditd`）或 `_git()` 产生的异常日志打印泄露。
+* **实现方案**: 
+  采用 **Operator-managed GITHUB_TOKEN** 结合 **环境变量** 传输。通过将 Token 放置于 `GITHUB_TOKEN` 或临时环境变量中，并使用 `GIT_ASKPASS` 脚本（或 `git credential approve` 通过标准输入喂入凭证）实现认证，确保 Token 绝不进入 `argv`、URL、Git config、任务持久化状态、IPC 消息以及任何物理日志。
+* **验收测试**:
+  启动克隆与推送进程，在执行期间并发运行 `ps -ef` 及查看 `git` 相关调用日志，确认没有任何明文 Token 残留在进程参数、控制台输出及配置文件中。
+* **修复 commit**: `Pending`
 
 ---
 
-### 02. 🔴 鲁棒性：私有仓库 Pre-flight 预检必败且可能挂起
-* **关联代码**: [orchestrator.py](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/plugins/agent_dashboard/orchestrator.py#L111) 与 [orchestrator.py](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/plugins/agent_dashboard/orchestrator.py#L288-L314)
-* **分析**:
-  在任务创建起点，系统提供了一个极好的“Pre-flight check”机制防止资源浪费：
-  ```python
-  await self._preflight_check_repo(repo_url, base_branch)
-  ```
-  但该方法根本没有接收 `github_token` 参数！
-  当用户提供一个私有仓库 URL 配合 `github_token` 时：
-  1. 预检执行 `git ls-remote --exit-code https://github.com/...`，由于没有携带 Token，GitHub 会返回 `401 Unauthorized`，导致预检被 Fail-Closed 熔断，任务直接回滚。
-  2. 更加危险的是，该预检子进程没有在环境变量中声明 `GIT_TERMINAL_PROMPT=0`。在某些网络或凭证状态下，`git` 会弹框提示输入密码，由于这是一个后台无交互进程，子进程将在此处**静默挂起 30 秒**直到被 `wait_for` 超时终止，严重拖累 Supervisor 的吞吐量。
-* **架构改进建议**:
-  预检必须能够处理私有凭证，并确保绝不进入交互式挂起：
-  ```python
-  async def _preflight_check_repo(self, repo_url: str, branch: str = "", github_token: str = "") -> None:
-      # 1. 注入 Token
-      if github_token and repo_url.startswith("https://"):
-          repo_url = repo_url.replace("https://", f"https://{github_token}@", 1)
-      
-      args = ["git", "ls-remote", "--exit-code", repo_url]
-      if branch:
-          args.extend(["--heads", branch])
-          
-      # 2. 强置非交互模式
-      env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
-      proc = await asyncio.create_subprocess_exec(*args, env=env, ...)
-  ```
+### 02. 🔴 Critical: Abort 异常中脏数据污染与自动合并
+* **关联代码**: [runner.py:L227](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/core/runner.py#L227)
+* **当前状态**: 
+  即使在 Commit `098de0b` 中加入了 Abort/Retry 的 IPC 应答机制，但 `runner.py` 在捕捉到 `CancelledError` 后，其 `finally` 块中的 `_cleanup_finally()` 依然会无条件尝试对 group 目录下的所有 `task_` 临时目录执行 `promote_worktree()` 自动合并。这导致任务被中止或重试时，半成品代码被合并入主工作区，产生严重代码污染。
+* **实现方案**: 
+  1. 在 Orchestrator 的 Step 协议中显式定义 `workspace_action=promote|discard|retain` 字段，交由编排层统一驱动工作区生命周期。
+  2. 在 `runner.py` 的 Cancel 拦截中，强制执行 `discard` 操作（即物理删除 `task_` 目录且不执行 Git merge）。
+  3. 捕获 `CancelledError` 时，在清理阶段拦截 promotion 触发。
+* **验收测试**:
+  触发一个耗时的 Coding 任务，在其执行中期调用 `/api/agent/tasks/{id}` 的 DELETE 路由发送 Abort 指令。检查 `worktrees` 目录发现对应 worktree 已被彻底清空，且主分支没有产生任何来自该任务的未授权变更提交。
+* **修复 commit**: `Pending` (当前工作区正在进行此修复)
 
 ---
 
-### 03. 🟡 资源与生命周期：`StuckDetector` 内存泄漏
-* **关联代码**: [stuck_detector.py](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/plugins/agent_dashboard/stuck_detector.py#L70-L83)
-* **分析**:
-  在卡死检测器的定期循环中，通过 `self._retry_counts` 对每个 Group 进行重试记数：
-  ```python
-  # 任务完成时，清理计数器
-  if state.status == "done":
-      self._retry_counts.pop(group_id, None)
-      continue
-
-  # 遇到其他终态（如出错、被强行中止、彻底卡死），直接跳过
-  if state.status in ("error", "aborted", "stuck", "stuck_permanently"):
-      continue
-  ```
-  注意看！当任务状态变成 `"error"`（运行出错退出）或 `"aborted"`（用户手动取消）时，代码直接 `continue` 了！
-  这意味着，一旦任务没有以 `"done"` 成功收尾，这个 `group_id` 对应的重试次数将**永久滞留**在 `self._retry_counts` 字典中。对于一个高吞吐量、长时间运行的机器人协作后台，随着失败/取消任务的累积，这里将发生缓慢但确定无疑的内存泄漏。
-* **架构改进建议**:
-  在任何任务达到**终态**（无论成功或失败）时，彻底注销其在检测器中的临时状态：
-  ```python
-  # 统一处理所有终态的内存释放
-  if state.status in ("done", "error", "aborted", "stuck_permanently"):
-      self._retry_counts.pop(group_id, None)
-      continue
-  ```
+### 03. 🔴 Critical: API 与 WebSocket 鉴权越权风险
+* **当前状态**: 
+  REST 读端 API（如 `/api/agent/tasks`）和 WebSocket 订阅端（`/ws/agent/{group_id}` 和 `/ws/agent/all`）虽然要求承载 JWT 凭证，但没有对调用者进行 Operator 角色校验，也没有做 Group 成员校验（Group Membership verification）。任意合法注册的普通用户，只要能获取 JWT，就可以订阅并监听到其他完全隔离的 Group 中的机密对话和文件流。
+* **实现方案**: 
+  1. 在 `/ws/agent/{group_id}` 握手和 `/api/agent/tasks` 查询前，引入 Group 鉴权中间件，验证 `jwt.user_id` 在 central 数据库中是否隶属于目标 `group_id`。
+  2. 对于 `/ws/agent/all` 以及管理类端点，强制依赖 `Depends(require_operator)`。
+* **验收测试**:
+  生成两个属于不同群组的独立 User JWT（User A 与 User B）。用 User B 的 JWT 尝试连接 `/ws/agent/all` 或 User A 所在的 `/ws/agent/{group_id}`，接口必须拒绝并返回 403 权限拒绝错误。
+* **修复 commit**: `Pending`
 
 ---
 
-### 04. 🟡 可靠性：脆弱的正则匹配导致成功测试被误判为失败
-* **关联代码**: [coding_agent.py](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/core/orchestration/plugins/coding_agent.py#L154-L163)
-* **分析**:
-  在单 Bot 协同的 `observe` 阶段，系统自动根据日志正则识别任务是否失败：
-  ```python
-  error_patterns = [
-      r"测试失败", r"test.*fail", r"error.*cannot.*fix",
-      ...
-  ]
-  ```
-  其中 `test.*fail` 是一个灾难性的正则：
-  在绝大多数测试框架（如 `pytest`）正常通过时，往往会打印类似以下总结：
-  `tests/test_auth.py: 12 passed, 0 failed in 1.2s`
-  或者
-  `test_api.py ......... [100%] (0 failed)`
-  这一行内容包含了 `test` 且后面包含了 `fail` (在 `failed` 单词中)。这会导致 `re.search(r"test.*fail", ...)` 成功匹配！
-  这意味着，即使代码实现完美，测试 100% 通过，Orchestrator 也会粗暴地判定“任务失败”，从而拦截本该正常提交的 PR，逼迫 Agent 陷入无意义的 `rework` 死循环，直到用光最大重试次数抛出异常。
-* **架构改进建议**:
-  测试日志的成功/失败提取不能使用如此宽泛且不加锚定的正则。应该通过限定边界，如匹配有正整数的 failure 统计，或者移除该宽泛的正则，仅依赖特定的终结符和明确的失败标识（如 `pytest` 非零退出码，或具体框架的错误关键字）。
-  ```python
-  # 改进匹配精度，防止误判
-  error_patterns = [
-      r"测试失败", r"failed:\s*[1-9]\d*", r"ERROR:", r"无法修复"
-  ]
-  ```
-  此外，Sentinel 检测 `AGENT_DONE` 时，代码里使用 `.replace("[", "").replace("]", "")` 剥离了括号。这导致如果 Agent 在普通文本中提到 "AGENT_DONE" 也会触发成功结束。建议**严格保留括号进行匹配**，将其作为确定性的控制信号。
-
----
-
-### 05. 🟡 协议规范：WebSocket 握手异常处理不符合 ASGI / Starlette 规范
-* **关联代码**: [websocket.py](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/plugins/agent_dashboard/websocket.py#L84-L93)
-* **分析**:
-  在 `websocket.py` 的授权拦截中：
-  ```python
-  if not token:
-      await ws.close(code=4001, reason="Missing authentication token")
-      return False
-  ```
-  在执行 `ws.close()` 时，底层的 WebSocket 连接**尚未被 Accept**（`dashboard_ws` 函数中 `await ws.accept()` 在这之后执行）。
-  在 ASGI 协议以及 FastAPI (Starlette) 内部状态机中，对一个处于 `connect` 阶段（未接受）的 Socket 直接发送 `close` 事件可能会导致部分 ASGI 服务器（如 Uvicorn / Hypercorn）抛出未捕获 of 运行时异常（如 `AssertionError: Cannot call close before accept` 或类似状态异常），并导致连接无法优雅断开。客户端也不会收到预期的 `4001` 关闭状态码，只会观察到通用的 TCP 层面异常关闭。
-* **架构改进建议**:
-  遵循 `main.py` 中已经沉淀的成熟 WS 鉴权拒连模式：先 Accept 握手，写入带有明确错误代码的 JSON 信息，然后再关闭：
-  ```python
-  # 改进后：保证 ASGI 状态机完整，让前端能明确收到 auth_error 事件
-  await ws.accept()
-  await ws.send_json({"type": "auth_error", "message": "Authentication required"})
-  await ws.close(code=4001)
-  ```
-
----
-
-### 06. 🟡 安全与输入校验：REST API 卡死重试命令的过滤防护存在绕过
-* **关联代码**: [api.py](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/plugins/agent_dashboard/api.py#L74-L82)
-* **分析**:
-  在 REST API 层针对 `test_command` 做了防注入校验：
-  ```python
-  dangerous = ["|", ";", "&&", "||", "`", "$(", "> ", "< ", "curl", "wget", "eval", "bash"]
-  ```
-  这种黑名单机制极其脆弱，很容易被刻意构造绕过：
-  1. **无空格重定向**: 校验了 `"> "`（带空格），但没有校验 `>`。攻击者只需传入 `pytest >/tmp/evil.sh` 即可完成文件写入。
-  2. **换行符命令拼接**: 校验没有包含 `\n`。攻击者如果传入：
-     ```bash
-     pytest
-     rm -rf /
+### 04. 🟡 High: Preflight 预检死锁隐患与进程僵尸残留
+* **关联代码**: [orchestrator.py:L111](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/plugins/agent_dashboard/orchestrator.py#L111), [orchestrator.py:L288-314](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/plugins/agent_dashboard/orchestrator.py#L288-L314)
+* **当前状态**: 
+  1. 预检没有携带凭据注入逻辑。虽然当运行机器本身配置了全局 Git Credential Helper 时可能侥幸成功，但对于未认证的私有仓库将必然抛出 401 失败或因交互式弹窗挂起。
+  2. 代码使用 `asyncio.wait_for(proc.communicate(), timeout=30)`，但在超时发生抛出 `TimeoutError` 后，底层创建的子进程并未被真正杀死（`wait_for` 超时不会自动发送 `SIGKILL` 给子进程），从而在系统中残留僵尸进程。
+* **实现方案**: 
+  1. 在预检的 `ls-remote` 调用中，通过临时环境变量或 AskPass 共享安全的认证上下文，并强制注入 `GIT_TERMINAL_PROMPT=0` 环境。
+  2. 修正 Timeout 捕获逻辑：
+     ```python
+     except asyncio.TimeoutError:
+         try:
+             proc.kill()
+             await proc.communicate() # 彻底收割僵尸进程
+         except Exception:
+             pass
+         raise RuntimeError("Preflight timeout")
      ```
-     在 Shell 顺序执行时，这会分行执行，彻底绕过所有分号或 `&&` 的过滤。
-  3. **非 bash 的 shell 启动**: 仅封禁了 `bash`，但 `sh`、`zsh`、`python -c` 均可长驱直入。
-* **架构改进建议**:
-  尽管在 Worker 执行侧还有最终的 Shell 防护，但 API 边界校验应遵循“fail-fast”原则。建议：
-  * 使用字符白名单，限制 `test_command` 仅能包含常见命令、字母、数字、点及有限的安全参数。
-  * 或者，使用 `shlex.split` 进行结构解析，确保不能解析出管道、重定向或多条独立命令。
-  ```python
-  # 强置字符集限制，禁止换行和重定向相关符号
-  if any(char in v for char in ("\n", "\r", ";", "&", "|", "`", "$", "<", ">")):
-      raise ValueError("Disallowed shell characters detected")
-  ```
+* **验收测试**:
+  输入无权限的私有仓库 URL，测试确认预检失败时控制台无交互弹窗阻塞，且 30 秒超时后，后台无残留的 `git ls-remote` 孤儿进程。
+* **修复 commit**: `Pending`
 
 ---
 
-### 07. 🔵 健壮性：私有 URL 凭证注入方式不够优雅，易损坏原 URL
-* **关联代码**: [github_client.py](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/integrations/github_client.py#L103-L105)
-* **分析**:
-  代码在拼接 HTTPS 克隆地址时，使用了简单的字符串替换：
-  ```python
-  if github_token and repo_url.startswith("https://"):
-      clone_url = repo_url.replace("https://", f"https://{github_token}@", 1)
-  ```
-  如果用户传入的 `repo_url` 本身就已经携带了用户名，例如：`https://oauth2@github.com/org/repo.git`，
-  经过该逻辑替换后，会得到：`https://<token>@oauth2@github.com/org/repo.git`。
-  含有双 `@` 符号的 URL 会直接导致 Git 底层解析失败，抛出畸形地址错误。
-* **架构改进建议**:
-  应当使用 Python 标准库中的 `urllib.parse` 进行规范的 URL 重组，而不是粗暴地操作字符串：
-  ```python
-  from urllib.parse import urlparse, urlunparse
-  
-  parsed = urlparse(repo_url)
-  if github_token and parsed.scheme == "https":
-      # 替换 netloc 中的 user:pass 部分
-      netloc = f"{github_token}@{parsed.hostname}"
-      if parsed.port:
-          netloc += f":{parsed.port}"
-      clone_url = urlunparse(parsed._replace(netloc=netloc))
-  ```
+### 05. 🟡 High: 仪表盘核心状态无持久化（重启即消失）
+* **当前状态**: 
+  `TaskOrchestrator._tasks` 字典和 `ProgressAdapter._states` 进度均只保存在进程内存中。只要 Supervisor 重启，所有的历史任务和当前运行的任务数据就会清空。
+* **实现方案**: 
+  在 central DB 中建表 `agent_tasks`（存储 `task_id`、`group_id`、`status`、`repo_url`、`requirements` 等元数据），在创建、重试、中止及状态机更新时同步写入 DB；在 Supervisor 启动阶段读取该表并 Hydrate 恢复到内存结构中。
+* **验收测试**:
+  启动任务并处于 running 状态，杀死 Supervisor 重启，发起 REST 请求 `GET /tasks`，校验该任务依然存在，且状态和 adapter 进度可以正常读取。
+* **修复 commit**: `Pending`
+
+---
+
+### 06. 🟡 High: GitHub Token 未向下传递至 PR 工具
+* **当前状态**: 
+  虽然 REST API 接收到了用户的 `github_token`，但在 `orchestrator.py` 创建任务并触发 Agent 工作流时，这个 Token 并未以任何上下文形式传递进 Worker 进程，这导致底层的 `rd_tools.create_pr()` 工具被 Agent 执行时，由于缺少凭据，在 push 分支或创建 PR 时抛出认证异常。
+* **实现方案**: 
+  将 `github_token` 封装进 `START_WORKFLOW` 的 payload 体中，Worker 在接收该指令并初始化执行上下文时，将其载入到会话级的隔离环境变量中，由 `github_client` 统一获取。
+* **验收测试**:
+  启动 Coding Agent 任务，验证当其走到第 6 步 `Create PR` 时，在 Worker 执行层收到的参数和环境变量中能成功解析出传入的 `github_token` 并创建 PR 成功。
+* **修复 commit**: `Pending`
+
+---
+
+### 07. 🟡 High: 生产环境 Docker 镜像缺失 `gh` 客户端
+* **当前状态**: 
+  系统在推送和 PR 阶段强依赖 GitHub CLI (`gh`) 客户端，但在系统生产部署的 `Dockerfile` 中未安装此客户端，这将导致生产模式下 PR 创建必然崩溃，或者意外退化到假的本地 `local://` 形式链接。
+* **实现方案**: 
+  在 `Dockerfile` 构建阶段中，添加官方 gh-cli apt 仓库（或下载对应的二进制包）并进行全局安装。
+* **验收测试**:
+  进入容器化运行的 Worker 环境，执行 `which gh`，验证命令可达且版本正常。
+* **修复 commit**: `Pending`
+
+---
+
+### 08. 🟡 High: 回滚/Abort 调用 `unregister_task()` 错误推送 done
+* **当前状态**: 
+  当新建任务出错进行 `rollback_group`，或手动执行任务 `abort_task` 时，调用 `self._adapter.unregister_task(group_id)` 清理适配器。但在适配器内部可能由于清除动作触发状态越界或在未解绑时向前端 WebSocket 广播了 `done` 终态信号。
+* **实现方案**: 
+  细化 `ProgressAdapter` 中解绑和注销逻辑，防止解绑操作污染状态广播。在 unregister 时应当仅销毁内存状态，若需广播，必须统一且明确地广播 `aborted` 或 `error` 状态包。
+* **验收测试**:
+  手动中止或回滚一个任务，抓取与其对应的 WS 最后一个包，校验其 type 不应是 `done`。
+* **修复 commit**: `Pending`
+
+---
+
+### 09. 🟡 High: 任务状态（Task Record Status）未随 Worker 同步
+* **当前状态**: 
+  `TaskOrchestrator` 内存中记录的 `status` 只有在初次分发 (`"dispatched"`) 或手动重试 (`"restarted"`) 时被更新。而任务在 Worker 端真实的运行阶段（如 Agent 的 Tool Loop 正在 `running`，或是因为超时失败变成 `error`）并没有反向回调或事件同步给该 record，导致通过 REST 接口读取的 task list 状态永远处于静态初始词。
+* **实现方案**: 
+  `ProgressAdapter` 在监听到 Supervisor 分发的底层 Agent 事件（如 `workflow_completed` 等）时，应主动调用 `orchestrator` 的内部方法更新 `self._tasks[task_id]["status"]`，完成状态机的双向同步。
+* **验收测试**:
+  查询 `/api/agent/tasks`，监控其任务状态从 dispatched 在 Agent 运行时变更为 running，在 Agent 提交 PR 结束后自动同步为 done。
+* **修复 commit**: `Pending`
+
+---
+
+### 10. 🟡 High: GitLab/Bitbucket 只有接口声明，实现完全缺失
+* **当前状态**: 
+  `api.py` 的 `CreateTaskRequest` 在 Pydantic 校验器中允许传入包含 `gitlab.com` 和 `bitbucket.org` 的 Git 链接。然而底层代码 `github_client.py` 几乎全部硬编码使用 `gh` CLI 交互，导致这些仓库一旦进入，在克隆或 PR 阶段必然发生不可控的崩溃。
+* **实现方案**: 
+  * 阶段一：在 API 正则校验器中，直接拦截限制仅能接收 `github.com`。
+  * 阶段二（长远）：对 GitClient 接口进行多提供商（GitHub / GitLab / Bitbucket）解耦和多态实现。
+* **验收测试**:
+  创建任务时传入 `https://gitlab.com/test.git`，API 直接拦截并返回 422 校验错误。
+* **修复 commit**: `Pending`
+
+---
+
+### 11. 🟢 Resolved: CodingAgentOrchestrator 正则误判定（已解决）
+* **关联代码**: [coding_agent.py:L154-163](file:///Users/Nuke/claudeFolder/nuke-ai-collaborator/backend/core/orchestration/plugins/coding_agent.py#L154-L163) (98f33df 前的旧代码)
+* **分析**: 
+  此前使用宽泛的 `test.*fail` 正则去检索 Agent 的测试输出日志。由于正常测试通过时，pytest 会在最后统计打印 `0 failed`，进而误触发了失败 reworking 重试分支，陷入死循环。
+* **修复实现**: 
+  在 Commit `98f33df` 中，重构了统一的完成信号协议（Unified completion signal protocol）。移除了基于测试日志正则检测的规则，改为使用严格的 `[[AGENT_DONE]]` Sentinel 哨兵机制和结构化工具信号。
+* **修复 commit**: `98f33df`
+
+---
+
+### 12. 🟢 Resolved: 无关文件的意外提交（已解决）
+* **分析**: 
+  Commit `98f33df` 意外包含了 `.opencode/opencode.json` 和 `.opencode/tui.json` 的无关修改。
+* **修复实现**: 
+  后续应对该分支进行 Git 变基清理，并在 `.gitignore` 中加入此类特定编辑器或辅助插件产生的私有配置文件路径。
+* **修复 commit**: `98f33df`
+
+---
+
+### 13. 🔵 Minor: API Command-injection 黑名单安全防御脆弱
+* **当前状态**: 
+  API 层的 `test_command` 校验逻辑使用硬编码字符敏感词校验（如过滤 `;`, `|`, `&&`）。该方式容易通过无空格重定向、换行符拼接绕过。
+* **评估**: 
+  降为 Minor 级别防线（Defense-in-depth）。接口传入的 `test_command` 只是被当作 Prompt 输入给 Agent，或作为沙箱内 `run_shell` 命令的参数。在 Worker 端有最终的 shlex 分离和 Sandbox 沙箱命令防线。因此“直接绕过并在宿主机执行命令”的因果链在此处并不成立。
+* **实现方案**: 
+  在 API 校验中直接拒绝特殊符号（如换行符等），或将 test command 强制收窄限制为特定的单执行文件（如只能以 `pytest` 或 `npm test` 起头，限制特殊符号）。
+* **验收测试**:
+  传入 `pytest\nrm -rf /`，API 层抛出参数错误限制执行。
+* **修复 commit**: `Pending`
+
+---
+
+### 14. 🔵 Minor: StuckDetector 内存泄漏风险夸大
+* **当前状态**: 
+  在非 `done` 状态下重试计数器残留。
+* **评估**: 
+  降为 Minor。该哈希映射中只保存了 `group_id: int -> count: int`，每个任务项极小。即便有数千个历史残留，物理内存开销也在几百 KB 以内，不会导致进程直接发生 OOM。
+* **实现方案**: 
+  在统一的任务注销（或者清理）函数中，主动触发 StuckDetector 将此 group 的状态清理掉。
+* **修复 commit**: `Pending`
+
+---
+
+## 三、 评审结论
+
+本版 Review 报告已经过最终校正，**对齐并固化了评审 Commit 区间为 20d472f..098de0b**。
+
+* **当前重点关注的 Critical 缺陷**: 
+  1. Token 写入进程 argv（01项）
+  2. CancelledError 下的强制 worktree promote 脏合并（02项）
+  3. API / WebSocket 越权隐患（03项）
+
+前述被夸大的 WebSocket Handshake 异常已被移除（确认为 Starlette 规范支持行为），且脆弱正则匹配问题已被 Commit `98f33df` 成功解决。项目当前的开发分支（带有 Dirty 状态的工作区）正在优先进行 02 项（Abort 数据隔离与 Discard）的研发工作。

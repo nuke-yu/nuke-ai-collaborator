@@ -100,7 +100,7 @@ class TestRetryTask(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["status"], "restarted")
         self.assertIn("restarted_at", result)
         mock_abort.assert_called_once_with(10, mode="retry")
-        mock_dispatch.assert_called_once_with(10, 5, "Add feature", "pytest")
+        mock_dispatch.assert_called_once_with(10, 5, "Add feature", "pytest", task_id="task_1")
         adapter.unregister_task.assert_called_once_with(10)
         adapter.register_task.assert_called_once_with(10, "task_1")
 
@@ -446,7 +446,7 @@ class TestCreateTaskAtomicity(unittest.IsolatedAsyncioTestCase):
         async def track_bind(group_id, worker_id):
             call_order.append("bind")
 
-        async def track_dispatch(group_id, bot_id, req, cmd):
+        async def track_dispatch(group_id, bot_id, req, cmd, task_id=""):
             call_order.append("dispatch")
 
         with patch.object(orch, "_preflight_check_repo", new_callable=AsyncMock), \

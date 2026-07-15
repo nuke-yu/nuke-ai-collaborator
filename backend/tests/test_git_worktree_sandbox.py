@@ -508,6 +508,7 @@ class TestGitWorktreeSandbox(unittest.IsolatedAsyncioTestCase):
                 self.done = True
                 self.next_units = []
                 self.workflow_paused = None
+                self.workspace_action = None
 
         class MockOrch:
             def participant_count(self, group_id):
@@ -574,6 +575,7 @@ class TestGitWorktreeSandbox(unittest.IsolatedAsyncioTestCase):
                 self.done = True
                 self.next_units = []
                 self.workflow_paused = None
+                self.workspace_action = None
 
         class MockOrch:
             def participant_count(self, group_id):

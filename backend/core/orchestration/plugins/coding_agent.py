@@ -46,10 +46,13 @@ class CodingAgentOrchestrator(Orchestrator):
     def begin(self, group_id: int, spec) -> OrchestratorStep:
         """Start the coding agent workflow.
 
-        spec = {"bots": [bot_dict], "requirements": str, "test_command": str}
+        spec = {"bots": [bot_dict], "requirements": str, "test_command": str, "task_id": str}
 
         Returns WorkUnit immediately so the bot starts without waiting for
         a separate trigger message.
+
+        P0-3: task_id is passed via spec and set in WorkUnit.tag["ticket_id"]
+        so the runner creates a worktree named after the task, not chat_<uuid>.
         """
         bots = spec.get("bots", [])
         if not bots:
@@ -58,6 +61,7 @@ class CodingAgentOrchestrator(Orchestrator):
         bot = bots[0]
         requirements = spec.get("requirements", "")
         test_command = spec.get("test_command", "")
+        task_id = spec.get("task_id", "")
 
         self._state[group_id] = {
             "bot": bot,
@@ -66,6 +70,7 @@ class CodingAgentOrchestrator(Orchestrator):
             "start_time": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
             "requirements": requirements,
             "test_command": test_command,
+            "task_id": task_id,
         }
 
         trigger = f"Please implement the following feature:\n\n{requirements}"
@@ -79,6 +84,7 @@ class CodingAgentOrchestrator(Orchestrator):
                 executor_id=bot.get("executor_id", "tool_loop_v1"),
                 trigger_msg=trigger,
                 is_workflow=True,
+                tag={"ticket_id": task_id} if task_id else {},
             )],
         )
 
@@ -100,9 +106,13 @@ class CodingAgentOrchestrator(Orchestrator):
         """Check if the bot's run completed via structured completion signals.
 
         Completion protocol:
-          - signal_stage_done → workflow done
-          - signal_rework → workflow stays active (for retry)
-          - No completion signal → WorkflowPaused(reason="completion_signal_missing")
+          - signal_stage_done → workflow done, workspace_action="promote"
+          - signal_rework → workflow stays active, workspace_action="discard"
+          - No completion signal → WorkflowPaused, workspace_action="discard"
+
+        P0-3: workspace_action controls worktree lifecycle:
+          - "promote": Merge changes into main (success)
+          - "discard": Delete worktree without merging (failure/abort)
 
         Text heuristics are NOT used. Only WorkflowSignal schema is authoritative.
         """
@@ -116,10 +126,17 @@ class CodingAgentOrchestrator(Orchestrator):
                 if is_signal_done(sig):
                     s["done"] = True
                     self.end(group_id)
-                    return OrchestratorStep(done=True, broadcast_state=True)
+                    return OrchestratorStep(
+                        done=True,
+                        broadcast_state=True,
+                        workspace_action="promote",  # Success: merge changes
+                    )
                 if is_signal_rework(sig):
                     log.info("coding_agent_v1: group %d reported rework needed", group_id)
-                    return OrchestratorStep(broadcast_state=True)
+                    return OrchestratorStep(
+                        broadcast_state=True,
+                        workspace_action="discard",  # Failure: discard changes
+                    )
 
         # No completion signal — this is an incomplete run
         # Publish WorkflowPaused to signal the missing completion signal
@@ -135,6 +152,7 @@ class CodingAgentOrchestrator(Orchestrator):
                 reason="completion_signal_missing",
                 details="Bot run completed without calling signal_stage_done or signal_rework",
             ),
+            workspace_action="discard",  # Incomplete: discard changes
         )
 
     def end(self, group_id: int) -> None:

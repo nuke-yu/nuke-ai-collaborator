@@ -42,6 +42,9 @@ class OrchestratorStep:
                                                         # {gate_id, label, bot_id, stage_name}
     workflow_paused: object | None = None               # WorkflowPaused event to publish
                                                         # (e.g., completion_signal_missing)
+    workspace_action: str | None = None                 # P0-3: Worktree action after task completion:
+                                                        # "promote" (merge changes), "discard" (delete),
+                                                        # "retain" (keep for inspection), or None (no action)
 
 
 class Orchestrator(ABC):
