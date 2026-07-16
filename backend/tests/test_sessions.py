@@ -373,6 +373,11 @@ class TestRecoverAll(unittest.IsolatedAsyncioTestCase):
         await recover_all(dispatcher=called.append)
         self.assertEqual(called, [])
 
+    def test_list_workspace_is_safe_to_replay(self):
+        from sessions.recovery import is_idempotent
+
+        self.assertTrue(is_idempotent("list_workspace"))
+
     async def test_completed_session_not_recovered(self):
         from sessions.store import create_session, update_session_status
         from sessions.recovery import recover_all

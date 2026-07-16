@@ -26,6 +26,7 @@ from db.migrations import (
     migration_028,
     migration_029,
     migration_030,
+    migration_031,
     run_migrations,
 )
 from db.schema import init_db
@@ -666,6 +667,55 @@ class TestMigration030(MigrationTestCase):
                     "claimed_at",
                 },
             )
+
+
+class TestMigration031(MigrationTestCase):
+    async def test_adds_operator_column_and_bootstraps_oldest_user(self):
+        async with self._connect() as conn:
+            await conn.execute(
+                "CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT NOT NULL)"
+            )
+            await conn.executemany(
+                "INSERT INTO users (id, username) VALUES (?, ?)",
+                [(7, "first"), (9, "second")],
+            )
+            await migration_031(conn)
+            self.assertIn("is_operator", await _table_columns(conn, "users"))
+            cur = await conn.execute(
+                "SELECT id, is_operator FROM users ORDER BY id"
+            )
+            self.assertEqual(await cur.fetchall(), [(7, 1), (9, 0)])
+
+    async def test_preserves_existing_operator(self):
+        async with self._connect() as conn:
+            await conn.execute(
+                "CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT NOT NULL, "
+                "is_operator INTEGER NOT NULL DEFAULT 0)"
+            )
+            await conn.executemany(
+                "INSERT INTO users (id, username, is_operator) VALUES (?, ?, ?)",
+                [(1, "first", 0), (2, "ops", 1)],
+            )
+            await migration_031(conn)
+            cur = await conn.execute(
+                "SELECT id, is_operator FROM users ORDER BY id"
+            )
+            self.assertEqual(await cur.fetchall(), [(1, 0), (2, 1)])
+
+    async def test_prefers_existing_nuke_account_for_bootstrap(self):
+        async with self._connect() as conn:
+            await conn.execute(
+                "CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT NOT NULL)"
+            )
+            await conn.executemany(
+                "INSERT INTO users (id, username) VALUES (?, ?)",
+                [(1, "tester"), (5, "Nuke")],
+            )
+            await migration_031(conn)
+            cur = await conn.execute(
+                "SELECT id, is_operator FROM users ORDER BY id"
+            )
+            self.assertEqual(await cur.fetchall(), [(1, 0), (5, 1)])
 
 
 if __name__ == "__main__":

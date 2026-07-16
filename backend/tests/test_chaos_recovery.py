@@ -96,6 +96,7 @@ class TestChaosRecovery(unittest.IsolatedAsyncioTestCase):
             "NUKE_APP_CONFIG_PATH": str(self.config_file),
             "NUKE_CHAOS_FLAG_DIR": str(self.flags_dir),
             "NUKE_IDEMPOTENT_TOOLS": "mock_blocking_tool",
+            "NUKE_GITHUB_ENABLED": "false",
             "MCP_SERVERS_CONFIG": str(Path(self.tmpdir) / "missing-mcp-servers.json"),
         })
         self._env.start()

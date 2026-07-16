@@ -2,7 +2,7 @@
 
 Tests the security boundary:
   - repo_url restricted to known HTTPS git hosts
-  - requirements minimum length and max length
+  - requirements non-empty and max length
   - test_command is a shell-free argv command using a known test runner
   - max_iterations bounded (1-500)
 """
@@ -20,6 +20,13 @@ class TestRepoUrlValidation(unittest.TestCase):
             requirements="Build a REST API for user management",
         )
         self.assertEqual(req.repo_url, "https://github.com/user/repo.git")
+
+    def test_valid_github_https_without_dot_git(self):
+        req = CreateTaskRequest(
+            repo_url="https://github.com/user/repo",
+            requirements="修复问题",
+        )
+        self.assertEqual(req.repo_url, "https://github.com/user/repo")
 
     def test_reject_gitlab_https(self):
         """P0-4: GitLab not yet supported, only github.com."""
@@ -56,10 +63,10 @@ class TestRepoUrlValidation(unittest.TestCase):
                 requirements="Build a REST API for user management",
             )
 
-    def test_reject_non_git_url(self):
+    def test_reject_repository_path_with_extra_segment(self):
         with self.assertRaises(ValidationError):
             CreateTaskRequest(
-                repo_url="https://github.com/user/repo",
+                repo_url="https://github.com/user/repo/issues",
                 requirements="Build a REST API for user management",
             )
 
@@ -119,13 +126,20 @@ class TestRequirementsValidation(unittest.TestCase):
         )
         self.assertIn("authentication", req.requirements)
 
-    def test_reject_too_short(self):
+    def test_accept_short_nonempty_requirements(self):
+        req = CreateTaskRequest(
+            repo_url="https://github.com/user/repo.git",
+            requirements="修复",
+        )
+        self.assertEqual(req.requirements, "修复")
+
+    def test_reject_empty_requirements(self):
         with self.assertRaises(ValidationError) as ctx:
             CreateTaskRequest(
                 repo_url="https://github.com/user/repo.git",
-                requirements="fix bug",
+                requirements="   ",
             )
-        self.assertIn("10 characters", str(ctx.exception))
+        self.assertIn("must not be empty", str(ctx.exception))
 
     def test_reject_too_long(self):
         with self.assertRaises(ValidationError):

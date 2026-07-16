@@ -762,6 +762,27 @@ async def migration_030(db):
     await db.commit()
 
 
+async def migration_031(db):
+    """Store control-plane authorization on users and bootstrap one operator."""
+    await _safe_add_column(
+        db,
+        "ALTER TABLE users ADD COLUMN is_operator INTEGER NOT NULL DEFAULT 0 "
+        "CHECK(is_operator IN (0, 1))",
+    )
+    cur = await db.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='users'"
+    )
+    if await cur.fetchone() is not None:
+        cur = await db.execute("SELECT 1 FROM users WHERE is_operator = 1 LIMIT 1")
+        if await cur.fetchone() is None:
+            await db.execute(
+                "UPDATE users SET is_operator = 1 WHERE id = COALESCE("
+                "(SELECT id FROM users WHERE username = 'Nuke' LIMIT 1), "
+                "(SELECT MIN(id) FROM users))"
+            )
+    await db.commit()
+
+
 MIGRATIONS: list = [
     migration_001,
     migration_002,
@@ -793,6 +814,7 @@ MIGRATIONS: list = [
     migration_028,
     migration_029,
     migration_030,
+    migration_031,
 ]
 
 

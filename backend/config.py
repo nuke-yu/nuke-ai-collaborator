@@ -15,6 +15,7 @@ FIELDS = {
     "minimax_api_key": "MINIMAX_API_KEY",
     "zhipu_api_key": "ZHIPU_API_KEY",
     "qwen_api_key": "QWEN_API_KEY",
+    "github_token": "GITHUB_TOKEN",
 }
 
 def read_config() -> dict:

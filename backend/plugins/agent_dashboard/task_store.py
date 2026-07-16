@@ -373,7 +373,11 @@ class TaskStore:
             return RetryClaim(token=token, previous_status=previous_status)
 
     async def complete_retry_claim(self, task_id: str, token: str) -> bool:
-        """Finalize retrying -> restarted only for the current lease owner."""
+        """Finalize retrying -> running only for the current lease owner.
+
+        ``restarted`` is retained as a legacy-readable status, but is not a
+        stable lifecycle state: once dispatch succeeds the task is running.
+        """
         from db import write_connect
 
         async with write_connect() as db:
@@ -387,7 +391,7 @@ class TaskStore:
                 return False
             cur = await db.execute(
                 """UPDATE agent_tasks
-                   SET status = 'restarted', error_message = NULL,
+                   SET status = 'running', error_message = NULL,
                        updated_at = CURRENT_TIMESTAMP
                    WHERE task_id = ? AND status = 'retrying'""",
                 (task_id,),
@@ -401,6 +405,41 @@ class TaskStore:
             )
             await db.commit()
             return True
+
+    async def reconcile_transient_states(self) -> dict[str, int]:
+        """Collapse states that cannot legitimately survive a process restart."""
+        from db import write_connect
+
+        async with write_connect() as db:
+            await db.execute("BEGIN IMMEDIATE")
+            stale_claims = await db.execute(
+                """DELETE FROM agent_task_retry_claims
+                   WHERE task_id IN (
+                       SELECT task_id FROM agent_tasks
+                       WHERE status = 'retrying'
+                          OR status = 'restarted'
+                   )"""
+            )
+            retrying = await db.execute(
+                """UPDATE agent_tasks
+                   SET status = 'stuck',
+                       error_message = 'Retry interrupted by process restart',
+                       updated_at = CURRENT_TIMESTAMP
+                   WHERE status = 'retrying'"""
+            )
+            restarted = await db.execute(
+                """UPDATE agent_tasks
+                   SET status = 'stuck',
+                       error_message = 'Legacy restarted state requires reconciliation',
+                       updated_at = CURRENT_TIMESTAMP
+                   WHERE status = 'restarted'"""
+            )
+            await db.commit()
+        return {
+            "retrying_to_stuck": retrying.rowcount,
+            "restarted_to_stuck": restarted.rowcount,
+            "retry_claims_removed": stale_claims.rowcount,
+        }
 
     async def restore_retry_claim(
         self, task_id: str, token: str, status: str, error_message: str

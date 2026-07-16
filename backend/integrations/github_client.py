@@ -55,8 +55,20 @@ class GitHubIntegrationUnavailable(RuntimeError):
     """The deployment cannot provide real GitHub repository/PR operations."""
 
 
+def _configured_token() -> str:
+    """Read the runtime-editable GitHub token without exposing it to callers."""
+    from config import get_key
+
+    return (
+        os.environ.get("GITHUB_TOKEN")
+        or os.environ.get("GH_TOKEN")
+        or get_key("github_token")
+        or ""
+    ).strip()
+
+
 def github_integration_enabled() -> bool:
-    return os.getenv("NUKE_GITHUB_ENABLED", "").lower() in _TRUE_VALUES
+    return os.getenv("NUKE_GITHUB_ENABLED", "true").lower() in _TRUE_VALUES
 
 
 def require_github_integration() -> None:
@@ -65,9 +77,9 @@ def require_github_integration() -> None:
         raise GitHubIntegrationUnavailable(
             "GitHub integration is disabled; set NUKE_GITHUB_ENABLED=true"
         )
-    if not os.environ.get("GITHUB_TOKEN"):
+    if not _configured_token():
         raise GitHubIntegrationUnavailable(
-            "GitHub integration is unavailable: GITHUB_TOKEN is not set"
+            "GitHub integration is unavailable: GITHUB_TOKEN is not configured"
         )
     if not is_gh_available():
         raise GitHubIntegrationUnavailable(
@@ -83,7 +95,7 @@ def require_github_integration() -> None:
 
 def _github_auth_env(*, require_token: bool = False) -> dict[str, str]:
     """Return non-interactive GitHub auth settings without writing credentials."""
-    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+    token = _configured_token()
     if require_token and not token:
         raise GitHubIntegrationUnavailable("GITHUB_TOKEN is required")
 
@@ -105,7 +117,7 @@ def _github_auth_env(*, require_token: bool = False) -> dict[str, str]:
 
 def _github_cli_auth_env() -> dict[str, str]:
     """Return the one credential variable exposed to an authenticated gh call."""
-    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+    token = _configured_token()
     if not token:
         raise GitHubIntegrationUnavailable("GITHUB_TOKEN is required")
     return {"GH_TOKEN": token}

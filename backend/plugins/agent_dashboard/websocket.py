@@ -66,44 +66,56 @@ _connections: dict[int, set[DashboardConnection]] = {}  # group_id → {connecti
 _all_connections: set[DashboardConnection] = set()       # subscribed to all
 
 
-async def _authenticate_ws(ws: WebSocket) -> bool:
-    """Validate JWT from query parameter or protocol header. Returns True if valid and user is operator."""
+async def _authenticate_ws(ws: WebSocket) -> tuple[bool, str | None]:
+    """Validate JWT and return whether authorized plus negotiated protocol."""
     from core import auth
 
     # Try protocol-based auth first (same as main WS endpoint)
     token = None
+    subprotocol = None
     for value in ws.headers.getlist("sec-websocket-protocol"):
-        if value.startswith("nuke.jwt."):
-            token = value[len("nuke.jwt."):]
-            break
+        for item in (part.strip() for part in value.split(",")):
+            if item.startswith("nuke.jwt."):
+                token = item[len("nuke.jwt."):]
+                subprotocol = item
+                break
 
     # Fallback to query parameter
     if not token:
         token = ws.query_params.get("token")
 
     if not token:
+        log.warning("agent dashboard WS rejected: authentication token missing")
         await ws.close(code=4001, reason="Missing authentication token")
-        return False
+        return False, None
 
     user_payload = auth.verify_token(token)
     if not user_payload:
+        log.warning("agent dashboard WS rejected: authentication token invalid")
         await ws.close(code=4001, reason="Invalid authentication token")
-        return False
+        return False, None
 
     # P1-3: Check if user is operator (agent dashboard is control plane)
     if not auth.is_operator(user_payload):
+        log.warning(
+            "agent dashboard WS rejected: user=%r uid=%r is_operator=%r",
+            user_payload.get("sub"),
+            user_payload.get("uid"),
+            user_payload.get("is_operator"),
+        )
         await ws.close(code=4003, reason="Operator privileges required")
-        return False
+        return False, None
 
-    return True
+    return True, subprotocol
 
 
 @router.websocket("/ws/agent/all")
 async def dashboard_all_ws(ws: WebSocket):
     """WebSocket endpoint for all active tasks' progress. Requires JWT auth."""
-    if not await _authenticate_ws(ws):
+    authorized, subprotocol = await _authenticate_ws(ws)
+    if not authorized:
         return
-    await ws.accept()
+    await ws.accept(subprotocol=subprotocol)
     conn = DashboardConnection(ws, group_filter=None)
     _all_connections.add(conn)
 
@@ -130,9 +142,10 @@ async def dashboard_all_ws(ws: WebSocket):
 @router.websocket("/ws/agent/{group_id}")
 async def dashboard_ws(ws: WebSocket, group_id: int):
     """WebSocket endpoint for a specific task's progress. Requires JWT auth."""
-    if not await _authenticate_ws(ws):
+    authorized, subprotocol = await _authenticate_ws(ws)
+    if not authorized:
         return
-    await ws.accept()
+    await ws.accept(subprotocol=subprotocol)
     conn = DashboardConnection(ws, group_filter=group_id)
 
     # Register connection

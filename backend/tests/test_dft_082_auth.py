@@ -24,7 +24,13 @@ class TestAuthLogic(unittest.TestCase):
         self.assertIsNotNone(payload)
         self.assertEqual(payload["uid"], uid)
         self.assertEqual(payload["sub"], username)
+        self.assertIs(payload["is_operator"], False)
         self.assertGreater(payload["exp"], time.time())
+
+    def test_operator_claim_is_signed_into_token(self):
+        payload = auth.verify_token(auth.create_token(1, "ops", True))
+        self.assertIs(payload["is_operator"], True)
+        self.assertTrue(auth.is_operator(payload))
 
     def test_invalid_token(self):
         self.assertIsNone(auth.verify_token("invalid.token"))

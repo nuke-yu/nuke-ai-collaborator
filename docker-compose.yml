@@ -73,9 +73,9 @@ services:
       NUKE_ENV: production
       NUKE_DB_PATH: /var/lib/nuke-ai-collaborator/chat.db
       NUKE_WORKSPACE_ROOT: /var/lib/nuke-ai-collaborator/workspaces
-      # Worker processes serving group shards. Default 4. Set ≈ host CPU cores.
+      # Worker processes serving group shards. Default 8. Tune for host capacity.
       # NOTE: only helps if groups are spread across workers (see group routing).
-      NUKE_WORKERS: 6
+      NUKE_WORKERS: 8
       # enable the per-group container sandbox (default is "local" = no isolation)
       NUKE_SHELL_EXEC_BACKEND: container
       NUKE_SANDBOX_IMAGE: nuke-sandbox:latest
@@ -86,10 +86,8 @@ services:
       #   Generate: python3 -c "import secrets; print(secrets.token_urlsafe(48))"
       #   App refuses to start without it in production mode.
       AUTH_SECRET: "${AUTH_SECRET:?Set AUTH_SECRET (minimum 32 chars; generate with python3 secrets.token_urlsafe)}"
-      # NUKE_OPERATOR_USERS: comma-separated usernames that get operator privileges.
-      #   Required for managing API keys (/api/config) and MCP servers.
-      #   Without this, all control-plane endpoints return 403.
-      NUKE_OPERATOR_USERS: ${NUKE_OPERATOR_USERS:?Set NUKE_OPERATOR_USERS to at least one admin username}
+      # Operator privileges are stored in users.is_operator. The first account
+      # registered on a new installation is bootstrapped as the operator.
       NUKE_GITHUB_ENABLED: "true"
       GITHUB_TOKEN: ${GITHUB_TOKEN:?Set GITHUB_TOKEN for repository and pull-request access}
       # API keys: pass here (bootstrap_from_env migrates them into app_config.json),

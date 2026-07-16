@@ -25,6 +25,8 @@ import sys
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+from runtime.ipc.protocol import MCP_COLLECTOR_ID
+
 log = logging.getLogger(__name__)
 
 
@@ -164,18 +166,34 @@ class PluginHost:
         Returns:
             worker_id string (e.g. "w0"), or None if no workers available
         """
-        workers = list(self._sup._workers.keys())
+        # ``Supervisor._workers`` contains every connected runtime peer, including
+        # the MCP collector.  The collector can execute MCP calls but cannot host
+        # groups or agent workflows, so it must never enter task scheduling.
+        workers = [
+            worker_id
+            for worker_id in self._sup._workers
+            if worker_id != MCP_COLLECTOR_ID
+        ]
         if not workers:
             return None
 
         if strategy == "least_loaded":
-            best, best_load = None, float("inf")
-            for wid in workers:
-                stats = self._sup._worker_stats.get(wid, {})
-                load = stats.get("bg", {}).get("active_tasks", 0)
-                if load < best_load:
-                    best, best_load = wid, load
-            return best
+            def load_key(worker_id: str) -> tuple[bool, int, int]:
+                stats = self._sup._worker_stats.get(worker_id)
+                active_tasks = (
+                    stats.get("bg", {}).get("active_tasks") if stats else None
+                )
+                active_groups = (
+                    stats.get("lifecycle", {}).get("active_groups_count", 0)
+                    if stats else 0
+                )
+                # Prefer workers that have reported health.  A newly connected
+                # worker remains a fallback, but missing telemetry is not treated
+                # as an artificial zero load.  Group count breaks equal-task ties
+                # so sequential coding jobs spread across otherwise idle workers.
+                return active_tasks is None, active_tasks or 0, active_groups
+
+            return min(workers, key=load_key)
         elif strategy == "random":
             import random
             return random.choice(workers)

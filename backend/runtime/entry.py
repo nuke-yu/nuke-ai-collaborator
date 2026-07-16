@@ -89,7 +89,7 @@ async def run_worker(worker_id: str, addr: str) -> None:
         await tool_router.close_all()          # terminate MCP subprocesses on worker exit
 
 
-async def run_supervisor(addr: str, num_workers: int = 0) -> None:
+async def run_supervisor(addr: str, num_workers: int = 8) -> None:
     sup = build_supervisor(addr, num_workers=num_workers)
     await sup.start()
     try:
@@ -110,7 +110,7 @@ def main(argv=None) -> None:
     p.add_argument("--role", required=True, choices=["supervisor", "worker", "mcp-collector"])
     p.add_argument("--id", default="w0", help="worker id (worker role)")
     p.add_argument("--addr", default=None, help="IPC address (default per platform)")
-    p.add_argument("--workers", type=int, default=0, help="number of worker processes to spawn (supervisor role)")
+    p.add_argument("--workers", type=int, default=8, help="number of worker processes to spawn (supervisor role)")
     args = p.parse_args(argv)
 
     # supervisor & collector share the supervisor's IPC address (the collector

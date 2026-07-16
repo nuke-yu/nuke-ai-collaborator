@@ -43,6 +43,7 @@ async def register(host):
     from .stuck_detector import StuckDetector
     from .orchestrator import TaskOrchestrator
     from .task_store import TaskStateProjector, TaskStore
+    from .reconciler import TaskReconciler
     from . import websocket as ws_module
     from . import api as api_module
 
@@ -54,11 +55,13 @@ async def register(host):
 
     # 1. Create shared components
     task_store = TaskStore()
+    await task_store.reconcile_transient_states()
     projector = TaskStateProjector(task_store)
     adapter = ProgressAdapter(projector=projector)
     adapter.hydrate(await task_store.list_tasks(limit=1000))
     orchestrator = TaskOrchestrator(adapter=adapter, task_store=task_store)
     detector = StuckDetector(adapter, orchestrator=orchestrator)
+    reconciler = TaskReconciler(task_store)
 
     # 2. Inject dependencies into sub-modules
     ws_module.set_adapter(adapter)
@@ -81,6 +84,7 @@ async def register(host):
 
     # 6. Start background tasks
     host.start_background(projector.run())
+    host.start_background(reconciler.run())
     host.start_background(detector.run())
     host.start_background(ws_module.consumer_loop(adapter))
 

@@ -31,24 +31,6 @@ if _secret_is_default:
 TOKEN_TTL = 86400 * 7 # 1 week
 
 
-def _operator_usernames() -> set[str]:
-    raw = os.environ.get("NUKE_OPERATOR_USERS", "")
-    return {item.strip() for item in raw.split(",") if item.strip()}
-
-
-def _operator_ids() -> set[int]:
-    raw = os.environ.get("NUKE_OPERATOR_IDS", "")
-    ids = set()
-    for item in raw.split(","):
-        item = item.strip()
-        if not item:
-            continue
-        try:
-            ids.add(int(item))
-        except Exception:
-            log.warning("Ignoring invalid NUKE_OPERATOR_IDS entry: %r", item)
-    return ids
-
 def hash_password(password: str) -> str:
     salt = os.urandom(16)
     dk = hashlib.pbkdf2_hmac('sha256', password.encode(), salt, 100000)
@@ -64,10 +46,11 @@ def verify_password(password: str, hashed: str) -> bool:
     except Exception:
         return False
 
-def create_token(user_id: int, username: str) -> str:
+def create_token(user_id: int, username: str, is_operator: bool = False) -> str:
     payload = {
         "uid": user_id,
         "sub": username,
+        "is_operator": bool(is_operator),
         "exp": int(time.time()) + TOKEN_TTL
     }
     payload_json = json.dumps(payload, separators=(',', ':'))
@@ -103,24 +86,8 @@ def verify_token(token: str) -> Optional[dict]:
 
 
 def is_operator(user: dict | None) -> bool:
-    """Control-plane authorization predicate.
-
-    Runtime sources, in priority order:
-    1. Explicit test/dev payload marker: {"is_operator": True}
-    2. Username allow-list via NUKE_OPERATOR_USERS
-    3. User-id allow-list via NUKE_OPERATOR_IDS
-    """
-    if not isinstance(user, dict):
-        return False
-    if user.get("is_operator") is True:
-        return True
-    if str(user.get("sub") or "") in _operator_usernames():
-        return True
-    try:
-        uid = int(user.get("uid"))
-    except Exception:
-        uid = None
-    return uid in _operator_ids() if uid is not None else False
+    """Return the signed operator claim issued from the users table."""
+    return isinstance(user, dict) and user.get("is_operator") is True
 
 # FastAPI Dependency
 from fastapi import Header, HTTPException, Depends

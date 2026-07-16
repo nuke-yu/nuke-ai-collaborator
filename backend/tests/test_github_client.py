@@ -143,7 +143,8 @@ class TestGhHelper(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("not authenticated", str(ctx.exception))
 
     async def test_missing_token_fails_before_spawning(self):
-        with patch.dict(os.environ, {}, clear=True):
+        with patch.dict(os.environ, {}, clear=True), \
+             patch("config.get_key", return_value=None):
             with patch("asyncio.create_subprocess_exec") as mock_exec:
                 with self.assertRaisesRegex(RuntimeError, "GITHUB_TOKEN"):
                     await _gh("pr", "create")

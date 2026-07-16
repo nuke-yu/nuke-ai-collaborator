@@ -260,7 +260,8 @@ class TestWorkerFailsClosed(unittest.IsolatedAsyncioTestCase):
         from integrations.github_client import require_github_integration
 
         with patch.dict(os.environ, {"NUKE_GITHUB_ENABLED": "true"}, clear=True), \
-             patch("shutil.which", return_value="/usr/bin/gh"):
+             patch("shutil.which", return_value="/usr/bin/gh"), \
+             patch("config.get_key", return_value=None):
             with self.assertRaisesRegex(RuntimeError, "GITHUB_TOKEN"):
                 require_github_integration()
 
@@ -278,8 +279,16 @@ class TestWorkerFailsClosed(unittest.IsolatedAsyncioTestCase):
     async def test_disabled_integration_fails_closed(self):
         from integrations.github_client import require_github_integration
 
-        with patch.dict(os.environ, {}, clear=True):
+        with patch.dict(os.environ, {"NUKE_GITHUB_ENABLED": "false"}, clear=True):
             with self.assertRaisesRegex(RuntimeError, "disabled"):
+                require_github_integration()
+
+    async def test_integration_is_enabled_by_default(self):
+        from integrations.github_client import require_github_integration
+
+        with patch.dict(os.environ, {}, clear=True), \
+             patch("config.get_key", return_value=None):
+            with self.assertRaisesRegex(RuntimeError, "GITHUB_TOKEN"):
                 require_github_integration()
 
     async def test_task_api_returns_503_when_integration_is_unavailable(self):

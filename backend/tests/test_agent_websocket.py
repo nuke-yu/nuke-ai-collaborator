@@ -3,7 +3,7 @@
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket
 from fastapi.testclient import TestClient
 
 from plugins.agent_dashboard import websocket
@@ -29,7 +29,7 @@ class TestAgentWebSocketRoutes(unittest.TestCase):
         websocket.set_adapter(adapter)
 
         with patch.object(
-            websocket, "_authenticate_ws", new=AsyncMock(return_value=True)
+            websocket, "_authenticate_ws", new=AsyncMock(return_value=(True, None))
         ):
             with TestClient(self.app) as client:
                 with client.websocket_connect("/ws/agent/all") as ws:
@@ -50,10 +50,29 @@ class TestAgentWebSocketRoutes(unittest.TestCase):
         websocket.set_adapter(adapter)
 
         with patch.object(
-            websocket, "_authenticate_ws", new=AsyncMock(return_value=True)
+            websocket, "_authenticate_ws", new=AsyncMock(return_value=(True, None))
         ):
             with TestClient(self.app) as client:
                 with client.websocket_connect("/ws/agent/7") as ws:
                     self.assertEqual(ws.receive_json()["group_id"], 7)
 
         adapter.get_progress.assert_called_once_with(7)
+
+    def test_dashboard_route_is_not_shadowed_by_numeric_chat_route(self):
+        app = FastAPI()
+
+        @app.websocket("/ws/{group_id:int}/{member_id:int}")
+        async def chat_ws(ws: WebSocket, group_id: int, member_id: int):
+            raise AssertionError("dashboard path must not hit chat websocket")
+
+        app.include_router(websocket.router)
+        websocket.set_adapter(MagicMock())
+        websocket._adapter.get_all_active.return_value = []
+
+        with patch.object(
+            websocket, "_authenticate_ws", new=AsyncMock(return_value=(True, None))
+        ):
+            with TestClient(app) as client:
+                with client.websocket_connect("/ws/agent/all") as ws:
+                    ws.send_json({"type": "ping"})
+                    self.assertEqual(ws.receive_json(), {"type": "pong"})

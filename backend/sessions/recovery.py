@@ -9,7 +9,7 @@ log = logging.getLogger(__name__)
 
 IDEMPOTENT_TOOLS = frozenset({
     "read_file", "list_dir", "web_search", "think", "search", "code_intel",
-    "get_memory", "list_files",
+    "get_memory", "list_files", "list_workspace",
 })
 
 def is_idempotent(tool_name: str) -> bool:

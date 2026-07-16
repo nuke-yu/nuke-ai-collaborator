@@ -51,7 +51,23 @@ class TestProtectedRoutes(unittest.IsolatedAsyncioTestCase):
                 "password": "password123"
             })
             self.assertEqual(resp.status_code, 200)
-            token = resp.json()["token"]
+            login_data = resp.json()
+            token = login_data["token"]
+            self.assertIs(login_data["user"]["is_operator"], True)
+            self.assertIs(auth.verify_token(token)["is_operator"], True)
+
+            # The bootstrap role is only assigned once.
+            resp = await client.post("/api/auth/register", json={
+                "username": "regular_user",
+                "password": "password123"
+            })
+            self.assertEqual(resp.status_code, 200)
+            resp = await client.post("/api/auth/login", json={
+                "username": "regular_user",
+                "password": "password123"
+            })
+            self.assertEqual(resp.status_code, 200)
+            self.assertIs(resp.json()["user"]["is_operator"], False)
             
             # 4. Access with token should succeed
             resp = await client.get("/api/groups", headers={

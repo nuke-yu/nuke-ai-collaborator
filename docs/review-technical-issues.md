@@ -25,7 +25,7 @@
 |---|--------|------|------|------|
 | 1 | **P0** | 应用层缺少 user↔group 授权边界——项目核心定义是 "Groups fully isolated"，但任意登录用户可访问任意群组、冒充任意 member。内部可信不等于群组隔离。DFT-082 是历史取舍，不覆盖当前产品要求。**必须正式决策**：(a) 实现 membership/role 模型 + `require_group_member`；或 (b) 正式修改 "Groups fully isolated" 的产品承诺。见架构文档 AC1 | 未修 | 所有 HTTP/WS 路由 |
 | 2 | **P0** | Chroma fact ID 跨组覆盖——`fact_id = f"{message_id}_{idx}"` 缺 group_id/bot_id，per-group message ID 重复导致 upsert 静默覆盖。**代码改动局部，数据迁移不可省略**：新 ID namespace (`fact_{bot_id}_{group_id}_{message_id}_{idx}`) + 跨组不覆盖测试 + 删除并重建全部 fact-class 数据（含 `mem_type=fact` 及缺失 `mem_type` 的 legacy facts）。已被覆盖的数据无法从 Chroma 可靠还原，只能从 SQLite 原始消息重新提取 | 未修 | `memory.py:496` |
-| 3 | **P0** | API-key `GET/PUT /api/config` 无 operator 校验。**验收范围必须包含**：(a) GET/PUT 都要求 operator + 审计日志；(b) 首个 operator 的部署配置（`NUKE_OPERATOR_USERS`/`NUKE_OPERATOR_IDS` 或数据库角色）；(c) production 未配置 operator 时行为明确：需要 UI 控制面则拒绝启动，否则显式禁用这些 endpoints，不能静默形成无人可管理的全 403 状态；(d) anonymous 401、普通用户 403、operator 成功的测试 | 未修 | `api/config.py:27,32` |
+| 3 | **P0** | API-key `GET/PUT /api/config` operator 授权：控制面统一走 `require_operator`；角色保存在 `users.is_operator` 并签入 JWT；新装首用户、存量最早用户在无 operator 时自动引导；覆盖 401/403/operator 测试 | 已修 | `api/config.py`, `api/admin_deps.py`, `core/auth.py` |
 | 4 | **P0** | `read/write_local_file` 基于 deny-list 边界。**真正风险是跨组 workspace、central DB、配置和 app 运行环境访问**。修复必须包含：(a) `Path.resolve()` + `Path.relative_to()`/等价语义，不能用字符串前缀；(b) read 仅允许当前群组根和显式授权的只读 skill 根，write 仅允许当前群组可写根；(c) read、existing write、non-existing write 的 symlink escape 测试；(d) 写入拒绝末级 symlink，并防止校验到打开之间的 symlink TOCTOU；(e) HIL 或 bypassPermissions 不得扩大根目录 | 未修 | `workspace_tools.py:1259,1270` |
 | 5 | **P0** | AUTH_SECRET production fail-closed——`b45150e` 只加了 CRITICAL log，**diagnostic mitigation landed; vulnerability open**。需在 `NUKE_ENV=production` 下拒绝启动 | commit `b45150e` | `core/auth.py:12` |
 | 6 | **P0/部署** | standalone production local shell 无隔离——`NUKE_ENV=production` + `NUKE_SHELL_EXEC_BACKEND=local`，bot shell 可访问 central DB 和所有群组 workspace。需明确标为 dev-only 或改为 container backend | 未修 | `docker-compose.standalone.yml:21,26` |
@@ -340,7 +340,6 @@
 
 | ID | 问题 | 位置 |
 |----|------|------|
-| TD-m1 | `NUKE_WORKERS` 各 compose 文件不一致 | `docker-compose*.yml` |
 | TD-m2 | 无日志轮转配置 | `docker-compose*.yml` |
 | TD-m3 | 无 `stop_grace_period` | `docker-compose*.yml` |
 | TD-m4 | 测试断言耦合中文错误消息精确措辞 | 多处 |

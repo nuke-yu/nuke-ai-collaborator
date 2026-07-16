@@ -99,7 +99,7 @@ async def lifespan(app: FastAPI):
     
     # 4. Start Supervisor Engine + Workers
     addr = ipc.make_addr("supervisor")
-    num_workers = int(os.getenv("NUKE_WORKERS", "4"))
+    num_workers = int(os.getenv("NUKE_WORKERS", "8"))
     sup = sup_mod.Supervisor(addr, num_workers=num_workers, on_unread=on_unread_delta)
     await sup.start()
     sup_mod.supervisor = sup
@@ -480,7 +480,7 @@ async def _handle_websocket_disconnect(websocket: WebSocket, group_id: int):
             pass
 
 
-@app.websocket("/ws/{group_id}/{member_id}")
+@app.websocket("/ws/{group_id:int}/{member_id:int}")
 async def websocket_endpoint(websocket: WebSocket, group_id: int, member_id: int, token: str = None):
     protocol_token, subprotocol = _websocket_protocol_auth(websocket)
     # Query token is a temporary compatibility fallback for older clients.

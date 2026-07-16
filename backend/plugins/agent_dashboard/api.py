@@ -12,6 +12,7 @@ Provides REST endpoints for the dashboard frontend:
 import logging
 import re
 import shlex
+import uuid
 import time
 from datetime import datetime
 from fastapi import APIRouter, Depends, Header, HTTPException
@@ -69,11 +70,12 @@ class CreateTaskRequest(BaseModel):
     @field_validator("requirements")
     @classmethod
     def validate_requirements(cls, v: str) -> str:
-        if len(v.strip()) < 10:
-            raise ValueError("requirements must be at least 10 characters")
+        requirements = v.strip()
+        if not requirements:
+            raise ValueError("requirements must not be empty")
         if len(v) > 10000:
             raise ValueError("requirements must be under 10000 characters")
-        return v
+        return requirements
 
     @field_validator("test_command")
     @classmethod
@@ -125,14 +127,14 @@ class RetryResponse(BaseModel):
 async def create_task(
     req: CreateTaskRequest,
     idempotency_key: Annotated[
-        str,
+        str | None,
         Header(
             alias="Idempotency-Key",
             min_length=8,
             max_length=128,
             pattern=r"^[A-Za-z0-9._:-]+$",
         ),
-    ],
+    ] = None,
     user=Depends(require_operator),
 ):
     """Create a new coding agent task.
@@ -160,7 +162,7 @@ async def create_task(
             model=req.model,
             max_iterations=req.max_iterations,
             worker_id=worker_id,
-            idempotency_key=idempotency_key,
+            idempotency_key=idempotency_key or f"server-{uuid.uuid4().hex}",
         )
 
         return TaskResponse(

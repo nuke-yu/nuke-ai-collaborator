@@ -45,6 +45,7 @@ _CENTRAL_DDL = [
         username     TEXT NOT NULL UNIQUE,
         password_hash TEXT NOT NULL,
         email        TEXT,
+        is_operator  INTEGER NOT NULL DEFAULT 0 CHECK(is_operator IN (0, 1)),
         created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )""",
 

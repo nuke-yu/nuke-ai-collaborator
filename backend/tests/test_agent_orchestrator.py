@@ -200,6 +200,47 @@ class TestCreateTask(DatabaseTestBase):
 
 class TestTaskStoreIdempotency(DatabaseTestBase):
 
+    async def test_startup_reconciles_interrupted_retry_states(self):
+        store = TaskStore()
+        import db
+        async with db.write_connect() as conn:
+            await conn.execute("INSERT INTO groups (id, name) VALUES (1, 'test-group')")
+            await conn.execute(
+                "INSERT INTO members (id, group_id, name, type, role) "
+                "VALUES (2, 1, 'test-bot', 'bot', 'developer')"
+            )
+            await conn.commit()
+        for task_id in ("retrying_task", "legacy_restarted_task"):
+            await store.create_task(
+                task_id=task_id,
+                group_id=1,
+                bot_id=2,
+                repo_url="https://github.com/user/repo.git",
+                requirements="Reconcile interrupted retry",
+            )
+        claim = await store.claim_retry(
+            "retrying_task", frozenset({"created"}), automatic=True
+        )
+        self.assertIsNotNone(claim)
+        async with db.write_connect() as conn:
+            await conn.execute(
+                "UPDATE agent_tasks SET status = 'restarted' WHERE task_id = ?",
+                ("legacy_restarted_task",),
+            )
+            await conn.commit()
+
+        result = await store.reconcile_transient_states()
+
+        self.assertEqual(result["retrying_to_stuck"], 1)
+        self.assertEqual(result["restarted_to_stuck"], 1)
+        self.assertEqual((await store.get_task("retrying_task"))["status"], "stuck")
+        self.assertEqual(
+            (await store.get_task("legacy_restarted_task"))["status"], "stuck"
+        )
+        async with db.connect() as conn:
+            cur = await conn.execute("SELECT COUNT(*) FROM agent_task_retry_claims")
+            self.assertEqual((await cur.fetchone())[0], 0)
+
     async def test_concurrent_reservation_has_one_owner(self):
         store = TaskStore()
         results = await asyncio.gather(
@@ -415,7 +456,7 @@ class TestRetryTask(DatabaseTestBase):
 
             result = await orch.retry_task("task_1")
 
-        self.assertEqual(result["status"], "restarted")
+        self.assertEqual(result["status"], "running")
         mock_abort.assert_called_once_with(10, "task_1", mode="retry")
         mock_dispatch.assert_called_once_with(10, 5, "Add feature", "pytest", task_id="task_1")
         adapter.reset_for_retry.assert_called_once_with(10)
@@ -475,7 +516,7 @@ class TestRetryTask(DatabaseTestBase):
              patch.object(orch, "_dispatch_agent", new_callable=AsyncMock):
             result = await orch.retry_task("auto_task", automatic=True)
 
-        self.assertEqual(result["status"], "restarted")
+            self.assertEqual(result["status"], "running")
         self.assertEqual(adapter._states[10].status, "running")
         self.assertNotIn(10, adapter._retry_claimed_groups)
 
@@ -518,7 +559,7 @@ class TestRetryTask(DatabaseTestBase):
             release_abort.set()
             result = await owner
 
-        self.assertEqual(result["status"], "restarted")
+        self.assertEqual(result["status"], "running")
         self.assertEqual(abort.call_count, 1)
         self.assertEqual(dispatch.await_count, 1)
 

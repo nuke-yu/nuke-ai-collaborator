@@ -30,13 +30,12 @@ class HostedGitProvider:
                 self.max_path_segments is not None
                 and len(segments) > self.max_path_segments
             )
-            or not segments[-1].endswith(".git")
         ):
             raise ValueError(
-                f"repo_url must identify a valid {self.name} repository ending in .git"
+                f"repo_url must identify a valid {self.name} repository"
             )
 
-        repository_name = segments[-1][:-4]
+        repository_name = segments[-1].removesuffix(".git")
         normalized_segments = [*segments[:-1], repository_name]
         if any(
             not segment

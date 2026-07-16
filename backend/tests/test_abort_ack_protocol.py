@@ -351,7 +351,7 @@ class TestOrchestratorAbortIntegration(unittest.IsolatedAsyncioTestCase):
         mock_dispatch.assert_called_once()
 
         # Verify status updated
-        self.assertEqual(result["status"], "restarted")
+        self.assertEqual(result["status"], "running")
 
     async def test_abort_waits_for_ack_before_terminal_state(self):
         """abort_task only writes terminal state after receiving successful ACK."""

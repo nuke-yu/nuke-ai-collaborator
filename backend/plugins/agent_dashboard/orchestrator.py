@@ -390,6 +390,11 @@ class TaskOrchestrator:
         # P1-1: Update status in database
         await self._task_store.update_status(task_id, "aborted")
 
+        # Converge the durable session/workflow records as part of the same
+        # logical termination. The periodic reconciler retries this idempotently.
+        from plugins.agent_dashboard.reconciler import finalize_group_state
+        await finalize_group_state(group_id, record["bot_id"], status="aborted")
+
         # P1-1: Fetch updated record from database
         return await self._task_store.get_task(task_id)
 
