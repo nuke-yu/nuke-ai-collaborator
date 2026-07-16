@@ -18,8 +18,15 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import db as database
 from db.migrations import (
-    run_migrations, migration_001, migration_002, migration_023, migration_029,
-    MIGRATIONS, _safe_add_column,
+    MIGRATIONS,
+    _safe_add_column,
+    migration_001,
+    migration_002,
+    migration_023,
+    migration_028,
+    migration_029,
+    migration_030,
+    run_migrations,
 )
 from db.schema import init_db
 
@@ -638,6 +645,25 @@ class TestMigration029(MigrationTestCase):
                     "error_message",
                     "created_at",
                     "updated_at",
+                },
+            )
+
+
+class TestMigration030(MigrationTestCase):
+    async def test_creates_tokenized_retry_claims(self):
+        async with self._connect() as conn:
+            await migration_028(conn)
+            await migration_030(conn)
+            self.assertTrue(await _has_table(conn, "agent_task_retry_claims"))
+            columns = set(await _table_columns(conn, "agent_task_retry_claims"))
+            self.assertEqual(
+                columns,
+                {
+                    "task_id",
+                    "token",
+                    "previous_status",
+                    "automatic",
+                    "claimed_at",
                 },
             )
 

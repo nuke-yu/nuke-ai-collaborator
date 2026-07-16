@@ -5,6 +5,7 @@ Tests the stuck detection logic:
   - Terminal-state tasks are skipped
   - Manual force_check works correctly
 """
+import asyncio
 import time
 import unittest
 from unittest.mock import MagicMock
@@ -166,8 +167,7 @@ class TestAutoRetry(unittest.IsolatedAsyncioTestCase):
         detector = StuckDetector(adapter, orchestrator=mock_orch, max_auto_retries=3)
         await detector._check_all()
 
-        self.assertEqual(state.status, "retrying")
-        self.assertIn("自动重试", state.detail)
+        self.assertEqual(state.status, "running")
         self.assertEqual(detector._retry_counts[1], 1)
         # Let the background task complete
         import asyncio
@@ -186,12 +186,15 @@ class TestAutoRetry(unittest.IsolatedAsyncioTestCase):
         detector = StuckDetector(adapter, orchestrator=mock_orch, max_auto_retries=3)
         # Simulate 3 stuck checks
         await detector._check_all()
+        await asyncio.sleep(0)
         state.status = "running"  # reset (simulates retry succeeded briefly)
         state.last_event_at = time.time() - STUCK_TIMEOUT_SEC - 10  # stuck again
         await detector._check_all()
+        await asyncio.sleep(0)
         state.status = "running"
         state.last_event_at = time.time() - STUCK_TIMEOUT_SEC - 10  # stuck again
         await detector._check_all()
+        await asyncio.sleep(0)
 
         self.assertEqual(detector._retry_counts[1], 3)
 
@@ -256,7 +259,7 @@ class TestAutoRetryAsync(unittest.IsolatedAsyncioTestCase):
 
         await detector._auto_retry(1, "task_1")
 
-        mock_orch.retry_task.assert_called_once_with("task_1")
+        mock_orch.retry_task.assert_called_once_with("task_1", automatic=True)
         # Counter NOT cleared on dispatch — only cleared on task completion
         self.assertEqual(detector._retry_counts.get(1), 2)
 

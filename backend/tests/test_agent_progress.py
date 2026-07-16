@@ -174,6 +174,19 @@ class TestPhaseDetection:
 
 class TestStatusTransitions:
 
+    def test_retry_claim_ignores_terminal_event_from_old_workflow(
+        self, active_adapter
+    ):
+        active_adapter.mark_retrying(1, "retrying")
+
+        active_adapter.on_event(1, {"type": "stream_aborted"})
+
+        assert active_adapter._states[1].status == "retrying"
+        assert 1 in active_adapter._active_groups
+        active_adapter.reset_for_retry(1)
+        assert active_adapter._states[1].status == "running"
+        assert 1 not in active_adapter._retry_claimed_groups
+
     def test_stream_end_does_not_complete_task(self, active_adapter):
         """stream_end only indicates model output finished, NOT task completion."""
         active_adapter.on_event(1, {"type": "tool_call", "tool_name": "create_pr", "tool_input": {}})

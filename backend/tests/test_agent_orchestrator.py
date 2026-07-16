@@ -13,6 +13,7 @@ from plugins.agent_dashboard.orchestrator import TaskOrchestrator, CODING_AGENT_
 from plugins.agent_dashboard.progress import ProgressAdapter
 from plugins.agent_dashboard.task_store import (
     IdempotencyConflict,
+    TaskRetryConflict,
     TaskStateProjector,
     TaskStore,
 )
@@ -424,6 +425,194 @@ class TestRetryTask(DatabaseTestBase):
         with self.assertRaises(ValueError) as ctx:
             await orch.retry_task("nonexistent")
         self.assertIn("not found", str(ctx.exception))
+
+    async def test_manual_retry_rejects_running_task_before_abort(self):
+        orch = TaskOrchestrator()
+        await self._create_retry_task(orch, "running_task", status="running")
+
+        with patch.object(orch, "_send_abort", new_callable=AsyncMock) as abort:
+            with self.assertRaises(TaskRetryConflict):
+                await orch.retry_task("running_task")
+
+        abort.assert_not_awaited()
+        record = await orch._task_store.get_task("running_task")
+        self.assertEqual(record["status"], "running")
+
+    async def test_manual_retry_rejects_completed_task(self):
+        orch = TaskOrchestrator()
+        await self._create_retry_task(orch, "completed_task", status="completed")
+
+        with self.assertRaises(TaskRetryConflict):
+            await orch.retry_task("completed_task")
+
+    async def test_retry_api_returns_conflict_for_ineligible_status(self):
+        from fastapi import HTTPException
+        from plugins.agent_dashboard import api
+
+        orchestrator = MagicMock()
+        orchestrator.retry_task = AsyncMock(
+            side_effect=TaskRetryConflict("running_task", "running")
+        )
+        previous = api._orchestrator
+        api._orchestrator = orchestrator
+        try:
+            with self.assertRaises(HTTPException) as ctx:
+                await api.retry_task(
+                    "running_task", user={"username": "operator"}
+                )
+        finally:
+            api._orchestrator = previous
+
+        self.assertEqual(ctx.exception.status_code, 409)
+
+    async def test_automatic_retry_can_claim_running_task(self):
+        adapter = ProgressAdapter()
+        adapter.register_task(10, "auto_task")
+        orch = TaskOrchestrator(adapter=adapter)
+        await self._create_retry_task(orch, "auto_task", status="running")
+
+        with patch.object(orch, "_send_abort", new_callable=AsyncMock), \
+             patch.object(orch, "_dispatch_agent", new_callable=AsyncMock):
+            result = await orch.retry_task("auto_task", automatic=True)
+
+        self.assertEqual(result["status"], "restarted")
+        self.assertEqual(adapter._states[10].status, "running")
+        self.assertNotIn(10, adapter._retry_claimed_groups)
+
+    async def test_local_stuck_projection_lag_restores_stuck_on_failure(self):
+        adapter = ProgressAdapter()
+        adapter.register_task(10, "lagged_task")
+        adapter.set_status(10, "stuck", project=False)
+        orch = TaskOrchestrator(adapter=adapter)
+        await self._create_retry_task(orch, "lagged_task", status="running")
+
+        with patch.object(orch, "_send_abort", new_callable=AsyncMock), \
+             patch.object(
+                 orch,
+                 "_dispatch_agent",
+                 new=AsyncMock(side_effect=RuntimeError("dispatch failed")),
+             ):
+            with self.assertRaisesRegex(RuntimeError, "dispatch failed"):
+                await orch.retry_task("lagged_task")
+
+        record = await orch._task_store.get_task("lagged_task")
+        self.assertEqual(record["status"], "stuck")
+        self.assertEqual(adapter._states[10].status, "stuck")
+
+    async def test_concurrent_retry_has_single_claim_owner(self):
+        orch = TaskOrchestrator()
+        await self._create_retry_task(orch, "concurrent_task", status="stuck")
+        abort_entered = asyncio.Event()
+        release_abort = asyncio.Event()
+
+        async def delayed_abort(*args, **kwargs):
+            abort_entered.set()
+            await release_abort.wait()
+
+        with patch.object(orch, "_send_abort", side_effect=delayed_abort) as abort, \
+             patch.object(orch, "_dispatch_agent", new_callable=AsyncMock) as dispatch:
+            owner = asyncio.create_task(orch.retry_task("concurrent_task"))
+            await asyncio.wait_for(abort_entered.wait(), timeout=1)
+            with self.assertRaises(TaskRetryConflict):
+                await orch.retry_task("concurrent_task")
+            release_abort.set()
+            result = await owner
+
+        self.assertEqual(result["status"], "restarted")
+        self.assertEqual(abort.call_count, 1)
+        self.assertEqual(dispatch.await_count, 1)
+
+    async def test_stale_retry_claim_can_be_recovered_by_new_owner(self):
+        orch = TaskOrchestrator()
+        await self._create_retry_task(orch, "stale_task", status="running")
+        first = await orch._task_store.claim_retry(
+            "stale_task", frozenset({"running"}), automatic=True
+        )
+        self.assertIsNotNone(first)
+
+        import db
+        async with db.write_connect() as conn:
+            await conn.execute(
+                """UPDATE agent_task_retry_claims
+                   SET claimed_at = datetime('now', '-10 minutes')
+                   WHERE task_id = ?""",
+                ("stale_task",),
+            )
+            await conn.commit()
+
+        second = await orch._task_store.claim_retry(
+            "stale_task", frozenset({"stuck"}), automatic=True
+        )
+        self.assertIsNotNone(second)
+        self.assertNotEqual(first.token, second.token)
+        self.assertFalse(
+            await orch._task_store.complete_retry_claim("stale_task", first.token)
+        )
+        self.assertTrue(
+            await orch._task_store.restore_retry_claim(
+                "stale_task", second.token, "stuck", "new owner released"
+            )
+        )
+
+    async def test_stale_claim_is_cleaned_when_task_already_completed(self):
+        orch = TaskOrchestrator()
+        await self._create_retry_task(orch, "finished_claim", status="running")
+        claim = await orch._task_store.claim_retry(
+            "finished_claim", frozenset({"running"}), automatic=True
+        )
+        self.assertIsNotNone(claim)
+
+        import db
+        async with db.write_connect() as conn:
+            # Simulate an external recovery writer reaching a terminal state
+            # before a crashed owner's stale lease row is removed.
+            await conn.execute(
+                "UPDATE agent_tasks SET status = 'completed' WHERE task_id = ?",
+                ("finished_claim",),
+            )
+            await conn.execute(
+                """UPDATE agent_task_retry_claims
+                   SET claimed_at = datetime('now', '-10 minutes')
+                   WHERE task_id = ?""",
+                ("finished_claim",),
+            )
+            await conn.commit()
+
+        self.assertIsNone(
+            await orch._task_store.claim_retry(
+                "finished_claim", frozenset({"stuck"}), automatic=True
+            )
+        )
+        async with db.connect() as conn:
+            cur = await conn.execute(
+                "SELECT COUNT(*) FROM agent_task_retry_claims WHERE task_id = ?",
+                ("finished_claim",),
+            )
+            self.assertEqual((await cur.fetchone())[0], 0)
+
+    async def _create_retry_task(
+        self, orch: TaskOrchestrator, task_id: str, *, status: str
+    ) -> None:
+        import db
+        async with db.write_connect() as conn:
+            await conn.execute(
+                "INSERT OR IGNORE INTO groups (id, name) VALUES (10, 'test-group')"
+            )
+            await conn.execute(
+                """INSERT OR IGNORE INTO members
+                   (id, group_id, name, type, role)
+                   VALUES (5, 10, 'test-bot', 'bot', 'developer')"""
+            )
+            await conn.commit()
+        await orch._task_store.create_task(
+            task_id=task_id,
+            group_id=10,
+            bot_id=5,
+            repo_url="https://github.com/test/repo.git",
+            requirements="Exercise retry state transitions",
+        )
+        if status != "created":
+            await orch._task_store.update_status(task_id, status)
 
 
 class TestAbortTask(DatabaseTestBase):

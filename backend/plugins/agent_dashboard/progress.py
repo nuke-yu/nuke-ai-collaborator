@@ -149,6 +149,9 @@ class ProgressAdapter:
         self._update_queue: asyncio.Queue = asyncio.Queue(maxsize=5000)
         # Groups being tracked as coding agent tasks
         self._active_groups: set[int] = set()
+        # Status events from the old workflow are ignored while its retry owner
+        # holds the durable TaskStore claim.
+        self._retry_claimed_groups: set[int] = set()
         self._cleanup_callbacks: list = []
         self._projector = projector
 
@@ -217,10 +220,18 @@ class ProgressAdapter:
         detail: Optional[str] = None,
         error_message: Optional[str] = None,
         push: bool = True,
+        project: bool = True,
     ) -> None:
         """Apply a local status transition and enforce terminal cleanup."""
         state = self._states.get(group_id)
         if state is None:
+            return
+        if group_id in self._retry_claimed_groups and status != "retrying":
+            log.debug(
+                "agent_dashboard: ignored status %s from superseded workflow in group %d",
+                status,
+                group_id,
+            )
             return
         state.status = status
         if status == "done":
@@ -230,11 +241,37 @@ class ProgressAdapter:
             state.detail = detail
         if error_message is not None:
             state.error_message = error_message
-        self._project_status(state)
+        if project:
+            self._project_status(state)
         if status in TERMINAL_STATUSES:
             self._retire(group_id)
         if push:
             self._push_update(group_id, state)
+
+    def mark_retrying(self, group_id: int, detail: str) -> None:
+        """Expose an already-persisted retry claim without re-projecting it."""
+        if group_id not in self._states:
+            return
+        self._active_groups.add(group_id)
+        self._retry_claimed_groups.add(group_id)
+        self.set_status(group_id, "retrying", detail=detail, project=False)
+
+    def fail_retry(
+        self, group_id: int, status: str, detail: str, error_message: str
+    ) -> None:
+        """Release a retry claim into a durable failure status."""
+        self._retry_claimed_groups.discard(group_id)
+        self.set_status(
+            group_id,
+            status,
+            detail=detail,
+            error_message=error_message,
+            project=False,
+        )
+
+    def release_retry_claim(self, group_id: int) -> None:
+        """Stop suppressing workflow events after durable claim ownership is lost."""
+        self._retry_claimed_groups.discard(group_id)
 
     def register_task(self, group_id: int, task_id: str = "") -> TaskProgress:
         """Register a new coding agent task for progress tracking."""
@@ -246,6 +283,7 @@ class ProgressAdapter:
 
     def remove_task(self, group_id: int) -> None:
         """Completely remove a task from tracking (e.g., on rollback)."""
+        self._retry_claimed_groups.discard(group_id)
         self._retire(group_id)
         self._states.pop(group_id, None)
         # No push_update since task is removed
@@ -264,6 +302,7 @@ class ProgressAdapter:
 
     def reset_for_retry(self, group_id: int) -> None:
         """Reset task state for retry (keeps tracking active)."""
+        self._retry_claimed_groups.discard(group_id)
         state = self._states.get(group_id)
         if state:
             self._active_groups.add(group_id)

@@ -85,6 +85,9 @@ class StuckDetector:
             state = self._adapter._states.get(group_id)
             if not state:
                 continue
+            retry_task = self._retry_tasks.get(group_id)
+            if retry_task and not retry_task.done():
+                continue
 
             if state.status in TERMINAL_STATUSES:
                 self._adapter.retire_if_terminal(group_id)
@@ -107,20 +110,16 @@ class StuckDetector:
                         "StuckDetector: group %d stuck (%.0fs idle), auto-retry %d/%d",
                         group_id, idle_sec, retry_count + 1, self._max_auto_retries,
                     )
-                    self._adapter.set_status(
-                        group_id,
-                        "retrying",
-                        detail=(
-                            f"卡死自动重试 "
-                            f"({retry_count + 1}/{self._max_auto_retries})"
-                        ),
-                    )
                     # Fire-and-forget retry (don't block the check loop)
                     task_id = state.task_id
                     task = asyncio.create_task(self._auto_retry(group_id, task_id))
                     self._retry_tasks[group_id] = task
                     task.add_done_callback(
-                        lambda completed, gid=group_id: self._retry_tasks.pop(gid, None)
+                        lambda completed, gid=group_id: (
+                            self._retry_tasks.pop(gid, None)
+                            if self._retry_tasks.get(gid) is completed
+                            else None
+                        )
                     )
                 else:
                     # No auto-retry or max retries exceeded
@@ -158,18 +157,30 @@ class StuckDetector:
         """
         try:
             if self._orchestrator:
-                await self._orchestrator.retry_task(task_id)
+                await self._orchestrator.retry_task(task_id, automatic=True)
                 log.info("StuckDetector: auto-retry dispatched for task %s", task_id)
         except Exception as e:
             log.error("StuckDetector: auto-retry failed for task %s: %s", task_id, e)
             state = self._adapter._states.get(group_id)
             if state:
                 state.last_event_at = time.time()
+                from plugins.agent_dashboard.task_store import TaskRetryConflict
+
+                conflict_status = e.status if isinstance(e, TaskRetryConflict) else None
+                local_status = {
+                    "completed": "done",
+                    "failed": "error",
+                    "aborted": "aborted",
+                    "stuck_permanently": "stuck_permanently",
+                    "retrying": "retrying",
+                    "restarted": "running",
+                }.get(conflict_status, "stuck")
                 self._adapter.set_status(
                     group_id,
-                    "stuck",
+                    local_status,
                     detail=f"自动重试失败: {str(e)[:80]}",
                     error_message=str(e),
+                    project=False,
                 )
 
     def force_check(self, group_id: int) -> bool:

@@ -20,6 +20,7 @@ from typing import Annotated, Optional
 
 from api.admin_deps import require_operator
 from integrations.repository_policy import DEFAULT_REPOSITORY_ADMISSION_POLICY
+from plugins.agent_dashboard.task_store import TaskRetryConflict
 
 log = logging.getLogger(__name__)
 
@@ -247,6 +248,8 @@ async def retry_task(task_id: str, user=Depends(require_operator)):
         )
     except ValueError:
         raise HTTPException(404, "Task not found")
+    except TaskRetryConflict as e:
+        raise HTTPException(409, str(e))
     except Exception as e:
         log.exception("agent_dashboard: retry failed for %s", task_id)
         raise HTTPException(500, f"Retry failed: {e}")

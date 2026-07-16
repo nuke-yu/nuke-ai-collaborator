@@ -16,7 +16,9 @@ Usage:
 import asyncio
 import logging
 import random
+import uuid
 from collections import OrderedDict
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -33,19 +35,26 @@ _ALLOWED_TRANSITIONS = {
     },
     "running": {"paused", "stuck", "retrying", "completed", "failed", "aborted"},
     "paused": {"running", "stuck", "retrying", "completed", "failed", "aborted"},
-    "stuck": {"retrying", "restarted", "failed", "aborted", "stuck_permanently"},
+    "stuck": {"retrying", "failed", "aborted", "stuck_permanently"},
     "retrying": {"running", "restarted", "failed", "aborted", "stuck_permanently"},
     "restarted": {
         "running", "paused", "stuck", "retrying", "completed", "failed", "aborted",
     },
-    "failed": {"restarted", "aborted"},
-    "aborted": {"restarted"},
-    "stuck_permanently": {"restarted", "aborted"},
+    "failed": {"retrying", "aborted"},
+    "aborted": {"retrying"},
+    "stuck_permanently": {"retrying", "aborted"},
     "completed": set(),
 }
 _PERSISTED_TERMINAL_STATUSES = frozenset(
     {"completed", "failed", "aborted", "stuck_permanently"}
 )
+_RETRY_CLAIM_TTL_SECONDS = 120
+
+
+@dataclass(frozen=True)
+class RetryClaim:
+    token: str
+    previous_status: str
 
 
 class IdempotencyConflict(RuntimeError):
@@ -58,6 +67,15 @@ class TaskCreationInProgress(RuntimeError):
 
 class PreviousTaskCreationFailed(RuntimeError):
     pass
+
+
+class TaskRetryConflict(RuntimeError):
+    """The task is not in a state that the requested retry mode can claim."""
+
+    def __init__(self, task_id: str, status: str):
+        self.task_id = task_id
+        self.status = status
+        super().__init__(f"Task {task_id} cannot be retried from status {status}")
 
 
 def _utc_iso(value) -> str:
@@ -277,6 +295,154 @@ class TaskStore:
             )
             await db.commit()
             return cur.rowcount > 0
+
+    async def claim_retry(
+        self,
+        task_id: str,
+        allowed_statuses: frozenset[str],
+        *,
+        automatic: bool = False,
+        stale_after_seconds: int = _RETRY_CLAIM_TTL_SECONDS,
+    ) -> Optional[RetryClaim]:
+        """Atomically lease an eligible task retry to one tokenized owner."""
+        if not allowed_statuses:
+            raise ValueError("allowed_statuses must not be empty")
+        if stale_after_seconds < 0:
+            raise ValueError("stale_after_seconds must not be negative")
+        from db import write_connect
+
+        async with write_connect() as db:
+            await db.execute("BEGIN IMMEDIATE")
+            recovered_stale_claim = False
+            existing_cur = await db.execute(
+                """SELECT token,
+                          claimed_at <= datetime('now', ?) AS is_stale
+                   FROM agent_task_retry_claims WHERE task_id = ?""",
+                (f"-{stale_after_seconds} seconds", task_id),
+            )
+            existing = await existing_cur.fetchone()
+            if existing is not None:
+                if not existing[1]:
+                    await db.rollback()
+                    return None
+                await db.execute(
+                    "DELETE FROM agent_task_retry_claims WHERE task_id = ? AND token = ?",
+                    (task_id, existing[0]),
+                )
+                recovered_stale_claim = True
+                await db.execute(
+                    """UPDATE agent_tasks
+                       SET status = 'stuck',
+                           error_message = 'Recovered stale retry claim',
+                           updated_at = CURRENT_TIMESTAMP
+                       WHERE task_id = ? AND status = 'retrying'""",
+                    (task_id,),
+                )
+
+            current_cur = await db.execute(
+                "SELECT status FROM agent_tasks WHERE task_id = ?",
+                (task_id,),
+            )
+            current_row = await current_cur.fetchone()
+            if current_row is None or current_row[0] not in allowed_statuses:
+                if recovered_stale_claim:
+                    await db.commit()
+                else:
+                    await db.rollback()
+                return None
+
+            previous_status = current_row[0]
+            token = uuid.uuid4().hex
+            await db.execute(
+                """INSERT INTO agent_task_retry_claims
+                   (task_id, token, previous_status, automatic)
+                   VALUES (?, ?, ?, ?)""",
+                (task_id, token, previous_status, int(automatic)),
+            )
+            cur = await db.execute(
+                """UPDATE agent_tasks
+                   SET status = 'retrying', error_message = NULL,
+                       updated_at = CURRENT_TIMESTAMP
+                   WHERE task_id = ? AND status = ?""",
+                (task_id, previous_status),
+            )
+            if cur.rowcount != 1:
+                await db.rollback()
+                return None
+            await db.commit()
+            return RetryClaim(token=token, previous_status=previous_status)
+
+    async def complete_retry_claim(self, task_id: str, token: str) -> bool:
+        """Finalize retrying -> restarted only for the current lease owner."""
+        from db import write_connect
+
+        async with write_connect() as db:
+            await db.execute("BEGIN IMMEDIATE")
+            owner_cur = await db.execute(
+                "SELECT 1 FROM agent_task_retry_claims WHERE task_id = ? AND token = ?",
+                (task_id, token),
+            )
+            if await owner_cur.fetchone() is None:
+                await db.rollback()
+                return False
+            cur = await db.execute(
+                """UPDATE agent_tasks
+                   SET status = 'restarted', error_message = NULL,
+                       updated_at = CURRENT_TIMESTAMP
+                   WHERE task_id = ? AND status = 'retrying'""",
+                (task_id,),
+            )
+            if cur.rowcount != 1:
+                await db.rollback()
+                return False
+            await db.execute(
+                "DELETE FROM agent_task_retry_claims WHERE task_id = ? AND token = ?",
+                (task_id, token),
+            )
+            await db.commit()
+            return True
+
+    async def restore_retry_claim(
+        self, task_id: str, token: str, status: str, error_message: str
+    ) -> bool:
+        """Restore a failed retry only while this caller still owns the claim."""
+        if status not in {
+            "running", "dispatched", "paused", "stuck", "failed", "aborted",
+            "stuck_permanently",
+        }:
+            raise ValueError(f"Invalid retry fallback status: {status}")
+        from db import write_connect
+
+        persisted_error = (
+            error_message[:2000]
+            if status in {"stuck", "failed", "stuck_permanently"}
+            else None
+        )
+        async with write_connect() as db:
+            await db.execute("BEGIN IMMEDIATE")
+            owner_cur = await db.execute(
+                "SELECT 1 FROM agent_task_retry_claims WHERE task_id = ? AND token = ?",
+                (task_id, token),
+            )
+            if await owner_cur.fetchone() is None:
+                await db.rollback()
+                return False
+            cur = await db.execute(
+                """UPDATE agent_tasks
+                   SET status = ?, error_message = ?,
+                       updated_at = CURRENT_TIMESTAMP
+                   WHERE task_id = ? AND status = 'retrying'""",
+                (status, persisted_error, task_id),
+            )
+            if cur.rowcount != 1:
+                await db.rollback()
+                return False
+            await db.execute(
+                "DELETE FROM agent_task_retry_claims WHERE task_id = ? AND token = ?",
+                (task_id, token),
+            )
+            await db.commit()
+            return True
 
     async def delete_task(self, task_id: str) -> bool:
         """Delete a task record.

@@ -30,7 +30,7 @@ log = logging.getLogger(__name__)
 CENTRAL_TABLES = frozenset({
     "users", "groups", "members", "role_templates", "permission_rules", "cron_jobs",
     "unread_counts", "bot_skills", "external_skills", "agent_tasks",
-    "agent_task_requests",
+    "agent_task_requests", "agent_task_retry_claims",
 })
 GROUP_TABLES = frozenset({
     "messages", "role_summaries", "message_embeddings", "member_read",
@@ -184,6 +184,14 @@ _CENTRAL_DDL = [
         error_message   TEXT DEFAULT NULL,
         created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )""",
+    """CREATE TABLE IF NOT EXISTS agent_task_retry_claims (
+        task_id         TEXT PRIMARY KEY,
+        token           TEXT NOT NULL UNIQUE,
+        previous_status TEXT NOT NULL,
+        automatic      INTEGER NOT NULL DEFAULT 0,
+        claimed_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (task_id) REFERENCES agent_tasks(task_id) ON DELETE CASCADE
     )""",
 ]
 

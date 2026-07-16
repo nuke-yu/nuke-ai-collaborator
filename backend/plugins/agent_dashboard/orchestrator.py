@@ -25,6 +25,20 @@ from typing import Optional
 
 log = logging.getLogger(__name__)
 
+_MANUAL_RETRY_STATUSES = frozenset(
+    {"stuck", "failed", "aborted", "stuck_permanently"}
+)
+_AUTOMATIC_RETRY_STATUSES = frozenset(
+    {"dispatched", "running", "paused", "stuck"}
+)
+_ACTIVE_PERSISTED_STATUSES = frozenset({"dispatched", "running", "paused"})
+_LOCAL_RETRY_FAILURE_STATUS = {
+    "stuck": "stuck",
+    "failed": "error",
+    "aborted": "aborted",
+    "stuck_permanently": "stuck_permanently",
+}
+
 # Default coding agent system prompt
 CODING_AGENT_SYSTEM_PROMPT = """You are an autonomous coding agent. Your task is to implement the requested feature, test it, and submit a PR.
 
@@ -247,7 +261,7 @@ class TaskOrchestrator:
         log.info("TaskOrchestrator: task %s dispatched (group=%d, bot=%d)", task_id, group_id, bot_id)
         return record
 
-    async def retry_task(self, task_id: str) -> dict:
+    async def retry_task(self, task_id: str, *, automatic: bool = False) -> dict:
         """Retry a stuck/failed task: abort via IPC ACK → re-dispatch.
 
         P0-2: Uses ABORT_REQUEST/ABORT_ACK protocol. Only re-dispatches after
@@ -262,23 +276,90 @@ class TaskOrchestrator:
             raise ValueError(f"Task {task_id} not found")
 
         group_id = record["group_id"]
-
-        # 1. Abort via IPC ACK protocol (raises on timeout/error - fail closed)
-        await self._send_abort(group_id, task_id, mode="retry")
-
-        # Re-dispatch before changing visible state.  A transport failure leaves
-        # the prior state intact and is therefore safely retryable.
-        await self._dispatch_agent(
-            group_id,
-            record["bot_id"],
-            record["requirements"],
-            record.get("test_command", ""),
-            task_id=task_id,
+        allowed_statuses = set(
+            _AUTOMATIC_RETRY_STATUSES if automatic else _MANUAL_RETRY_STATUSES
         )
+        local_stuck_override = False
+        if not automatic and self._adapter:
+            local_state = self._adapter._states.get(group_id)
+            if (
+                local_state
+                and local_state.task_id == task_id
+                and local_state.status == "stuck"
+            ):
+                # The local detector can be ahead of its asynchronous projector.
+                local_stuck_override = True
+                allowed_statuses.update(_ACTIVE_PERSISTED_STATUSES)
+
+        claim = await self._task_store.claim_retry(
+            task_id,
+            frozenset(allowed_statuses),
+            automatic=automatic,
+        )
+        if claim is None:
+            from plugins.agent_dashboard.task_store import TaskRetryConflict
+
+            current = await self._task_store.get_task(task_id)
+            raise TaskRetryConflict(
+                task_id, current["status"] if current else "missing"
+            )
+
+        try:
+            if self._adapter:
+                self._adapter.mark_retrying(group_id, "正在停止旧任务并准备重试")
+            # Only the owner of the durable retry claim may abort and dispatch.
+            await self._send_abort(group_id, task_id, mode="retry")
+            await self._dispatch_agent(
+                group_id,
+                record["bot_id"],
+                record["requirements"],
+                record.get("test_command", ""),
+                task_id=task_id,
+            )
+            updated = await self._task_store.complete_retry_claim(
+                task_id, claim.token
+            )
+            if not updated:
+                raise RuntimeError(
+                    f"Retry claim for task {task_id} was lost before completion"
+                )
+        except BaseException as exc:
+            fallback_status = (
+                "stuck"
+                if (
+                    (automatic or local_stuck_override)
+                    and claim.previous_status in _ACTIVE_PERSISTED_STATUSES
+                )
+                else claim.previous_status
+            )
+            try:
+                restored = await asyncio.shield(
+                    self._task_store.restore_retry_claim(
+                        task_id, claim.token, fallback_status, str(exc)
+                    )
+                )
+            except Exception:
+                restored = False
+                log.exception(
+                    "TaskOrchestrator: failed to restore retry claim for %s",
+                    task_id,
+                )
+            if self._adapter and restored:
+                local_status = _LOCAL_RETRY_FAILURE_STATUS.get(
+                    fallback_status, "stuck"
+                )
+                self._adapter.fail_retry(
+                    group_id,
+                    local_status,
+                    f"重试失败: {str(exc)[:80]}",
+                    str(exc),
+                )
+            elif self._adapter:
+                self._adapter.release_retry_claim(group_id)
+            raise
 
         if self._adapter:
             self._adapter.reset_for_retry(group_id)
-        await self._task_store.update_status(task_id, "restarted")
 
         # P1-1: Fetch updated record from database
         return await self._task_store.get_task(task_id)

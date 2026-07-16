@@ -747,6 +747,21 @@ async def migration_029(db):
     await db.commit()
 
 
+async def migration_030(db):
+    """Add tokenized, recoverable leases for coding-agent task retries."""
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS agent_task_retry_claims (
+            task_id         TEXT PRIMARY KEY,
+            token           TEXT NOT NULL UNIQUE,
+            previous_status TEXT NOT NULL,
+            automatic      INTEGER NOT NULL DEFAULT 0,
+            claimed_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (task_id) REFERENCES agent_tasks(task_id) ON DELETE CASCADE
+        )
+    """)
+    await db.commit()
+
+
 MIGRATIONS: list = [
     migration_001,
     migration_002,
@@ -777,6 +792,7 @@ MIGRATIONS: list = [
     migration_027,
     migration_028,
     migration_029,
+    migration_030,
 ]
 
 
