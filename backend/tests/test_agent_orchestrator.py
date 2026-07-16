@@ -138,6 +138,7 @@ class TestCreateTask(DatabaseTestBase):
 
         # Verify task is stored in database
         stored_task = await orch._task_store.get_task(result["task_id"])
+        self.assertEqual(stored_task["branch"], f"task_{result['task_id']}")
         self.assertIsNotNone(stored_task)
         self.assertEqual(stored_task["requirements"], "Fix bug")
         self.assertRegex(stored_task["created_at"], r"^\d{4}-\d{2}-\d{2}T.*Z$")

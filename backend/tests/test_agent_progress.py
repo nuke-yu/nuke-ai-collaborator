@@ -251,6 +251,17 @@ class TestIterationTracking:
         active_adapter.on_event(1, {"type": "ai_thought_start", "iteration": 5})
         assert active_adapter._states[1].iteration == 5
 
+    def test_percent_increases_with_iteration_inside_same_phase(self, active_adapter):
+        active_adapter.on_event(1, {
+            "type": "tool_call", "tool_name": "write_file", "tool_input": "x"
+        })
+        initial = active_adapter._states[1].percent
+
+        active_adapter.on_event(1, {"type": "ai_thought_start", "iteration": 10})
+
+        assert active_adapter._states[1].phase == "coding"
+        assert active_adapter._states[1].percent > initial
+
     def test_percent_increases_with_phase_and_iteration(self, active_adapter):
         state = active_adapter._states[1]
         initial = state.percent

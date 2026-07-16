@@ -200,13 +200,7 @@ async def list_tasks(user=Depends(require_operator)):
     result = []
     for task_id, record in tasks.items():
         progress = _adapter.get_progress(record["group_id"]) if _adapter else None
-        result.append({
-            "task_id": task_id,
-            "group_id": record["group_id"],
-            "status": record["status"],
-            "created_at": record["created_at"],
-            "progress": progress,
-        })
+        result.append({**record, "progress": progress})
     return {"tasks": result}
 
 
@@ -224,15 +218,7 @@ async def get_task(task_id: str, user=Depends(require_operator)):
 
     progress = _adapter.get_progress(record["group_id"]) if _adapter else None
 
-    return {
-        "task_id": task_id,
-        "group_id": record["group_id"],
-        "status": record["status"],
-        "created_at": record["created_at"],
-        "repo_url": record.get("repo_url", ""),
-        "requirements": record.get("requirements", ""),
-        "progress": progress,
-    }
+    return {**record, "progress": progress}
 
 
 @router.post("/tasks/{task_id}/retry", response_model=RetryResponse)

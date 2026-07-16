@@ -105,6 +105,9 @@ def _utc_iso(value) -> str:
 def _row_to_task(row) -> dict:
     return {
         "task_id": row[0],
+        # The worktree manager creates this branch for the task. Keep it
+        # distinct from base_branch, which is only the branch it started from.
+        "branch": f"task_{row[0]}",
         "group_id": row[1],
         "bot_id": row[2],
         "repo_url": row[3],

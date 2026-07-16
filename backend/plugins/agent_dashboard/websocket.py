@@ -122,7 +122,7 @@ async def dashboard_all_ws(ws: WebSocket):
     # Send current state of all active tasks
     if _adapter:
         for state in _adapter.get_all_active():
-            await conn.send(state)
+            await conn.send({"type": "agent_progress", **state})
 
     try:
         while True:
@@ -155,7 +155,7 @@ async def dashboard_ws(ws: WebSocket, group_id: int):
     if _adapter:
         current = _adapter.get_progress(group_id)
         if current:
-            await conn.send(current)
+            await conn.send({"type": "agent_progress", **current})
 
     try:
         # Keep connection alive, handle client messages (e.g. ping/pong)

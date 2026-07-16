@@ -360,6 +360,10 @@ class ProgressAdapter:
         if handler:
             handler(self, state, payload)
             if group_id in self._active_groups:
+                # Iterations continue to advance while a task remains in the
+                # same phase. Recalculate on every handled event so dashboard
+                # progress does not freeze until the next phase transition.
+                state.percent = max(state.percent, self._calc_percent(state))
                 self._push_update(group_id, state)
 
     # ── Event handlers ────────────────────────────────────────────────

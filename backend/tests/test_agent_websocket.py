@@ -24,7 +24,7 @@ class TestAgentWebSocketRoutes(unittest.TestCase):
     def test_all_route_completes_real_websocket_handshake(self):
         adapter = MagicMock()
         adapter.get_all_active.return_value = [
-            {"type": "agent_progress", "group_id": 7, "status": "running"}
+            {"group_id": 7, "status": "running"}
         ]
         websocket.set_adapter(adapter)
 
@@ -33,7 +33,9 @@ class TestAgentWebSocketRoutes(unittest.TestCase):
         ):
             with TestClient(self.app) as client:
                 with client.websocket_connect("/ws/agent/all") as ws:
-                    self.assertEqual(ws.receive_json()["group_id"], 7)
+                    snapshot = ws.receive_json()
+                    self.assertEqual(snapshot["type"], "agent_progress")
+                    self.assertEqual(snapshot["group_id"], 7)
                     ws.send_json({"type": "ping"})
                     self.assertEqual(ws.receive_json(), {"type": "pong"})
 
@@ -43,7 +45,6 @@ class TestAgentWebSocketRoutes(unittest.TestCase):
     def test_numeric_group_route_still_targets_one_group(self):
         adapter = MagicMock()
         adapter.get_progress.return_value = {
-            "type": "agent_progress",
             "group_id": 7,
             "status": "running",
         }
@@ -54,7 +55,9 @@ class TestAgentWebSocketRoutes(unittest.TestCase):
         ):
             with TestClient(self.app) as client:
                 with client.websocket_connect("/ws/agent/7") as ws:
-                    self.assertEqual(ws.receive_json()["group_id"], 7)
+                    snapshot = ws.receive_json()
+                    self.assertEqual(snapshot["type"], "agent_progress")
+                    self.assertEqual(snapshot["group_id"], 7)
 
         adapter.get_progress.assert_called_once_with(7)
 
