@@ -24,7 +24,8 @@ log = logging.getLogger(__name__)
 # Default timeout for git/gh commands
 _CMD_TIMEOUT = 60
 _TRUE_VALUES = {"1", "true", "yes"}
-_ASKPASS_PATH = Path(__file__).with_name("git_askpass.sh")
+_CREDENTIAL_HELPER_PATH = Path(__file__).with_name("git_credential_github.sh")
+_FALSE_PATH = shutil.which("false") or "/bin/false"
 _SUBPROCESS_ENV_KEYS = {
     "ALL_PROXY",
     "GIT_AUTHOR_EMAIL",
@@ -72,9 +73,11 @@ def require_github_integration() -> None:
         raise GitHubIntegrationUnavailable(
             "GitHub integration is unavailable: gh CLI is not installed"
         )
-    if not _ASKPASS_PATH.is_file() or not os.access(_ASKPASS_PATH, os.X_OK):
+    if not _CREDENTIAL_HELPER_PATH.is_file() or not os.access(
+        _CREDENTIAL_HELPER_PATH, os.X_OK
+    ):
         raise GitHubIntegrationUnavailable(
-            f"GitHub askpass helper is unavailable: {_ASKPASS_PATH}"
+            f"GitHub credential helper is unavailable: {_CREDENTIAL_HELPER_PATH}"
         )
 
 
@@ -88,10 +91,14 @@ def _github_auth_env(*, require_token: bool = False) -> dict[str, str]:
     if token:
         env.update({
             "GITHUB_TOKEN": token,
-            "GIT_ASKPASS": str(_ASKPASS_PATH),
-            "GIT_CONFIG_COUNT": "1",
-            "GIT_CONFIG_KEY_0": "credential.username",
-            "GIT_CONFIG_VALUE_0": "x-access-token",
+            "GIT_ASKPASS": _FALSE_PATH,
+            "GIT_CONFIG_COUNT": "2",
+            # Empty credential.helper resets helpers inherited from system,
+            # global, and repository config before installing the scoped helper.
+            "GIT_CONFIG_KEY_0": "credential.helper",
+            "GIT_CONFIG_VALUE_0": "",
+            "GIT_CONFIG_KEY_1": "credential.helper",
+            "GIT_CONFIG_VALUE_1": str(_CREDENTIAL_HELPER_PATH),
         })
     return env
 
@@ -183,8 +190,8 @@ async def clone_repo(repo_url: str, dest: str | Path, branch: str = "") -> Path:
     """Clone a git repository to the destination directory.
 
     P0-4: GitHub credentials are read from GITHUB_TOKEN environment variable,
-    not passed as parameters. Uses GIT_ASKPASS for authentication instead of
-    embedding token in URL.
+    not passed as parameters. Uses a host-scoped Git credential helper instead
+    of embedding the token in the URL or parsing askpass prompts.
 
     Args:
         repo_url: Git repository URL (HTTPS)

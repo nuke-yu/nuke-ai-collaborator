@@ -4,7 +4,7 @@ Tests that GitHub credentials are handled securely:
   - github_token removed from API body and orchestrator parameters
   - GITHUB_TOKEN read from environment variable only
   - Token not embedded in git remote URLs
-  - static GIT_ASKPASS helper reads credentials only from process environment
+  - host-scoped Git credential helper reads credentials only from process environment
   - Security assertion rejects URLs with credentials
   - Worker fails closed when NUKE_GITHUB_ENABLED=true but gh/token missing
 """
@@ -88,8 +88,8 @@ class TestGitHubTokenFromEnvironment(unittest.TestCase):
 class TestGitHubTokenNotInURLs(unittest.IsolatedAsyncioTestCase):
     """Test that GITHUB_TOKEN is not embedded in git remote URLs."""
 
-    async def test_clone_uses_git_askpass_not_url_embedding(self):
-        """clone_repo uses GIT_ASKPASS instead of embedding token in URL."""
+    async def test_clone_uses_scoped_credential_helper_not_url_embedding(self):
+        """clone_repo uses a scoped helper instead of embedding token in URL."""
         from integrations.github_client import clone_repo
 
         # Set GITHUB_TOKEN in environment
@@ -115,10 +115,13 @@ class TestGitHubTokenNotInURLs(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(url_arg, "https://github.com/user/repo.git")
 
                     child_env = mock_exec.call_args_list[0].kwargs["env"]
-                    askpass = child_env["GIT_ASKPASS"]
-                    self.assertNotIn("secret123", askpass)
-                    self.assertNotIn("secret123", Path(askpass).read_text(encoding="utf-8"))
-                    self.assertFalse(os.path.exists("/tmp/.git_askpass.sh"))
+                    helper = Path(child_env["GIT_CONFIG_VALUE_1"])
+                    self.assertEqual(child_env["GIT_CONFIG_VALUE_0"], "")
+                    self.assertNotIn("secret123", str(helper))
+                    self.assertNotIn(
+                        "secret123", helper.read_text(encoding="utf-8")
+                    )
+                    self.assertNotEqual(child_env["GIT_ASKPASS"], str(helper))
 
     async def test_security_assertion_rejects_url_with_credentials(self):
         """Security assertion rejects if git remote URL contains credentials."""
@@ -141,38 +144,100 @@ class TestGitHubTokenNotInURLs(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("Security violation", str(ctx.exception))
                 self.assertIn("credentials", str(ctx.exception))
 
-    async def test_askpass_rejects_non_github_prompt(self):
+    async def test_credential_helper_rejects_non_github_host_and_injected_path(self):
         from integrations import github_client
 
         result = subprocess.run(
-            [
-                str(github_client._ASKPASS_PATH),
-                "Password for 'https://x-access-token@evil.example': ",
-            ],
+            [str(github_client._CREDENTIAL_HELPER_PATH), "get"],
             capture_output=True,
             check=False,
             env={"GITHUB_TOKEN": "secret123", "PATH": os.defpath},
+            input=(
+                "protocol=https\n"
+                "host=evil.example\n"
+                "path=git?leak=@github.com\n\n"
+            ),
+            text=True,
+        )
+
+        self.assertEqual(result.stdout, "")
+
+    async def test_credential_helper_releases_token_for_exact_github_host(self):
+        from integrations import github_client
+
+        result = subprocess.run(
+            [str(github_client._CREDENTIAL_HELPER_PATH), "get"],
+            capture_output=True,
+            check=True,
+            env={"GITHUB_TOKEN": "secret123", "PATH": os.defpath},
+            input="protocol=https\nhost=github.com\n\n",
+            text=True,
+        )
+
+        self.assertEqual(
+            result.stdout,
+            "username=x-access-token\npassword=secret123\n",
+        )
+
+    async def test_credential_helper_rejects_host_variants_and_userinfo(self):
+        from integrations import github_client
+
+        cases = (
+            "protocol=https\nhost=github.com.evil.example\n\n",
+            "protocol=https\nhost=github.com:443\n\n",
+            "protocol=http\nhost=github.com\n\n",
+            "protocol=https\nhost=github.com\nusername=attacker\n\n",
+        )
+        for credential in cases:
+            with self.subTest(credential=credential):
+                result = subprocess.run(
+                    [str(github_client._CREDENTIAL_HELPER_PATH), "get"],
+                    capture_output=True,
+                    check=False,
+                    env={"GITHUB_TOKEN": "secret123", "PATH": os.defpath},
+                    input=credential,
+                    text=True,
+                )
+                self.assertEqual(result.stdout, "")
+
+    async def test_git_credential_flow_has_no_askpass_fallback_for_evil_host(self):
+        from integrations.github_client import _github_auth_env
+
+        with patch.dict(os.environ, {"GITHUB_TOKEN": "secret123"}, clear=True):
+            env = {**os.environ, **_github_auth_env(require_token=True)}
+        result = subprocess.run(
+            ["git", "-c", "credential.useHttpPath=true", "credential", "fill"],
+            capture_output=True,
+            check=False,
+            env=env,
+            input=(
+                "protocol=https\n"
+                "host=evil.example\n"
+                "path=git?leak=@github.com\n\n"
+            ),
             text=True,
         )
 
         self.assertNotEqual(result.returncode, 0)
-        self.assertEqual(result.stdout, "")
+        self.assertNotIn("secret123", result.stdout)
+        self.assertNotIn("password=", result.stdout)
 
-    async def test_askpass_releases_token_only_for_github_prompt(self):
-        from integrations import github_client
+    async def test_git_credential_flow_returns_token_for_exact_github_host(self):
+        from integrations.github_client import _github_auth_env
 
+        with patch.dict(os.environ, {"GITHUB_TOKEN": "secret123"}, clear=True):
+            env = {**os.environ, **_github_auth_env(require_token=True)}
         result = subprocess.run(
-            [
-                str(github_client._ASKPASS_PATH),
-                "Password for 'https://x-access-token@github.com': ",
-            ],
+            ["git", "credential", "fill"],
             capture_output=True,
             check=True,
-            env={"GITHUB_TOKEN": "secret123", "PATH": os.defpath},
+            env=env,
+            input="protocol=https\nhost=github.com\n\n",
             text=True,
         )
 
-        self.assertEqual(result.stdout, "secret123\n")
+        self.assertIn("username=x-access-token", result.stdout)
+        self.assertIn("password=secret123", result.stdout)
 
 
 class TestWorkerFailsClosed(unittest.IsolatedAsyncioTestCase):

@@ -110,6 +110,13 @@ class TestGitHelper(unittest.IsolatedAsyncioTestCase):
         child_env = mock_exec.call_args.kwargs["env"]
         self.assertEqual(child_env["GITHUB_TOKEN"], "github-secret")
         self.assertIn("GIT_ASKPASS", child_env)
+        self.assertEqual(child_env["GIT_CONFIG_COUNT"], "2")
+        self.assertEqual(child_env["GIT_CONFIG_KEY_0"], "credential.helper")
+        self.assertEqual(child_env["GIT_CONFIG_VALUE_0"], "")
+        self.assertEqual(child_env["GIT_CONFIG_KEY_1"], "credential.helper")
+        self.assertTrue(child_env["GIT_CONFIG_VALUE_1"].endswith(
+            "git_credential_github.sh"
+        ))
         self.assertNotIn("GH_TOKEN", child_env)
         self.assertNotIn("UNRELATED_SECRET", child_env)
 
