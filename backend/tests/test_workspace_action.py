@@ -164,8 +164,8 @@ class TestRunnerWorktreeLifecycle(unittest.IsolatedAsyncioTestCase):
             events.append("promote")
 
         async def publish(event):
-            if isinstance(event, WorkflowUpdate) and event.done:
-                events.append("done")
+            if isinstance(event, WorkflowUpdate):
+                events.append("done" if event.done else "not_done")
 
         orch = MagicMock()
         orch.serialize.return_value = None
@@ -175,7 +175,11 @@ class TestRunnerWorktreeLifecycle(unittest.IsolatedAsyncioTestCase):
             await runner.apply_step(
                 1,
                 orch,
-                OrchestratorStep(done=True, workspace_action="promote"),
+                OrchestratorStep(
+                    done=True,
+                    broadcast_state=True,
+                    workspace_action="promote",
+                ),
                 workspace_task_id="agent_123",
             )
 

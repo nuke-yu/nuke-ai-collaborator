@@ -1,8 +1,10 @@
 """工作区工具包装层从 context 贯穿 group_id 给 VFS。"""
 import asyncio
 import unittest
+from unittest.mock import AsyncMock
 
 from executors.plugins import workspace_tools as wt
+from permissions.models import Rule, Ruleset
 
 
 class TestToolGroupThreading(unittest.TestCase):
@@ -69,6 +71,36 @@ class TestToolGroupThreading(unittest.TestCase):
         finally:
             wt._ws.list_workspace = orig
         self.assertEqual(captured["gid"], 3)
+
+    def test_read_only_tool_does_not_wait_for_permission(self):
+        broadcaster = AsyncMock()
+        result = self._run(wt._permission_check_hook(
+            "list_workspace",
+            {},
+            {
+                "bot_id": 7,
+                "group_id": 3,
+                "ruleset": Ruleset(),
+                "broadcaster": broadcaster,
+            },
+        ))
+        self.assertIsNone(result)
+        broadcaster.broadcast.assert_not_awaited()
+
+    def test_read_only_tool_still_honors_explicit_deny(self):
+        result = self._run(wt._permission_check_hook(
+            "list_workspace",
+            {},
+            {
+                "bot_id": 7,
+                "group_id": 3,
+                "ruleset": Ruleset(rules=[Rule(
+                    tool_pattern="list_workspace", action="deny"
+                )]),
+                "broadcaster": AsyncMock(),
+            },
+        ))
+        self.assertTrue(result["block"])
 
 
 if __name__ == "__main__":

@@ -121,7 +121,12 @@ async def apply_step(
         await _post_system_msg(group_id, ann.sender_bot_id, ann.text)
     if step.confirm_gate:
         await _post_confirm_gate(group_id, step.confirm_gate)
-    if step.broadcast_state:
+    # A terminal observe() may already have removed the orchestrator's in-memory
+    # state. Publishing that empty snapshot before the authoritative done event
+    # produces {active:false, done:false}, which the dashboard correctly treats
+    # as failure and then retires before {done:true} arrives. Terminal steps only
+    # publish the single authoritative completion event below.
+    if step.broadcast_state and not step.done:
         await _publish_workflow_state(group_id, orch)
         blob = orch.serialize(group_id)
         if blob is not None:

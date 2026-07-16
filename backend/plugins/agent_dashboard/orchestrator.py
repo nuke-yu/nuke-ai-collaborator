@@ -608,6 +608,11 @@ class TaskOrchestrator:
             # Coding tasks must finish through signal_stage_done/signal_rework.
             # A plain planning sentence from the model is not a completed run.
             "require_tool_completion_signal": True,
+            # The dashboard control plane has no interactive permission-response
+            # channel. This dedicated bot works in an isolated task worktree;
+            # shell danger guards still run after the permission hook, and
+            # bypassPermissions is attenuated for any spawned sub-agent.
+            "permission_mode": "bypassPermissions",
         })
 
         async with write_connect() as db:

@@ -846,6 +846,13 @@ _AUTO_ALLOW_TOOLS = frozenset({
     "create_jira_ticket", "list_jira_tickets", "update_jira_ticket", "create_pr",
 })
 
+# These tools cannot mutate the workspace or escape it. Treat them as confined
+# so explicit deny rules still win in permissions.check(), while the default
+# policy does not suspend an autonomous run waiting for a meaningless approval.
+_READ_ONLY_CONFINED_TOOLS = frozenset({
+    "list_workspace", "read_file", "read_anchored", "memory_search",
+})
+
 
 async def _permission_check_hook(name: str, arguments: dict, context: dict) -> dict | None:
     """Run the permission decision pipeline before every tool call."""
@@ -867,7 +874,7 @@ async def _permission_check_hook(name: str, arguments: dict, context: dict) -> d
     # content git never stored, or rewrite the shared remote). Those skip both the
     # confined auto-allow and any scoped/blanket allow rule, and always reach human
     # approval — deny rules still win, sub-agents still can't prompt (→ denied).
-    workspace_confined = False
+    workspace_confined = name in _READ_ONLY_CONFINED_TOOLS
     force_ask = False
     if name == "run_shell":
         cwd = (arguments.get("cwd") or "").strip()
