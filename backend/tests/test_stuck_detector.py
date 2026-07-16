@@ -182,7 +182,6 @@ class TestAutoRetry(unittest.IsolatedAsyncioTestCase):
 
         mock_orch = MagicMock()
         mock_orch.retry_task = AsyncMock(return_value={"status": "restarted"})
-
         detector = StuckDetector(adapter, orchestrator=mock_orch, max_auto_retries=3)
         # Simulate 3 stuck checks
         await detector._check_all()
@@ -207,15 +206,22 @@ class TestAutoRetry(unittest.IsolatedAsyncioTestCase):
 
         mock_orch = MagicMock()
         mock_orch.retry_task = AsyncMock(return_value={"status": "restarted"})
+        async def terminate(_task_id, reason):
+            adapter.set_status(
+                1, "stuck_permanently", detail=reason, project=False
+            )
+        mock_orch.terminate_permanently_stuck = AsyncMock(side_effect=terminate)
 
         detector = StuckDetector(adapter, orchestrator=mock_orch, max_auto_retries=2)
         detector._retry_counts[1] = 2  # already at max
 
         await detector._check_all()
+        await asyncio.sleep(0)
         self.assertEqual(state.status, "stuck_permanently")
         self.assertIn("永久卡死", state.detail)
         self.assertNotIn(1, adapter._active_groups)
         self.assertNotIn(1, detector._retry_counts)
+        mock_orch.terminate_permanently_stuck.assert_awaited_once()
 
     async def test_no_auto_retry_without_orchestrator(self):
         """Without orchestrator, falls back to manual retry (status=stuck)."""

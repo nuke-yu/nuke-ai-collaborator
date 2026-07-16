@@ -533,6 +533,14 @@ async def cleanup_and_finalize(runner) -> ExecutionResult:
         if m.get("role") == "tool" and m.get("name")
     ]
     
+    runner.messages.append({"role": "assistant", "content": runner.full_text})
+    await runner.ctx.interaction.save_session_snapshot(runner.session_id, runner.messages)
+    await runner.ctx.interaction.update_session_status(runner.session_id, "completed")
+
+    # Durable completion must win the per-group writer lock before optional
+    # background side effects are spawned. Otherwise a memory/archive task can
+    # acquire the lock between snapshot and status and leave the foreground run
+    # indefinitely reported as running.
     import core.workflow as _wf
     bg.spawn(runner.memory.observe(MemoryEvent(
         bot_id=runner.bot["id"], group_id=runner.ctx.group_id,
@@ -569,11 +577,6 @@ async def cleanup_and_finalize(runner) -> ExecutionResult:
             model=runner.model_name,
             executor=runner.executor.executor_id,
         ))
-
-
-    runner.messages.append({"role": "assistant", "content": runner.full_text})
-    await runner.ctx.interaction.save_session_snapshot(runner.session_id, runner.messages)
-    await runner.ctx.interaction.update_session_status(runner.session_id, "completed")
     return ExecutionResult(full_text=runner.full_text, msg_id=msg_id, signals=signals)
 
 

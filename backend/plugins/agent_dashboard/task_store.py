@@ -32,13 +32,21 @@ _ALLOWED_TRANSITIONS = {
     },
     "dispatched": {
         "running", "paused", "stuck", "retrying", "completed", "failed", "aborted",
+        "stuck_permanently",
     },
-    "running": {"paused", "stuck", "retrying", "completed", "failed", "aborted"},
-    "paused": {"running", "stuck", "retrying", "completed", "failed", "aborted"},
+    "running": {
+        "paused", "stuck", "retrying", "completed", "failed", "aborted",
+        "stuck_permanently",
+    },
+    "paused": {
+        "running", "stuck", "retrying", "completed", "failed", "aborted",
+        "stuck_permanently",
+    },
     "stuck": {"retrying", "failed", "aborted", "stuck_permanently"},
     "retrying": {"running", "restarted", "failed", "aborted", "stuck_permanently"},
     "restarted": {
         "running", "paused", "stuck", "retrying", "completed", "failed", "aborted",
+        "stuck_permanently",
     },
     "failed": {"retrying", "aborted"},
     "aborted": {"retrying"},

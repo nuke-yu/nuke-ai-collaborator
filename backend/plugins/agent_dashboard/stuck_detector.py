@@ -128,10 +128,17 @@ class StuckDetector:
                             "StuckDetector: group %d permanently stuck (max retries %d exceeded)",
                             group_id, self._max_auto_retries,
                         )
-                        self._adapter.set_status(
-                            group_id,
-                            "stuck_permanently",
-                            detail=f"永久卡死: 已重试 {retry_count} 次仍失败",
+                        reason = f"永久卡死: 已重试 {retry_count} 次仍失败"
+                        task = asyncio.create_task(
+                            self._terminate_permanently(group_id, state.task_id, reason)
+                        )
+                        self._retry_tasks[group_id] = task
+                        task.add_done_callback(
+                            lambda completed, gid=group_id: (
+                                self._retry_tasks.pop(gid, None)
+                                if self._retry_tasks.get(gid) is completed
+                                else None
+                            )
                         )
                     else:
                         log.warning(
@@ -180,6 +187,30 @@ class StuckDetector:
                     local_status,
                     detail=f"自动重试失败: {str(e)[:80]}",
                     error_message=str(e),
+                    project=False,
+                )
+
+    async def _terminate_permanently(
+        self, group_id: int, task_id: str, reason: str
+    ) -> None:
+        """Cancel the live runner before projecting the durable terminal state."""
+        try:
+            await self._orchestrator.terminate_permanently_stuck(task_id, reason)
+            log.info("StuckDetector: permanently terminated task %s", task_id)
+        except Exception as exc:
+            log.error(
+                "StuckDetector: permanent termination failed for task %s: %s",
+                task_id,
+                exc,
+            )
+            state = self._adapter._states.get(group_id)
+            if state:
+                state.last_event_at = time.time()
+                self._adapter.set_status(
+                    group_id,
+                    "stuck",
+                    detail=f"永久终止失败: {str(exc)[:80]}",
+                    error_message=str(exc),
                     project=False,
                 )
 

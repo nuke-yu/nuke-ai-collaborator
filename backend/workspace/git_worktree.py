@@ -384,7 +384,13 @@ async def _remove_worktree_nolock(group_id: int, task_id: str):
     # 3. git branch -D
     if (shared_workspace / ".git").exists():
         try:
-            await _run_git_cmd(shared_workspace, "branch", "-D", branch_name)
+            existing = await _run_git_cmd(
+                shared_workspace, "branch", "--list", branch_name
+            )
+            if existing.strip():
+                await _run_git_cmd(shared_workspace, "branch", "-D", branch_name)
+            else:
+                log.info("Branch %s already absent; cleanup is complete", branch_name)
         except Exception as e:
             log.warning(f"Failed to delete branch {branch_name}: {e}", exc_info=True)
 

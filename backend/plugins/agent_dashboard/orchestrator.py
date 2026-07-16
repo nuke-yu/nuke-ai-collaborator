@@ -398,6 +398,39 @@ class TaskOrchestrator:
         # P1-1: Fetch updated record from database
         return await self._task_store.get_task(task_id)
 
+    async def terminate_permanently_stuck(self, task_id: str, reason: str) -> dict:
+        """Fail a hung task only after its Worker proves cancellation/cleanup."""
+        record = await self._task_store.get_task(task_id)
+        if not record:
+            raise ValueError(f"Task {task_id} not found")
+
+        group_id = record["group_id"]
+        await self._send_abort(group_id, task_id, mode="abort")
+
+        updated = await self._task_store.update_status(
+            task_id, "stuck_permanently", error_message=reason
+        )
+        if not updated:
+            current = await self._task_store.get_task(task_id)
+            raise RuntimeError(
+                f"Could not persist permanently stuck task {task_id} "
+                f"from status {(current or {}).get('status', 'missing')}"
+            )
+
+        from plugins.agent_dashboard.reconciler import finalize_group_state
+        await finalize_group_state(
+            group_id, record["bot_id"], status="failed"
+        )
+        if self._adapter:
+            self._adapter.set_status(
+                group_id,
+                "stuck_permanently",
+                detail=reason,
+                error_message=reason,
+                project=False,
+            )
+        return await self._task_store.get_task(task_id)
+
     # Note: cleanup_orphan_worktrees removed (R2-2). The previous implementation
     # was dangerous: it swept for "unknown" worktrees (tid not in self._tasks),
     # but runner creates chat_<uuid> worktrees that would be incorrectly flagged
@@ -570,7 +603,12 @@ class TaskOrchestrator:
         import json
 
         system_prompt = CODING_AGENT_SYSTEM_PROMPT
-        config = json.dumps({"max_iterations": max_iterations})
+        config = json.dumps({
+            "max_iterations": max_iterations,
+            # Coding tasks must finish through signal_stage_done/signal_rework.
+            # A plain planning sentence from the model is not a completed run.
+            "require_tool_completion_signal": True,
+        })
 
         async with write_connect() as db:
             async with db.execute(

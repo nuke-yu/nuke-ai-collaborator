@@ -700,6 +700,43 @@ class TestAbortTask(DatabaseTestBase):
         with self.assertRaises(ValueError):
             await orch.abort_task("nonexistent")
 
+    async def test_permanently_stuck_running_task_is_aborted_and_finalized(self):
+        import db
+        adapter = MagicMock()
+        orch = TaskOrchestrator(adapter=adapter)
+        async with db.write_connect() as conn:
+            await conn.execute(
+                "INSERT INTO groups (id, name, assigned_worker_id) VALUES (10, 'test-group', 'w7')"
+            )
+            await conn.execute(
+                "INSERT INTO members (id, group_id, name, type, role) VALUES (5, 10, 'bot', 'bot', 'developer')"
+            )
+            await conn.commit()
+        await orch._task_store.create_task(
+            "task_stuck", 10, 5, "https://github.com/test/repo.git", "test task"
+        )
+        await orch._task_store.update_status("task_stuck", "running")
+
+        with patch.object(orch, "_send_abort", new_callable=AsyncMock) as abort, \
+             patch(
+                 "plugins.agent_dashboard.reconciler.finalize_group_state",
+                 new_callable=AsyncMock,
+             ) as finalize:
+            result = await orch.terminate_permanently_stuck(
+                "task_stuck", "max retries exceeded"
+            )
+
+        self.assertEqual(result["status"], "stuck_permanently")
+        abort.assert_awaited_once_with(10, "task_stuck", mode="abort")
+        finalize.assert_awaited_once_with(10, 5, status="failed")
+        adapter.set_status.assert_called_once_with(
+            10,
+            "stuck_permanently",
+            detail="max retries exceeded",
+            error_message="max retries exceeded",
+            project=False,
+        )
+
 
 class TestSendAbort(DatabaseTestBase):
 

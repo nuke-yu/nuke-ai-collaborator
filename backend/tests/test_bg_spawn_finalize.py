@@ -16,12 +16,17 @@ from executors.plugins.tool_loop_v1 import ToolLoopV1
 
 
 class _MockInteraction(InteractionAdapter):
+    def __init__(self):
+        self.events = []
+
     async def create_session(self, **kwargs): pass
-    async def update_session_status(self, session_id, status): pass
+    async def update_session_status(self, session_id, status):
+        self.events.append(("status", status))
     async def broadcast(self, group_id, payload): pass
     async def save_message(self, group_id, member_id, content, **kwargs): return 123
     async def append_session_event(self, session_id, event_type, payload): pass
-    async def save_session_snapshot(self, session_id, messages): pass
+    async def save_session_snapshot(self, session_id, messages):
+        self.events.append(("snapshot", session_id))
     async def update_session_tokens(self, session_id, **usage): pass
 
 
@@ -36,16 +41,18 @@ def _bot():
 
 class TestBgSpawnFinalize(unittest.IsolatedAsyncioTestCase):
     async def test_finalize_side_effects_go_through_bg_spawn(self):
+        interaction = _MockInteraction()
         ctx = ExecutionContext(
             bot=_bot(), group_id=1, user_message="task",
             sender={"id": 2, "name": "Human", "type": "human"},
             history=[], all_bots=[_bot()], all_members=[_bot()],
-            interaction=_MockInteraction(),
+            interaction=interaction,
         )
 
         spawned = []
 
         def fake_spawn(coro):
+            interaction.events.append(("spawn", None))
             spawned.append(getattr(coro, "__qualname__", "") or getattr(coro, "__name__", ""))
             coro.close()  # we only assert it was scheduled via bg.spawn
             return MagicMock()
@@ -84,6 +91,9 @@ class TestBgSpawnFinalize(unittest.IsolatedAsyncioTestCase):
             any("observe" in n for n in spawned),
             f"记忆写路径 (memory.observe) 必须经 bg.spawn 调度，实际: {spawned}",
         )
+        completed_index = interaction.events.index(("status", "completed"))
+        first_spawn_index = interaction.events.index(("spawn", None))
+        self.assertLess(completed_index, first_spawn_index)
 
 
 if __name__ == "__main__":

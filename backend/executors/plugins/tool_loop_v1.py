@@ -81,6 +81,8 @@ class ToolLoopRunner:
         self.iter_count = 0
         self.consecutive_tool_only = 0
         self.tool_calls_history = []
+        self.premature_text_count = 0
+        self.completion_signal_seen = False
         self.tool_records = []
         self.file_tracker = {}
         self.invoked_skills = {}   # name -> inline skill body, for compaction survival
@@ -280,6 +282,34 @@ class ToolLoopRunner:
                         self.consecutive_tool_only = 0
                         self.tool_calls_history.clear()
                         self.full_text = result["content"]
+                        require_signal = bool(
+                            (self.bot.get("executor_config") or {}).get(
+                                "require_tool_completion_signal"
+                            )
+                        )
+                        if (
+                            require_signal
+                            and not self.completion_signal_seen
+                            and self.premature_text_count < 2
+                        ):
+                            self.premature_text_count += 1
+                            self.messages.append({
+                                "role": "assistant",
+                                "content": self.full_text,
+                            })
+                            self.messages.append({
+                                "role": "user",
+                                "content": (
+                                    "[系统] 任务尚未结束。不要只描述下一步；请立即调用可用工具继续执行。"
+                                    "只有完成全部实现与验证后才能调用 signal_stage_done，无法继续时调用 "
+                                    "signal_rework。"
+                                ),
+                            })
+                            await self.ctx.interaction.save_session_snapshot(
+                                self.session_id, self.messages
+                            )
+                            self.full_text = ""
+                            continue
                         await self._finalize_reply()
                         break
 
@@ -305,6 +335,11 @@ class ToolLoopRunner:
                         await self.ctx.interaction.save_session_snapshot(self.session_id, self.messages)
 
                         calls = result["calls"]
+                        if any(
+                            call.get("name") in {"signal_stage_done", "signal_rework"}
+                            for call in calls
+                        ):
+                            self.completion_signal_seen = True
                         _run_parallel = (
                             len(calls) > 1
                             and all(tool_executor.is_concurrency_safe(c["name"]) for c in calls)
