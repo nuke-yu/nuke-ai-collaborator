@@ -93,9 +93,10 @@ class StuckDetector:
                 self._adapter.retire_if_terminal(group_id)
                 continue
 
-            # Stuck tasks wait for manual retry; retrying tasks already have one
-            # in-flight retry and must not be dispatched again by the next tick.
-            if state.status in ("stuck", "retrying"):
+            # Paused tasks are intentionally waiting for intervention and must
+            # never be interpreted as idle runners. Stuck tasks wait for manual
+            # retry; retrying tasks already have one in-flight retry.
+            if state.status in ("paused", "stuck", "retrying"):
                 continue
 
             # Check timeout: no events for STUCK_TIMEOUT_SEC
@@ -217,7 +218,9 @@ class StuckDetector:
     def force_check(self, group_id: int) -> bool:
         """Manually check a specific group. Returns True if stuck."""
         state = self._adapter._states.get(group_id)
-        if not state or state.status in ("done", "error", "aborted"):
+        if not state or state.status in (
+            "paused", "done", "error", "aborted", "stuck_permanently"
+        ):
             return False
 
         idle_sec = time.time() - state.last_event_at

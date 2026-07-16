@@ -484,7 +484,12 @@ async def _once_openai_compat(url: str, api_key: str, model: str, system_prompt:
                     args = repaired
                     args["__truncated__"] = True
                 else:
-                    raise
+                    # Providers occasionally return a truncated/malformed
+                    # function-arguments string. Retrying the model request is
+                    # safe because no tool has been executed yet.
+                    raise LLMTransientError(
+                        f"AI returned malformed arguments for tool {func_name}"
+                    )
             
             # Reconstruct the tool call with valid JSON for API history compatibility
             api_args = {k: v for k, v in args.items() if k != "__truncated__"}

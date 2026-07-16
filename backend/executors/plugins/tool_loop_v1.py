@@ -62,6 +62,38 @@ _DOOM_LOOP_THRESHOLD = config.DOOM_LOOP_THRESHOLD
 _MAX_EXTERNAL_TOOL_SCHEMAS = 48
 
 
+def _completion_deadline(
+    schemas: list[dict],
+    *,
+    remaining_iterations: int,
+    require_pull_request: bool,
+    completion_signal_seen: bool,
+) -> tuple[list[dict], str]:
+    """Apply the Dashboard coding-task endgame policy."""
+    if (
+        not require_pull_request
+        or completion_signal_seen
+        or remaining_iterations > 8
+    ):
+        return schemas, ""
+
+    suffix = (
+        "\n\n[COMPLETION DEADLINE] "
+        f"Only {remaining_iterations} model iterations remain. "
+        "Stop adding features. Verify and finalize the current work now, "
+        "call create_pr, then call signal_stage_done. If completion is "
+        "impossible, call signal_rework instead."
+    )
+    if remaining_iterations > 3:
+        return schemas, suffix
+
+    completion_tools = {"create_pr", "signal_stage_done", "signal_rework"}
+    return [
+        schema for schema in schemas
+        if schema["function"]["name"] in completion_tools
+    ], suffix
+
+
 class ToolLoopRunner:
     """Encapsulates the state and execution flow of a single AI tool loop run."""
     def __init__(self, executor, ctx: ExecutionContext):
@@ -84,6 +116,7 @@ class ToolLoopRunner:
         self.premature_text_count = 0
         self.completion_signal_seen = False
         self.tool_records = []
+        self.execution_error: str | None = None
         self.file_tracker = {}
         self.invoked_skills = {}   # name -> inline skill body, for compaction survival
         self.temp_id = str(uuid.uuid4())
@@ -238,6 +271,20 @@ class ToolLoopRunner:
                     else:
                         _active_schemas = self.tool_schemas
 
+                    require_pr_completion = bool(
+                        (self.bot.get("executor_config") or {}).get(
+                            "require_pull_request_completion"
+                        )
+                    )
+                    remaining_iterations = self.max_iter - self.iter_count + 1
+                    _active_schemas, deadline_suffix = _completion_deadline(
+                        _active_schemas,
+                        remaining_iterations=remaining_iterations,
+                        require_pull_request=require_pr_completion,
+                        completion_signal_seen=self.completion_signal_seen,
+                    )
+                    self.system_prompt += deadline_suffix
+
                     from skills.metadata import strip_context_window_suffix
                     _iter_model = strip_context_window_suffix(
                         self.execution_ctx.pop("skill_model", None) or self.model_name
@@ -273,6 +320,7 @@ class ToolLoopRunner:
                             reinject_fn=self._build_reinject
                         )
                     except AIError as e:
+                        self.execution_error = str(e)
                         await self.ctx.interaction.broadcast(self.ctx.group_id, {
                             "type": "stream_error", "temp_id": self.temp_id, "message": str(e),
                         })

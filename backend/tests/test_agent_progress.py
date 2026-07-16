@@ -129,6 +129,27 @@ class TestTaskRegistration:
 
 class TestPhaseDetection:
 
+    def test_runtime_tool_event_contract_advances_phase(self, active_adapter):
+        active_adapter.on_event(1, {
+            "type": "tool_call", "tool": "edit_file",
+            "args": {"path": "src/app.py"},
+        })
+        state = active_adapter._states[1]
+        assert state.phase == "coding"
+        assert "src/app.py" in state.files_modified
+
+    def test_tool_progress_start_updates_iteration_and_percent(self, active_adapter):
+        active_adapter.on_event(1, {
+            "type": "tool_call", "tool": "edit_file", "args": {"path": "x.py"}
+        })
+        initial = active_adapter._states[1].percent
+        active_adapter.on_event(1, {
+            "type": "tool_progress_start", "tool_name": "edit_file",
+            "tool_args": {"path": "x.py"}, "iteration": 12,
+        })
+        assert active_adapter._states[1].iteration == 12
+        assert active_adapter._states[1].percent > initial
+
     def test_explore_tools_advance_to_exploring(self, active_adapter):
         active_adapter.on_event(1, {"type": "tool_call", "tool_name": "read_file", "tool_input": {"file_path": "main.py"}})
         state = active_adapter._states[1]
@@ -231,6 +252,8 @@ class TestStatusTransitions:
         [
             ("completion_signal_missing", "No completion signal"),
             ("rework_requested", "Tests are still failing"),
+            ("pull_request_missing", "No pull request was created"),
+            ("execution_failed", "Malformed model tool arguments"),
         ],
     )
     def test_workflow_failure_reason_is_terminal(self, active_adapter, reason, details):

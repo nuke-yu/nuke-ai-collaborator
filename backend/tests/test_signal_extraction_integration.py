@@ -7,6 +7,39 @@ Verifies the full signal flow:
 """
 import unittest
 from core.orchestration.plugins.coding_agent import CodingAgentOrchestrator
+from executors.plugins.tool_loop_v1_helpers import _extract_completion_signals
+
+
+class TestSuccessfulToolEvidence(unittest.TestCase):
+
+    def test_execution_error_is_projected(self):
+        signals = _extract_completion_signals([], [], "AI service failed")
+
+        self.assertEqual(signals, [{
+            "name": "_execution_failed",
+            "arguments": {"reason": "AI service failed"},
+        }])
+
+    def test_successful_create_pr_is_projected(self):
+        signals = _extract_completion_signals([], [{
+            "name": "create_pr",
+            "result": "https://github.com/acme/repo/pull/42",
+            "is_error": False,
+        }])
+
+        self.assertIn(
+            {"name": "_tool_succeeded", "arguments": {"tool_name": "create_pr"}},
+            signals,
+        )
+
+    def test_failed_create_pr_is_not_projected(self):
+        signals = _extract_completion_signals([], [{
+            "name": "create_pr",
+            "result": "authentication failed",
+            "is_error": True,
+        }])
+
+        self.assertEqual(signals, [])
 
 
 class TestSignalExtractionIntegration(unittest.TestCase):
@@ -63,6 +96,21 @@ class TestSignalExtractionIntegration(unittest.TestCase):
         self.assertFalse(step.done)
         self.assertIsNotNone(step.workflow_paused)
         self.assertEqual(step.workflow_paused.reason, "completion_signal_missing")
+
+    def test_execution_failure_is_not_reported_as_missing_signal(self):
+        orch = CodingAgentOrchestrator()
+        bot = {"id": 5, "name": "Agent"}
+        orch.begin(1, {"bots": [bot], "requirements": "Build API"})
+
+        step = orch.observe(1, 5, "", signals=[{
+            "name": "_execution_failed",
+            "arguments": {"reason": "AI returned malformed tool arguments"},
+        }])
+
+        self.assertFalse(step.done)
+        self.assertEqual(step.workflow_paused.reason, "execution_failed")
+        self.assertIn("malformed", step.workflow_paused.details)
+        self.assertIsNone(step.workspace_action)
 
     def test_multiple_signals_first_wins(self):
         """If multiple signals present, first one determines outcome."""

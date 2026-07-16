@@ -82,7 +82,7 @@ _LOCAL_STATUS = {
     "aborted": "aborted",
 }
 _ACTIVITY_EVENTS = frozenset({
-    "ai_thought_start", "tool_call", "tool_result", "tool_progress_running",
+    "ai_thought_start", "tool_call", "tool_result", "tool_progress_start", "tool_progress_running",
     "tool_progress_end", "stream_end",
 })
 _PR_URL_RE = re.compile(r"https://github\.com/[^\s，,)]+/pull/\d+")
@@ -373,8 +373,10 @@ class ProgressAdapter:
         state.detail = f"AI 思考中（第 {state.iteration} 轮）"
 
     def _handle_tool_call(self, state: TaskProgress, payload: dict) -> None:
-        tool = payload.get("tool_name", "")
-        tool_input = payload.get("tool_input", "")
+        # Runtime broadcasts use tool/args; typed progress events and older
+        # producers use tool_name/tool_input. Accept both contracts.
+        tool = payload.get("tool_name") or payload.get("tool", "")
+        tool_input = payload.get("tool_input", payload.get("args", ""))
         state.tools_called.append(tool)
 
         # Phase detection by tool type
@@ -399,13 +401,16 @@ class ProgressAdapter:
             state.detail = "创建 Pull Request"
 
     def _handle_tool_result(self, state: TaskProgress, payload: dict) -> None:
-        if payload.get("error"):
-            tool = payload.get("tool_name", "")
+        tool = payload.get("tool_name") or payload.get("tool", "")
+        if payload.get("error") or payload.get("is_error"):
             state.detail = f"⚠️ {tool} 执行出错"
-        elif payload.get("tool_name") == "create_pr" and self._projector:
+        elif tool == "create_pr" and self._projector:
             match = _PR_URL_RE.search(str(payload.get("result", "")))
             if match:
                 self._projector.enqueue_pr_url(state.task_id, match.group(0))
+
+    def _handle_tool_progress_start(self, state: TaskProgress, payload: dict) -> None:
+        state.iteration = payload.get("iteration", state.iteration)
 
     def _handle_tool_progress_running(self, state: TaskProgress, payload: dict) -> None:
         tool = payload.get("tool_name", "")
@@ -470,11 +475,15 @@ class ProgressAdapter:
             "provider_unavailable",
             "completion_signal_missing",
             "rework_requested",
+            "pull_request_missing",
+            "execution_failed",
         }:
             defaults = {
                 "provider_unavailable": "AI provider unavailable",
                 "completion_signal_missing": "Agent did not report a completion signal",
                 "rework_requested": "Agent requested rework",
+                "pull_request_missing": "Agent did not create a pull request",
+                "execution_failed": "Coding agent execution failed",
             }
             error = payload.get("details") or defaults[reason]
             self.set_status(
@@ -489,6 +498,7 @@ class ProgressAdapter:
         "ai_thought_start": _handle_thought_start,
         "tool_call": _handle_tool_call,
         "tool_result": _handle_tool_result,
+        "tool_progress_start": _handle_tool_progress_start,
         "tool_progress_running": _handle_tool_progress_running,
         "tool_progress_end": _handle_tool_progress_end,
         "stream_end": _handle_stream_end,

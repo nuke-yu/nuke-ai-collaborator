@@ -62,6 +62,7 @@ class CodingAgentOrchestrator(Orchestrator):
         requirements = spec.get("requirements", "")
         test_command = spec.get("test_command", "")
         task_id = spec.get("task_id", "")
+        require_pull_request = bool(spec.get("require_pull_request", False))
 
         self._state[group_id] = {
             "bot": bot,
@@ -71,6 +72,7 @@ class CodingAgentOrchestrator(Orchestrator):
             "requirements": requirements,
             "test_command": test_command,
             "task_id": task_id,
+            "require_pull_request": require_pull_request,
         }
 
         trigger = f"Please implement the following feature:\n\n{requirements}"
@@ -120,10 +122,55 @@ class CodingAgentOrchestrator(Orchestrator):
         if not s or s.get("done"):
             return OrchestratorStep()
 
+        execution_failure = next(
+            (sig for sig in (signals or []) if sig.get("name") == "_execution_failed"),
+            None,
+        )
+        if execution_failure:
+            reason = str(
+                (execution_failure.get("arguments") or {}).get("reason")
+                or "Coding agent execution failed"
+            )
+            log.warning("coding_agent_v1: group %d execution failed: %s", group_id, reason)
+            return OrchestratorStep(
+                broadcast_state=True,
+                workflow_paused=WorkflowPaused(
+                    group_id=group_id,
+                    reason="execution_failed",
+                    details=reason,
+                ),
+                workspace_action=None,
+            )
+
         # Check for completion signals (using unified WorkflowSignal schema)
         if signals:
+            successful_tools = {
+                str((sig.get("arguments") or {}).get("tool_name") or "")
+                for sig in signals
+                if sig.get("name") == "_tool_succeeded"
+            }
             for sig in signals:
                 if is_signal_done(sig):
+                    if s.get("require_pull_request") and "create_pr" not in successful_tools:
+                        log.warning(
+                            "coding_agent_v1: group %d reported completion without "
+                            "a successful create_pr call",
+                            group_id,
+                        )
+                        return OrchestratorStep(
+                            broadcast_state=True,
+                            workflow_paused=WorkflowPaused(
+                                group_id=group_id,
+                                reason="pull_request_missing",
+                                details=(
+                                    "Dashboard coding task called signal_stage_done "
+                                    "without successfully creating a pull request"
+                                ),
+                            ),
+                            # Keep the task worktree intact so retry/recovery can
+                            # create the missing PR without losing implementation.
+                            workspace_action=None,
+                        )
                     s["done"] = True
                     self.end(group_id)
                     return OrchestratorStep(
@@ -161,7 +208,9 @@ class CodingAgentOrchestrator(Orchestrator):
                 reason="completion_signal_missing",
                 details="Bot run completed without calling signal_stage_done or signal_rework",
             ),
-            workspace_action="discard",  # Incomplete: discard changes
+            # Preserve partial implementation for retry/recovery. A missing
+            # control signal is a protocol failure, not proof the code is useless.
+            workspace_action=None,
         )
 
     def end(self, group_id: int) -> None:
@@ -226,4 +275,5 @@ class CodingAgentOrchestrator(Orchestrator):
             "requirements": body.get("requirements", ""),
             "test_command": body.get("test_command", ""),
             "task_id": body.get("task_id", ""),
+            "require_pull_request": bool(body.get("require_pull_request", False)),
         }

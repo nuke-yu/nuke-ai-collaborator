@@ -659,6 +659,47 @@ class TestRetryTask(DatabaseTestBase):
 
 class TestAbortTask(DatabaseTestBase):
 
+    async def test_delete_terminal_task_removes_durable_record(self):
+        adapter = MagicMock()
+        orch = TaskOrchestrator(adapter=adapter)
+        import db
+        async with db.write_connect() as conn:
+            await conn.execute("INSERT INTO groups (id, name) VALUES (10, 'test-group')")
+            await conn.execute(
+                "INSERT INTO members (id, group_id, name, type, role) "
+                "VALUES (5, 10, 'test-bot', 'bot', 'developer')"
+            )
+            await conn.commit()
+        await orch._task_store.create_task(
+            "task_done", 10, 5, "https://github.com/test/repo.git", "Test task"
+        )
+        await orch._task_store.update_status("task_done", "completed")
+
+        deleted = await orch.delete_task_record("task_done")
+
+        self.assertEqual(deleted["status"], "completed")
+        self.assertIsNone(await orch._task_store.get_task("task_done"))
+        adapter.remove_task.assert_called_once_with(10)
+
+    async def test_delete_running_task_is_rejected(self):
+        orch = TaskOrchestrator()
+        import db
+        async with db.write_connect() as conn:
+            await conn.execute("INSERT INTO groups (id, name) VALUES (10, 'test-group')")
+            await conn.execute(
+                "INSERT INTO members (id, group_id, name, type, role) "
+                "VALUES (5, 10, 'test-bot', 'bot', 'developer')"
+            )
+            await conn.commit()
+        await orch._task_store.create_task(
+            "task_running", 10, 5, "https://github.com/test/repo.git", "Test task"
+        )
+        await orch._task_store.update_status("task_running", "running")
+
+        with self.assertRaises(RuntimeError):
+            await orch.delete_task_record("task_running")
+        self.assertIsNotNone(await orch._task_store.get_task("task_running"))
+
     async def test_abort_known_task(self):
         adapter = MagicMock()
         orch = TaskOrchestrator(adapter=adapter)
@@ -842,6 +883,8 @@ class TestDispatchAgent(DatabaseTestBase):
         # Verify START_WORKFLOW is used (not USER_MESSAGE)
         call_args = mock_sup.send_to_worker.call_args
         self.assertEqual(call_args[0][0], 10)  # group_id
+        envelope_body = mock_envelope.call_args.kwargs["body"]
+        self.assertTrue(envelope_body["require_pull_request"])
 
 
 class TestSystemPrompt(unittest.TestCase):

@@ -398,6 +398,24 @@ class TaskOrchestrator:
         # P1-1: Fetch updated record from database
         return await self._task_store.get_task(task_id)
 
+    async def delete_task_record(self, task_id: str) -> dict:
+        """Permanently remove a terminal task from the dashboard registry."""
+        record = await self._task_store.get_task(task_id)
+        if not record:
+            raise ValueError(f"Task {task_id} not found")
+        if record["status"] not in {
+            "completed", "failed", "aborted", "stuck_permanently"
+        }:
+            raise RuntimeError(
+                f"Task {task_id} must be terminal before it can be removed"
+            )
+
+        if self._adapter:
+            self._adapter.remove_task(record["group_id"])
+        if not await self._task_store.delete_task(task_id):
+            raise ValueError(f"Task {task_id} not found")
+        return record
+
     async def terminate_permanently_stuck(self, task_id: str, reason: str) -> dict:
         """Fail a hung task only after its Worker proves cancellation/cleanup."""
         record = await self._task_store.get_task(task_id)
@@ -608,6 +626,7 @@ class TaskOrchestrator:
             # Coding tasks must finish through signal_stage_done/signal_rework.
             # A plain planning sentence from the model is not a completed run.
             "require_tool_completion_signal": True,
+            "require_pull_request_completion": True,
             # The dashboard control plane has no interactive permission-response
             # channel. This dedicated bot works in an isolated task worktree;
             # shell danger guards still run after the permission hook, and
@@ -679,6 +698,9 @@ class TaskOrchestrator:
             "requirements": requirements,
             "test_command": test_command,
             "task_id": task_id,  # P0-3: Pass task_id for worktree naming
+            # Dashboard tasks are only complete once their feature branch has
+            # been pushed and a pull request was successfully created.
+            "require_pull_request": True,
         }
         await sup.send_to_worker(
             group_id,

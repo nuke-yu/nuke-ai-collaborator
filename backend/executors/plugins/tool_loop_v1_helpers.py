@@ -465,10 +465,18 @@ async def finalize_reply(runner) -> None:
         })
 
 
-async def cleanup_and_finalize(runner) -> ExecutionResult:
-    # Extract structured signals from tool calls in assistant messages
+def _extract_completion_signals(
+    messages: list[dict],
+    tool_records: list[dict],
+    execution_error: str | None = None,
+) -> list[dict]:
+    """Return workflow signals plus verified successful-tool evidence."""
+    # Extract structured workflow signals from tool calls in assistant messages.
+    # Successful tool outcomes are also projected as internal evidence so an
+    # orchestrator can enforce completion gates (for example, a Dashboard coding
+    # task must not complete unless create_pr actually succeeded).
     signals = []
-    for msg in runner.messages:
+    for msg in messages:
         if msg.get("role") == "assistant" and msg.get("tool_calls"):
             for tc in msg["tool_calls"]:
                 func = tc.get("function", {})
@@ -482,6 +490,29 @@ async def cleanup_and_finalize(runner) -> ExecutionResult:
                         "name": name,
                         "arguments": args
                     })
+
+    for record in tool_records:
+        if not record.get("is_error", False):
+            signals.append({
+                "name": "_tool_succeeded",
+                "arguments": {"tool_name": record.get("name", "")},
+            })
+
+    if execution_error:
+        signals.append({
+            "name": "_execution_failed",
+            "arguments": {"reason": execution_error},
+        })
+
+    return signals
+
+
+async def cleanup_and_finalize(runner) -> ExecutionResult:
+    signals = _extract_completion_signals(
+        runner.messages,
+        runner.tool_records,
+        getattr(runner, "execution_error", None),
+    )
 
     if runner.ctx.spawn_depth > 0:
         await runner.ctx.interaction.broadcast(runner.ctx.group_id, {
@@ -623,6 +654,7 @@ async def execute_parallel_tools(runner, calls, iteration=None) -> None:
             "name": call["name"],
             "args": call["arguments"],
             "result": display_result,
+            "is_error": is_error,
         })
         runner.messages.append({
             "role": "tool",
@@ -706,6 +738,7 @@ async def execute_serial_tools(runner, calls, iteration=None) -> None:
             "name": call["name"],
             "args": call["arguments"],
             "result": display_result,
+            "is_error": is_error,
         })
         runner.messages.append({
             "role": "tool",

@@ -42,11 +42,11 @@ class TestCodingAgentWorkspaceAction(unittest.TestCase):
         self.assertEqual(step.workspace_action, "discard")
         self.assertEqual(step.workflow_paused.reason, "rework_requested")
 
-    def test_missing_signal_discards_and_pauses(self):
+    def test_missing_signal_preserves_workspace_and_pauses(self):
         self._begin()
         step = self.orch.observe(1, 5, "No signal", signals=[])
         self.assertFalse(step.done)
-        self.assertEqual(step.workspace_action, "discard")
+        self.assertIsNone(step.workspace_action)
         self.assertEqual(step.workflow_paused.reason, "completion_signal_missing")
 
 

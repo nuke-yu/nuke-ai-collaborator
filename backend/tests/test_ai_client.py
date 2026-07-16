@@ -429,6 +429,27 @@ class TestTokenUsageExtraction(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["usage"]["input_tokens"], 30)
         self.assertEqual(result["usage"]["output_tokens"], 15)
 
+    async def test_malformed_tool_arguments_are_transient(self):
+        from ai.client import LLMTransientError, _once_openai_compat
+        tool_calls = [{
+            "id": "c1", "type": "function",
+            "function": {"name": "write_file", "arguments": "not-json"},
+        }]
+        mock_resp = self._make_openai_resp(
+            tool_calls=tool_calls, finish_reason="tool_calls",
+        )
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=mock_resp)
+
+        with patch("ai.client._get_client", return_value=mock_client):
+            with self.assertRaisesRegex(LLMTransientError, "write_file"):
+                await _once_openai_compat(
+                    url="https://api.deepseek.com/v1/chat/completions",
+                    api_key="key", model="deepseek-chat",
+                    system_prompt="sp", messages=[{"role": "user", "content": "hi"}],
+                    temperature=0.7, max_tokens=256, tools=None,
+                )
+
     async def test_openai_missing_usage_field_returns_zeros(self):
         """If the API omits 'usage', input_tokens and output_tokens default to 0."""
         from ai.client import _once_openai_compat

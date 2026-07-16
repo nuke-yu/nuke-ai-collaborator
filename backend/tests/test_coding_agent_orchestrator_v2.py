@@ -48,6 +48,42 @@ class TestObserve(unittest.TestCase):
                             signals=[{"name": "signal_stage_done", "arguments": {"reason": "completed"}}])
         self.assertTrue(step.done)
 
+    def test_dashboard_task_requires_successful_create_pr(self):
+        orch = CodingAgentOrchestrator()
+        bot = {"id": 5, "name": "Agent"}
+        orch.begin(1, {
+            "bots": [bot],
+            "requirements": "test",
+            "require_pull_request": True,
+        })
+
+        step = orch.observe(
+            1,
+            5,
+            "Done",
+            signals=[{"name": "signal_stage_done", "arguments": {"reason": "done"}}],
+        )
+
+        self.assertFalse(step.done)
+        self.assertEqual(step.workflow_paused.reason, "pull_request_missing")
+        self.assertIsNone(step.workspace_action)
+
+    def test_dashboard_task_completes_after_successful_create_pr(self):
+        orch = CodingAgentOrchestrator()
+        bot = {"id": 5, "name": "Agent"}
+        orch.begin(1, {
+            "bots": [bot],
+            "requirements": "test",
+            "require_pull_request": True,
+        })
+
+        step = orch.observe(1, 5, "Done", signals=[
+            {"name": "_tool_succeeded", "arguments": {"tool_name": "create_pr"}},
+            {"name": "signal_stage_done", "arguments": {"reason": "done"}},
+        ])
+
+        self.assertTrue(step.done)
+
     def test_observe_no_signal_pauses(self):
         """Without completion signal, workflow publishes WorkflowPaused."""
         orch = CodingAgentOrchestrator()
@@ -58,6 +94,7 @@ class TestObserve(unittest.TestCase):
         self.assertFalse(step.done)
         self.assertIsNotNone(step.workflow_paused)
         self.assertEqual(step.workflow_paused.reason, "completion_signal_missing")
+        self.assertIsNone(step.workspace_action)
 
     def test_observe_signal_rework_keeps_active(self):
         """signal_rework keeps workflow active for retry."""
@@ -86,6 +123,15 @@ class TestParseSpec(unittest.TestCase):
         self.assertEqual(len(spec["bots"]), 1)
         self.assertEqual(spec["bots"][0]["id"], 5)
         self.assertEqual(spec["requirements"], "Build API")
+
+    def test_parse_spec_preserves_pull_request_requirement(self):
+        orch = CodingAgentOrchestrator()
+        all_bots = {5: {"id": 5, "name": "Agent"}}
+        spec = orch.parse_spec(
+            {"bot_id": 5, "require_pull_request": True},
+            all_bots,
+        )
+        self.assertTrue(spec["require_pull_request"])
 
     def test_parse_spec_unknown_bot(self):
         orch = CodingAgentOrchestrator()

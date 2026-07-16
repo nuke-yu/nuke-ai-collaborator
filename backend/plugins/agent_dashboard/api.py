@@ -256,6 +256,21 @@ async def abort_task(task_id: str, user=Depends(require_operator)):
         raise HTTPException(404, "Task not found")
 
 
+@router.delete("/tasks/{task_id}/record")
+async def delete_task_record(task_id: str, user=Depends(require_operator)):
+    """Permanently remove a terminal task from the durable registry."""
+    if not _orchestrator:
+        raise HTTPException(503, "Agent orchestrator not initialized")
+
+    try:
+        record = await _orchestrator.delete_task_record(task_id)
+        return {"task_id": task_id, "status": record["status"], "deleted": True}
+    except ValueError:
+        raise HTTPException(404, "Task not found")
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc))
+
+
 @router.get("/workers")
 async def get_workers(user=Depends(require_operator)):
     """Get worker load stats for monitoring and routing decisions."""

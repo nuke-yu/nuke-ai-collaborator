@@ -75,6 +75,22 @@ class TestStuckDetection(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(adapter._states[1].status, "stuck")  # unchanged
 
+    async def test_paused_tasks_never_auto_retry(self):
+        """An intentional pause is not a stuck running task."""
+        from unittest.mock import AsyncMock
+
+        adapter = self._make_adapter_with_task(
+            status="paused", idle_sec=STUCK_TIMEOUT_SEC + 100
+        )
+        mock_orch = MagicMock()
+        mock_orch.retry_task = AsyncMock()
+        detector = StuckDetector(adapter, orchestrator=mock_orch)
+
+        await detector._check_all()
+
+        self.assertEqual(adapter._states[1].status, "paused")
+        mock_orch.retry_task.assert_not_awaited()
+
     async def test_multiple_tasks_independent(self):
         """Multiple tasks are checked independently."""
         adapter = ProgressAdapter()
@@ -130,6 +146,18 @@ class TestForceCheck(unittest.TestCase):
         detector = StuckDetector(adapter)
         result = detector.force_check(1)
         self.assertFalse(result)
+
+    def test_force_check_paused_task(self):
+        adapter = ProgressAdapter()
+        state = adapter.register_task(1, "t1")
+        state.status = "paused"
+        state.last_event_at = time.time() - STUCK_TIMEOUT_SEC - 5
+
+        detector = StuckDetector(adapter)
+        result = detector.force_check(1)
+
+        self.assertFalse(result)
+        self.assertEqual(state.status, "paused")
 
 
 class TestStuckDetectorLoop(unittest.IsolatedAsyncioTestCase):
