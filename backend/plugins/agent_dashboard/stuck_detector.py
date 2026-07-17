@@ -182,6 +182,7 @@ class StuckDetector:
                     "stuck_permanently": "stuck_permanently",
                     "retrying": "retrying",
                     "restarted": "running",
+                    "incomplete": "incomplete",
                 }.get(conflict_status, "stuck")
                 self._adapter.set_status(
                     group_id,
@@ -219,7 +220,7 @@ class StuckDetector:
         """Manually check a specific group. Returns True if stuck."""
         state = self._adapter._states.get(group_id)
         if not state or state.status in (
-            "paused", "done", "error", "aborted", "stuck_permanently"
+            "paused", "done", "error", "aborted", "stuck_permanently", "incomplete"
         ):
             return False
 

@@ -13,7 +13,7 @@ log = logging.getLogger(__name__)
 RECONCILE_INTERVAL_SEC = 60
 TASK_START_GRACE_SEC = 180
 NEEDS_REVIEW_TTL_SEC = 600 if os.getenv("NUKE_ENV", "").lower() != "production" else 86400
-_TASK_TERMINAL = frozenset({"completed", "failed", "aborted", "stuck_permanently"})
+_TASK_TERMINAL = frozenset({"completed", "failed", "aborted", "stuck_permanently", "incomplete"})
 _SESSION_ACTIVE = ("running", "recovering", "awaiting_recovery", "needs_review")
 
 

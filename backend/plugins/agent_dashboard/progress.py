@@ -54,7 +54,7 @@ _CODE_TOOLS = {
 # Shell commands that indicate testing
 _TEST_KEYWORDS = {"pytest", "npm test", "npm run test", "jest", "vitest", "go test", "cargo test"}
 
-TERMINAL_STATUSES = frozenset({"done", "error", "aborted", "stuck_permanently"})
+TERMINAL_STATUSES = frozenset({"done", "error", "aborted", "stuck_permanently", "incomplete"})
 
 _PERSISTED_STATUS = {
     "running": "running",
@@ -64,6 +64,7 @@ _PERSISTED_STATUS = {
     "stuck_permanently": "stuck_permanently",
     "done": "completed",
     "error": "failed",
+    "incomplete": "incomplete",
     "aborted": "aborted",
 }
 _LOCAL_STATUS = {
@@ -79,6 +80,7 @@ _LOCAL_STATUS = {
     "stuck_permanently": "stuck_permanently",
     "completed": "done",
     "failed": "error",
+    "incomplete": "incomplete",
     "aborted": "aborted",
 }
 _ACTIVITY_EVENTS = frozenset({
@@ -486,12 +488,20 @@ class ProgressAdapter:
                 "execution_failed": "Coding agent execution failed",
             }
             error = payload.get("details") or defaults[reason]
-            self.set_status(
-                state.group_id,
-                "error",
-                detail=f"任务失败: {error[:80]}",
-                error_message=error,
-            )
+            if reason == "pull_request_missing":
+                self.set_status(
+                    state.group_id,
+                    "incomplete",
+                    detail="需要补 PR / 进入修复态",
+                    error_message=error,
+                )
+            else:
+                self.set_status(
+                    state.group_id,
+                    "error",
+                    detail=f"任务失败: {error[:80]}",
+                    error_message=error,
+                )
 
     # Handler dispatch table
     _HANDLERS = {

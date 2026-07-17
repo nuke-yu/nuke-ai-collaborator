@@ -26,7 +26,7 @@ from typing import Optional
 log = logging.getLogger(__name__)
 
 _MANUAL_RETRY_STATUSES = frozenset(
-    {"stuck", "failed", "aborted", "stuck_permanently"}
+    {"stuck", "failed", "aborted", "stuck_permanently", "incomplete"}
 )
 _AUTOMATIC_RETRY_STATUSES = frozenset(
     {"dispatched", "running", "paused", "stuck"}
@@ -37,6 +37,7 @@ _LOCAL_RETRY_FAILURE_STATUS = {
     "failed": "error",
     "aborted": "aborted",
     "stuck_permanently": "stuck_permanently",
+    "incomplete": "incomplete",
 }
 
 # Default coding agent system prompt
@@ -404,7 +405,7 @@ class TaskOrchestrator:
         if not record:
             raise ValueError(f"Task {task_id} not found")
         if record["status"] not in {
-            "completed", "failed", "aborted", "stuck_permanently"
+            "completed", "failed", "aborted", "stuck_permanently", "incomplete"
         }:
             raise RuntimeError(
                 f"Task {task_id} must be terminal before it can be removed"

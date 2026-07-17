@@ -257,6 +257,7 @@ class ToolLoopRunner:
                     "broadcaster": self.ctx.interaction,
                     "steer_channel": self.ctx.steer_channel,
                     "rewake_queue": self.rewake_queue,
+                    "runner": self,
                 }
 
                 _active_schemas = self.tool_schemas
@@ -396,6 +397,12 @@ class ToolLoopRunner:
                             await self._execute_parallel_tools(calls, iteration=self.iter_count)
                         else:
                             await self._execute_serial_tools(calls, iteration=self.iter_count)
+
+                        # Update completion_signal_seen based on actual successful execution
+                        self.completion_signal_seen = any(
+                            rec.get("name") in {"signal_stage_done", "signal_rework"} and not rec.get("is_error")
+                            for rec in self.tool_records
+                        )
 
                         self.messages = compact.apply_tool_result_microcompact(self.messages)
                         self.messages, _ = compact.snip_if_needed(self.messages, self.model_name)

@@ -291,6 +291,24 @@ async def _spawn_agent_handler(bot_name: str, task: str, background: bool = Fals
 
 
 async def _handle_signal_stage_done(reason: str = "", context: dict = None) -> str:
+    ctx = context or {}
+    runner = ctx.get("runner")
+    if runner:
+        require_pr = bool(
+            (runner.bot.get("executor_config") or {}).get(
+                "require_pull_request_completion"
+            )
+        )
+        if require_pr:
+            has_pr = any(
+                rec.get("name") == "create_pr" and not rec.get("is_error")
+                for rec in runner.tool_records
+            )
+            if not has_pr:
+                return (
+                    "[错误] 在调用 signal_stage_done 之前，必须先成功调用 create_pr 创建 Pull Request。"
+                    "请先调用 create_pr，确认成功后再调用 signal_stage_done。"
+                )
     return f"[系统] 已记录阶段完成信号。原因: {reason}。正在推进工作流..."
 
 

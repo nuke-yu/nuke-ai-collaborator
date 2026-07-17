@@ -252,7 +252,6 @@ class TestStatusTransitions:
         [
             ("completion_signal_missing", "No completion signal"),
             ("rework_requested", "Tests are still failing"),
-            ("pull_request_missing", "No pull request was created"),
             ("execution_failed", "Malformed model tool arguments"),
         ],
     )
@@ -265,6 +264,18 @@ class TestStatusTransitions:
         state = active_adapter._states[1]
         assert state.status == "error"
         assert state.error_message == details
+        assert 1 not in active_adapter._active_groups
+
+    def test_workflow_pull_request_missing_is_incomplete(self, active_adapter):
+        active_adapter.on_event(
+            1,
+            {"type": "workflow_paused", "reason": "pull_request_missing", "details": "No pull request was created"},
+        )
+
+        state = active_adapter._states[1]
+        assert state.status == "incomplete"
+        assert state.detail == "需要补 PR / 进入修复态"
+        assert state.error_message == "No pull request was created"
         assert 1 not in active_adapter._active_groups
 
 

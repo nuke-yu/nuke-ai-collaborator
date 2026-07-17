@@ -482,14 +482,26 @@ def _extract_completion_signals(
                 func = tc.get("function", {})
                 name = func.get("name")
                 if name in ("signal_stage_done", "signal_rework"):
-                    try:
-                        args = json.loads(func.get("arguments") or "{}") if isinstance(func.get("arguments"), str) else func.get("arguments", {})
-                    except Exception:
-                        args = {}
-                    signals.append({
-                        "name": name,
-                        "arguments": args
-                    })
+                    tc_id = tc.get("id")
+                    failed = False
+                    if tc_id:
+                        for m in messages:
+                            if m.get("role") == "tool" and m.get("tool_call_id") == tc_id:
+                                content = str(m.get("content") or "")
+                                if content.startswith("[") and "]" in content:
+                                    prefix = content.split("]", 1)[0] + "]"
+                                    if any(k in prefix for k in ("错误", "拒绝", "不存在", "受保护", "拦截", "异常", "fail", "error", "denied", "blocked")):
+                                        failed = True
+                                break
+                    if not failed:
+                        try:
+                            args = json.loads(func.get("arguments") or "{}") if isinstance(func.get("arguments"), str) else func.get("arguments", {})
+                        except Exception:
+                            args = {}
+                        signals.append({
+                            "name": name,
+                            "arguments": args
+                        })
 
     for record in tool_records:
         if not record.get("is_error", False):

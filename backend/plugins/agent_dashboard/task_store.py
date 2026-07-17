@@ -28,33 +28,34 @@ log = logging.getLogger(__name__)
 _ALLOWED_TRANSITIONS = {
     "created": {
         "dispatched", "running", "paused", "stuck", "retrying",
-        "completed", "failed", "aborted", "stuck_permanently",
+        "completed", "failed", "aborted", "stuck_permanently", "incomplete",
     },
     "dispatched": {
         "running", "paused", "stuck", "retrying", "completed", "failed", "aborted",
-        "stuck_permanently",
+        "stuck_permanently", "incomplete",
     },
     "running": {
         "paused", "stuck", "retrying", "completed", "failed", "aborted",
-        "stuck_permanently",
+        "stuck_permanently", "incomplete",
     },
     "paused": {
         "running", "stuck", "retrying", "completed", "failed", "aborted",
-        "stuck_permanently",
+        "stuck_permanently", "incomplete",
     },
-    "stuck": {"retrying", "failed", "aborted", "stuck_permanently"},
-    "retrying": {"running", "restarted", "failed", "aborted", "stuck_permanently"},
+    "stuck": {"retrying", "failed", "aborted", "stuck_permanently", "incomplete"},
+    "retrying": {"running", "restarted", "failed", "aborted", "stuck_permanently", "incomplete"},
     "restarted": {
         "running", "paused", "stuck", "retrying", "completed", "failed", "aborted",
-        "stuck_permanently",
+        "stuck_permanently", "incomplete",
     },
     "failed": {"retrying", "aborted"},
     "aborted": {"retrying"},
     "stuck_permanently": {"retrying", "aborted"},
+    "incomplete": {"retrying", "aborted"},
     "completed": set(),
 }
 _PERSISTED_TERMINAL_STATUSES = frozenset(
-    {"completed", "failed", "aborted", "stuck_permanently"}
+    {"completed", "failed", "aborted", "stuck_permanently", "incomplete"}
 )
 _RETRY_CLAIM_TTL_SECONDS = 120
 
@@ -281,7 +282,7 @@ class TaskStore:
                 SET status = ?,
                     pr_url = COALESCE(?, pr_url),
                     error_message = CASE
-                        WHEN ? IN ('failed', 'stuck', 'stuck_permanently')
+                        WHEN ? IN ('failed', 'stuck', 'stuck_permanently', 'incomplete')
                         THEN COALESCE(?, error_message)
                         ELSE NULL
                     END,

@@ -700,6 +700,29 @@ class TestAbortTask(DatabaseTestBase):
             await orch.delete_task_record("task_running")
         self.assertIsNotNone(await orch._task_store.get_task("task_running"))
 
+    async def test_delete_incomplete_task_is_allowed(self):
+        adapter = MagicMock()
+        orch = TaskOrchestrator(adapter=adapter)
+        import db
+        async with db.write_connect() as conn:
+            await conn.execute("INSERT INTO groups (id, name) VALUES (10, 'test-group')")
+            await conn.execute(
+                "INSERT INTO members (id, group_id, name, type, role) "
+                "VALUES (5, 10, 'test-bot', 'bot', 'developer')"
+            )
+            await conn.commit()
+        await orch._task_store.create_task(
+            "task_incomplete", 10, 5, "https://github.com/test/repo.git", "Test task"
+        )
+        await orch._task_store.update_status("task_incomplete", "running")
+        await orch._task_store.update_status("task_incomplete", "incomplete")
+
+        deleted = await orch.delete_task_record("task_incomplete")
+
+        self.assertEqual(deleted["status"], "incomplete")
+        self.assertIsNone(await orch._task_store.get_task("task_incomplete"))
+        adapter.remove_task.assert_called_once_with(10)
+
     async def test_abort_known_task(self):
         adapter = MagicMock()
         orch = TaskOrchestrator(adapter=adapter)
