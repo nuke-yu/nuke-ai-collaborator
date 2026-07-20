@@ -284,6 +284,13 @@ async def setup_session(runner) -> None:
         skill_context, runner.retrieved_skill_ids = "",[]
     if skill_context:
         memory = f"{memory}\n\n{skill_context}" if memory else skill_context
+    if getattr(runner.ctx,"personal_user_id",None) is not None:
+        from ai.personal_vault import format_projected_context
+        personal_context = await format_projected_context(
+            user_id=runner.ctx.personal_user_id,group_id=runner.ctx.group_id,
+            bot_id=runner.bot["id"])
+        if personal_context:
+            memory = f"{memory}\n\n{personal_context}" if memory else personal_context
 
     if skill_discovery:
         runner.system_prompt_base, runner.skills_xml, runner.skills_snapshot, runner.always_skills = await prompt_builder.compile_system_prompt(

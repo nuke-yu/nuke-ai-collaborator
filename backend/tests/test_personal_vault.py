@@ -3,7 +3,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from ai.personal_vault import add_record, connect, ingest_knowledge, observe_habit, project, projected_context
+from ai.personal_vault import (add_record,connect,delete_vault,export_vault,format_projected_context,
+                               ingest_knowledge,observe_habit,project,projected_context,rebuild_vault)
 from runtime.dbpaths import personal_db_path
 
 
@@ -72,3 +73,13 @@ class PersonalVaultTest(unittest.IsolatedAsyncioTestCase):
         async with connect(4) as db:
             async with db.execute("SELECT status FROM personal_records WHERE record_id=?",(record_id,)) as cur:
                 self.assertEqual((await cur.fetchone())[0],"provisional")
+
+    async def test_context_export_rebuild_and_delete(self):
+        record_id=await add_record(user_id=4,kind="expertise",content="Knows Python",source_type="manual",explicit=True)
+        await project(user_id=4,record_id=record_id,group_id=2,bot_id=None,purpose="assistant_context",expires_at=1)
+        result=await rebuild_vault(4); self.assertEqual(result["expired_projections"],1)
+        await project(user_id=4,record_id=record_id,group_id=2,bot_id=None,purpose="assistant_context")
+        context=await format_projected_context(user_id=4,group_id=2,bot_id=9)
+        self.assertIn("Knows Python",context)
+        exported=await export_vault(4); self.assertEqual(exported["user_id"],4); self.assertEqual(len(exported["records"]),1)
+        self.assertTrue(await delete_vault(4)); self.assertFalse(Path(personal_db_path(4)).exists())

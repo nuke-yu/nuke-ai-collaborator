@@ -81,7 +81,7 @@ async def project(*,user_id:int,record_id:str,group_id:int,bot_id:int|None,purpo
         projection_id="projection:"+hashlib.sha256(key.encode()).hexdigest()[:24]; now=int(time.time()*1000)
         await db.execute("""INSERT INTO personal_projections
           (projection_id,record_id,group_id,bot_id,purpose,expires_at,created_at,updated_at)
-          VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(record_id,group_id,bot_id,purpose)
+          VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(projection_id)
           DO UPDATE SET status='active',expires_at=excluded.expires_at,updated_at=excluded.updated_at""",
           (projection_id,record_id,group_id,bot_id,purpose,expires_at,now,now)); await db.commit()
     return projection_id
@@ -146,3 +146,50 @@ async def observe_habit(*,user_id:int,habit_key:str,statement:str,source_type:st
         await db.execute("UPDATE personal_records SET status=?,confidence=?,updated_at=? WHERE record_id=?",
                          ("active" if eligible else "provisional",confidence,now,record_id)); await db.commit()
     return record_id
+
+
+async def export_vault(user_id:int) -> dict:
+    async with connect(user_id) as db:
+        async with db.execute("SELECT record_id,kind,content,speaker,subject,authority,sensitivity,status,"
+                              "source_type,source_id,confidence,explicit,valid_from,valid_to FROM personal_records "
+                              "WHERE user_id=? ORDER BY created_at",(user_id,)) as cur:
+            records=await cur.fetchall()
+        async with db.execute("SELECT projection_id,record_id,group_id,bot_id,purpose,status,expires_at "
+                              "FROM personal_projections ORDER BY created_at") as cur:
+            projections=await cur.fetchall()
+    fields=("record_id","kind","content","speaker","subject","authority","sensitivity","status",
+            "source_type","source_id","confidence","explicit","valid_from","valid_to")
+    pfields=("projection_id","record_id","group_id","bot_id","purpose","status","expires_at")
+    return {"schema_version":1,"user_id":user_id,"records":[dict(zip(fields,r)) for r in records],
+            "projections":[dict(zip(pfields,r)) for r in projections]}
+
+
+async def delete_vault(user_id:int) -> bool:
+    from runtime.dbpaths import personal_db_path
+    from pathlib import Path
+    path=Path(personal_db_path(user_id)); existed=path.exists()
+    if existed:path.unlink()
+    for suffix in ("-wal","-shm"):
+        sidecar=Path(str(path)+suffix)
+        if sidecar.exists():sidecar.unlink()
+    return existed
+
+
+async def rebuild_vault(user_id:int) -> dict:
+    now=int(time.time()*1000)
+    async with connect(user_id) as db:
+        expired=await db.execute("UPDATE personal_projections SET status='expired',updated_at=? "
+                                 "WHERE status='active' AND expires_at IS NOT NULL AND expires_at<=?",(now,now))
+        await db.execute("REINDEX"); await db.commit()
+    return {"expired_projections":expired.rowcount,"schema_version":1}
+
+
+async def format_projected_context(*,user_id:int,group_id:int,bot_id:int|None,
+                                   purpose:str="assistant_context",char_budget:int=3000)->str:
+    rows=await projected_context(user_id=user_id,group_id=group_id,bot_id=bot_id,purpose=purpose)
+    chunks=[];used=0
+    for row in rows:
+        line=f"- [{row['kind']}/{row['authority']}] {row['content']}"
+        if used+len(line)>char_budget:break
+        chunks.append(line);used+=len(line)
+    return "[Authorized personal context]\n"+"\n".join(chunks) if chunks else ""

@@ -152,6 +152,7 @@ class ExecutionContext:
     # session from its reconstructed WAL messages instead of starting fresh.
     resume_session_id: str | None = None
     resume_messages: list | None = None
+    personal_user_id: int | None = None  # trusted auth identity; never inferred from member_id
 
 
 @dataclass
