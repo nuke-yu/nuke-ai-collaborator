@@ -25,6 +25,25 @@
 
 ### 1.1 当前实现基线 [CURRENT]
 
+#### 2026-07-21 实施增量 [CURRENT]
+
+以下目标链路已经进入生产代码，不再只是 TARGET：
+
+- Group 私库中的 `agent_runs`、`agent_cases`、`memory_records`、`pipeline_jobs`；
+- 稳定 `run_id / step_id / attempt_id` 与结构化 `run_decisions`，不保存原始 CoT；
+- Run 终态确定性生成 Case，Outcome Evaluator 仅对高信息增益 Case 继续处理；
+- 失败后修正成功的 Case 生成 Experience，普通成功跳过蒸馏；
+- Experience 按 Group/Bot 隔离，采用词项与 Chroma vector 融合召回，固定 Top-K 和上下文预算；
+- Experience 的强化、反证、暂停、衰减和使用成本追踪；
+- durable/idempotent Case pipeline job，包含 lease、重试上限和 dead 状态；
+- 受预算约束、最多一次的 Execution Reflexion，并保留结构化 Decision Trace；
+- canonical `skills / skill_versions / skill_usage`；
+- 仅允许 S0/S1 声明式 Learned Skill，禁止 shell、任意代码和权限旁路；
+- Trial → Active → Stable 的执行结果晋升，以及失败暂停；
+- canonical Skill 到 Bot workspace 的受信任、可重建投影。
+
+仍属于 TARGET 的主要内容包括 Personal Knowledge Vault、外部个人数据 ingestion、Habit/观点归属、完整 UI/API，以及 S2/S3 安全基础设施。Capability Registry、可信验证和完整 Evaluation Harness 按已确认决策继续后置。
+
 当前系统已经具备可插拔的 `MemoryProvider` 接缝：
 
 ```text
