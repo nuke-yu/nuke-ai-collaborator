@@ -19,6 +19,14 @@ CREATE TABLE IF NOT EXISTS personal_projections (
  projection_id TEXT PRIMARY KEY,record_id TEXT NOT NULL,group_id INTEGER NOT NULL,bot_id INTEGER,
  purpose TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'active',expires_at INTEGER,
  created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL,UNIQUE(record_id,group_id,bot_id,purpose));
+CREATE TABLE IF NOT EXISTS personal_sources (
+ source_key TEXT PRIMARY KEY,user_id INTEGER NOT NULL,source_type TEXT NOT NULL,source_id TEXT NOT NULL,
+ speaker TEXT NOT NULL DEFAULT '',subject TEXT NOT NULL DEFAULT '',context_kind TEXT NOT NULL DEFAULT '',
+ observed_at INTEGER NOT NULL,content_hash TEXT NOT NULL,created_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS habit_evidence (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,record_id TEXT NOT NULL,source_key TEXT NOT NULL,
+ context_kind TEXT NOT NULL,polarity TEXT NOT NULL,observed_at INTEGER NOT NULL,
+ UNIQUE(record_id,source_key));
 CREATE TABLE IF NOT EXISTS _schema_version(version INTEGER NOT NULL,applied_at INTEGER NOT NULL);
 """
 
@@ -89,3 +97,52 @@ async def projected_context(*,user_id:int,group_id:int,bot_id:int|None,purpose:s
           AND (p.expires_at IS NULL OR p.expires_at>?) ORDER BY r.explicit DESC,r.confidence DESC LIMIT ?""",
           (user_id,group_id,bot_id,purpose,now,max(1,min(limit,100)))) as cur: rows=await cur.fetchall()
     return [{"record_id":r[0],"kind":r[1],"content":r[2],"authority":r[3],"confidence":r[4]} for r in rows]
+
+
+async def ingest_knowledge(*,user_id:int,kind:str,statement:str,source_type:str,source_id:str,
+                           speaker:str,subject:str,context_kind:str,observed_at:int|None=None,
+                           asserted_by_user:bool=False,sensitivity:str="private") -> str:
+    """Ingest an extracted statement, never an email/chat credential or raw mailbox dump."""
+    observed=observed_at or int(time.time()*1000)
+    authority="user_statement" if asserted_by_user and str(subject)==str(user_id) else (
+        "third_party" if str(subject)!=str(user_id) else "observed")
+    record_id=await add_record(user_id=user_id,kind=kind,content=statement,source_type=source_type,
+                               source_id=source_id,speaker=speaker,subject=subject,authority=authority,
+                               sensitivity=sensitivity,confidence=1.0 if authority=="user_statement" else .45,
+                               explicit=authority=="user_statement")
+    source_key=f"{source_type}:{source_id}"
+    async with connect(user_id) as db:
+        await db.execute("""INSERT INTO personal_sources
+          (source_key,user_id,source_type,source_id,speaker,subject,context_kind,observed_at,content_hash,created_at)
+          VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(source_key) DO NOTHING""",
+          (source_key,user_id,source_type,source_id,speaker,subject,context_kind,observed,
+           hashlib.sha256(statement.encode()).hexdigest(),int(time.time()*1000))); await db.commit()
+    return record_id
+
+
+async def observe_habit(*,user_id:int,habit_key:str,statement:str,source_type:str,source_id:str,
+                        context_kind:str,observed_at:int,polarity:str="support") -> str:
+    if polarity not in {"support","contradict"}:raise ValueError("invalid habit evidence polarity")
+    record_id="habit:"+hashlib.sha256(f"{user_id}:{habit_key}".encode()).hexdigest()[:24]
+    now=int(time.time()*1000); source_key=f"{source_type}:{source_id}"
+    async with connect(user_id) as db:
+        await db.execute("""INSERT INTO personal_records
+          (record_id,user_id,kind,content,authority,sensitivity,status,source_type,source_id,
+           confidence,explicit,valid_from,created_at,updated_at) VALUES(?,?,'habit',?,'observed','private',
+           'provisional',?,?,.35,0,?,?,?) ON CONFLICT(record_id) DO UPDATE SET updated_at=excluded.updated_at""",
+          (record_id,user_id,statement,source_type,source_id,observed_at,now,now))
+        await db.execute("""INSERT INTO habit_evidence(record_id,source_key,context_kind,polarity,observed_at)
+          VALUES(?,?,?,?,?) ON CONFLICT(record_id,source_key) DO UPDATE SET polarity=excluded.polarity,
+          context_kind=excluded.context_kind,observed_at=excluded.observed_at""",
+          (record_id,source_key,context_kind,polarity,observed_at))
+        async with db.execute("""SELECT COUNT(DISTINCT CASE WHEN polarity='support' THEN source_key END),
+          COUNT(DISTINCT CASE WHEN polarity='support' THEN context_kind END),
+          MIN(CASE WHEN polarity='support' THEN observed_at END),MAX(CASE WHEN polarity='support' THEN observed_at END),
+          COUNT(CASE WHEN polarity='contradict' THEN 1 END) FROM habit_evidence WHERE record_id=?""",
+          (record_id,)) as cur: evidence=await cur.fetchone()
+        samples,contexts,first,last,contradictions=evidence
+        eligible=samples>=3 and contexts>=2 and first is not None and last-first>=14*86_400_000 and contradictions==0
+        confidence=min(.9,.35+.12*samples-.15*contradictions)
+        await db.execute("UPDATE personal_records SET status=?,confidence=?,updated_at=? WHERE record_id=?",
+                         ("active" if eligible else "provisional",confidence,now,record_id)); await db.commit()
+    return record_id

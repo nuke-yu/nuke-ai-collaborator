@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from ai.personal_vault import add_record, connect, project, projected_context
+from ai.personal_vault import add_record, connect, ingest_knowledge, observe_habit, project, projected_context
 from runtime.dbpaths import personal_db_path
 
 
@@ -43,3 +43,32 @@ class PersonalVaultTest(unittest.IsolatedAsyncioTestCase):
             async with db.execute("SELECT content,status FROM personal_records WHERE record_id=?",(record_id,)) as cur:
                 content,status=await cur.fetchone()
         self.assertNotIn("AKIAIOSFODNN7EXAMPLE",content); self.assertEqual(status,"provisional")
+
+    async def test_statement_attribution_does_not_turn_third_party_into_user_view(self):
+        own=await ingest_knowledge(user_id=4,kind="decision",statement="I prefer written decisions",
+                                   source_type="chat",source_id="1",speaker="me",subject="4",
+                                   context_kind="planning",asserted_by_user=True)
+        other=await ingest_knowledge(user_id=4,kind="decision",statement="Alice dislikes reviews",
+                                     source_type="email",source_id="2",speaker="Alice",subject="Alice",
+                                     context_kind="email",asserted_by_user=False)
+        async with connect(4) as db:
+            async with db.execute("SELECT record_id,authority,status FROM personal_records ORDER BY record_id") as cur:
+                rows={r[0]:(r[1],r[2]) for r in await cur.fetchall()}
+        self.assertEqual(rows[own],("user_statement","active"))
+        self.assertEqual(rows[other],("third_party","provisional"))
+
+    async def test_habit_requires_samples_contexts_time_and_no_counterexample(self):
+        day=86_400_000
+        for source,context,when in (("1","coding",0),("2","review",7*day),("3","coding",15*day)):
+            record_id=await observe_habit(user_id=4,habit_key="concise",statement="Prefers concise output",
+                                          source_type="task",source_id=source,context_kind=context,
+                                          observed_at=when,polarity="support")
+        async with connect(4) as db:
+            async with db.execute("SELECT status FROM personal_records WHERE record_id=?",(record_id,)) as cur:
+                self.assertEqual((await cur.fetchone())[0],"active")
+        await observe_habit(user_id=4,habit_key="concise",statement="Prefers concise output",
+                            source_type="task",source_id="4",context_kind="incident",observed_at=16*day,
+                            polarity="contradict")
+        async with connect(4) as db:
+            async with db.execute("SELECT status FROM personal_records WHERE record_id=?",(record_id,)) as cur:
+                self.assertEqual((await cur.fetchone())[0],"provisional")
