@@ -72,11 +72,26 @@ class PersonalVaultTest(unittest.IsolatedAsyncioTestCase):
                          source_type="chat",source_id="message-1",speaker="assistant",
                          subject="4",authority="observed",sensitivity="private",
                          confidence=.2,explicit=False)
+        await add_record(user_id=4,kind="preference",content="Prefer written plans",
+                         source_type="chat",source_id="message-1",speaker="forged",
+                         subject="attacker",authority="user_statement",sensitivity="private",
+                         confidence=1.0,explicit=True)
         async with connect(4) as db:
             async with db.execute("SELECT speaker,authority,sensitivity,status,confidence,explicit "
                                   "FROM personal_records WHERE record_id=?",(record_id,)) as cur:
                 row=await cur.fetchone()
         self.assertEqual(row,("me","user_statement","restricted","active",1.0,1))
+
+    async def test_record_authority_and_explicitness_must_be_consistent(self):
+        with self.assertRaisesRegex(ValueError,"invalid authority"):
+            await add_record(user_id=4,kind="profile",content="invalid",source_type="manual",
+                             authority="model_guess",explicit=False)
+        with self.assertRaisesRegex(ValueError,"require user_statement"):
+            await add_record(user_id=4,kind="profile",content="invalid",source_type="manual",
+                             authority="observed",explicit=True)
+        with self.assertRaisesRegex(ValueError,"require user_statement"):
+            await add_record(user_id=4,kind="profile",content="invalid",source_type="manual",
+                             authority="user_statement",explicit=False)
 
     async def test_habit_requires_samples_contexts_time_and_no_counterexample(self):
         day=86_400_000
@@ -95,7 +110,8 @@ class PersonalVaultTest(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual((await cur.fetchone())[0],"provisional")
 
     async def test_context_export_rebuild_and_delete(self):
-        record_id=await add_record(user_id=4,kind="expertise",content="Knows Python",source_type="manual",explicit=True)
+        record_id=await add_record(user_id=4,kind="expertise",content="Knows Python",source_type="manual",
+                                   authority="user_statement",explicit=True)
         await project(user_id=4,record_id=record_id,group_id=2,bot_id=None,purpose="assistant_context",expires_at=1)
         result=await rebuild_vault(4); self.assertEqual(result["expired_projections"],1)
         await project(user_id=4,record_id=record_id,group_id=2,bot_id=None,purpose="assistant_context")

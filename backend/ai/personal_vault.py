@@ -53,6 +53,9 @@ async def add_record(*,user_id:int,kind:str,content:str,source_type:str,source_i
     if kind not in {"profile","expertise","decision","workflow","social","preference","habit","temporary"}:
         raise ValueError("unsupported personal knowledge kind")
     if sensitivity not in {"private","restricted","secret"}:raise ValueError("invalid sensitivity")
+    if authority not in {"observed","third_party","user_statement"}:raise ValueError("invalid authority")
+    if explicit != (authority=="user_statement"):
+        raise ValueError("explicit records require user_statement authority")
     from executors.redaction import redact_secrets
     safe,_=redact_secrets(content)
     now=int(time.time()*1000); key=f"{user_id}:{source_type}:{source_id}:{kind}:{safe}"
@@ -63,9 +66,12 @@ async def add_record(*,user_id:int,kind:str,content:str,source_type:str,source_i
           (record_id,user_id,kind,content,speaker,subject,authority,sensitivity,status,source_type,
            source_id,confidence,explicit,valid_from,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
           ON CONFLICT(record_id) DO UPDATE SET
-           speaker=CASE WHEN excluded.explicit=1 THEN excluded.speaker ELSE personal_records.speaker END,
-           subject=CASE WHEN excluded.explicit=1 THEN excluded.subject ELSE personal_records.subject END,
-           authority=CASE WHEN excluded.explicit=1 THEN excluded.authority ELSE personal_records.authority END,
+           speaker=CASE WHEN excluded.explicit=1 AND personal_records.explicit=0
+            THEN excluded.speaker ELSE personal_records.speaker END,
+           subject=CASE WHEN excluded.explicit=1 AND personal_records.explicit=0
+            THEN excluded.subject ELSE personal_records.subject END,
+           authority=CASE WHEN excluded.explicit=1 AND personal_records.explicit=0
+            THEN excluded.authority ELSE personal_records.authority END,
            sensitivity=CASE
             WHEN personal_records.sensitivity='secret' OR excluded.sensitivity='secret' THEN 'secret'
             WHEN personal_records.sensitivity='restricted' OR excluded.sensitivity='restricted' THEN 'restricted'
