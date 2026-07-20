@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException
 from core import auth
 from db import global_db
-from ai.personal_vault import add_record, delete_vault, export_vault, project, rebuild_vault
+from ai.personal_vault import (add_record,delete_vault,export_vault,ingest_knowledge,
+                               observe_habit,project,rebuild_vault)
 
 router=APIRouter()
 
@@ -33,6 +34,28 @@ async def create_personal_projection(body:dict,user=Depends(auth.get_current_use
           bot_id=bot_id,purpose=body.get("purpose","assistant_context"),expires_at=body.get("expires_at"))
     except (KeyError,ValueError) as exc:raise HTTPException(400,str(exc))
     return {"projection_id":projection_id}
+
+@router.post("/api/personal/memory/sources")
+async def ingest_personal_source(body:dict,user=Depends(auth.get_current_user)):
+    try:
+        record_id=await ingest_knowledge(user_id=int(user["uid"]),kind=body["kind"],
+          statement=body["statement"],source_type=body["source_type"],source_id=body["source_id"],
+          speaker=body.get("speaker",""),subject=str(body.get("subject",user["uid"])),
+          context_kind=body.get("context_kind","general"),observed_at=body.get("observed_at"),
+          asserted_by_user=bool(body.get("asserted_by_user",False)),
+          sensitivity=body.get("sensitivity","private"))
+    except (KeyError,ValueError) as exc:raise HTTPException(400,str(exc))
+    return {"record_id":record_id}
+
+@router.post("/api/personal/memory/habits")
+async def observe_personal_habit(body:dict,user=Depends(auth.get_current_user)):
+    try:
+        record_id=await observe_habit(user_id=int(user["uid"]),habit_key=body["habit_key"],
+          statement=body["statement"],source_type=body["source_type"],source_id=body["source_id"],
+          context_kind=body["context_kind"],observed_at=int(body["observed_at"]),
+          polarity=body.get("polarity","support"))
+    except (KeyError,ValueError) as exc:raise HTTPException(400,str(exc))
+    return {"record_id":record_id}
 
 @router.post("/api/personal/memory/rebuild")
 async def rebuild_personal_memory(user=Depends(auth.get_current_user)):
