@@ -22,7 +22,7 @@ from ai.tool_events import (
 )
 from ai.execution_runs import finish_run, start_run
 from ai.cases import assemble_case, task_signature
-from ai.experiences import distill_case
+from ai.experiences import complete_usage, distill_case, recall_experiences
 
 TEST_DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "test_tool_events.db")
 
@@ -288,6 +288,23 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0][0], "experience")
         self.assertEqual(json.loads(rows[0][2]), [corrected])
+
+    async def test_recall_tracks_injection_and_execution_cost(self):
+        case_id = await assemble_case(
+            run_id="source", group_id=7, bot_id=3, task="修复数据库迁移失败",
+            outcome="completed", tool_records=[{"name":"run_shell","args":{},"result":"migration failed","is_error":True}],
+        )
+        record_id = await distill_case(case_id, 7)
+        context, ids = await recall_experiences(
+            query="数据库迁移怎么修复", run_id="target", group_id=7, bot_id=3)
+        self.assertEqual(ids, [record_id])
+        self.assertIn("prior execution experience", context)
+        await complete_usage(record_ids=ids, run_id="target", group_id=7,
+                             outcome="completed", input_tokens=90, output_tokens=20, tool_attempts=1)
+        async with database.connect(TEST_DB_PATH) as db:
+            async with db.execute("SELECT state,outcome,input_tokens,tool_attempts FROM experience_usage") as cur:
+                row = await cur.fetchone()
+        self.assertEqual(row, ("executed", "completed", 90, 1))
 
 
 class RetrievalTest(unittest.IsolatedAsyncioTestCase):

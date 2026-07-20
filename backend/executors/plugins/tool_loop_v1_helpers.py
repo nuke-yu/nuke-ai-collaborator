@@ -263,6 +263,13 @@ async def setup_session(runner) -> None:
         role=runner.bot.get("role") or "", query=runner.ctx.user_message, history=runner.ctx.history,
         thread_id=thread_id,
     ))
+    from ai.experiences import recall_experiences
+    experience_context, runner.retrieved_experience_ids = await recall_experiences(
+        query=runner.ctx.user_message, run_id=runner.run_id,
+        group_id=runner.ctx.group_id, bot_id=runner.bot["id"],
+    )
+    if experience_context:
+        memory = f"{memory}\n\n{experience_context}" if memory else experience_context
 
     if skill_discovery:
         runner.system_prompt_base, runner.skills_xml, runner.skills_snapshot, runner.always_skills = await prompt_builder.compile_system_prompt(
@@ -608,6 +615,14 @@ async def cleanup_and_finalize(runner) -> ExecutionResult:
     from ai.experiences import distill_case
     if case_id:
         await distill_case(case_id, runner.ctx.group_id)
+    from ai.experiences import complete_usage
+    await complete_usage(
+        record_ids=runner.retrieved_experience_ids, run_id=runner.run_id,
+        group_id=runner.ctx.group_id, outcome="completed",
+        input_tokens=runner.ai_service.usage.input_tokens,
+        output_tokens=runner.ai_service.usage.output_tokens,
+        tool_attempts=len(runner.tool_records),
+    )
 
     # Durable completion must win the per-group writer lock before optional
     # background side effects are spawned. Otherwise a memory/archive task can

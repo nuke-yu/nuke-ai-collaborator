@@ -400,7 +400,9 @@ _GROUP_DDL = [
     """CREATE TABLE IF NOT EXISTS experience_usage (
         id INTEGER PRIMARY KEY AUTOINCREMENT, record_id TEXT NOT NULL, run_id TEXT NOT NULL,
         group_id INTEGER NOT NULL, bot_id INTEGER, state TEXT NOT NULL,
-        outcome TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+        outcome TEXT NOT NULL DEFAULT '', input_tokens INTEGER NOT NULL DEFAULT 0,
+        output_tokens INTEGER NOT NULL DEFAULT 0, tool_attempts INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
         UNIQUE(record_id, run_id)
     )""",
 ]

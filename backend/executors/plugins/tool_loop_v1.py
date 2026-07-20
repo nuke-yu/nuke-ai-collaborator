@@ -133,6 +133,7 @@ class ToolLoopRunner:
 
         self.rewake_queue = asyncio.Queue()
         self.execution_ctx = {}
+        self.retrieved_experience_ids = []
 
         self.ruleset = None
         self.use_cached_mc = compact.should_use_cached_microcompact(self.provider)

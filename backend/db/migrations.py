@@ -861,8 +861,17 @@ async def migration_034(db):
     await db.execute("""CREATE TABLE IF NOT EXISTS experience_usage (
         id INTEGER PRIMARY KEY AUTOINCREMENT, record_id TEXT NOT NULL, run_id TEXT NOT NULL,
         group_id INTEGER NOT NULL, bot_id INTEGER, state TEXT NOT NULL,
-        outcome TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+        outcome TEXT NOT NULL DEFAULT '', input_tokens INTEGER NOT NULL DEFAULT 0,
+        output_tokens INTEGER NOT NULL DEFAULT 0, tool_attempts INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
         UNIQUE(record_id, run_id))""")
+    await db.commit()
+
+
+async def migration_035(db):
+    await _safe_add_column(db, "ALTER TABLE experience_usage ADD COLUMN input_tokens INTEGER NOT NULL DEFAULT 0")
+    await _safe_add_column(db, "ALTER TABLE experience_usage ADD COLUMN output_tokens INTEGER NOT NULL DEFAULT 0")
+    await _safe_add_column(db, "ALTER TABLE experience_usage ADD COLUMN tool_attempts INTEGER NOT NULL DEFAULT 0")
     await db.commit()
 
 
@@ -901,6 +910,7 @@ MIGRATIONS: list = [
     migration_032,
     migration_033,
     migration_034,
+    migration_035,
 ]
 
 
