@@ -37,6 +37,7 @@ GROUP_TABLES = frozenset({
     "message_reactions", "pinned_messages", "agent_sessions", "session_events",
     "workflow_state", "group_locks", "tickets", "reflection_state", "tool_events",
     "agent_runs", "agent_cases", "memory_records", "experience_usage", "pipeline_jobs", "run_decisions",
+    "skills", "skill_versions", "skill_usage",
 })
 
 # ── CENTRAL DDL (final shape; central-internal FKs kept) ──────────────────
@@ -422,6 +423,24 @@ _GROUP_DDL = [
         failure_class TEXT NOT NULL DEFAULT '', observation TEXT NOT NULL DEFAULT '',
         corrective_plan TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL,
         UNIQUE(run_id, step_id, decision_type)
+    )""",
+    """CREATE TABLE IF NOT EXISTS skills (
+        skill_id TEXT PRIMARY KEY, group_id INTEGER NOT NULL, bot_id INTEGER,
+        name TEXT NOT NULL, maturity TEXT NOT NULL DEFAULT 'candidate', risk_level TEXT NOT NULL,
+        current_version INTEGER NOT NULL DEFAULT 1, status TEXT NOT NULL DEFAULT 'active',
+        success_count INTEGER NOT NULL DEFAULT 0, failure_count INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+        UNIQUE(group_id,bot_id,name)
+    )""",
+    """CREATE TABLE IF NOT EXISTS skill_versions (
+        skill_id TEXT NOT NULL, version INTEGER NOT NULL, schema_version TEXT NOT NULL DEFAULT '1',
+        declaration_json TEXT NOT NULL, content_hash TEXT NOT NULL, evidence_ids TEXT NOT NULL DEFAULT '[]',
+        created_at INTEGER NOT NULL, PRIMARY KEY(skill_id,version)
+    )""",
+    """CREATE TABLE IF NOT EXISTS skill_usage (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, skill_id TEXT NOT NULL, version INTEGER NOT NULL,
+        run_id TEXT NOT NULL, group_id INTEGER NOT NULL, outcome TEXT NOT NULL DEFAULT '',
+        created_at INTEGER NOT NULL, UNIQUE(skill_id,run_id)
     )""",
 ]
 

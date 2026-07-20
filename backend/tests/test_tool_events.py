@@ -26,6 +26,7 @@ from ai.cases import assemble_case, task_signature
 from ai.cases import evaluate_outcome
 from ai.pipeline import process_case
 from ai.reflexion import classify_failure, maybe_inject
+from ai.skill_learning import compile_candidate, validate_declaration
 from ai.experiences import complete_usage, decay_experiences, distill_case, recall_experiences
 
 TEST_DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "test_tool_events.db")
@@ -368,6 +369,27 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
             await db.execute("UPDATE memory_records SET status='active',confidence=0.4,created_at=1,last_used_at=NULL")
             await db.commit()
         self.assertEqual(await decay_experiences(7, now_ms=100*86_400_000), 1)
+
+    async def test_candidate_compiler_requires_repeated_evidence_and_is_declarative(self):
+        first = await assemble_case(run_id="s1",group_id=7,bot_id=3,task="fix schema",
+                                    outcome="completed",tool_records=[{"name":"run_shell","args":{},"result":"x","is_error":True}])
+        second = await assemble_case(run_id="s2",group_id=7,bot_id=3,task="fix schema",
+                                     outcome="completed",tool_records=[{"name":"run_shell","args":{},"result":"y","is_error":True}])
+        record_id = await distill_case(first,7)
+        self.assertIsNone(await compile_candidate(record_id,7))
+        await distill_case(second,7)
+        async with database.connect(TEST_DB_PATH) as db:
+            await db.execute("UPDATE memory_records SET confidence=0.75 WHERE record_id=?",(record_id,))
+            await db.commit()
+        skill_id = await compile_candidate(record_id,7)
+        async with database.connect(TEST_DB_PATH) as db:
+            async with db.execute("SELECT maturity,risk_level FROM skills WHERE skill_id=?",(skill_id,)) as cur:
+                row = await cur.fetchone()
+            async with db.execute("SELECT declaration_json FROM skill_versions WHERE skill_id=?",(skill_id,)) as cur:
+                declaration = json.loads((await cur.fetchone())[0])
+        self.assertEqual(row,("candidate","S0")); self.assertEqual(declaration["allowed_tools"],[])
+        with self.assertRaises(ValueError):
+            validate_declaration({"risk_level":"S1","trigger":"x","procedure":["x"],"allowed_tools":["run_shell"]})
 
 
 class RetrievalTest(unittest.IsolatedAsyncioTestCase):

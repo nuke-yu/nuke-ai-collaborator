@@ -47,9 +47,13 @@ async def process_case(case_id: str, group_id: int) -> str:
         if evaluation.should_distill:
             from ai.experiences import distill_case
             record_id = await distill_case(case_id, group_id)
+        skill_id = None
+        if record_id:
+            from ai.skill_learning import compile_candidate
+            skill_id = await compile_candidate(record_id, group_id)
         output = {"classification":evaluation.classification,"information_gain":evaluation.information_gain,
                   "should_distill":evaluation.should_distill,"confidence":evaluation.confidence,
-                  "record_id":record_id}
+                  "record_id":record_id,"skill_id":skill_id}
         async with await _memory_db("pipeline_jobs", group_id, write=True) as db:
             await db.execute("UPDATE pipeline_jobs SET status='completed',lease_until=NULL,error='',output_json=?,"
                              "completed_at=?,updated_at=? WHERE job_id=?", (json.dumps(output),now,now,job_id))
