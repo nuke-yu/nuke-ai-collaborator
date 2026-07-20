@@ -230,6 +230,7 @@ async def _run_unit_body(group_id: int, unit, orch) -> None:
         workflow_suffix=unit.prompt_suffix,
         is_workflow=unit.is_workflow,
         active_ticket_id=ticket_id,
+        personal_user_id=unit.tag.get("personal_user_id") if isinstance(unit.tag,dict) else None,
         # Side-effect dispatcher: broadcasts via the bus + persists via the writer.
         # (Executors default this themselves when None, but wiring it here makes the
         # workflow path explicit and testable.)

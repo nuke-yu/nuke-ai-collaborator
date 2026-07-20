@@ -118,6 +118,7 @@ class HelloFrame(BaseFrame):
 @dataclass(eq=False)
 class UserMessageFrame(BaseFrame):
     member_id: int = 0
+    user_id: int = 0
     content: str = ""
     file_url: Optional[str] = None
     file_name: Optional[str] = None

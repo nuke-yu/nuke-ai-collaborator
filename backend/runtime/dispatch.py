@@ -103,6 +103,10 @@ async def dispatch_user_message(msg: dict) -> None:
     # Unified Orchestration Call
     orch = wf._orch_for(gid)
     step = await orch.dispatch(gid, saved, all_members, recent)
+    personal_user_id = int(msg.get("user_id") or 0)
+    if personal_user_id and sender.get("type") == "human":
+        for unit in step.next_units:
+            unit.tag["personal_user_id"] = personal_user_id
 
     # If user's UI is set to English, ask each bot to reply in English.
     if msg.get("lang") == "en" and step.next_units:

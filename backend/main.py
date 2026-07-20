@@ -338,14 +338,14 @@ def _websocket_protocol_auth(websocket: WebSocket) -> tuple[str | None, str | No
 async def _authenticate_websocket(
     websocket: WebSocket, group_id: int, member_id: int, token: str = None,
     *, subprotocol: str | None = None,
-) -> bool:
+) -> dict | None:
     # CELL-Auth: Verify token during handshake
     user_payload = auth.verify_token(token) if token else None
     if not user_payload:
         await websocket.accept(subprotocol=subprotocol)
         await websocket.send_json({"type": "auth_error", "message": "Authentication required"})
         await websocket.close()
-        return False
+        return None
     
     # DFT-082: a valid token (a logged-in company user) is the access boundary —
     # this is a trusted, internal shared workspace, not a public multi-tenant
@@ -358,8 +358,8 @@ async def _authenticate_websocket(
                 await websocket.accept(subprotocol=subprotocol)
                 await websocket.send_json({"type": "auth_error", "message": "Unknown member for this group"})
                 await websocket.close()
-                return False
-    return True
+                return None
+    return user_payload
 
 
 async def _initialize_websocket_session(
@@ -389,7 +389,8 @@ async def _initialize_websocket_session(
     await manager.broadcast(group_id, ev_dict)
 
 
-async def _handle_incoming_message(payload: dict, group_id: int, member_id: int, trace_id: str):
+async def _handle_incoming_message(payload: dict, group_id: int, member_id: int, trace_id: str,
+                                   user_id: int = 0):
     t = payload.get("type")
 
     if t == "read":
@@ -430,7 +431,7 @@ async def _handle_incoming_message(payload: dict, group_id: int, member_id: int,
         # supervisor only routes; member_id comes from the authed URL,
         # not the client payload. Strip reserved envelope keys.
         fields = {k: v for k, v in payload.items()
-                  if k not in ("type", "group_id", "trace_id", "member_id")}
+                  if k not in ("type", "group_id", "trace_id", "member_id", "user_id")}
         mtype = ipc.protocol.QUERY if t == "query" else ipc.protocol.MUTATE
         await sup_mod.supervisor.send_to_worker(group_id, ipc.protocol.envelope(
             mtype, group_id=group_id, trace_id=trace_id, member_id=member_id, **fields
@@ -448,11 +449,12 @@ async def _handle_incoming_message(payload: dict, group_id: int, member_id: int,
     # client-sent group_id/type/trace_id/member_id collides with the
     # envelope's own kwargs and raises "multiple values for ...".
     fields = {k: v for k, v in payload.items()
-              if k not in ("type", "group_id", "trace_id", "member_id")}
+              if k not in ("type", "group_id", "trace_id", "member_id", "user_id")}
     await sup_mod.supervisor.send_to_worker(group_id, ipc.protocol.envelope(
         ipc.protocol.USER_MESSAGE,
         group_id=group_id,
         member_id=member_id,
+        user_id=user_id,
         online_ids=manager.get_online_member_ids(group_id),
         trace_id=trace_id,
         **fields
@@ -487,9 +489,10 @@ async def websocket_endpoint(websocket: WebSocket, group_id: int, member_id: int
     protocol_token, subprotocol = _websocket_protocol_auth(websocket)
     # Query token is a temporary compatibility fallback for older clients.
     auth_token = protocol_token or token
-    if not await _authenticate_websocket(
+    user_payload = await _authenticate_websocket(
         websocket, group_id, member_id, auth_token, subprotocol=subprotocol,
-    ):
+    )
+    if not user_payload:
         return
 
     await _initialize_websocket_session(
@@ -503,7 +506,7 @@ async def websocket_endpoint(websocket: WebSocket, group_id: int, member_id: int
             with tracing.trace_context(group_id=group_id):
                 tid = tracing.get_trace_id()
                 payload = json.loads(data)
-                await _handle_incoming_message(payload, group_id, member_id, tid)
+                await _handle_incoming_message(payload, group_id, member_id, tid, int(user_payload["uid"]))
     except WebSocketDisconnect:
         await _handle_websocket_disconnect(websocket, group_id)
 
