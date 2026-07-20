@@ -41,8 +41,15 @@
 - 仅允许 S0/S1 声明式 Learned Skill，禁止 shell、任意代码和权限旁路；
 - Trial → Active → Stable 的执行结果晋升，以及失败暂停；
 - canonical Skill 到 Bot workspace 的受信任、可重建投影。
+- 每用户独立 Personal Knowledge SQLite Vault，物理路径不位于任何 Group；
+- Personal Record 的来源、说话者、观点主体、authority、敏感度和显式/观察状态；
+- Personal → Group/Bot/Purpose 的显式 Scoped Projection，secret 禁止投影；
+- 登录身份经 WebSocket → IPC → WorkUnit → ExecutionContext 可信传播，禁止从 member_id 猜测用户；
+- 仅在存在授权 Projection 时注入 Personal Context，并受固定字符预算限制；
+- Habit 的多独立样本、跨场景、14 天跨度和反例门控；
+- Personal Vault 的来源 intake、导出、删除、过期清理与重建 API。
 
-仍属于 TARGET 的主要内容包括 Personal Knowledge Vault、外部个人数据 ingestion、Habit/观点归属、完整 UI/API，以及 S2/S3 安全基础设施。Capability Registry、可信验证和完整 Evaluation Harness 按已确认决策继续后置。
+仍属于 TARGET 的主要内容包括 Gmail/Outlook、日历和任务系统等具体 Connector、Personal Memory 管理 UI、观点演变的高级关系建模，以及 S2/S3 安全基础设施。Capability Registry、可信验证和完整 Evaluation Harness 按已确认决策继续后置。
 
 当前系统已经具备可插拔的 `MemoryProvider` 接缝：
 
