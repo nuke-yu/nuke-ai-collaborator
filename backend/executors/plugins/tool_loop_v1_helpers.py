@@ -600,6 +600,11 @@ async def cleanup_and_finalize(runner) -> ExecutionResult:
         input_tokens=runner.ai_service.usage.input_tokens,
         output_tokens=runner.ai_service.usage.output_tokens,
     )
+    from ai.cases import assemble_case
+    await assemble_case(
+        run_id=runner.run_id, group_id=runner.ctx.group_id, bot_id=runner.bot["id"],
+        task=runner.ctx.user_message, outcome="completed", tool_records=runner.tool_records,
+    )
 
     # Durable completion must win the per-group writer lock before optional
     # background side effects are spawned. Otherwise a memory/archive task can

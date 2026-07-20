@@ -21,6 +21,7 @@ from ai.tool_events import (
     timeline_events,
 )
 from ai.execution_runs import finish_run, start_run
+from ai.cases import assemble_case, task_signature
 
 TEST_DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "test_tool_events.db")
 
@@ -253,6 +254,21 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
     async def test_invalid_terminal_status_rejected(self):
         with self.assertRaises(ValueError):
             await finish_run(run_id="r", group_id=7, status="running")
+
+    async def test_assemble_case_is_deterministic_and_idempotent(self):
+        self.assertEqual(task_signature(" Fix   BUG "), task_signature("fix bug"))
+        records = [
+            {"name": "read_file", "args": {"path": "a.py"}, "result": "ok", "is_error": False},
+            {"name": "run_shell", "args": {"cmd": "pytest"}, "result": "failed", "is_error": True},
+        ]
+        case_id = await assemble_case(run_id="r1", group_id=7, bot_id=3,
+                                      task="Fix bug", outcome="completed", tool_records=records)
+        await assemble_case(run_id="r1", group_id=7, bot_id=3,
+                            task="Fix bug", outcome="completed", tool_records=records)
+        async with database.connect(TEST_DB_PATH) as db:
+            async with db.execute("SELECT case_id, attempts, outcome, files_touched FROM agent_cases") as cur:
+                rows = await cur.fetchall()
+        self.assertEqual(rows, [(case_id, 2, "completed", '["a.py"]')])
 
 
 class RetrievalTest(unittest.IsolatedAsyncioTestCase):
