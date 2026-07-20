@@ -7,6 +7,7 @@ import asyncio
 import json
 import os
 import unittest
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import db as database
@@ -24,6 +25,7 @@ from ai.execution_runs import finish_run, start_run
 from ai.cases import assemble_case, task_signature
 from ai.cases import evaluate_outcome
 from ai.pipeline import process_case
+from ai.reflexion import classify_failure, maybe_inject
 from ai.experiences import complete_usage, distill_case, recall_experiences
 
 TEST_DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "test_tool_events.db")
@@ -325,6 +327,27 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((jobs[0][0], jobs[0][1]), ("completed", 1))
         self.assertTrue(json.loads(jobs[0][2])["should_distill"])
         self.assertEqual(count, 1)
+
+    async def test_reflexion_is_bounded_and_persists_decision_trace(self):
+        self.assertEqual(classify_failure("run_shell", "command failed"), "correctable_execution")
+        runner = SimpleNamespace(
+            reflexion_used=False, run_id="rr", ctx=SimpleNamespace(group_id=7), bot={"id":3},
+            messages=[], tool_records=[{"name":"run_shell","result":"command failed","is_error":True}],
+        )
+        self.assertTrue(await maybe_inject(runner, iteration=2))
+        self.assertFalse(await maybe_inject(runner, iteration=3))
+        self.assertIn("Execution Reflexion", runner.messages[-1]["content"])
+        async with database.connect(TEST_DB_PATH) as db:
+            async with db.execute("SELECT failure_class,step_id FROM run_decisions") as cur:
+                rows = await cur.fetchall()
+        self.assertEqual(rows, [("correctable_execution", "rr:step:2")])
+
+    async def test_reflexion_never_retries_permission_failure(self):
+        runner = SimpleNamespace(
+            reflexion_used=False, run_id="rr", ctx=SimpleNamespace(group_id=7), bot={"id":3},
+            messages=[], tool_records=[{"name":"write_file","result":"permission denied","is_error":True}],
+        )
+        self.assertFalse(await maybe_inject(runner, iteration=1))
 
 
 class RetrievalTest(unittest.IsolatedAsyncioTestCase):

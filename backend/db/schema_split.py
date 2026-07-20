@@ -36,7 +36,7 @@ GROUP_TABLES = frozenset({
     "messages", "role_summaries", "message_embeddings", "member_read",
     "message_reactions", "pinned_messages", "agent_sessions", "session_events",
     "workflow_state", "group_locks", "tickets", "reflection_state", "tool_events",
-    "agent_runs", "agent_cases", "memory_records", "experience_usage", "pipeline_jobs",
+    "agent_runs", "agent_cases", "memory_records", "experience_usage", "pipeline_jobs", "run_decisions",
 })
 
 # ── CENTRAL DDL (final shape; central-internal FKs kept) ──────────────────
@@ -414,6 +414,13 @@ _GROUP_DDL = [
         created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, completed_at INTEGER
     )""",
     "CREATE INDEX IF NOT EXISTS idx_pipeline_jobs_ready ON pipeline_jobs(group_id, status, updated_at)",
+    """CREATE TABLE IF NOT EXISTS run_decisions (
+        decision_id TEXT PRIMARY KEY, run_id TEXT NOT NULL, group_id INTEGER NOT NULL,
+        bot_id INTEGER, step_id TEXT NOT NULL, decision_type TEXT NOT NULL,
+        failure_class TEXT NOT NULL DEFAULT '', observation TEXT NOT NULL DEFAULT '',
+        corrective_plan TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL,
+        UNIQUE(run_id, step_id, decision_type)
+    )""",
 ]
 
 # FTS5 ranked search over tool_events (L3 upgrade). Kept separate and applied

@@ -135,6 +135,7 @@ class ToolLoopRunner:
         self.rewake_queue = asyncio.Queue()
         self.execution_ctx = {}
         self.retrieved_experience_ids = []
+        self.reflexion_used = False
 
         self.ruleset = None
         self.use_cached_mc = compact.should_use_cached_microcompact(self.provider)
@@ -401,6 +402,12 @@ class ToolLoopRunner:
                             await self._execute_parallel_tools(calls, iteration=self.iter_count)
                         else:
                             await self._execute_serial_tools(calls, iteration=self.iter_count)
+
+                        from ai.reflexion import maybe_inject
+                        try:
+                            await maybe_inject(self, iteration=self.iter_count)
+                        except aiosqlite.OperationalError:
+                            pass
 
                         # Update completion_signal_seen based on actual successful execution
                         self.completion_signal_seen = any(
