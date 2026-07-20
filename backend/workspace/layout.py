@@ -29,6 +29,10 @@ def group_dir(gid: int) -> Path:
     return _root() / f"group_{gid}"
 
 
+def personal_dir(user_id: int) -> Path:
+    return _root() / "_personal" / f"user_{int(user_id)}"
+
+
 def group_shared_dir(gid: int) -> Path:
     overrides = current_workspace_path.get()
     if overrides and gid in overrides:

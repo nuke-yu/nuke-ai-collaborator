@@ -12,3 +12,8 @@ def group_db_path(group_id: int) -> str:
 def central_db_path() -> str:
     import db
     return db.DB_PATH
+
+
+def personal_db_path(user_id: int) -> str:
+    """Personal knowledge is physically separate from every Group database."""
+    return os.path.join(str(layout.personal_dir(user_id)), "knowledge.db")
