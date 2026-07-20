@@ -1,6 +1,7 @@
 import asyncio
 import uuid
 import json
+import aiosqlite
 from executors.base import (
     BotExecutor, ExecutionContext, ExecutionResult,
     PluginManifest, WorkspaceConfig, CollabConfig,
@@ -430,18 +431,21 @@ class ToolLoopRunner:
             async def _cleanup():
                 try:
                     await self.ctx.interaction.update_session_status(self.session_id, "failed")
-                    from ai.execution_runs import finish_run
-                    await finish_run(
-                        run_id=self.run_id, group_id=self.ctx.group_id,
-                        status="cancelled", iterations=self.iter_count,
-                        input_tokens=self.ai_service.usage.input_tokens,
-                        output_tokens=self.ai_service.usage.output_tokens,
-                        error_summary="execution cancelled",
-                    )
                     await self.ctx.interaction.broadcast(self.ctx.group_id, {
                         "type": "stream_aborted", "temp_id": self.temp_id, "member_id": self.bot["id"],
                         "session_id": self.session_id,
                     })
+                    try:
+                        from ai.execution_runs import finish_run
+                        await finish_run(
+                            run_id=self.run_id, group_id=self.ctx.group_id,
+                            status="cancelled", iterations=self.iter_count,
+                            input_tokens=self.ai_service.usage.input_tokens,
+                            output_tokens=self.ai_service.usage.output_tokens,
+                            error_summary="execution cancelled",
+                        )
+                    except aiosqlite.OperationalError:
+                        pass
                 except Exception:
                     pass
             # Note: asyncio.shield is a best-effort soft protection. In case of a second cancellation

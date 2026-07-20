@@ -264,10 +264,15 @@ async def setup_session(runner) -> None:
         thread_id=thread_id,
     ))
     from ai.experiences import recall_experiences
-    experience_context, runner.retrieved_experience_ids = await recall_experiences(
-        query=runner.ctx.user_message, run_id=runner.run_id,
-        group_id=runner.ctx.group_id, bot_id=runner.bot["id"],
-    )
+    try:
+        experience_context, runner.retrieved_experience_ids = await recall_experiences(
+            query=runner.ctx.user_message,
+            run_id=getattr(runner, "run_id", runner.session_id),
+            group_id=runner.ctx.group_id, bot_id=runner.bot["id"],
+        )
+    except aiosqlite.OperationalError:
+        logger.warning("experience recall unavailable; group schema is not ready", exc_info=True)
+        experience_context, runner.retrieved_experience_ids = "", []
     if experience_context:
         memory = f"{memory}\n\n{experience_context}" if memory else experience_context
 
@@ -361,8 +366,9 @@ async def setup_session(runner) -> None:
         })
 
     from ai.execution_runs import start_run
-    await start_run(
-        run_id=runner.run_id,
+    try:
+        await start_run(
+        run_id=getattr(runner, "run_id", runner.session_id),
         group_id=runner.ctx.group_id,
         bot_id=runner.bot["id"],
         session_id=runner.session_id,
@@ -370,7 +376,9 @@ async def setup_session(runner) -> None:
         provider=runner.provider,
         model=runner.model_name,
         executor=runner.executor.executor_id,
-    )
+        )
+    except aiosqlite.OperationalError:
+        logger.warning("run trace unavailable; group schema is not ready", exc_info=True)
         
     await runner.ctx.interaction.broadcast(runner.ctx.group_id, {
         "type": "stream_start", "temp_id": runner.temp_id,
@@ -598,31 +606,30 @@ async def cleanup_and_finalize(runner) -> ExecutionResult:
     runner.messages.append({"role": "assistant", "content": runner.full_text})
     await runner.ctx.interaction.save_session_snapshot(runner.session_id, runner.messages)
     await runner.ctx.interaction.update_session_status(runner.session_id, "completed")
-    from ai.execution_runs import finish_run
-    await finish_run(
-        run_id=runner.run_id,
-        group_id=runner.ctx.group_id,
-        status="completed",
-        iterations=runner.iter_count,
-        input_tokens=runner.ai_service.usage.input_tokens,
-        output_tokens=runner.ai_service.usage.output_tokens,
-    )
-    from ai.cases import assemble_case
-    case_id = await assemble_case(
-        run_id=runner.run_id, group_id=runner.ctx.group_id, bot_id=runner.bot["id"],
-        task=runner.ctx.user_message, outcome="completed", tool_records=runner.tool_records,
-    )
-    from ai.experiences import distill_case
-    if case_id:
-        await distill_case(case_id, runner.ctx.group_id)
-    from ai.experiences import complete_usage
-    await complete_usage(
-        record_ids=runner.retrieved_experience_ids, run_id=runner.run_id,
-        group_id=runner.ctx.group_id, outcome="completed",
-        input_tokens=runner.ai_service.usage.input_tokens,
-        output_tokens=runner.ai_service.usage.output_tokens,
-        tool_attempts=len(runner.tool_records),
-    )
+    try:
+        from ai.execution_runs import finish_run
+        await finish_run(
+            run_id=runner.run_id, group_id=runner.ctx.group_id, status="completed",
+            iterations=runner.iter_count, input_tokens=runner.ai_service.usage.input_tokens,
+            output_tokens=runner.ai_service.usage.output_tokens,
+        )
+        from ai.cases import assemble_case
+        case_id = await assemble_case(
+            run_id=runner.run_id, group_id=runner.ctx.group_id, bot_id=runner.bot["id"],
+            task=runner.ctx.user_message, outcome="completed", tool_records=runner.tool_records,
+        )
+        from ai.experiences import complete_usage, distill_case
+        if case_id:
+            await distill_case(case_id, runner.ctx.group_id)
+        await complete_usage(
+            record_ids=runner.retrieved_experience_ids, run_id=runner.run_id,
+            group_id=runner.ctx.group_id, outcome="completed",
+            input_tokens=runner.ai_service.usage.input_tokens,
+            output_tokens=runner.ai_service.usage.output_tokens,
+            tool_attempts=len(runner.tool_records),
+        )
+    except aiosqlite.OperationalError:
+        logger.warning("run learning finalization unavailable; group schema is not ready", exc_info=True)
 
     # Durable completion must win the per-group writer lock before optional
     # background side effects are spawned. Otherwise a memory/archive task can
