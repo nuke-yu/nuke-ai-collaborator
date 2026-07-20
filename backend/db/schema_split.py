@@ -36,7 +36,7 @@ GROUP_TABLES = frozenset({
     "messages", "role_summaries", "message_embeddings", "member_read",
     "message_reactions", "pinned_messages", "agent_sessions", "session_events",
     "workflow_state", "group_locks", "tickets", "reflection_state", "tool_events",
-    "agent_runs", "agent_cases",
+    "agent_runs", "agent_cases", "memory_records", "experience_usage",
 })
 
 # ── CENTRAL DDL (final shape; central-internal FKs kept) ──────────────────
@@ -388,6 +388,21 @@ _GROUP_DDL = [
         created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
     )""",
     "CREATE INDEX IF NOT EXISTS idx_agent_cases_group_created ON agent_cases(group_id, created_at DESC)",
+    """CREATE TABLE IF NOT EXISTS memory_records (
+        record_id TEXT PRIMARY KEY, kind TEXT NOT NULL, group_id INTEGER NOT NULL,
+        bot_id INTEGER, status TEXT NOT NULL DEFAULT 'active', content TEXT NOT NULL,
+        task_signature TEXT NOT NULL DEFAULT '', confidence REAL NOT NULL DEFAULT 0.0,
+        importance REAL NOT NULL DEFAULT 0.0, source_ids TEXT NOT NULL DEFAULT '[]',
+        metadata_json TEXT NOT NULL DEFAULT '{}', algorithm_version TEXT NOT NULL DEFAULT 'experience-v1',
+        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_memory_records_lookup ON memory_records(group_id, bot_id, kind, status)",
+    """CREATE TABLE IF NOT EXISTS experience_usage (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, record_id TEXT NOT NULL, run_id TEXT NOT NULL,
+        group_id INTEGER NOT NULL, bot_id INTEGER, state TEXT NOT NULL,
+        outcome TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+        UNIQUE(record_id, run_id)
+    )""",
 ]
 
 # FTS5 ranked search over tool_events (L3 upgrade). Kept separate and applied

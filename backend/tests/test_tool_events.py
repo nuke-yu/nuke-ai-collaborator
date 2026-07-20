@@ -22,6 +22,7 @@ from ai.tool_events import (
 )
 from ai.execution_runs import finish_run, start_run
 from ai.cases import assemble_case, task_signature
+from ai.experiences import distill_case
 
 TEST_DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "test_tool_events.db")
 
@@ -269,6 +270,24 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
             async with db.execute("SELECT case_id, attempts, outcome, files_touched FROM agent_cases") as cur:
                 rows = await cur.fetchall()
         self.assertEqual(rows, [(case_id, 2, "completed", '["a.py"]')])
+
+    async def test_distill_case_requires_failure_then_completion(self):
+        plain = await assemble_case(run_id="plain", group_id=7, bot_id=3, task="read file",
+                                    outcome="completed", tool_records=[])
+        self.assertIsNone(await distill_case(plain, 7))
+        corrected = await assemble_case(
+            run_id="fixed", group_id=7, bot_id=3, task="fix tests", outcome="completed",
+            tool_records=[{"name":"run_shell","args":{"cmd":"pytest"},
+                           "result":"failed then fixed","is_error":True}],
+        )
+        record_id = await distill_case(corrected, 7)
+        self.assertEqual(record_id, await distill_case(corrected, 7))
+        async with database.connect(TEST_DB_PATH) as db:
+            async with db.execute("SELECT kind,confidence,source_ids FROM memory_records") as cur:
+                rows = await cur.fetchall()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0][0], "experience")
+        self.assertEqual(json.loads(rows[0][2]), [corrected])
 
 
 class RetrievalTest(unittest.IsolatedAsyncioTestCase):
