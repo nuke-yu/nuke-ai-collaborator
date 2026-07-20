@@ -62,7 +62,18 @@ async def add_record(*,user_id:int,kind:str,content:str,source_type:str,source_i
         await db.execute("""INSERT INTO personal_records
           (record_id,user_id,kind,content,speaker,subject,authority,sensitivity,status,source_type,
            source_id,confidence,explicit,valid_from,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-          ON CONFLICT(record_id) DO UPDATE SET updated_at=excluded.updated_at""",
+          ON CONFLICT(record_id) DO UPDATE SET
+           speaker=CASE WHEN excluded.explicit=1 THEN excluded.speaker ELSE personal_records.speaker END,
+           subject=CASE WHEN excluded.explicit=1 THEN excluded.subject ELSE personal_records.subject END,
+           authority=CASE WHEN excluded.explicit=1 THEN excluded.authority ELSE personal_records.authority END,
+           sensitivity=CASE
+            WHEN personal_records.sensitivity='secret' OR excluded.sensitivity='secret' THEN 'secret'
+            WHEN personal_records.sensitivity='restricted' OR excluded.sensitivity='restricted' THEN 'restricted'
+            ELSE 'private' END,
+           status=CASE WHEN excluded.explicit=1 THEN 'active' ELSE personal_records.status END,
+           confidence=MAX(personal_records.confidence,excluded.confidence),
+           explicit=MAX(personal_records.explicit,excluded.explicit),
+           updated_at=excluded.updated_at""",
           (record_id,user_id,kind,safe,speaker,subject,authority,sensitivity,status,source_type,
            source_id,max(0,min(1,confidence)),int(explicit),now,now,now))
         await db.commit()

@@ -58,6 +58,26 @@ class PersonalVaultTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(rows[own],("user_statement","active"))
         self.assertEqual(rows[other],("third_party","provisional"))
 
+    async def test_explicit_statement_upgrades_matching_observation_without_later_downgrade(self):
+        record_id=await add_record(user_id=4,kind="preference",content="Prefer written plans",
+                                   source_type="chat",source_id="message-1",speaker="assistant",
+                                   subject="4",authority="observed",sensitivity="restricted",
+                                   confidence=.45,explicit=False)
+        confirmed_id=await add_record(user_id=4,kind="preference",content="Prefer written plans",
+                                      source_type="chat",source_id="message-1",speaker="me",
+                                      subject="4",authority="user_statement",sensitivity="private",
+                                      confidence=1.0,explicit=True)
+        self.assertEqual(confirmed_id,record_id)
+        await add_record(user_id=4,kind="preference",content="Prefer written plans",
+                         source_type="chat",source_id="message-1",speaker="assistant",
+                         subject="4",authority="observed",sensitivity="private",
+                         confidence=.2,explicit=False)
+        async with connect(4) as db:
+            async with db.execute("SELECT speaker,authority,sensitivity,status,confidence,explicit "
+                                  "FROM personal_records WHERE record_id=?",(record_id,)) as cur:
+                row=await cur.fetchone()
+        self.assertEqual(row,("me","user_statement","restricted","active",1.0,1))
+
     async def test_habit_requires_samples_contexts_time_and_no_counterexample(self):
         day=86_400_000
         for source,context,when in (("1","coding",0),("2","review",7*day),("3","coding",15*day)):
