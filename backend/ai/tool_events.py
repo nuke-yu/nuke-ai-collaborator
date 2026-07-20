@@ -98,6 +98,9 @@ async def record_event(
     result,
     is_error: bool,
     thread_id: str | None = None,
+    run_id: str | None = None,
+    step_id: str | None = None,
+    attempt_id: str | None = None,
 ) -> None:
     """把一次工具调用写成一行 tool_events。group_id 缺失即跳过（测试/最小 loop）。"""
     if group_id is None or not tool:
@@ -115,13 +118,16 @@ async def record_event(
             1 if is_error else 0,
             json.dumps(_extract_files(arguments), ensure_ascii=False),
             _extract_command(tool, arguments),
+            run_id or "",
+            step_id or "",
+            attempt_id or "",
         )
         async with await _memory_db("tool_events", group_id, write=True) as db:
             await db.execute(
                 "INSERT INTO tool_events "
                 "(ts, group_id, bot_id, thread_id, tool, args_summary, result_summary, "
-                " is_error, files_touched, command) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " is_error, files_touched, command, run_id, step_id, attempt_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 row,
             )
             await db.commit()
@@ -144,7 +150,7 @@ _SEARCHABLE = ("tool || ' ' || args_summary || ' ' || result_summary || ' ' "
                "|| IFNULL(command,'') || ' ' || files_touched")
 _INDEX_COLS = "id, ts, tool, is_error, files_touched, command"
 _FULL_COLS = ("id, ts, group_id, bot_id, thread_id, tool, args_summary, "
-              "result_summary, is_error, files_touched, command")
+              "result_summary, is_error, files_touched, command, run_id, step_id, attempt_id")
 
 
 def _index_row(r) -> dict:
@@ -156,7 +162,8 @@ def _full_row(r) -> dict:
     return {"id": r[0], "ts": r[1], "group_id": r[2], "bot_id": r[3],
             "thread_id": r[4], "tool": r[5], "args_summary": r[6],
             "result_summary": r[7], "is_error": bool(r[8]),
-            "files_touched": r[9], "command": r[10]}
+            "files_touched": r[9], "command": r[10], "run_id": r[11],
+            "step_id": r[12], "attempt_id": r[13]}
 
 
 def _fts_match_query(query: str) -> str:

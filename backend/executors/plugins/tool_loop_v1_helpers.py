@@ -352,6 +352,18 @@ async def setup_session(runner) -> None:
         await runner.ctx.interaction.append_session_event(runner.session_id, "session_start", {
             "user_content": user_content if isinstance(user_content, str) else json.dumps(user_content, ensure_ascii=False),
         })
+
+    from ai.execution_runs import start_run
+    await start_run(
+        run_id=runner.run_id,
+        group_id=runner.ctx.group_id,
+        bot_id=runner.bot["id"],
+        session_id=runner.session_id,
+        thread_id=thread_id,
+        provider=runner.provider,
+        model=runner.model_name,
+        executor=runner.executor.executor_id,
+    )
         
     await runner.ctx.interaction.broadcast(runner.ctx.group_id, {
         "type": "stream_start", "temp_id": runner.temp_id,
@@ -579,6 +591,15 @@ async def cleanup_and_finalize(runner) -> ExecutionResult:
     runner.messages.append({"role": "assistant", "content": runner.full_text})
     await runner.ctx.interaction.save_session_snapshot(runner.session_id, runner.messages)
     await runner.ctx.interaction.update_session_status(runner.session_id, "completed")
+    from ai.execution_runs import finish_run
+    await finish_run(
+        run_id=runner.run_id,
+        group_id=runner.ctx.group_id,
+        status="completed",
+        iterations=runner.iter_count,
+        input_tokens=runner.ai_service.usage.input_tokens,
+        output_tokens=runner.ai_service.usage.output_tokens,
+    )
 
     # Durable completion must win the per-group writer lock before optional
     # background side effects are spawned. Otherwise a memory/archive task can
@@ -645,8 +666,11 @@ async def execute_parallel_tools(runner, calls, iteration=None) -> None:
     _t0 = asyncio.get_running_loop().time()
     from executors.tool_dispatch import dispatch_tool
     raw_results = await asyncio.gather(*[
-        dispatch_tool(c["name"], c["arguments"], runner.execution_ctx)
-        for c in calls
+        dispatch_tool(c["name"], c["arguments"], {
+            **runner.execution_ctx,
+            "step_id": f"{runner.run_id}:step:{_iter}",
+            "attempt_id": c["id"],
+        }) for c in calls
     ])
     _duration = round(asyncio.get_running_loop().time() - _t0, 2)
 
@@ -711,7 +735,11 @@ async def execute_serial_tools(runner, calls, iteration=None) -> None:
         _t0 = asyncio.get_running_loop().time()
         from executors.tool_dispatch import dispatch_tool
         tool_result, is_error = await dispatch_tool(
-            call["name"], call["arguments"], runner.execution_ctx
+            call["name"], call["arguments"], {
+                **runner.execution_ctx,
+                "step_id": f"{runner.run_id}:step:{_iter}",
+                "attempt_id": call["id"],
+            }
         )
         tool_result, _ = _check_and_attach_file(runner, tool_result)
         _duration = round(asyncio.get_running_loop().time() - _t0, 2)

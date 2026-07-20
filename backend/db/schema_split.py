@@ -36,6 +36,7 @@ GROUP_TABLES = frozenset({
     "messages", "role_summaries", "message_embeddings", "member_read",
     "message_reactions", "pinned_messages", "agent_sessions", "session_events",
     "workflow_state", "group_locks", "tickets", "reflection_state", "tool_events",
+    "agent_runs",
 })
 
 # ── CENTRAL DDL (final shape; central-internal FKs kept) ──────────────────
@@ -347,12 +348,36 @@ _GROUP_DDL = [
         is_error       INTEGER NOT NULL DEFAULT 0,
         files_touched  TEXT    NOT NULL DEFAULT '[]',  -- JSON array of paths
         command        TEXT,                           -- run_shell cmd, else NULL
+        run_id         TEXT    NOT NULL DEFAULT '',
+        step_id        TEXT    NOT NULL DEFAULT '',
+        attempt_id     TEXT    NOT NULL DEFAULT '',
         -- L4: 0 = not yet folded into a durable summary; 1 = compressed (then
         -- prunable). maybe_compress_tool_events advances this in batches.
         compressed     INTEGER NOT NULL DEFAULT 0
     )""",
     "CREATE INDEX IF NOT EXISTS idx_tool_events_grp_ts ON tool_events(group_id, ts)",
     "CREATE INDEX IF NOT EXISTS idx_tool_events_uncompressed ON tool_events(group_id, bot_id, compressed)",
+    "CREATE INDEX IF NOT EXISTS idx_tool_events_run_step ON tool_events(group_id, run_id, step_id)",
+    """CREATE TABLE IF NOT EXISTS agent_runs (
+        run_id          TEXT PRIMARY KEY,
+        group_id        INTEGER NOT NULL,
+        bot_id          INTEGER,
+        thread_id       TEXT NOT NULL DEFAULT '',
+        session_id      TEXT NOT NULL,
+        status          TEXT NOT NULL DEFAULT 'running'
+                        CHECK(status IN ('running', 'completed', 'failed', 'cancelled')),
+        provider        TEXT NOT NULL DEFAULT '',
+        model           TEXT NOT NULL DEFAULT '',
+        executor        TEXT NOT NULL DEFAULT '',
+        started_at      INTEGER NOT NULL,
+        completed_at    INTEGER,
+        iterations      INTEGER NOT NULL DEFAULT 0,
+        input_tokens    INTEGER NOT NULL DEFAULT 0,
+        output_tokens   INTEGER NOT NULL DEFAULT 0,
+        error_summary   TEXT NOT NULL DEFAULT '',
+        updated_at      INTEGER NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_agent_runs_group_started ON agent_runs(group_id, started_at DESC)",
 ]
 
 # FTS5 ranked search over tool_events (L3 upgrade). Kept separate and applied

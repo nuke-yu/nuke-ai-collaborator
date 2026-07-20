@@ -121,6 +121,7 @@ class ToolLoopRunner:
         self.invoked_skills = {}   # name -> inline skill body, for compaction survival
         self.temp_id = str(uuid.uuid4())
         self.session_id = ctx.resume_session_id or str(uuid.uuid4())
+        self.run_id = self.session_id
         self.ai_service = AIService(ctx, self.session_id, self.temp_id)
         
         self.skills_xml = ""
@@ -258,6 +259,7 @@ class ToolLoopRunner:
                     "steer_channel": self.ctx.steer_channel,
                     "rewake_queue": self.rewake_queue,
                     "runner": self,
+                    "run_id": self.run_id,
                 }
 
                 _active_schemas = self.tool_schemas
@@ -427,6 +429,14 @@ class ToolLoopRunner:
             async def _cleanup():
                 try:
                     await self.ctx.interaction.update_session_status(self.session_id, "failed")
+                    from ai.execution_runs import finish_run
+                    await finish_run(
+                        run_id=self.run_id, group_id=self.ctx.group_id,
+                        status="cancelled", iterations=self.iter_count,
+                        input_tokens=self.ai_service.usage.input_tokens,
+                        output_tokens=self.ai_service.usage.output_tokens,
+                        error_summary="execution cancelled",
+                    )
                     await self.ctx.interaction.broadcast(self.ctx.group_id, {
                         "type": "stream_aborted", "temp_id": self.temp_id, "member_id": self.bot["id"],
                         "session_id": self.session_id,
@@ -441,6 +451,14 @@ class ToolLoopRunner:
             raise
         except AIError as e:
             await self.ctx.interaction.update_session_status(self.session_id, "failed")
+            from ai.execution_runs import finish_run
+            await finish_run(
+                run_id=self.run_id, group_id=self.ctx.group_id,
+                status="failed", iterations=self.iter_count,
+                input_tokens=self.ai_service.usage.input_tokens,
+                output_tokens=self.ai_service.usage.output_tokens,
+                error_summary=str(e),
+            )
             await self.ctx.interaction.broadcast(self.ctx.group_id, {
                 "type": "stream_error", "temp_id": self.temp_id, "message": str(e),
                 "session_id": self.session_id,

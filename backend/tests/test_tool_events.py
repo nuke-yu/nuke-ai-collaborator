@@ -20,6 +20,7 @@ from ai.tool_events import (
     search_events,
     timeline_events,
 )
+from ai.execution_runs import finish_run, start_run
 
 TEST_DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "test_tool_events.db")
 
@@ -28,13 +29,14 @@ async def _fetch_events(group_id: int) -> list[dict]:
     async with database.connect(TEST_DB_PATH) as db:
         async with db.execute(
             "SELECT ts, group_id, bot_id, thread_id, tool, args_summary, "
-            "result_summary, is_error, files_touched, command "
+            "result_summary, is_error, files_touched, command, run_id, step_id, attempt_id "
             "FROM tool_events WHERE group_id=? ORDER BY id",
             (group_id,),
         ) as cur:
             rows = await cur.fetchall()
     cols = ["ts", "group_id", "bot_id", "thread_id", "tool", "args_summary",
-            "result_summary", "is_error", "files_touched", "command"]
+            "result_summary", "is_error", "files_touched", "command", "run_id",
+            "step_id", "attempt_id"]
     return [dict(zip(cols, r)) for r in rows]
 
 
@@ -122,6 +124,17 @@ class RecordEventTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual((await _fetch_events(7))[0]["is_error"], 1)
 
+    async def test_record_event_persists_execution_identity(self):
+        await record_event(
+            group_id=7, bot_id=1, tool="read_file", arguments={"path": "a.py"},
+            result="ok", is_error=False, run_id="run-1",
+            step_id="run-1:step:2", attempt_id="call-3",
+        )
+        row = (await _fetch_events(7))[0]
+        self.assertEqual(row["run_id"], "run-1")
+        self.assertEqual(row["step_id"], "run-1:step:2")
+        self.assertEqual(row["attempt_id"], "call-3")
+
     async def test_group_isolation(self):
         await record_event(group_id=10, bot_id=1, tool="read_file", arguments={}, result="a", is_error=False)
         await record_event(group_id=20, bot_id=1, tool="read_file", arguments={}, result="b", is_error=False)
@@ -148,6 +161,23 @@ class RecordEventTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["tool"], "read_file")
         self.assertEqual(json.loads(rows[0]["files_touched"]), ["z.py"])
+
+    async def test_dispatch_tool_propagates_execution_identity(self):
+        from executors import tool_dispatch
+        ctx = {
+            "group_id": 42, "bot_id": 5, "run_id": "r1",
+            "step_id": "r1:step:1", "attempt_id": "c1",
+        }
+        with patch.object(tool_dispatch.tool_executor, "has_tool", return_value=True), \
+             patch.object(tool_dispatch.tool_executor, "execute",
+                          new=AsyncMock(return_value=("done", False))):
+            await tool_dispatch.dispatch_tool("read_file", {"path": "z.py"}, ctx)
+        if tool_dispatch._recording_tasks:
+            await asyncio.gather(*list(tool_dispatch._recording_tasks))
+        row = (await _fetch_events(42))[0]
+        self.assertEqual((row["run_id"], row["step_id"], row["attempt_id"]),
+                         ("r1", "r1:step:1", "c1"))
+
 
     async def test_dispatch_tool_logs_if_event_recording_cannot_be_scheduled(self):
         from executors import tool_dispatch
@@ -184,6 +214,45 @@ class RecordEventTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual((res, is_err), ("done", False))
         self.assertTrue(any("failed to resolve current thread id" in line for line in logs.output))
+
+
+class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self._orig = database.DB_PATH
+        database.DB_PATH = TEST_DB_PATH
+        if os.path.exists(TEST_DB_PATH):
+            os.remove(TEST_DB_PATH)
+        await database.init_db()
+
+    async def asyncTearDown(self):
+        database.DB_PATH = self._orig
+        if os.path.exists(TEST_DB_PATH):
+            os.remove(TEST_DB_PATH)
+
+    async def test_run_lifecycle_is_durable_and_resume_safe(self):
+        kwargs = dict(
+            run_id="session-1", group_id=7, bot_id=3, session_id="session-1",
+            thread_id="thread-1", provider="openai", model="test", executor="tool_loop_v1",
+        )
+        await start_run(**kwargs)
+        await start_run(**kwargs)
+        await finish_run(
+            run_id="session-1", group_id=7, status="completed", iterations=4,
+            input_tokens=120, output_tokens=30,
+        )
+        async with database.connect(TEST_DB_PATH) as db:
+            async with db.execute(
+                "SELECT status, iterations, input_tokens, output_tokens, completed_at "
+                "FROM agent_runs WHERE run_id='session-1'"
+            ) as cur:
+                rows = await cur.fetchall()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0][:4], ("completed", 4, 120, 30))
+        self.assertIsNotNone(rows[0][4])
+
+    async def test_invalid_terminal_status_rejected(self):
+        with self.assertRaises(ValueError):
+            await finish_run(run_id="r", group_id=7, status="running")
 
 
 class RetrievalTest(unittest.IsolatedAsyncioTestCase):

@@ -783,6 +783,53 @@ async def migration_031(db):
     await db.commit()
 
 
+async def migration_032(db):
+    """Add durable execution identity to group-domain tool traces.
+
+    ``run_id`` is stable across a resumed agent session, ``step_id`` identifies
+    one model iteration, and ``attempt_id`` identifies the concrete tool call.
+    The columns remain empty for legacy/minimal callers that have no run scope.
+    """
+    cur = await db.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='tool_events'"
+    )
+    if await cur.fetchone() is None:
+        return
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS agent_runs (
+            run_id          TEXT PRIMARY KEY,
+            group_id        INTEGER NOT NULL,
+            bot_id          INTEGER,
+            thread_id       TEXT NOT NULL DEFAULT '',
+            session_id      TEXT NOT NULL,
+            status          TEXT NOT NULL DEFAULT 'running'
+                            CHECK(status IN ('running', 'completed', 'failed', 'cancelled')),
+            provider        TEXT NOT NULL DEFAULT '',
+            model           TEXT NOT NULL DEFAULT '',
+            executor        TEXT NOT NULL DEFAULT '',
+            started_at      INTEGER NOT NULL,
+            completed_at    INTEGER,
+            iterations      INTEGER NOT NULL DEFAULT 0,
+            input_tokens    INTEGER NOT NULL DEFAULT 0,
+            output_tokens   INTEGER NOT NULL DEFAULT 0,
+            error_summary   TEXT NOT NULL DEFAULT '',
+            updated_at      INTEGER NOT NULL
+        )
+    """)
+    await db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_agent_runs_group_started "
+        "ON agent_runs(group_id, started_at DESC)"
+    )
+    await _safe_add_column(db, "ALTER TABLE tool_events ADD COLUMN run_id TEXT NOT NULL DEFAULT ''")
+    await _safe_add_column(db, "ALTER TABLE tool_events ADD COLUMN step_id TEXT NOT NULL DEFAULT ''")
+    await _safe_add_column(db, "ALTER TABLE tool_events ADD COLUMN attempt_id TEXT NOT NULL DEFAULT ''")
+    await db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_tool_events_run_step "
+        "ON tool_events(group_id, run_id, step_id)"
+    )
+    await db.commit()
+
+
 MIGRATIONS: list = [
     migration_001,
     migration_002,
@@ -815,6 +862,7 @@ MIGRATIONS: list = [
     migration_029,
     migration_030,
     migration_031,
+    migration_032,
 ]
 
 

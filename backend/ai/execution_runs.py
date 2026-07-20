@@ -1,0 +1,45 @@
+"""Durable, group-isolated execution run lifecycle records."""
+from __future__ import annotations
+
+import time
+
+
+async def start_run(
+    *, run_id: str, group_id: int | None, bot_id: int | None,
+    session_id: str, thread_id: str | None, provider: str,
+    model: str, executor: str,
+) -> None:
+    if group_id is None or not run_id:
+        return
+    from ai.memory import _memory_db
+    now = int(time.time() * 1000)
+    async with await _memory_db("agent_runs", group_id, write=True) as db:
+        await db.execute(
+            "INSERT INTO agent_runs "
+            "(run_id, group_id, bot_id, thread_id, session_id, status, provider, model, "
+            " executor, started_at, updated_at) VALUES (?, ?, ?, ?, ?, 'running', ?, ?, ?, ?, ?) "
+            "ON CONFLICT(run_id) DO UPDATE SET status='running', completed_at=NULL, "
+            "error_summary='', updated_at=excluded.updated_at",
+            (run_id, group_id, bot_id, thread_id or "", session_id, provider, model, executor, now, now),
+        )
+        await db.commit()
+
+
+async def finish_run(
+    *, run_id: str, group_id: int | None, status: str,
+    iterations: int = 0, input_tokens: int = 0, output_tokens: int = 0,
+    error_summary: str = "",
+) -> None:
+    if group_id is None or not run_id:
+        return
+    if status not in {"completed", "failed", "cancelled"}:
+        raise ValueError(f"invalid terminal run status: {status}")
+    from ai.memory import _memory_db
+    now = int(time.time() * 1000)
+    async with await _memory_db("agent_runs", group_id, write=True) as db:
+        await db.execute(
+            "UPDATE agent_runs SET status=?, completed_at=?, iterations=?, input_tokens=?, "
+            "output_tokens=?, error_summary=?, updated_at=? WHERE run_id=? AND group_id=?",
+            (status, now, iterations, input_tokens, output_tokens, error_summary[:2000], now, run_id, group_id),
+        )
+        await db.commit()
