@@ -4,6 +4,19 @@ import hashlib
 import json
 import time
 import re
+import asyncio
+
+
+async def _index_vector(record_id: str, content: str, group_id: int, bot_id: int | None,
+                        confidence: float) -> None:
+    try:
+        from ai.memory import ChromaStore
+        await asyncio.to_thread(ChromaStore.write_fact_sync, record_id, content, {
+            "group_id": group_id, "bot_id": bot_id or 0, "mem_type": "experience",
+            "timestamp": time.time(), "importance": confidence,
+        })
+    except Exception:
+        return
 
 
 async def distill_case(case_id: str, group_id: int | None) -> str | None:
@@ -41,6 +54,7 @@ async def distill_case(case_id: str, group_id: int | None) -> str | None:
                              "updated_at=? WHERE record_id=?",
                              (existing[2]+1,json.dumps(sources),now,existing[0]))
             await db.commit()
+            await _index_vector(existing[0], content, group_id, row[0], min(0.95, 0.73))
             return existing[0]
         await db.execute("""INSERT INTO memory_records
           (record_id,kind,group_id,bot_id,status,content,task_signature,confidence,importance,
@@ -49,6 +63,7 @@ async def distill_case(case_id: str, group_id: int | None) -> str | None:
           (record_id,"experience",group_id,row[0],"active",content,row[2],0.65,0.8,
            json.dumps([case_id]),json.dumps({"verification":"verified_after_correction"}),now,now))
         await db.commit()
+    await _index_vector(record_id, content, group_id, row[0], 0.65)
     return record_id
 
 
@@ -71,10 +86,21 @@ async def recall_experiences(*, query: str, run_id: str, group_id: int | None,
                               "WHERE group_id=? AND bot_id=? AND kind='experience' AND status='active'",
                               (group_id, bot_id)) as cur:
             rows = await cur.fetchall()
+    vector_scores = {}
+    try:
+        from ai.memory import ChromaStore
+        where = {"$and":[{"group_id":{"$eq":group_id}},{"bot_id":{"$eq":bot_id or 0}},
+                          {"mem_type":{"$eq":"experience"}}]}
+        result = await asyncio.to_thread(ChromaStore.query_similar_sync, query, where, max(limit * 4, 8))
+        ids = (result.get("ids") or [[]])[0]; distances = (result.get("distances") or [[]])[0]
+        vector_scores = {rid:max(0.0,1.0-float(dist)) for rid,dist in zip(ids,distances)}
+    except Exception:
+        pass
     q = _terms(query); ranked = []
     for record_id, content, confidence in rows:
         terms = _terms(content)
-        score = len(q & terms) / max(1, len(q | terms))
+        lexical = len(q & terms) / max(1, len(q | terms))
+        score = 0.55 * lexical + 0.45 * vector_scores.get(record_id, 0.0)
         if score:
             ranked.append((score * float(confidence), record_id, content))
     ranked.sort(reverse=True); selected = []; used = 0
