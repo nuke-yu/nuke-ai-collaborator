@@ -4,6 +4,25 @@ import hashlib
 import json
 import re
 import time
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class OutcomeEvaluation:
+    classification: str
+    information_gain: str
+    should_distill: bool
+    confidence: float
+
+
+def evaluate_outcome(*, outcome: str, errors: list[str], attempts: int) -> OutcomeEvaluation:
+    if outcome != "completed":
+        return OutcomeEvaluation("failed", "high", False, 0.9)
+    if errors:
+        return OutcomeEvaluation("corrected_success", "high", True, 0.9)
+    if attempts == 0:
+        return OutcomeEvaluation("ordinary_success", "low", False, 0.8)
+    return OutcomeEvaluation("ordinary_success", "low", False, 0.9)
 
 
 def task_signature(task: str) -> str:

@@ -22,6 +22,8 @@ from ai.tool_events import (
 )
 from ai.execution_runs import finish_run, start_run
 from ai.cases import assemble_case, task_signature
+from ai.cases import evaluate_outcome
+from ai.pipeline import process_case
 from ai.experiences import complete_usage, distill_case, recall_experiences
 
 TEST_DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "test_tool_events.db")
@@ -305,6 +307,24 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
             async with db.execute("SELECT state,outcome,input_tokens,tool_attempts FROM experience_usage") as cur:
                 row = await cur.fetchone()
         self.assertEqual(row, ("executed", "completed", 90, 1))
+
+    async def test_outcome_evaluator_and_pipeline_are_idempotent(self):
+        self.assertFalse(evaluate_outcome(outcome="completed", errors=[], attempts=1).should_distill)
+        self.assertTrue(evaluate_outcome(outcome="completed", errors=["x"], attempts=2).should_distill)
+        case_id = await assemble_case(
+            run_id="pipeline", group_id=7, bot_id=3, task="fix migration",
+            outcome="completed", tool_records=[{"name":"run_shell","args":{},"result":"failed","is_error":True}],
+        )
+        job_id = await process_case(case_id, 7)
+        self.assertEqual(job_id, await process_case(case_id, 7))
+        async with database.connect(TEST_DB_PATH) as db:
+            async with db.execute("SELECT status,attempt,output_json FROM pipeline_jobs") as cur:
+                jobs = await cur.fetchall()
+            async with db.execute("SELECT COUNT(*) FROM memory_records") as cur:
+                count = (await cur.fetchone())[0]
+        self.assertEqual((jobs[0][0], jobs[0][1]), ("completed", 1))
+        self.assertTrue(json.loads(jobs[0][2])["should_distill"])
+        self.assertEqual(count, 1)
 
 
 class RetrievalTest(unittest.IsolatedAsyncioTestCase):

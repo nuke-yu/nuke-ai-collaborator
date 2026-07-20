@@ -618,9 +618,10 @@ async def cleanup_and_finalize(runner) -> ExecutionResult:
             run_id=runner.run_id, group_id=runner.ctx.group_id, bot_id=runner.bot["id"],
             task=runner.ctx.user_message, outcome="completed", tool_records=runner.tool_records,
         )
-        from ai.experiences import complete_usage, distill_case
+        from ai.experiences import complete_usage
         if case_id:
-            await distill_case(case_id, runner.ctx.group_id)
+            from ai.pipeline import process_case
+            await process_case(case_id, runner.ctx.group_id)
         await complete_usage(
             record_ids=runner.retrieved_experience_ids, run_id=runner.run_id,
             group_id=runner.ctx.group_id, outcome="completed",
