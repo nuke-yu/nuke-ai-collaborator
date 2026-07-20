@@ -26,7 +26,7 @@ from ai.cases import assemble_case, task_signature
 from ai.cases import evaluate_outcome
 from ai.pipeline import process_case
 from ai.reflexion import classify_failure, maybe_inject
-from ai.skill_learning import compile_candidate, validate_declaration
+from ai.skill_learning import compile_candidate, complete_skill_usage, recall_skills, validate_declaration
 from ai.experiences import complete_usage, decay_experiences, distill_case, recall_experiences
 
 TEST_DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "test_tool_events.db")
@@ -387,9 +387,27 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
                 row = await cur.fetchone()
             async with db.execute("SELECT declaration_json FROM skill_versions WHERE skill_id=?",(skill_id,)) as cur:
                 declaration = json.loads((await cur.fetchone())[0])
-        self.assertEqual(row,("candidate","S0")); self.assertEqual(declaration["allowed_tools"],[])
+        self.assertEqual(row,("trial","S0")); self.assertEqual(declaration["allowed_tools"],[])
         with self.assertRaises(ValueError):
             validate_declaration({"risk_level":"S1","trigger":"x","procedure":["x"],"allowed_tools":["run_shell"]})
+
+    async def test_skill_maturity_uses_independent_run_outcomes(self):
+        case1=await assemble_case(run_id="k1",group_id=7,bot_id=3,task="repair schema migration",
+                                  outcome="completed",tool_records=[{"name":"run_shell","args":{},"result":"x","is_error":True}])
+        case2=await assemble_case(run_id="k2",group_id=7,bot_id=3,task="repair schema migration",
+                                  outcome="completed",tool_records=[{"name":"run_shell","args":{},"result":"y","is_error":True}])
+        record_id=await distill_case(case1,7); await distill_case(case2,7)
+        async with database.connect(TEST_DB_PATH) as db:
+            await db.execute("UPDATE memory_records SET confidence=.8 WHERE record_id=?",(record_id,)); await db.commit()
+        skill_id=await compile_candidate(record_id,7)
+        context,ids=await recall_skills(query="repair schema migration",run_id="new-run",group_id=7,bot_id=3)
+        self.assertEqual(ids,[skill_id]); self.assertIn("declarative skills",context)
+        with patch("ai.skill_learning.project_skill",new=AsyncMock(return_value="x")):
+            await complete_skill_usage(skill_ids=ids,run_id="new-run",group_id=7,outcome="completed")
+        async with database.connect(TEST_DB_PATH) as db:
+            async with db.execute("SELECT maturity,success_count FROM skills WHERE skill_id=?",(skill_id,)) as cur:
+                row=await cur.fetchone()
+        self.assertEqual(row,("active",1))
 
 
 class RetrievalTest(unittest.IsolatedAsyncioTestCase):

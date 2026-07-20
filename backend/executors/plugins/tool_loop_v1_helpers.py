@@ -275,6 +275,15 @@ async def setup_session(runner) -> None:
         experience_context, runner.retrieved_experience_ids = "", []
     if experience_context:
         memory = f"{memory}\n\n{experience_context}" if memory else experience_context
+    from ai.skill_learning import recall_skills
+    try:
+        skill_context, runner.retrieved_skill_ids = await recall_skills(
+            query=runner.ctx.user_message,run_id=getattr(runner,"run_id",runner.session_id),
+            group_id=runner.ctx.group_id,bot_id=runner.bot["id"])
+    except aiosqlite.OperationalError:
+        skill_context, runner.retrieved_skill_ids = "",[]
+    if skill_context:
+        memory = f"{memory}\n\n{skill_context}" if memory else skill_context
 
     if skill_discovery:
         runner.system_prompt_base, runner.skills_xml, runner.skills_snapshot, runner.always_skills = await prompt_builder.compile_system_prompt(
@@ -629,6 +638,9 @@ async def cleanup_and_finalize(runner) -> ExecutionResult:
             output_tokens=runner.ai_service.usage.output_tokens,
             tool_attempts=len(runner.tool_records),
         )
+        from ai.skill_learning import complete_skill_usage
+        await complete_skill_usage(skill_ids=runner.retrieved_skill_ids,run_id=runner.run_id,
+                                   group_id=runner.ctx.group_id,outcome="completed")
     except aiosqlite.OperationalError:
         logger.warning("run learning finalization unavailable; group schema is not ready", exc_info=True)
 

@@ -136,6 +136,7 @@ class ToolLoopRunner:
         self.execution_ctx = {}
         self.retrieved_experience_ids = []
         self.reflexion_used = False
+        self.retrieved_skill_ids = []
 
         self.ruleset = None
         self.use_cached_mc = compact.should_use_cached_microcompact(self.provider)
