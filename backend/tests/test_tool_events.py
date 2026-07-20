@@ -26,7 +26,7 @@ from ai.cases import assemble_case, task_signature
 from ai.cases import evaluate_outcome
 from ai.pipeline import process_case
 from ai.reflexion import classify_failure, maybe_inject
-from ai.experiences import complete_usage, distill_case, recall_experiences
+from ai.experiences import complete_usage, decay_experiences, distill_case, recall_experiences
 
 TEST_DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "test_tool_events.db")
 
@@ -348,6 +348,26 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
             messages=[], tool_records=[{"name":"write_file","result":"permission denied","is_error":True}],
         )
         self.assertFalse(await maybe_inject(runner, iteration=1))
+
+    async def test_experience_reinforcement_contradiction_and_decay(self):
+        first = await assemble_case(run_id="e1", group_id=7, bot_id=3, task="fix db",
+                                    outcome="completed", tool_records=[{"name":"run_shell","args":{},"result":"x","is_error":True}])
+        second = await assemble_case(run_id="e2", group_id=7, bot_id=3, task="fix db",
+                                     outcome="completed", tool_records=[{"name":"run_shell","args":{},"result":"y","is_error":True}])
+        record_id = await distill_case(first, 7)
+        self.assertEqual(record_id, await distill_case(second, 7))
+        for run_id in ("bad1", "bad2"):
+            await recall_experiences(query="fix db", run_id=run_id, group_id=7, bot_id=3)
+            await complete_usage(record_ids=[record_id],run_id=run_id,group_id=7,outcome="failed",
+                                 input_tokens=1,output_tokens=1,tool_attempts=1)
+        async with database.connect(TEST_DB_PATH) as db:
+            async with db.execute("SELECT supporting_count,contradicting_count,status FROM memory_records") as cur:
+                row = await cur.fetchone()
+        self.assertEqual(row, (2,2,"suspended"))
+        async with database.connect(TEST_DB_PATH) as db:
+            await db.execute("UPDATE memory_records SET status='active',confidence=0.4,created_at=1,last_used_at=NULL")
+            await db.commit()
+        self.assertEqual(await decay_experiences(7, now_ms=100*86_400_000), 1)
 
 
 class RetrievalTest(unittest.IsolatedAsyncioTestCase):

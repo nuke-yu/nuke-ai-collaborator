@@ -30,6 +30,18 @@ async def distill_case(case_id: str, group_id: int | None) -> str | None:
     }, ensure_ascii=False)
     now = int(time.time() * 1000)
     async with await _memory_db("memory_records", group_id, write=True) as db:
+        async with db.execute("SELECT record_id,source_ids,supporting_count FROM memory_records "
+                              "WHERE group_id=? AND bot_id=? AND kind='experience' AND status='active' "
+                              "AND task_signature=? ORDER BY updated_at DESC LIMIT 1",
+                              (group_id,row[0],row[2])) as cur:
+            existing = await cur.fetchone()
+        if existing:
+            sources = list(dict.fromkeys(json.loads(existing[1] or "[]") + [case_id]))
+            await db.execute("UPDATE memory_records SET supporting_count=?,source_ids=?,confidence=MIN(0.95,confidence+0.08),"
+                             "updated_at=? WHERE record_id=?",
+                             (existing[2]+1,json.dumps(sources),now,existing[0]))
+            await db.commit()
+            return existing[0]
         await db.execute("""INSERT INTO memory_records
           (record_id,kind,group_id,bot_id,status,content,task_signature,confidence,importance,
            source_ids,metadata_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
@@ -96,4 +108,26 @@ async def complete_usage(*, record_ids: list[str], run_id: str, group_id: int | 
             await db.execute("UPDATE experience_usage SET state='executed',outcome=?,input_tokens=?,"
                 "output_tokens=?,tool_attempts=?,updated_at=? WHERE record_id=? AND run_id=? AND group_id=?",
                 (outcome,input_tokens,output_tokens,tool_attempts,now,record_id,run_id,group_id))
+            if outcome == "completed":
+                await db.execute("UPDATE memory_records SET supporting_count=supporting_count+1,"
+                                 "confidence=MIN(0.98,confidence+0.03),last_used_at=?,updated_at=? WHERE record_id=?",
+                                 (now,now,record_id))
+            else:
+                await db.execute("UPDATE memory_records SET contradicting_count=contradicting_count+1,"
+                                 "confidence=MAX(0.05,confidence-0.2),last_used_at=?,updated_at=?,"
+                                 "status=CASE WHEN contradicting_count+1>=2 THEN 'suspended' ELSE status END "
+                                 "WHERE record_id=?", (now,now,record_id))
         await db.commit()
+
+
+async def decay_experiences(group_id: int, *, now_ms: int | None = None,
+                            stale_days: int = 90) -> int:
+    from ai.memory import _memory_db
+    now = now_ms or int(time.time() * 1000)
+    cutoff = now - stale_days * 86_400_000
+    async with await _memory_db("memory_records", group_id, write=True) as db:
+        cur = await db.execute("""UPDATE memory_records SET status='deprecated',valid_to=?,updated_at=?
+          WHERE group_id=? AND kind='experience' AND status='active' AND confidence<0.5
+          AND COALESCE(last_used_at,created_at)<?""", (now,now,group_id,cutoff))
+        await db.commit()
+        return cur.rowcount

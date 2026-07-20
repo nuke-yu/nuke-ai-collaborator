@@ -394,6 +394,8 @@ _GROUP_DDL = [
         task_signature TEXT NOT NULL DEFAULT '', confidence REAL NOT NULL DEFAULT 0.0,
         importance REAL NOT NULL DEFAULT 0.0, source_ids TEXT NOT NULL DEFAULT '[]',
         metadata_json TEXT NOT NULL DEFAULT '{}', algorithm_version TEXT NOT NULL DEFAULT 'experience-v1',
+        supporting_count INTEGER NOT NULL DEFAULT 1, contradicting_count INTEGER NOT NULL DEFAULT 0,
+        last_used_at INTEGER, valid_to INTEGER, superseded_by TEXT,
         created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
     )""",
     "CREATE INDEX IF NOT EXISTS idx_memory_records_lookup ON memory_records(group_id, bot_id, kind, status)",
