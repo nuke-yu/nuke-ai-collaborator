@@ -32,7 +32,103 @@ Run → Case → Evaluation → Experience → Skill → Reuse Feedback
 3. 因 Nuke 架构边界不能直接调用时，完整复现算法流程、输入输出契约和验证方法；
 4. 通过对照测试证明 Nuke 实现达到同等功能，不得用简单规则替代核心算法。
 
-## 2. 记忆提取与更新
+## 2. 独立模块架构基线
+
+本次升级必须将 Memory 建设为独立、可复用、可替换、可独立测试和可独立部署的业务模块，不得继续把算法、数据访问和 Worker 调用逻辑堆放在 `backend/ai` 内。
+
+现有 `backend/ai/memory_provider.py` 已将基础 `recall / observe / forget` 从 tool loop 中抽离，可作为迁移起点，但还不是完整模块边界：
+
+- `cases`、`experiences`、`skill_learning`、`reflexion`、`tool_events` 和 `pipeline` 仍直接依赖 `ai.memory` 的私有数据库函数；
+- tool loop 仍直接调用 Experience、Skill 和 Personal Vault 具体实现；
+- Chroma、SQLite、LLM provider 与记忆领域逻辑混合；
+- 后台学习编排直接 import 具体蒸馏和技能生成函数；
+- 现有接口只覆盖对话记忆，没有覆盖 Case、Experience、Skill、Graph、Personal Projection 和审计。
+
+### 2.1 模块边界
+
+目标代码布局：
+
+```text
+backend/memory/
+├── domain/          # 纯领域对象、状态机、规则和不变量
+├── application/     # use cases：observe、recall、learn、consolidate、forget
+├── ports/           # 存储、模型、embedding、reranker、graph、checkpoint 协议
+├── adapters/
+│   ├── persistence/ # Group SQLite、Chroma/向量库、图存储
+│   ├── algorithms/  # mem0、EverOS、Graphiti、AutoGen、Voyager 适配器
+│   └── runtime/     # Worker in-process、IPC 或远程客户端
+├── contracts/        # 版本化 command、query、event、DTO 与 error
+└── bootstrap.py      # 组装依赖，领域代码不得反向依赖它
+```
+
+`backend/ai` 和 `backend/executors` 只允许依赖 `memory/contracts` 与对外 facade，不得 import `memory/adapters` 或底层表结构。API 层也只调用 application use case，不直接访问 Personal Vault 数据库。
+
+### 2.2 稳定对外契约
+
+对外能力按职责拆分，避免一个过大的 `MemoryProvider` 接口：
+
+| Port | 责任 |
+|---|---|
+| `MemoryCommandPort` | `observe`、`forget`、`correct`、`project` |
+| `MemoryQueryPort` | `recall`、`get_timeline`、`explain_provenance` |
+| `LearningPort` | Case 提取、Experience 蒸馏、Skill 候选与验证 |
+| `PersonalKnowledgePort` | Personal Fact/Profile/Habit 的增量演化和授权 Projection |
+| `MemoryAdminPort` | 导出、删除、重建索引、回滚和按 scope 禁用 |
+| `MemoryEventPort` | 发布版本化的 accepted/rejected/updated/deprecated/promoted 事件 |
+
+每个 command/query 必须显式携带不可变 `MemoryScope`：
+
+```text
+tenant/user identity
+group_id (required for group execution)
+bot_id (required for bot-private experience; optional for group knowledge)
+thread_id / run_id / purpose
+actor and authorization context
+```
+
+禁止使用隐式全局 Group、默认 Group 或仅靠 metadata 过滤代替物理隔离。跨 Group 请求在进入算法和存储层之前必须被拒绝。
+
+### 2.3 依赖方向与框架隔离
+
+```text
+Worker / API / Scheduler
+        ↓ contracts
+Memory application use cases
+        ↓ ports
+Domain  ← adapters (mem0 / EverOS / Graphiti / storage / model)
+```
+
+- Domain 和 application 不得 import FastAPI、Worker、Chroma、Graphiti、mem0 或具体模型 SDK；
+- 参考框架算法只能出现在 adapter 后面，并转换为 Nuke 的统一领域结果；
+- 替换向量库、图库、LLM 或 reranker 不得修改业务 use case；
+- 算法适配器必须声明 `algorithm_id / source / version / license / capabilities`，并将实际版本写入 provenance；
+- 任一外部算法不可用时，模块按 Group/Bot 策略降级或 fail-open，不阻断主任务。
+
+### 2.4 独立性与复用性验收
+
+Memory 模块只有同时满足以下条件才算完成解耦：
+
+- 使用假存储和假模型可在不启动 FastAPI、Supervisor、Worker 和 MCP Collector 时运行全部领域测试；
+- 主程序通过契约测试对接，没有对 Memory 表、Chroma collection 或算法类的直接依赖；
+- 支持 in-process adapter，同一契约可扩展为 IPC/独立服务，业务调用方无需改写；
+- 模块可按 Group/Bot 独立启用、禁用、版本切换和回滚；
+- 使用 contract tests 验证每个存储、算法与 runtime adapter，使用 architecture tests 禁止逆向 import；
+- 记忆的完整数据、索引和运行时依赖均可通过标准管理契约导出、重建和删除；
+- 不得把 MCP 连接移入 Memory 模块；如需工具结果，只消费 Worker 传入的已授权、已脱敏 Observation。
+
+### 2.5 迁移约束
+
+采用 Strangler 方式渐进迁移，不一次性重写现有路径：
+
+1. 先创建 contracts、domain、ports 和架构依赖测试；
+2. 用 legacy adapters 包装现有 `ai.memory / experiences / skill_learning / personal_vault`，保持行为不变；
+3. 将 tool loop、API 和后台 pipeline 切换到新契约；
+4. 在模块内按本文后续批次逐个替换 legacy adapter 为真实算法 adapter；
+5. 新旧双读/影子运行通过对照后，再删除旧入口，数据迁移必须可回滚。
+
+独立模块化是后续所有算法批次的前置条件，不是完成算法后再做的重构优化。
+
+## 3. 记忆提取与更新
 
 | ID | 功能 | 引用框架与算法 | 核心源码 | Nuke 实现目标 |
 |---|---|---|---|---|
@@ -53,7 +149,7 @@ M3/M4 的 EverOS orchestration 使用 Apache-2.0；真正算法位于独立 PyPI
 
 引入前必须分别核验这些包的许可证、源码可审计性、版本锁定和离线降级行为。
 
-## 3. 经验聚类与蒸馏
+## 4. 经验聚类与蒸馏
 
 | ID | 功能 | 引用框架与算法 | 核心源码 | Nuke 实现目标 |
 |---|---|---|---|---|
@@ -78,7 +174,7 @@ counterexamples
 source_case_ids
 ```
 
-## 4. 工业级混合检索
+## 5. 工业级混合检索
 
 | ID | 功能 | 引用框架与算法 | 核心源码 | Nuke 实现目标 |
 |---|---|---|---|---|
@@ -103,7 +199,7 @@ Query classification
 → Token-budget packing
 ```
 
-## 5. 技能生成与验证
+## 6. 技能生成与验证
 
 | ID | 功能 | 引用框架与算法 | 核心源码 | Nuke 实现目标 |
 |---|---|---|---|---|
@@ -130,7 +226,7 @@ limitations
 evidence_ids
 ```
 
-## 6. 观点演变和时序知识
+## 7. 观点演变和时序知识
 
 | ID | 功能 | 引用框架与算法 | 核心源码 | Nuke 实现目标 |
 |---|---|---|---|---|
@@ -144,7 +240,7 @@ evidence_ids
 
 如果保留“吸收 Graphiti”的产品表述，G1–G6 必须真实实现；否则从已实现能力中删除该表述。
 
-## 7. 持久执行与恢复
+## 8. 持久执行与恢复
 
 | ID | 功能 | 引用框架与算法 | 核心源码 | Nuke 实现目标 |
 |---|---|---|---|---|
@@ -155,7 +251,7 @@ evidence_ids
 
 LangGraph 只用于后台 Memory Learning DAG 的 checkpoint 核心，不替换 Supervisor → Worker → MCP Collector。
 
-## 8. Personal Knowledge 与上下文预算
+## 9. Personal Knowledge 与上下文预算
 
 | ID | 功能 | 引用框架与算法 | 核心源码 | Nuke 实现目标 |
 |---|---|---|---|---|
@@ -166,7 +262,7 @@ LangGraph 只用于后台 Memory Learning DAG 的 checkpoint 核心，不替换 
 | P5 | Access Audit | OpenMemory `MemoryAccessLog` | `openmemory/api/app/mcp_server.py` | 搜索、读取、Projection、删除记录用户、Group、Bot、用途和时间 |
 | P6 | Personal Fact Evolution | mem0 ADD/UPDATE/DELETE + history | `mem0/memory/main.py`、`storage.py` | 用户知识可追踪地新增、修订、失效和恢复，不重复追加 |
 
-## 9. ReAct 与 Reflexion
+## 10. ReAct 与 Reflexion
 
 | ID | 功能 | 算法 | Nuke 实现目标 |
 |---|---|---|---|
@@ -175,7 +271,7 @@ LangGraph 只用于后台 Memory Learning DAG 的 checkpoint 核心，不替换 
 | X3 | Reflexion Memory | 失败反思的 episodic memory | 反思在下一次执行验证成功后才进入 Experience |
 | X4 | Bounded Retry | Nuke 安全约束 | 最多一次反思重试，不能绕过 HIL、权限、Shell Guard 和 MCP Collector |
 
-## 10. 许可证与引用策略
+## 11. 许可证与引用策略
 
 | 项目 | 已确认代码许可证 | 引用策略 |
 |---|---|---|
@@ -202,22 +298,24 @@ Ruflo 当前只有设计材料，没有本地源码，因此不能满足“引�
 - 建立供应链和许可证扫描；
 - 禁止未经审计的远程动态代码进入执行路径。
 
-## 11. 实施批次
+## 12. 实施批次
 
 每个批次独立开发、验证和提交：
 
-1. mem0 记忆提取与 ADD/UPDATE/DELETE；
-2. EverOS/everalgo Agent Case Extractor；
-3. AutoGen Failure Insight Learning 与结果验证；
-4. EverOS Case Clustering；
-5. EverOS Agent Skill Extractor；
-6. EverOS + Graphiti BM25/ANN/RRF/Cross-Encoder/MMR 检索；
-7. Voyager Critic 和成功门控；
-8. LangGraph Learning DAG Checkpoint；
-9. Letta Token Budget 与 Core/Archival Blocks；
-10. OpenMemory ACL 和访问审计；
-11. Graphiti Entity/Edge/Temporal Invalidation；
-12. 全链路对照测试：无记忆、使用 Experience、使用 Skill。
+1. 建立独立模块 contracts/domain/ports、legacy adapters 和架构测试；
+2. 将 tool loop、API 和 Learning Pipeline 从直接 import 切换到模块契约；
+3. mem0 记忆提取与 ADD/UPDATE/DELETE adapter；
+4. EverOS/everalgo Agent Case Extractor adapter；
+5. AutoGen Failure Insight Learning 与结果验证；
+6. EverOS Case Clustering；
+7. EverOS Agent Skill Extractor；
+8. EverOS + Graphiti BM25/ANN/RRF/Cross-Encoder/MMR 检索；
+9. Voyager Critic 和成功门控；
+10. LangGraph Learning DAG Checkpoint；
+11. Letta Token Budget 与 Core/Archival Blocks；
+12. OpenMemory ACL 和访问审计；
+13. Graphiti Entity/Edge/Temporal Invalidation；
+14. 全链路对照测试：无记忆、使用 Experience、使用 Skill。
 
 每批开始前必须完成：
 
@@ -226,7 +324,7 @@ Ruflo 当前只有设计材料，没有本地源码，因此不能满足“引�
 - 输入输出契约和数据迁移设计；
 - 降级、回滚、成本预算和安全边界设计。
 
-## 12. 工业级验收标准
+## 13. 工业级验收标准
 
 一项能力只有同时满足以下条件才可以标记为完成：
 
@@ -239,6 +337,7 @@ Ruflo 当前只有设计材料，没有本地源码，因此不能满足“引�
 - 证明不会破坏 Group 物理隔离、Bot 私有经验和 Personal Projection；
 - 学习失败不阻塞正常任务执行；
 - 能够按 Group/Bot 关闭、降级和回滚；
+- 通过模块契约、架构依赖和独立运行测试，证明 Memory 可替换、可复用且不与 Worker/API/存储实现耦合；
 - 不绕过 ToolRouter、HIL、Shell Guard、输出脱敏和 Collector-only MCP；
 - 每个功能批次独立提交。
 
