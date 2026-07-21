@@ -2,6 +2,8 @@
 
 from .models import (
     CONTRACT_VERSION,
+    CreatePersonalProjection,
+    CreatePersonalRecord,
     ForgetMemory,
     MemoryEvent,
     MemoryEventType,
@@ -14,6 +16,8 @@ from .models import (
 
 __all__ = [
     "CONTRACT_VERSION",
+    "CreatePersonalProjection",
+    "CreatePersonalRecord",
     "ForgetMemory",
     "MemoryEvent",
     "MemoryEventType",

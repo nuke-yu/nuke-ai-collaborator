@@ -15,6 +15,39 @@ class MemoryOperationError(RuntimeError):
 
 
 @dataclass(frozen=True, slots=True)
+class CreatePersonalRecord:
+    scope: MemoryScope
+    kind: str
+    content: str
+    source_type: str = "manual"
+    source_id: str = ""
+    speaker: str = ""
+    sensitivity: str = "private"
+
+
+@dataclass(frozen=True, slots=True)
+class CreatePersonalProjection:
+    scope: MemoryScope
+    record_id: str
+    target_group_id: int
+    target_bot_id: int | None = None
+    purpose: str = "assistant_context"
+    expires_at: int | None = None
+
+    def __post_init__(self) -> None:
+        if not self.record_id.strip():
+            raise ValueError("record_id is required")
+        if (not isinstance(self.target_group_id, int)
+                or isinstance(self.target_group_id, bool) or self.target_group_id <= 0):
+            raise ValueError("target_group_id must be positive")
+        if self.target_bot_id is not None and (
+            not isinstance(self.target_bot_id, int)
+            or isinstance(self.target_bot_id, bool) or self.target_bot_id <= 0
+        ):
+            raise ValueError("target_bot_id must be positive")
+
+
+@dataclass(frozen=True, slots=True)
 class ObserveMemory:
     scope: MemoryScope
     source_id: str

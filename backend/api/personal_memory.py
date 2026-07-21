@@ -1,9 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException
 from core import auth
 from db import global_db
-from ai.personal_vault import (add_record,ingest_knowledge,
-                               observe_habit,project,rebuild_vault)
+from ai.personal_vault import ingest_knowledge,observe_habit,rebuild_vault
 from memory.bootstrap import build_personal_knowledge_client
+from memory.contracts import CreatePersonalProjection, CreatePersonalRecord
 from memory.domain import MemoryScope
 
 router=APIRouter()
@@ -17,10 +17,12 @@ async def export_personal_memory(user=Depends(auth.get_current_user)):
 @router.post("/api/personal/memory/records")
 async def create_personal_record(body:dict,user=Depends(auth.get_current_user)):
     try:
-        record_id=await add_record(user_id=int(user["uid"]),kind=body["kind"],content=body["content"],
-          source_type=body.get("source_type","manual"),source_id=body.get("source_id",""),
-          speaker=body.get("speaker",user.get("sub","")),subject=str(user["uid"]),authority="user_statement",
-          sensitivity=body.get("sensitivity","private"),confidence=1.0,explicit=True)
+        uid=int(user["uid"])
+        record_id=await build_personal_knowledge_client().create_record(CreatePersonalRecord(
+          scope=MemoryScope.personal(user_id=uid,actor_id=f"user:{uid}",purpose="personal_record_create"),
+          kind=body["kind"],content=body["content"],source_type=body.get("source_type","manual"),
+          source_id=body.get("source_id",""),speaker=body.get("speaker",user.get("sub","")),
+          sensitivity=body.get("sensitivity","private")))
     except (KeyError,ValueError) as exc:raise HTTPException(400,str(exc))
     return {"record_id":record_id}
 
@@ -34,8 +36,12 @@ async def create_personal_projection(body:dict,user=Depends(auth.get_current_use
             async with db.execute("SELECT 1 FROM members WHERE id=? AND group_id=? AND type='bot'",(bot_id,gid)) as cur: valid=await cur.fetchone()
     if not valid:raise HTTPException(404,"projection target not found")
     try:
-        projection_id=await project(user_id=int(user["uid"]),record_id=body["record_id"],group_id=gid,
-          bot_id=bot_id,purpose=body.get("purpose","assistant_context"),expires_at=body.get("expires_at"))
+        uid=int(user["uid"])
+        projection_id=await build_personal_knowledge_client().create_projection(CreatePersonalProjection(
+          scope=MemoryScope.personal(user_id=uid,actor_id=f"user:{uid}",group_id=gid,
+                                     purpose="personal_projection_create"),
+          record_id=body["record_id"],target_group_id=gid,target_bot_id=bot_id,
+          purpose=body.get("purpose","assistant_context"),expires_at=body.get("expires_at")))
     except (KeyError,ValueError) as exc:raise HTTPException(400,str(exc))
     return {"projection_id":projection_id}
 

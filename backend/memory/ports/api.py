@@ -3,7 +3,8 @@ from __future__ import annotations
 
 from typing import Any, Mapping, Protocol, runtime_checkable
 
-from memory.contracts import ForgetMemory, MemoryEvent, ObserveMemory, RecallMemory, RecallResult
+from memory.contracts import (CreatePersonalProjection, CreatePersonalRecord, ForgetMemory,
+                              MemoryEvent, ObserveMemory, RecallMemory, RecallResult)
 from memory.domain import MemoryScope
 
 
@@ -25,5 +26,7 @@ class MemoryEventPort(Protocol):
 
 @runtime_checkable
 class PersonalKnowledgePort(Protocol):
+    async def create_record(self, command: CreatePersonalRecord) -> str: ...
+    async def create_projection(self, command: CreatePersonalProjection) -> str: ...
     async def export(self, scope: MemoryScope) -> Mapping[str, Any]: ...
     async def delete(self, scope: MemoryScope) -> bool: ...
