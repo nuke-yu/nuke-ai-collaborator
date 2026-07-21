@@ -10,7 +10,7 @@ from executors.base import build_group_section, ExecutionResult
 from core import config
 import permissions
 from ai.client import call_ai_once, AIError
-from memory.contracts import ObserveMemory, RecallMemory
+from memory.contracts import ObserveMemory, ProcessLearningCase, RecallMemory
 from memory.domain import MemoryScope
 from core.role_router import build_context_message, build_image_content
 from workspace import load_context_files, format_context_blocks, append_log, archive_run
@@ -649,8 +649,16 @@ async def cleanup_and_finalize(runner) -> ExecutionResult:
         )
         from ai.experiences import complete_usage
         if case_id:
-            from ai.pipeline import process_case
-            await process_case(case_id, runner.ctx.group_id)
+            await runner.learning.process_case(ProcessLearningCase(
+                scope=MemoryScope.bot(
+                    group_id=runner.ctx.group_id,
+                    bot_id=runner.bot["id"],
+                    actor_id=f"bot:{runner.bot['id']}",
+                    run_id=runner.run_id,
+                    purpose="case_learning",
+                ),
+                case_id=case_id,
+            ))
         await complete_usage(
             record_ids=runner.retrieved_experience_ids, run_id=runner.run_id,
             group_id=runner.ctx.group_id, outcome="completed",

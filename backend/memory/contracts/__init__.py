@@ -12,6 +12,7 @@ from .models import (
     MemoryOperationError,
     ObserveMemory,
     ObservePersonalHabit,
+    ProcessLearningCase,
     RecallMemory,
     RecallResult,
 )
@@ -28,6 +29,7 @@ __all__ = [
     "MemoryOperationError",
     "ObserveMemory",
     "ObservePersonalHabit",
+    "ProcessLearningCase",
     "RecallMemory",
     "RecallResult",
 ]

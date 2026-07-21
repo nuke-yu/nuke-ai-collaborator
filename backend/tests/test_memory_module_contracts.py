@@ -104,6 +104,7 @@ class TestMemoryArchitecture(unittest.TestCase):
                 elif isinstance(node, ast.Import):
                     imports.extend(alias.name for alias in node.names)
         self.assertNotIn("ai.memory_provider", imports)
+        self.assertNotIn("ai.pipeline", imports)
         self.assertIn("memory.bootstrap", imports)
         self.assertIn("memory.contracts", imports)
 

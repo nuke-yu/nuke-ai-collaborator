@@ -75,6 +75,17 @@ class ObservePersonalHabit:
 
 
 @dataclass(frozen=True, slots=True)
+class ProcessLearningCase:
+    scope: MemoryScope
+    case_id: str
+    input_version: str = "1"
+
+    def __post_init__(self) -> None:
+        if not self.case_id.strip():
+            raise ValueError("case_id is required")
+
+
+@dataclass(frozen=True, slots=True)
 class ObserveMemory:
     scope: MemoryScope
     source_id: str
