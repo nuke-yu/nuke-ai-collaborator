@@ -1,9 +1,10 @@
 """Public application ports consumed by runtime code."""
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+from typing import Any, Mapping, Protocol, runtime_checkable
 
 from memory.contracts import ForgetMemory, MemoryEvent, ObserveMemory, RecallMemory, RecallResult
+from memory.domain import MemoryScope
 
 
 @runtime_checkable
@@ -21,3 +22,8 @@ class MemoryQueryPort(Protocol):
 class MemoryEventPort(Protocol):
     async def publish(self, event: MemoryEvent) -> None: ...
 
+
+@runtime_checkable
+class PersonalKnowledgePort(Protocol):
+    async def export(self, scope: MemoryScope) -> Mapping[str, Any]: ...
+    async def delete(self, scope: MemoryScope) -> bool: ...

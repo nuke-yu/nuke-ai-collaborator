@@ -6,7 +6,7 @@ interchangeable.
 """
 from __future__ import annotations
 
-from memory.adapters.runtime import LegacyConversationMemoryAdapter
+from memory.adapters.runtime import LegacyConversationMemoryAdapter, LegacyPersonalKnowledgeAdapter
 
 
 def build_memory_client(bot: dict | None = None) -> LegacyConversationMemoryAdapter:
@@ -15,3 +15,6 @@ def build_memory_client(bot: dict | None = None) -> LegacyConversationMemoryAdap
 
     return LegacyConversationMemoryAdapter(get_memory_provider(bot))
 
+
+def build_personal_knowledge_client() -> LegacyPersonalKnowledgeAdapter:
+    return LegacyPersonalKnowledgeAdapter()

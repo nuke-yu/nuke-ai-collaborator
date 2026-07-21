@@ -1,14 +1,18 @@
 from fastapi import APIRouter, Depends, HTTPException
 from core import auth
 from db import global_db
-from ai.personal_vault import (add_record,delete_vault,export_vault,ingest_knowledge,
+from ai.personal_vault import (add_record,ingest_knowledge,
                                observe_habit,project,rebuild_vault)
+from memory.bootstrap import build_personal_knowledge_client
+from memory.domain import MemoryScope
 
 router=APIRouter()
 
 @router.get("/api/personal/memory")
 async def export_personal_memory(user=Depends(auth.get_current_user)):
-    return await export_vault(int(user["uid"]))
+    uid=int(user["uid"])
+    return await build_personal_knowledge_client().export(MemoryScope.personal(
+        user_id=uid,actor_id=f"user:{uid}",purpose="personal_memory_export"))
 
 @router.post("/api/personal/memory/records")
 async def create_personal_record(body:dict,user=Depends(auth.get_current_user)):
@@ -63,4 +67,7 @@ async def rebuild_personal_memory(user=Depends(auth.get_current_user)):
 
 @router.delete("/api/personal/memory")
 async def delete_personal_memory(user=Depends(auth.get_current_user)):
-    return {"deleted":await delete_vault(int(user["uid"]))}
+    uid=int(user["uid"])
+    deleted=await build_personal_knowledge_client().delete(MemoryScope.personal(
+        user_id=uid,actor_id=f"user:{uid}",purpose="personal_memory_deletion"))
+    return {"deleted":deleted}
