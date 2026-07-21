@@ -1,5 +1,8 @@
 """Algorithm adapters implementing MemoryAlgorithmPort (Mem0, EverOS, Graphiti, etc.)."""
 
+from .autogen_adapter import AutoGenFailureAlgorithmAdapter
+from .autogen_failure_engine import (AutoGenFailureEngine, FailureCategory,
+                                      FailureInsight)
 from .everos_adapter import EverOSCaseAlgorithmAdapter
 from .everos_case_engine import CaseEvaluation, EverOSCaseEngine, ExtractedCase
 from .mem0_adapter import Mem0FactAlgorithmAdapter
@@ -14,5 +17,10 @@ __all__ = [
     "EverOSCaseEngine",
     "ExtractedCase",
     "EverOSCaseAlgorithmAdapter",
+    "FailureCategory",
+    "FailureInsight",
+    "AutoGenFailureEngine",
+    "AutoGenFailureAlgorithmAdapter",
 ]
+
 

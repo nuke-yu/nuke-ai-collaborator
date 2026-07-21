@@ -1,0 +1,66 @@
+"""Unit tests for Task 5 (AutoGen Failure Insight Learning Engine and Adapter)."""
+from __future__ import annotations
+
+import os
+import sys
+import unittest
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from memory.adapters.algorithms import (AutoGenFailureAlgorithmAdapter,
+                                         AutoGenFailureEngine, FailureCategory)
+
+
+class TestAutoGenFailureEngine(unittest.TestCase):
+    def setUp(self) -> None:
+        self.engine = AutoGenFailureEngine()
+
+    def test_analyze_failure_diagnoses_path_not_found(self) -> None:
+        errors = ["FileNotFoundError: [Errno 2] No such file or directory: 'config/missing.json'"]
+        insight = self.engine.analyze_failure("Read config file", errors)
+        self.assertEqual(insight.category, FailureCategory.PATH_NOT_FOUND)
+        self.assertIn("list_dir", insight.corrective_action)
+
+    def test_analyze_failure_diagnoses_syntax_error(self) -> None:
+        errors = ["SyntaxError: invalid syntax (line 42)"]
+        insight = self.engine.analyze_failure("Compile Python code", errors)
+        self.assertEqual(insight.category, FailureCategory.SYNTAX_ERROR)
+        self.assertIn("syntax", insight.corrective_action)
+
+    def test_analyze_failure_diagnoses_permission_denied(self) -> None:
+        errors = ["PermissionError: [Errno 13] Permission denied: '/etc/passwd'"]
+        insight = self.engine.analyze_failure("Modify file", errors)
+        self.assertEqual(insight.category, FailureCategory.PERMISSION_DENIED)
+        self.assertIn("workspace", insight.corrective_action)
+
+    def test_analyze_failure_diagnoses_timeout(self) -> None:
+        errors = ["TimeoutError: Command 'pytest' timed out after 60 seconds"]
+        insight = self.engine.analyze_failure("Run tests", errors)
+        self.assertEqual(insight.category, FailureCategory.TIMEOUT)
+        self.assertIn("time limit", insight.insight_summary)
+
+    def test_analyze_failure_diagnoses_invalid_argument(self) -> None:
+        tool_records = [
+            {"name": "write_file", "result": "TypeError: missing required argument 'TargetFile'", "is_error": True}
+        ]
+        insight = self.engine.analyze_failure("Write file", [], tool_records)
+        self.assertEqual(insight.category, FailureCategory.INVALID_ARGUMENT)
+        self.assertIn("Validate schema", insight.corrective_action)
+
+
+class TestAutoGenFailureAlgorithmAdapter(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        self.adapter = AutoGenFailureAlgorithmAdapter()
+
+    async def test_adapter_descriptor_matches_audit_policy(self) -> None:
+        self.assertEqual(self.adapter.descriptor.algorithm_id, "nuke.autogen.failure_insight")
+        self.assertEqual(self.adapter.descriptor.source, "AutoGen (MIT)")
+        self.assertEqual(self.adapter.descriptor.license, "MIT")
+
+    async def test_adapter_analyze_returns_insight(self) -> None:
+        insight = await self.adapter.analyze("Run script", ["FileNotFoundError: missing.py"])
+        self.assertEqual(insight.category, FailureCategory.PATH_NOT_FOUND)
+
+
+if __name__ == "__main__":
+    unittest.main()
