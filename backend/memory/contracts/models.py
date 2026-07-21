@@ -10,6 +10,10 @@ from memory.domain import MemoryScope
 CONTRACT_VERSION = "memory.v1"
 
 
+class MemoryOperationError(RuntimeError):
+    """A public, transport-safe failure raised by a Memory use case."""
+
+
 @dataclass(frozen=True, slots=True)
 class ObserveMemory:
     scope: MemoryScope
@@ -33,6 +37,7 @@ class RecallMemory:
     limit: int = 10
     token_budget: int | None = None
     kinds: tuple[str, ...] = ()
+    metadata: Mapping[str, Any] = field(default_factory=dict)
     contract_version: str = CONTRACT_VERSION
 
     def __post_init__(self) -> None:
@@ -86,4 +91,3 @@ class MemoryEvent:
     record_id: str | None = None
     payload: Mapping[str, Any] = field(default_factory=dict)
     contract_version: str = CONTRACT_VERSION
-

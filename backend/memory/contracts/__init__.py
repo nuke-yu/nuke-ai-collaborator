@@ -6,6 +6,7 @@ from .models import (
     MemoryEvent,
     MemoryEventType,
     MemoryHit,
+    MemoryOperationError,
     ObserveMemory,
     RecallMemory,
     RecallResult,
@@ -17,8 +18,8 @@ __all__ = [
     "MemoryEvent",
     "MemoryEventType",
     "MemoryHit",
+    "MemoryOperationError",
     "ObserveMemory",
     "RecallMemory",
     "RecallResult",
 ]
-
