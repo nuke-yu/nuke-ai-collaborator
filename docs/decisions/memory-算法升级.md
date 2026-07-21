@@ -80,13 +80,13 @@ backend/memory/
 
 ```text
 tenant/user identity
-group_id (required for group execution)
+group_id (required for group execution; absent for an unprojected Personal Vault operation)
 bot_id (required for bot-private experience; optional for group knowledge)
 thread_id / run_id / purpose
 actor and authorization context
 ```
 
-禁止使用隐式全局 Group、默认 Group 或仅靠 metadata 过滤代替物理隔离。跨 Group 请求在进入算法和存储层之前必须被拒绝。
+禁止使用隐式全局 Group、默认 Group 或仅靠 metadata 过滤代替物理隔离。跨 Group 请求在进入算法和存储层之前必须被拒绝。Personal Vault 可以不绑定 Group；只有经过显式授权的 Projection 才携带目标 `group_id` 进入 Group 召回路径。
 
 ### 2.3 依赖方向与框架隔离
 
