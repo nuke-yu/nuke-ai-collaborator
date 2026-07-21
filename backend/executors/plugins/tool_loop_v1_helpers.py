@@ -10,7 +10,8 @@ from executors.base import build_group_section, ExecutionResult
 from core import config
 import permissions
 from ai.client import call_ai_once, AIError
-from ai.memory_provider import get_memory_provider, MemoryContext, MemoryEvent
+from memory.contracts import ObserveMemory, RecallMemory
+from memory.domain import MemoryScope
 from core.role_router import build_context_message, build_image_content
 from workspace import load_context_files, format_context_blocks, append_log, archive_run
 import workspace as _ws
@@ -258,11 +259,23 @@ async def setup_session(runner) -> None:
     )
     import core.workflow as _wf
     thread_id = _wf.current_thread_id(runner.ctx.group_id)
-    memory = await runner.memory.recall(MemoryContext(
-        bot_id=runner.bot["id"], group_id=runner.ctx.group_id,
-        role=runner.bot.get("role") or "", query=runner.ctx.user_message, history=runner.ctx.history,
+    memory_scope = MemoryScope.bot(
+        group_id=runner.ctx.group_id,
+        bot_id=runner.bot["id"],
+        actor_id=f"bot:{runner.bot['id']}",
         thread_id=thread_id,
+        run_id=getattr(runner, "run_id", runner.session_id),
+        purpose="task_context_recall",
+    )
+    memory_result = await runner.memory.recall(RecallMemory(
+        scope=memory_scope,
+        query=runner.ctx.user_message,
+        metadata={
+            "role": runner.bot.get("role") or "",
+            "history": runner.ctx.history,
+        },
     ))
+    memory = memory_result.rendered_context
     from ai.experiences import recall_experiences
     try:
         experience_context, runner.retrieved_experience_ids = await recall_experiences(
@@ -656,12 +669,24 @@ async def cleanup_and_finalize(runner) -> ExecutionResult:
     # acquire the lock between snapshot and status and leave the foreground run
     # indefinitely reported as running.
     import core.workflow as _wf
-    bg.spawn(runner.memory.observe(MemoryEvent(
-        bot_id=runner.bot["id"], group_id=runner.ctx.group_id,
-        role=runner.bot.get("role") or "", bot_name=runner.bot["name"],
-        message_id=msg_id, text=runner.full_text,
-        provider=runner.provider, model=runner.model_name,
-        thread_id=_wf.current_thread_id(runner.ctx.group_id),
+    bg.spawn(runner.memory.observe(ObserveMemory(
+        scope=MemoryScope.bot(
+            group_id=runner.ctx.group_id,
+            bot_id=runner.bot["id"],
+            actor_id=f"bot:{runner.bot['id']}",
+            thread_id=_wf.current_thread_id(runner.ctx.group_id),
+            run_id=runner.run_id,
+            purpose="task_result_observation",
+        ),
+        source_id=f"message:{msg_id}",
+        content=runner.full_text,
+        metadata={
+            "message_id": msg_id,
+            "role": runner.bot.get("role") or "",
+            "bot_name": runner.bot["name"],
+            "provider": runner.provider,
+            "model": runner.model_name,
+        },
     )))
     bg.spawn(bus.publish(CompactionTriggered(
         group_id=runner.ctx.group_id,

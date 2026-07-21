@@ -89,6 +89,24 @@ class TestMemoryArchitecture(unittest.TestCase):
                             violations.append(f"{path.relative_to(root)} imports {module}")
         self.assertEqual(violations, [])
 
+    def test_tool_loop_depends_on_module_contract_not_legacy_provider(self):
+        backend = Path(__file__).resolve().parents[1]
+        paths = (
+            backend / "executors" / "plugins" / "tool_loop_v1.py",
+            backend / "executors" / "plugins" / "tool_loop_v1_helpers.py",
+        )
+        imports = []
+        for path in paths:
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ImportFrom) and node.module:
+                    imports.append(node.module)
+                elif isinstance(node, ast.Import):
+                    imports.extend(alias.name for alias in node.names)
+        self.assertNotIn("ai.memory_provider", imports)
+        self.assertIn("memory.bootstrap", imports)
+        self.assertIn("memory.contracts", imports)
+
 
 if __name__ == "__main__":
     unittest.main()

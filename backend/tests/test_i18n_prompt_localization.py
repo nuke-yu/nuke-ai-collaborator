@@ -218,7 +218,8 @@ class TestI18nPromptLocalization(unittest.IsolatedAsyncioTestCase):
                 self.temperature = 0.7
                 self.max_tokens = 2048
                 self.memory = AsyncMock()
-                self.memory.recall = AsyncMock(return_value="test memory")
+                from memory.contracts import RecallResult
+                self.memory.recall = AsyncMock(return_value=RecallResult(rendered_context="test memory"))
                 
                 # Mock statically registered tools in executor manifest
                 self.executor.manifest.tools = [
@@ -257,6 +258,11 @@ class TestI18nPromptLocalization(unittest.IsolatedAsyncioTestCase):
             runner_true = DummyRunner()
             runner_true.executor.manifest.workspace.skill_discovery = True
             await setup_session(runner_true)
+            recall_query = runner_true.memory.recall.await_args.args[0]
+            self.assertEqual(recall_query.scope.group_id, self.group_id)
+            self.assertEqual(recall_query.scope.bot_id, 1)
+            self.assertEqual(recall_query.scope.thread_id, "123")
+            self.assertEqual(recall_query.query, "hello")
             
             tool_names_true = [s["function"]["name"] for s in runner_true.tool_schemas]
             self.assertIn("run_skill", tool_names_true)

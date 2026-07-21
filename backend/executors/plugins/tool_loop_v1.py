@@ -16,7 +16,7 @@ from executors.plugins.rd_tools import RD_TOOLS, register_rd_tools
 from executors.plugins.memory_search_tool import MEMORY_TOOLS
 import executors.compact as compact
 from ai.client import call_ai_once, call_ai_stream_messages, AIError, AIContextOverflowError
-from ai.memory_provider import get_memory_provider
+from memory.bootstrap import build_memory_client
 import workspace as _ws
 from core.orchestration.ai_service import AIService
 from ai.model_limits import resolve_max_tokens
@@ -105,7 +105,7 @@ class ToolLoopRunner:
         self.bf_config = (self.bot.get("executor_config") or {}).get("before_finalize")
         self.model_name = self.bot.get("model_name", "deepseek-chat")
         self.provider = self.bot.get("model_provider", "deepseek")
-        self.memory = get_memory_provider(self.bot)
+        self.memory = build_memory_client(self.bot)
         self.temperature = self.bot.get("temperature", 0.7)
         self.max_tokens = resolve_max_tokens(self.provider, self.model_name, self.bot.get("max_tokens"))
         
