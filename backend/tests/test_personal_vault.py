@@ -32,6 +32,49 @@ class PersonalVaultTest(unittest.IsolatedAsyncioTestCase):
         async with connect(4) as db:
             async with db.execute("PRAGMA journal_mode") as cur:
                 self.assertEqual((await cur.fetchone())[0].lower(),"wal")
+
+    async def test_v1_schema_migrates_foreign_keys_and_removes_orphans(self):
+        path=Path(personal_db_path(4));path.parent.mkdir(parents=True,exist_ok=True)
+        async with aiosqlite.connect(path) as db:
+            await db.executescript("""
+              CREATE TABLE personal_records (
+               record_id TEXT PRIMARY KEY,user_id INTEGER,kind TEXT,status TEXT);
+              CREATE TABLE personal_projections (
+               projection_id TEXT PRIMARY KEY,record_id TEXT NOT NULL,group_id INTEGER NOT NULL,bot_id INTEGER,
+               purpose TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'active',expires_at INTEGER,
+               created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL,UNIQUE(record_id,group_id,bot_id,purpose));
+              CREATE TABLE habit_evidence (
+               id INTEGER PRIMARY KEY AUTOINCREMENT,record_id TEXT NOT NULL,source_key TEXT NOT NULL,
+               context_kind TEXT NOT NULL,polarity TEXT NOT NULL,observed_at INTEGER NOT NULL,
+               UNIQUE(record_id,source_key));
+              CREATE TABLE _schema_version(version INTEGER NOT NULL,applied_at INTEGER NOT NULL);
+              INSERT INTO _schema_version VALUES(1,1);
+              INSERT INTO personal_records VALUES('kept',4,'habit','active');
+              INSERT INTO personal_projections VALUES('p1','kept',1,NULL,'test','active',NULL,1,1);
+              INSERT INTO personal_projections VALUES('orphan','missing',1,NULL,'test','active',NULL,1,1);
+              INSERT INTO habit_evidence(record_id,source_key,context_kind,polarity,observed_at)
+               VALUES('kept','s1','coding','support',1),('missing','s2','coding','support',1);
+            """)
+            await db.commit()
+        async with connect(4) as db:
+            async with db.execute("SELECT MAX(version) FROM _schema_version") as cur:
+                self.assertEqual((await cur.fetchone())[0],2)
+            async with db.execute("SELECT COUNT(*) FROM personal_projections") as cur:
+                self.assertEqual((await cur.fetchone())[0],1)
+            async with db.execute("SELECT COUNT(*) FROM habit_evidence") as cur:
+                self.assertEqual((await cur.fetchone())[0],1)
+            async with db.execute("PRAGMA foreign_key_list(personal_projections)") as cur:
+                projection_fk=await cur.fetchone()
+            async with db.execute("PRAGMA foreign_key_list(habit_evidence)") as cur:
+                evidence_fk=await cur.fetchone()
+            self.assertEqual(projection_fk[2:7],("personal_records","record_id","record_id","NO ACTION","CASCADE"))
+            self.assertEqual(evidence_fk[2:7],("personal_records","record_id","record_id","NO ACTION","CASCADE"))
+            await db.execute("DELETE FROM personal_records WHERE record_id='kept'")
+            await db.commit()
+            async with db.execute("SELECT COUNT(*) FROM personal_projections") as cur:
+                self.assertEqual((await cur.fetchone())[0],0)
+            async with db.execute("SELECT COUNT(*) FROM habit_evidence") as cur:
+                self.assertEqual((await cur.fetchone())[0],0)
             async with db.execute("PRAGMA busy_timeout") as cur:
                 self.assertEqual((await cur.fetchone())[0],5000)
             async with db.execute("PRAGMA foreign_keys") as cur:

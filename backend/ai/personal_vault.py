@@ -18,7 +18,8 @@ CREATE INDEX IF NOT EXISTS idx_personal_records_active ON personal_records(user_
 CREATE TABLE IF NOT EXISTS personal_projections (
  projection_id TEXT PRIMARY KEY,record_id TEXT NOT NULL,group_id INTEGER NOT NULL,bot_id INTEGER,
  purpose TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'active',expires_at INTEGER,
- created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL,UNIQUE(record_id,group_id,bot_id,purpose));
+ created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL,UNIQUE(record_id,group_id,bot_id,purpose),
+ FOREIGN KEY(record_id) REFERENCES personal_records(record_id) ON DELETE CASCADE);
 CREATE TABLE IF NOT EXISTS personal_sources (
  source_key TEXT PRIMARY KEY,user_id INTEGER NOT NULL,source_type TEXT NOT NULL,source_id TEXT NOT NULL,
  speaker TEXT NOT NULL DEFAULT '',subject TEXT NOT NULL DEFAULT '',context_kind TEXT NOT NULL DEFAULT '',
@@ -26,9 +27,53 @@ CREATE TABLE IF NOT EXISTS personal_sources (
 CREATE TABLE IF NOT EXISTS habit_evidence (
  id INTEGER PRIMARY KEY AUTOINCREMENT,record_id TEXT NOT NULL,source_key TEXT NOT NULL,
  context_kind TEXT NOT NULL,polarity TEXT NOT NULL,observed_at INTEGER NOT NULL,
- UNIQUE(record_id,source_key));
+ UNIQUE(record_id,source_key),
+ FOREIGN KEY(record_id) REFERENCES personal_records(record_id) ON DELETE CASCADE);
 CREATE TABLE IF NOT EXISTS _schema_version(version INTEGER NOT NULL,applied_at INTEGER NOT NULL);
 """
+
+_MIGRATE_V2 = """
+PRAGMA foreign_keys=OFF;
+BEGIN IMMEDIATE;
+CREATE TABLE personal_projections_v2 (
+ projection_id TEXT PRIMARY KEY,record_id TEXT NOT NULL,group_id INTEGER NOT NULL,bot_id INTEGER,
+ purpose TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'active',expires_at INTEGER,
+ created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL,UNIQUE(record_id,group_id,bot_id,purpose),
+ FOREIGN KEY(record_id) REFERENCES personal_records(record_id) ON DELETE CASCADE);
+INSERT INTO personal_projections_v2
+ SELECT p.* FROM personal_projections p JOIN personal_records r ON r.record_id=p.record_id;
+CREATE TABLE habit_evidence_v2 (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,record_id TEXT NOT NULL,source_key TEXT NOT NULL,
+ context_kind TEXT NOT NULL,polarity TEXT NOT NULL,observed_at INTEGER NOT NULL,
+ UNIQUE(record_id,source_key),
+ FOREIGN KEY(record_id) REFERENCES personal_records(record_id) ON DELETE CASCADE);
+INSERT INTO habit_evidence_v2
+ SELECT h.* FROM habit_evidence h JOIN personal_records r ON r.record_id=h.record_id;
+DROP TABLE personal_projections;
+DROP TABLE habit_evidence;
+ALTER TABLE personal_projections_v2 RENAME TO personal_projections;
+ALTER TABLE habit_evidence_v2 RENAME TO habit_evidence;
+DELETE FROM _schema_version;
+INSERT INTO _schema_version(version,applied_at)
+ VALUES(2,CAST(strftime('%s','now') AS INTEGER)*1000);
+COMMIT;
+PRAGMA foreign_keys=ON;
+"""
+
+
+async def _ensure_schema(db:aiosqlite.Connection) -> None:
+    await db.executescript(_DDL)
+    async with db.execute("SELECT MAX(version) FROM _schema_version") as cur:
+        version=(await cur.fetchone())[0]
+    if version is None:
+        await db.execute("INSERT INTO _schema_version(version,applied_at) VALUES(2,?)",
+                         (int(time.time()*1000),))
+        await db.commit()
+    elif version<2:
+        await db.executescript(_MIGRATE_V2)
+    async with db.execute("PRAGMA foreign_key_check") as cur:
+        if await cur.fetchone() is not None:
+            raise RuntimeError("personal vault foreign key check failed")
 
 
 @asynccontextmanager
@@ -45,10 +90,8 @@ async def connect(user_id:int):
             journal_mode=(await cur.fetchone())[0]
         if str(journal_mode).lower()!="wal":
             await db.execute("PRAGMA journal_mode=WAL")
-        await db.executescript(_DDL)
-        await db.execute("INSERT INTO _schema_version(version,applied_at) SELECT 1,? "
-                         "WHERE NOT EXISTS(SELECT 1 FROM _schema_version)",(int(time.time()*1000),))
-        await db.commit(); yield db
+        await _ensure_schema(db)
+        yield db
     finally:
         await db.close()
 
