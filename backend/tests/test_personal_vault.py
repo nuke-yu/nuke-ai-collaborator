@@ -2,6 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+import aiosqlite
 
 from ai.personal_vault import (add_record,connect,delete_vault,export_vault,format_projected_context,
                                ingest_knowledge,observe_habit,project,projected_context,rebuild_vault)
@@ -26,6 +27,18 @@ class PersonalVaultTest(unittest.IsolatedAsyncioTestCase):
         async with connect(4) as db:
             async with db.execute("SELECT status FROM personal_records WHERE record_id=?",(record_id,)) as cur:
                 self.assertEqual((await cur.fetchone())[0],"active")
+
+    async def test_connection_enables_durable_concurrency_pragmas(self):
+        async with connect(4) as db:
+            async with db.execute("PRAGMA journal_mode") as cur:
+                self.assertEqual((await cur.fetchone())[0].lower(),"wal")
+            async with db.execute("PRAGMA busy_timeout") as cur:
+                self.assertEqual((await cur.fetchone())[0],5000)
+            async with db.execute("PRAGMA foreign_keys") as cur:
+                self.assertEqual((await cur.fetchone())[0],1)
+        async with aiosqlite.connect(personal_db_path(4)) as db:
+            async with db.execute("PRAGMA journal_mode") as cur:
+                self.assertEqual((await cur.fetchone())[0].lower(),"wal")
 
     async def test_projection_is_group_bot_and_purpose_scoped(self):
         record_id=await add_record(user_id=4,kind="preference",content="Use concise reports",

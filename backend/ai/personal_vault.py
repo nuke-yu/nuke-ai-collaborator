@@ -37,8 +37,14 @@ async def connect(user_id:int):
     path=personal_db_path(user_id)
     from pathlib import Path
     Path(path).parent.mkdir(parents=True,exist_ok=True)
-    db=await aiosqlite.connect(path)
+    db=await aiosqlite.connect(path,timeout=5.0)
     try:
+        await db.execute("PRAGMA busy_timeout=5000")
+        await db.execute("PRAGMA foreign_keys=ON")
+        async with db.execute("PRAGMA journal_mode") as cur:
+            journal_mode=(await cur.fetchone())[0]
+        if str(journal_mode).lower()!="wal":
+            await db.execute("PRAGMA journal_mode=WAL")
         await db.executescript(_DDL)
         await db.execute("INSERT INTO _schema_version(version,applied_at) SELECT 1,? "
                          "WHERE NOT EXISTS(SELECT 1 FROM _schema_version)",(int(time.time()*1000),))
