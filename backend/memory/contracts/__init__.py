@@ -2,9 +2,17 @@
 
 from .models import (
     CONTRACT_VERSION,
+    AssembleCase,
+    ClaimPipelineJob,
+    CompleteExperienceUsage,
+    CompletePipelineJob,
+    CompleteSkillUsage,
     CreatePersonalProjection,
     CreatePersonalRecord,
+    EnqueuePipelineJob,
+    FailPipelineJob,
     ForgetMemory,
+    FormatProjectedContext,
     IngestPersonalKnowledge,
     MemoryEvent,
     MemoryEventType,
@@ -13,15 +21,25 @@ from .models import (
     ObserveMemory,
     ObservePersonalHabit,
     ProcessLearningCase,
+    RecallExperiences,
     RecallMemory,
     RecallResult,
+    RecallSkills,
 )
 
 __all__ = [
     "CONTRACT_VERSION",
+    "AssembleCase",
+    "ClaimPipelineJob",
+    "CompleteExperienceUsage",
+    "CompletePipelineJob",
+    "CompleteSkillUsage",
     "CreatePersonalProjection",
     "CreatePersonalRecord",
+    "EnqueuePipelineJob",
+    "FailPipelineJob",
     "ForgetMemory",
+    "FormatProjectedContext",
     "IngestPersonalKnowledge",
     "MemoryEvent",
     "MemoryEventType",
@@ -30,6 +48,9 @@ __all__ = [
     "ObserveMemory",
     "ObservePersonalHabit",
     "ProcessLearningCase",
+    "RecallExperiences",
     "RecallMemory",
     "RecallResult",
+    "RecallSkills",
 ]
+

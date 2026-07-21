@@ -105,6 +105,10 @@ class TestMemoryArchitecture(unittest.TestCase):
                     imports.extend(alias.name for alias in node.names)
         self.assertNotIn("ai.memory_provider", imports)
         self.assertNotIn("ai.pipeline", imports)
+        self.assertNotIn("ai.cases", imports)
+        self.assertNotIn("ai.experiences", imports)
+        self.assertNotIn("ai.skill_learning", imports)
+        self.assertNotIn("ai.personal_vault", imports)
         self.assertIn("memory.bootstrap", imports)
         self.assertIn("memory.contracts", imports)
 

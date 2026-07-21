@@ -2,7 +2,8 @@
 
 from .api import (LearningPort, MemoryCommandPort, MemoryEventPort, MemoryQueryPort,
                   PersonalKnowledgePort)
-from .infrastructure import AlgorithmDescriptor, MemoryAlgorithmPort, MemoryRepositoryPort
+from .infrastructure import (AlgorithmDescriptor, MemoryAlgorithmPort, MemoryRepositoryPort,
+                             PipelineJobRepositoryPort)
 
 __all__ = [
     "AlgorithmDescriptor",
@@ -13,4 +14,6 @@ __all__ = [
     "MemoryQueryPort",
     "PersonalKnowledgePort",
     "MemoryRepositoryPort",
+    "PipelineJobRepositoryPort",
 ]
+

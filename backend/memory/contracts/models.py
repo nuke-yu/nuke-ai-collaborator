@@ -86,6 +86,131 @@ class ProcessLearningCase:
 
 
 @dataclass(frozen=True, slots=True)
+class AssembleCase:
+    scope: MemoryScope
+    run_id: str
+    task: str
+    outcome: str
+    tool_records: Sequence[Mapping[str, Any]] = ()
+
+    def __post_init__(self) -> None:
+        if not self.run_id.strip():
+            raise ValueError("run_id is required")
+
+
+@dataclass(frozen=True, slots=True)
+class RecallExperiences:
+    scope: MemoryScope
+    query: str
+    run_id: str
+    limit: int = 2
+    char_budget: int = 2400
+
+    def __post_init__(self) -> None:
+        if not self.query.strip():
+            raise ValueError("query is required")
+        if not self.run_id.strip():
+            raise ValueError("run_id is required")
+
+
+@dataclass(frozen=True, slots=True)
+class CompleteExperienceUsage:
+    scope: MemoryScope
+    record_ids: tuple[str, ...]
+    run_id: str
+    outcome: str
+    input_tokens: int = 0
+    output_tokens: int = 0
+    tool_attempts: int = 0
+
+    def __post_init__(self) -> None:
+        if not self.run_id.strip():
+            raise ValueError("run_id is required")
+
+
+@dataclass(frozen=True, slots=True)
+class RecallSkills:
+    scope: MemoryScope
+    query: str
+    run_id: str
+    limit: int = 2
+
+    def __post_init__(self) -> None:
+        if not self.query.strip():
+            raise ValueError("query is required")
+        if not self.run_id.strip():
+            raise ValueError("run_id is required")
+
+
+@dataclass(frozen=True, slots=True)
+class CompleteSkillUsage:
+    scope: MemoryScope
+    skill_ids: tuple[str, ...]
+    run_id: str
+    outcome: str
+
+    def __post_init__(self) -> None:
+        if not self.run_id.strip():
+            raise ValueError("run_id is required")
+
+
+@dataclass(frozen=True, slots=True)
+class FormatProjectedContext:
+    scope: MemoryScope
+    purpose: str = "assistant_context"
+    char_budget: int = 3000
+
+
+@dataclass(frozen=True, slots=True)
+class EnqueuePipelineJob:
+    scope: MemoryScope
+    job_type: str
+    input_id: str
+    input_version: str = "1"
+
+    def __post_init__(self) -> None:
+        if not self.job_type.strip():
+            raise ValueError("job_type is required")
+        if not self.input_id.strip():
+            raise ValueError("input_id is required")
+
+
+@dataclass(frozen=True, slots=True)
+class ClaimPipelineJob:
+    scope: MemoryScope
+    job_id: str
+    lease_seconds: int = 60
+
+    def __post_init__(self) -> None:
+        if not self.job_id.strip():
+            raise ValueError("job_id is required")
+
+
+@dataclass(frozen=True, slots=True)
+class CompletePipelineJob:
+    scope: MemoryScope
+    job_id: str
+    output_json: str = "{}"
+
+    def __post_init__(self) -> None:
+        if not self.job_id.strip():
+            raise ValueError("job_id is required")
+
+
+@dataclass(frozen=True, slots=True)
+class FailPipelineJob:
+    scope: MemoryScope
+    job_id: str
+    error_message: str
+    max_attempts: int = 3
+
+    def __post_init__(self) -> None:
+        if not self.job_id.strip():
+            raise ValueError("job_id is required")
+
+
+
+@dataclass(frozen=True, slots=True)
 class ObserveMemory:
     scope: MemoryScope
     source_id: str

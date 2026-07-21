@@ -107,6 +107,7 @@ class ToolLoopRunner:
         self.provider = self.bot.get("model_provider", "deepseek")
         self.memory = build_memory_client(self.bot)
         self.learning = build_learning_client()
+        self.personal = build_personal_knowledge_client()
         self.temperature = self.bot.get("temperature", 0.7)
         self.max_tokens = resolve_max_tokens(self.provider, self.model_name, self.bot.get("max_tokens"))
         

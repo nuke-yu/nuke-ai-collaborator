@@ -62,6 +62,20 @@ class LegacyPersonalKnowledgeAdapter:
             polarity=command.polarity,
         )
 
+    async def format_projected_context(self, command: FormatProjectedContext) -> str:
+        user_id = self._user_id(command.scope)
+        if command.scope.group_id is None:
+            return ""
+        from ai.personal_vault import format_projected_context
+        return await format_projected_context(
+            user_id=user_id,
+            group_id=command.scope.group_id,
+            bot_id=command.scope.bot_id,
+            purpose=command.purpose,
+            char_budget=command.char_budget,
+        )
+
+
     async def rebuild(self, scope: MemoryScope) -> Mapping[str, Any]:
         user_id = self._user_id(scope)
         from ai.personal_vault import rebuild_vault

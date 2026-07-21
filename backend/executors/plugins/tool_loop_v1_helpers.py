@@ -10,7 +10,9 @@ from executors.base import build_group_section, ExecutionResult
 from core import config
 import permissions
 from ai.client import call_ai_once, AIError
-from memory.contracts import ObserveMemory, ProcessLearningCase, RecallMemory
+from memory.contracts import (AssembleCase, CompleteExperienceUsage, CompleteSkillUsage,
+                              FormatProjectedContext, ObserveMemory, ProcessLearningCase,
+                              RecallExperiences, RecallMemory, RecallSkills)
 from memory.domain import MemoryScope
 from core.role_router import build_context_message, build_image_content
 from workspace import load_context_files, format_context_blocks, append_log, archive_run
@@ -276,32 +278,41 @@ async def setup_session(runner) -> None:
         },
     ))
     memory = memory_result.rendered_context
-    from ai.experiences import recall_experiences
     try:
-        experience_context, runner.retrieved_experience_ids = await recall_experiences(
-            query=runner.ctx.user_message,
-            run_id=getattr(runner, "run_id", runner.session_id),
-            group_id=runner.ctx.group_id, bot_id=runner.bot["id"],
+        experience_context, runner.retrieved_experience_ids = await runner.learning.recall_experiences(
+            RecallExperiences(
+                scope=memory_scope,
+                query=runner.ctx.user_message,
+                run_id=getattr(runner, "run_id", runner.session_id),
+            )
         )
     except aiosqlite.OperationalError:
         logger.warning("experience recall unavailable; group schema is not ready", exc_info=True)
         experience_context, runner.retrieved_experience_ids = "", []
     if experience_context:
         memory = f"{memory}\n\n{experience_context}" if memory else experience_context
-    from ai.skill_learning import recall_skills
     try:
-        skill_context, runner.retrieved_skill_ids = await recall_skills(
-            query=runner.ctx.user_message,run_id=getattr(runner,"run_id",runner.session_id),
-            group_id=runner.ctx.group_id,bot_id=runner.bot["id"])
+        skill_context, runner.retrieved_skill_ids = await runner.learning.recall_skills(
+            RecallSkills(
+                scope=memory_scope,
+                query=runner.ctx.user_message,
+                run_id=getattr(runner, "run_id", runner.session_id),
+            )
+        )
     except aiosqlite.OperationalError:
-        skill_context, runner.retrieved_skill_ids = "",[]
+        skill_context, runner.retrieved_skill_ids = "", []
     if skill_context:
         memory = f"{memory}\n\n{skill_context}" if memory else skill_context
-    if getattr(runner.ctx,"personal_user_id",None) is not None:
-        from ai.personal_vault import format_projected_context
-        personal_context = await format_projected_context(
-            user_id=runner.ctx.personal_user_id,group_id=runner.ctx.group_id,
-            bot_id=runner.bot["id"])
+    if getattr(runner.ctx, "personal_user_id", None) is not None:
+        personal_scope = MemoryScope.personal(
+            user_id=runner.ctx.personal_user_id,
+            group_id=runner.ctx.group_id,
+            actor_id=f"user:{runner.ctx.personal_user_id}",
+            bot_id=runner.bot["id"],
+        )
+        personal_context = await runner.personal.format_projected_context(
+            FormatProjectedContext(scope=personal_scope)
+        )
         if personal_context:
             memory = f"{memory}\n\n{personal_context}" if memory else personal_context
 
@@ -642,33 +653,40 @@ async def cleanup_and_finalize(runner) -> ExecutionResult:
             iterations=runner.iter_count, input_tokens=runner.ai_service.usage.input_tokens,
             output_tokens=runner.ai_service.usage.output_tokens,
         )
-        from ai.cases import assemble_case
-        case_id = await assemble_case(
-            run_id=runner.run_id, group_id=runner.ctx.group_id, bot_id=runner.bot["id"],
-            task=runner.ctx.user_message, outcome="completed", tool_records=runner.tool_records,
+        bot_scope = MemoryScope.bot(
+            group_id=runner.ctx.group_id,
+            bot_id=runner.bot["id"],
+            actor_id=f"bot:{runner.bot['id']}",
+            run_id=runner.run_id,
+            purpose="case_learning",
         )
-        from ai.experiences import complete_usage
+        case_id = await runner.learning.assemble_case(AssembleCase(
+            scope=bot_scope,
+            run_id=runner.run_id,
+            task=runner.ctx.user_message,
+            outcome="completed",
+            tool_records=runner.tool_records,
+        ))
         if case_id:
             await runner.learning.process_case(ProcessLearningCase(
-                scope=MemoryScope.bot(
-                    group_id=runner.ctx.group_id,
-                    bot_id=runner.bot["id"],
-                    actor_id=f"bot:{runner.bot['id']}",
-                    run_id=runner.run_id,
-                    purpose="case_learning",
-                ),
+                scope=bot_scope,
                 case_id=case_id,
             ))
-        await complete_usage(
-            record_ids=runner.retrieved_experience_ids, run_id=runner.run_id,
-            group_id=runner.ctx.group_id, outcome="completed",
+        await runner.learning.complete_experience_usage(CompleteExperienceUsage(
+            scope=bot_scope,
+            record_ids=tuple(runner.retrieved_experience_ids),
+            run_id=runner.run_id,
+            outcome="completed",
             input_tokens=runner.ai_service.usage.input_tokens,
             output_tokens=runner.ai_service.usage.output_tokens,
             tool_attempts=len(runner.tool_records),
-        )
-        from ai.skill_learning import complete_skill_usage
-        await complete_skill_usage(skill_ids=runner.retrieved_skill_ids,run_id=runner.run_id,
-                                   group_id=runner.ctx.group_id,outcome="completed")
+        ))
+        await runner.learning.complete_skill_usage(CompleteSkillUsage(
+            scope=bot_scope,
+            skill_ids=tuple(runner.retrieved_skill_ids),
+            run_id=runner.run_id,
+            outcome="completed",
+        ))
     except aiosqlite.OperationalError:
         logger.warning("run learning finalization unavailable; group schema is not ready", exc_info=True)
 
