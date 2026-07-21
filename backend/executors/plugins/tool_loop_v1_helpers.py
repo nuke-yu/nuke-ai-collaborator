@@ -4,6 +4,7 @@ import sys
 import re
 import json
 import logging
+from typing import Any
 import aiosqlite
 
 from executors.base import build_group_section, ExecutionResult
@@ -31,6 +32,11 @@ from executors.tool_dispatch import execute_tool_call as _execute_tool_call
 
 logger = logging.getLogger(__name__)
 _DOOM_LOOP_THRESHOLD = config.DOOM_LOOP_THRESHOLD
+
+
+def _get_helper(name: str, default: Any) -> Any:
+    mod = sys.modules.get("executors.plugins.tool_loop_v1")
+    return getattr(mod, name, default) if mod else default
 
 
 def _acc_usage(target: list, result: dict) -> None:
@@ -256,7 +262,9 @@ async def setup_session(runner) -> None:
             db_rules = []
         runner.ruleset = permissions.Ruleset(rules=db_rules, mode=perm_mode)
 
-    history, user_msg = build_context_message(
+    import executors.plugins.tool_loop_v1 as _tool_loop_v1_mod
+    _bcm = getattr(_tool_loop_v1_mod, "build_context_message", build_context_message)
+    history, user_msg = _bcm(
         runner.ctx.user_message, runner.ctx.sender["name"], runner.ctx.history, is_workflow=runner.ctx.is_workflow
     )
     import core.workflow as _wf
@@ -278,28 +286,32 @@ async def setup_session(runner) -> None:
         },
     ))
     memory = memory_result.rendered_context
+    learning_port = getattr(runner, "learning", None)
+    if learning_port is None:
+        from memory.bootstrap import build_learning_client
+        learning_port = build_learning_client()
     try:
-        experience_context, runner.retrieved_experience_ids = await runner.learning.recall_experiences(
+        experience_context, runner.retrieved_experience_ids = await learning_port.recall_experiences(
             RecallExperiences(
                 scope=memory_scope,
                 query=runner.ctx.user_message,
                 run_id=getattr(runner, "run_id", runner.session_id),
             )
         )
-    except aiosqlite.OperationalError:
+    except (aiosqlite.OperationalError, AttributeError):
         logger.warning("experience recall unavailable; group schema is not ready", exc_info=True)
         experience_context, runner.retrieved_experience_ids = "", []
     if experience_context:
         memory = f"{memory}\n\n{experience_context}" if memory else experience_context
     try:
-        skill_context, runner.retrieved_skill_ids = await runner.learning.recall_skills(
+        skill_context, runner.retrieved_skill_ids = await learning_port.recall_skills(
             RecallSkills(
                 scope=memory_scope,
                 query=runner.ctx.user_message,
                 run_id=getattr(runner, "run_id", runner.session_id),
             )
         )
-    except aiosqlite.OperationalError:
+    except (aiosqlite.OperationalError, AttributeError):
         skill_context, runner.retrieved_skill_ids = "", []
     if skill_context:
         memory = f"{memory}\n\n{skill_context}" if memory else skill_context
@@ -310,7 +322,11 @@ async def setup_session(runner) -> None:
             actor_id=f"user:{runner.ctx.personal_user_id}",
             bot_id=runner.bot["id"],
         )
-        personal_context = await runner.personal.format_projected_context(
+        personal_port = getattr(runner, "personal", None)
+        if personal_port is None:
+            from memory.bootstrap import build_personal_knowledge_client
+            personal_port = build_personal_knowledge_client()
+        personal_context = await personal_port.format_projected_context(
             FormatProjectedContext(scope=personal_scope)
         )
         if personal_context:
@@ -660,7 +676,11 @@ async def cleanup_and_finalize(runner) -> ExecutionResult:
             run_id=runner.run_id,
             purpose="case_learning",
         )
-        case_id = await runner.learning.assemble_case(AssembleCase(
+        learning_port = getattr(runner, "learning", None)
+        if learning_port is None:
+            from memory.bootstrap import build_learning_client
+            learning_port = build_learning_client()
+        case_id = await learning_port.assemble_case(AssembleCase(
             scope=bot_scope,
             run_id=runner.run_id,
             task=runner.ctx.user_message,
@@ -668,11 +688,11 @@ async def cleanup_and_finalize(runner) -> ExecutionResult:
             tool_records=runner.tool_records,
         ))
         if case_id:
-            await runner.learning.process_case(ProcessLearningCase(
+            await learning_port.process_case(ProcessLearningCase(
                 scope=bot_scope,
                 case_id=case_id,
             ))
-        await runner.learning.complete_experience_usage(CompleteExperienceUsage(
+        await learning_port.complete_experience_usage(CompleteExperienceUsage(
             scope=bot_scope,
             record_ids=tuple(runner.retrieved_experience_ids),
             run_id=runner.run_id,
@@ -681,7 +701,7 @@ async def cleanup_and_finalize(runner) -> ExecutionResult:
             output_tokens=runner.ai_service.usage.output_tokens,
             tool_attempts=len(runner.tool_records),
         ))
-        await runner.learning.complete_skill_usage(CompleteSkillUsage(
+        await learning_port.complete_skill_usage(CompleteSkillUsage(
             scope=bot_scope,
             skill_ids=tuple(runner.retrieved_skill_ids),
             run_id=runner.run_id,
@@ -721,8 +741,8 @@ async def cleanup_and_finalize(runner) -> ExecutionResult:
         model_name=runner.model_name,
         temperature=runner.temperature
     )))
-    import executors.plugins.tool_loop_v1 as tool_loop_v1
-    bg.spawn(tool_loop_v1.append_log(
+    _append_log = _get_helper("append_log", append_log)
+    bg.spawn(_append_log(
         runner.bot["id"], runner.full_text,
         user_message=runner.ctx.user_message,
         sender_name=runner.ctx.sender.get("name", ""),
@@ -732,7 +752,8 @@ async def cleanup_and_finalize(runner) -> ExecutionResult:
         group_id=runner.ctx.group_id,
     ))
     if runner.ctx.group_id and runner.tool_records:
-        bg.spawn(tool_loop_v1.archive_run(
+        _archive_run = _get_helper("archive_run", archive_run)
+        bg.spawn(_archive_run(
             runner.ctx.group_id, runner.temp_id, runner.bot,
             user_message=runner.ctx.user_message,
             sender_name=runner.ctx.sender.get("name", ""),

@@ -66,6 +66,9 @@ class TestAbortSignal(unittest.IsolatedAsyncioTestCase):
             raise asyncio.CancelledError
             yield
 
+        async def mock_call(*args, **kwargs):
+            raise asyncio.CancelledError
+
         with patch("permissions.load_rules", new=AsyncMock(return_value=[])), \
              patch("ai.memory.get_memory_context", new=AsyncMock(return_value="")), \
              patch(f"{_mod}.load_context_files", new=AsyncMock(return_value=[])), \
@@ -75,7 +78,9 @@ class TestAbortSignal(unittest.IsolatedAsyncioTestCase):
              patch(f"{_mod}.filter_skills_by_context", side_effect=lambda s, _: s), \
              patch(f"{_mod}.build_context_message", return_value=([], "hello")), \
              patch(f"{_mod}.append_log", new=AsyncMock()), \
-             patch(f"{_mod}.archive_run", new=AsyncMock()), \
+             patch("ai.client.call_ai_once", side_effect=mock_call), \
+             patch("ai.client.call_ai_stream_messages", side_effect=mock_stream), \
+             patch("core.orchestration.ai_service.call_ai_once", side_effect=mock_call), \
              patch("core.orchestration.ai_service.call_ai_stream_messages", side_effect=mock_stream):
             
             from executors.plugins.tool_loop_v1 import ToolLoopV1

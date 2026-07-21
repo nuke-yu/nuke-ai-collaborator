@@ -16,7 +16,11 @@ from executors.plugins.rd_tools import RD_TOOLS, register_rd_tools
 from executors.plugins.memory_search_tool import MEMORY_TOOLS
 import executors.compact as compact
 from ai.client import call_ai_once, call_ai_stream_messages, AIError, AIContextOverflowError
-from memory.bootstrap import build_learning_client, build_memory_client
+from memory.bootstrap import (
+    build_learning_client,
+    build_memory_client,
+    build_personal_knowledge_client,
+)
 import workspace as _ws
 from core.orchestration.ai_service import AIService
 from ai.model_limits import resolve_max_tokens
