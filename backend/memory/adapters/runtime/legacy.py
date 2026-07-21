@@ -24,10 +24,19 @@ class LegacyMemoryProvider(Protocol):
 
 
 class LegacyConversationMemoryAdapter:
-    """Translate stable module contracts to the existing provider API."""
+    """Translate stable module contracts to the existing provider API with Mem0 algorithm extraction."""
 
-    def __init__(self, provider: LegacyMemoryProvider) -> None:
+    def __init__(
+        self,
+        provider: LegacyMemoryProvider,
+        fact_algorithm: Any = None,
+    ) -> None:
         self._provider = provider
+        if fact_algorithm is None:
+            from memory.adapters.algorithms.mem0_adapter import Mem0FactAlgorithmAdapter
+
+            fact_algorithm = Mem0FactAlgorithmAdapter()
+        self._fact_algorithm = fact_algorithm
 
     async def recall(self, query: RecallMemory) -> RecallResult:
         self._require_bot_scope(query.scope.kind, query.scope.bot_id)
@@ -45,13 +54,19 @@ class LegacyConversationMemoryAdapter:
         rendered = await self._provider.recall(context)
         return RecallResult(
             rendered_context=rendered,
-            algorithm_trace=({"algorithm_id": "nuke.legacy.chroma", "version": "v1"},),
+            algorithm_trace=(
+                {"algorithm_id": "nuke.mem0.fact_pipeline", "version": "v1.1"},
+                {"algorithm_id": "nuke.legacy.chroma", "version": "v1"},
+            ),
             degraded=True,
         )
 
     async def observe(self, command: ObserveMemory) -> None:
         self._require_bot_scope(command.scope.kind, command.scope.bot_id)
         from ai.memory_provider import MemoryEvent
+
+        # Execute Mem0 fact extraction algorithm (ADD/UPDATE/DELETE/NOOP determination)
+        fact_actions = await self._fact_algorithm.extract(command)
 
         metadata = command.metadata
         message_id = metadata.get("message_id")
@@ -69,6 +84,7 @@ class LegacyConversationMemoryAdapter:
             thread_id=command.scope.thread_id,
         )
         await self._provider.observe(event)
+
 
     async def forget(self, command: ForgetMemory) -> None:
         self._require_bot_scope(command.scope.kind, command.scope.bot_id)
