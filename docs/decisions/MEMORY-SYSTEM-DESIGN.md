@@ -1390,16 +1390,40 @@ retrieval:
 
 ## 15. 外部项目参考定位
 
-| 项目 | 主要借鉴点 | 不直接引入的部分 |
+本节是外部参考的吸收统计和实现追踪表，不表示引入这些项目作为运行依赖。统计口径是“已经进入 Nuke 设计并有当前代码落点的能力组”；仅作为未来候选、尚未进入当前实现的内容不计入已吸收数。
+
+| 参考项目 | 已吸收能力组数 | 已吸收并进入当前实现的特点 | Nuke 当前代码落点 | 明确不复制或后置 |
+|---|---:|---|---|---|
+| mem0 | 4 | 选择性提炼而非保存全部原文；ADD/upsert 的幂等记忆写入；向量与关键词混合召回；按用户、Group、Bot 和用途限定作用域 | `ai/experiences.py`、`ai/personal_vault.py`、`api/personal_memory.py` | 完整 SDK/Provider、第二套 runtime、把所有对话直接写入向量库 |
+| EverOS | 5 | Run → Case → Experience → Skill 分层；来源证据可追溯；Case 与 Outcome Evaluation 分离；经验到技能的晋升；数据库为权威、Markdown/Workspace 仅作投影 | `ai/execution_runs.py`、`ai/cases.py`、`ai/experiences.py`、`ai/skill_learning.py` | Markdown + SQLite + LanceDB 三写权威体系，不复制其产品运行架构 |
+| Graphiti | 3 | `valid_from/valid_to` 时间有效性；冲突与反证不直接覆盖旧结论；来源、说话人和观点主体分离 | `ai/personal_vault.py`、`ai/experiences.py` | 当前不引入图数据库、不做全量实体关系抽取；高级观点图谱仍按 Phase 5 进入条件决定 |
+| AutoGen Task-Centric Memory | 3 | Task/Run 组装成可学习 Case；Insight 必须经过结果验证；纠正或重试成功比普通成功更有学习价值 | `ai/cases.py`、`ai/pipeline.py`、`ai/experiences.py` | 不复制依赖标准答案、为每个任务运行训练循环的完整方案 |
+| Voyager | 4 | 从成功轨迹提炼技能候选；按任务签名检索技能；技能具有试用、激活、稳定、暂停生命周期；真实复用结果反向更新技能 | `ai/skill_learning.py`、`ai/pipeline.py` | 不复制自动课程；当前只生成 S0/S1 声明式技能，不生成任意可执行代码 |
+| LangGraph | 4 | Run/attempt 持久身份；durable pipeline job；lease、幂等和失败恢复；执行状态与派生学习状态分离 | `ai/execution_runs.py`、`ai/pipeline.py`、`ai/reflexion.py` | 不以 LangGraph 替换 Supervisor → Worker → MCP Collector 拓扑 |
+| Letta | 3 | Core Context 与长期存储分离；上下文预算控制；长期个人知识必须经过选择后进入当前上下文 | `ai/personal_vault.py`、`executors/base.py`、`runtime/dispatch.py` | 不引入 Letta runtime，不允许 Agent 任意改写用户核心记忆 |
+| OpenMemory | 4 | Personal Vault 独立存储；显式 Projection；导出、删除、重建生命周期；管理面与执行面分离 | `ai/personal_vault.py`、`api/personal_memory.py`、`runtime/dbpaths.py` | 不复制其已 sunset 的后端和 MCP 架构；管理 UI 不属于当前实现基线 |
+| Ruflo / claude-flow | 5 | 执行证据优先于代理评分；确定性蒸馏门槛；相似经验先聚合再晋升；弱因果关系不自动升级；学习收益和 token 成本必须可统计 | `ai/cases.py`、`ai/experiences.py`、`ai/skill_learning.py`、`ai/pipeline.py` | 不复制联邦、共识、神经网络式宣传能力或另一套多 Agent runtime |
+
+### 15.1 吸收统计
+
+| 统计项 | 当前结果 |
+|---|---:|
+| 已审阅并进入设计映射的外部项目 | 9 |
+| 已进入当前实现的主要能力组 | 35 |
+| 作为运行时依赖直接引入的外部框架 | 0 |
+| 被外部框架替换的 Nuke 核心拓扑 | 0 |
+
+这 35 个能力组不是 35 个独立产品功能，而是用于追踪设计来源的归类统计。多个参考项目可能共同影响同一个 Nuke 能力，例如 EverOS、AutoGen Task-Centric Memory 和 Ruflo 都影响了 Case/Experience 的证据门槛；实现中只保留一套 Nuke 数据模型，不建立三套重复机制。
+
+### 15.2 推理与学习方法的吸收
+
+ReAct、Reflexion 和 Chain-of-Thought 是方法，不作为外部产品框架计入上面的 9 项统计：
+
+| 方法 | Nuke 的吸收方式 | 当前边界 |
 |---|---|---|
-| mem0 | ADD-only、混合检索、时间与实体信号 | 完整 SDK/Provider 和第二套运行时 |
-| EverOS | Case、Experience、Skill、Markdown 投影和来源关系 | Markdown + SQLite + LanceDB 三写体系 |
-| Graphiti | 事实有效时间、冲突和证据关系 | 初期图数据库和全量关系抽取 |
-| AutoGen Task-Centric Memory | Insight 的执行与重试验证 | 依赖标准答案的完整训练循环 |
-| Voyager | 成功轨迹到可执行 Skill | 自动课程、简化 Critic 和覆盖式 Skill 存储 |
-| LangGraph | Run checkpoint、pending writes、恢复语义 | 替换现有进程与编排架构 |
-| Letta | Core/Archival Memory 与上下文预算 | Letta runtime 和 Agent 任意重写核心记忆 |
-| OpenMemory | 后期管理与可视化参考 | 已 sunset 的后端和 MCP 架构 |
+| ReAct | 扩展现有 `tool_loop_v1` 的 Action/Observation/Decision 轨迹并绑定 Run/Attempt | 不引入第二套 ReAct runtime |
+| Reflexion | 对可修正失败生成结构化纠错信息，并最多允许一次受控重试 | 反思文本不能绕过权限，也不能未经执行验证直接成为 Experience/Skill |
+| Chain-of-Thought | 只保留可审计的 Decision Trace、失败分类、证据和结果 | 不持久化、不检索模型原始隐式推理文本 |
 
 所有外部项目只作为领域和算法来源。Nuke 的 Group-first、Bot-private、Collector-only MCP、安全守卫和进程拓扑是上位约束。
 
