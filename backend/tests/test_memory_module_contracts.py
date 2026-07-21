@@ -107,6 +107,20 @@ class TestMemoryArchitecture(unittest.TestCase):
         self.assertIn("memory.bootstrap", imports)
         self.assertIn("memory.contracts", imports)
 
+    def test_bot_context_deletion_uses_memory_module_contract(self):
+        backend = Path(__file__).resolve().parents[1]
+        path = backend / "db" / "queries.py"
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        imports = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module:
+                imports.append(node.module)
+            elif isinstance(node, ast.Import):
+                imports.extend(alias.name for alias in node.names)
+        self.assertNotIn("ai.memory_provider", imports)
+        self.assertIn("memory.bootstrap", imports)
+        self.assertIn("memory.contracts", imports)
+
 
 if __name__ == "__main__":
     unittest.main()
