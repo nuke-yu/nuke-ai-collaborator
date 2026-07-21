@@ -1,9 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException
 from core import auth
 from db import global_db
-from ai.personal_vault import ingest_knowledge,observe_habit,rebuild_vault
 from memory.bootstrap import build_personal_knowledge_client
-from memory.contracts import CreatePersonalProjection, CreatePersonalRecord
+from memory.contracts import (CreatePersonalProjection, CreatePersonalRecord,
+                              IngestPersonalKnowledge, ObservePersonalHabit)
 from memory.domain import MemoryScope
 
 router=APIRouter()
@@ -48,28 +48,34 @@ async def create_personal_projection(body:dict,user=Depends(auth.get_current_use
 @router.post("/api/personal/memory/sources")
 async def ingest_personal_source(body:dict,user=Depends(auth.get_current_user)):
     try:
-        record_id=await ingest_knowledge(user_id=int(user["uid"]),kind=body["kind"],
-          statement=body["statement"],source_type=body["source_type"],source_id=body["source_id"],
-          speaker=body.get("speaker",""),subject=str(body.get("subject",user["uid"])),
-          context_kind=body.get("context_kind","general"),observed_at=body.get("observed_at"),
-          asserted_by_user=bool(body.get("asserted_by_user",False)),
-          sensitivity=body.get("sensitivity","private"))
+        uid=int(user["uid"])
+        record_id=await build_personal_knowledge_client().ingest(IngestPersonalKnowledge(
+          scope=MemoryScope.personal(user_id=uid,actor_id=f"user:{uid}",purpose="personal_source_ingest"),
+          kind=body["kind"],statement=body["statement"],source_type=body["source_type"],
+          source_id=body["source_id"],speaker=body.get("speaker",""),
+          subject=str(body.get("subject",uid)),context_kind=body.get("context_kind","general"),
+          observed_at=body.get("observed_at"),asserted_by_user=bool(body.get("asserted_by_user",False)),
+          sensitivity=body.get("sensitivity","private")))
     except (KeyError,ValueError) as exc:raise HTTPException(400,str(exc))
     return {"record_id":record_id}
 
 @router.post("/api/personal/memory/habits")
 async def observe_personal_habit(body:dict,user=Depends(auth.get_current_user)):
     try:
-        record_id=await observe_habit(user_id=int(user["uid"]),habit_key=body["habit_key"],
-          statement=body["statement"],source_type=body["source_type"],source_id=body["source_id"],
-          context_kind=body["context_kind"],observed_at=int(body["observed_at"]),
-          polarity=body.get("polarity","support"))
+        uid=int(user["uid"])
+        record_id=await build_personal_knowledge_client().observe_habit(ObservePersonalHabit(
+          scope=MemoryScope.personal(user_id=uid,actor_id=f"user:{uid}",purpose="personal_habit_observe"),
+          habit_key=body["habit_key"],statement=body["statement"],source_type=body["source_type"],
+          source_id=body["source_id"],context_kind=body["context_kind"],
+          observed_at=int(body["observed_at"]),polarity=body.get("polarity","support")))
     except (KeyError,ValueError) as exc:raise HTTPException(400,str(exc))
     return {"record_id":record_id}
 
 @router.post("/api/personal/memory/rebuild")
 async def rebuild_personal_memory(user=Depends(auth.get_current_user)):
-    return await rebuild_vault(int(user["uid"]))
+    uid=int(user["uid"])
+    return await build_personal_knowledge_client().rebuild(MemoryScope.personal(
+        user_id=uid,actor_id=f"user:{uid}",purpose="personal_memory_rebuild"))
 
 @router.delete("/api/personal/memory")
 async def delete_personal_memory(user=Depends(auth.get_current_user)):

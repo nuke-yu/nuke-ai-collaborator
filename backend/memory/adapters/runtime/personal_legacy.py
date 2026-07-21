@@ -3,7 +3,9 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
-from memory.contracts import CreatePersonalProjection, CreatePersonalRecord, MemoryOperationError
+from memory.contracts import (CreatePersonalProjection, CreatePersonalRecord,
+                              IngestPersonalKnowledge, MemoryOperationError,
+                              ObservePersonalHabit)
 from memory.domain import MemoryScope, ScopeKind
 
 
@@ -38,6 +40,32 @@ class LegacyPersonalKnowledgeAdapter:
             purpose=command.purpose,
             expires_at=command.expires_at,
         )
+
+    async def ingest(self, command: IngestPersonalKnowledge) -> str:
+        user_id = self._user_id(command.scope)
+        from ai.personal_vault import ingest_knowledge
+        return await ingest_knowledge(
+            user_id=user_id, kind=command.kind, statement=command.statement,
+            source_type=command.source_type, source_id=command.source_id,
+            speaker=command.speaker, subject=command.subject or str(user_id),
+            context_kind=command.context_kind, observed_at=command.observed_at,
+            asserted_by_user=command.asserted_by_user, sensitivity=command.sensitivity,
+        )
+
+    async def observe_habit(self, command: ObservePersonalHabit) -> str:
+        user_id = self._user_id(command.scope)
+        from ai.personal_vault import observe_habit
+        return await observe_habit(
+            user_id=user_id, habit_key=command.habit_key, statement=command.statement,
+            source_type=command.source_type, source_id=command.source_id,
+            context_kind=command.context_kind, observed_at=command.observed_at,
+            polarity=command.polarity,
+        )
+
+    async def rebuild(self, scope: MemoryScope) -> Mapping[str, Any]:
+        user_id = self._user_id(scope)
+        from ai.personal_vault import rebuild_vault
+        return await rebuild_vault(user_id)
 
     async def export(self, scope: MemoryScope) -> Mapping[str, Any]:
         user_id = self._user_id(scope)

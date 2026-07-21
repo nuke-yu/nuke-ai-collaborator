@@ -121,6 +121,15 @@ class TestMemoryArchitecture(unittest.TestCase):
         self.assertIn("memory.bootstrap", imports)
         self.assertIn("memory.contracts", imports)
 
+    def test_personal_api_has_no_direct_vault_dependency(self):
+        backend = Path(__file__).resolve().parents[1]
+        path = backend / "api" / "personal_memory.py"
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        modules = [node.module for node in ast.walk(tree)
+                   if isinstance(node, ast.ImportFrom) and node.module]
+        self.assertNotIn("ai.personal_vault", modules)
+        self.assertIn("memory.bootstrap", modules)
+
 
 if __name__ == "__main__":
     unittest.main()

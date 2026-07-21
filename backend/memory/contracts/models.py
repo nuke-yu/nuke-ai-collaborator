@@ -48,6 +48,33 @@ class CreatePersonalProjection:
 
 
 @dataclass(frozen=True, slots=True)
+class IngestPersonalKnowledge:
+    scope: MemoryScope
+    kind: str
+    statement: str
+    source_type: str
+    source_id: str
+    speaker: str = ""
+    subject: str = ""
+    context_kind: str = "general"
+    observed_at: int | None = None
+    asserted_by_user: bool = False
+    sensitivity: str = "private"
+
+
+@dataclass(frozen=True, slots=True)
+class ObservePersonalHabit:
+    scope: MemoryScope
+    habit_key: str
+    statement: str
+    source_type: str
+    source_id: str
+    context_kind: str
+    observed_at: int
+    polarity: str = "support"
+
+
+@dataclass(frozen=True, slots=True)
 class ObserveMemory:
     scope: MemoryScope
     source_id: str

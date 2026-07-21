@@ -6,7 +6,9 @@ from unittest.mock import AsyncMock, patch
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from memory.adapters.runtime import LegacyPersonalKnowledgeAdapter
-from memory.contracts import CreatePersonalProjection, CreatePersonalRecord, MemoryOperationError
+from memory.contracts import (CreatePersonalProjection, CreatePersonalRecord,
+                              IngestPersonalKnowledge, MemoryOperationError,
+                              ObservePersonalHabit)
 from memory.domain import MemoryScope
 from memory.ports import PersonalKnowledgePort
 
@@ -44,6 +46,36 @@ class TestLegacyPersonalKnowledgeAdapter(unittest.IsolatedAsyncioTestCase):
         command = CreatePersonalProjection(scope=scope, record_id="personal:1", target_group_id=10)
         with self.assertRaisesRegex(MemoryOperationError, "authorized group"):
             await self.adapter.create_projection(command)
+
+    @patch("ai.personal_vault.ingest_knowledge", new_callable=AsyncMock)
+    async def test_ingest_preserves_source_attribution(self, ingest):
+        ingest.return_value = "personal:2"
+        command = IngestPersonalKnowledge(
+            scope=self.scope, kind="decision", statement="Use ADR", source_type="email",
+            source_id="mail:1", speaker="me", subject="7", context_kind="architecture",
+            asserted_by_user=True,
+        )
+        self.assertEqual(await self.adapter.ingest(command), "personal:2")
+        self.assertEqual(ingest.await_args.kwargs["source_id"], "mail:1")
+        self.assertTrue(ingest.await_args.kwargs["asserted_by_user"])
+
+    @patch("ai.personal_vault.observe_habit", new_callable=AsyncMock)
+    async def test_habit_evidence_keeps_context_time_and_polarity(self, observe):
+        observe.return_value = "habit:1"
+        command = ObservePersonalHabit(
+            scope=self.scope, habit_key="concise", statement="Concise output",
+            source_type="task", source_id="run:1", context_kind="review",
+            observed_at=123, polarity="contradict",
+        )
+        self.assertEqual(await self.adapter.observe_habit(command), "habit:1")
+        self.assertEqual(observe.await_args.kwargs["context_kind"], "review")
+        self.assertEqual(observe.await_args.kwargs["polarity"], "contradict")
+
+    @patch("ai.personal_vault.rebuild_vault", new_callable=AsyncMock)
+    async def test_rebuild_is_user_scoped(self, rebuild):
+        rebuild.return_value = {"expired_projections": 2}
+        self.assertEqual((await self.adapter.rebuild(self.scope))["expired_projections"], 2)
+        rebuild.assert_awaited_once_with(7)
 
     @patch("ai.personal_vault.export_vault", new_callable=AsyncMock)
     async def test_export_uses_authenticated_personal_scope(self, export):
