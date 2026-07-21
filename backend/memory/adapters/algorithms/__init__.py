@@ -5,6 +5,8 @@ from .autogen_failure_engine import (AutoGenFailureEngine, FailureCategory,
                                       FailureInsight)
 from .everos_adapter import EverOSCaseAlgorithmAdapter
 from .everos_case_engine import CaseEvaluation, EverOSCaseEngine, ExtractedCase
+from .everos_clustering_adapter import EverOSClusteringAlgorithmAdapter
+from .everos_clustering_engine import CaseCluster, EverOSClusteringEngine
 from .mem0_adapter import Mem0FactAlgorithmAdapter
 from .mem0_fact_engine import FactAction, FactActionType, Mem0FactEngine
 
@@ -21,6 +23,9 @@ __all__ = [
     "FailureInsight",
     "AutoGenFailureEngine",
     "AutoGenFailureAlgorithmAdapter",
+    "CaseCluster",
+    "EverOSClusteringEngine",
+    "EverOSClusteringAlgorithmAdapter",
 ]
 
 
