@@ -1,16 +1,15 @@
 """Compatibility boundary for the existing durable learning pipeline."""
 from __future__ import annotations
 
-from memory.contracts import MemoryOperationError, ProcessLearningCase
-from memory.domain import ScopeKind
-
-
-import aiosqlite
 import hashlib
 import time
+import uuid
+from typing import Any
 
-from memory.contracts import (AssembleCase, CompleteExperienceUsage, CompleteSkillUsage,
-                              MemoryOperationError, ProcessLearningCase, RecallExperiences,
+import aiosqlite
+from memory.contracts import (AssembleCase, CompleteExperienceUsage,
+                              CompleteSkillUsage, MemoryOperationError,
+                              ProcessLearningCase, RecallExperiences,
                               RecallSkills)
 from memory.domain import MemoryScope, ScopeKind
 
@@ -109,38 +108,51 @@ class LegacyPipelineJobAdapter:
             await db.commit()
         return job_id
 
-    async def claim(self, scope: MemoryScope, job_id: str, lease_seconds: int = 60) -> bool:
+    async def claim(self, scope: MemoryScope, job_id: str, lease_seconds: int = 60) -> str | None:
         group_id = self._group_id(scope)
         now = int(time.time() * 1000)
         lease_until = now + lease_seconds * 1000
+        lease_token = f"fence:{uuid.uuid4().hex[:12]}"
         from ai.memory import _memory_db
         async with await _memory_db("pipeline_jobs", group_id, write=True) as db:
             cur = await db.execute("""UPDATE pipeline_jobs SET status='running',attempt=attempt+1,
-              lease_until=?,updated_at=? WHERE job_id=? AND group_id=? AND
+              lease_until=?,lease_token=?,updated_at=? WHERE job_id=? AND group_id=? AND
               (status='pending' OR (status='running' AND lease_until<?) OR status='failed') AND attempt<max_attempts""",
-              (lease_until, now, job_id, group_id, now))
+              (lease_until, lease_token, now, job_id, group_id, now))
+            await db.commit()
+            return lease_token if cur.rowcount == 1 else None
+
+    async def complete(self, scope: MemoryScope, job_id: str, output_json: str = "{}", lease_token: str | None = None) -> bool:
+        group_id = self._group_id(scope)
+        now = int(time.time() * 1000)
+        query = ("UPDATE pipeline_jobs SET status='completed',lease_until=NULL,lease_token=NULL,error='',output_json=?,"
+                 "completed_at=?,updated_at=? WHERE job_id=? AND group_id=? AND status='running'")
+        params: list[Any] = [output_json, now, now, job_id, group_id]
+        if lease_token is not None:
+            query += " AND lease_token=?"
+            params.append(lease_token)
+
+        from ai.memory import _memory_db
+        async with await _memory_db("pipeline_jobs", group_id, write=True) as db:
+            cur = await db.execute(query, params)
             await db.commit()
             return cur.rowcount == 1
 
-    async def complete(self, scope: MemoryScope, job_id: str, output_json: str = "{}") -> None:
+    async def fail(self, scope: MemoryScope, job_id: str, error_message: str, max_attempts: int = 3, lease_token: str | None = None) -> bool:
         group_id = self._group_id(scope)
         now = int(time.time() * 1000)
-        from ai.memory import _memory_db
-        async with await _memory_db("pipeline_jobs", group_id, write=True) as db:
-            await db.execute("UPDATE pipeline_jobs SET status='completed',lease_until=NULL,error='',output_json=?,"
-                             "completed_at=?,updated_at=? WHERE job_id=? AND group_id=?",
-                             (output_json, now, now, job_id, group_id))
-            await db.commit()
+        query = ("UPDATE pipeline_jobs SET status=CASE WHEN attempt>=max_attempts THEN 'dead' "
+                 "ELSE 'failed' END,lease_until=NULL,lease_token=NULL,error=?,updated_at=? WHERE job_id=? AND group_id=? AND status='running'")
+        params: list[Any] = [error_message[:2000], now, job_id, group_id]
+        if lease_token is not None:
+            query += " AND lease_token=?"
+            params.append(lease_token)
 
-    async def fail(self, scope: MemoryScope, job_id: str, error_message: str, max_attempts: int = 3) -> None:
-        group_id = self._group_id(scope)
-        now = int(time.time() * 1000)
         from ai.memory import _memory_db
         async with await _memory_db("pipeline_jobs", group_id, write=True) as db:
-            await db.execute("""UPDATE pipeline_jobs SET status=CASE WHEN attempt>=max_attempts THEN 'dead'
-              ELSE 'failed' END,lease_until=NULL,error=?,updated_at=? WHERE job_id=? AND group_id=?""",
-              (error_message[:2000], now, job_id, group_id))
+            cur = await db.execute(query, params)
             await db.commit()
+            return cur.rowcount == 1
 
     @staticmethod
     def _group_id(scope: MemoryScope) -> int:

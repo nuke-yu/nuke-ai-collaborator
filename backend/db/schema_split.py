@@ -413,7 +413,7 @@ _GROUP_DDL = [
         input_id TEXT NOT NULL, input_version TEXT NOT NULL DEFAULT '1',
         status TEXT NOT NULL DEFAULT 'pending', attempt INTEGER NOT NULL DEFAULT 0,
         max_attempts INTEGER NOT NULL DEFAULT 3, idempotency_key TEXT NOT NULL UNIQUE,
-        lease_until INTEGER, error TEXT NOT NULL DEFAULT '', output_json TEXT NOT NULL DEFAULT '{}',
+        lease_until INTEGER, lease_token TEXT DEFAULT NULL, error TEXT NOT NULL DEFAULT '', output_json TEXT NOT NULL DEFAULT '{}',
         created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, completed_at INTEGER
     )""",
     "CREATE INDEX IF NOT EXISTS idx_pipeline_jobs_ready ON pipeline_jobs(group_id, status, updated_at)",
