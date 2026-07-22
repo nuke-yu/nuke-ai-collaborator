@@ -1,6 +1,7 @@
 """Runtime protocol conformance tests verifying all algorithm adapters implement their ISP ports."""
 from __future__ import annotations
 
+import inspect
 import os
 import sys
 import typing
@@ -66,6 +67,46 @@ class TestProtocolConformance(unittest.TestCase):
         self.assertTrue(isinstance(LettaACLAlgorithmAdapter(), MemoryACLPort))
         self.assertTrue(isinstance(LettaACLAlgorithmAdapter(), ContextBudgetPort))
         self.assertTrue(isinstance(GraphitiTemporalAlgorithmAdapter(), TemporalGraphPort))
+
+    def test_strict_signature_and_async_conformance(self) -> None:
+        pairs = [
+            (FactExtractionPort, Mem0FactAlgorithmAdapter),
+            (CaseExtractionPort, EverOSCaseAlgorithmAdapter),
+            (CaseClusteringPort, EverOSClusteringAlgorithmAdapter),
+            (SkillExtractionPort, EverOSSkillAlgorithmAdapter),
+            (FailureInsightPort, AutoGenFailureAlgorithmAdapter),
+            (SuccessCriticPort, VoyagerCriticAlgorithmAdapter),
+            (RerankPort, HybridRerankAlgorithmAdapter),
+            (DAGCheckpointPort, LangGraphDAGAlgorithmAdapter),
+            (MemoryACLPort, LettaACLAlgorithmAdapter),
+            (ContextBudgetPort, LettaACLAlgorithmAdapter),
+            (TemporalGraphPort, GraphitiTemporalAlgorithmAdapter),
+        ]
+        for port_cls, adapter_cls in pairs:
+            port_methods = [
+                m for m in dir(port_cls)
+                if not m.startswith("_") and callable(getattr(port_cls, m, None))
+            ]
+            for method_name in port_methods:
+                port_method = getattr(port_cls, method_name)
+                adapter_method = getattr(adapter_cls, method_name, None)
+                self.assertIsNotNone(
+                    adapter_method,
+                    f"{adapter_cls.__name__} is missing method '{method_name}' from {port_cls.__name__}",
+                )
+                if inspect.iscoroutinefunction(port_method):
+                    self.assertTrue(
+                        inspect.iscoroutinefunction(adapter_method),
+                        f"{adapter_cls.__name__}.{method_name} must be an async coroutine function matching {port_cls.__name__}.{method_name}",
+                    )
+                port_sig = inspect.signature(port_method)
+                adapter_sig = inspect.signature(adapter_method)
+                port_params = set(port_sig.parameters.keys()) - {"self"}
+                adapter_params = set(adapter_sig.parameters.keys()) - {"self"}
+                self.assertTrue(
+                    port_params.issubset(adapter_params),
+                    f"{adapter_cls.__name__}.{method_name} parameter set {adapter_params} missing protocol parameters {port_params}",
+                )
 
     def test_type_hints_introspection_without_name_errors(self) -> None:
         import memory.ports.infrastructure as infra
