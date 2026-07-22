@@ -38,6 +38,7 @@ GROUP_TABLES = frozenset({
     "workflow_state", "group_locks", "tickets", "reflection_state", "tool_events",
     "agent_runs", "agent_cases", "memory_records", "experience_usage", "pipeline_jobs", "run_decisions",
     "skills", "skill_versions", "skill_usage", "skill_promotion_audit",
+    "memory_projection_outbox",
 })
 
 # ── CENTRAL DDL (final shape; central-internal FKs kept) ──────────────────
@@ -407,6 +408,16 @@ _GROUP_DDL = [
         created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
     )""",
     "CREATE INDEX IF NOT EXISTS idx_memory_records_lookup ON memory_records(group_id, bot_id, kind, status)",
+    """CREATE TABLE IF NOT EXISTS memory_projection_outbox (
+        event_id TEXT PRIMARY KEY, projection_type TEXT NOT NULL,
+        aggregate_id TEXT NOT NULL, aggregate_version TEXT NOT NULL,
+        group_id INTEGER NOT NULL, payload_json TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending', attempt_count INTEGER NOT NULL DEFAULT 0,
+        next_attempt_at INTEGER NOT NULL DEFAULT 0, lease_token TEXT,
+        lease_until INTEGER, last_error TEXT NOT NULL DEFAULT '',
+        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, completed_at INTEGER
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_memory_projection_outbox_ready ON memory_projection_outbox(group_id,status,next_attempt_at,updated_at)",
     """CREATE TABLE IF NOT EXISTS experience_usage (
         id INTEGER PRIMARY KEY AUTOINCREMENT, record_id TEXT NOT NULL, run_id TEXT NOT NULL,
         group_id INTEGER NOT NULL, bot_id INTEGER, state TEXT NOT NULL,

@@ -9,14 +9,51 @@ import asyncio
 
 async def _index_vector(record_id: str, content: str, group_id: int, bot_id: int | None,
                         confidence: float) -> None:
-    try:
-        from ai.memory import ChromaStore
-        await asyncio.to_thread(ChromaStore.write_fact_sync, record_id, content, {
-            "group_id": group_id, "bot_id": bot_id or 0, "mem_type": "experience",
-            "timestamp": time.time(), "importance": confidence,
-        })
-    except Exception:
-        return
+    from ai.memory import ChromaStore
+    await asyncio.to_thread(ChromaStore.write_fact_sync, record_id, content, {
+        "group_id": group_id, "bot_id": bot_id or 0, "mem_type": "experience",
+        "timestamp": time.time(), "importance": confidence,
+    })
+
+
+def _projection_version(
+    record_id: str, content: str, bot_id: int | None, confidence: float
+) -> str:
+    canonical = json.dumps(
+        [record_id, content, bot_id, confidence],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+async def _enqueue_vector_projection(
+    db,
+    *,
+    record_id: str,
+    content: str,
+    group_id: int,
+    bot_id: int | None,
+    confidence: float,
+    now_ms: int,
+) -> None:
+    from ai.projection_outbox import enqueue_projection
+    await enqueue_projection(
+        db,
+        event_id=f"experience-vector:{record_id}",
+        projection_type="experience_vector_upsert",
+        aggregate_id=record_id,
+        aggregate_version=_projection_version(record_id, content, bot_id, confidence),
+        group_id=group_id,
+        payload={
+            "record_id": record_id,
+            "content": content,
+            "group_id": group_id,
+            "bot_id": bot_id,
+            "confidence": confidence,
+        },
+        now_ms=now_ms,
+    )
 
 
 async def distill_case(case_id: str, group_id: int | None) -> str | None:
@@ -69,7 +106,6 @@ async def distill_case(case_id: str, group_id: int | None) -> str | None:
             await db.execute("UPDATE memory_records SET status=?,content=?,supporting_count=?,source_ids=?,confidence=?,"
                              "updated_at=? WHERE record_id=?",
                              (next_status,content,new_count,json.dumps(sources),target_confidence,now,existing[0]))
-            await db.commit()
             target_rid = existing[0]
         else:
             await db.execute("""INSERT INTO memory_records
@@ -77,12 +113,51 @@ async def distill_case(case_id: str, group_id: int | None) -> str | None:
                supporting_count,source_ids,created_at,updated_at) VALUES (?, 'experience',?,?, 'active',?,?,0.73,0.6,1,?,?,?)
               ON CONFLICT(record_id) DO UPDATE SET status='active',content=excluded.content,updated_at=excluded.updated_at""",
               (record_id,group_id,row[0],content,row[2],json.dumps([case_id]),now,now))
-            await db.commit()
             target_rid = record_id
 
-    # Execute vector indexing OUTSIDE SQLite writer transaction
-    await _index_vector(target_rid, content, group_id, row[0], target_confidence)
+        await _enqueue_vector_projection(
+            db,
+            record_id=target_rid,
+            content=content,
+            group_id=group_id,
+            bot_id=row[0],
+            confidence=target_confidence,
+            now_ms=now,
+        )
+        await db.commit()
+
+    # Best-effort low-latency delivery. Failure remains durable for the worker's
+    # periodic and hydration-time consumers.
+    from ai.projection_outbox import drain_projection_outbox
+    await drain_projection_outbox(
+        group_id, limit=1, event_id=f"experience-vector:{target_rid}"
+    )
     return target_rid
+
+
+async def reconcile_experience_projections(group_id: int) -> int:
+    """Re-enqueue canonical records so hydration repairs a missing vector index."""
+    from ai.memory import _memory_db
+    now = int(time.time() * 1000)
+    async with await _memory_db("memory_records", group_id, write=True) as db:
+        async with db.execute(
+            "SELECT record_id,content,bot_id,confidence FROM memory_records "
+            "WHERE group_id=? AND kind='experience'",
+            (group_id,),
+        ) as cur:
+            rows = await cur.fetchall()
+        for record_id, content, bot_id, confidence in rows:
+            await _enqueue_vector_projection(
+                db,
+                record_id=record_id,
+                content=content,
+                group_id=group_id,
+                bot_id=bot_id,
+                confidence=float(confidence),
+                now_ms=now,
+            )
+        await db.commit()
+    return len(rows)
 
 
 def _terms(text: str) -> set[str]:
