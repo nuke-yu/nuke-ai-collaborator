@@ -1,3 +1,4 @@
+import hashlib
 import os
 import sys
 import unittest
@@ -80,7 +81,24 @@ class TestLegacyLearningAdapter(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(MemoryOperationError, "group scope"):
             await self.adapter.process_case(command)
 
+    async def test_pipeline_job_identity_remains_upgrade_compatible(self):
+        mock_db = AsyncMock()
+        mock_db_ctx = AsyncMock()
+        mock_db_ctx.__aenter__.return_value = mock_db
+        scope = MemoryScope.group(group_id=9, actor_id="pipeline")
+        canonical_key = "evaluate_case:9:case:42:3"
+        expected_id = "job:" + hashlib.sha256(canonical_key.encode()).hexdigest()[:24]
+
+        with patch("ai.memory._memory_db", return_value=mock_db_ctx):
+            job_id = await self.pipeline_repo.enqueue(
+                scope, "evaluate_case", "case:42", input_version="3"
+            )
+
+        self.assertEqual(job_id, expected_id)
+        params = mock_db.execute.await_args.args[1]
+        self.assertEqual(params[0], expected_id)
+        self.assertEqual(params[5], canonical_key)
+
 
 if __name__ == "__main__":
     unittest.main()
-

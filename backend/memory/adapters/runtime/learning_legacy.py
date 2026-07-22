@@ -96,8 +96,11 @@ class LegacyPipelineJobAdapter:
 
     async def enqueue(self, scope: MemoryScope, job_type: str, input_id: str, input_version: str = "1") -> str:
         group_id = self._group_id(scope)
-        key = hashlib.sha256(f"{group_id}:{job_type}:{input_id}:{input_version}".encode()).hexdigest()[:32]
-        job_id = f"job:{key[:16]}"
+        # This raw key format and the derived ID are persisted API: changing
+        # either creates a second job for inputs already queued by older
+        # releases. Keep the canonical representation stable across upgrades.
+        key = f"{job_type}:{group_id}:{input_id}:{input_version}"
+        job_id = "job:" + hashlib.sha256(key.encode()).hexdigest()[:24]
         now = int(time.time() * 1000)
         from ai.memory import _memory_db
         async with await _memory_db("pipeline_jobs", group_id, write=True) as db:
@@ -157,5 +160,4 @@ class LegacyPipelineJobAdapter:
         if scope.kind not in (ScopeKind.GROUP, ScopeKind.BOT) or scope.group_id is None:
             raise MemoryOperationError("pipeline job operation requires group scope")
         return scope.group_id
-
 
