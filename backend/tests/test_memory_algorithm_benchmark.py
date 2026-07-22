@@ -119,9 +119,10 @@ class TestMemoryAlgorithmBenchmark(unittest.IsolatedAsyncioTestCase):
 
         t0 = time.perf_counter()
         budget = engine.calculate_context_budget(4096, "sys prompt", "work mem", "recall mem")
+        from memory.domain import Principal
         scope = MemoryScope.personal(user_id=1, group_id=1, actor_id="user:1")
-        acl_allow = engine.check_acl_access(scope, "user:1")
-        acl_deny = engine.check_acl_access(scope, "user:2")
+        acl_allow = engine.check_acl_access(scope, principal=Principal.user(1, [1]))
+        acl_deny = engine.check_acl_access(scope, principal=Principal.user(2, [1]))
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
 
         self.assertFalse(budget.is_budget_exceeded)
