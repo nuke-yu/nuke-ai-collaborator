@@ -932,6 +932,11 @@ async def migration_039(db):
     await db.commit()
 
 
+async def migration_040(db):
+    await _safe_add_column(db, "ALTER TABLE pipeline_jobs ADD COLUMN lease_token TEXT DEFAULT NULL")
+    await db.commit()
+
+
 MIGRATIONS: list = [
     migration_001,
     migration_002,
@@ -972,6 +977,7 @@ MIGRATIONS: list = [
     migration_037,
     migration_038,
     migration_039,
+    migration_040,
 ]
 
 
