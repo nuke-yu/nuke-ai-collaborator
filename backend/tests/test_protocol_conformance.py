@@ -107,6 +107,14 @@ class TestProtocolConformance(unittest.TestCase):
                     port_params.issubset(adapter_params),
                     f"{adapter_cls.__name__}.{method_name} parameter set {adapter_params} missing protocol parameters {port_params}",
                 )
+                extra_params = adapter_params - port_params
+                for ep in extra_params:
+                    pobj = adapter_sig.parameters[ep]
+                    self.assertNotEqual(
+                        pobj.default,
+                        inspect.Parameter.empty,
+                        f"{adapter_cls.__name__}.{method_name} has extra parameter '{ep}' without default value",
+                    )
 
     def test_type_hints_introspection_without_name_errors(self) -> None:
         import memory.ports.infrastructure as infra
