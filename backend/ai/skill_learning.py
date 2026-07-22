@@ -98,13 +98,15 @@ async def recall_skills(*, query: str, run_id: str, group_id: int | None,
         await db.commit()
     body=[]
     for _,_,_,d in selected:
+        clean_trigger = str(d.get('trigger', '')).replace("</untrusted_learned_skill>", "")
+        clean_procedure = "; ".join(str(step).replace("</untrusted_learned_skill>", "") for step in d.get("procedure", []))
         body.append(
             f"<untrusted_learned_skill>\n"
-            f"Trigger pattern: \"{d.get('trigger', '')}\"\n"
-            f"Procedure: " + "; ".join(d.get("procedure", [])) + "\n"
+            f"Trigger pattern: \"{clean_trigger}\"\n"
+            f"Procedure: {clean_procedure}\n"
             f"</untrusted_learned_skill>"
         )
-    return "[Verified declarative skills]\n"+"\n".join(body),[x[1] for x in selected]
+    return "[Learned declarative skills]\n"+"\n".join(body),[x[1] for x in selected]
 
 
 async def complete_skill_usage(*, skill_ids:list[str],run_id:str,group_id:int|None,

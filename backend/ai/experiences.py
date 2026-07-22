@@ -35,9 +35,10 @@ async def distill_case(case_id: str, group_id: int | None) -> str | None:
     errors = json.loads(row[4] or "[]")
     if not errors:
         return None
+    clean_task = re.sub(r"[\r\n\t<>]", " ", row[1] or "").strip()[:200]
     record_id = "exp:" + hashlib.sha256(case_id.encode()).hexdigest()[:24]
     content = json.dumps({
-        "task_pattern": row[1], "approach": json.loads(row[3] or "[]"),
+        "task_pattern": clean_task, "approach": json.loads(row[3] or "[]"),
         "failure_mode": errors, "corrective_action": "Subsequent execution completed successfully",
         "verification": "run_terminal_completed", "limitations": "Derived from one case",
     }, ensure_ascii=False)
@@ -62,13 +63,11 @@ async def distill_case(case_id: str, group_id: int | None) -> str | None:
             return existing[0]
         await db.execute("""INSERT INTO memory_records
           (record_id,kind,group_id,bot_id,status,content,task_signature,confidence,importance,
-           source_ids,metadata_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
-          ON CONFLICT(record_id) DO UPDATE SET content=excluded.content,updated_at=excluded.updated_at""",
-          (record_id,"experience",group_id,row[0],"active",content,row[2],0.65,0.8,
-           json.dumps([case_id]),json.dumps({"verification":"verified_after_correction"}),now,now))
+           supporting_count,source_ids,created_at,updated_at) VALUES (?, 'experience',?,?, 'active',?,?,0.73,0.6,1,?,?,?)""",
+          (record_id,group_id,row[0],content,row[2],json.dumps([case_id]),now,now))
         await db.commit()
-    await _index_vector(record_id, content, group_id, row[0], 0.65)
-    return record_id
+        await _index_vector(record_id, content, group_id, row[0], 0.73)
+        return record_id
 
 
 def _terms(text: str) -> set[str]:
@@ -123,7 +122,11 @@ async def recall_experiences(*, query: str, run_id: str, group_id: int | None,
                 "ON CONFLICT(record_id,run_id) DO UPDATE SET state='injected',updated_at=excluded.updated_at",
                 (record_id,run_id,group_id,bot_id,"injected",now,now))
         await db.commit()
-    return "[Relevant prior execution experience]\n" + "\n".join(f"- {x[1]}" for x in selected), [x[0] for x in selected]
+    formatted_experiences = []
+    for _, snippet in selected:
+        safe_snippet = snippet.replace("</untrusted_learned_experience>", "")
+        formatted_experiences.append(f"<untrusted_learned_experience>\n{safe_snippet}\n</untrusted_learned_experience>")
+    return "[Prior execution experiences]\n" + "\n".join(formatted_experiences), [x[0] for x in selected]
 
 
 async def complete_usage(*, record_ids: list[str], run_id: str, group_id: int | None,
