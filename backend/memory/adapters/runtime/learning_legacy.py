@@ -33,7 +33,7 @@ class LegacyLearningAdapter:
             bot_id=command.scope.bot_id,
             task=command.task,
             outcome=command.outcome,
-            tool_records=list(command.tool_records),
+            tool_records=[dict(record) for record in command.tool_records],
         )
 
     async def recall_experiences(self, command: RecallExperiences) -> tuple[str, list[str]]:

@@ -19,7 +19,7 @@ from memory.domain import ScopeKind
 
 class LegacyMemoryProvider(Protocol):
     async def recall(self, ctx: Any) -> str: ...
-    async def observe(self, event: Any) -> None: ...
+    async def observe(self, ev: Any) -> None: ...
     async def forget(self, bot_id: int, group_id: int | None) -> None: ...
 
 
@@ -39,12 +39,12 @@ class LegacyConversationMemoryAdapter:
         self._fact_algorithm = fact_algorithm
 
     async def recall(self, query: RecallMemory) -> RecallResult:
-        self._require_bot_scope(query.scope.kind, query.scope.bot_id)
+        bot_id = self._require_bot_scope(query.scope.kind, query.scope.bot_id)
         from ai.memory_provider import MemoryContext
 
         metadata = query_metadata(query)
         context = MemoryContext(
-            bot_id=query.scope.bot_id,
+            bot_id=bot_id,
             group_id=query.scope.group_id,
             role=str(metadata.get("role", "")),
             query=query.query,
@@ -61,7 +61,7 @@ class LegacyConversationMemoryAdapter:
         )
 
     async def observe(self, command: ObserveMemory) -> None:
-        self._require_bot_scope(command.scope.kind, command.scope.bot_id)
+        bot_id = self._require_bot_scope(command.scope.kind, command.scope.bot_id)
         from ai.memory_provider import MemoryEvent
 
         metadata = command.metadata
@@ -69,7 +69,7 @@ class LegacyConversationMemoryAdapter:
         if not isinstance(message_id, int) or isinstance(message_id, bool) or message_id <= 0:
             raise MemoryOperationError("legacy conversation observe requires a positive message_id")
         event = MemoryEvent(
-            bot_id=command.scope.bot_id,
+            bot_id=bot_id,
             group_id=command.scope.group_id,
             role=str(metadata.get("role", "")),
             bot_name=str(metadata.get("bot_name", "")),
@@ -83,15 +83,16 @@ class LegacyConversationMemoryAdapter:
 
 
     async def forget(self, command: ForgetMemory) -> None:
-        self._require_bot_scope(command.scope.kind, command.scope.bot_id)
+        bot_id = self._require_bot_scope(command.scope.kind, command.scope.bot_id)
         if command.record_ids:
             raise MemoryOperationError("legacy provider only supports forgetting the complete bot scope")
-        await self._provider.forget(command.scope.bot_id, command.scope.group_id)
+        await self._provider.forget(bot_id, command.scope.group_id)
 
     @staticmethod
-    def _require_bot_scope(kind: ScopeKind, bot_id: int | None) -> None:
+    def _require_bot_scope(kind: ScopeKind, bot_id: int | None) -> int:
         if kind is not ScopeKind.BOT or bot_id is None:
             raise MemoryOperationError("legacy conversation memory requires bot scope")
+        return bot_id
 
 
 def query_metadata(query: RecallMemory) -> Mapping[str, Any]:
@@ -102,4 +103,3 @@ def query_metadata(query: RecallMemory) -> Mapping[str, Any]:
 
 def _optional_list(value: Any) -> list | None:
     return value if isinstance(value, list) else None
-

@@ -113,31 +113,72 @@ class MemoryScope:
             raise ValueError("personal scope requires a positive user_id")
 
     @classmethod
-    def group(cls, *, group_id: int, actor_id: str, **context: object) -> "MemoryScope":
-        return cls(kind=ScopeKind.GROUP, group_id=group_id, actor_id=actor_id, **context)
+    def group(
+        cls,
+        *,
+        group_id: int,
+        actor_id: str,
+        bot_id: int | None = None,
+        user_id: int | None = None,
+        thread_id: str | None = None,
+        run_id: str | None = None,
+        purpose: str = "task_execution",
+    ) -> "MemoryScope":
+        return cls(
+            kind=ScopeKind.GROUP,
+            group_id=group_id,
+            actor_id=actor_id,
+            bot_id=bot_id,
+            user_id=user_id,
+            thread_id=thread_id,
+            run_id=run_id,
+            purpose=purpose,
+        )
 
     @classmethod
     def bot(
-        cls, *, group_id: int, bot_id: int, actor_id: str, **context: object
+        cls,
+        *,
+        group_id: int,
+        bot_id: int,
+        actor_id: str,
+        user_id: int | None = None,
+        thread_id: str | None = None,
+        run_id: str | None = None,
+        purpose: str = "task_execution",
     ) -> "MemoryScope":
         return cls(
             kind=ScopeKind.BOT,
             group_id=group_id,
             bot_id=bot_id,
             actor_id=actor_id,
-            **context,
+            user_id=user_id,
+            thread_id=thread_id,
+            run_id=run_id,
+            purpose=purpose,
         )
 
     @classmethod
     def personal(
-        cls, *, user_id: int, actor_id: str, group_id: int | None = None, **context: object
+        cls,
+        *,
+        user_id: int,
+        actor_id: str,
+        group_id: int | None = None,
+        bot_id: int | None = None,
+        thread_id: str | None = None,
+        run_id: str | None = None,
+        purpose: str = "task_execution",
     ) -> "MemoryScope":
         return cls(
             kind=ScopeKind.PERSONAL,
             group_id=group_id,
+            bot_id=bot_id,
             user_id=user_id,
             actor_id=actor_id,
-            **context,
+            thread_id=thread_id,
+            run_id=run_id,
+            purpose=purpose,
         )
 
     def storage_partition(self) -> tuple[int | None, ScopeKind, int | None]:

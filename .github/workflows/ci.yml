@@ -27,6 +27,11 @@ jobs:
         run: |
           python3 -m pytest -x -q --tb=short
 
+      - name: Check Memory module types
+        working-directory: backend
+        run: |
+          python3 -m pyright --project pyrightconfig.json
+
   frontend:
     runs-on: ubuntu-latest
     steps:

@@ -12,7 +12,7 @@ import json
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
-from memory.domain import MemoryScope
+from memory.domain import MemoryScope, Principal, ScopeKind
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,8 +83,6 @@ class LettaOpenMemoryEngine:
         requesting_actor_id: str = "",
     ) -> ACLPermissionCheck:
         """Enforce OpenMemory multi-tenant ACL access control policy (Fail-Closed)."""
-        from memory.domain import Principal, ScopeKind
-
         if principal is None and isinstance(requesting_actor_id, Principal):
             principal = requesting_actor_id
 

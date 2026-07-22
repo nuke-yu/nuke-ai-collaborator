@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 from memory.contracts import (CreatePersonalProjection, CreatePersonalRecord,
-                              IngestPersonalKnowledge, MemoryOperationError,
+                              FormatProjectedContext, IngestPersonalKnowledge, MemoryOperationError,
                               ObservePersonalHabit)
 from memory.domain import MemoryScope, ScopeKind
 
