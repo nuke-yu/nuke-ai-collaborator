@@ -400,6 +400,7 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
         async with database.connect(TEST_DB_PATH) as db:
             await db.execute("UPDATE memory_records SET confidence=.8 WHERE record_id=?",(record_id,)); await db.commit()
         skill_id=await compile_candidate(record_id,7)
+        self.assertTrue(await promote_skill(skill_id, 7, "active"))
         context,ids=await recall_skills(query="repair schema migration",run_id="new-run",group_id=7,bot_id=3)
         self.assertEqual(ids,[skill_id]); self.assertIn("declarative skills",context)
         with patch("ai.skill_learning.project_skill",new=AsyncMock(return_value="x")):

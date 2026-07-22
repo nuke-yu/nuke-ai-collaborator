@@ -59,15 +59,18 @@ async def compile_candidate(record_id: str, group_id: int) -> str | None:
     return skill_id
 
 
-async def promote_skill(skill_id: str, group_id: int, target_maturity: str = "active") -> bool:
-    """Explicit promotion gate for trial skills (e.g. shadow evaluation or human approval)."""
+async def promote_skill(skill_id: str, group_id: int, target_maturity: str = "active",
+                        actor_id: str = "system:promotion_gate", reason: str = "Shadow evaluation passed") -> bool:
+    """Explicit promotion gate for trial skills (requires valid predecessor maturity and active status)."""
     if target_maturity not in {"active", "stable"}:
         raise ValueError("Invalid target maturity for promotion")
     from ai.memory import _memory_db
     now = int(time.time() * 1000)
+    expected_prev = "trial" if target_maturity == "active" else "active"
     async with await _memory_db("skills", group_id, write=True) as db:
-        cur = await db.execute("UPDATE skills SET maturity=?, updated_at=? WHERE skill_id=? AND group_id=?",
-                               (target_maturity, now, skill_id, group_id))
+        cur = await db.execute("""UPDATE skills SET maturity=?, updated_at=?
+                               WHERE skill_id=? AND group_id=? AND status='active' AND maturity=?""",
+                               (target_maturity, now, skill_id, group_id, expected_prev))
         await db.commit()
         return cur.rowcount == 1
 
@@ -81,7 +84,7 @@ async def recall_skills(*, query: str, run_id: str, group_id: int | None,
     async with await _memory_db("skills",group_id,write=False) as db:
         async with db.execute("""SELECT s.skill_id,s.current_version,v.declaration_json
           FROM skills s JOIN skill_versions v ON v.skill_id=s.skill_id AND v.version=s.current_version
-          WHERE s.group_id=? AND s.bot_id=? AND s.status='active' AND s.maturity IN ('trial','active','stable')""",
+          WHERE s.group_id=? AND s.bot_id=? AND s.status='active' AND s.maturity IN ('active','stable')""",
           (group_id,bot_id)) as cur:
             rows=await cur.fetchall()
     q=_terms(query); ranked=[]

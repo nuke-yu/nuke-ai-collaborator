@@ -96,8 +96,8 @@ class LegacyPipelineJobAdapter:
 
     async def enqueue(self, scope: MemoryScope, job_type: str, input_id: str, input_version: str = "1") -> str:
         group_id = self._group_id(scope)
-        key = f"{job_type}:{group_id}:{input_id}:{input_version}"
-        job_id = "job:" + hashlib.sha256(key.encode()).hexdigest()[:24]
+        key = hashlib.sha256(f"{group_id}:{job_type}:{input_id}:{input_version}".encode()).hexdigest()[:32]
+        job_id = f"job:{key[:16]}"
         now = int(time.time() * 1000)
         from ai.memory import _memory_db
         async with await _memory_db("pipeline_jobs", group_id, write=True) as db:
@@ -142,9 +142,9 @@ class LegacyPipelineJobAdapter:
             return False
         group_id = self._group_id(scope)
         now = int(time.time() * 1000)
-        query = ("UPDATE pipeline_jobs SET status=CASE WHEN attempt>=max_attempts THEN 'dead' "
+        query = ("UPDATE pipeline_jobs SET status=CASE WHEN attempt>=? THEN 'dead' "
                  "ELSE 'failed' END,lease_until=NULL,lease_token=NULL,error=?,updated_at=? WHERE job_id=? AND group_id=? AND status='running' AND lease_token=?")
-        params: list[Any] = [error_message[:2000], now, job_id, group_id, lease_token]
+        params: list[Any] = [max_attempts, error_message[:2000], now, job_id, group_id, lease_token]
 
         from ai.memory import _memory_db
         async with await _memory_db("pipeline_jobs", group_id, write=True) as db:

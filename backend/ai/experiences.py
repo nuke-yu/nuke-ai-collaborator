@@ -119,7 +119,8 @@ async def recall_experiences(*, query: str, run_id: str, group_id: int | None,
         for record_id, _ in selected:
             await db.execute("INSERT INTO experience_usage "
                 "(record_id,run_id,group_id,bot_id,state,created_at,updated_at) VALUES (?,?,?,?,?,?,?) "
-                "ON CONFLICT(record_id,run_id) DO UPDATE SET state='injected',updated_at=excluded.updated_at",
+                "ON CONFLICT(record_id,run_id) DO UPDATE SET updated_at=excluded.updated_at "
+                "WHERE experience_usage.state='injected'",
                 (record_id,run_id,group_id,bot_id,"injected",now,now))
         await db.commit()
     formatted_experiences = []

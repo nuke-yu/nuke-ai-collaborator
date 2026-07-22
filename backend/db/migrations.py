@@ -939,6 +939,7 @@ async def migration_040(db):
 
 async def migration_041(db):
     await _safe_add_column(db, "ALTER TABLE skill_usage ADD COLUMN state TEXT NOT NULL DEFAULT 'injected'")
+    await db.execute("UPDATE skill_usage SET state='executed' WHERE outcome IS NOT NULL AND outcome!=''")
     await db.commit()
 
 
