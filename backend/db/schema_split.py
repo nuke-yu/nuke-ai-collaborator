@@ -23,6 +23,7 @@ import logging
 from db import DB_PATH
 from db.migrations import MIGRATIONS
 from db.schema import _seed_templates
+from memory.infrastructure.schema import MEMORY_GROUP_DDL, MEMORY_GROUP_TABLES
 
 log = logging.getLogger(__name__)
 
@@ -36,10 +37,8 @@ GROUP_TABLES = frozenset({
     "messages", "role_summaries", "message_embeddings", "member_read",
     "message_reactions", "pinned_messages", "agent_sessions", "session_events",
     "workflow_state", "group_locks", "tickets", "reflection_state", "tool_events",
-    "agent_runs", "agent_cases", "memory_records", "experience_usage", "pipeline_jobs", "run_decisions",
-    "skills", "skill_versions", "skill_usage", "skill_promotion_audit",
-    "memory_projection_outbox",
-})
+    "agent_runs", "run_decisions",
+}) | MEMORY_GROUP_TABLES
 
 # ── CENTRAL DDL (final shape; central-internal FKs kept) ──────────────────
 _CENTRAL_DDL = [
@@ -387,54 +386,6 @@ _GROUP_DDL = [
         updated_at      INTEGER NOT NULL
     )""",
     "CREATE INDEX IF NOT EXISTS idx_agent_runs_group_started ON agent_runs(group_id, started_at DESC)",
-    """CREATE TABLE IF NOT EXISTS agent_cases (
-        case_id TEXT PRIMARY KEY, run_id TEXT NOT NULL UNIQUE, group_id INTEGER NOT NULL,
-        bot_id INTEGER, task TEXT NOT NULL DEFAULT '', task_signature TEXT NOT NULL DEFAULT '',
-        tools_used TEXT NOT NULL DEFAULT '[]', files_touched TEXT NOT NULL DEFAULT '[]',
-        attempts INTEGER NOT NULL DEFAULT 0, errors TEXT NOT NULL DEFAULT '[]',
-        outcome TEXT NOT NULL, outcome_confidence REAL NOT NULL DEFAULT 0.0,
-        verification_signals TEXT NOT NULL DEFAULT '[]', summary TEXT NOT NULL DEFAULT '',
-        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
-    )""",
-    "CREATE INDEX IF NOT EXISTS idx_agent_cases_group_created ON agent_cases(group_id, created_at DESC)",
-    """CREATE TABLE IF NOT EXISTS memory_records (
-        record_id TEXT PRIMARY KEY, kind TEXT NOT NULL, group_id INTEGER NOT NULL,
-        bot_id INTEGER, status TEXT NOT NULL DEFAULT 'active', content TEXT NOT NULL,
-        task_signature TEXT NOT NULL DEFAULT '', confidence REAL NOT NULL DEFAULT 0.0,
-        importance REAL NOT NULL DEFAULT 0.0, source_ids TEXT NOT NULL DEFAULT '[]',
-        metadata_json TEXT NOT NULL DEFAULT '{}', algorithm_version TEXT NOT NULL DEFAULT 'experience-v1',
-        supporting_count INTEGER NOT NULL DEFAULT 1, contradicting_count INTEGER NOT NULL DEFAULT 0,
-        last_used_at INTEGER, valid_to INTEGER, superseded_by TEXT,
-        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
-    )""",
-    "CREATE INDEX IF NOT EXISTS idx_memory_records_lookup ON memory_records(group_id, bot_id, kind, status)",
-    """CREATE TABLE IF NOT EXISTS memory_projection_outbox (
-        event_id TEXT PRIMARY KEY, projection_type TEXT NOT NULL,
-        aggregate_id TEXT NOT NULL, aggregate_version TEXT NOT NULL,
-        group_id INTEGER NOT NULL, payload_json TEXT NOT NULL,
-        status TEXT NOT NULL DEFAULT 'pending', attempt_count INTEGER NOT NULL DEFAULT 0,
-        next_attempt_at INTEGER NOT NULL DEFAULT 0, lease_token TEXT,
-        lease_until INTEGER, last_error TEXT NOT NULL DEFAULT '',
-        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, completed_at INTEGER
-    )""",
-    "CREATE INDEX IF NOT EXISTS idx_memory_projection_outbox_ready ON memory_projection_outbox(group_id,status,next_attempt_at,updated_at)",
-    """CREATE TABLE IF NOT EXISTS experience_usage (
-        id INTEGER PRIMARY KEY AUTOINCREMENT, record_id TEXT NOT NULL, run_id TEXT NOT NULL,
-        group_id INTEGER NOT NULL, bot_id INTEGER, state TEXT NOT NULL,
-        outcome TEXT NOT NULL DEFAULT '', input_tokens INTEGER NOT NULL DEFAULT 0,
-        output_tokens INTEGER NOT NULL DEFAULT 0, tool_attempts INTEGER NOT NULL DEFAULT 0,
-        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
-        UNIQUE(record_id, run_id)
-    )""",
-    """CREATE TABLE IF NOT EXISTS pipeline_jobs (
-        job_id TEXT PRIMARY KEY, job_type TEXT NOT NULL, group_id INTEGER NOT NULL,
-        input_id TEXT NOT NULL, input_version TEXT NOT NULL DEFAULT '1',
-        status TEXT NOT NULL DEFAULT 'pending', attempt INTEGER NOT NULL DEFAULT 0,
-        max_attempts INTEGER NOT NULL DEFAULT 3, idempotency_key TEXT NOT NULL UNIQUE,
-        lease_until INTEGER, lease_token TEXT DEFAULT NULL, error TEXT NOT NULL DEFAULT '', output_json TEXT NOT NULL DEFAULT '{}',
-        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, completed_at INTEGER
-    )""",
-    "CREATE INDEX IF NOT EXISTS idx_pipeline_jobs_ready ON pipeline_jobs(group_id, status, updated_at)",
     """CREATE TABLE IF NOT EXISTS run_decisions (
         decision_id TEXT PRIMARY KEY, run_id TEXT NOT NULL, group_id INTEGER NOT NULL,
         bot_id INTEGER, step_id TEXT NOT NULL, decision_type TEXT NOT NULL,
@@ -442,38 +393,7 @@ _GROUP_DDL = [
         corrective_plan TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL,
         UNIQUE(run_id, step_id, decision_type)
     )""",
-    """CREATE TABLE IF NOT EXISTS skills (
-        skill_id TEXT PRIMARY KEY, group_id INTEGER NOT NULL, bot_id INTEGER,
-        name TEXT NOT NULL, maturity TEXT NOT NULL DEFAULT 'candidate', risk_level TEXT NOT NULL,
-        current_version INTEGER NOT NULL DEFAULT 1, status TEXT NOT NULL DEFAULT 'active',
-        success_count INTEGER NOT NULL DEFAULT 0, failure_count INTEGER NOT NULL DEFAULT 0,
-        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
-        UNIQUE(group_id,bot_id,name)
-    )""",
-    """CREATE TABLE IF NOT EXISTS skill_versions (
-        skill_id TEXT NOT NULL, version INTEGER NOT NULL, schema_version TEXT NOT NULL DEFAULT '1',
-        declaration_json TEXT NOT NULL, content_hash TEXT NOT NULL, evidence_ids TEXT NOT NULL DEFAULT '[]',
-        created_at INTEGER NOT NULL, PRIMARY KEY(skill_id,version)
-    )""",
-    """CREATE TABLE IF NOT EXISTS skill_usage (
-        id INTEGER PRIMARY KEY AUTOINCREMENT, skill_id TEXT NOT NULL, version INTEGER NOT NULL,
-        run_id TEXT NOT NULL, group_id INTEGER NOT NULL, outcome TEXT NOT NULL DEFAULT '',
-        state TEXT NOT NULL DEFAULT 'injected',
-        created_at INTEGER NOT NULL, UNIQUE(skill_id,run_id)
-    )""",
-    """CREATE TABLE IF NOT EXISTS skill_promotion_audit (
-        id INTEGER PRIMARY KEY AUTOINCREMENT, skill_id TEXT NOT NULL,
-        group_id INTEGER NOT NULL, actor_id TEXT NOT NULL, reason TEXT NOT NULL,
-        from_maturity TEXT NOT NULL, to_maturity TEXT NOT NULL,
-        created_at INTEGER NOT NULL
-    )""",
-    """CREATE TRIGGER IF NOT EXISTS skill_promotion_audit_no_update
-        BEFORE UPDATE ON skill_promotion_audit BEGIN
-        SELECT RAISE(ABORT, 'skill promotion audit is immutable'); END""",
-    """CREATE TRIGGER IF NOT EXISTS skill_promotion_audit_no_delete
-        BEFORE DELETE ON skill_promotion_audit BEGIN
-        SELECT RAISE(ABORT, 'skill promotion audit is immutable'); END""",
-]
+] + list(MEMORY_GROUP_DDL)
 
 # FTS5 ranked search over tool_events (L3 upgrade). Kept separate and applied
 # best-effort: a SQLite build without FTS5 must NOT brick group-DB init —

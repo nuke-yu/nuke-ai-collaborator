@@ -101,6 +101,17 @@ class TestMemoryArchitecture(unittest.TestCase):
         self.assertNotIn("INSERT INTO memory_projection_outbox", compatibility)
         self.assertIn("INSERT INTO memory_projection_outbox", implementation)
 
+    def test_host_group_schema_reuses_memory_manifest(self):
+        backend = Path(__file__).resolve().parents[1]
+        host_schema = (backend / "db" / "schema_split.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("MEMORY_GROUP_DDL", host_schema)
+        self.assertIn("MEMORY_GROUP_TABLES", host_schema)
+        self.assertNotIn(
+            "CREATE TABLE IF NOT EXISTS memory_records", host_schema
+        )
+
     def test_tool_loop_depends_on_module_contract_not_legacy_provider(self):
         backend = Path(__file__).resolve().parents[1]
         paths = (

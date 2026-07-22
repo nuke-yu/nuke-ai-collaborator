@@ -481,6 +481,8 @@ class LifecycleManager:
         try:
             await db.aclose_writer(group_db_path(gid))
         finally:
+            from memory.bootstrap import get_memory_module
+            get_memory_module().unregister_group(gid)
             # 5. Release file lock
             if glock:
                 glock.release()

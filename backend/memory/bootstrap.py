@@ -17,7 +17,7 @@ from memory.adapters.runtime import (
 )
 from memory.application import AuthorizedPersonalKnowledgeService
 from memory.domain import Principal
-from memory.infrastructure import ProjectionOutbox
+from memory.infrastructure import MemorySchemaManager, ProjectionOutbox
 from memory.module import MemoryModule
 from memory.ports import MemoryACLPort
 
@@ -59,6 +59,7 @@ def build_memory_module(*, drain_interval_seconds: float = 60.0) -> MemoryModule
     )
     return MemoryModule(
         legacy_memory_database,
+        MemorySchemaManager(legacy_memory_database),
         outbox,
         LegacyExperienceProjectionReconciler(),
         drain_interval_seconds=drain_interval_seconds,

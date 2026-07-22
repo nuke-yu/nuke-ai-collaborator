@@ -2,10 +2,14 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import sys
 import unittest
 from contextlib import asynccontextmanager
 from typing import Any, Mapping
 from unittest.mock import AsyncMock
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from memory.infrastructure import DrainResult, ProjectionOutbox
 from memory.module import MemoryModule
@@ -34,6 +38,15 @@ class _Reconciler:
         return 0
 
 
+class _Schema:
+    def __init__(self) -> None:
+        self.groups: list[int] = []
+
+    async def ensure_group(self, group_id: int) -> int:
+        self.groups.append(group_id)
+        return 1
+
+
 class _Outbox(ProjectionOutbox):
     def __init__(self) -> None:
         super().__init__(_Database(), _Delivery())
@@ -60,11 +73,13 @@ class MemoryModuleLifecycleTest(unittest.IsolatedAsyncioTestCase):
         database = _Database()
         outbox = _Outbox()
         reconciler = _Reconciler()
-        module = MemoryModule(database, outbox, reconciler)
+        schema = _Schema()
+        module = MemoryModule(database, schema, outbox, reconciler)
 
         result = await module.reconcile_group(9)
 
         self.assertIs(module.database, database)
+        self.assertEqual(schema.groups, [9])
         self.assertEqual(reconciler.groups, [9])
         self.assertEqual(outbox.drained, [9])
         self.assertEqual(result.completed, 1)
@@ -72,7 +87,8 @@ class MemoryModuleLifecycleTest(unittest.IsolatedAsyncioTestCase):
     async def test_standalone_start_and_stop_are_idempotent(self) -> None:
         outbox = _Outbox()
         module = MemoryModule(
-            _Database(), outbox, _Reconciler(), drain_interval_seconds=0.001
+            _Database(), _Schema(), outbox, _Reconciler(),
+            drain_interval_seconds=0.001
         )
         module.register_group(7)
 
@@ -93,16 +109,29 @@ class MemoryModuleLifecycleTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(module.running)
 
     async def test_group_registration_is_fail_closed(self) -> None:
-        module = MemoryModule(_Database(), _Outbox(), _Reconciler())
+        module = MemoryModule(_Database(), _Schema(), _Outbox(), _Reconciler())
         with self.assertRaisesRegex(ValueError, "positive"):
             module.register_group(0)
         with self.assertRaisesRegex(ValueError, "positive"):
             await module.reconcile_group(-1)
 
+    async def test_schema_check_is_cached_until_group_is_unregistered(self) -> None:
+        schema = _Schema()
+        module = MemoryModule(_Database(), schema, _Outbox(), _Reconciler())
+
+        await module.drain_groups((7,))
+        await module.drain_groups((7,))
+        self.assertEqual(schema.groups, [7])
+
+        module.unregister_group(7)
+        await module.drain_groups((7,))
+        self.assertEqual(schema.groups, [7, 7])
+
     async def test_background_failure_is_isolated_per_group(self) -> None:
         outbox = _FailingGroupOutbox()
         module = MemoryModule(
-            _Database(), outbox, _Reconciler(), drain_interval_seconds=0.001
+            _Database(), _Schema(), outbox, _Reconciler(),
+            drain_interval_seconds=0.001
         )
         module.register_group(7)
         module.register_group(8)

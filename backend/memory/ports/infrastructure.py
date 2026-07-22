@@ -163,3 +163,10 @@ class ProjectionReconcilerPort(Protocol):
     """Rebuild projection intents from canonical state for one tenant."""
 
     async def reconcile(self, group_id: int) -> int: ...
+
+
+@runtime_checkable
+class MemorySchemaPort(Protocol):
+    """Initialize or upgrade Memory-owned storage for one tenant."""
+
+    async def ensure_group(self, group_id: int) -> int: ...

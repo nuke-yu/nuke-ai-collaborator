@@ -1,0 +1,155 @@
+"""Versioned schema manifest owned by the Memory bounded context."""
+from __future__ import annotations
+
+from typing import Final
+
+from memory.contracts import MemoryOperationError
+from memory.ports import MemoryDatabasePort
+
+MEMORY_SCHEMA_VERSION: Final = 1
+
+MEMORY_GROUP_TABLES = frozenset(
+    {
+        "memory_schema_version",
+        "agent_cases",
+        "memory_records",
+        "memory_projection_outbox",
+        "experience_usage",
+        "pipeline_jobs",
+        "skills",
+        "skill_versions",
+        "skill_usage",
+        "skill_promotion_audit",
+    }
+)
+
+_VERSION_TABLE_DDL = """CREATE TABLE IF NOT EXISTS memory_schema_version (
+    version INTEGER PRIMARY KEY,
+    applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+)"""
+
+MEMORY_V1_DDL = (
+    """CREATE TABLE IF NOT EXISTS agent_cases (
+        case_id TEXT PRIMARY KEY, run_id TEXT NOT NULL UNIQUE, group_id INTEGER NOT NULL,
+        bot_id INTEGER, task TEXT NOT NULL DEFAULT '', task_signature TEXT NOT NULL DEFAULT '',
+        tools_used TEXT NOT NULL DEFAULT '[]', files_touched TEXT NOT NULL DEFAULT '[]',
+        attempts INTEGER NOT NULL DEFAULT 0, errors TEXT NOT NULL DEFAULT '[]',
+        outcome TEXT NOT NULL, outcome_confidence REAL NOT NULL DEFAULT 0.0,
+        verification_signals TEXT NOT NULL DEFAULT '[]', summary TEXT NOT NULL DEFAULT '',
+        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_agent_cases_group_created ON agent_cases(group_id, created_at DESC)",
+    """CREATE TABLE IF NOT EXISTS memory_records (
+        record_id TEXT PRIMARY KEY, kind TEXT NOT NULL, group_id INTEGER NOT NULL,
+        bot_id INTEGER, status TEXT NOT NULL DEFAULT 'active', content TEXT NOT NULL,
+        task_signature TEXT NOT NULL DEFAULT '', confidence REAL NOT NULL DEFAULT 0.0,
+        importance REAL NOT NULL DEFAULT 0.0, source_ids TEXT NOT NULL DEFAULT '[]',
+        metadata_json TEXT NOT NULL DEFAULT '{}', algorithm_version TEXT NOT NULL DEFAULT 'experience-v1',
+        supporting_count INTEGER NOT NULL DEFAULT 1, contradicting_count INTEGER NOT NULL DEFAULT 0,
+        last_used_at INTEGER, valid_to INTEGER, superseded_by TEXT,
+        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_memory_records_lookup ON memory_records(group_id, bot_id, kind, status)",
+    """CREATE TABLE IF NOT EXISTS memory_projection_outbox (
+        event_id TEXT PRIMARY KEY, projection_type TEXT NOT NULL,
+        aggregate_id TEXT NOT NULL, aggregate_version TEXT NOT NULL,
+        group_id INTEGER NOT NULL, payload_json TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending', attempt_count INTEGER NOT NULL DEFAULT 0,
+        next_attempt_at INTEGER NOT NULL DEFAULT 0, lease_token TEXT,
+        lease_until INTEGER, last_error TEXT NOT NULL DEFAULT '',
+        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, completed_at INTEGER
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_memory_projection_outbox_ready ON memory_projection_outbox(group_id,status,next_attempt_at,updated_at)",
+    """CREATE TABLE IF NOT EXISTS experience_usage (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, record_id TEXT NOT NULL, run_id TEXT NOT NULL,
+        group_id INTEGER NOT NULL, bot_id INTEGER, state TEXT NOT NULL,
+        outcome TEXT NOT NULL DEFAULT '', input_tokens INTEGER NOT NULL DEFAULT 0,
+        output_tokens INTEGER NOT NULL DEFAULT 0, tool_attempts INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+        UNIQUE(record_id, run_id)
+    )""",
+    """CREATE TABLE IF NOT EXISTS pipeline_jobs (
+        job_id TEXT PRIMARY KEY, job_type TEXT NOT NULL, group_id INTEGER NOT NULL,
+        input_id TEXT NOT NULL, input_version TEXT NOT NULL DEFAULT '1',
+        status TEXT NOT NULL DEFAULT 'pending', attempt INTEGER NOT NULL DEFAULT 0,
+        max_attempts INTEGER NOT NULL DEFAULT 3, idempotency_key TEXT NOT NULL UNIQUE,
+        lease_until INTEGER, lease_token TEXT DEFAULT NULL, error TEXT NOT NULL DEFAULT '',
+        output_json TEXT NOT NULL DEFAULT '{}', created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL, completed_at INTEGER
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_pipeline_jobs_ready ON pipeline_jobs(group_id, status, updated_at)",
+    """CREATE TABLE IF NOT EXISTS skills (
+        skill_id TEXT PRIMARY KEY, group_id INTEGER NOT NULL, bot_id INTEGER,
+        name TEXT NOT NULL, maturity TEXT NOT NULL DEFAULT 'candidate', risk_level TEXT NOT NULL,
+        current_version INTEGER NOT NULL DEFAULT 1, status TEXT NOT NULL DEFAULT 'active',
+        success_count INTEGER NOT NULL DEFAULT 0, failure_count INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+        UNIQUE(group_id,bot_id,name)
+    )""",
+    """CREATE TABLE IF NOT EXISTS skill_versions (
+        skill_id TEXT NOT NULL, version INTEGER NOT NULL,
+        schema_version TEXT NOT NULL DEFAULT '1', declaration_json TEXT NOT NULL,
+        content_hash TEXT NOT NULL, evidence_ids TEXT NOT NULL DEFAULT '[]',
+        created_at INTEGER NOT NULL, PRIMARY KEY(skill_id,version)
+    )""",
+    """CREATE TABLE IF NOT EXISTS skill_usage (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, skill_id TEXT NOT NULL, version INTEGER NOT NULL,
+        run_id TEXT NOT NULL, group_id INTEGER NOT NULL, outcome TEXT NOT NULL DEFAULT '',
+        state TEXT NOT NULL DEFAULT 'injected', created_at INTEGER NOT NULL,
+        UNIQUE(skill_id,run_id)
+    )""",
+    """CREATE TABLE IF NOT EXISTS skill_promotion_audit (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, skill_id TEXT NOT NULL,
+        group_id INTEGER NOT NULL, actor_id TEXT NOT NULL, reason TEXT NOT NULL,
+        from_maturity TEXT NOT NULL, to_maturity TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+    )""",
+    """CREATE TRIGGER IF NOT EXISTS skill_promotion_audit_no_update
+        BEFORE UPDATE ON skill_promotion_audit BEGIN
+        SELECT RAISE(ABORT, 'skill promotion audit is immutable'); END""",
+    """CREATE TRIGGER IF NOT EXISTS skill_promotion_audit_no_delete
+        BEFORE DELETE ON skill_promotion_audit BEGIN
+        SELECT RAISE(ABORT, 'skill promotion audit is immutable'); END""",
+)
+
+MEMORY_GROUP_DDL = (
+    _VERSION_TABLE_DDL,
+    *MEMORY_V1_DDL,
+)
+
+
+class MemorySchemaManager:
+    """Apply Memory-owned schema versions through an injected database port."""
+
+    def __init__(self, database: MemoryDatabasePort) -> None:
+        self._database = database
+
+    async def ensure_group(self, group_id: int) -> int:
+        if group_id <= 0:
+            raise ValueError("group_id must be positive")
+        # memory_records is present in both legacy single-DB installations and
+        # split group DBs, so it is the stable routing anchor during migration.
+        async with await self._database.connect(
+            "memory_records", group_id, write=True
+        ) as connection:
+            await connection.execute(_VERSION_TABLE_DDL)
+            async with connection.execute(
+                "SELECT COALESCE(MAX(version), 0) FROM memory_schema_version"
+            ) as cursor:
+                current = int((await cursor.fetchone())[0])
+            if current > MEMORY_SCHEMA_VERSION:
+                raise MemoryOperationError(
+                    "memory schema is newer than this runtime "
+                    f"(database={current}, runtime={MEMORY_SCHEMA_VERSION})"
+                )
+            # Reapply idempotent final-shape DDL to repair missing derived
+            # tables, indexes, or governance triggers after external damage.
+            for statement in MEMORY_V1_DDL:
+                await connection.execute(statement)
+            if current < 1:
+                await connection.execute(
+                    "INSERT INTO memory_schema_version(version) VALUES (?)",
+                    (MEMORY_SCHEMA_VERSION,),
+                )
+            await connection.commit()
+        return MEMORY_SCHEMA_VERSION

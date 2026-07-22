@@ -15,6 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import db
 from db.schema_split import CENTRAL_TABLES, GROUP_TABLES
 from db.migrations import MIGRATIONS
+from memory.infrastructure.schema import MEMORY_GROUP_TABLES
 
 
 async def _tables(path):
@@ -59,6 +60,7 @@ class TestSchemaSplit(unittest.IsolatedAsyncioTestCase):
         tables = await _tables(self.group)
         self.assertTrue(GROUP_TABLES <= tables, GROUP_TABLES - tables)
         self.assertFalse(CENTRAL_TABLES & tables, CENTRAL_TABLES & tables)
+        self.assertTrue(MEMORY_GROUP_TABLES <= GROUP_TABLES)
 
     async def test_cross_domain_fks_dropped_in_group(self):
         # messages no longer references central groups/members
