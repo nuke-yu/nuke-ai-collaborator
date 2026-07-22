@@ -440,6 +440,7 @@ _GROUP_DDL = [
     """CREATE TABLE IF NOT EXISTS skill_usage (
         id INTEGER PRIMARY KEY AUTOINCREMENT, skill_id TEXT NOT NULL, version INTEGER NOT NULL,
         run_id TEXT NOT NULL, group_id INTEGER NOT NULL, outcome TEXT NOT NULL DEFAULT '',
+        state TEXT NOT NULL DEFAULT 'injected',
         created_at INTEGER NOT NULL, UNIQUE(skill_id,run_id)
     )""",
 ]

@@ -937,6 +937,11 @@ async def migration_040(db):
     await db.commit()
 
 
+async def migration_041(db):
+    await _safe_add_column(db, "ALTER TABLE skill_usage ADD COLUMN state TEXT NOT NULL DEFAULT 'injected'")
+    await db.commit()
+
+
 MIGRATIONS: list = [
     migration_001,
     migration_002,
@@ -978,6 +983,7 @@ MIGRATIONS: list = [
     migration_038,
     migration_039,
     migration_040,
+    migration_041,
 ]
 
 
