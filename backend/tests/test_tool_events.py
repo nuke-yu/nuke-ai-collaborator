@@ -6,6 +6,7 @@ init_db() (which runs migrations, creating tool_events via migration_025).
 import asyncio
 import json
 import os
+import sqlite3
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -344,6 +345,32 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
             ) as cur:
                 rows = await cur.fetchall()
         self.assertEqual(rows, [("1", "completed"), ("2", "completed")])
+
+    async def test_pipeline_promotes_qualified_skill_with_immutable_audit(self):
+        for run_id in ("promotion-evidence-1", "promotion-evidence-2"):
+            case_id = await assemble_case(
+                run_id=run_id, group_id=7, bot_id=3, task="repair schema migration",
+                outcome="completed",
+                tool_records=[{"name": "run_shell", "result": "failed", "is_error": True}],
+            )
+            await process_case(case_id, 7)
+
+        async with database.connect(TEST_DB_PATH) as db:
+            async with db.execute("SELECT skill_id,maturity FROM skills") as cur:
+                skill = await cur.fetchone()
+            async with db.execute(
+                "SELECT skill_id,actor_id,reason,from_maturity,to_maturity "
+                "FROM skill_promotion_audit"
+            ) as cur:
+                audit = await cur.fetchone()
+            with self.assertRaises(sqlite3.IntegrityError):
+                await db.execute("UPDATE skill_promotion_audit SET reason='rewritten'")
+
+        self.assertEqual(skill[1], "active")
+        self.assertEqual(audit[0], skill[0])
+        self.assertEqual(audit[1], "system:learning_pipeline")
+        self.assertEqual(audit[3:], ("trial", "active"))
+        self.assertIn("repeated-evidence", audit[2])
 
     async def test_reflexion_is_bounded_and_persists_decision_trace(self):
         self.assertEqual(classify_failure("run_shell", "command failed"), "correctable_execution")

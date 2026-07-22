@@ -64,6 +64,10 @@ async def promote_skill(skill_id: str, group_id: int, target_maturity: str = "ac
     """Explicit promotion gate for trial skills (requires valid predecessor maturity and active status)."""
     if target_maturity not in {"active", "stable"}:
         raise ValueError("Invalid target maturity for promotion")
+    if not actor_id.strip():
+        raise ValueError("Promotion actor_id is required")
+    if not reason.strip():
+        raise ValueError("Promotion reason is required")
     from ai.memory import _memory_db
     now = int(time.time() * 1000)
     expected_prev = "trial" if target_maturity == "active" else "active"
@@ -71,6 +75,11 @@ async def promote_skill(skill_id: str, group_id: int, target_maturity: str = "ac
         cur = await db.execute("""UPDATE skills SET maturity=?, updated_at=?
                                WHERE skill_id=? AND group_id=? AND status='active' AND maturity=?""",
                                (target_maturity, now, skill_id, group_id, expected_prev))
+        if cur.rowcount == 1:
+            await db.execute("""INSERT INTO skill_promotion_audit
+              (skill_id,group_id,actor_id,reason,from_maturity,to_maturity,created_at)
+              VALUES (?,?,?,?,?,?,?)""",
+              (skill_id,group_id,actor_id,reason,expected_prev,target_maturity,now))
         await db.commit()
         return cur.rowcount == 1
 

@@ -45,12 +45,20 @@ async def process_case(case_id: str, group_id: int, *, input_version: str = "1")
             from ai.experiences import distill_case
             record_id = await distill_case(case_id, group_id)
         skill_id = None
+        skill_promoted = False
         if record_id:
-            from ai.skill_learning import compile_candidate
+            from ai.skill_learning import compile_candidate, promote_skill
             skill_id = await compile_candidate(record_id, group_id)
+            if skill_id:
+                skill_promoted = await promote_skill(
+                    skill_id,
+                    group_id,
+                    actor_id="system:learning_pipeline",
+                    reason="Candidate passed repeated-evidence compilation gate",
+                )
         output = {"classification": evaluation.classification, "information_gain": evaluation.information_gain,
                   "should_distill": evaluation.should_distill, "confidence": evaluation.confidence,
-                  "record_id": record_id, "skill_id": skill_id}
+                  "record_id": record_id, "skill_id": skill_id, "skill_promoted": skill_promoted}
         from memory.contracts import LostLeaseError
         completed = await _pipeline_repo.complete(scope, job_id, lease_token=lease_token, output_json=json.dumps(output))
         if not completed:

@@ -443,6 +443,18 @@ _GROUP_DDL = [
         state TEXT NOT NULL DEFAULT 'injected',
         created_at INTEGER NOT NULL, UNIQUE(skill_id,run_id)
     )""",
+    """CREATE TABLE IF NOT EXISTS skill_promotion_audit (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, skill_id TEXT NOT NULL,
+        group_id INTEGER NOT NULL, actor_id TEXT NOT NULL, reason TEXT NOT NULL,
+        from_maturity TEXT NOT NULL, to_maturity TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+    )""",
+    """CREATE TRIGGER IF NOT EXISTS skill_promotion_audit_no_update
+        BEFORE UPDATE ON skill_promotion_audit BEGIN
+        SELECT RAISE(ABORT, 'skill promotion audit is immutable'); END""",
+    """CREATE TRIGGER IF NOT EXISTS skill_promotion_audit_no_delete
+        BEFORE DELETE ON skill_promotion_audit BEGIN
+        SELECT RAISE(ABORT, 'skill promotion audit is immutable'); END""",
 ]
 
 # FTS5 ranked search over tool_events (L3 upgrade). Kept separate and applied
