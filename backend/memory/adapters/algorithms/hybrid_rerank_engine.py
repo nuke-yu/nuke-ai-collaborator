@@ -63,6 +63,8 @@ class HybridRerankEngine:
         unselected = list(candidates)
         selected: list[dict[str, Any]] = []
 
+        max_rrf = max((float(c.get("rrf_score") or c.get("score") or 0.0) for c in candidates), default=1.0) or 1.0
+
         while unselected and len(selected) < top_k:
             best_item = None
             best_mmr_score = -float("inf")
@@ -71,11 +73,11 @@ class HybridRerankEngine:
                 cand_text = str(candidate.get("content") or "")
                 cand_tokens = set(re.findall(r"\w+", cand_text.lower()))
 
-                # Sim1: Query relevance
-                if not query_tokens or not cand_tokens:
-                    sim1 = float(candidate.get("rrf_score") or candidate.get("score") or 0.0)
-                else:
-                    sim1 = len(query_tokens & cand_tokens) / float(len(query_tokens | cand_tokens))
+                # Sim1: Weighted combination of RRF rank score and lexical token similarity
+                raw_rrf = float(candidate.get("rrf_score") or candidate.get("score") or 0.0)
+                norm_rrf = raw_rrf / max_rrf
+                jaccard = (len(query_tokens & cand_tokens) / float(len(query_tokens | cand_tokens))) if (query_tokens and cand_tokens) else 0.0
+                sim1 = 0.5 * norm_rrf + 0.5 * jaccard
 
                 # Sim2: Max similarity to already selected items
                 sim2 = 0.0
