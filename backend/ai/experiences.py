@@ -32,9 +32,10 @@ async def distill_case(case_id: str, group_id: int | None) -> str | None:
             row = await cur.fetchone()
     if not row or row[5] != "completed":
         return None
-    errors = json.loads(row[4] or "[]")
-    if not errors:
+    raw_errors = json.loads(row[4] or "[]")
+    if not raw_errors:
         return None
+    errors = [re.sub(r"[\r\n\t<>]", " ", str(err)).strip()[:150] for err in raw_errors]
     clean_task = re.sub(r"[\r\n\t<>]", " ", row[1] or "").strip()[:200]
     record_id = "exp:" + hashlib.sha256(case_id.encode()).hexdigest()[:24]
     content = json.dumps({
@@ -43,9 +44,11 @@ async def distill_case(case_id: str, group_id: int | None) -> str | None:
         "verification": "run_terminal_completed", "limitations": "Derived from one case",
     }, ensure_ascii=False)
     now = int(time.time() * 1000)
+    target_rid = None
+    target_confidence = 0.73
     async with await _memory_db("memory_records", group_id, write=True) as db:
         async with db.execute("SELECT record_id,source_ids,supporting_count FROM memory_records "
-                              "WHERE group_id=? AND bot_id=? AND kind='experience' AND status='active' "
+                              "WHERE group_id=? AND bot_id=? AND kind='experience' "
                               "AND task_signature=? ORDER BY updated_at DESC LIMIT 1",
                               (group_id,row[0],row[2])) as cur:
             existing = await cur.fetchone()
@@ -55,19 +58,24 @@ async def distill_case(case_id: str, group_id: int | None) -> str | None:
                 return existing[0]
             sources = prev_sources + [case_id]
             new_count = len(sources)
-            await db.execute("UPDATE memory_records SET supporting_count=?,source_ids=?,confidence=MIN(0.95,confidence+0.08),"
+            target_confidence = min(0.95, 0.73 + 0.08 * (new_count - 1))
+            await db.execute("UPDATE memory_records SET status='active',supporting_count=?,source_ids=?,confidence=?,"
                              "updated_at=? WHERE record_id=?",
-                             (new_count,json.dumps(sources),now,existing[0]))
+                             (new_count,json.dumps(sources),target_confidence,now,existing[0]))
             await db.commit()
-            await _index_vector(existing[0], content, group_id, row[0], min(0.95, 0.73))
-            return existing[0]
-        await db.execute("""INSERT INTO memory_records
-          (record_id,kind,group_id,bot_id,status,content,task_signature,confidence,importance,
-           supporting_count,source_ids,created_at,updated_at) VALUES (?, 'experience',?,?, 'active',?,?,0.73,0.6,1,?,?,?)""",
-          (record_id,group_id,row[0],content,row[2],json.dumps([case_id]),now,now))
-        await db.commit()
-        await _index_vector(record_id, content, group_id, row[0], 0.73)
-        return record_id
+            target_rid = existing[0]
+        else:
+            await db.execute("""INSERT INTO memory_records
+              (record_id,kind,group_id,bot_id,status,content,task_signature,confidence,importance,
+               supporting_count,source_ids,created_at,updated_at) VALUES (?, 'experience',?,?, 'active',?,?,0.73,0.6,1,?,?,?)
+              ON CONFLICT(record_id) DO UPDATE SET status='active',content=excluded.content,updated_at=excluded.updated_at""",
+              (record_id,group_id,row[0],content,row[2],json.dumps([case_id]),now,now))
+            await db.commit()
+            target_rid = record_id
+
+    # Execute vector indexing OUTSIDE SQLite writer transaction
+    await _index_vector(target_rid, content, group_id, row[0], target_confidence)
+    return target_rid
 
 
 def _terms(text: str) -> set[str]:
