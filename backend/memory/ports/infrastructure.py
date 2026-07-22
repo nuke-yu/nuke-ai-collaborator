@@ -28,13 +28,29 @@ class FactExtractionPort(MemoryAlgorithmPort, Protocol):
 
 
 @runtime_checkable
+class CaseExtractionPort(MemoryAlgorithmPort, Protocol):
+    async def extract_case(self, command: Any) -> Any: ...
+
+
+@runtime_checkable
+class SkillExtractionPort(MemoryAlgorithmPort, Protocol):
+    async def compile_candidate(self, cluster: Any) -> Any: ...
+
+
+@runtime_checkable
 class FailureInsightPort(MemoryAlgorithmPort, Protocol):
-    async def analyze_failure(self, task: str, error_traces: Sequence[str]) -> Any: ...
+    async def analyze_failure(
+        self,
+        task: str,
+        errors: Sequence[str],
+        tool_records: Sequence[Mapping[str, Any]] = (),
+        ai_call_fn: Any = None,
+    ) -> Any: ...
 
 
 @runtime_checkable
 class SuccessCriticPort(MemoryAlgorithmPort, Protocol):
-    async def evaluate(
+    async def evaluate_success(
         self,
         task: str,
         outcome: str,

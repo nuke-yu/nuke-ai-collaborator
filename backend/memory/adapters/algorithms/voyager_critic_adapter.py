@@ -23,7 +23,7 @@ class VoyagerCriticAlgorithmAdapter:
     def __init__(self, engine: VoyagerCriticEngine | None = None) -> None:
         self._engine = engine or VoyagerCriticEngine()
 
-    async def evaluate(
+    async def evaluate_success(
         self,
         task: str,
         outcome: str,
@@ -35,3 +35,5 @@ class VoyagerCriticAlgorithmAdapter:
         return await self._engine.evaluate_success_with_llm(
             task, outcome, tool_records, error_traces, ai_call_fn=ai_call_fn
         )
+
+    evaluate = evaluate_success

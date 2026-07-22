@@ -23,7 +23,7 @@ class AutoGenFailureAlgorithmAdapter:
     def __init__(self, engine: AutoGenFailureEngine | None = None) -> None:
         self._engine = engine or AutoGenFailureEngine()
 
-    async def analyze(
+    async def analyze_failure(
         self,
         task: str,
         errors: Sequence[str],
@@ -36,3 +36,5 @@ class AutoGenFailureAlgorithmAdapter:
                 task, errors, tool_records, ai_call_fn=ai_call_fn
             )
         return self._engine.analyze_failure(task, errors, tool_records)
+
+    analyze = analyze_failure
