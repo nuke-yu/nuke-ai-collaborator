@@ -28,8 +28,13 @@ class AutoGenFailureAlgorithmAdapter:
         task: str,
         errors: Sequence[str],
         tool_records: Sequence[Mapping[str, Any]] = (),
+        ai_call_fn: Any = None,
     ) -> FailureInsight:
-        """Analyze failure trace and return structured FailureInsight."""
+        """Analyze failure trace and return structured FailureInsight using LLM Prompt & Rule Fallback."""
+        if ai_call_fn is not None:
+            return await self._engine.analyze_failure_with_llm(
+                task, errors, tool_records, ai_call_fn=ai_call_fn
+            )
         return self._engine.analyze_failure(task, errors, tool_records)
 
     async def extract(self, command: ObserveMemory) -> Sequence[Mapping[str, Any]]:

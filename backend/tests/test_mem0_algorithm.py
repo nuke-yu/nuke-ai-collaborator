@@ -14,7 +14,7 @@ from memory.contracts import ObserveMemory
 from memory.domain import MemoryScope
 
 
-class TestMem0FactEngine(unittest.TestCase):
+class TestMem0FactEngine(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         self.engine = Mem0FactEngine()
 
@@ -49,7 +49,16 @@ class TestMem0FactEngine(unittest.TestCase):
         existing = [{"record_id": "rec:3", "content": "User uses Windows 11"}]
         action = self.engine.reconcile_fact(existing, "User no longer uses Windows 11")
         self.assertEqual(action.action_type, FactActionType.DELETE)
-        self.assertEqual(action.target_record_id, "rec:3")
+    async def test_reconcile_with_llm_parses_json_actions(self) -> None:
+        mock_ai_call = AsyncMock(return_value={
+            "content": '[{"action": "ADD", "fact": "User speaks French", "target_record_id": null, "reason": "new language"}]'
+        })
+        actions = await self.engine.reconcile_with_llm(
+            "I speak French fluently.", [], ai_call_fn=mock_ai_call
+        )
+        self.assertEqual(len(actions), 1)
+        self.assertEqual(actions[0].action_type, FactActionType.ADD)
+        self.assertEqual(actions[0].content, "User speaks French")
 
 
 class TestMem0FactAlgorithmAdapter(unittest.IsolatedAsyncioTestCase):

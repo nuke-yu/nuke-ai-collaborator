@@ -31,8 +31,31 @@ class FailureInsight:
     relevancy_score: float = 0.9
 
 
+AUTOGEN_FAILURE_SYSTEM_PROMPT = """You are an AutoGen Task-Centric Failure Reflection Agent.
+Analyze the user's failed task execution trace, tool execution logs, and error outputs.
+Diagnose the root cause category and formulate a precise, actionable corrective insight.
+
+Categories:
+- path_not_found
+- invalid_argument
+- permission_denied
+- timeout
+- syntax_error
+- execution_error
+- unknown_failure
+
+Return ONLY a JSON object:
+{
+  "category": "path_not_found" | "invalid_argument" | "permission_denied" | "timeout" | "syntax_error" | "execution_error" | "unknown_failure",
+  "insight_summary": "Detailed root cause explanation",
+  "corrective_action": "Specific actionable step to prevent this failure",
+  "relevancy_score": 0.95
+}
+"""
+
+
 class AutoGenFailureEngine:
-    """Audit-grade AutoGen failure analysis and corrective insight engine."""
+    """Audit-grade AutoGen failure analysis and corrective insight engine (Supports LLM Prompt & Rule Fallback)."""
 
     _PATH_RE = re.compile(
         r"(file\s*not\s*found|filenotfound|no such file|does not exist|path.*invalid|cannot find)",
@@ -119,3 +142,64 @@ class AutoGenFailureEngine:
             corrective_action="Review tool parameters and handle exceptional state before retrying.",
             relevancy_score=0.80,
         )
+
+    async def analyze_failure_with_llm(
+        self,
+        task: str,
+        errors: Sequence[str],
+        tool_records: Sequence[Mapping[str, Any]] = (),
+        ai_call_fn: Any = None,
+        model: str = "deepseek-chat",
+        provider: str = "deepseek",
+    ) -> FailureInsight:
+        """Perform AutoGen Failure Reflection LLM Prompt diagnosis with rule-based fallback."""
+        combined_text = "\n".join(errors) if errors else ""
+        for rec in tool_records:
+            if rec.get("is_error"):
+                combined_text += f"\n{rec.get('name')}: {rec.get('result')}"
+
+        if not combined_text.strip():
+            return self.analyze_failure(task, errors, tool_records)
+
+        prompt = (
+            f"Failed Task: {task}\n\n"
+            f"Error Traces & Tool Outputs:\n{combined_text[:3000]}\n\n"
+            "Diagnose root cause and return JSON with category, insight_summary, corrective_action, relevancy_score."
+        )
+
+        try:
+            if ai_call_fn is None:
+                from ai.client import call_ai_once
+                ai_call_fn = call_ai_once
+
+            res = await ai_call_fn(
+                AUTOGEN_FAILURE_SYSTEM_PROMPT,
+                [{"role": "user", "content": prompt}],
+                provider=provider,
+                model=model,
+                temperature=0.1,
+            )
+            content = res.get("content", "") if isinstance(res, dict) else str(res)
+            import json
+            match = re.search(r"\{.*\}", content, re.DOTALL)
+            if not match:
+                raise ValueError("No JSON object found in LLM output")
+            obj = json.loads(match.group(0))
+
+            cat_str = str(obj.get("category", "execution_error")).lower()
+            try:
+                cat = FailureCategory(cat_str)
+            except ValueError:
+                cat = FailureCategory.EXECUTION_ERROR
+
+            return FailureInsight(
+                category=cat,
+                insight_summary=str(obj.get("insight_summary", "LLM failure diagnosis")),
+                corrective_action=str(obj.get("corrective_action", "Follow suggested corrective step")),
+                relevancy_score=float(obj.get("relevancy_score", 0.95)),
+            )
+        except Exception:
+            pass
+
+        return self.analyze_failure(task, errors, tool_records)
+

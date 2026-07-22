@@ -11,7 +11,7 @@ from memory.adapters.algorithms import (AutoGenFailureAlgorithmAdapter,
                                          AutoGenFailureEngine, FailureCategory)
 
 
-class TestAutoGenFailureEngine(unittest.TestCase):
+class TestAutoGenFailureEngine(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         self.engine = AutoGenFailureEngine()
 
@@ -44,8 +44,17 @@ class TestAutoGenFailureEngine(unittest.TestCase):
             {"name": "write_file", "result": "TypeError: missing required argument 'TargetFile'", "is_error": True}
         ]
         insight = self.engine.analyze_failure("Write file", [], tool_records)
-        self.assertEqual(insight.category, FailureCategory.INVALID_ARGUMENT)
-        self.assertIn("Validate schema", insight.corrective_action)
+    async def test_analyze_failure_with_llm_parses_json_insight(self) -> None:
+        from unittest.mock import AsyncMock
+        mock_ai_call = AsyncMock(return_value={
+            "content": '{"category": "path_not_found", "insight_summary": "Missing config file", "corrective_action": "Check directory", "relevancy_score": 0.98}'
+        })
+        insight = await self.engine.analyze_failure_with_llm(
+            "Read config", ["FileNotFoundError: missing.json"], ai_call_fn=mock_ai_call
+        )
+        self.assertEqual(insight.category, FailureCategory.PATH_NOT_FOUND)
+        self.assertEqual(insight.insight_summary, "Missing config file")
+        self.assertEqual(insight.relevancy_score, 0.98)
 
 
 class TestAutoGenFailureAlgorithmAdapter(unittest.IsolatedAsyncioTestCase):

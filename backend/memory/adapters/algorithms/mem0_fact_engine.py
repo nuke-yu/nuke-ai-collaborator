@@ -30,8 +30,30 @@ class FactAction:
     reason: str = ""
 
 
+MEM0_SYSTEM_PROMPT = """You are a Memory Management Agent adhering to the Mem0 specification.
+Your goal is to analyze user conversation input alongside existing memory records and extract atomic facts, then reconcile each fact into an action: ADD, UPDATE, DELETE, or NOOP.
+
+Rules:
+- ADD: A new fact about the user or project that is not present in existing records.
+- UPDATE: A fact that updates or modifies an existing record's attribute/value (specify target_record_id and old_content).
+- DELETE: User explicitly refutes or invalidates an existing record (specify target_record_id).
+- NOOP: Fact already exists in memory records or is non-factual chatter.
+
+Return ONLY a JSON array of objects:
+[
+  {
+    "action": "ADD" | "UPDATE" | "DELETE" | "NOOP",
+    "fact": "statement",
+    "target_record_id": "record_id or null",
+    "old_content": "old_text or null",
+    "reason": "short explanation"
+  }
+]
+"""
+
+
 class Mem0FactEngine:
-    """Audit-grade fact extraction and conflict reconciliation engine."""
+    """Audit-grade fact extraction and conflict reconciliation engine (Supports LLM Prompt & Rule Fallback)."""
 
     # Common chatter prefixes and non-factual phrases
     _CHATTER_RE = re.compile(
@@ -201,3 +223,74 @@ class Mem0FactEngine:
         intersection = t1 & t2
         union = t1 | t2
         return len(intersection) / len(union)
+
+    async def reconcile_with_llm(
+        self,
+        user_message: str,
+        existing_records: Sequence[Mapping[str, Any]],
+        ai_call_fn: Any = None,
+        model: str = "deepseek-chat",
+        provider: str = "deepseek",
+    ) -> list[FactAction]:
+        """Perform LLM Prompt-based fact extraction and reconciliation (Mem0 Specification)."""
+        if not user_message or not user_message.strip():
+            return []
+
+        formatted_records = [
+            {"record_id": str(r.get("record_id")), "content": str(r.get("content"))}
+            for r in existing_records
+        ]
+        prompt = (
+            f"User Input:\n{user_message}\n\n"
+            f"Existing Memory Records:\n{formatted_records}\n\n"
+            "Extract facts and reconcile into JSON list according to system prompt rules."
+        )
+
+        try:
+            if ai_call_fn is None:
+                from ai.client import call_ai_once
+                ai_call_fn = call_ai_once
+
+            res = await ai_call_fn(
+                MEM0_SYSTEM_PROMPT,
+                [{"role": "user", "content": prompt}],
+                provider=provider,
+                model=model,
+                temperature=0.1,
+            )
+            content = res.get("content", "") if isinstance(res, dict) else str(res)
+            # Parse JSON from response
+            import json
+            match = re.search(r"\[.*\]", content, re.DOTALL)
+            if not match:
+                raise ValueError("No JSON array found in LLM output")
+            items = json.loads(match.group(0))
+
+            actions: list[FactAction] = []
+            for item in items:
+                act_str = str(item.get("action", "ADD")).upper()
+                try:
+                    act_type = FactActionType(act_str)
+                except ValueError:
+                    act_type = FactActionType.ADD
+
+                actions.append(
+                    FactAction(
+                        action_type=act_type,
+                        content=str(item.get("fact", "")),
+                        target_record_id=item.get("target_record_id"),
+                        old_content=item.get("old_content"),
+                        confidence=0.95,
+                        reason=str(item.get("reason", "llm_reconciled")),
+                    )
+                )
+            if actions:
+                return actions
+        except Exception:
+            # Fall back smoothly to rule-based engine if LLM call fails or returns non-JSON
+            pass
+
+        # Fallback to rule-based extraction
+        candidates = self.extract_candidate_facts(user_message)
+        return [self.reconcile_fact(existing_records, c) for c in candidates]
+

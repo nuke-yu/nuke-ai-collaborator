@@ -23,14 +23,22 @@ class Mem0FactAlgorithmAdapter:
         self._engine = engine or Mem0FactEngine()
 
     async def extract(
-        self, command: ObserveMemory, existing_records: Sequence[Mapping[str, Any]] = ()
+        self,
+        command: ObserveMemory,
+        existing_records: Sequence[Mapping[str, Any]] = (),
+        ai_call_fn: Any = None,
     ) -> Sequence[Mapping[str, Any]]:
-        """Extract candidate facts and reconcile actions against existing records."""
-        candidates = self._engine.extract_candidate_facts(command.content)
-        actions: list[dict[str, Any]] = []
+        """Extract candidate facts and reconcile actions against existing records using LLM Prompt & Rule Fallback."""
+        if ai_call_fn is not None:
+            actions_objs = await self._engine.reconcile_with_llm(
+                command.content, existing_records, ai_call_fn=ai_call_fn
+            )
+        else:
+            candidates = self._engine.extract_candidate_facts(command.content)
+            actions_objs = [self._engine.reconcile_fact(existing_records, c) for c in candidates]
 
-        for fact_text in candidates:
-            action: FactAction = self._engine.reconcile_fact(existing_records, fact_text)
+        actions: list[dict[str, Any]] = []
+        for action in actions_objs:
             actions.append(
                 {
                     "action": str(action.action_type),
