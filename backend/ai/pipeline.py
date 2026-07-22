@@ -24,8 +24,8 @@ async def process_case(case_id: str, group_id: int) -> str:
     from ai.memory import _memory_db
     scope = MemoryScope.group(group_id=group_id, actor_id="pipeline")
     job_id = await _pipeline_repo.enqueue(scope, job_type="evaluate_case", input_id=case_id)
-    claimed = await _pipeline_repo.claim(scope, job_id, lease_seconds=60)
-    if not claimed:
+    lease_token = await _pipeline_repo.claim(scope, job_id, lease_seconds=60)
+    if not lease_token:
         return job_id
     try:
         async with await _memory_db("agent_cases", group_id, write=False) as db:
@@ -46,9 +46,9 @@ async def process_case(case_id: str, group_id: int) -> str:
         output = {"classification": evaluation.classification, "information_gain": evaluation.information_gain,
                   "should_distill": evaluation.should_distill, "confidence": evaluation.confidence,
                   "record_id": record_id, "skill_id": skill_id}
-        await _pipeline_repo.complete(scope, job_id, output_json=json.dumps(output))
+        await _pipeline_repo.complete(scope, job_id, lease_token=lease_token, output_json=json.dumps(output))
     except Exception as exc:
-        await _pipeline_repo.fail(scope, job_id, error_message=str(exc))
+        await _pipeline_repo.fail(scope, job_id, lease_token=lease_token, error_message=str(exc))
         raise
     return job_id
 

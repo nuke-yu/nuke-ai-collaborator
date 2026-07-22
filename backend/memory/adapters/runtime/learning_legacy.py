@@ -122,15 +122,14 @@ class LegacyPipelineJobAdapter:
             await db.commit()
             return lease_token if cur.rowcount == 1 else None
 
-    async def complete(self, scope: MemoryScope, job_id: str, output_json: str = "{}", lease_token: str | None = None) -> bool:
+    async def complete(self, scope: MemoryScope, job_id: str, lease_token: str, output_json: str = "{}") -> bool:
+        if not lease_token:
+            return False
         group_id = self._group_id(scope)
         now = int(time.time() * 1000)
         query = ("UPDATE pipeline_jobs SET status='completed',lease_until=NULL,lease_token=NULL,error='',output_json=?,"
-                 "completed_at=?,updated_at=? WHERE job_id=? AND group_id=? AND status='running'")
-        params: list[Any] = [output_json, now, now, job_id, group_id]
-        if lease_token is not None:
-            query += " AND lease_token=?"
-            params.append(lease_token)
+                 "completed_at=?,updated_at=? WHERE job_id=? AND group_id=? AND status='running' AND lease_token=?")
+        params: list[Any] = [output_json, now, now, job_id, group_id, lease_token]
 
         from ai.memory import _memory_db
         async with await _memory_db("pipeline_jobs", group_id, write=True) as db:
@@ -138,15 +137,14 @@ class LegacyPipelineJobAdapter:
             await db.commit()
             return cur.rowcount == 1
 
-    async def fail(self, scope: MemoryScope, job_id: str, error_message: str, max_attempts: int = 3, lease_token: str | None = None) -> bool:
+    async def fail(self, scope: MemoryScope, job_id: str, lease_token: str, error_message: str, max_attempts: int = 3) -> bool:
+        if not lease_token:
+            return False
         group_id = self._group_id(scope)
         now = int(time.time() * 1000)
         query = ("UPDATE pipeline_jobs SET status=CASE WHEN attempt>=max_attempts THEN 'dead' "
-                 "ELSE 'failed' END,lease_until=NULL,lease_token=NULL,error=?,updated_at=? WHERE job_id=? AND group_id=? AND status='running'")
-        params: list[Any] = [error_message[:2000], now, job_id, group_id]
-        if lease_token is not None:
-            query += " AND lease_token=?"
-            params.append(lease_token)
+                 "ELSE 'failed' END,lease_until=NULL,lease_token=NULL,error=?,updated_at=? WHERE job_id=? AND group_id=? AND status='running' AND lease_token=?")
+        params: list[Any] = [error_message[:2000], now, job_id, group_id, lease_token]
 
         from ai.memory import _memory_db
         async with await _memory_db("pipeline_jobs", group_id, write=True) as db:

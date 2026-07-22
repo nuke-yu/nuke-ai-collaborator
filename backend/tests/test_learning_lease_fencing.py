@@ -50,6 +50,20 @@ class TestLearningLeaseFencing(unittest.IsolatedAsyncioTestCase):
             self.assertIn("lease_token=?", sql_call)
             self.assertIn("status='running'", sql_call)
 
+    async def test_stale_worker_with_mismatched_token_cannot_complete(self) -> None:
+        mock_cursor = MagicMock()
+        mock_cursor.rowcount = 0  # Stale token failed DB match
+
+        mock_db = AsyncMock()
+        mock_db.execute = AsyncMock(return_value=mock_cursor)
+
+        mock_db_ctx = AsyncMock()
+        mock_db_ctx.__aenter__.return_value = mock_db
+
+        with patch("ai.memory._memory_db", return_value=mock_db_ctx):
+            success = await self.adapter.complete(self.scope, "job:1", lease_token="fence:stale_token")
+            self.assertFalse(success)
+
 
 if __name__ == "__main__":
     unittest.main()
