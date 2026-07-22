@@ -9,6 +9,8 @@ from .everos_clustering_adapter import EverOSClusteringAlgorithmAdapter
 from .everos_clustering_engine import CaseCluster, EverOSClusteringEngine
 from .everos_skill_adapter import EverOSSkillAlgorithmAdapter
 from .everos_skill_engine import EverOSSkillEngine, SkillCandidate
+from .hybrid_rerank_adapter import HybridRerankAlgorithmAdapter
+from .hybrid_rerank_engine import HybridRerankEngine
 from .mem0_adapter import Mem0FactAlgorithmAdapter
 from .mem0_fact_engine import FactAction, FactActionType, Mem0FactEngine
 from .voyager_critic_adapter import VoyagerCriticAlgorithmAdapter
@@ -36,6 +38,8 @@ __all__ = [
     "CriticResult",
     "VoyagerCriticEngine",
     "VoyagerCriticAlgorithmAdapter",
+    "HybridRerankEngine",
+    "HybridRerankAlgorithmAdapter",
 ]
 
 
