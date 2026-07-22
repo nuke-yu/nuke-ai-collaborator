@@ -46,7 +46,10 @@ async def process_case(case_id: str, group_id: int) -> str:
         output = {"classification": evaluation.classification, "information_gain": evaluation.information_gain,
                   "should_distill": evaluation.should_distill, "confidence": evaluation.confidence,
                   "record_id": record_id, "skill_id": skill_id}
-        await _pipeline_repo.complete(scope, job_id, lease_token=lease_token, output_json=json.dumps(output))
+        from memory.contracts import LostLeaseError
+        completed = await _pipeline_repo.complete(scope, job_id, lease_token=lease_token, output_json=json.dumps(output))
+        if not completed:
+            raise LostLeaseError(f"Worker lost lease for job {job_id}")
     except Exception as exc:
         await _pipeline_repo.fail(scope, job_id, lease_token=lease_token, error_message=str(exc))
         raise
