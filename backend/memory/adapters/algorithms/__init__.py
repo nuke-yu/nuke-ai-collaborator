@@ -13,6 +13,9 @@ from .hybrid_rerank_adapter import HybridRerankAlgorithmAdapter
 from .hybrid_rerank_engine import HybridRerankEngine
 from .langgraph_adapter import LangGraphDAGAlgorithmAdapter
 from .langgraph_dag_engine import DAGStateCheckpoint, LangGraphDAGEngine
+from .letta_acl_adapter import LettaACLAlgorithmAdapter
+from .letta_acl_engine import (ACLPermissionCheck, ContextBudgetAllocation,
+                                LettaOpenMemoryEngine)
 from .mem0_adapter import Mem0FactAlgorithmAdapter
 from .mem0_fact_engine import FactAction, FactActionType, Mem0FactEngine
 from .voyager_critic_adapter import VoyagerCriticAlgorithmAdapter
@@ -45,6 +48,10 @@ __all__ = [
     "DAGStateCheckpoint",
     "LangGraphDAGEngine",
     "LangGraphDAGAlgorithmAdapter",
+    "ContextBudgetAllocation",
+    "ACLPermissionCheck",
+    "LettaOpenMemoryEngine",
+    "LettaACLAlgorithmAdapter",
 ]
 
 
