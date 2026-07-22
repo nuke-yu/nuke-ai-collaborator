@@ -94,6 +94,23 @@ class MemoryACLPort(MemoryAlgorithmPort, Protocol):
 
 
 @runtime_checkable
+class CaseClusteringPort(MemoryAlgorithmPort, Protocol):
+    async def cluster(self, cases_with_timestamps: Sequence[tuple[Any, float]]) -> Any: ...
+
+
+@runtime_checkable
+class ContextBudgetPort(MemoryAlgorithmPort, Protocol):
+    async def calculate_budget(
+        self,
+        max_tokens: int,
+        system_prompt: str,
+        working_memory: str,
+        recall_memory: str,
+        tool_schemas: Sequence[Mapping[str, Any]] = (),
+    ) -> Any: ...
+
+
+@runtime_checkable
 class TemporalGraphPort(MemoryAlgorithmPort, Protocol):
     async def add_temporal_fact(
         self,
@@ -103,6 +120,8 @@ class TemporalGraphPort(MemoryAlgorithmPort, Protocol):
         fact: str,
         valid_at: float | None = None,
     ) -> Any: ...
+
+    async def get_active_facts(self, as_of: float | None = None) -> Sequence[Any]: ...
 
 
 @runtime_checkable
