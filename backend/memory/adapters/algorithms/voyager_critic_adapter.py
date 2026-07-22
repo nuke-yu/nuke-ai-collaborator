@@ -35,11 +35,3 @@ class VoyagerCriticAlgorithmAdapter:
         return await self._engine.evaluate_success_with_llm(
             task, outcome, tool_records, error_traces, ai_call_fn=ai_call_fn
         )
-
-    async def extract(self, command: ObserveMemory) -> Sequence[Mapping[str, Any]]:
-        """Placeholder for observation extraction."""
-        return ()
-
-    async def retrieve(self, query: RecallMemory) -> Sequence[MemoryHit]:
-        """Placeholder for critic retrieval."""
-        return ()

@@ -37,11 +37,3 @@ class GraphitiTemporalAlgorithmAdapter:
     async def get_active_facts(self, as_of: float | None = None) -> Sequence[TemporalEdge]:
         """Retrieve active temporal facts as of point in time."""
         return self._engine.get_active_edges(as_of=as_of)
-
-    async def extract(self, command: ObserveMemory) -> Sequence[Mapping[str, Any]]:
-        """Placeholder for observation extraction."""
-        return ()
-
-    async def retrieve(self, query: RecallMemory) -> Sequence[MemoryHit]:
-        """Placeholder for temporal graph retrieval."""
-        return ()

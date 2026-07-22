@@ -56,7 +56,3 @@ class Mem0FactAlgorithmAdapter:
             )
 
         return actions
-
-    async def retrieve(self, query: RecallMemory) -> Sequence[MemoryHit]:
-        """Placeholder for algorithm-native retrieval (delegated to repository)."""
-        return ()

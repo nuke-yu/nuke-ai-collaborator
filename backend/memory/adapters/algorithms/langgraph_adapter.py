@@ -32,11 +32,3 @@ class LangGraphDAGAlgorithmAdapter:
     ) -> DAGStateCheckpoint:
         """Create stateful DAG checkpoint."""
         return self._engine.create_checkpoint(thread_id, step_name, state, parent_id)
-
-    async def extract(self, command: ObserveMemory) -> Sequence[Mapping[str, Any]]:
-        """Placeholder for observation extraction."""
-        return ()
-
-    async def retrieve(self, query: RecallMemory) -> Sequence[MemoryHit]:
-        """Placeholder for checkpoint retrieval."""
-        return ()

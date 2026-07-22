@@ -31,11 +31,3 @@ class EverOSCaseAlgorithmAdapter:
             outcome=command.outcome,
             tool_records=command.tool_records,
         )
-
-    async def extract(self, command: ObserveMemory) -> Sequence[Mapping[str, Any]]:
-        """Placeholder for observation extraction."""
-        return ()
-
-    async def retrieve(self, query: RecallMemory) -> Sequence[MemoryHit]:
-        """Placeholder for case retrieval."""
-        return ()

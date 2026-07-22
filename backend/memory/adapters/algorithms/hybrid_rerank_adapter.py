@@ -31,11 +31,3 @@ class HybridRerankAlgorithmAdapter:
     ) -> list[dict[str, Any]]:
         """Rerank candidates using RRF and MMR diversification."""
         return self._engine.rerank(keyword_hits, vector_hits, query, top_k=top_k)
-
-    async def extract(self, command: ObserveMemory) -> Sequence[Mapping[str, Any]]:
-        """Placeholder for observation extraction."""
-        return ()
-
-    async def retrieve(self, query: RecallMemory) -> Sequence[MemoryHit]:
-        """Placeholder for algorithm-native retrieval."""
-        return ()

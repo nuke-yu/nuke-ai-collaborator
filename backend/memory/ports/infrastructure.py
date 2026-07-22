@@ -21,8 +21,72 @@ class AlgorithmDescriptor:
 class MemoryAlgorithmPort(Protocol):
     descriptor: AlgorithmDescriptor
 
+
+@runtime_checkable
+class FactExtractionPort(MemoryAlgorithmPort, Protocol):
     async def extract(self, command: ObserveMemory) -> Sequence[Mapping[str, Any]]: ...
-    async def retrieve(self, query: RecallMemory) -> Sequence[MemoryHit]: ...
+
+
+@runtime_checkable
+class FailureInsightPort(MemoryAlgorithmPort, Protocol):
+    async def analyze_failure(self, task: str, error_traces: Sequence[str]) -> Any: ...
+
+
+@runtime_checkable
+class SuccessCriticPort(MemoryAlgorithmPort, Protocol):
+    async def evaluate(
+        self,
+        task: str,
+        outcome: str,
+        tool_records: Sequence[Mapping[str, Any]] = (),
+        error_traces: Sequence[str] = (),
+        ai_call_fn: Any = None,
+    ) -> Any: ...
+
+
+@runtime_checkable
+class RerankPort(MemoryAlgorithmPort, Protocol):
+    async def rerank(
+        self,
+        keyword_hits: Sequence[Mapping[str, Any]],
+        vector_hits: Sequence[Mapping[str, Any]],
+        query: str,
+        top_k: int = 5,
+    ) -> list[dict[str, Any]]: ...
+
+
+@runtime_checkable
+class DAGCheckpointPort(MemoryAlgorithmPort, Protocol):
+    async def checkpoint(
+        self,
+        thread_id: str,
+        step_name: str,
+        state: Mapping[str, Any],
+        parent_id: str | None = None,
+    ) -> Any: ...
+
+
+@runtime_checkable
+class MemoryACLPort(MemoryAlgorithmPort, Protocol):
+    async def check_acl(
+        self,
+        scope: MemoryScope,
+        requesting_actor_id: str,
+        action: str = "read",
+        actor_group_ids: Sequence[int] | set[int] = (),
+    ) -> Any: ...
+
+
+@runtime_checkable
+class TemporalGraphPort(MemoryAlgorithmPort, Protocol):
+    async def add_temporal_fact(
+        self,
+        source: str,
+        relation: str,
+        target: str,
+        fact: str,
+        valid_at: float | None = None,
+    ) -> Any: ...
 
 
 @runtime_checkable

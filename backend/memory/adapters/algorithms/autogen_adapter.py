@@ -36,11 +36,3 @@ class AutoGenFailureAlgorithmAdapter:
                 task, errors, tool_records, ai_call_fn=ai_call_fn
             )
         return self._engine.analyze_failure(task, errors, tool_records)
-
-    async def extract(self, command: ObserveMemory) -> Sequence[Mapping[str, Any]]:
-        """Placeholder for observation extraction."""
-        return ()
-
-    async def retrieve(self, query: RecallMemory) -> Sequence[MemoryHit]:
-        """Placeholder for failure insight retrieval."""
-        return ()

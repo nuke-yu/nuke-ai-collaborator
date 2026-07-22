@@ -30,11 +30,3 @@ class EverOSClusteringAlgorithmAdapter:
     ) -> Sequence[CaseCluster]:
         """Cluster cases into thematic clusters based on semantic & geometric time metrics."""
         return self._engine.cluster_cases(cases_with_timestamps)
-
-    async def extract(self, command: ObserveMemory) -> Sequence[Mapping[str, Any]]:
-        """Placeholder for observation extraction."""
-        return ()
-
-    async def retrieve(self, query: RecallMemory) -> Sequence[MemoryHit]:
-        """Placeholder for cluster retrieval."""
-        return ()

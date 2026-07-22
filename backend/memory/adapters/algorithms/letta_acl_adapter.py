@@ -48,11 +48,3 @@ class LettaACLAlgorithmAdapter:
         return self._engine.check_acl_access(
             scope, requesting_actor_id, action, actor_group_ids=actor_group_ids
         )
-
-    async def extract(self, command: ObserveMemory) -> Sequence[Mapping[str, Any]]:
-        """Placeholder for observation extraction."""
-        return ()
-
-    async def retrieve(self, query: RecallMemory) -> Sequence[MemoryHit]:
-        """Placeholder for budget retrieval."""
-        return ()

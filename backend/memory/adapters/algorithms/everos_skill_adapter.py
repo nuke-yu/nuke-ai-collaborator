@@ -27,11 +27,3 @@ class EverOSSkillAlgorithmAdapter:
     async def compile_candidate(self, cluster: CaseCluster) -> SkillCandidate | None:
         """Compile candidate skill from case cluster."""
         return self._engine.compile_skill_candidate(cluster)
-
-    async def extract(self, command: ObserveMemory) -> Sequence[Mapping[str, Any]]:
-        """Placeholder for observation extraction."""
-        return ()
-
-    async def retrieve(self, query: RecallMemory) -> Sequence[MemoryHit]:
-        """Placeholder for skill retrieval."""
-        return ()
