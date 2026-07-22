@@ -30,6 +30,12 @@ class TestCreateGroupRouting(unittest.IsolatedAsyncioTestCase):
                     assigned_worker_id TEXT DEFAULT 'w0'
                 )"""
             )
+            await c.execute(
+                """CREATE TABLE group_memberships (
+                    user_id INTEGER NOT NULL, group_id INTEGER NOT NULL,
+                    role TEXT NOT NULL, PRIMARY KEY(user_id,group_id)
+                )"""
+            )
             await c.commit()
 
     async def asyncTearDown(self):
@@ -44,12 +50,20 @@ class TestCreateGroupRouting(unittest.IsolatedAsyncioTestCase):
     async def test_new_group_is_unassigned_despite_legacy_default(self):
         from api.groups import create_group, CreateGroupRequest
         with patch("api.groups.init_group_workspace", new=AsyncMock()):
-            res = await create_group(CreateGroupRequest(name="New Project"))
+            res = await create_group(
+                CreateGroupRequest(name="New Project"),
+                user={"uid": 7, "sub": "owner"},
+            )
         gid = res["id"]
         async with db.write_connect() as c:
             cur = await c.execute("SELECT assigned_worker_id FROM groups WHERE id = ?", (gid,))
             row = await cur.fetchone()
+            cur = await c.execute(
+                "SELECT role FROM group_memberships WHERE user_id=7 AND group_id=?", (gid,)
+            )
+            membership = await cur.fetchone()
         self.assertIsNone(row[0], "new group must be unassigned (NULL), not the 'w0' default")
+        self.assertEqual(membership, ("owner",))
 
 
 if __name__ == "__main__":

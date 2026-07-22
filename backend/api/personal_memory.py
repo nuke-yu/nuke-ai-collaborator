@@ -31,9 +31,16 @@ async def create_personal_projection(body:dict,user=Depends(auth.get_current_use
     gid=int(body.get("group_id",0)); bot_id=body.get("bot_id"); uid=int(user["uid"])
     async with global_db() as db:
         if bot_id is None:
-            async with db.execute("SELECT 1 FROM groups WHERE id=?",(gid,)) as cur: valid=await cur.fetchone()
+            async with db.execute(
+                "SELECT 1 FROM group_memberships gm JOIN groups g ON g.id=gm.group_id "
+                "WHERE gm.user_id=? AND gm.group_id=?", (uid,gid)
+            ) as cur: valid=await cur.fetchone()
         else:
-            async with db.execute("SELECT 1 FROM members WHERE id=? AND group_id=? AND type='bot'",(bot_id,gid)) as cur: valid=await cur.fetchone()
+            async with db.execute(
+                "SELECT 1 FROM group_memberships gm JOIN members m ON m.group_id=gm.group_id "
+                "WHERE gm.user_id=? AND gm.group_id=? AND m.id=? AND m.type='bot'",
+                (uid,gid,bot_id)
+            ) as cur: valid=await cur.fetchone()
     if not valid:raise HTTPException(404,"projection target not found")
     try:
         uid=int(user["uid"])

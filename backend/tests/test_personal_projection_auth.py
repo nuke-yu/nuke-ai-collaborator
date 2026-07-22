@@ -34,7 +34,7 @@ class TestPersonalProjectionAuth(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(cm.exception.status_code, 404)
             self.assertIn("target not found", cm.exception.detail)
 
-    async def test_create_projection_allows_authenticated_user_for_valid_group(self) -> None:
+    async def test_create_projection_allows_group_member_for_valid_group(self) -> None:
         user = {"uid": 10, "sub": "test_user"}
         body = {"group_id": 1, "record_id": "rec:1"}
 
@@ -55,6 +55,27 @@ class TestPersonalProjectionAuth(unittest.IsolatedAsyncioTestCase):
              patch("api.personal_memory.build_personal_knowledge_client", return_value=mock_client):
             res = await create_personal_projection(body=body, user=user)
             self.assertEqual(res, {"projection_id": "proj:100"})
+
+        sql, params = mock_db.execute.call_args.args
+        self.assertIn("group_memberships", sql)
+        self.assertEqual(params, (10, 1))
+
+    async def test_create_projection_rejects_authenticated_non_member(self) -> None:
+        user = {"uid": 11, "sub": "outsider"}
+        body = {"group_id": 1, "record_id": "rec:1"}
+        mock_db_ctx = MagicMock()
+        mock_db = MagicMock()
+        mock_execute_ctx = AsyncMock()
+        mock_cursor = AsyncMock()
+        mock_cursor.fetchone.return_value = None
+        mock_execute_ctx.__aenter__.return_value = mock_cursor
+        mock_db.execute.return_value = mock_execute_ctx
+        mock_db_ctx.__aenter__.return_value = mock_db
+
+        with patch("api.personal_memory.global_db", return_value=mock_db_ctx):
+            with self.assertRaises(HTTPException) as cm:
+                await create_personal_projection(body=body, user=user)
+        self.assertEqual(cm.exception.status_code, 404)
 
 
 if __name__ == "__main__":

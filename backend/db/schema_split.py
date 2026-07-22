@@ -28,7 +28,7 @@ log = logging.getLogger(__name__)
 
 # ── table → domain ────────────────────────────────────────────────────────
 CENTRAL_TABLES = frozenset({
-    "users", "groups", "members", "role_templates", "permission_rules", "cron_jobs",
+    "users", "groups", "group_memberships", "members", "role_templates", "permission_rules", "cron_jobs",
     "unread_counts", "bot_skills", "external_skills", "agent_tasks",
     "agent_task_requests", "agent_task_retry_claims",
 })
@@ -37,7 +37,7 @@ GROUP_TABLES = frozenset({
     "message_reactions", "pinned_messages", "agent_sessions", "session_events",
     "workflow_state", "group_locks", "tickets", "reflection_state", "tool_events",
     "agent_runs", "agent_cases", "memory_records", "experience_usage", "pipeline_jobs", "run_decisions",
-    "skills", "skill_versions", "skill_usage",
+    "skills", "skill_versions", "skill_usage", "skill_promotion_audit",
 })
 
 # ── CENTRAL DDL (final shape; central-internal FKs kept) ──────────────────
@@ -62,6 +62,13 @@ _CENTRAL_DDL = [
         -- would pile onto worker w0 (the hotspot bug).
         assigned_worker_id TEXT DEFAULT NULL,
         away_summary TEXT DEFAULT NULL
+    )""",
+    """CREATE TABLE IF NOT EXISTS group_memberships (
+        user_id INTEGER NOT NULL, group_id INTEGER NOT NULL,
+        role TEXT NOT NULL DEFAULT 'member', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY(user_id,group_id),
+        FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY(group_id) REFERENCES groups(id) ON DELETE CASCADE
     )""",
     """CREATE TABLE IF NOT EXISTS members (
         id               INTEGER PRIMARY KEY AUTOINCREMENT,

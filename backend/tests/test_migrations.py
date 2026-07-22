@@ -27,6 +27,7 @@ from db.migrations import (
     migration_029,
     migration_030,
     migration_031,
+    migration_043,
     run_migrations,
 )
 from db.schema import init_db
@@ -716,6 +717,34 @@ class TestMigration031(MigrationTestCase):
                 "SELECT id, is_operator FROM users ORDER BY id"
             )
             self.assertEqual(await cur.fetchall(), [(1, 0), (5, 1)])
+
+
+class TestMigration043(MigrationTestCase):
+    async def test_backfills_legacy_groups_for_single_user(self):
+        async with self._connect() as conn:
+            await conn.execute("CREATE TABLE users (id INTEGER PRIMARY KEY)")
+            await conn.execute("CREATE TABLE groups (id INTEGER PRIMARY KEY)")
+            await conn.execute("INSERT INTO users VALUES (7)")
+            await conn.executemany("INSERT INTO groups VALUES (?)", [(1,), (2,)])
+
+            await migration_043(conn)
+
+            cur = await conn.execute(
+                "SELECT user_id,group_id,role FROM group_memberships ORDER BY group_id"
+            )
+            self.assertEqual(await cur.fetchall(), [(7, 1, "owner"), (7, 2, "owner")])
+
+    async def test_does_not_grant_legacy_groups_when_multiple_users_exist(self):
+        async with self._connect() as conn:
+            await conn.execute("CREATE TABLE users (id INTEGER PRIMARY KEY)")
+            await conn.execute("CREATE TABLE groups (id INTEGER PRIMARY KEY)")
+            await conn.executemany("INSERT INTO users VALUES (?)", [(7,), (8,)])
+            await conn.execute("INSERT INTO groups VALUES (1)")
+
+            await migration_043(conn)
+
+            cur = await conn.execute("SELECT COUNT(*) FROM group_memberships")
+            self.assertEqual((await cur.fetchone())[0], 0)
 
 
 if __name__ == "__main__":

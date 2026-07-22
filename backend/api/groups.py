@@ -7,6 +7,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, HTTPException, Depends
 
 from api.deps import ensure_group_ready
+from core import auth
 from fastapi.responses import Response
 from db import (get_db, write_connect, global_db, get_group, get_members, get_all_messages, get_member_stats,
                       update_member_setting, update_member_full, clear_bot_context)
@@ -133,7 +134,8 @@ async def get_all_groups():
 
 
 @router.post("/api/groups")
-async def create_group(req: CreateGroupRequest):
+async def create_group(req: CreateGroupRequest, user=Depends(auth.get_current_user)):
+    user_id = int(user["uid"])
     async with write_connect() as db:
         # Explicit NULL assigned_worker_id (don't inherit the legacy DEFAULT 'w0'
         # on older DBs) so the Supervisor spreads the group by modulo instead of
@@ -142,6 +144,10 @@ async def create_group(req: CreateGroupRequest):
             "INSERT INTO groups (name, assigned_worker_id) VALUES (?, NULL)", (req.name,)
         ) as cur:
             group_id = cur.lastrowid
+        await db.execute(
+            "INSERT INTO group_memberships(user_id,group_id,role) VALUES (?,?, 'owner')",
+            (user_id, group_id),
+        )
         await db.commit()
     await init_group_workspace(group_id, req.name)
     return {"id": group_id, "name": req.name}

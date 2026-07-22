@@ -961,6 +961,27 @@ async def migration_042(db):
     await db.commit()
 
 
+async def migration_043(db):
+    cur = await db.execute(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('users','groups')"
+    )
+    if (await cur.fetchone())[0] != 2:
+        return
+    await db.execute("""CREATE TABLE IF NOT EXISTS group_memberships (
+        user_id INTEGER NOT NULL, group_id INTEGER NOT NULL,
+        role TEXT NOT NULL DEFAULT 'member', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY(user_id,group_id),
+        FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY(group_id) REFERENCES groups(id) ON DELETE CASCADE)""")
+    # Preserve legacy single-user installations without granting any implicit
+    # access when multiple identities already exist.
+    await db.execute("""INSERT INTO group_memberships(user_id,group_id,role)
+        SELECT u.id,g.id,'owner' FROM users u CROSS JOIN groups g
+        WHERE (SELECT COUNT(*) FROM users)=1
+        ON CONFLICT(user_id,group_id) DO NOTHING""")
+    await db.commit()
+
+
 MIGRATIONS: list = [
     migration_001,
     migration_002,
@@ -1004,6 +1025,7 @@ MIGRATIONS: list = [
     migration_040,
     migration_041,
     migration_042,
+    migration_043,
 ]
 
 
