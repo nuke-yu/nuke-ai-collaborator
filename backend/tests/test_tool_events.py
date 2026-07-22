@@ -329,6 +329,22 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(json.loads(jobs[0][2])["should_distill"])
         self.assertEqual(count, 1)
 
+    async def test_pipeline_input_versions_create_distinct_jobs(self):
+        case_id = await assemble_case(
+            run_id="versioned-pipeline", group_id=7, bot_id=3, task="fix migration",
+            outcome="completed", tool_records=[],
+        )
+        version_one = await process_case(case_id, 7, input_version="1")
+        version_two = await process_case(case_id, 7, input_version="2")
+
+        self.assertNotEqual(version_one, version_two)
+        async with database.connect(TEST_DB_PATH) as db:
+            async with db.execute(
+                "SELECT input_version,status FROM pipeline_jobs ORDER BY input_version"
+            ) as cur:
+                rows = await cur.fetchall()
+        self.assertEqual(rows, [("1", "completed"), ("2", "completed")])
+
     async def test_reflexion_is_bounded_and_persists_decision_trace(self):
         self.assertEqual(classify_failure("run_shell", "command failed"), "correctable_execution")
         runner = SimpleNamespace(

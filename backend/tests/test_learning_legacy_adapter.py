@@ -30,9 +30,10 @@ class TestLegacyLearningAdapter(unittest.IsolatedAsyncioTestCase):
         command = ProcessLearningCase(
             scope=MemoryScope.bot(group_id=9, bot_id=5, actor_id="bot:5"),
             case_id="case:1",
+            input_version="2",
         )
         self.assertEqual(await self.adapter.process_case(command), "job:1")
-        process.assert_awaited_once_with("case:1", 9)
+        process.assert_awaited_once_with("case:1", 9, input_version="2")
 
     @patch("ai.cases.assemble_case", new_callable=AsyncMock)
     async def test_case_assembly_routes_through_scope(self, assemble):

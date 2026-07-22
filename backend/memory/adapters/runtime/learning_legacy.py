@@ -18,7 +18,11 @@ class LegacyLearningAdapter:
     async def process_case(self, command: ProcessLearningCase) -> str:
         group_id = self._group_id(command.scope)
         from ai.pipeline import process_case
-        return await process_case(command.case_id, group_id)
+        return await process_case(
+            command.case_id,
+            group_id,
+            input_version=command.input_version,
+        )
 
     async def assemble_case(self, command: AssembleCase) -> str | None:
         group_id = self._group_id(command.scope)
@@ -160,4 +164,3 @@ class LegacyPipelineJobAdapter:
         if scope.kind not in (ScopeKind.GROUP, ScopeKind.BOT) or scope.group_id is None:
             raise MemoryOperationError("pipeline job operation requires group scope")
         return scope.group_id
-

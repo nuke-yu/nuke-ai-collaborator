@@ -19,11 +19,16 @@ async def enqueue(*, job_type: str, group_id: int, input_id: str,
     return await _pipeline_repo.enqueue(scope, job_type=job_type, input_id=input_id, input_version=input_version)
 
 
-async def process_case(case_id: str, group_id: int) -> str:
+async def process_case(case_id: str, group_id: int, *, input_version: str = "1") -> str:
     """Claim and process one Case job; safe to call repeatedly after a crash."""
     from ai.memory import _memory_db
     scope = MemoryScope.group(group_id=group_id, actor_id="pipeline")
-    job_id = await _pipeline_repo.enqueue(scope, job_type="evaluate_case", input_id=case_id)
+    job_id = await _pipeline_repo.enqueue(
+        scope,
+        job_type="evaluate_case",
+        input_id=case_id,
+        input_version=input_version,
+    )
     lease_token = await _pipeline_repo.claim(scope, job_id, lease_seconds=60)
     if not lease_token:
         return job_id
@@ -54,4 +59,3 @@ async def process_case(case_id: str, group_id: int) -> str:
         await _pipeline_repo.fail(scope, job_id, lease_token=lease_token, error_message=str(exc))
         raise
     return job_id
-
