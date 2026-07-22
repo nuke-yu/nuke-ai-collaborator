@@ -59,6 +59,19 @@ async def compile_candidate(record_id: str, group_id: int) -> str | None:
     return skill_id
 
 
+async def promote_skill(skill_id: str, group_id: int, target_maturity: str = "active") -> bool:
+    """Explicit promotion gate for trial skills (e.g. shadow evaluation or human approval)."""
+    if target_maturity not in {"active", "stable"}:
+        raise ValueError("Invalid target maturity for promotion")
+    from ai.memory import _memory_db
+    now = int(time.time() * 1000)
+    async with await _memory_db("skills", group_id, write=True) as db:
+        cur = await db.execute("UPDATE skills SET maturity=?, updated_at=? WHERE skill_id=? AND group_id=?",
+                               (target_maturity, now, skill_id, group_id))
+        await db.commit()
+        return cur.rowcount == 1
+
+
 async def recall_skills(*, query: str, run_id: str, group_id: int | None,
                         bot_id: int | None, limit: int = 2) -> tuple[str,list[str]]:
     if group_id is None:

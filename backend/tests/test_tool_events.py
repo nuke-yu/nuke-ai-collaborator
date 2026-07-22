@@ -26,7 +26,7 @@ from ai.cases import assemble_case, task_signature
 from ai.cases import evaluate_outcome
 from ai.pipeline import process_case
 from ai.reflexion import classify_failure, maybe_inject
-from ai.skill_learning import compile_candidate, complete_skill_usage, recall_skills, validate_declaration
+from ai.skill_learning import compile_candidate, complete_skill_usage, promote_skill, recall_skills, validate_declaration
 from ai.experiences import complete_usage, decay_experiences, distill_case, recall_experiences
 
 TEST_DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "test_tool_events.db")
@@ -400,6 +400,7 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
         async with database.connect(TEST_DB_PATH) as db:
             await db.execute("UPDATE memory_records SET confidence=.8 WHERE record_id=?",(record_id,)); await db.commit()
         skill_id=await compile_candidate(record_id,7)
+        await promote_skill(skill_id, 7, "active")
         context,ids=await recall_skills(query="repair schema migration",run_id="new-run",group_id=7,bot_id=3)
         self.assertEqual(ids,[skill_id]); self.assertIn("declarative skills",context)
         with patch("ai.skill_learning.project_skill",new=AsyncMock(return_value="x")):
