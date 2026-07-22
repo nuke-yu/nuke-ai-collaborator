@@ -68,7 +68,7 @@ async def recall_skills(*, query: str, run_id: str, group_id: int | None,
     async with await _memory_db("skills",group_id,write=False) as db:
         async with db.execute("""SELECT s.skill_id,s.current_version,v.declaration_json
           FROM skills s JOIN skill_versions v ON v.skill_id=s.skill_id AND v.version=s.current_version
-          WHERE s.group_id=? AND s.bot_id=? AND s.status='active' AND s.maturity IN ('trial','active','stable')""",
+          WHERE s.group_id=? AND s.bot_id=? AND s.status='active' AND s.maturity IN ('active','stable')""",
           (group_id,bot_id)) as cur:
             rows=await cur.fetchall()
     q=_terms(query); ranked=[]
@@ -85,7 +85,12 @@ async def recall_skills(*, query: str, run_id: str, group_id: int | None,
         await db.commit()
     body=[]
     for _,_,_,d in selected:
-        body.append(f"Trigger: {d['trigger']}\nProcedure: " + "; ".join(d["procedure"]))
+        body.append(
+            f"<untrusted_learned_skill>\n"
+            f"Trigger pattern: \"{d.get('trigger', '')}\"\n"
+            f"Procedure: " + "; ".join(d.get("procedure", [])) + "\n"
+            f"</untrusted_learned_skill>"
+        )
     return "[Verified declarative skills]\n"+"\n".join(body),[x[1] for x in selected]
 
 
