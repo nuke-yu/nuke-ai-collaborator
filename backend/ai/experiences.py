@@ -126,7 +126,7 @@ async def recall_experiences(*, query: str, run_id: str, group_id: int | None,
     for _, snippet in selected:
         safe_snippet = snippet.replace("</untrusted_learned_experience>", "")
         formatted_experiences.append(f"<untrusted_learned_experience>\n{safe_snippet}\n</untrusted_learned_experience>")
-    return "[Prior execution experiences]\n" + "\n".join(formatted_experiences), [x[0] for x in selected]
+    return "[Relevant prior execution experience]\n" + "\n".join(formatted_experiences), [x[0] for x in selected]
 
 
 async def complete_usage(*, record_ids: list[str], run_id: str, group_id: int | None,
