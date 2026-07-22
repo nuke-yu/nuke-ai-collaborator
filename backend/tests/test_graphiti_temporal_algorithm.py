@@ -1,0 +1,69 @@
+"""Unit tests for Task 12 (Graphiti SQLite Temporal Graph & Invalidation Engine and Adapter)."""
+from __future__ import annotations
+
+import os
+import sys
+import time
+import unittest
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from memory.adapters.algorithms import (GraphitiTemporalAlgorithmAdapter,
+                                         GraphitiTemporalEngine)
+
+
+class TestGraphitiTemporalEngine(unittest.TestCase):
+    def setUp(self) -> None:
+        self.engine = GraphitiTemporalEngine()
+
+    def test_add_edge_registers_nodes_and_active_edge(self) -> None:
+        t0 = time.time()
+        edge = self.engine.add_edge("User", "lives_in", "Seattle", "User lives in Seattle", valid_at=t0)
+        self.assertEqual(edge.relation, "lives_in")
+        self.assertIsNone(edge.invalid_at)
+
+        active = self.engine.get_active_edges(as_of=t0 + 10)
+        self.assertEqual(len(active), 1)
+        self.assertEqual(active[0].edge_id, edge.edge_id)
+
+    def test_add_conflicting_edge_invalidates_prior_edge_with_timestamp(self) -> None:
+        t0 = 1000.0
+        t1 = 2000.0
+
+        e1 = self.engine.add_edge("User", "lives_in", "Seattle", "User lives in Seattle", valid_at=t0)
+        self.assertIsNone(e1.invalid_at)
+
+        e2 = self.engine.add_edge("User", "lives_in", "San Francisco", "User lives in San Francisco", valid_at=t1)
+        self.assertEqual(e1.invalid_at, t1)
+        self.assertIsNone(e2.invalid_at)
+
+        # Historical query at t0+500 shows e1 active
+        active_t0 = self.engine.get_active_edges(as_of=t0 + 500)
+        self.assertEqual(len(active_t0), 1)
+        self.assertEqual(active_t0[0].edge_id, e1.edge_id)
+
+        # Current query at t1+500 shows e2 active
+        active_t1 = self.engine.get_active_edges(as_of=t1 + 500)
+        self.assertEqual(len(active_t1), 1)
+        self.assertEqual(active_t1[0].edge_id, e2.edge_id)
+
+
+class TestGraphitiTemporalAlgorithmAdapter(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        self.adapter = GraphitiTemporalAlgorithmAdapter()
+
+    async def test_adapter_descriptor_matches_audit_policy(self) -> None:
+        self.assertEqual(self.adapter.descriptor.algorithm_id, "nuke.graphiti.temporal_graph")
+        self.assertEqual(self.adapter.descriptor.source, "Graphiti (Zep AI / Apache-2.0)")
+        self.assertEqual(self.adapter.descriptor.license, "Apache-2.0")
+
+    async def test_adapter_add_and_get_active_facts(self) -> None:
+        edge = await self.adapter.add_temporal_fact("User", "works_at", "Google", "User works at Google")
+        self.assertEqual(edge.relation, "works_at")
+
+        active = await self.adapter.get_active_facts()
+        self.assertEqual(len(active), 1)
+
+
+if __name__ == "__main__":
+    unittest.main()
