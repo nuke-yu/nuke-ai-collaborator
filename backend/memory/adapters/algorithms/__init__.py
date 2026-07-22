@@ -11,6 +11,8 @@ from .everos_skill_adapter import EverOSSkillAlgorithmAdapter
 from .everos_skill_engine import EverOSSkillEngine, SkillCandidate
 from .mem0_adapter import Mem0FactAlgorithmAdapter
 from .mem0_fact_engine import FactAction, FactActionType, Mem0FactEngine
+from .voyager_critic_adapter import VoyagerCriticAlgorithmAdapter
+from .voyager_critic_engine import CriticResult, VoyagerCriticEngine
 
 __all__ = [
     "FactAction",
@@ -31,6 +33,9 @@ __all__ = [
     "SkillCandidate",
     "EverOSSkillEngine",
     "EverOSSkillAlgorithmAdapter",
+    "CriticResult",
+    "VoyagerCriticEngine",
+    "VoyagerCriticAlgorithmAdapter",
 ]
 
 
