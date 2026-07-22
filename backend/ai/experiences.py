@@ -66,9 +66,9 @@ async def distill_case(case_id: str, group_id: int | None) -> str | None:
                 and new_count >= int(existing[3]) + 2
             )
             next_status = "active" if should_reactivate else existing[5]
-            await db.execute("UPDATE memory_records SET status=?,supporting_count=?,source_ids=?,confidence=?,"
+            await db.execute("UPDATE memory_records SET status=?,content=?,supporting_count=?,source_ids=?,confidence=?,"
                              "updated_at=? WHERE record_id=?",
-                             (next_status,new_count,json.dumps(sources),target_confidence,now,existing[0]))
+                             (next_status,content,new_count,json.dumps(sources),target_confidence,now,existing[0]))
             await db.commit()
             target_rid = existing[0]
         else:

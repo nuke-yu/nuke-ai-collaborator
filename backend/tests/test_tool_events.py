@@ -295,6 +295,34 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(rows[0][0], "experience")
         self.assertEqual(json.loads(rows[0][2]), [corrected])
 
+    async def test_experience_vector_projection_matches_canonical_content(self):
+        first = await assemble_case(
+            run_id="canonical-1", group_id=7, bot_id=3, task="fix db",
+            outcome="completed",
+            tool_records=[{"name": "run_shell", "result": "first failure", "is_error": True}],
+        )
+        second = await assemble_case(
+            run_id="canonical-2", group_id=7, bot_id=3, task="fix db",
+            outcome="completed",
+            tool_records=[{"name": "run_shell", "result": "latest failure", "is_error": True}],
+        )
+
+        with patch("ai.experiences._index_vector", new=AsyncMock()) as index_vector:
+            record_id = await distill_case(first, 7)
+            await distill_case(second, 7)
+
+        async with database.connect(TEST_DB_PATH) as db:
+            async with db.execute(
+                "SELECT content,confidence FROM memory_records WHERE record_id=?", (record_id,)
+            ) as cur:
+                canonical_content, confidence = await cur.fetchone()
+        projected_content = index_vector.await_args_list[-1].args[1]
+        projected_confidence = index_vector.await_args_list[-1].args[4]
+        self.assertEqual(projected_content, canonical_content)
+        self.assertEqual(projected_confidence, confidence)
+        self.assertIn("latest failure", canonical_content)
+        self.assertNotIn("first failure", canonical_content)
+
     async def test_recall_tracks_injection_and_execution_cost(self):
         case_id = await assemble_case(
             run_id="source", group_id=7, bot_id=3, task="修复数据库迁移失败",
