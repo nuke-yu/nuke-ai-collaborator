@@ -413,6 +413,44 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
             await db.commit()
         self.assertEqual(await decay_experiences(7, now_ms=100*86_400_000), 1)
 
+    async def test_suspended_experience_requires_hysteresis_to_reactivate(self):
+        case_ids = []
+        for index in range(6):
+            case_ids.append(await assemble_case(
+                run_id=f"hysteresis-{index}", group_id=7, bot_id=3, task="fix db",
+                outcome="completed",
+                tool_records=[{"name": "run_shell", "result": "failed", "is_error": True}],
+            ))
+        record_id = await distill_case(case_ids[0], 7)
+        await distill_case(case_ids[1], 7)
+        for run_id in ("contradiction-1", "contradiction-2"):
+            await recall_experiences(query="fix db", run_id=run_id, group_id=7, bot_id=3)
+            await complete_usage(
+                record_ids=[record_id], run_id=run_id, group_id=7, outcome="failed",
+                input_tokens=1, output_tokens=1, tool_attempts=1,
+            )
+
+        await distill_case(case_ids[2], 7)
+        async with database.connect(TEST_DB_PATH) as db:
+            async with db.execute(
+                "SELECT status,confidence FROM memory_records WHERE record_id=?", (record_id,)
+            ) as cur:
+                after_one = await cur.fetchone()
+        self.assertEqual(after_one[0], "suspended")
+        self.assertAlmostEqual(after_one[1], 0.49)
+
+        for case_id in case_ids[3:6]:
+            await distill_case(case_id, 7)
+        async with database.connect(TEST_DB_PATH) as db:
+            async with db.execute(
+                "SELECT status,confidence,supporting_count,contradicting_count "
+                "FROM memory_records WHERE record_id=?", (record_id,)
+            ) as cur:
+                recovered = await cur.fetchone()
+        self.assertEqual(recovered[0], "active")
+        self.assertAlmostEqual(recovered[1], 0.73)
+        self.assertEqual(recovered[2:], (6, 2))
+
     async def test_candidate_compiler_requires_repeated_evidence_and_is_declarative(self):
         first = await assemble_case(run_id="s1",group_id=7,bot_id=3,task="fix schema",
                                     outcome="completed",tool_records=[{"name":"run_shell","args":{},"result":"x","is_error":True}])

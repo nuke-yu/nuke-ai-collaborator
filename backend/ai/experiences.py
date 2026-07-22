@@ -47,7 +47,8 @@ async def distill_case(case_id: str, group_id: int | None) -> str | None:
     target_rid = None
     target_confidence = 0.73
     async with await _memory_db("memory_records", group_id, write=True) as db:
-        async with db.execute("SELECT record_id,source_ids,supporting_count FROM memory_records "
+        async with db.execute("SELECT record_id,source_ids,supporting_count,contradicting_count,"
+                              "confidence,status FROM memory_records "
                               "WHERE group_id=? AND bot_id=? AND kind='experience' "
                               "AND task_signature=? ORDER BY updated_at DESC LIMIT 1",
                               (group_id,row[0],row[2])) as cur:
@@ -58,10 +59,16 @@ async def distill_case(case_id: str, group_id: int | None) -> str | None:
                 return existing[0]
             sources = prev_sources + [case_id]
             new_count = len(sources)
-            target_confidence = min(0.95, 0.73 + 0.08 * (new_count - 1))
-            await db.execute("UPDATE memory_records SET status='active',supporting_count=?,source_ids=?,confidence=?,"
+            target_confidence = min(0.95, float(existing[4]) + 0.08)
+            should_reactivate = (
+                existing[5] == "suspended"
+                and target_confidence >= 0.7
+                and new_count >= int(existing[3]) + 2
+            )
+            next_status = "active" if should_reactivate else existing[5]
+            await db.execute("UPDATE memory_records SET status=?,supporting_count=?,source_ids=?,confidence=?,"
                              "updated_at=? WHERE record_id=?",
-                             (new_count,json.dumps(sources),target_confidence,now,existing[0]))
+                             (next_status,new_count,json.dumps(sources),target_confidence,now,existing[0]))
             await db.commit()
             target_rid = existing[0]
         else:
