@@ -206,7 +206,6 @@ class FailPipelineJob:
     scope: MemoryScope
     job_id: str
     error_message: str
-    max_attempts: int = 3
 
     def __post_init__(self) -> None:
         if not self.job_id.strip():

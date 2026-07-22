@@ -64,6 +64,25 @@ class TestLearningLeaseFencing(unittest.IsolatedAsyncioTestCase):
             success = await self.adapter.complete(self.scope, "job:1", lease_token="fence:stale_token")
             self.assertFalse(success)
 
+    async def test_fail_uses_persisted_retry_limit(self) -> None:
+        mock_cursor = MagicMock()
+        mock_cursor.rowcount = 1
+        mock_db = AsyncMock()
+        mock_db.execute = AsyncMock(return_value=mock_cursor)
+        mock_db_ctx = AsyncMock()
+        mock_db_ctx.__aenter__.return_value = mock_db
+
+        with patch("ai.memory._memory_db", return_value=mock_db_ctx):
+            success = await self.adapter.fail(
+                self.scope, "job:1", lease_token="fence:valid", error_message="failed"
+            )
+
+        self.assertTrue(success)
+        sql, params = mock_db.execute.await_args.args
+        self.assertIn("attempt>=max_attempts", sql)
+        self.assertNotIn("attempt>=?", sql)
+        self.assertEqual(params[0], "failed")
+
 
 if __name__ == "__main__":
     unittest.main()
