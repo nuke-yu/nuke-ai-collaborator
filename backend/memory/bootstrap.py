@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from memory.adapters.runtime import (LegacyConversationMemoryAdapter, LegacyLearningAdapter,
                                      LegacyPersonalKnowledgeAdapter)
+from memory.application import AuthorizedPersonalKnowledgeService
+from memory.domain import Principal
 from memory.ports import MemoryACLPort
 
 
@@ -18,8 +20,11 @@ def build_memory_client(bot: dict | None = None) -> LegacyConversationMemoryAdap
     return LegacyConversationMemoryAdapter(get_memory_provider(bot))
 
 
-def build_personal_knowledge_client() -> LegacyPersonalKnowledgeAdapter:
-    return LegacyPersonalKnowledgeAdapter()
+def build_personal_knowledge_client(principal: Principal) -> AuthorizedPersonalKnowledgeService:
+    """Build the fail-closed personal-memory application boundary."""
+    return AuthorizedPersonalKnowledgeService(
+        LegacyPersonalKnowledgeAdapter(), build_memory_acl(), principal
+    )
 
 
 def build_learning_client() -> LegacyLearningAdapter:

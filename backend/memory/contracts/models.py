@@ -14,6 +14,10 @@ class MemoryOperationError(RuntimeError):
     """A public, transport-safe failure raised by a Memory use case."""
 
 
+class MemoryAuthorizationError(MemoryOperationError):
+    """Raised when a principal cannot perform a Memory use case."""
+
+
 class LostLeaseError(MemoryOperationError):
     """Raised when a worker attempts to complete a job after losing its lease token."""
 

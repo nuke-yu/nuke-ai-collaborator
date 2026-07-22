@@ -21,6 +21,7 @@ from memory.bootstrap import (
     build_memory_client,
     build_personal_knowledge_client,
 )
+from memory.domain import Principal
 import workspace as _ws
 from core.orchestration.ai_service import AIService
 from ai.model_limits import resolve_max_tokens
@@ -111,7 +112,13 @@ class ToolLoopRunner:
         self.provider = self.bot.get("model_provider", "deepseek")
         self.memory = build_memory_client(self.bot)
         self.learning = build_learning_client()
-        self.personal = build_personal_knowledge_client()
+        personal_user_id = getattr(ctx, "personal_user_id", None)
+        self.personal = (
+            build_personal_knowledge_client(
+                Principal.user(personal_user_id, [ctx.group_id])
+            )
+            if personal_user_id is not None and ctx.group_id is not None else None
+        )
         self.temperature = self.bot.get("temperature", 0.7)
         self.max_tokens = resolve_max_tokens(self.provider, self.model_name, self.bot.get("max_tokens"))
         

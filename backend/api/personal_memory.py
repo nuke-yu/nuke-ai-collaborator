@@ -1,24 +1,29 @@
 from fastapi import APIRouter, Depends, HTTPException
 from core import auth
 from db import global_db
-from memory.bootstrap import build_memory_acl, build_personal_knowledge_client
+from memory.bootstrap import build_personal_knowledge_client
 from memory.contracts import (CreatePersonalProjection, CreatePersonalRecord,
-                              IngestPersonalKnowledge, ObservePersonalHabit)
+                              IngestPersonalKnowledge, MemoryAuthorizationError,
+                              ObservePersonalHabit)
 from memory.domain import MemoryScope, Principal
 
 router=APIRouter()
 
+
+def _personal_client(uid: int, group_ids=()):
+    return build_personal_knowledge_client(Principal.user(uid, group_ids))
+
 @router.get("/api/personal/memory")
 async def export_personal_memory(user=Depends(auth.get_current_user)):
     uid=int(user["uid"])
-    return await build_personal_knowledge_client().export(MemoryScope.personal(
+    return await _personal_client(uid).export(MemoryScope.personal(
         user_id=uid,actor_id=f"user:{uid}",purpose="personal_memory_export"))
 
 @router.post("/api/personal/memory/records")
 async def create_personal_record(body:dict,user=Depends(auth.get_current_user)):
     try:
         uid=int(user["uid"])
-        record_id=await build_personal_knowledge_client().create_record(CreatePersonalRecord(
+        record_id=await _personal_client(uid).create_record(CreatePersonalRecord(
           scope=MemoryScope.personal(user_id=uid,actor_id=f"user:{uid}",purpose="personal_record_create"),
           kind=body["kind"],content=body["content"],source_type=body.get("source_type","manual"),
           source_id=body.get("source_id",""),speaker=body.get("speaker",user.get("sub","")),
@@ -42,26 +47,14 @@ async def create_personal_projection(body:dict,user=Depends(auth.get_current_use
                 (uid,gid,bot_id)
             ) as cur: valid=await cur.fetchone()
     if not valid:raise HTTPException(404,"projection target not found")
-    principal = Principal.user(user_id=uid, group_ids=[int(valid[0])])
-    acl = build_memory_acl()
-    source_scope = MemoryScope.personal(
-        user_id=uid, actor_id=f"user:{uid}", group_id=gid,
-        purpose="personal_projection_source",
-    )
-    target_scope = MemoryScope.group(
-        group_id=gid, actor_id=f"user:{uid}", purpose="personal_projection_target"
-    )
-    source_check = await acl.check_acl(source_scope, principal=principal, action="project")
-    target_check = await acl.check_acl(target_scope, principal=principal, action="project")
-    if not source_check.allowed or not target_check.allowed:
-        raise HTTPException(403, "personal projection is not permitted")
     try:
         uid=int(user["uid"])
-        projection_id=await build_personal_knowledge_client().create_projection(CreatePersonalProjection(
+        projection_id=await _personal_client(uid, [int(valid[0])]).create_projection(CreatePersonalProjection(
           scope=MemoryScope.personal(user_id=uid,actor_id=f"user:{uid}",group_id=gid,
                                      purpose="personal_projection_create"),
           record_id=body["record_id"],target_group_id=gid,target_bot_id=bot_id,
           purpose=body.get("purpose","assistant_context"),expires_at=body.get("expires_at")))
+    except MemoryAuthorizationError as exc:raise HTTPException(403,str(exc))
     except (KeyError,ValueError) as exc:raise HTTPException(400,str(exc))
     return {"projection_id":projection_id}
 
@@ -69,7 +62,7 @@ async def create_personal_projection(body:dict,user=Depends(auth.get_current_use
 async def ingest_personal_source(body:dict,user=Depends(auth.get_current_user)):
     try:
         uid=int(user["uid"])
-        record_id=await build_personal_knowledge_client().ingest(IngestPersonalKnowledge(
+        record_id=await _personal_client(uid).ingest(IngestPersonalKnowledge(
           scope=MemoryScope.personal(user_id=uid,actor_id=f"user:{uid}",purpose="personal_source_ingest"),
           kind=body["kind"],statement=body["statement"],source_type=body["source_type"],
           source_id=body["source_id"],speaker=body.get("speaker",""),
@@ -83,7 +76,7 @@ async def ingest_personal_source(body:dict,user=Depends(auth.get_current_user)):
 async def observe_personal_habit(body:dict,user=Depends(auth.get_current_user)):
     try:
         uid=int(user["uid"])
-        record_id=await build_personal_knowledge_client().observe_habit(ObservePersonalHabit(
+        record_id=await _personal_client(uid).observe_habit(ObservePersonalHabit(
           scope=MemoryScope.personal(user_id=uid,actor_id=f"user:{uid}",purpose="personal_habit_observe"),
           habit_key=body["habit_key"],statement=body["statement"],source_type=body["source_type"],
           source_id=body["source_id"],context_kind=body["context_kind"],
@@ -94,12 +87,12 @@ async def observe_personal_habit(body:dict,user=Depends(auth.get_current_user)):
 @router.post("/api/personal/memory/rebuild")
 async def rebuild_personal_memory(user=Depends(auth.get_current_user)):
     uid=int(user["uid"])
-    return await build_personal_knowledge_client().rebuild(MemoryScope.personal(
+    return await _personal_client(uid).rebuild(MemoryScope.personal(
         user_id=uid,actor_id=f"user:{uid}",purpose="personal_memory_rebuild"))
 
 @router.delete("/api/personal/memory")
 async def delete_personal_memory(user=Depends(auth.get_current_user)):
     uid=int(user["uid"])
-    deleted=await build_personal_knowledge_client().delete(MemoryScope.personal(
+    deleted=await _personal_client(uid).delete(MemoryScope.personal(
         user_id=uid,actor_id=f"user:{uid}",purpose="personal_memory_deletion"))
     return {"deleted":deleted}

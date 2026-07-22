@@ -17,6 +17,7 @@ from .models import (
     MemoryEvent,
     MemoryEventType,
     MemoryHit,
+    MemoryAuthorizationError,
     MemoryOperationError,
     LostLeaseError,
     ObserveMemory,
@@ -45,6 +46,7 @@ __all__ = [
     "MemoryEvent",
     "MemoryEventType",
     "MemoryHit",
+    "MemoryAuthorizationError",
     "MemoryOperationError",
     "LostLeaseError",
     "ObserveMemory",
@@ -55,4 +57,3 @@ __all__ = [
     "RecallResult",
     "RecallSkills",
 ]
-

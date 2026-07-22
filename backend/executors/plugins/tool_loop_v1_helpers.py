@@ -14,7 +14,7 @@ from ai.client import call_ai_once, AIError
 from memory.contracts import (AssembleCase, CompleteExperienceUsage, CompleteSkillUsage,
                               FormatProjectedContext, ObserveMemory, ProcessLearningCase,
                               RecallExperiences, RecallMemory, RecallSkills)
-from memory.domain import MemoryScope
+from memory.domain import MemoryScope, Principal
 from core.role_router import build_context_message, build_image_content
 from workspace import load_context_files, format_context_blocks, append_log, archive_run
 import workspace as _ws
@@ -348,7 +348,9 @@ async def setup_session(runner) -> None:
         personal_port = getattr(runner, "personal", None)
         if personal_port is None:
             from memory.bootstrap import build_personal_knowledge_client
-            personal_port = build_personal_knowledge_client()
+            personal_port = build_personal_knowledge_client(
+                Principal.user(runner.ctx.personal_user_id, [runner.ctx.group_id])
+            )
         personal_context = await personal_port.format_projected_context(
             FormatProjectedContext(scope=personal_scope)
         )
