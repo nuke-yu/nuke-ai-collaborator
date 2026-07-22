@@ -4,6 +4,7 @@ from __future__ import annotations
 import inspect
 import os
 import sys
+import types
 import typing
 import unittest
 
@@ -35,6 +36,31 @@ from memory.ports.infrastructure import (
     SuccessCriticPort,
     TemporalGraphPort,
 )
+
+
+def _annotation_is_compatible(protocol_type: object, adapter_type: object) -> bool:
+    """Return whether an adapter annotation is a safe specialization of a port."""
+    if protocol_type is typing.Any:
+        return adapter_type is not inspect.Signature.empty
+    if protocol_type == adapter_type:
+        return True
+    protocol_origin = typing.get_origin(protocol_type)
+    adapter_origin = typing.get_origin(adapter_type)
+    if protocol_origin in (typing.Union, types.UnionType):
+        protocol_args = typing.get_args(protocol_type)
+        adapter_args = typing.get_args(adapter_type)
+        return bool(adapter_args) and all(
+            any(_annotation_is_compatible(expected, actual) for expected in protocol_args)
+            for actual in adapter_args
+        )
+    if protocol_origin is not None and protocol_origin == adapter_origin:
+        protocol_args = typing.get_args(protocol_type)
+        adapter_args = typing.get_args(adapter_type)
+        return len(protocol_args) == len(adapter_args) and all(
+            _annotation_is_compatible(expected, actual)
+            for expected, actual in zip(protocol_args, adapter_args)
+        )
+    return False
 
 
 class TestProtocolConformance(unittest.TestCase):
@@ -94,27 +120,46 @@ class TestProtocolConformance(unittest.TestCase):
                     adapter_method,
                     f"{adapter_cls.__name__} is missing method '{method_name}' from {port_cls.__name__}",
                 )
-                if inspect.iscoroutinefunction(port_method):
-                    self.assertTrue(
-                        inspect.iscoroutinefunction(adapter_method),
-                        f"{adapter_cls.__name__}.{method_name} must be an async coroutine function matching {port_cls.__name__}.{method_name}",
-                    )
+                self.assertEqual(
+                    inspect.iscoroutinefunction(adapter_method),
+                    inspect.iscoroutinefunction(port_method),
+                    f"{adapter_cls.__name__}.{method_name} sync/async kind differs from {port_cls.__name__}.{method_name}",
+                )
                 port_sig = inspect.signature(port_method)
                 adapter_sig = inspect.signature(adapter_method)
-                port_params = set(port_sig.parameters.keys()) - {"self"}
-                adapter_params = set(adapter_sig.parameters.keys()) - {"self"}
-                self.assertTrue(
-                    port_params.issubset(adapter_params),
-                    f"{adapter_cls.__name__}.{method_name} parameter set {adapter_params} missing protocol parameters {port_params}",
-                )
-                extra_params = adapter_params - port_params
-                for ep in extra_params:
-                    pobj = adapter_sig.parameters[ep]
+                port_params = [p for name, p in port_sig.parameters.items() if name != "self"]
+                adapter_params = [p for name, p in adapter_sig.parameters.items() if name != "self"]
+                self.assertGreaterEqual(len(adapter_params), len(port_params))
+                for expected, actual in zip(port_params, adapter_params):
+                    self.assertEqual(actual.name, expected.name)
+                    self.assertEqual(actual.kind, expected.kind)
+                    self.assertEqual(actual.default, expected.default)
+                for extra in adapter_params[len(port_params):]:
                     self.assertNotEqual(
-                        pobj.default,
+                        extra.default,
                         inspect.Parameter.empty,
-                        f"{adapter_cls.__name__}.{method_name} has extra parameter '{ep}' without default value",
+                        f"{adapter_cls.__name__}.{method_name} has extra parameter '{extra.name}' without default value",
                     )
+
+                port_hints = typing.get_type_hints(port_method)
+                adapter_hints = typing.get_type_hints(adapter_method)
+                for expected in port_params:
+                    self.assertIn(expected.name, port_hints)
+                    self.assertIn(expected.name, adapter_hints)
+                    self.assertTrue(
+                        _annotation_is_compatible(
+                            port_hints[expected.name], adapter_hints[expected.name]
+                        ),
+                        f"{adapter_cls.__name__}.{method_name} annotation for '{expected.name}' "
+                        f"({adapter_hints[expected.name]!r}) is incompatible with "
+                        f"{port_cls.__name__} ({port_hints[expected.name]!r})",
+                    )
+                self.assertIn("return", port_hints)
+                self.assertIn("return", adapter_hints)
+                self.assertTrue(
+                    _annotation_is_compatible(port_hints["return"], adapter_hints["return"]),
+                    f"{adapter_cls.__name__}.{method_name} return annotation is incompatible",
+                )
 
     def test_type_hints_introspection_without_name_errors(self) -> None:
         import memory.ports.infrastructure as infra
