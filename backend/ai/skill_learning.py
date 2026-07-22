@@ -81,7 +81,7 @@ async def recall_skills(*, query: str, run_id: str, group_id: int | None,
     async with await _memory_db("skills",group_id,write=False) as db:
         async with db.execute("""SELECT s.skill_id,s.current_version,v.declaration_json
           FROM skills s JOIN skill_versions v ON v.skill_id=s.skill_id AND v.version=s.current_version
-          WHERE s.group_id=? AND s.bot_id=? AND s.status='active' AND s.maturity IN ('active','stable')""",
+          WHERE s.group_id=? AND s.bot_id=? AND s.status='active' AND s.maturity IN ('trial','active','stable')""",
           (group_id,bot_id)) as cur:
             rows=await cur.fetchall()
     q=_terms(query); ranked=[]
@@ -114,17 +114,18 @@ async def complete_skill_usage(*, skill_ids:list[str],run_id:str,group_id:int|No
     now=int(time.time()*1000)
     async with await _memory_db("skills",group_id,write=True) as db:
         for skill_id in skill_ids:
-            await db.execute("UPDATE skill_usage SET outcome=? WHERE skill_id=? AND run_id=?",
+            cur = await db.execute("UPDATE skill_usage SET outcome=?, state='executed' WHERE skill_id=? AND run_id=? AND state!='executed'",
                              (outcome,skill_id,run_id))
-            if outcome=="completed":
-                await db.execute("""UPDATE skills SET success_count=success_count+1,
-                  maturity=CASE WHEN maturity='trial' THEN 'active'
-                    WHEN maturity='active' AND success_count+1>=3 THEN 'stable' ELSE maturity END,
-                  updated_at=? WHERE skill_id=?""",(now,skill_id))
-            else:
-                await db.execute("""UPDATE skills SET failure_count=failure_count+1,
-                  status=CASE WHEN failure_count+1>=2 THEN 'suspended' ELSE status END,
-                  updated_at=? WHERE skill_id=?""",(now,skill_id))
+            if cur.rowcount == 1:
+                if outcome=="completed":
+                    await db.execute("""UPDATE skills SET success_count=success_count+1,
+                      maturity=CASE WHEN maturity='trial' THEN 'active'
+                        WHEN maturity='active' AND success_count+1>=3 THEN 'stable' ELSE maturity END,
+                      updated_at=? WHERE skill_id=?""",(now,skill_id))
+                else:
+                    await db.execute("""UPDATE skills SET failure_count=failure_count+1,
+                      status=CASE WHEN failure_count+1>=2 THEN 'suspended' ELSE status END,
+                      updated_at=? WHERE skill_id=?""",(now,skill_id))
         await db.commit()
     for skill_id in skill_ids:
         await project_skill(skill_id,group_id)
