@@ -44,6 +44,8 @@ class TestAutoGenFailureEngine(unittest.IsolatedAsyncioTestCase):
             {"name": "write_file", "result": "TypeError: missing required argument 'TargetFile'", "is_error": True}
         ]
         insight = self.engine.analyze_failure("Write file", [], tool_records)
+        self.assertEqual(insight.category, FailureCategory.INVALID_ARGUMENT)
+        self.assertIn("argument", insight.corrective_action)
     async def test_analyze_failure_with_llm_parses_json_insight(self) -> None:
         from unittest.mock import AsyncMock
         mock_ai_call = AsyncMock(return_value={
