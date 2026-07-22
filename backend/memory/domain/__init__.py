@@ -1,6 +1,6 @@
 """Pure Memory domain types and invariants."""
 
-from .scope import MemoryScope, ScopeKind
+from .scope import MemoryScope, Principal, ScopeKind
 
-__all__ = ["MemoryScope", "ScopeKind"]
+__all__ = ["MemoryScope", "Principal", "ScopeKind"]
 

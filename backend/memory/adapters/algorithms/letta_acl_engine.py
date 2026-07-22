@@ -78,25 +78,37 @@ class LettaOpenMemoryEngine:
     def check_acl_access(
         self,
         scope: MemoryScope,
-        requesting_actor_id: str,
+        requesting_actor_id: str = "",
         action: str = "read",
         actor_group_ids: Sequence[int] | set[int] = (),
+        principal: Principal | None = None,
     ) -> ACLPermissionCheck:
         """Enforce OpenMemory multi-tenant ACL access control policy (Fail-Closed)."""
-        if not requesting_actor_id:
-            return ACLPermissionCheck(allowed=False, reason="Missing requesting actor ID.")
+        from memory.domain import Principal, ScopeKind
+
+        if principal is None:
+            if isinstance(requesting_actor_id, Principal):
+                principal = requesting_actor_id
+            elif requesting_actor_id:
+                # Legacy unauthenticated fallback parsing
+                uid = int(requesting_actor_id.split(":")[1]) if requesting_actor_id.startswith("user:") and requesting_actor_id.split(":")[1].isdigit() else None
+                bid = int(requesting_actor_id.split(":")[1]) if requesting_actor_id.startswith("bot:") and requesting_actor_id.split(":")[1].isdigit() else None
+                principal = Principal(actor_id=requesting_actor_id, user_id=uid, bot_id=bid, group_ids=set(actor_group_ids))
+            else:
+                return ACLPermissionCheck(allowed=False, reason="Missing authenticated principal identity.")
+
+        if not principal or not principal.actor_id:
+            return ACLPermissionCheck(allowed=False, reason="Missing authenticated principal identity.")
 
         valid_actions = {"read", "write", "delete", "project"}
         if action not in valid_actions:
             return ACLPermissionCheck(allowed=False, reason=f"Access denied: Unsupported action '{action}'.")
 
-        group_set = set(actor_group_ids)
-        from memory.domain import ScopeKind
+        group_set = principal.group_ids | set(actor_group_ids)
 
         # Scope Kind: Personal Vault Memory
         if scope.kind == ScopeKind.PERSONAL:
-            expected_user_actor = f"user:{scope.user_id}"
-            if requesting_actor_id == expected_user_actor:
+            if principal.user_id is not None and principal.user_id == scope.user_id:
                 return ACLPermissionCheck(allowed=True, reason="Personal vault owner access granted.")
             return ACLPermissionCheck(allowed=False, reason=f"Access denied: Personal memory belongs to user {scope.user_id}.")
 
@@ -108,7 +120,7 @@ class LettaOpenMemoryEngine:
 
         # Scope Kind: Bot Memory
         if scope.kind == ScopeKind.BOT:
-            if scope.actor_id == requesting_actor_id:
+            if principal.bot_id is not None and principal.bot_id == scope.bot_id:
                 return ACLPermissionCheck(allowed=True, reason="Bot self-access granted.")
             if scope.group_id is not None and scope.group_id in group_set:
                 return ACLPermissionCheck(allowed=True, reason=f"Access granted: Actor belongs to bot group {scope.group_id}.")

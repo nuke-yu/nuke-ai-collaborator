@@ -1,8 +1,29 @@
 """Isolation boundary carried by every Memory command and query."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
+from typing import Sequence
+
+
+@dataclass(frozen=True, slots=True)
+class Principal:
+    """Authenticated caller identity principal for ACL access control."""
+    actor_id: str
+    user_id: int | None = None
+    bot_id: int | None = None
+    group_ids: set[int] = field(default_factory=set)
+
+    @classmethod
+    def user(cls, user_id: int, group_ids: Sequence[int] | set[int] = ()) -> "Principal":
+        return cls(actor_id=f"user:{user_id}", user_id=user_id, group_ids=set(group_ids))
+
+    @classmethod
+    def bot(cls, bot_id: int, group_id: int | None = None, group_ids: Sequence[int] | set[int] = ()) -> "Principal":
+        gset = set(group_ids)
+        if group_id is not None:
+            gset.add(group_id)
+        return cls(actor_id=f"bot:{bot_id}", bot_id=bot_id, group_ids=gset)
 
 
 class ScopeKind(StrEnum):

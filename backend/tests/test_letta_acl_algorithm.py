@@ -51,6 +51,14 @@ class TestLettaOpenMemoryEngine(unittest.TestCase):
         self.assertFalse(check.allowed)
         self.assertIn("user 10", check.reason)
 
+    def test_check_acl_access_blocks_spoofed_principal_personal_access(self) -> None:
+        from memory.domain import Principal
+        scope = MemoryScope.personal(user_id=10, group_id=1, actor_id="user:10")
+        # Attacker sends spoofed requesting_actor_id="user:10", but their authenticated Principal has user_id=99
+        attacker_principal = Principal.user(user_id=99, group_ids=[1])
+        check = self.engine.check_acl_access(scope, requesting_actor_id="user:10", principal=attacker_principal)
+        self.assertFalse(check.allowed)
+
 
     def test_check_acl_access_blocks_cross_group_access(self) -> None:
         scope = MemoryScope.group(group_id=1, actor_id="user:99")

@@ -71,9 +71,10 @@ class MemoryACLPort(MemoryAlgorithmPort, Protocol):
     async def check_acl(
         self,
         scope: MemoryScope,
-        requesting_actor_id: str,
+        requesting_actor_id: str = "",
         action: str = "read",
         actor_group_ids: Sequence[int] | set[int] = (),
+        principal: Principal | None = None,
     ) -> Any: ...
 
 

@@ -40,11 +40,12 @@ class LettaACLAlgorithmAdapter:
     async def check_acl(
         self,
         scope: MemoryScope,
-        requesting_actor_id: str,
+        requesting_actor_id: str = "",
         action: str = "read",
         actor_group_ids: Sequence[int] | set[int] = (),
+        principal: Principal | None = None,
     ) -> ACLPermissionCheck:
         """Check OpenMemory security ACL permissions."""
         return self._engine.check_acl_access(
-            scope, requesting_actor_id, action, actor_group_ids=actor_group_ids
+            scope, requesting_actor_id=requesting_actor_id, action=action, actor_group_ids=actor_group_ids, principal=principal
         )
