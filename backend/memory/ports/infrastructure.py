@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from contextlib import AbstractAsyncContextManager
 from typing import Any, Mapping, Protocol, Sequence, runtime_checkable
 
 from memory.contracts import MemoryHit, ObserveMemory, RecallMemory
@@ -138,3 +139,27 @@ class PipelineJobRepositoryPort(Protocol):
     async def complete(self, scope: MemoryScope, job_id: str, lease_token: str, output_json: str = "{}") -> bool: ...
     async def fail(self, scope: MemoryScope, job_id: str, lease_token: str, error_message: str) -> bool: ...
 
+
+@runtime_checkable
+class MemoryDatabasePort(Protocol):
+    """Resolve a logical Memory table to an isolated physical connection."""
+
+    async def connect(
+        self, table_name: str, group_id: int | None, *, write: bool
+    ) -> AbstractAsyncContextManager[Any]: ...
+
+
+@runtime_checkable
+class ProjectionDeliveryPort(Protocol):
+    """Deliver a durable canonical-memory event to a derived projection."""
+
+    async def deliver(
+        self, projection_type: str, payload: Mapping[str, Any]
+    ) -> None: ...
+
+
+@runtime_checkable
+class ProjectionReconcilerPort(Protocol):
+    """Rebuild projection intents from canonical state for one tenant."""
+
+    async def reconcile(self, group_id: int) -> int: ...

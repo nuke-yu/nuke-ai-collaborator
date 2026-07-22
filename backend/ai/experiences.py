@@ -37,8 +37,8 @@ async def _enqueue_vector_projection(
     confidence: float,
     now_ms: int,
 ) -> None:
-    from ai.projection_outbox import enqueue_projection
-    await enqueue_projection(
+    from memory.bootstrap import get_memory_module
+    await get_memory_module().projection_outbox.enqueue(
         db,
         event_id=f"experience-vector:{record_id}",
         projection_type="experience_vector_upsert",
@@ -128,8 +128,8 @@ async def distill_case(case_id: str, group_id: int | None) -> str | None:
 
     # Best-effort low-latency delivery. Failure remains durable for the worker's
     # periodic and hydration-time consumers.
-    from ai.projection_outbox import drain_projection_outbox
-    await drain_projection_outbox(
+    from memory.bootstrap import get_memory_module
+    await get_memory_module().projection_outbox.drain(
         group_id, limit=1, event_id=f"experience-vector:{target_rid}"
     )
     return target_rid

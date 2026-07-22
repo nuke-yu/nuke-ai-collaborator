@@ -117,7 +117,10 @@ class TestMemorySilentFailureLogging(unittest.IsolatedAsyncioTestCase):
     改为记录日志但不阻断主流程。"""
 
     async def test_maybe_summarize_logs_on_error_and_does_not_raise(self):
-        with patch("ai.memory.get_db", side_effect=RuntimeError("db-boom-summarize")):
+        with patch(
+            "memory.adapters.runtime.sqlite_legacy.legacy_memory_database.connect",
+            side_effect=RuntimeError("db-boom-summarize"),
+        ):
             with self.assertLogs("ai.memory", level="ERROR") as cm:
                 # member_ids 非空以越过早返回；get_db 抛错被捕获并记日志
                 await memory.maybe_summarize(group_id=1, bot_id=2, role="r", member_ids=[2])
@@ -129,7 +132,10 @@ class TestMemorySilentFailureLogging(unittest.IsolatedAsyncioTestCase):
     async def test_get_memory_context_logs_on_error_and_returns_string(self):
         # 隔离 chroma：retrieve_relevant 返回空，避免触发 embedding 模型下载
         with patch("ai.memory.retrieve_relevant", new=AsyncMock(return_value=[])), \
-             patch("ai.memory.get_db", side_effect=RuntimeError("db-boom-context")):
+             patch(
+                 "memory.adapters.runtime.sqlite_legacy.legacy_memory_database.connect",
+                 side_effect=RuntimeError("db-boom-context"),
+             ):
             with self.assertLogs("ai.memory", level="ERROR") as cm:
                 # thread_id 有值才会走摘要加载分支（即出错点）；自由聊天(None)按设计跳过摘要。
                 result = await memory.get_memory_context(bot_id=2, role="r", query="q", thread_id="disc:t1")

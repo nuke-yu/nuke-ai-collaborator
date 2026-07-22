@@ -75,7 +75,7 @@ class TestMemoryArchitecture(unittest.TestCase):
             "memory.adapters",
         )
         violations = []
-        for layer in ("domain", "application"):
+        for layer in ("domain", "application", "infrastructure"):
             for path in (root / layer).rglob("*.py"):
                 tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
                 for node in ast.walk(tree):
@@ -88,6 +88,18 @@ class TestMemoryArchitecture(unittest.TestCase):
                         if any(module == name or module.startswith(name + ".") for name in forbidden):
                             violations.append(f"{path.relative_to(root)} imports {module}")
         self.assertEqual(violations, [])
+
+    def test_projection_outbox_implementation_is_owned_by_memory(self):
+        backend = Path(__file__).resolve().parents[1]
+        compatibility = (backend / "ai" / "projection_outbox.py").read_text(
+            encoding="utf-8"
+        )
+        implementation = (
+            backend / "memory" / "infrastructure" / "projection_outbox.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("memory.bootstrap", compatibility)
+        self.assertNotIn("INSERT INTO memory_projection_outbox", compatibility)
+        self.assertIn("INSERT INTO memory_projection_outbox", implementation)
 
     def test_tool_loop_depends_on_module_contract_not_legacy_provider(self):
         backend = Path(__file__).resolve().parents[1]

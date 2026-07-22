@@ -116,13 +116,14 @@ class LifecycleManager:
 
     async def _drain_projection_outboxes(self) -> None:
         """Deliver durable memory projections for groups owned by this worker."""
-        from ai.projection_outbox import drain_projection_outbox
+        from memory.bootstrap import get_memory_module
 
         async with self._lock:
             group_ids = tuple(self._active_groups)
+        memory_module = get_memory_module()
         for group_id in group_ids:
             try:
-                await drain_projection_outbox(group_id)
+                await memory_module.drain_groups((group_id,))
             except Exception:
                 log.exception(
                     "lifecycle: failed to drain projection outbox for group %d",
@@ -277,10 +278,8 @@ class LifecycleManager:
                 # then deliver them. This repairs the commit→Chroma crash window
                 # and external vector-index loss without blocking DB migration.
                 try:
-                    from ai.experiences import reconcile_experience_projections
-                    from ai.projection_outbox import drain_projection_outbox
-                    await reconcile_experience_projections(group_id)
-                    await drain_projection_outbox(group_id)
+                    from memory.bootstrap import get_memory_module
+                    await get_memory_module().reconcile_group(group_id)
                 except Exception:
                     log.exception(
                         "lifecycle: failed to reconcile memory projections for group %d",

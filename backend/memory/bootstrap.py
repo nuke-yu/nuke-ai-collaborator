@@ -6,11 +6,22 @@ interchangeable.
 """
 from __future__ import annotations
 
-from memory.adapters.runtime import (LegacyConversationMemoryAdapter, LegacyLearningAdapter,
-                                     LegacyPersonalKnowledgeAdapter)
+from memory.adapters.runtime import (
+    LegacyConversationMemoryAdapter,
+    LegacyExperienceProjectionDelivery,
+    LegacyExperienceProjectionReconciler,
+    LegacyLearningAdapter,
+    LegacyPersonalKnowledgeAdapter,
+    legacy_memory_database,
+    redact_projection_error,
+)
 from memory.application import AuthorizedPersonalKnowledgeService
 from memory.domain import Principal
+from memory.infrastructure import ProjectionOutbox
+from memory.module import MemoryModule
 from memory.ports import MemoryACLPort
+
+_memory_module: MemoryModule | None = None
 
 
 def build_memory_client(bot: dict | None = None) -> LegacyConversationMemoryAdapter:
@@ -36,3 +47,27 @@ def build_memory_acl() -> MemoryACLPort:
     from memory.adapters.algorithms import LettaACLAlgorithmAdapter
 
     return LettaACLAlgorithmAdapter()
+
+
+def build_memory_module(*, drain_interval_seconds: float = 60.0) -> MemoryModule:
+    """Compose an embeddable Memory runtime from host-specific adapters."""
+    delivery = LegacyExperienceProjectionDelivery()
+    outbox = ProjectionOutbox(
+        legacy_memory_database,
+        delivery,
+        error_sanitizer=redact_projection_error,
+    )
+    return MemoryModule(
+        legacy_memory_database,
+        outbox,
+        LegacyExperienceProjectionReconciler(),
+        drain_interval_seconds=drain_interval_seconds,
+    )
+
+
+def get_memory_module() -> MemoryModule:
+    """Return the process-local Memory composition used by legacy callers."""
+    global _memory_module
+    if _memory_module is None:
+        _memory_module = build_memory_module()
+    return _memory_module

@@ -117,7 +117,11 @@ class ProjectionOutboxTest(unittest.IsolatedAsyncioTestCase):
             )
             await db.commit()
 
-        with patch("ai.projection_outbox._deliver", side_effect=delayed_delivery):
+        with patch(
+            "memory.adapters.runtime.projection_legacy."
+            "LegacyExperienceProjectionDelivery.deliver",
+            side_effect=delayed_delivery,
+        ):
             first_drain = asyncio.create_task(drain_projection_outbox(7))
             await started.wait()
             async with database.write_connect(TEST_DB_PATH) as db:
