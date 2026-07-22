@@ -125,6 +125,8 @@ class LettaOpenMemoryEngine:
         if scope.kind == ScopeKind.BOT:
             # Bot Self Access
             if principal.bot_id is not None and principal.bot_id == scope.bot_id:
+                if scope.group_id is not None and scope.group_id not in group_set:
+                    return ACLPermissionCheck(allowed=False, reason=f"Access denied: Bot {principal.bot_id} does not belong to target group {scope.group_id}.")
                 if action in ("read", "write", "delete"):
                     return ACLPermissionCheck(allowed=True, reason="Bot self-access granted.")
                 return ACLPermissionCheck(allowed=False, reason="Access denied: Bot cannot project personal memory.")

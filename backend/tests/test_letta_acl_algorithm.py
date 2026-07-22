@@ -28,7 +28,18 @@ class TestLettaOpenMemoryEngine(unittest.TestCase):
         with self.assertRaises(ValueError):
             Principal(actor_id="bad", user_id=-5)
         with self.assertRaises(ValueError):
-            Principal(actor_id="bad", user_id=1, bot_id=2)
+            Principal(actor_id="user:1", user_id=1, bot_id=2)
+        with self.assertRaises(ValueError):
+            # Counter-example 1: actor_id bot:999 with user_id 10 must be rejected
+            Principal(actor_id="bot:999", user_id=10, group_ids=frozenset({7}))
+
+    def test_check_acl_access_blocks_cross_group_bot_self_access(self) -> None:
+        # Counter-example 2: Bot 5 in Group 1 attempting to access Bot 5 in Group 999 must be denied
+        p = Principal.bot(bot_id=5, group_id=1)
+        scope = MemoryScope.bot(group_id=999, bot_id=5, actor_id="bot:5")
+        check = self.engine.check_acl_access(scope, principal=p, action="delete")
+        self.assertFalse(check.allowed)
+        self.assertIn("does not belong to target group 999", check.reason)
 
     def test_calculate_context_budget_computes_allocations(self) -> None:
         budget = self.engine.calculate_context_budget(

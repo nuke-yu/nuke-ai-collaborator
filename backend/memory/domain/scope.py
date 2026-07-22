@@ -32,6 +32,13 @@ class Principal:
         ):
             raise ValueError("bot_id must be a positive integer when provided")
 
+        if self.user_id is not None and self.actor_id != f"user:{self.user_id}":
+            raise ValueError(f"actor_id '{self.actor_id}' does not match user_id {self.user_id}")
+        if self.bot_id is not None and self.actor_id != f"bot:{self.bot_id}":
+            raise ValueError(f"actor_id '{self.actor_id}' does not match bot_id {self.bot_id}")
+        if self.user_id is None and self.bot_id is None and not (self.actor_id.startswith("system:") or self.actor_id.startswith("service:")):
+            raise ValueError("system/service principal actor_id must start with system: or service:")
+
         gset = frozenset(self.group_ids) if self.group_ids else frozenset()
         for gid in gset:
             if not isinstance(gid, int) or isinstance(gid, bool) or gid <= 0:
