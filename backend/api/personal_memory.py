@@ -28,8 +28,15 @@ async def create_personal_record(body:dict,user=Depends(auth.get_current_user)):
 
 @router.post("/api/personal/memory/projections")
 async def create_personal_projection(body:dict,user=Depends(auth.get_current_user)):
-    gid=int(body.get("group_id",0)); bot_id=body.get("bot_id")
+    gid=int(body.get("group_id",0)); bot_id=body.get("bot_id"); uid=int(user["uid"])
     async with global_db() as db:
+        async with db.execute(
+            "SELECT 1 FROM members WHERE group_id=? AND user_id=? AND type='user'",
+            (gid, uid),
+        ) as cur:
+            user_member = await cur.fetchone()
+        if not user_member:
+            raise HTTPException(403, "Access denied: user is not a member of target group")
         if bot_id is None:
             async with db.execute("SELECT 1 FROM groups WHERE id=?",(gid,)) as cur: valid=await cur.fetchone()
         else:
