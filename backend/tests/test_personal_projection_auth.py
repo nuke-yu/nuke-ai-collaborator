@@ -37,13 +37,13 @@ class TestPersonalProjectionAuth(unittest.IsolatedAsyncioTestCase):
 
     async def test_create_projection_allows_group_member_for_valid_group(self) -> None:
         user = {"uid": 10, "sub": "test_user"}
-        body = {"group_id": 1, "record_id": "rec:1"}
+        body = {"group_id": 7, "record_id": "rec:1"}
 
         mock_db_ctx = MagicMock()
         mock_db = MagicMock()
         mock_execute_ctx = AsyncMock()
         mock_cursor = AsyncMock()
-        mock_cursor.fetchone.return_value = (1,)  # Group 1 exists
+        mock_cursor.fetchone.return_value = (7,)  # Membership in Group 7
 
         mock_execute_ctx.__aenter__.return_value = mock_cursor
         mock_db.execute.return_value = mock_execute_ctx
@@ -62,13 +62,13 @@ class TestPersonalProjectionAuth(unittest.IsolatedAsyncioTestCase):
 
         sql, params = mock_db.execute.call_args.args
         self.assertIn("group_memberships", sql)
-        self.assertEqual(params, (10, 1))
+        self.assertEqual(params, (10, 7))
         self.assertEqual(mock_acl.check_acl.await_count, 2)
         source_call, target_call = mock_acl.check_acl.await_args_list
         self.assertEqual(source_call.kwargs["action"], "project")
         self.assertEqual(source_call.args[0].user_id, 10)
-        self.assertEqual(target_call.args[0].group_id, 1)
-        self.assertEqual(target_call.kwargs["principal"].group_ids, frozenset({1}))
+        self.assertEqual(target_call.args[0].group_id, 7)
+        self.assertEqual(target_call.kwargs["principal"].group_ids, frozenset({7}))
 
     async def test_create_projection_rejects_authenticated_non_member(self) -> None:
         user = {"uid": 11, "sub": "outsider"}
