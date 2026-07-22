@@ -1,10 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException
 from core import auth
 from db import global_db
-from memory.bootstrap import build_personal_knowledge_client
+from memory.bootstrap import build_memory_acl, build_personal_knowledge_client
 from memory.contracts import (CreatePersonalProjection, CreatePersonalRecord,
                               IngestPersonalKnowledge, ObservePersonalHabit)
-from memory.domain import MemoryScope
+from memory.domain import MemoryScope, Principal
 
 router=APIRouter()
 
@@ -42,6 +42,19 @@ async def create_personal_projection(body:dict,user=Depends(auth.get_current_use
                 (uid,gid,bot_id)
             ) as cur: valid=await cur.fetchone()
     if not valid:raise HTTPException(404,"projection target not found")
+    principal = Principal.user(user_id=uid, group_ids=[int(valid[0])])
+    acl = build_memory_acl()
+    source_scope = MemoryScope.personal(
+        user_id=uid, actor_id=f"user:{uid}", group_id=gid,
+        purpose="personal_projection_source",
+    )
+    target_scope = MemoryScope.group(
+        group_id=gid, actor_id=f"user:{uid}", purpose="personal_projection_target"
+    )
+    source_check = await acl.check_acl(source_scope, principal=principal, action="project")
+    target_check = await acl.check_acl(target_scope, principal=principal, action="project")
+    if not source_check.allowed or not target_check.allowed:
+        raise HTTPException(403, "personal projection is not permitted")
     try:
         uid=int(user["uid"])
         projection_id=await build_personal_knowledge_client().create_projection(CreatePersonalProjection(

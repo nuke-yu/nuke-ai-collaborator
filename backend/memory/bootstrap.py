@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from memory.adapters.runtime import (LegacyConversationMemoryAdapter, LegacyLearningAdapter,
                                      LegacyPersonalKnowledgeAdapter)
+from memory.ports import MemoryACLPort
 
 
 def build_memory_client(bot: dict | None = None) -> LegacyConversationMemoryAdapter:
@@ -23,3 +24,10 @@ def build_personal_knowledge_client() -> LegacyPersonalKnowledgeAdapter:
 
 def build_learning_client() -> LegacyLearningAdapter:
     return LegacyLearningAdapter()
+
+
+def build_memory_acl() -> MemoryACLPort:
+    """Build the production ACL policy behind its stable application port."""
+    from memory.adapters.algorithms import LettaACLAlgorithmAdapter
+
+    return LettaACLAlgorithmAdapter()
