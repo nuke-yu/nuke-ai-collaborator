@@ -12,18 +12,42 @@ class Principal:
     actor_id: str
     user_id: int | None = None
     bot_id: int | None = None
-    group_ids: set[int] = field(default_factory=set)
+    group_ids: frozenset[int] = field(default_factory=frozenset)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.actor_id, str) or not self.actor_id.strip():
+            raise ValueError("actor_id is required and must be a non-empty string")
+        if self.user_id is not None and self.bot_id is not None:
+            raise ValueError("principal cannot have both user_id and bot_id")
+        if self.user_id is not None and (
+            not isinstance(self.user_id, int)
+            or isinstance(self.user_id, bool)
+            or self.user_id <= 0
+        ):
+            raise ValueError("user_id must be a positive integer when provided")
+        if self.bot_id is not None and (
+            not isinstance(self.bot_id, int)
+            or isinstance(self.bot_id, bool)
+            or self.bot_id <= 0
+        ):
+            raise ValueError("bot_id must be a positive integer when provided")
+
+        gset = frozenset(self.group_ids) if self.group_ids else frozenset()
+        for gid in gset:
+            if not isinstance(gid, int) or isinstance(gid, bool) or gid <= 0:
+                raise ValueError("group_ids must contain positive integers")
+        object.__setattr__(self, "group_ids", gset)
 
     @classmethod
-    def user(cls, user_id: int, group_ids: Sequence[int] | set[int] = ()) -> "Principal":
-        return cls(actor_id=f"user:{user_id}", user_id=user_id, group_ids=set(group_ids))
+    def user(cls, user_id: int, group_ids: Sequence[int] | set[int] | frozenset[int] = ()) -> "Principal":
+        return cls(actor_id=f"user:{user_id}", user_id=user_id, group_ids=frozenset(group_ids))
 
     @classmethod
-    def bot(cls, bot_id: int, group_id: int | None = None, group_ids: Sequence[int] | set[int] = ()) -> "Principal":
+    def bot(cls, bot_id: int, group_id: int | None = None, group_ids: Sequence[int] | set[int] | frozenset[int] = ()) -> "Principal":
         gset = set(group_ids)
         if group_id is not None:
             gset.add(group_id)
-        return cls(actor_id=f"bot:{bot_id}", bot_id=bot_id, group_ids=gset)
+        return cls(actor_id=f"bot:{bot_id}", bot_id=bot_id, group_ids=frozenset(gset))
 
 
 class ScopeKind(StrEnum):

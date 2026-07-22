@@ -6,7 +6,7 @@ from typing import Any, Mapping, Sequence
 from memory.adapters.algorithms.letta_acl_engine import (
     ACLPermissionCheck, ContextBudgetAllocation, LettaOpenMemoryEngine)
 from memory.contracts import MemoryHit, ObserveMemory, RecallMemory
-from memory.domain import MemoryScope
+from memory.domain import MemoryScope, Principal
 from memory.ports.infrastructure import AlgorithmDescriptor, MemoryAlgorithmPort
 
 
@@ -40,12 +40,11 @@ class LettaACLAlgorithmAdapter:
     async def check_acl(
         self,
         scope: MemoryScope,
-        requesting_actor_id: str = "",
-        action: str = "read",
-        actor_group_ids: Sequence[int] | set[int] = (),
         principal: Principal | None = None,
+        action: str = "read",
+        requesting_actor_id: str = "",
     ) -> ACLPermissionCheck:
         """Check OpenMemory security ACL permissions."""
         return self._engine.check_acl_access(
-            scope, requesting_actor_id=requesting_actor_id, action=action, actor_group_ids=actor_group_ids, principal=principal
+            scope, principal=principal, action=action, requesting_actor_id=requesting_actor_id
         )

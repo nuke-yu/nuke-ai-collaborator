@@ -78,33 +78,24 @@ class LettaOpenMemoryEngine:
     def check_acl_access(
         self,
         scope: MemoryScope,
-        requesting_actor_id: str = "",
-        action: str = "read",
-        actor_group_ids: Sequence[int] | set[int] = (),
         principal: Principal | None = None,
+        action: str = "read",
+        requesting_actor_id: str = "",
     ) -> ACLPermissionCheck:
         """Enforce OpenMemory multi-tenant ACL access control policy (Fail-Closed)."""
         from memory.domain import Principal, ScopeKind
 
-        if principal is None:
-            if isinstance(requesting_actor_id, Principal):
-                principal = requesting_actor_id
-            elif requesting_actor_id:
-                # Legacy unauthenticated fallback parsing
-                uid = int(requesting_actor_id.split(":")[1]) if requesting_actor_id.startswith("user:") and requesting_actor_id.split(":")[1].isdigit() else None
-                bid = int(requesting_actor_id.split(":")[1]) if requesting_actor_id.startswith("bot:") and requesting_actor_id.split(":")[1].isdigit() else None
-                principal = Principal(actor_id=requesting_actor_id, user_id=uid, bot_id=bid, group_ids=set(actor_group_ids))
-            else:
-                return ACLPermissionCheck(allowed=False, reason="Missing authenticated principal identity.")
+        if principal is None and isinstance(requesting_actor_id, Principal):
+            principal = requesting_actor_id
 
-        if not principal or not principal.actor_id:
-            return ACLPermissionCheck(allowed=False, reason="Missing authenticated principal identity.")
+        if not isinstance(principal, Principal) or not principal.actor_id:
+            return ACLPermissionCheck(allowed=False, reason="Missing or invalid authenticated principal.")
 
         valid_actions = {"read", "write", "delete", "project"}
         if action not in valid_actions:
             return ACLPermissionCheck(allowed=False, reason=f"Access denied: Unsupported action '{action}'.")
 
-        group_set = principal.group_ids | set(actor_group_ids)
+        group_set = principal.group_ids
 
         # Scope Kind: Personal Vault Memory
         if scope.kind == ScopeKind.PERSONAL:
@@ -114,16 +105,36 @@ class LettaOpenMemoryEngine:
 
         # Scope Kind: Group Memory
         if scope.kind == ScopeKind.GROUP:
-            if scope.group_id is not None and scope.group_id in group_set:
-                return ACLPermissionCheck(allowed=True, reason=f"Access granted: Actor belongs to group {scope.group_id}.")
-            return ACLPermissionCheck(allowed=False, reason=f"Access denied: Actor is not a member of group {scope.group_id}.")
+            if scope.group_id is None or scope.group_id not in group_set:
+                return ACLPermissionCheck(allowed=False, reason=f"Access denied: Actor is not a member of group {scope.group_id}.")
+
+            if action in ("read", "project"):
+                return ACLPermissionCheck(allowed=True, reason=f"Access granted: Group {scope.group_id} member '{action}'.")
+
+            if action == "write":
+                if principal.user_id is not None:
+                    return ACLPermissionCheck(allowed=True, reason=f"Access granted: Human member write to group {scope.group_id}.")
+                return ACLPermissionCheck(allowed=False, reason=f"Access denied: Bots cannot directly write to group memory without human approval.")
+
+            if action == "delete":
+                if principal.user_id is not None:
+                    return ACLPermissionCheck(allowed=True, reason=f"Access granted: Human member delete in group {scope.group_id}.")
+                return ACLPermissionCheck(allowed=False, reason=f"Access denied: Delete action in group memory restricted to human members.")
 
         # Scope Kind: Bot Memory
         if scope.kind == ScopeKind.BOT:
+            # Bot Self Access
             if principal.bot_id is not None and principal.bot_id == scope.bot_id:
-                return ACLPermissionCheck(allowed=True, reason="Bot self-access granted.")
-            if scope.group_id is not None and scope.group_id in group_set:
-                return ACLPermissionCheck(allowed=True, reason=f"Access granted: Actor belongs to bot group {scope.group_id}.")
+                if action in ("read", "write", "delete"):
+                    return ACLPermissionCheck(allowed=True, reason="Bot self-access granted.")
+                return ACLPermissionCheck(allowed=False, reason="Access denied: Bot cannot project personal memory.")
+
+            # Same Group Human Member Access to Bot Memory
+            if scope.group_id is not None and scope.group_id in group_set and principal.user_id is not None:
+                if action == "read":
+                    return ACLPermissionCheck(allowed=True, reason=f"Access granted: Group {scope.group_id} human member read bot memory.")
+                return ACLPermissionCheck(allowed=False, reason=f"Access denied: Action '{action}' on bot memory restricted to bot self.")
+
             return ACLPermissionCheck(allowed=False, reason=f"Access denied: Actor does not belong to bot group {scope.group_id}.")
 
         return ACLPermissionCheck(allowed=False, reason="Access denied: Unknown scope kind fail-closed protection.")

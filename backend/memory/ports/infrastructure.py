@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping, Protocol, Sequence, runtime_checkable
 
 from memory.contracts import MemoryHit, ObserveMemory, RecallMemory
-from memory.domain import MemoryScope
+from memory.domain import MemoryScope, Principal
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,10 +87,9 @@ class MemoryACLPort(MemoryAlgorithmPort, Protocol):
     async def check_acl(
         self,
         scope: MemoryScope,
-        requesting_actor_id: str = "",
-        action: str = "read",
-        actor_group_ids: Sequence[int] | set[int] = (),
         principal: Principal | None = None,
+        action: str = "read",
+        requesting_actor_id: str = "",
     ) -> Any: ...
 
 

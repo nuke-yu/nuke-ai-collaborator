@@ -9,12 +9,26 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from memory.adapters.algorithms import (LettaACLAlgorithmAdapter,
                                          LettaOpenMemoryEngine)
-from memory.domain import MemoryScope
+from memory.domain import MemoryScope, Principal
 
 
 class TestLettaOpenMemoryEngine(unittest.TestCase):
     def setUp(self) -> None:
         self.engine = LettaOpenMemoryEngine()
+
+    def test_principal_immutability_and_validation(self) -> None:
+        p = Principal.user(10, [1, 2])
+        self.assertIsInstance(p.group_ids, frozenset)
+        self.assertIn(1, p.group_ids)
+        with self.assertRaises(AttributeError):
+            p.group_ids.add(999)  # type: ignore
+
+        with self.assertRaises(ValueError):
+            Principal(actor_id="", user_id=1)
+        with self.assertRaises(ValueError):
+            Principal(actor_id="bad", user_id=-5)
+        with self.assertRaises(ValueError):
+            Principal(actor_id="bad", user_id=1, bot_id=2)
 
     def test_calculate_context_budget_computes_allocations(self) -> None:
         budget = self.engine.calculate_context_budget(
@@ -42,34 +56,41 @@ class TestLettaOpenMemoryEngine(unittest.TestCase):
 
     def test_check_acl_access_grants_personal_owner(self) -> None:
         scope = MemoryScope.personal(user_id=10, group_id=1, actor_id="user:10")
-        check = self.engine.check_acl_access(scope, requesting_actor_id="user:10")
+        principal = Principal.user(user_id=10, group_ids=[1])
+        check = self.engine.check_acl_access(scope, principal=principal, action="read")
         self.assertTrue(check.allowed)
 
     def test_check_acl_access_blocks_cross_user_personal_access(self) -> None:
         scope = MemoryScope.personal(user_id=10, group_id=1, actor_id="user:10")
-        check = self.engine.check_acl_access(scope, requesting_actor_id="user:99")
+        principal = Principal.user(user_id=99, group_ids=[1])
+        check = self.engine.check_acl_access(scope, principal=principal, action="read")
         self.assertFalse(check.allowed)
         self.assertIn("user 10", check.reason)
 
-    def test_check_acl_access_blocks_spoofed_principal_personal_access(self) -> None:
-        from memory.domain import Principal
-        scope = MemoryScope.personal(user_id=10, group_id=1, actor_id="user:10")
-        # Attacker sends spoofed requesting_actor_id="user:10", but their authenticated Principal has user_id=99
-        attacker_principal = Principal.user(user_id=99, group_ids=[1])
-        check = self.engine.check_acl_access(scope, requesting_actor_id="user:10", principal=attacker_principal)
-        self.assertFalse(check.allowed)
-
-
     def test_check_acl_access_blocks_cross_group_access(self) -> None:
         scope = MemoryScope.group(group_id=1, actor_id="user:99")
-        # User belongs to group 2, but attempting to access group 1
-        check = self.engine.check_acl_access(scope, requesting_actor_id="user:99", actor_group_ids=[2])
+        # User belongs to group 2, attempting to access group 1
+        principal = Principal.user(user_id=99, group_ids=[2])
+        check = self.engine.check_acl_access(scope, principal=principal, action="read")
         self.assertFalse(check.allowed)
         self.assertIn("not a member", check.reason)
 
+    def test_check_acl_access_enforces_bot_action_matrix_in_group(self) -> None:
+        scope = MemoryScope.group(group_id=1, actor_id="bot:5")
+        bot_principal = Principal.bot(bot_id=5, group_id=1)
+        human_principal = Principal.user(user_id=10, group_ids=[1])
+
+        # Bot reading group memory is allowed
+        self.assertTrue(self.engine.check_acl_access(scope, principal=bot_principal, action="read").allowed)
+        # Bot writing group memory directly is denied (requires HIL approval)
+        self.assertFalse(self.engine.check_acl_access(scope, principal=bot_principal, action="write").allowed)
+        # Human writing group memory is allowed
+        self.assertTrue(self.engine.check_acl_access(scope, principal=human_principal, action="write").allowed)
+
     def test_check_acl_access_blocks_unsupported_action(self) -> None:
         scope = MemoryScope.personal(user_id=10, group_id=1, actor_id="user:10")
-        check = self.engine.check_acl_access(scope, requesting_actor_id="user:10", action="unsupported_op")
+        principal = Principal.user(user_id=10, group_ids=[1])
+        check = self.engine.check_acl_access(scope, principal=principal, action="unsupported_op")
         self.assertFalse(check.allowed)
         self.assertIn("Unsupported action", check.reason)
 
@@ -88,7 +109,8 @@ class TestLettaACLAlgorithmAdapter(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(budget.max_tokens, 4096)
 
         scope = MemoryScope.bot(group_id=1, bot_id=2, actor_id="bot:2")
-        check = await self.adapter.check_acl(scope, "bot:2", actor_group_ids=[1])
+        principal = Principal.bot(bot_id=2, group_id=1)
+        check = await self.adapter.check_acl(scope, principal=principal, action="read")
         self.assertTrue(check.allowed)
 
 
