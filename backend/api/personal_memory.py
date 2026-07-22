@@ -31,7 +31,7 @@ async def create_personal_projection(body:dict,user=Depends(auth.get_current_use
     gid=int(body.get("group_id",0)); bot_id=body.get("bot_id"); uid=int(user["uid"])
     async with global_db() as db:
         async with db.execute(
-            "SELECT 1 FROM members WHERE group_id=? AND user_id=? AND type='user'",
+            "SELECT 1 FROM members WHERE group_id=? AND user_id=? AND type='human'",
             (gid, uid),
         ) as cur:
             user_member = await cur.fetchone()
