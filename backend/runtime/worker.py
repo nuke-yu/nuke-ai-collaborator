@@ -114,6 +114,7 @@ class Worker:
                     "bg": bg.stats(),
                     "permissions": permissions.pending_stats(),
                     "lifecycle": lifecycle.stats(),
+                    "sqlite_writer": db.writer_stats(),
                     "worker_id": self.worker_id,
                 }
                 await ipc.send_msg(self._writer, ipc.protocol.envelope(

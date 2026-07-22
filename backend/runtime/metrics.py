@@ -122,11 +122,49 @@ class SupervisorCollector:
             "nuke_worker_stats_age_seconds",
             "Seconds since the worker last reported stats (detects silent hangs).",
             labels=["worker_id"])
+        writer_acquisitions = CounterMetricFamily(
+            "nuke_sqlite_writer_acquisitions",
+            "Total serialized SQLite writer acquisitions.", labels=["worker_id"])
+        writer_contended = CounterMetricFamily(
+            "nuke_sqlite_writer_contended_acquisitions",
+            "Writer acquisitions that queued behind an in-process writer.", labels=["worker_id"])
+        writer_busy = CounterMetricFamily(
+            "nuke_sqlite_writer_busy_errors",
+            "SQLITE_BUSY or SQLITE_LOCKED errors after native busy timeout.", labels=["worker_id"])
+        writer_failures = CounterMetricFamily(
+            "nuke_sqlite_writer_transaction_failures",
+            "Write scopes that exited with an exception.", labels=["worker_id"])
+        writer_wait = CounterMetricFamily(
+            "nuke_sqlite_writer_wait_seconds",
+            "Total time queued for the in-process writer lock.", labels=["worker_id"])
+        writer_tx = CounterMetricFamily(
+            "nuke_sqlite_writer_transaction_seconds",
+            "Total time spent inside serialized write scopes.", labels=["worker_id"])
+        writer_wait_max = GaugeMetricFamily(
+            "nuke_sqlite_writer_wait_seconds_max",
+            "Longest observed in-process writer queue wait.", labels=["worker_id"])
+        writer_tx_max = GaugeMetricFamily(
+            "nuke_sqlite_writer_transaction_seconds_max",
+            "Longest observed serialized write scope.", labels=["worker_id"])
+        writer_busy_timeout = GaugeMetricFamily(
+            "nuke_sqlite_writer_busy_timeout_seconds",
+            "Configured native SQLite busy timeout.", labels=["worker_id"])
         now = time.time()
         for wid, payload in worker_stats.items():
             bg_tasks.add_metric([wid], float(_dig(payload, "bg", "active")))
             pending.add_metric([wid], float(_dig(payload, "permissions", "pending")))
             leases.add_metric([wid], float(_dig(payload, "lifecycle", "active_leases")))
+            writer_acquisitions.add_metric([wid], float(_dig(payload, "sqlite_writer", "acquisitions")))
+            writer_contended.add_metric([wid], float(_dig(payload, "sqlite_writer", "contended_acquisitions")))
+            writer_busy.add_metric([wid], float(_dig(payload, "sqlite_writer", "busy_errors")))
+            writer_failures.add_metric([wid], float(_dig(payload, "sqlite_writer", "transaction_failures")))
+            writer_wait.add_metric([wid], float(_dig(payload, "sqlite_writer", "wait_seconds_total")))
+            writer_tx.add_metric([wid], float(_dig(payload, "sqlite_writer", "transaction_seconds_total")))
+            writer_wait_max.add_metric([wid], float(_dig(payload, "sqlite_writer", "wait_seconds_max")))
+            writer_tx_max.add_metric([wid], float(_dig(payload, "sqlite_writer", "transaction_seconds_max")))
+            writer_busy_timeout.add_metric(
+                [wid], float(_dig(payload, "sqlite_writer", "busy_timeout_ms")) / 1000.0
+            )
             ts = worker_stats_ts.get(wid)
             if ts is not None:
                 age.add_metric([wid], max(0.0, now - ts))
@@ -134,6 +172,15 @@ class SupervisorCollector:
         yield pending
         yield leases
         yield age
+        yield writer_acquisitions
+        yield writer_contended
+        yield writer_busy
+        yield writer_failures
+        yield writer_wait
+        yield writer_tx
+        yield writer_wait_max
+        yield writer_tx_max
+        yield writer_busy_timeout
 
         # ── browser connections per group ────────────────────────────────
         browsers_g = GaugeMetricFamily(

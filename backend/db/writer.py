@@ -19,6 +19,7 @@ reusing a lock or connection bound to a dead loop.
 """
 import asyncio
 import os
+import time
 from contextlib import asynccontextmanager
 
 import aiosqlite
@@ -31,6 +32,18 @@ import weakref
 
 # (loop_id, db_path) -> {"conn": aiosqlite.Connection | None, "lock": asyncio.Lock}
 _state: dict[tuple[int, str], dict] = {}
+_BUSY_TIMEOUT_MS = 5_000
+_metrics = {
+    "acquisitions": 0,
+    "contended_acquisitions": 0,
+    "wait_seconds_total": 0.0,
+    "wait_seconds_max": 0.0,
+    "transaction_seconds_total": 0.0,
+    "transaction_seconds_max": 0.0,
+    "transaction_failures": 0,
+    "busy_errors": 0,
+    "rollbacks": 0,
+}
 
 
 def _resolve(path: str | None) -> str:
@@ -70,7 +83,7 @@ async def _get_write_conn(st: dict, db_path: str) -> aiosqlite.Connection:
         conn.daemon = True
         conn = await conn
         await conn.execute("PRAGMA journal_mode=WAL")
-        await conn.execute("PRAGMA busy_timeout=5000")
+        await conn.execute(f"PRAGMA busy_timeout={_BUSY_TIMEOUT_MS}")
         await conn.execute("PRAGMA foreign_keys=ON")
         st["conn"] = conn
     return st["conn"]
@@ -88,11 +101,23 @@ async def write_connect(path: str | None = None):
     """
     db_path = _resolve(path)
     st = _conn_state(db_path)
+    wait_started = time.perf_counter()
+    was_contended = st["lock"].locked()
     async with st["lock"]:
+        waited = time.perf_counter() - wait_started
+        _metrics["acquisitions"] += 1
+        _metrics["wait_seconds_total"] += waited
+        _metrics["wait_seconds_max"] = max(_metrics["wait_seconds_max"], waited)
+        if was_contended:
+            _metrics["contended_acquisitions"] += 1
+        transaction_started = time.perf_counter()
         conn = await _get_write_conn(st, db_path)
         try:
             yield conn
-        except BaseException:
+        except BaseException as exc:
+            _metrics["transaction_failures"] += 1
+            if _is_busy_error(exc):
+                _metrics["busy_errors"] += 1
             # The write connection is persistent and reused by the next writer
             # (DFT-053). A query that raises mid-transaction (before its own
             # commit) would otherwise leave a half-open transaction on the shared
@@ -102,9 +127,31 @@ async def write_connect(path: str | None = None):
             # cancelled/aborted task (DFT-027) also leaves no dangling tx.
             try:
                 await conn.rollback()
+                _metrics["rollbacks"] += 1
             except Exception:
                 pass
             raise
+        finally:
+            duration = time.perf_counter() - transaction_started
+            _metrics["transaction_seconds_total"] += duration
+            _metrics["transaction_seconds_max"] = max(
+                _metrics["transaction_seconds_max"], duration
+            )
+
+
+def _is_busy_error(exc: BaseException) -> bool:
+    if not isinstance(exc, aiosqlite.OperationalError):
+        return False
+    code = getattr(exc, "sqlite_errorcode", None)
+    if code in (5, 6):  # SQLITE_BUSY / SQLITE_LOCKED
+        return True
+    message = str(exc).lower()
+    return "database is locked" in message or "database is busy" in message
+
+
+def stats() -> dict[str, int | float]:
+    """Return process-local cumulative writer contention statistics."""
+    return {**_metrics, "busy_timeout_ms": _BUSY_TIMEOUT_MS}
 
 
 async def aclose_writer(path: str | None = None) -> None:

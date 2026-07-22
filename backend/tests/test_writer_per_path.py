@@ -7,6 +7,7 @@ never contend, while writes to the SAME DB still serialize (DFT-053). Keyed by
 backward compatibility.
 """
 import asyncio
+import aiosqlite
 import os
 import sys
 import tempfile
@@ -104,6 +105,50 @@ class TestPerPathWriter(unittest.IsolatedAsyncioTestCase):
             self.assertIn((lid, self.a), writer._state)
         finally:
             writer.DB_PATH = os.path.join(os.path.dirname(writer.__file__), "chat.db")
+
+    async def test_stats_measure_same_path_contention(self):
+        before = writer.stats()
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        async def holder():
+            async with writer.write_connect(self.a):
+                entered.set()
+                await release.wait()
+
+        async def waiter():
+            await entered.wait()
+            async with writer.write_connect(self.a):
+                pass
+
+        holder_task = asyncio.create_task(holder())
+        waiter_task = asyncio.create_task(waiter())
+        await entered.wait()
+        await asyncio.sleep(0.01)
+        release.set()
+        await asyncio.gather(holder_task, waiter_task)
+
+        after = writer.stats()
+        self.assertEqual(after["acquisitions"] - before["acquisitions"], 2)
+        self.assertEqual(
+            after["contended_acquisitions"] - before["contended_acquisitions"], 1
+        )
+        self.assertGreater(after["wait_seconds_total"], before["wait_seconds_total"])
+
+    async def test_stats_count_busy_error_after_native_timeout(self):
+        before = writer.stats()
+
+        with self.assertRaises(aiosqlite.OperationalError):
+            async with writer.write_connect(self.a):
+                raise aiosqlite.OperationalError("database is locked")
+
+        after = writer.stats()
+        self.assertEqual(after["busy_errors"] - before["busy_errors"], 1)
+        self.assertEqual(
+            after["transaction_failures"] - before["transaction_failures"], 1
+        )
+        self.assertEqual(after["rollbacks"] - before["rollbacks"], 1)
+        self.assertEqual(after["busy_timeout_ms"], 5000)
 
 
 if __name__ == "__main__":

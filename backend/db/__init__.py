@@ -55,7 +55,7 @@ def global_db():
     return connect(DB_PATH)
 
 
-from db.writer import write_connect, aclose_writer  # noqa: E402
+from db.writer import write_connect, aclose_writer, stats as writer_stats  # noqa: E402
 
 
 from db.schema import init_db  # noqa: E402
@@ -75,7 +75,7 @@ from db.queries import (       # noqa: E402
 )
 
 __all__ = [
-    "DB_PATH", "get_db", "global_db", "connect", "connect_sync", "write_connect", "aclose_writer",
+    "DB_PATH", "get_db", "global_db", "connect", "connect_sync", "write_connect", "aclose_writer", "writer_stats",
     "bind_db", "current_db_path", "init_db",
     "init_central_db", "init_group_db", "CENTRAL_TABLES", "GROUP_TABLES",
     "ensure_group_db_ready",

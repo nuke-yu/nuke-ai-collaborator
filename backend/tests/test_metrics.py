@@ -73,12 +73,29 @@ class TestMetricsCollector(unittest.TestCase):
                 "bg": {"active": 4},
                 "permissions": {"pending": 2},
                 "lifecycle": {"active_leases": 5},
+                "sqlite_writer": {
+                    "acquisitions": 12,
+                    "contended_acquisitions": 3,
+                    "busy_errors": 1,
+                    "transaction_failures": 2,
+                    "wait_seconds_total": 1.25,
+                    "wait_seconds_max": 0.5,
+                    "transaction_seconds_total": 4.5,
+                    "transaction_seconds_max": 1.5,
+                    "busy_timeout_ms": 5000,
+                },
             }
         }
         out = self._render(sup)
         self.assertIn('nuke_worker_bg_tasks{worker_id="w0"} 4.0', out)
         self.assertIn('nuke_pending_permissions{worker_id="w0"} 2.0', out)
         self.assertIn('nuke_active_leases{worker_id="w0"} 5.0', out)
+        self.assertIn('nuke_sqlite_writer_acquisitions_total{worker_id="w0"} 12.0', out)
+        self.assertIn('nuke_sqlite_writer_contended_acquisitions_total{worker_id="w0"} 3.0', out)
+        self.assertIn('nuke_sqlite_writer_busy_errors_total{worker_id="w0"} 1.0', out)
+        self.assertIn('nuke_sqlite_writer_wait_seconds_total{worker_id="w0"} 1.25', out)
+        self.assertIn('nuke_sqlite_writer_transaction_seconds_max{worker_id="w0"} 1.5', out)
+        self.assertIn('nuke_sqlite_writer_busy_timeout_seconds{worker_id="w0"} 5.0', out)
 
     def test_stats_age_seconds_from_timestamp(self):
         sup = _FakeSupervisor()
