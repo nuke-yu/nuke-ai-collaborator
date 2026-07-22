@@ -49,10 +49,14 @@ async def distill_case(case_id: str, group_id: int | None) -> str | None:
                               (group_id,row[0],row[2])) as cur:
             existing = await cur.fetchone()
         if existing:
-            sources = list(dict.fromkeys(json.loads(existing[1] or "[]") + [case_id]))
+            prev_sources = json.loads(existing[1] or "[]")
+            if case_id in prev_sources:
+                return existing[0]
+            sources = prev_sources + [case_id]
+            new_count = len(sources)
             await db.execute("UPDATE memory_records SET supporting_count=?,source_ids=?,confidence=MIN(0.95,confidence+0.08),"
                              "updated_at=? WHERE record_id=?",
-                             (existing[2]+1,json.dumps(sources),now,existing[0]))
+                             (new_count,json.dumps(sources),now,existing[0]))
             await db.commit()
             await _index_vector(existing[0], content, group_id, row[0], min(0.95, 0.73))
             return existing[0]
