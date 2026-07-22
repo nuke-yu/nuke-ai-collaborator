@@ -55,7 +55,6 @@ class LegacyConversationMemoryAdapter:
         return RecallResult(
             rendered_context=rendered,
             algorithm_trace=(
-                {"algorithm_id": "nuke.mem0.fact_pipeline", "version": "v1.1"},
                 {"algorithm_id": "nuke.legacy.chroma", "version": "v1"},
             ),
             degraded=True,
@@ -64,9 +63,6 @@ class LegacyConversationMemoryAdapter:
     async def observe(self, command: ObserveMemory) -> None:
         self._require_bot_scope(command.scope.kind, command.scope.bot_id)
         from ai.memory_provider import MemoryEvent
-
-        # Execute Mem0 fact extraction algorithm (ADD/UPDATE/DELETE/NOOP determination)
-        fact_actions = await self._fact_algorithm.extract(command)
 
         metadata = command.metadata
         message_id = metadata.get("message_id")
