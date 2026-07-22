@@ -38,10 +38,16 @@ class LettaACLAlgorithmAdapter:
         )
 
     async def check_acl(
-        self, scope: MemoryScope, requesting_actor_id: str, action: str = "read"
+        self,
+        scope: MemoryScope,
+        requesting_actor_id: str,
+        action: str = "read",
+        actor_group_ids: Sequence[int] | set[int] = (),
     ) -> ACLPermissionCheck:
         """Check OpenMemory security ACL permissions."""
-        return self._engine.check_acl_access(scope, requesting_actor_id, action)
+        return self._engine.check_acl_access(
+            scope, requesting_actor_id, action, actor_group_ids=actor_group_ids
+        )
 
     async def extract(self, command: ObserveMemory) -> Sequence[Mapping[str, Any]]:
         """Placeholder for observation extraction."""

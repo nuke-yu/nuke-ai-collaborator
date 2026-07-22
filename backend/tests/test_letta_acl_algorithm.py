@@ -52,6 +52,20 @@ class TestLettaOpenMemoryEngine(unittest.TestCase):
         self.assertIn("user 10", check.reason)
 
 
+    def test_check_acl_access_blocks_cross_group_access(self) -> None:
+        scope = MemoryScope.group(group_id=1, actor_id="user:99")
+        # User belongs to group 2, but attempting to access group 1
+        check = self.engine.check_acl_access(scope, requesting_actor_id="user:99", actor_group_ids=[2])
+        self.assertFalse(check.allowed)
+        self.assertIn("not a member", check.reason)
+
+    def test_check_acl_access_blocks_unsupported_action(self) -> None:
+        scope = MemoryScope.personal(user_id=10, group_id=1, actor_id="user:10")
+        check = self.engine.check_acl_access(scope, requesting_actor_id="user:10", action="unsupported_op")
+        self.assertFalse(check.allowed)
+        self.assertIn("Unsupported action", check.reason)
+
+
 class TestLettaACLAlgorithmAdapter(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         self.adapter = LettaACLAlgorithmAdapter()
@@ -66,7 +80,7 @@ class TestLettaACLAlgorithmAdapter(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(budget.max_tokens, 4096)
 
         scope = MemoryScope.bot(group_id=1, bot_id=2, actor_id="bot:2")
-        check = await self.adapter.check_acl(scope, "bot:2")
+        check = await self.adapter.check_acl(scope, "bot:2", actor_group_ids=[1])
         self.assertTrue(check.allowed)
 
 

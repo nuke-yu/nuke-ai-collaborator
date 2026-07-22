@@ -80,23 +80,21 @@ class LettaOpenMemoryEngine:
         scope: MemoryScope,
         requesting_actor_id: str,
         action: str = "read",
+        actor_group_ids: Sequence[int] | set[int] = (),
     ) -> ACLPermissionCheck:
-        """Enforce OpenMemory multi-tenant ACL access control policy."""
+        """Enforce OpenMemory multi-tenant ACL access control policy (Fail-Closed)."""
         if not requesting_actor_id:
             return ACLPermissionCheck(allowed=False, reason="Missing requesting actor ID.")
 
-        from memory.domain import ScopeKind
+        valid_actions = {"read", "write", "delete", "project"}
+        if action not in valid_actions:
+            return ACLPermissionCheck(allowed=False, reason=f"Access denied: Unsupported action '{action}'.")
 
-        # Scope Kind: Bot Memory
-        if scope.kind == ScopeKind.BOT:
-            # Bot memory can be accessed by its owning bot or group members
-            if scope.actor_id == requesting_actor_id or scope.actor_id.startswith("bot:"):
-                return ACLPermissionCheck(allowed=True, reason="Bot self or group bot access granted.")
-            return ACLPermissionCheck(allowed=True, reason="Bot memory group isolation passed.")
+        group_set = set(actor_group_ids)
+        from memory.domain import ScopeKind
 
         # Scope Kind: Personal Vault Memory
         if scope.kind == ScopeKind.PERSONAL:
-            # Personal memory MUST match user actor_id
             expected_user_actor = f"user:{scope.user_id}"
             if requesting_actor_id == expected_user_actor:
                 return ACLPermissionCheck(allowed=True, reason="Personal vault owner access granted.")
@@ -104,7 +102,16 @@ class LettaOpenMemoryEngine:
 
         # Scope Kind: Group Memory
         if scope.kind == ScopeKind.GROUP:
-            if scope.group_id is not None:
-                return ACLPermissionCheck(allowed=True, reason="Group member access granted.")
+            if scope.group_id is not None and scope.group_id in group_set:
+                return ACLPermissionCheck(allowed=True, reason=f"Access granted: Actor belongs to group {scope.group_id}.")
+            return ACLPermissionCheck(allowed=False, reason=f"Access denied: Actor is not a member of group {scope.group_id}.")
 
-        return ACLPermissionCheck(allowed=False, reason="Scope ACL rule violation.")
+        # Scope Kind: Bot Memory
+        if scope.kind == ScopeKind.BOT:
+            if scope.actor_id == requesting_actor_id:
+                return ACLPermissionCheck(allowed=True, reason="Bot self-access granted.")
+            if scope.group_id is not None and scope.group_id in group_set:
+                return ACLPermissionCheck(allowed=True, reason=f"Access granted: Actor belongs to bot group {scope.group_id}.")
+            return ACLPermissionCheck(allowed=False, reason=f"Access denied: Actor does not belong to bot group {scope.group_id}.")
+
+        return ACLPermissionCheck(allowed=False, reason="Access denied: Unknown scope kind fail-closed protection.")
