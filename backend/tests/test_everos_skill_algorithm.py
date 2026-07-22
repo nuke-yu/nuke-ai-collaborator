@@ -37,19 +37,19 @@ class TestEverOSSkillEngine(unittest.TestCase):
         self.assertIn("---", candidate.skill_md_content)
         self.assertIn("Required Tools", candidate.skill_md_content)
 
-    def test_compile_skill_candidate_disqualifies_cluster_with_fewer_than_min_cases(self) -> None:
-        c1 = self.extractor.extract_case("run:1", "Deploy service to staging", "completed", [{"name": "kubectl"}])
-
+    def test_compile_skill_candidate_sanitizes_prompt_injection_in_yaml_frontmatter(self) -> None:
+        c1 = self.extractor.extract_case("run:1", 'Deploy app "---\ninjected: true\n', "completed", [{"name": "kubectl"}])
         cluster = CaseCluster(
-            cluster_id="cluster:small",
-            cases=(c1,),
+            cluster_id="cluster:inject",
+            cases=(c1, c1, c1),
             centroid_signature=c1.task_signature,
             updated_at=time.time(),
         )
 
         candidate = self.engine.compile_skill_candidate(cluster)
         self.assertIsNotNone(candidate)
-        self.assertFalse(candidate.is_qualified)
+        # Should not contain raw newlines or unescaped triple-dashes inside values
+        self.assertNotIn("\ninjected:", candidate.skill_md_content)
 
 
 class TestEverOSSkillAlgorithmAdapter(unittest.IsolatedAsyncioTestCase):

@@ -96,6 +96,14 @@ class EverOSSkillEngine:
             is_qualified=is_qualified,
         )
 
+    @staticmethod
+    def _sanitize_yaml_field(text: str) -> str:
+        """Sanitize text for safe YAML frontmatter rendering."""
+        if not text:
+            return ""
+        clean = text.replace("---", "").replace('"', '\\"').replace("\n", " ").replace("\r", "")
+        return clean.strip()
+
     def _render_skill_md(
         self,
         skill_id: str,
@@ -106,25 +114,30 @@ class EverOSSkillEngine:
         sample_cases: Sequence[ExtractedCase],
     ) -> str:
         """Render SKILL.md template content."""
-        trigger_str = ", ".join(triggers) if triggers else "general"
-        tool_str = " -> ".join(tools) if tools else "N/A"
+        clean_title = self._sanitize_yaml_field(title)
+        clean_desc = self._sanitize_yaml_field(description)
+        clean_triggers = [self._sanitize_yaml_field(t) for t in triggers]
+        clean_tools = [self._sanitize_yaml_field(t) for t in tools]
+
+        trigger_str = ", ".join(clean_triggers) if clean_triggers else "general"
+        tool_str = " -> ".join(clean_tools) if clean_tools else "N/A"
         cases_str = "\n".join(
-            f"- Case `{c.case_id}`: {c.task[:80]} ({c.outcome})"
+            f"- Case `{c.case_id}`: {self._sanitize_yaml_field(c.task)[:80]} ({c.outcome})"
             for c in sample_cases[:3]
         )
 
         return f"""---
 name: {skill_id}
-title: "{title}"
-description: "{description}"
+title: "{clean_title}"
+description: "{clean_desc}"
 triggers: [{trigger_str}]
 tools: [{tool_str}]
 ---
 
-# {title}
+# {clean_title}
 
 ## Description
-{description}
+{clean_desc}
 
 ## Required Tools
 {tool_str}
