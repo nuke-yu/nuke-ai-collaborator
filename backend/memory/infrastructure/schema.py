@@ -6,7 +6,7 @@ from typing import Final
 from memory.contracts import MemoryOperationError
 from memory.ports import MemoryDatabasePort
 
-MEMORY_SCHEMA_VERSION: Final = 5
+MEMORY_SCHEMA_VERSION: Final = 6
 
 MEMORY_GROUP_TABLES = frozenset(
     {
@@ -67,6 +67,13 @@ MEMORY_V1_DDL = (
         semantic_cluster_key TEXT NOT NULL DEFAULT '',
         environment_signature TEXT NOT NULL DEFAULT '',
         failure_signature TEXT NOT NULL DEFAULT '',
+        owner_type TEXT NOT NULL DEFAULT 'bot',
+        authority TEXT NOT NULL DEFAULT 'bot_observation',
+        subject_key TEXT NOT NULL DEFAULT '',
+        sensitivity TEXT NOT NULL DEFAULT 'group',
+        evidence_json TEXT NOT NULL DEFAULT '{}',
+        created_by TEXT NOT NULL DEFAULT '',
+        effective_from INTEGER,
         importance REAL NOT NULL DEFAULT 0.0, source_ids TEXT NOT NULL DEFAULT '[]',
         metadata_json TEXT NOT NULL DEFAULT '{}', algorithm_version TEXT NOT NULL DEFAULT 'experience-v1',
         supporting_count INTEGER NOT NULL DEFAULT 1, contradicting_count INTEGER NOT NULL DEFAULT 0,
@@ -75,6 +82,7 @@ MEMORY_V1_DDL = (
     )""",
     "CREATE INDEX IF NOT EXISTS idx_memory_records_lookup ON memory_records(group_id, bot_id, kind, status)",
     "CREATE INDEX IF NOT EXISTS idx_memory_records_semantic ON memory_records(group_id,bot_id,kind,status,semantic_cluster_key,environment_signature,failure_signature)",
+    "CREATE INDEX IF NOT EXISTS idx_memory_records_group_facts ON memory_records(group_id,owner_type,kind,status,subject_key,updated_at DESC)",
     """CREATE TABLE IF NOT EXISTS memory_projection_outbox (
         event_id TEXT PRIMARY KEY, projection_type TEXT NOT NULL,
         aggregate_id TEXT NOT NULL, aggregate_version TEXT NOT NULL,
@@ -195,6 +203,18 @@ MEMORY_V5_COLUMNS = {
     ),
 }
 
+MEMORY_V6_COLUMNS = {
+    "memory_records": (
+        ("owner_type", "TEXT NOT NULL DEFAULT 'bot'"),
+        ("authority", "TEXT NOT NULL DEFAULT 'bot_observation'"),
+        ("subject_key", "TEXT NOT NULL DEFAULT ''"),
+        ("sensitivity", "TEXT NOT NULL DEFAULT 'group'"),
+        ("evidence_json", "TEXT NOT NULL DEFAULT '{}'"),
+        ("created_by", "TEXT NOT NULL DEFAULT ''"),
+        ("effective_from", "INTEGER"),
+    ),
+}
+
 MEMORY_GROUP_DDL = (
     _VERSION_TABLE_DDL,
     *MEMORY_V1_DDL,
@@ -285,6 +305,25 @@ class MemorySchemaManager:
                 )
                 await connection.execute(
                     "INSERT INTO memory_schema_version(version) VALUES (5)"
+                )
+            if current < 6:
+                async with connection.execute(
+                    "PRAGMA table_info(memory_records)"
+                ) as cursor:
+                    existing = {str(row[1]) for row in await cursor.fetchall()}
+                for name, declaration in MEMORY_V6_COLUMNS["memory_records"]:
+                    if name not in existing:
+                        await connection.execute(
+                            f"ALTER TABLE memory_records ADD COLUMN "
+                            f"{name} {declaration}"
+                        )
+                await connection.execute(
+                    """CREATE INDEX IF NOT EXISTS idx_memory_records_group_facts
+                    ON memory_records(group_id,owner_type,kind,status,
+                    subject_key,updated_at DESC)"""
+                )
+                await connection.execute(
+                    "INSERT INTO memory_schema_version(version) VALUES (6)"
                 )
             await connection.commit()
         return MEMORY_SCHEMA_VERSION

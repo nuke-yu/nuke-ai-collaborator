@@ -83,6 +83,18 @@ class MemorySchemaTest(unittest.IsolatedAsyncioTestCase):
             }
             <= record_columns
         )
+        self.assertTrue(
+            {
+                "owner_type",
+                "authority",
+                "subject_key",
+                "sensitivity",
+                "evidence_json",
+                "created_by",
+                "effective_from",
+            }
+            <= record_columns
+        )
 
     async def test_ensure_is_idempotent_and_preserves_canonical_records(self) -> None:
         await self.schema.ensure_group(7)

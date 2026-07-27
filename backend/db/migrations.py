@@ -1094,6 +1094,28 @@ async def migration_048(db):
     await db.commit()
 
 
+async def migration_049(db):
+    """Add explicit ownership, authority, and evidence to canonical memory."""
+    for declaration in (
+        "owner_type TEXT NOT NULL DEFAULT 'bot'",
+        "authority TEXT NOT NULL DEFAULT 'bot_observation'",
+        "subject_key TEXT NOT NULL DEFAULT ''",
+        "sensitivity TEXT NOT NULL DEFAULT 'group'",
+        "evidence_json TEXT NOT NULL DEFAULT '{}'",
+        "created_by TEXT NOT NULL DEFAULT ''",
+        "effective_from INTEGER",
+    ):
+        await _safe_add_column(
+            db, f"ALTER TABLE memory_records ADD COLUMN {declaration}"
+        )
+    await db.execute(
+        """CREATE INDEX IF NOT EXISTS idx_memory_records_group_facts
+        ON memory_records(group_id,owner_type,kind,status,subject_key,
+        updated_at DESC)"""
+    )
+    await db.commit()
+
+
 MIGRATIONS: list = [
     migration_001,
     migration_002,
@@ -1143,6 +1165,7 @@ MIGRATIONS: list = [
     migration_046,
     migration_047,
     migration_048,
+    migration_049,
 ]
 
 
