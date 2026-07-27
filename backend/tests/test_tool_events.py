@@ -410,11 +410,27 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
         record_id = await distill_case(corrected, 7)
         self.assertEqual(record_id, await distill_case(corrected, 7))
         async with database.connect(TEST_DB_PATH) as db:
-            async with db.execute("SELECT kind,confidence,source_ids FROM memory_records") as cur:
+            async with db.execute(
+                """SELECT kind,confidence,source_ids,content,metadata_json,
+                    algorithm_version FROM memory_records"""
+            ) as cur:
                 rows = await cur.fetchall()
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0][0], "experience")
         self.assertEqual(json.loads(rows[0][2]), [corrected])
+        content = json.loads(rows[0][3])
+        metadata = json.loads(rows[0][4])
+        self.assertEqual(rows[0][5], "experience-v2")
+        self.assertEqual(content["schema_version"], "experience-v2")
+        self.assertEqual(content["root_cause"]["status"], "unresolved")
+        self.assertEqual(content["corrective_actions"][0]["tool"], "edit_file")
+        self.assertEqual(content["verification"]["adapter"], "pytest")
+        self.assertEqual(content["source_case_ids"], [corrected])
+        self.assertEqual(
+            metadata["environment_signature"],
+            content["environment"]["signature"],
+        )
+        self.assertEqual(metadata["evidence_quality"], "deterministic_verified_trace")
 
     async def test_experience_vector_projection_matches_canonical_content(self):
         first = await assemble_case(

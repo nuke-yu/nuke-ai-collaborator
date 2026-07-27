@@ -63,39 +63,47 @@ async def distill_case(case_id: str, group_id: int | None) -> str | None:
     from ai.memory import _memory_db
     async with await _memory_db("agent_cases", group_id, write=False) as db:
         async with db.execute(
-            """SELECT bot_id,task,task_signature,tools_used,errors,outcome,summary,
-                outcome_status,verification_adapter,correction_evidence_json
+            """SELECT bot_id,task,task_signature,tools_used,files_touched,
+                errors,outcome,summary,outcome_status,verification_adapter,
+                correction_evidence_json
                 FROM agent_cases
                 WHERE case_id=? AND group_id=?""",
             (case_id, group_id),
         ) as cur:
             row = await cur.fetchone()
+        async with db.execute(
+            """SELECT ordinal,step_id,attempt_id,phase,action_tool,
+                action_target,observation_status,observation_summary,
+                verifier_adapter,verifies_task
+                FROM agent_case_attempts
+                WHERE case_id=? AND group_id=? ORDER BY ordinal""",
+            (case_id, group_id),
+        ) as cur:
+            attempt_rows = await cur.fetchall()
     if (
         not row
-        or row[5] != "completed"
-        or row[7] != "verified_success"
+        or row[6] != "completed"
+        or row[8] != "verified_success"
     ):
         return None
-    correction = json.loads(row[9] or "{}")
+    correction = json.loads(row[10] or "{}")
     if not correction:
         return None
-    raw_errors = json.loads(row[4] or "[]")
+    raw_errors = json.loads(row[5] or "[]")
     if not raw_errors:
         return None
     errors = [re.sub(r"[\r\n\t<>]", " ", str(err)).strip()[:150] for err in raw_errors]
     clean_task = re.sub(r"[\r\n\t<>]", " ", row[1] or "").strip()[:200]
     record_id = "exp:" + hashlib.sha256(case_id.encode()).hexdigest()[:24]
-    content = json.dumps({
-        "task_pattern": clean_task, "approach": json.loads(row[3] or "[]"),
-        "failure_mode": errors,
-        "corrective_action": correction.get("corrective_actions", []),
-        "verification": {
-            "adapter": row[8],
-            "target": correction.get("target", ""),
-            "status": row[7],
-        },
-        "limitations": "Derived from one verified case",
-    }, ensure_ascii=False)
+    experience = _build_experience_v2(
+        task=clean_task,
+        files=json.loads(row[4] or "[]"),
+        errors=errors,
+        outcome_status=row[8],
+        verification_adapter=row[9],
+        correction=correction,
+        attempt_rows=attempt_rows,
+    )
     now = int(time.time() * 1000)
     target_rid = None
     target_confidence = 0.73
@@ -111,6 +119,9 @@ async def distill_case(case_id: str, group_id: int | None) -> str | None:
             if case_id in prev_sources:
                 return existing[0]
             sources = prev_sources + [case_id]
+            experience["source_case_ids"] = sources
+            content = json.dumps(experience, ensure_ascii=False)
+            metadata = _experience_metadata(experience)
             new_count = len(sources)
             target_confidence = min(0.95, float(existing[4]) + 0.08)
             should_reactivate = (
@@ -119,16 +130,43 @@ async def distill_case(case_id: str, group_id: int | None) -> str | None:
                 and new_count >= int(existing[3]) + 2
             )
             next_status = "active" if should_reactivate else existing[5]
-            await db.execute("UPDATE memory_records SET status=?,content=?,supporting_count=?,source_ids=?,confidence=?,"
-                             "updated_at=? WHERE record_id=?",
-                             (next_status,content,new_count,json.dumps(sources),target_confidence,now,existing[0]))
+            await db.execute(
+                """UPDATE memory_records SET status=?,content=?,
+                supporting_count=?,source_ids=?,confidence=?,
+                metadata_json=?,algorithm_version='experience-v2',
+                updated_at=? WHERE record_id=?""",
+                (
+                    next_status,
+                    content,
+                    new_count,
+                    json.dumps(sources),
+                    target_confidence,
+                    json.dumps(metadata, ensure_ascii=False),
+                    now,
+                    existing[0],
+                ),
+            )
             target_rid = existing[0]
         else:
+            experience["source_case_ids"] = [case_id]
+            content = json.dumps(experience, ensure_ascii=False)
+            metadata = _experience_metadata(experience)
             await db.execute("""INSERT INTO memory_records
               (record_id,kind,group_id,bot_id,status,content,task_signature,confidence,importance,
-               supporting_count,source_ids,created_at,updated_at) VALUES (?, 'experience',?,?, 'active',?,?,0.73,0.6,1,?,?,?)
+               supporting_count,source_ids,metadata_json,algorithm_version,created_at,updated_at)
+              VALUES (?, 'experience',?,?, 'active',?,?,0.73,0.6,1,?,?,'experience-v2',?,?)
               ON CONFLICT(record_id) DO UPDATE SET status='active',content=excluded.content,updated_at=excluded.updated_at""",
-              (record_id,group_id,row[0],content,row[2],json.dumps([case_id]),now,now))
+              (
+                  record_id,
+                  group_id,
+                  row[0],
+                  content,
+                  row[2],
+                  json.dumps([case_id]),
+                  json.dumps(metadata, ensure_ascii=False),
+                  now,
+                  now,
+              ))
             target_rid = record_id
 
         await _enqueue_vector_projection(
@@ -149,6 +187,141 @@ async def distill_case(case_id: str, group_id: int | None) -> str | None:
         group_id, limit=1, event_id=f"experience-vector:{target_rid}"
     )
     return target_rid
+
+
+def _build_experience_v2(
+    *,
+    task: str,
+    files: list[str],
+    errors: list[str],
+    outcome_status: str,
+    verification_adapter: str,
+    correction: dict,
+    attempt_rows: list[tuple],
+) -> dict:
+    attempts = [
+        {
+            "ordinal": row[0],
+            "step_id": row[1],
+            "attempt_id": row[2],
+            "phase": row[3],
+            "tool": row[4],
+            "target": row[5],
+            "status": row[6],
+            "summary": row[7],
+            "verifier_adapter": row[8],
+            "verifies_task": bool(row[9]),
+        }
+        for row in attempt_rows
+    ]
+    corrective_actions = [
+        {
+            "step_id": attempt["step_id"],
+            "attempt_id": attempt["attempt_id"],
+            "tool": attempt["tool"],
+            "target": attempt["target"],
+            "status": attempt["status"],
+        }
+        for attempt in attempts
+        if attempt["phase"] == "recover" and attempt["status"] == "success"
+    ]
+    failed_verification = next(
+        (
+            attempt
+            for attempt in attempts
+            if attempt["verifies_task"] and attempt["status"] == "error"
+        ),
+        None,
+    )
+    successful_verification = next(
+        (
+            attempt
+            for attempt in reversed(attempts)
+            if attempt["verifies_task"] and attempt["status"] == "success"
+        ),
+        None,
+    )
+    extensions = sorted(
+        {
+            "." + path.rsplit(".", 1)[-1].lower()
+            for path in files
+            if "." in path.rsplit("/", 1)[-1]
+        }
+    )
+    tools = list(dict.fromkeys(attempt["tool"] for attempt in attempts if attempt["tool"]))
+    environment = {
+        "file_extensions": extensions,
+        "tools": tools,
+        "verification_adapter": verification_adapter,
+    }
+    environment["signature"] = hashlib.sha256(
+        json.dumps(environment, sort_keys=True).encode()
+    ).hexdigest()[:16]
+    normalized_failure = " | ".join(error.lower() for error in errors)
+    failure_signature = hashlib.sha256(
+        normalized_failure.encode()
+    ).hexdigest()[:16]
+    return {
+        "schema_version": "experience-v2",
+        "task_pattern": task,
+        "environment": environment,
+        "failure": {
+            "signature": failure_signature,
+            "adapter": verification_adapter,
+            "target": correction.get("target", ""),
+            "messages": errors,
+            "step_id": failed_verification["step_id"] if failed_verification else "",
+            "attempt_id": (
+                failed_verification["attempt_id"] if failed_verification else ""
+            ),
+        },
+        "root_cause": {
+            "status": "unresolved",
+            "method": "deterministic_trace_only",
+            "confidence": 0.0,
+        },
+        "approach": [
+            {
+                "phase": attempt["phase"],
+                "tool": attempt["tool"],
+                "target": attempt["target"],
+                "status": attempt["status"],
+            }
+            for attempt in attempts
+        ],
+        "corrective_actions": corrective_actions,
+        "verification": {
+            "adapter": verification_adapter,
+            "target": correction.get("target", ""),
+            "status": outcome_status,
+            "step_id": (
+                successful_verification["step_id"]
+                if successful_verification
+                else ""
+            ),
+            "attempt_id": (
+                successful_verification["attempt_id"]
+                if successful_verification
+                else ""
+            ),
+        },
+        "limitations": [
+            "derived_from_verified_execution_trace",
+            "root_cause_not_yet_confirmed",
+            "revalidate_when_environment_signature_changes",
+        ],
+        "source_case_ids": [],
+    }
+
+
+def _experience_metadata(experience: dict) -> dict:
+    return {
+        "schema_version": experience["schema_version"],
+        "environment_signature": experience["environment"]["signature"],
+        "failure_signature": experience["failure"]["signature"],
+        "verification_adapter": experience["verification"]["adapter"],
+        "evidence_quality": "deterministic_verified_trace",
+    }
 
 
 async def reconcile_experience_projections(group_id: int) -> int:
