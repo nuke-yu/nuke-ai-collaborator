@@ -21,6 +21,8 @@ class TestEverOSCaseEngine(unittest.TestCase):
         tool_records = [
             {"name": "read_file", "args": {"path": "src/main.py"}, "result": "ok", "is_error": False},
             {"name": "run_shell", "args": {"command": "pytest"}, "result": "SyntaxError", "is_error": True},
+            {"name": "edit_file", "args": {"path": "src/main.py"}, "result": "edited", "is_error": False},
+            {"name": "run_shell", "args": {"command": "pytest"}, "result": "1 passed", "is_error": False},
         ]
 
         extracted = self.engine.extract_case(
@@ -76,7 +78,11 @@ class TestEverOSCaseAlgorithmAdapter(unittest.IsolatedAsyncioTestCase):
             run_id="run:55",
             task="Debug database timeout",
             outcome="completed",
-            tool_records=({"name": "run_shell", "args": {"command": "pytest"}, "result": "Timeout", "is_error": True},),
+            tool_records=(
+                {"name": "run_shell", "args": {"command": "pytest"}, "result": "Timeout", "is_error": True},
+                {"name": "edit_file", "args": {"path": "db.py"}, "result": "edited", "is_error": False},
+                {"name": "run_shell", "args": {"command": "pytest"}, "result": "1 passed", "is_error": False},
+            ),
         )
 
         extracted = await self.adapter.extract_case(command)

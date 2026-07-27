@@ -13,6 +13,8 @@ import re
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
+from memory.domain.outcome import OutcomeStatus, evaluate_outcome_verdict
+
 
 @dataclass(frozen=True, slots=True)
 class CaseEvaluation:
@@ -36,6 +38,7 @@ class ExtractedCase:
     information_gain: str
     should_distill: bool
     summary: str
+    correction_evidence: Mapping[str, Any]
 
 
 class EverOSCaseEngine:
@@ -70,12 +73,27 @@ class EverOSCaseEngine:
                 if err_text:
                     errors.append(err_text)
 
+        verdict = evaluate_outcome_verdict(
+            terminal_outcome=outcome,
+            tool_records=tool_records,
+        )
+        correction_evidence = (
+            {
+                "adapter": verdict.correction.adapter,
+                "target": verdict.correction.target,
+                "failure_signal_index": verdict.correction.failure_signal_index,
+                "success_signal_index": verdict.correction.success_signal_index,
+                "corrective_signal_indices": verdict.correction.corrective_signal_indices,
+            }
+            if verdict.correction is not None
+            else {}
+        )
         eval_result = self.evaluate_outcome(
-            outcome=outcome, errors=errors, tool_attempts=len(tool_records)
+            outcome=outcome,
+            outcome_status=verdict.status,
+            has_correction=bool(correction_evidence),
         )
-        signals = (["terminal_completion"] if outcome == "completed" else []) + (
-            ["tool_errors"] if errors else []
-        )
+        signals = [verdict.status.value]
         if eval_result.classification == "corrected_success":
             signals.append("corrected_success")
 
@@ -96,10 +114,14 @@ class EverOSCaseEngine:
             information_gain=eval_result.information_gain,
             should_distill=eval_result.should_distill,
             summary=summary,
+            correction_evidence=correction_evidence,
         )
 
     def evaluate_outcome(
-        self, outcome: str, errors: Sequence[str], tool_attempts: int
+        self,
+        outcome: str,
+        outcome_status: OutcomeStatus,
+        has_correction: bool,
     ) -> CaseEvaluation:
         """Determine outcome classification and distillation gating."""
         if outcome != "completed":
@@ -110,7 +132,15 @@ class EverOSCaseEngine:
                 confidence=0.9,
             )
 
-        if errors:
+        if outcome_status is OutcomeStatus.VERIFIED_FAILURE:
+            return CaseEvaluation(
+                classification="failed",
+                information_gain="high",
+                should_distill=False,
+                confidence=1.0,
+            )
+
+        if outcome_status is OutcomeStatus.VERIFIED_SUCCESS and has_correction:
             return CaseEvaluation(
                 classification="corrected_success",
                 information_gain="high",
@@ -118,12 +148,12 @@ class EverOSCaseEngine:
                 confidence=0.9,
             )
 
-        if tool_attempts == 0:
+        if outcome_status is OutcomeStatus.UNVERIFIED_COMPLETION:
             return CaseEvaluation(
-                classification="ordinary_success",
+                classification="unverified_completion",
                 information_gain="low",
                 should_distill=False,
-                confidence=0.8,
+                confidence=0.5,
             )
 
         return CaseEvaluation(

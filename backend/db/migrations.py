@@ -1032,6 +1032,19 @@ async def migration_045(db):
     await db.commit()
 
 
+async def migration_046(db):
+    """Persist deterministic Case verdicts and correction evidence."""
+    for column in (
+        "outcome_status TEXT NOT NULL DEFAULT 'unverified_completion'",
+        "verification_adapter TEXT NOT NULL DEFAULT ''",
+        "correction_evidence_json TEXT NOT NULL DEFAULT '{}'",
+    ):
+        await _safe_add_column(
+            db, f"ALTER TABLE agent_cases ADD COLUMN {column}"
+        )
+    await db.commit()
+
+
 MIGRATIONS: list = [
     migration_001,
     migration_002,
@@ -1078,6 +1091,7 @@ MIGRATIONS: list = [
     migration_043,
     migration_044,
     migration_045,
+    migration_046,
 ]
 
 

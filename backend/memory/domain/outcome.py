@@ -25,11 +25,21 @@ class OutcomeSignal:
 
 
 @dataclass(frozen=True, slots=True)
+class CorrectionEvidence:
+    adapter: str
+    target: str
+    failure_signal_index: int
+    success_signal_index: int
+    corrective_signal_indices: tuple[int, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class OutcomeVerdict:
     status: OutcomeStatus
     confidence: float
     primary_adapter: str
     signals: tuple[OutcomeSignal, ...]
+    correction: CorrectionEvidence | None = None
 
     @property
     def is_verified(self) -> bool:
@@ -255,15 +265,40 @@ def evaluate_outcome_verdict(
     if terminal in {"abandoned", "timed_out"}:
         return OutcomeVerdict(OutcomeStatus.ABANDONED, 1.0, "", tuple(signals))
 
-    task_signals = [signal for signal in signals if signal.verifies_task]
-    primary = task_signals[-1] if task_signals else None
+    task_signal_indices = [
+        index for index, signal in enumerate(signals) if signal.verifies_task
+    ]
+    primary_index = task_signal_indices[-1] if task_signal_indices else None
+    primary = signals[primary_index] if primary_index is not None else None
     if primary is not None:
+        verification_invalidated = (
+            primary.success
+            and terminal == "completed"
+            and any(
+                signal.adapter == "file_change" and signal.success
+                for signal in signals[primary_index + 1 :]
+            )
+        )
+        if verification_invalidated:
+            return OutcomeVerdict(
+                OutcomeStatus.UNVERIFIED_COMPLETION,
+                0.5,
+                "",
+                tuple(signals),
+            )
         status = (
             OutcomeStatus.VERIFIED_SUCCESS
             if primary.success and terminal == "completed"
             else OutcomeStatus.VERIFIED_FAILURE
         )
-        return OutcomeVerdict(status, 1.0, primary.adapter, tuple(signals))
+        correction = (
+            _find_correction_evidence(signals)
+            if status is OutcomeStatus.VERIFIED_SUCCESS
+            else None
+        )
+        return OutcomeVerdict(
+            status, 1.0, primary.adapter, tuple(signals), correction
+        )
 
     if terminal == "completed":
         return OutcomeVerdict(
@@ -274,6 +309,42 @@ def evaluate_outcome_verdict(
 
 def _normalized_command(command: str) -> str:
     return re.sub(r"\s+", " ", command.strip().lower())[:500]
+
+
+def _find_correction_evidence(
+    signals: Sequence[OutcomeSignal],
+) -> CorrectionEvidence | None:
+    """Find failure → different corrective action → same-target success."""
+
+    for success_index in range(len(signals) - 1, -1, -1):
+        success = signals[success_index]
+        if not success.verifies_task or not success.success:
+            continue
+        for failure_index in range(success_index - 1, -1, -1):
+            failure = signals[failure_index]
+            if (
+                not failure.verifies_task
+                or failure.success
+                or failure.adapter != success.adapter
+                or failure.target != success.target
+            ):
+                continue
+            corrective = tuple(
+                index
+                for index in range(failure_index + 1, success_index)
+                if signals[index].success
+                and not signals[index].verifies_task
+                and signals[index].adapter == "file_change"
+            )
+            if corrective:
+                return CorrectionEvidence(
+                    adapter=success.adapter,
+                    target=success.target,
+                    failure_signal_index=failure_index,
+                    success_signal_index=success_index,
+                    corrective_signal_indices=corrective,
+                )
+    return None
 
 
 def _pytest_target(command: str) -> str:

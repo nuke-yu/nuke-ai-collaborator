@@ -156,6 +156,18 @@ class MemorySchemaTest(unittest.IsolatedAsyncioTestCase):
                 "SELECT state,verification_status FROM skill_usage"
             ) as cursor:
                 self.assertEqual(await cursor.fetchone(), ("injected", "unverified"))
+            async with connection.execute(
+                "PRAGMA table_info(agent_cases)"
+            ) as cursor:
+                case_columns = {row[1] for row in await cursor.fetchall()}
+            self.assertTrue(
+                {
+                    "outcome_status",
+                    "verification_adapter",
+                    "correction_evidence_json",
+                }
+                <= case_columns
+            )
 
     async def test_audit_immutability_is_part_of_owned_schema(self) -> None:
         await self.schema.ensure_group(7)

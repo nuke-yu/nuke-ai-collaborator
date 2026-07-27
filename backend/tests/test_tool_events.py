@@ -29,10 +29,34 @@ from ai.pipeline import process_case
 from ai.reflexion import classify_failure, maybe_inject
 from ai.skill_learning import compile_candidate, complete_skill_usage, promote_skill, recall_skills, validate_declaration
 from ai.experiences import complete_usage, decay_experiences, distill_case, recall_experiences
+from ai.learning_metrics import collect_learning_shadow_metrics
 from ai.usage_tracking import mark_adopted, mark_executed, mark_verified
 from memory.domain import UsageKind, UsageState
 
 TEST_DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "test_tool_events.db")
+
+
+def _corrected_trace(failure: str = "verification failed") -> list[dict]:
+    return [
+        {
+            "name": "run_shell",
+            "args": {"cmd": "pytest tests/test_memory.py -q"},
+            "result": failure,
+            "is_error": True,
+        },
+        {
+            "name": "edit_file",
+            "args": {"path": "backend/ai/memory.py"},
+            "result": "edited",
+            "is_error": False,
+        },
+        {
+            "name": "run_shell",
+            "args": {"cmd": "pytest tests/test_memory.py -q"},
+            "result": "1 passed",
+            "is_error": False,
+        },
+    ]
 
 
 async def _fetch_events(group_id: int) -> list[dict]:
@@ -317,10 +341,25 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
         plain = await assemble_case(run_id="plain", group_id=7, bot_id=3, task="read file",
                                     outcome="completed", tool_records=[])
         self.assertIsNone(await distill_case(plain, 7))
+        error_only = await assemble_case(
+            run_id="error-only",
+            group_id=7,
+            bot_id=3,
+            task="claim success without retry",
+            outcome="completed",
+            tool_records=[
+                {
+                    "name": "run_shell",
+                    "args": {"cmd": "pytest"},
+                    "result": "1 failed",
+                    "is_error": True,
+                }
+            ],
+        )
+        self.assertIsNone(await distill_case(error_only, 7))
         corrected = await assemble_case(
             run_id="fixed", group_id=7, bot_id=3, task="fix tests", outcome="completed",
-            tool_records=[{"name":"run_shell","args":{"cmd":"pytest"},
-                           "result":"failed then fixed","is_error":True}],
+            tool_records=_corrected_trace("failed then fixed"),
         )
         record_id = await distill_case(corrected, 7)
         self.assertEqual(record_id, await distill_case(corrected, 7))
@@ -335,12 +374,12 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
         first = await assemble_case(
             run_id="canonical-1", group_id=7, bot_id=3, task="fix db",
             outcome="completed",
-            tool_records=[{"name": "run_shell", "result": "first failure", "is_error": True}],
+            tool_records=_corrected_trace("first failure"),
         )
         second = await assemble_case(
             run_id="canonical-2", group_id=7, bot_id=3, task="fix db",
             outcome="completed",
-            tool_records=[{"name": "run_shell", "result": "latest failure", "is_error": True}],
+            tool_records=_corrected_trace("latest failure"),
         )
 
         with patch("ai.experiences._index_vector", new=AsyncMock()) as index_vector:
@@ -362,7 +401,7 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
     async def test_run_completion_is_shadow_telemetry_not_usage_evidence(self):
         case_id = await assemble_case(
             run_id="source", group_id=7, bot_id=3, task="修复数据库迁移失败",
-            outcome="completed", tool_records=[{"name":"run_shell","args":{},"result":"migration failed","is_error":True}],
+            outcome="completed", tool_records=_corrected_trace("migration failed"),
         )
         record_id = await distill_case(case_id, 7)
         context, ids = await recall_experiences(
@@ -389,6 +428,9 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
                 evidence = await cur.fetchone()
         self.assertEqual(row, ("injected", "completed", 90, 1))
         self.assertEqual(evidence, before_completion)
+        metrics = await collect_learning_shadow_metrics(7)
+        self.assertEqual(metrics.experience_completion_without_adoption, 1)
+        self.assertEqual(metrics.cases_corrected_success, 1)
 
     async def test_verified_causal_usage_is_the_only_reinforcement_path(self):
         case_id = await assemble_case(
@@ -397,13 +439,7 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
             bot_id=3,
             task="repair verified migration",
             outcome="completed",
-            tool_records=[
-                {
-                    "name": "run_shell",
-                    "result": "migration failed",
-                    "is_error": True,
-                }
-            ],
+            tool_records=_corrected_trace("migration failed"),
         )
         record_id = await distill_case(case_id, 7)
         _, ids = await recall_experiences(
@@ -446,10 +482,17 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_outcome_evaluator_and_pipeline_are_idempotent(self):
         self.assertFalse(evaluate_outcome(outcome="completed", errors=[], attempts=1).should_distill)
-        self.assertTrue(evaluate_outcome(outcome="completed", errors=["x"], attempts=2).should_distill)
+        self.assertFalse(evaluate_outcome(outcome="completed", errors=["x"], attempts=2).should_distill)
+        self.assertTrue(evaluate_outcome(
+            outcome="completed",
+            errors=["x"],
+            attempts=3,
+            outcome_status="verified_success",
+            correction_evidence={"target": "pytest:tests/test_memory.py"},
+        ).should_distill)
         case_id = await assemble_case(
             run_id="pipeline", group_id=7, bot_id=3, task="fix migration",
-            outcome="completed", tool_records=[{"name":"run_shell","args":{},"result":"failed","is_error":True}],
+            outcome="completed", tool_records=_corrected_trace(),
         )
         job_id = await process_case(case_id, 7)
         self.assertEqual(job_id, await process_case(case_id, 7))
@@ -458,9 +501,18 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
                 jobs = await cur.fetchall()
             async with db.execute("SELECT COUNT(*) FROM memory_records") as cur:
                 count = (await cur.fetchone())[0]
+            async with db.execute(
+                """SELECT outcome_status,verification_adapter,
+                    correction_evidence_json FROM agent_cases"""
+            ) as cur:
+                case = await cur.fetchone()
         self.assertEqual((jobs[0][0], jobs[0][1]), ("completed", 1))
         self.assertTrue(json.loads(jobs[0][2])["should_distill"])
         self.assertEqual(count, 1)
+        self.assertEqual(case[:2], ("verified_success", "pytest"))
+        self.assertEqual(
+            json.loads(case[2])["target"], "pytest:tests/test_memory.py"
+        )
 
     async def test_pipeline_input_versions_create_distinct_jobs(self):
         case_id = await assemble_case(
@@ -483,7 +535,7 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
             case_id = await assemble_case(
                 run_id=run_id, group_id=7, bot_id=3, task="repair schema migration",
                 outcome="completed",
-                tool_records=[{"name": "run_shell", "result": "failed", "is_error": True}],
+                tool_records=_corrected_trace(),
             )
             await process_case(case_id, 7)
 
@@ -527,9 +579,9 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_experience_reinforcement_contradiction_and_decay(self):
         first = await assemble_case(run_id="e1", group_id=7, bot_id=3, task="fix db",
-                                    outcome="completed", tool_records=[{"name":"run_shell","args":{},"result":"x","is_error":True}])
+                                    outcome="completed", tool_records=_corrected_trace("x"))
         second = await assemble_case(run_id="e2", group_id=7, bot_id=3, task="fix db",
-                                     outcome="completed", tool_records=[{"name":"run_shell","args":{},"result":"y","is_error":True}])
+                                     outcome="completed", tool_records=_corrected_trace("y"))
         record_id = await distill_case(first, 7)
         self.assertEqual(record_id, await distill_case(second, 7))
         for run_id in ("bad1", "bad2"):
@@ -557,7 +609,7 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
             case_ids.append(await assemble_case(
                 run_id=f"hysteresis-{index}", group_id=7, bot_id=3, task="fix db",
                 outcome="completed",
-                tool_records=[{"name": "run_shell", "result": "failed", "is_error": True}],
+                tool_records=_corrected_trace(),
             ))
         record_id = await distill_case(case_ids[0], 7)
         await distill_case(case_ids[1], 7)
@@ -597,9 +649,9 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_candidate_compiler_requires_repeated_evidence_and_is_declarative(self):
         first = await assemble_case(run_id="s1",group_id=7,bot_id=3,task="fix schema",
-                                    outcome="completed",tool_records=[{"name":"run_shell","args":{},"result":"x","is_error":True}])
+                                    outcome="completed",tool_records=_corrected_trace("x"))
         second = await assemble_case(run_id="s2",group_id=7,bot_id=3,task="fix schema",
-                                     outcome="completed",tool_records=[{"name":"run_shell","args":{},"result":"y","is_error":True}])
+                                     outcome="completed",tool_records=_corrected_trace("y"))
         record_id = await distill_case(first,7)
         self.assertIsNone(await compile_candidate(record_id,7))
         await distill_case(second,7)
@@ -618,9 +670,9 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_skill_maturity_uses_independent_run_outcomes(self):
         case1=await assemble_case(run_id="k1",group_id=7,bot_id=3,task="repair schema migration",
-                                  outcome="completed",tool_records=[{"name":"run_shell","args":{},"result":"x","is_error":True}])
+                                  outcome="completed",tool_records=_corrected_trace("x"))
         case2=await assemble_case(run_id="k2",group_id=7,bot_id=3,task="repair schema migration",
-                                  outcome="completed",tool_records=[{"name":"run_shell","args":{},"result":"y","is_error":True}])
+                                  outcome="completed",tool_records=_corrected_trace("y"))
         record_id=await distill_case(case1,7); await distill_case(case2,7)
         async with database.connect(TEST_DB_PATH) as db:
             await db.execute("UPDATE memory_records SET confidence=.8 WHERE record_id=?",(record_id,)); await db.commit()
@@ -640,6 +692,9 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
             async with db.execute("SELECT maturity,success_count FROM skills WHERE skill_id=?",(skill_id,)) as cur:
                 row=await cur.fetchone()
         self.assertEqual(row,("active",1))
+        metrics = await collect_learning_shadow_metrics(7)
+        self.assertEqual(metrics.skill_verified_success, 1)
+        self.assertEqual(metrics.skill_completion_without_adoption, 0)
 
 
 class RetrievalTest(unittest.IsolatedAsyncioTestCase):

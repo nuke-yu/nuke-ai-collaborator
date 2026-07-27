@@ -6,7 +6,7 @@ from typing import Final
 from memory.contracts import MemoryOperationError
 from memory.ports import MemoryDatabasePort
 
-MEMORY_SCHEMA_VERSION: Final = 2
+MEMORY_SCHEMA_VERSION: Final = 3
 
 MEMORY_GROUP_TABLES = frozenset(
     {
@@ -35,6 +35,9 @@ MEMORY_V1_DDL = (
         tools_used TEXT NOT NULL DEFAULT '[]', files_touched TEXT NOT NULL DEFAULT '[]',
         attempts INTEGER NOT NULL DEFAULT 0, errors TEXT NOT NULL DEFAULT '[]',
         outcome TEXT NOT NULL, outcome_confidence REAL NOT NULL DEFAULT 0.0,
+        outcome_status TEXT NOT NULL DEFAULT 'unverified_completion',
+        verification_adapter TEXT NOT NULL DEFAULT '',
+        correction_evidence_json TEXT NOT NULL DEFAULT '{}',
         verification_signals TEXT NOT NULL DEFAULT '[]', summary TEXT NOT NULL DEFAULT '',
         created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
     )""",
@@ -149,6 +152,14 @@ MEMORY_V2_COLUMNS = {
     ),
 }
 
+MEMORY_V3_COLUMNS = {
+    "agent_cases": (
+        ("outcome_status", "TEXT NOT NULL DEFAULT 'unverified_completion'"),
+        ("verification_adapter", "TEXT NOT NULL DEFAULT ''"),
+        ("correction_evidence_json", "TEXT NOT NULL DEFAULT '{}'"),
+    ),
+}
+
 MEMORY_GROUP_DDL = (
     _VERSION_TABLE_DDL,
     *MEMORY_V1_DDL,
@@ -194,6 +205,17 @@ class MemorySchemaManager:
                             await connection.execute(
                                 f"ALTER TABLE {table} ADD COLUMN {name} {declaration}"
                             )
+            if current < 3:
+                for table, columns in MEMORY_V3_COLUMNS.items():
+                    async with connection.execute(
+                        f"PRAGMA table_info({table})"
+                    ) as cursor:
+                        existing = {str(row[1]) for row in await cursor.fetchall()}
+                    for name, declaration in columns:
+                        if name not in existing:
+                            await connection.execute(
+                                f"ALTER TABLE {table} ADD COLUMN {name} {declaration}"
+                            )
             if current < 1:
                 await connection.execute(
                     "INSERT INTO memory_schema_version(version) VALUES (1)",
@@ -201,6 +223,10 @@ class MemorySchemaManager:
             if current < 2:
                 await connection.execute(
                     "INSERT INTO memory_schema_version(version) VALUES (2)"
+                )
+            if current < 3:
+                await connection.execute(
+                    "INSERT INTO memory_schema_version(version) VALUES (3)"
                 )
             await connection.commit()
         return MEMORY_SCHEMA_VERSION

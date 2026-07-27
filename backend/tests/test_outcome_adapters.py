@@ -121,6 +121,80 @@ class OutcomeAdapterTest(unittest.TestCase):
         self.assertEqual(verdict.status, OutcomeStatus.CANCELLED)
         self.assertFalse(verdict.is_verified)
 
+    def test_correction_requires_same_target_retry_and_intervening_action(self) -> None:
+        verdict = evaluate_outcome_verdict(
+            terminal_outcome="completed",
+            tool_records=[
+                {
+                    "name": "run_shell",
+                    "args": {"cmd": "pytest tests/test_api.py -q"},
+                    "result": "1 failed",
+                    "is_error": True,
+                },
+                {
+                    "name": "edit_file",
+                    "args": {"path": "api.py"},
+                    "result": "edited",
+                    "is_error": False,
+                },
+                {
+                    "name": "run_shell",
+                    "args": {"cmd": "pytest tests/test_api.py -q"},
+                    "result": "1 passed",
+                    "is_error": False,
+                },
+            ],
+        )
+
+        self.assertEqual(verdict.status, OutcomeStatus.VERIFIED_SUCCESS)
+        self.assertIsNotNone(verdict.correction)
+        self.assertEqual(verdict.correction.target, "pytest:tests/test_api.py")
+        self.assertEqual(verdict.correction.corrective_signal_indices, (1,))
+
+    def test_success_after_failure_without_correction_is_not_corrected(self) -> None:
+        verdict = evaluate_outcome_verdict(
+            terminal_outcome="completed",
+            tool_records=[
+                {
+                    "name": "run_shell",
+                    "args": {"cmd": "pytest tests/test_api.py"},
+                    "result": "transient failure",
+                    "is_error": True,
+                },
+                {
+                    "name": "run_shell",
+                    "args": {"cmd": "pytest tests/test_api.py"},
+                    "result": "1 passed",
+                    "is_error": False,
+                },
+            ],
+        )
+
+        self.assertEqual(verdict.status, OutcomeStatus.VERIFIED_SUCCESS)
+        self.assertIsNone(verdict.correction)
+
+    def test_file_change_after_verification_invalidates_success(self) -> None:
+        verdict = evaluate_outcome_verdict(
+            terminal_outcome="completed",
+            tool_records=[
+                {
+                    "name": "run_shell",
+                    "args": {"cmd": "pytest tests/test_api.py"},
+                    "result": "1 passed",
+                    "is_error": False,
+                },
+                {
+                    "name": "edit_file",
+                    "args": {"path": "api.py"},
+                    "result": "edited after test",
+                    "is_error": False,
+                },
+            ],
+        )
+
+        self.assertEqual(verdict.status, OutcomeStatus.UNVERIFIED_COMPLETION)
+        self.assertIsNone(verdict.correction)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -34,12 +34,21 @@ async def process_case(case_id: str, group_id: int, *, input_version: str = "1")
         return job_id
     try:
         async with await _memory_db("agent_cases", group_id, write=False) as db:
-            async with db.execute("SELECT outcome,errors,attempts FROM agent_cases WHERE case_id=? AND group_id=?",
+            async with db.execute(
+                """SELECT outcome,errors,attempts,outcome_status,
+                    correction_evidence_json FROM agent_cases
+                    WHERE case_id=? AND group_id=?""",
                                   (case_id, group_id)) as cur:
                 row = await cur.fetchone()
         if not row:
             raise ValueError(f"case not found: {case_id}")
-        evaluation = evaluate_outcome(outcome=row[0], errors=json.loads(row[1] or "[]"), attempts=row[2])
+        evaluation = evaluate_outcome(
+            outcome=row[0],
+            errors=json.loads(row[1] or "[]"),
+            attempts=row[2],
+            outcome_status=row[3],
+            correction_evidence=json.loads(row[4] or "{}"),
+        )
         record_id = None
         if evaluation.should_distill:
             from ai.experiences import distill_case

@@ -63,11 +63,21 @@ async def distill_case(case_id: str, group_id: int | None) -> str | None:
     from ai.memory import _memory_db
     async with await _memory_db("agent_cases", group_id, write=False) as db:
         async with db.execute(
-            "SELECT bot_id,task,task_signature,tools_used,errors,outcome,summary FROM agent_cases "
-            "WHERE case_id=? AND group_id=?", (case_id, group_id),
+            """SELECT bot_id,task,task_signature,tools_used,errors,outcome,summary,
+                outcome_status,verification_adapter,correction_evidence_json
+                FROM agent_cases
+                WHERE case_id=? AND group_id=?""",
+            (case_id, group_id),
         ) as cur:
             row = await cur.fetchone()
-    if not row or row[5] != "completed":
+    if (
+        not row
+        or row[5] != "completed"
+        or row[7] != "verified_success"
+    ):
+        return None
+    correction = json.loads(row[9] or "{}")
+    if not correction:
         return None
     raw_errors = json.loads(row[4] or "[]")
     if not raw_errors:
@@ -77,8 +87,14 @@ async def distill_case(case_id: str, group_id: int | None) -> str | None:
     record_id = "exp:" + hashlib.sha256(case_id.encode()).hexdigest()[:24]
     content = json.dumps({
         "task_pattern": clean_task, "approach": json.loads(row[3] or "[]"),
-        "failure_mode": errors, "corrective_action": "Subsequent execution completed successfully",
-        "verification": "run_terminal_completed", "limitations": "Derived from one case",
+        "failure_mode": errors,
+        "corrective_action": correction.get("corrective_actions", []),
+        "verification": {
+            "adapter": row[8],
+            "target": correction.get("target", ""),
+            "status": row[7],
+        },
+        "limitations": "Derived from one verified case",
     }, ensure_ascii=False)
     now = int(time.time() * 1000)
     target_rid = None

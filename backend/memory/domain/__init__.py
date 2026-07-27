@@ -3,6 +3,7 @@
 from .outcome import (
     ApiResponseAdapter,
     BuildAdapter,
+    CorrectionEvidence,
     FileChangeAdapter,
     LintAdapter,
     OutcomeSignal,
@@ -32,6 +33,7 @@ __all__ = [
     "Principal",
     "ApiResponseAdapter",
     "BuildAdapter",
+    "CorrectionEvidence",
     "FileChangeAdapter",
     "LintAdapter",
     "PytestAdapter",

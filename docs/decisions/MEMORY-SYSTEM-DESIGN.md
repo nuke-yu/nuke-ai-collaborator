@@ -49,6 +49,21 @@
 - Habit 的多独立样本、跨场景、14 天跨度和反例门控；
 - Personal Vault 的来源 intake、导出、删除、过期清理与重建 API。
 
+#### 2026-07-28 证据语义增量 [CURRENT]
+
+- Experience/Skill usage 已升级为
+  `injected → adopted → executed → verified_success | verified_failure`
+  单向状态机，旧 finalization 仅保留 shadow telemetry；
+- 只有 Decision Trace、匹配行动和 Outcome Adapter 组成完整因果证据链后，
+  才能强化、反驳 Experience 或改变 Skill 成熟度；
+- 已实现 Shell exit、Pytest、Build、Lint、File change、API response 和
+  Workflow state 的确定性 adapter；普通工具成功不再等同于任务成功；
+- Case 持久化 `outcome_status`、验证 adapter 和 correction evidence；
+- `corrected_success` 必须满足同一验证目标失败、发生不同纠正动作、同目标重试成功、
+  Run 最终完成四项条件；只有这种 Case 可以蒸馏 Experience；
+- 已提供 Group 内只读 shadow metrics，用于比较“旧规则会强化”与“新规则有因果证据”
+  的数量差异。
+
 仍属于 TARGET 的主要内容包括 Gmail/Outlook、日历和任务系统等具体 Connector、Personal Memory 管理 UI、观点演变的高级关系建模，以及 S2/S3 安全基础设施。Capability Registry、可信验证和完整 Evaluation Harness 按已确认决策继续后置。
 
 当前系统已经具备可插拔的 `MemoryProvider` 接缝：

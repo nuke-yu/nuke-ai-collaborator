@@ -842,6 +842,8 @@ async def execute_parallel_tools(runner, calls, iteration=None) -> None:
             "args": call["arguments"],
             "result": display_result,
             "is_error": is_error,
+            "step_id": f"{runner.run_id}:step:{_iter}",
+            "attempt_id": call["id"],
         })
         runner.messages.append({
             "role": "tool",
@@ -930,6 +932,8 @@ async def execute_serial_tools(runner, calls, iteration=None) -> None:
             "args": call["arguments"],
             "result": display_result,
             "is_error": is_error,
+            "step_id": f"{runner.run_id}:step:{_iter}",
+            "attempt_id": call["id"],
         })
         runner.messages.append({
             "role": "tool",

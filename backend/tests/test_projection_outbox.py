@@ -38,7 +38,24 @@ class ProjectionOutboxTest(unittest.IsolatedAsyncioTestCase):
             task="repair durable projection",
             outcome="completed",
             tool_records=[
-                {"name": "run_shell", "result": "failed then fixed", "is_error": True}
+                {
+                    "name": "run_shell",
+                    "args": {"cmd": "pytest tests/test_projection_outbox.py"},
+                    "result": "1 failed",
+                    "is_error": True,
+                },
+                {
+                    "name": "edit_file",
+                    "args": {"path": "backend/ai/experiences.py"},
+                    "result": "edited",
+                    "is_error": False,
+                },
+                {
+                    "name": "run_shell",
+                    "args": {"cmd": "pytest tests/test_projection_outbox.py"},
+                    "result": "1 passed",
+                    "is_error": False,
+                },
             ],
         )
 
