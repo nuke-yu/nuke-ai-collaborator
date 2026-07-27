@@ -223,26 +223,20 @@ async def recall_experiences(*, query: str, run_id: str, group_id: int | None,
 async def complete_usage(*, record_ids: list[str], run_id: str, group_id: int | None,
                          outcome: str, input_tokens: int, output_tokens: int,
                          tool_attempts: int) -> None:
-    if group_id is None or not record_ids:
-        return
-    from ai.memory import _memory_db
-    now = int(time.time() * 1000)
-    async with await _memory_db("experience_usage", group_id, write=True) as db:
-        for record_id in record_ids:
-            cur = await db.execute("UPDATE experience_usage SET state='executed',outcome=?,input_tokens=?,"
-                "output_tokens=?,tool_attempts=?,updated_at=? WHERE record_id=? AND run_id=? AND group_id=? AND state!='executed'",
-                (outcome,input_tokens,output_tokens,tool_attempts,now,record_id,run_id,group_id))
-            if cur.rowcount == 1:
-                if outcome == "completed":
-                    await db.execute("UPDATE memory_records SET supporting_count=supporting_count+1,"
-                                     "confidence=MIN(0.98,confidence+0.03),last_used_at=?,updated_at=? WHERE record_id=?",
-                                     (now,now,record_id))
-                else:
-                    await db.execute("UPDATE memory_records SET contradicting_count=contradicting_count+1,"
-                                     "confidence=MAX(0.05,confidence-0.2),last_used_at=?,updated_at=?,"
-                                     "status=CASE WHEN contradicting_count+1>=2 THEN 'suspended' ELSE status END "
-                                     "WHERE record_id=?", (now,now,record_id))
-        await db.commit()
+    """Compatibility telemetry: run completion alone is not causal usage evidence."""
+
+    from ai.usage_tracking import record_legacy_completion
+    from memory.domain import UsageKind
+    await record_legacy_completion(
+        kind=UsageKind.EXPERIENCE,
+        item_ids=record_ids,
+        run_id=run_id,
+        group_id=group_id,
+        outcome=outcome,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        tool_attempts=tool_attempts,
+    )
 
 
 async def decay_experiences(group_id: int, *, now_ms: int | None = None,

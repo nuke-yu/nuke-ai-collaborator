@@ -9,8 +9,9 @@ from typing import Any
 import aiosqlite
 from memory.contracts import (AssembleCase, CompleteExperienceUsage,
                               CompleteSkillUsage, MemoryOperationError,
+                              MarkUsageAdopted, MarkUsageExecuted,
                               ProcessLearningCase, RecallExperiences,
-                              RecallSkills)
+                              RecallSkills, VerifyUsage)
 from memory.domain import MemoryScope, ScopeKind
 
 
@@ -87,6 +88,44 @@ class LegacyLearningAdapter:
             group_id=group_id,
             outcome=command.outcome,
         )
+
+    async def mark_usage_adopted(self, command: MarkUsageAdopted) -> int:
+        from ai.usage_tracking import mark_adopted
+        return await mark_adopted(
+            kind=command.kind,
+            item_ids=command.item_ids,
+            run_id=command.run_id,
+            group_id=self._group_id(command.scope),
+            adopted_via=command.adopted_via,
+            evidence=command.evidence,
+        )
+
+    async def mark_usage_executed(self, command: MarkUsageExecuted) -> int:
+        from ai.usage_tracking import mark_executed
+        return await mark_executed(
+            kind=command.kind,
+            item_ids=command.item_ids,
+            run_id=command.run_id,
+            group_id=self._group_id(command.scope),
+            evidence=command.evidence,
+        )
+
+    async def verify_usage(self, command: VerifyUsage) -> int:
+        from ai.usage_tracking import mark_verified
+        changed = await mark_verified(
+            kind=command.kind,
+            item_ids=command.item_ids,
+            run_id=command.run_id,
+            group_id=self._group_id(command.scope),
+            status=command.status,
+            evidence=command.evidence,
+        )
+        if changed and command.kind.value == "skill":
+            from ai.skill_learning import project_skill
+            group_id = self._group_id(command.scope)
+            for skill_id in command.item_ids:
+                await project_skill(skill_id, group_id)
+        return changed
 
     @staticmethod
     def _group_id(scope: MemoryScope) -> int:

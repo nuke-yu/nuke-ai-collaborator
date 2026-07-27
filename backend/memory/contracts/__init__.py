@@ -19,6 +19,8 @@ from .models import (
     MemoryHit,
     MemoryAuthorizationError,
     MemoryOperationError,
+    MarkUsageAdopted,
+    MarkUsageExecuted,
     LostLeaseError,
     ObserveMemory,
     ObservePersonalHabit,
@@ -27,6 +29,7 @@ from .models import (
     RecallMemory,
     RecallResult,
     RecallSkills,
+    VerifyUsage,
 )
 
 __all__ = [
@@ -48,6 +51,8 @@ __all__ = [
     "MemoryHit",
     "MemoryAuthorizationError",
     "MemoryOperationError",
+    "MarkUsageAdopted",
+    "MarkUsageExecuted",
     "LostLeaseError",
     "ObserveMemory",
     "ObservePersonalHabit",
@@ -56,4 +61,5 @@ __all__ = [
     "RecallMemory",
     "RecallResult",
     "RecallSkills",
+    "VerifyUsage",
 ]

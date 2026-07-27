@@ -105,8 +105,9 @@ async def recall_skills(*, query: str, run_id: str, group_id: int | None,
     if not selected: return "",[]
     async with await _memory_db("skill_usage",group_id,write=True) as db:
         for _,skill_id,version,_ in selected:
-            await db.execute("INSERT INTO skill_usage(skill_id,version,run_id,group_id,created_at) VALUES(?,?,?,?,?) "
-                             "ON CONFLICT(skill_id,run_id) DO NOTHING",(skill_id,version,run_id,group_id,now))
+            await db.execute("INSERT INTO skill_usage(skill_id,version,run_id,group_id,created_at,updated_at) "
+                             "VALUES(?,?,?,?,?,?) ON CONFLICT(skill_id,run_id) DO NOTHING",
+                             (skill_id,version,run_id,group_id,now,now))
         await db.commit()
     body=[]
     for _,_,_,d in selected:
@@ -123,26 +124,17 @@ async def recall_skills(*, query: str, run_id: str, group_id: int | None,
 
 async def complete_skill_usage(*, skill_ids:list[str],run_id:str,group_id:int|None,
                                outcome:str) -> None:
-    if group_id is None or not skill_ids:return
-    from ai.memory import _memory_db
-    now=int(time.time()*1000)
-    async with await _memory_db("skills",group_id,write=True) as db:
-        for skill_id in skill_ids:
-            cur = await db.execute("UPDATE skill_usage SET outcome=?, state='executed' WHERE skill_id=? AND run_id=? AND state!='executed'",
-                             (outcome,skill_id,run_id))
-            if cur.rowcount == 1:
-                if outcome=="completed":
-                    await db.execute("""UPDATE skills SET success_count=success_count+1,
-                      maturity=CASE WHEN maturity='trial' THEN 'active'
-                        WHEN maturity='active' AND success_count+1>=3 THEN 'stable' ELSE maturity END,
-                      updated_at=? WHERE skill_id=?""",(now,skill_id))
-                else:
-                    await db.execute("""UPDATE skills SET failure_count=failure_count+1,
-                      status=CASE WHEN failure_count+1>=2 THEN 'suspended' ELSE status END,
-                      updated_at=? WHERE skill_id=?""",(now,skill_id))
-        await db.commit()
-    for skill_id in skill_ids:
-        await project_skill(skill_id,group_id)
+    """Compatibility telemetry: run completion alone cannot mature a Skill."""
+
+    from ai.usage_tracking import record_legacy_completion
+    from memory.domain import UsageKind
+    await record_legacy_completion(
+        kind=UsageKind.SKILL,
+        item_ids=skill_ids,
+        run_id=run_id,
+        group_id=group_id,
+        outcome=outcome,
+    )
 
 
 async def project_skill(skill_id:str,group_id:int) -> str|None:

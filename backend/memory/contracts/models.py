@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Mapping, Sequence
 
-from memory.domain import MemoryScope
+from memory.domain import MemoryScope, UsageKind, UsageState
 
 CONTRACT_VERSION = "memory.v1"
 
@@ -156,6 +156,47 @@ class CompleteSkillUsage:
     skill_ids: tuple[str, ...]
     run_id: str
     outcome: str
+
+    def __post_init__(self) -> None:
+        if not self.run_id.strip():
+            raise ValueError("run_id is required")
+
+
+@dataclass(frozen=True, slots=True)
+class MarkUsageAdopted:
+    scope: MemoryScope
+    kind: UsageKind
+    item_ids: tuple[str, ...]
+    run_id: str
+    adopted_via: str
+    evidence: Mapping[str, Any]
+
+    def __post_init__(self) -> None:
+        if not self.run_id.strip():
+            raise ValueError("run_id is required")
+
+
+@dataclass(frozen=True, slots=True)
+class MarkUsageExecuted:
+    scope: MemoryScope
+    kind: UsageKind
+    item_ids: tuple[str, ...]
+    run_id: str
+    evidence: Mapping[str, Any]
+
+    def __post_init__(self) -> None:
+        if not self.run_id.strip():
+            raise ValueError("run_id is required")
+
+
+@dataclass(frozen=True, slots=True)
+class VerifyUsage:
+    scope: MemoryScope
+    kind: UsageKind
+    item_ids: tuple[str, ...]
+    run_id: str
+    status: UsageState
+    evidence: Mapping[str, Any]
 
     def __post_init__(self) -> None:
         if not self.run_id.strip():

@@ -12,6 +12,8 @@ from memory.domain import (
     ScopeKind,
     UsageState,
     can_transition_usage,
+    require_adoption_evidence,
+    require_execution_evidence,
     require_usage_transition,
 )
 from memory.ports import MemoryCommandPort, MemoryQueryPort
@@ -53,6 +55,12 @@ class TestMemoryScope(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "invalid usage transition"):
             require_usage_transition(
                 UsageState.VERIFIED_SUCCESS, UsageState.EXECUTED
+            )
+        with self.assertRaisesRegex(ValueError, "decision_trace"):
+            require_adoption_evidence("model_self_report", {"decision_id": "d:1"})
+        with self.assertRaisesRegex(ValueError, "matching action"):
+            require_execution_evidence(
+                {"action_match": False, "evidence_ids": ["event:1"]}
             )
 
 

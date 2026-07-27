@@ -29,6 +29,8 @@ from ai.pipeline import process_case
 from ai.reflexion import classify_failure, maybe_inject
 from ai.skill_learning import compile_candidate, complete_skill_usage, promote_skill, recall_skills, validate_declaration
 from ai.experiences import complete_usage, decay_experiences, distill_case, recall_experiences
+from ai.usage_tracking import mark_adopted, mark_executed, mark_verified
+from memory.domain import UsageKind, UsageState
 
 TEST_DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "test_tool_events.db")
 
@@ -237,6 +239,40 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
         if os.path.exists(TEST_DB_PATH):
             os.remove(TEST_DB_PATH)
 
+    async def _verify_usage(
+        self,
+        kind: UsageKind,
+        item_ids: list[str],
+        run_id: str,
+        status: UsageState,
+    ) -> None:
+        await mark_adopted(
+            kind=kind,
+            item_ids=item_ids,
+            run_id=run_id,
+            group_id=7,
+            adopted_via="decision_trace",
+            evidence={"decision_id": f"decision:{run_id}"},
+        )
+        await mark_executed(
+            kind=kind,
+            item_ids=item_ids,
+            run_id=run_id,
+            group_id=7,
+            evidence={
+                "action_match": True,
+                "evidence_ids": [f"tool-event:{run_id}"],
+            },
+        )
+        await mark_verified(
+            kind=kind,
+            item_ids=item_ids,
+            run_id=run_id,
+            group_id=7,
+            status=status,
+            evidence={"adapter": "test_adapter", "signal": status.value},
+        )
+
     async def test_run_lifecycle_is_durable_and_resume_safe(self):
         kwargs = dict(
             run_id="session-1", group_id=7, bot_id=3, session_id="session-1",
@@ -323,7 +359,7 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("latest failure", canonical_content)
         self.assertNotIn("first failure", canonical_content)
 
-    async def test_recall_tracks_injection_and_execution_cost(self):
+    async def test_run_completion_is_shadow_telemetry_not_usage_evidence(self):
         case_id = await assemble_case(
             run_id="source", group_id=7, bot_id=3, task="修复数据库迁移失败",
             outcome="completed", tool_records=[{"name":"run_shell","args":{},"result":"migration failed","is_error":True}],
@@ -333,12 +369,80 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
             query="数据库迁移怎么修复", run_id="target", group_id=7, bot_id=3)
         self.assertEqual(ids, [record_id])
         self.assertIn("prior execution experience", context)
+        async with database.connect(TEST_DB_PATH) as db:
+            async with db.execute(
+                "SELECT supporting_count,confidence FROM memory_records "
+                "WHERE record_id=?",
+                (record_id,),
+            ) as cur:
+                before_completion = await cur.fetchone()
         await complete_usage(record_ids=ids, run_id="target", group_id=7,
                              outcome="completed", input_tokens=90, output_tokens=20, tool_attempts=1)
         async with database.connect(TEST_DB_PATH) as db:
             async with db.execute("SELECT state,outcome,input_tokens,tool_attempts FROM experience_usage") as cur:
                 row = await cur.fetchone()
-        self.assertEqual(row, ("executed", "completed", 90, 1))
+            async with db.execute(
+                "SELECT supporting_count,confidence FROM memory_records "
+                "WHERE record_id=?",
+                (record_id,),
+            ) as cur:
+                evidence = await cur.fetchone()
+        self.assertEqual(row, ("injected", "completed", 90, 1))
+        self.assertEqual(evidence, before_completion)
+
+    async def test_verified_causal_usage_is_the_only_reinforcement_path(self):
+        case_id = await assemble_case(
+            run_id="verified-source",
+            group_id=7,
+            bot_id=3,
+            task="repair verified migration",
+            outcome="completed",
+            tool_records=[
+                {
+                    "name": "run_shell",
+                    "result": "migration failed",
+                    "is_error": True,
+                }
+            ],
+        )
+        record_id = await distill_case(case_id, 7)
+        _, ids = await recall_experiences(
+            query="repair verified migration",
+            run_id="verified-target",
+            group_id=7,
+            bot_id=3,
+        )
+
+        await self._verify_usage(
+            UsageKind.EXPERIENCE,
+            ids,
+            "verified-target",
+            UsageState.VERIFIED_SUCCESS,
+        )
+        # Replaying the same verdict must not reinforce twice.
+        await self._verify_usage(
+            UsageKind.EXPERIENCE,
+            ids,
+            "verified-target",
+            UsageState.VERIFIED_SUCCESS,
+        )
+
+        async with database.connect(TEST_DB_PATH) as db:
+            async with db.execute(
+                """SELECT state,adopted_at,executed_at,verified_at,
+                    verification_status FROM experience_usage"""
+            ) as cur:
+                usage = await cur.fetchone()
+            async with db.execute(
+                "SELECT supporting_count,confidence FROM memory_records "
+                "WHERE record_id=?",
+                (record_id,),
+            ) as cur:
+                memory = await cur.fetchone()
+        self.assertEqual(usage[0], "verified_success")
+        self.assertTrue(all(value is not None for value in usage[1:4]))
+        self.assertEqual(usage[4], "verified_success")
+        self.assertEqual(memory, (2, 0.76))
 
     async def test_outcome_evaluator_and_pipeline_are_idempotent(self):
         self.assertFalse(evaluate_outcome(outcome="completed", errors=[], attempts=1).should_distill)
@@ -432,6 +536,12 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
             await recall_experiences(query="fix db", run_id=run_id, group_id=7, bot_id=3)
             await complete_usage(record_ids=[record_id],run_id=run_id,group_id=7,outcome="failed",
                                  input_tokens=1,output_tokens=1,tool_attempts=1)
+            await self._verify_usage(
+                UsageKind.EXPERIENCE,
+                [record_id],
+                run_id,
+                UsageState.VERIFIED_FAILURE,
+            )
         async with database.connect(TEST_DB_PATH) as db:
             async with db.execute("SELECT supporting_count,contradicting_count,status FROM memory_records") as cur:
                 row = await cur.fetchone()
@@ -456,6 +566,12 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
             await complete_usage(
                 record_ids=[record_id], run_id=run_id, group_id=7, outcome="failed",
                 input_tokens=1, output_tokens=1, tool_attempts=1,
+            )
+            await self._verify_usage(
+                UsageKind.EXPERIENCE,
+                [record_id],
+                run_id,
+                UsageState.VERIFIED_FAILURE,
             )
 
         await distill_case(case_ids[2], 7)
@@ -514,6 +630,12 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ids,[skill_id]); self.assertIn("declarative skills",context)
         with patch("ai.skill_learning.project_skill",new=AsyncMock(return_value="x")):
             await complete_skill_usage(skill_ids=ids,run_id="new-run",group_id=7,outcome="completed")
+            await self._verify_usage(
+                UsageKind.SKILL,
+                ids,
+                "new-run",
+                UsageState.VERIFIED_SUCCESS,
+            )
         async with database.connect(TEST_DB_PATH) as db:
             async with db.execute("SELECT maturity,success_count FROM skills WHERE skill_id=?",(skill_id,)) as cur:
                 row=await cur.fetchone()
