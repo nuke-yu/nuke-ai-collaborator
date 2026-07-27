@@ -15,7 +15,7 @@ from memory.adapters.runtime import (
     legacy_memory_database,
     redact_projection_error,
 )
-from memory.application import AuthorizedPersonalKnowledgeService
+from memory.application import AuthorizedPersonalKnowledgeService, GroupFactService
 from memory.domain import Principal
 from memory.infrastructure import MemorySchemaManager, ProjectionOutbox
 from memory.module import MemoryModule
@@ -40,6 +40,10 @@ def build_personal_knowledge_client(principal: Principal) -> AuthorizedPersonalK
 
 def build_learning_client() -> LegacyLearningAdapter:
     return LegacyLearningAdapter()
+
+
+def build_group_knowledge_client() -> GroupFactService:
+    return GroupFactService(legacy_memory_database)
 
 
 def build_memory_acl() -> MemoryACLPort:

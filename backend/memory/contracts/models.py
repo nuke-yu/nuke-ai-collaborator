@@ -83,6 +83,25 @@ class ObservePersonalHabit:
 
 
 @dataclass(frozen=True, slots=True)
+class IngestGroupFact:
+    scope: MemoryScope
+    statement: str
+    subject_key: str
+    source_type: str
+    source_id: str
+    sensitivity: str = "group"
+    evidence: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not self.statement.strip():
+            raise ValueError("statement is required")
+        if not self.subject_key.strip():
+            raise ValueError("subject_key is required")
+        if not self.source_id.strip():
+            raise ValueError("source_id is required")
+
+
+@dataclass(frozen=True, slots=True)
 class ProcessLearningCase:
     scope: MemoryScope
     case_id: str

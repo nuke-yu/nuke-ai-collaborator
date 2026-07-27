@@ -6,6 +6,7 @@ from typing import Any, Mapping, Protocol, runtime_checkable
 from memory.contracts import (AssembleCase, CompleteExperienceUsage, CompleteSkillUsage,
                               CreatePersonalProjection, CreatePersonalRecord, ForgetMemory,
                               FormatProjectedContext, IngestPersonalKnowledge, MemoryEvent,
+                              IngestGroupFact,
                               MarkUsageAdopted, MarkUsageExecuted,
                               ObserveMemory, ObservePersonalHabit, ProcessLearningCase,
                               RecallExperiences, RecallMemory, RecallResult, RecallSkills,
@@ -27,6 +28,11 @@ class MemoryQueryPort(Protocol):
 @runtime_checkable
 class MemoryEventPort(Protocol):
     async def publish(self, event: MemoryEvent) -> None: ...
+
+
+@runtime_checkable
+class GroupKnowledgePort(Protocol):
+    async def ingest_fact(self, command: IngestGroupFact) -> str: ...
 
 
 @runtime_checkable
