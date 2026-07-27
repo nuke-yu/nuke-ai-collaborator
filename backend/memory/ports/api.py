@@ -10,6 +10,7 @@ from memory.contracts import (AssembleCase, CompleteExperienceUsage, CompleteSki
                               MarkUsageAdopted, MarkUsageExecuted,
                               ObserveMemory, ObservePersonalHabit, ProcessLearningCase,
                               RecallExperiences, RecallMemory, RecallResult, RecallSkills,
+                              RecallGroupFacts,
                               VerifyUsage)
 from memory.domain import MemoryScope
 
@@ -33,6 +34,7 @@ class MemoryEventPort(Protocol):
 @runtime_checkable
 class GroupKnowledgePort(Protocol):
     async def ingest_fact(self, command: IngestGroupFact) -> str: ...
+    async def recall_facts(self, query: RecallGroupFacts) -> RecallResult: ...
 
 
 @runtime_checkable

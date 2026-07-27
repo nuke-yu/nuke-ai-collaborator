@@ -9,7 +9,11 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import db as database
 from memory.application import GroupFactService
-from memory.contracts import IngestGroupFact, MemoryAuthorizationError
+from memory.contracts import (
+    IngestGroupFact,
+    MemoryAuthorizationError,
+    RecallGroupFacts,
+)
 from memory.domain import MemoryScope
 from memory.adapters.runtime import legacy_memory_database
 
@@ -127,6 +131,74 @@ class GroupFactServiceTest(unittest.IsolatedAsyncioTestCase):
             ) as cursor:
                 rows = await cursor.fetchall()
         self.assertEqual(rows, [(7, 1), (8, 1)])
+
+    async def test_active_fact_is_shared_across_bots_but_not_groups(self) -> None:
+        await self.service.ingest_fact(IngestGroupFact(
+            scope=MemoryScope.group(group_id=7, actor_id="user:1"),
+            statement="The release branch is main",
+            subject_key="release.branch",
+            source_type="user_explicit",
+            source_id="message:1",
+        ))
+        for bot_id in (3, 4):
+            result = await self.service.recall_facts(RecallGroupFacts(
+                scope=MemoryScope.bot(
+                    group_id=7, bot_id=bot_id, actor_id=f"bot:{bot_id}"
+                ),
+                query="Which release branch should we use?",
+            ))
+            self.assertEqual(len(result.hits), 1)
+            self.assertIn("release branch is main", result.rendered_context)
+            self.assertEqual(result.hits[0].provenance["group_id"], 7)
+        isolated = await self.service.recall_facts(RecallGroupFacts(
+            scope=MemoryScope.bot(group_id=8, bot_id=3, actor_id="bot:3"),
+            query="Which release branch should we use?",
+        ))
+        self.assertEqual(isolated.hits, ())
+
+    async def test_provisional_and_superseded_facts_are_not_recalled(self) -> None:
+        await self.service.ingest_fact(IngestGroupFact(
+            scope=MemoryScope.group(group_id=7, actor_id="user:1"),
+            statement="API version is v1",
+            subject_key="api.version",
+            source_type="user_explicit",
+            source_id="message:1",
+        ))
+        await self.service.ingest_fact(IngestGroupFact(
+            scope=MemoryScope.group(group_id=7, actor_id="system:config"),
+            statement="API version is v2",
+            subject_key="api.version",
+            source_type="deterministic_system_state",
+            source_id="config:2",
+        ))
+        await self.service.ingest_fact(IngestGroupFact(
+            scope=MemoryScope.bot(group_id=7, bot_id=3, actor_id="bot:3"),
+            statement="API version might be v3",
+            subject_key="api.version",
+            source_type="bot_inference",
+            source_id="run:3",
+        ))
+        result = await self.service.recall_facts(RecallGroupFacts(
+            scope=MemoryScope.bot(group_id=7, bot_id=4, actor_id="bot:4"),
+            query="What is the API version?",
+        ))
+        self.assertEqual([hit.content for hit in result.hits], ["API version is v2"])
+
+    async def test_group_fact_budget_is_independent_and_fail_closed(self) -> None:
+        await self.service.ingest_fact(IngestGroupFact(
+            scope=MemoryScope.group(group_id=7, actor_id="user:1"),
+            statement="Deployment " + "x" * 300,
+            subject_key="deployment.policy",
+            source_type="user_explicit",
+            source_id="message:1",
+        ))
+        result = await self.service.recall_facts(RecallGroupFacts(
+            scope=MemoryScope.bot(group_id=7, bot_id=3, actor_id="bot:3"),
+            query="deployment policy",
+            char_budget=40,
+        ))
+        self.assertEqual(result.hits, ())
+        self.assertEqual(result.rendered_context, "")
 
 
 if __name__ == "__main__":

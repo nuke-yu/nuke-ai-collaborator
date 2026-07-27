@@ -75,6 +75,20 @@
 - Experience 合并要求 Group/Bot、semantic cluster、environment signature 和 failure
   signature 同时匹配；召回在 lexical/vector 之外增加有界的 structured-cluster 信号。
 
+#### 2026-07-28 Canonical Group Fact 增量 [CURRENT]
+
+- `memory_records` 已显式保存 owner、authority、subject、sensitivity、evidence、
+  creator 和 effective time；
+- 只有 user explicit、authoritative project source、deterministic system state
+  可以直接形成 Active Group Fact；Bot observation/reply/inference 只能 Provisional；
+- Group Fact 写入会校验 authority 与 actor 身份，Bot 不能伪装为 user/system 来源；
+- 同 subject 的新 Active Fact 使用 `valid_to + superseded_by` soft supersede，
+  Provisional 不覆盖 Active；
+- Active Group Fact 在同一 Group 内跨 Bot 召回，Provisional/Superseded 和其他 Group
+  永不进入结果；
+- Group Fact 使用独立 Top-K/字符预算，并与 Experience/Skill 一样作为不可信历史数据
+  放入 user-data 权限层，authority 不等同于可执行指令。
+
 仍属于 TARGET 的主要内容包括 Gmail/Outlook、日历和任务系统等具体 Connector、Personal Memory 管理 UI、观点演变的高级关系建模，以及 S2/S3 安全基础设施。Capability Registry、可信验证和完整 Evaluation Harness 按已确认决策继续后置。
 
 当前系统已经具备可插拔的 `MemoryProvider` 接缝：

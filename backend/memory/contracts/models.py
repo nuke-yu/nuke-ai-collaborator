@@ -102,6 +102,22 @@ class IngestGroupFact:
 
 
 @dataclass(frozen=True, slots=True)
+class RecallGroupFacts:
+    scope: MemoryScope
+    query: str
+    limit: int = 5
+    char_budget: int = 1600
+
+    def __post_init__(self) -> None:
+        if not self.query.strip():
+            raise ValueError("query is required")
+        if self.limit < 1:
+            raise ValueError("limit must be positive")
+        if self.char_budget < 1:
+            raise ValueError("char_budget must be positive")
+
+
+@dataclass(frozen=True, slots=True)
 class ProcessLearningCase:
     scope: MemoryScope
     case_id: str

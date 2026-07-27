@@ -6,7 +6,13 @@ import json
 import re
 import time
 
-from memory.contracts import IngestGroupFact, MemoryAuthorizationError
+from memory.contracts import (
+    IngestGroupFact,
+    MemoryAuthorizationError,
+    MemoryHit,
+    RecallGroupFacts,
+    RecallResult,
+)
 from memory.domain import (
     FactAuthority,
     FactSensitivity,
@@ -118,6 +124,83 @@ class GroupFactService:
             await db.commit()
         return record_id
 
+    async def recall_facts(self, query: RecallGroupFacts) -> RecallResult:
+        scope = query.scope
+        if scope.kind not in {ScopeKind.GROUP, ScopeKind.BOT} or scope.group_id is None:
+            raise MemoryAuthorizationError("Group Fact recall requires group scope")
+        terms = _terms(query.query)
+        async with await self._database.connect(
+            "memory_records", scope.group_id, write=False
+        ) as db:
+            async with db.execute(
+                """SELECT record_id,content,confidence,authority,subject_key,
+                    source_ids,updated_at FROM memory_records
+                WHERE group_id=? AND owner_type='group'
+                  AND kind='group_fact' AND status='active'
+                  AND sensitivity IN ('public','group')
+                ORDER BY updated_at DESC LIMIT 200""",
+                (scope.group_id,),
+            ) as cursor:
+                rows = await cursor.fetchall()
+        ranked = []
+        for row in rows:
+            candidate_terms = _terms(f"{row[4]} {row[1]}")
+            lexical = len(terms & candidate_terms) / max(
+                1, len(terms | candidate_terms)
+            )
+            if lexical <= 0:
+                continue
+            score = 0.75 * lexical + 0.25 * float(row[2])
+            ranked.append((score, row))
+        ranked.sort(key=lambda item: (item[0], item[1][6]), reverse=True)
+
+        hits = []
+        rendered = []
+        used = 0
+        for score, row in ranked[: query.limit]:
+            safe_content = str(row[1]).replace(
+                "</untrusted_group_fact>", ""
+            )[:1000]
+            block = (
+                f'<untrusted_group_fact subject="{row[4]}" '
+                f'authority="{row[3]}">\n'
+                f"{safe_content}\n</untrusted_group_fact>"
+            )
+            if used + len(block) > query.char_budget:
+                break
+            used += len(block)
+            rendered.append(block)
+            hits.append(
+                MemoryHit(
+                    record_id=row[0],
+                    kind="group_fact",
+                    content=safe_content,
+                    score=score,
+                    provenance={
+                        "group_id": scope.group_id,
+                        "authority": row[3],
+                        "subject_key": row[4],
+                        "source_ids": tuple(json.loads(row[5] or "[]")),
+                    },
+                )
+            )
+        context = (
+            "[Canonical Group Facts]\n" + "\n".join(rendered)
+            if rendered
+            else ""
+        )
+        return RecallResult(
+            hits=tuple(hits),
+            rendered_context=context,
+            algorithm_trace=(
+                {
+                    "algorithm_id": "nuke.group_fact.lexical",
+                    "version": "v1",
+                    "candidate_count": len(rows),
+                },
+            ),
+        )
+
     @staticmethod
     def _authorize_source(actor_id: str, authority: FactAuthority) -> None:
         if authority is FactAuthority.USER_EXPLICIT:
@@ -150,3 +233,14 @@ def _record_id(
 ) -> str:
     raw = f"{group_id}:{source_type}:{source_id}:{subject_key}"
     return "group-fact:" + hashlib.sha256(raw.encode()).hexdigest()[:24]
+
+
+def _terms(value: str) -> set[str]:
+    lowered = value.lower()
+    terms = set(re.findall(r"[a-z0-9_.:/-]{2,}", lowered))
+    chinese = "".join(re.findall(r"[\u4e00-\u9fff]", lowered))
+    terms.update(
+        chinese[index : index + 2]
+        for index in range(max(0, len(chinese) - 1))
+    )
+    return terms
