@@ -1,5 +1,18 @@
 """Pure Memory domain types and invariants."""
 
+from .outcome import (
+    ApiResponseAdapter,
+    BuildAdapter,
+    FileChangeAdapter,
+    LintAdapter,
+    OutcomeSignal,
+    OutcomeStatus,
+    OutcomeVerdict,
+    PytestAdapter,
+    ShellExitCodeAdapter,
+    WorkflowStateAdapter,
+    evaluate_outcome_verdict,
+)
 from .scope import MemoryScope, Principal, ScopeKind
 from .usage import (
     UsageKind,
@@ -13,7 +26,18 @@ from .usage import (
 
 __all__ = [
     "MemoryScope",
+    "OutcomeSignal",
+    "OutcomeStatus",
+    "OutcomeVerdict",
     "Principal",
+    "ApiResponseAdapter",
+    "BuildAdapter",
+    "FileChangeAdapter",
+    "LintAdapter",
+    "PytestAdapter",
+    "ShellExitCodeAdapter",
+    "WorkflowStateAdapter",
+    "evaluate_outcome_verdict",
     "ScopeKind",
     "UsageKind",
     "UsageState",
