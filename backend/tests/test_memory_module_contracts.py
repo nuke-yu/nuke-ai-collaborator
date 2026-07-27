@@ -7,7 +7,13 @@ from pathlib import Path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from memory.contracts import ObserveMemory, RecallMemory
-from memory.domain import MemoryScope, ScopeKind
+from memory.domain import (
+    MemoryScope,
+    ScopeKind,
+    UsageState,
+    can_transition_usage,
+    require_usage_transition,
+)
 from memory.ports import MemoryCommandPort, MemoryQueryPort
 
 
@@ -33,6 +39,21 @@ class TestMemoryScope(unittest.TestCase):
     def test_personal_scope_exists_outside_group_until_explicit_projection(self):
         scope = MemoryScope.personal(user_id=7, actor_id="user:7")
         self.assertEqual(scope.storage_partition(), (None, ScopeKind.PERSONAL, 7))
+
+    def test_usage_evidence_lifecycle_is_monotonic(self):
+        self.assertTrue(
+            can_transition_usage(UsageState.INJECTED, UsageState.ADOPTED)
+        )
+        self.assertTrue(
+            can_transition_usage(UsageState.EXECUTED, UsageState.VERIFIED_SUCCESS)
+        )
+        self.assertFalse(
+            can_transition_usage(UsageState.INJECTED, UsageState.EXECUTED)
+        )
+        with self.assertRaisesRegex(ValueError, "invalid usage transition"):
+            require_usage_transition(
+                UsageState.VERIFIED_SUCCESS, UsageState.EXECUTED
+            )
 
 
 class _MemoryClient:

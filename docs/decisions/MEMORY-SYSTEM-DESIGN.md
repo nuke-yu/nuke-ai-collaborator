@@ -877,7 +877,19 @@ verified_success
 verified_failure
 ```
 
-召回次数不能作为有效性证据，只有执行并得到结果才能支持或反驳 Experience。
+状态只能按证据单向推进：
+
+```text
+injected → adopted → executed → verified_success | verified_failure
+```
+
+- `adopted`：Decision Trace 明确引用 memory ID，且后续行动与该建议匹配；
+- `executed`：已观察到匹配行动实际发生，并保存结构化执行证据；
+- `verified_*`：Outcome Adapter 已给出确定性或结构化验证结果。
+
+不得跳级、回退或覆盖终态。模型自我声明最多作为 adoption 的弱信号，不能单独形成
+`executed` 或 `verified_*`。召回次数、注入次数和 Run 的整体完成状态都不能作为有效性
+证据；只有与该 Experience/Skill 建立因果关联的执行和验证结果，才能支持或反驳它。
 
 ### 8.3 Skill 成熟度
 

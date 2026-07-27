@@ -1001,6 +1001,37 @@ async def migration_044(db):
     await db.commit()
 
 
+async def migration_045(db):
+    """Add evidence-bearing lifecycle fields to Experience and Skill usage."""
+    usage_columns = {
+        "experience_usage": (
+            "adopted_at INTEGER",
+            "executed_at INTEGER",
+            "verified_at INTEGER",
+            "adopted_via TEXT NOT NULL DEFAULT ''",
+            "adoption_evidence_json TEXT NOT NULL DEFAULT '{}'",
+            "execution_evidence_json TEXT NOT NULL DEFAULT '{}'",
+            "verification_status TEXT NOT NULL DEFAULT 'unverified'",
+            "verification_evidence_json TEXT NOT NULL DEFAULT '{}'",
+        ),
+        "skill_usage": (
+            "adopted_at INTEGER",
+            "executed_at INTEGER",
+            "verified_at INTEGER",
+            "adopted_via TEXT NOT NULL DEFAULT ''",
+            "adoption_evidence_json TEXT NOT NULL DEFAULT '{}'",
+            "execution_evidence_json TEXT NOT NULL DEFAULT '{}'",
+            "verification_status TEXT NOT NULL DEFAULT 'unverified'",
+            "verification_evidence_json TEXT NOT NULL DEFAULT '{}'",
+            "updated_at INTEGER NOT NULL DEFAULT 0",
+        ),
+    }
+    for table, columns in usage_columns.items():
+        for column in columns:
+            await _safe_add_column(db, f"ALTER TABLE {table} ADD COLUMN {column}")
+    await db.commit()
+
+
 MIGRATIONS: list = [
     migration_001,
     migration_002,
@@ -1046,6 +1077,7 @@ MIGRATIONS: list = [
     migration_042,
     migration_043,
     migration_044,
+    migration_045,
 ]
 
 

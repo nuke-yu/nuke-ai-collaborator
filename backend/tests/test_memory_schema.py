@@ -82,7 +82,80 @@ class MemorySchemaTest(unittest.IsolatedAsyncioTestCase):
             async with connection.execute(
                 "SELECT COUNT(*) FROM memory_schema_version"
             ) as cursor:
-                self.assertEqual((await cursor.fetchone())[0], 1)
+                self.assertEqual(
+                    (await cursor.fetchone())[0], MEMORY_SCHEMA_VERSION
+                )
+
+    async def test_v1_usage_tables_are_upgraded_without_losing_rows(self) -> None:
+        async with db.connect(self.path) as connection:
+            await connection.execute(
+                """CREATE TABLE memory_schema_version (
+                    version INTEGER PRIMARY KEY,
+                    applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )"""
+            )
+            await connection.execute(
+                "INSERT INTO memory_schema_version(version) VALUES (1)"
+            )
+            for statement in (
+                """CREATE TABLE experience_usage (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, record_id TEXT NOT NULL,
+                    run_id TEXT NOT NULL, group_id INTEGER NOT NULL, bot_id INTEGER,
+                    state TEXT NOT NULL, outcome TEXT NOT NULL DEFAULT '',
+                    input_tokens INTEGER NOT NULL DEFAULT 0,
+                    output_tokens INTEGER NOT NULL DEFAULT 0,
+                    tool_attempts INTEGER NOT NULL DEFAULT 0,
+                    created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+                    UNIQUE(record_id, run_id)
+                )""",
+                """CREATE TABLE skill_usage (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, skill_id TEXT NOT NULL,
+                    version INTEGER NOT NULL, run_id TEXT NOT NULL,
+                    group_id INTEGER NOT NULL, outcome TEXT NOT NULL DEFAULT '',
+                    state TEXT NOT NULL DEFAULT 'injected',
+                    created_at INTEGER NOT NULL, UNIQUE(skill_id,run_id)
+                )""",
+            ):
+                await connection.execute(statement)
+            await connection.execute(
+                """INSERT INTO experience_usage
+                (record_id,run_id,group_id,state,created_at,updated_at)
+                VALUES ('record:1','run:1',7,'injected',1,1)"""
+            )
+            await connection.execute(
+                """INSERT INTO skill_usage
+                (skill_id,version,run_id,group_id,created_at)
+                VALUES ('skill:1',1,'run:1',7,1)"""
+            )
+            await connection.commit()
+
+        await self.schema.ensure_group(7)
+
+        async with db.connect(self.path) as connection:
+            for table in ("experience_usage", "skill_usage"):
+                async with connection.execute(f"PRAGMA table_info({table})") as cursor:
+                    columns = {row[1] for row in await cursor.fetchall()}
+                self.assertTrue(
+                    {
+                        "adopted_at",
+                        "executed_at",
+                        "verified_at",
+                        "adopted_via",
+                        "adoption_evidence_json",
+                        "execution_evidence_json",
+                        "verification_status",
+                        "verification_evidence_json",
+                    }
+                    <= columns
+                )
+            async with connection.execute(
+                "SELECT state,verification_status FROM experience_usage"
+            ) as cursor:
+                self.assertEqual(await cursor.fetchone(), ("injected", "unverified"))
+            async with connection.execute(
+                "SELECT state,verification_status FROM skill_usage"
+            ) as cursor:
+                self.assertEqual(await cursor.fetchone(), ("injected", "unverified"))
 
     async def test_audit_immutability_is_part_of_owned_schema(self) -> None:
         await self.schema.ensure_group(7)

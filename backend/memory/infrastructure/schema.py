@@ -6,7 +6,7 @@ from typing import Final
 from memory.contracts import MemoryOperationError
 from memory.ports import MemoryDatabasePort
 
-MEMORY_SCHEMA_VERSION: Final = 1
+MEMORY_SCHEMA_VERSION: Final = 2
 
 MEMORY_GROUP_TABLES = frozenset(
     {
@@ -65,6 +65,12 @@ MEMORY_V1_DDL = (
         group_id INTEGER NOT NULL, bot_id INTEGER, state TEXT NOT NULL,
         outcome TEXT NOT NULL DEFAULT '', input_tokens INTEGER NOT NULL DEFAULT 0,
         output_tokens INTEGER NOT NULL DEFAULT 0, tool_attempts INTEGER NOT NULL DEFAULT 0,
+        adopted_at INTEGER, executed_at INTEGER, verified_at INTEGER,
+        adopted_via TEXT NOT NULL DEFAULT '',
+        adoption_evidence_json TEXT NOT NULL DEFAULT '{}',
+        execution_evidence_json TEXT NOT NULL DEFAULT '{}',
+        verification_status TEXT NOT NULL DEFAULT 'unverified',
+        verification_evidence_json TEXT NOT NULL DEFAULT '{}',
         created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
         UNIQUE(record_id, run_id)
     )""",
@@ -95,7 +101,14 @@ MEMORY_V1_DDL = (
     """CREATE TABLE IF NOT EXISTS skill_usage (
         id INTEGER PRIMARY KEY AUTOINCREMENT, skill_id TEXT NOT NULL, version INTEGER NOT NULL,
         run_id TEXT NOT NULL, group_id INTEGER NOT NULL, outcome TEXT NOT NULL DEFAULT '',
-        state TEXT NOT NULL DEFAULT 'injected', created_at INTEGER NOT NULL,
+        state TEXT NOT NULL DEFAULT 'injected',
+        adopted_at INTEGER, executed_at INTEGER, verified_at INTEGER,
+        adopted_via TEXT NOT NULL DEFAULT '',
+        adoption_evidence_json TEXT NOT NULL DEFAULT '{}',
+        execution_evidence_json TEXT NOT NULL DEFAULT '{}',
+        verification_status TEXT NOT NULL DEFAULT 'unverified',
+        verification_evidence_json TEXT NOT NULL DEFAULT '{}',
+        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
         UNIQUE(skill_id,run_id)
     )""",
     """CREATE TABLE IF NOT EXISTS skill_promotion_audit (
@@ -111,6 +124,30 @@ MEMORY_V1_DDL = (
         BEFORE DELETE ON skill_promotion_audit BEGIN
         SELECT RAISE(ABORT, 'skill promotion audit is immutable'); END""",
 )
+
+MEMORY_V2_COLUMNS = {
+    "experience_usage": (
+        ("adopted_at", "INTEGER"),
+        ("executed_at", "INTEGER"),
+        ("verified_at", "INTEGER"),
+        ("adopted_via", "TEXT NOT NULL DEFAULT ''"),
+        ("adoption_evidence_json", "TEXT NOT NULL DEFAULT '{}'"),
+        ("execution_evidence_json", "TEXT NOT NULL DEFAULT '{}'"),
+        ("verification_status", "TEXT NOT NULL DEFAULT 'unverified'"),
+        ("verification_evidence_json", "TEXT NOT NULL DEFAULT '{}'"),
+    ),
+    "skill_usage": (
+        ("adopted_at", "INTEGER"),
+        ("executed_at", "INTEGER"),
+        ("verified_at", "INTEGER"),
+        ("adopted_via", "TEXT NOT NULL DEFAULT ''"),
+        ("adoption_evidence_json", "TEXT NOT NULL DEFAULT '{}'"),
+        ("execution_evidence_json", "TEXT NOT NULL DEFAULT '{}'"),
+        ("verification_status", "TEXT NOT NULL DEFAULT 'unverified'"),
+        ("verification_evidence_json", "TEXT NOT NULL DEFAULT '{}'"),
+        ("updated_at", "INTEGER NOT NULL DEFAULT 0"),
+    ),
+}
 
 MEMORY_GROUP_DDL = (
     _VERSION_TABLE_DDL,
@@ -146,10 +183,24 @@ class MemorySchemaManager:
             # tables, indexes, or governance triggers after external damage.
             for statement in MEMORY_V1_DDL:
                 await connection.execute(statement)
+            if current < 2:
+                for table, columns in MEMORY_V2_COLUMNS.items():
+                    async with connection.execute(
+                        f"PRAGMA table_info({table})"
+                    ) as cursor:
+                        existing = {str(row[1]) for row in await cursor.fetchall()}
+                    for name, declaration in columns:
+                        if name not in existing:
+                            await connection.execute(
+                                f"ALTER TABLE {table} ADD COLUMN {name} {declaration}"
+                            )
             if current < 1:
                 await connection.execute(
-                    "INSERT INTO memory_schema_version(version) VALUES (?)",
-                    (MEMORY_SCHEMA_VERSION,),
+                    "INSERT INTO memory_schema_version(version) VALUES (1)",
+                )
+            if current < 2:
+                await connection.execute(
+                    "INSERT INTO memory_schema_version(version) VALUES (2)"
                 )
             await connection.commit()
         return MEMORY_SCHEMA_VERSION
