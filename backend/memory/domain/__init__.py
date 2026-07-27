@@ -12,6 +12,7 @@ from .outcome import (
     PytestAdapter,
     ShellExitCodeAdapter,
     WorkflowStateAdapter,
+    evaluate_outcome_signal,
     evaluate_outcome_verdict,
 )
 from .scope import MemoryScope, Principal, ScopeKind
@@ -39,6 +40,7 @@ __all__ = [
     "PytestAdapter",
     "ShellExitCodeAdapter",
     "WorkflowStateAdapter",
+    "evaluate_outcome_signal",
     "evaluate_outcome_verdict",
     "ScopeKind",
     "UsageKind",

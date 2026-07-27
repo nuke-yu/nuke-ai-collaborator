@@ -61,6 +61,7 @@ class MemorySchemaTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(version, MEMORY_SCHEMA_VERSION)
         self.assertEqual(stored_version, MEMORY_SCHEMA_VERSION)
         self.assertTrue(MEMORY_GROUP_TABLES <= tables)
+        self.assertIn("agent_case_attempts", tables)
 
     async def test_ensure_is_idempotent_and_preserves_canonical_records(self) -> None:
         await self.schema.ensure_group(7)

@@ -23,7 +23,7 @@ from ai.tool_events import (
     timeline_events,
 )
 from ai.execution_runs import finish_run, start_run
-from ai.cases import assemble_case, task_signature
+from ai.cases import assemble_case, build_attempt_trace, task_signature
 from ai.cases import evaluate_outcome
 from ai.pipeline import process_case
 from ai.reflexion import classify_failure, maybe_inject
@@ -336,6 +336,52 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
             async with db.execute("SELECT case_id, attempts, outcome, files_touched FROM agent_cases") as cur:
                 rows = await cur.fetchall()
         self.assertEqual(rows, [(case_id, 2, "completed", '["a.py"]')])
+
+    async def test_case_attempt_trace_preserves_order_and_evidence_ids(self):
+        records = _corrected_trace("token ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890 failed")
+        records[0]["step_id"] = "run:trace:step:1"
+        records[0]["attempt_id"] = "call:verify-1"
+        case_id = await assemble_case(
+            run_id="trace",
+            group_id=7,
+            bot_id=3,
+            task="repair trace",
+            outcome="completed",
+            tool_records=records,
+        )
+        # Reassembly replaces the snapshot rather than duplicating attempts.
+        await assemble_case(
+            run_id="trace",
+            group_id=7,
+            bot_id=3,
+            task="repair trace",
+            outcome="completed",
+            tool_records=records,
+        )
+
+        async with database.connect(TEST_DB_PATH) as db:
+            async with db.execute(
+                """SELECT ordinal,step_id,attempt_id,phase,action_tool,
+                    observation_status,observation_summary,verifier_adapter,
+                    verifies_task FROM agent_case_attempts
+                    WHERE case_id=? ORDER BY ordinal""",
+                (case_id,),
+            ) as cur:
+                attempts = await cur.fetchall()
+        self.assertEqual(len(attempts), 3)
+        self.assertEqual(
+            [row[3] for row in attempts], ["verify", "recover", "verify"]
+        )
+        self.assertEqual(attempts[0][1:3], ("run:trace:step:1", "call:verify-1"))
+        self.assertEqual(attempts[0][5], "error")
+        self.assertNotIn("ghp_", attempts[0][6])
+        self.assertEqual(attempts[2][7:], ("pytest", 1))
+
+    def test_attempt_trace_uses_deterministic_fallback_ids(self):
+        trace = build_attempt_trace("run:fallback", [{"name": "read_file"}])
+        self.assertEqual(trace[0]["step_id"], "run:fallback:step:1")
+        self.assertEqual(trace[0]["attempt_id"], "run:fallback:attempt:1")
+        self.assertEqual(trace[0]["phase"], "investigate")
 
     async def test_distill_case_requires_failure_then_completion(self):
         plain = await assemble_case(run_id="plain", group_id=7, bot_id=3, task="read file",

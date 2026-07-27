@@ -243,6 +243,19 @@ DEFAULT_OUTCOME_ADAPTERS: tuple[OutcomeAdapter, ...] = (
 )
 
 
+def evaluate_outcome_signal(
+    record: Mapping[str, Any],
+    adapters: Sequence[OutcomeAdapter] = DEFAULT_OUTCOME_ADAPTERS,
+) -> OutcomeSignal | None:
+    """Return the highest-specificity deterministic signal for one attempt."""
+
+    for adapter in adapters:
+        signal = adapter.evaluate(record)
+        if signal is not None:
+            return signal
+    return None
+
+
 def evaluate_outcome_verdict(
     *,
     terminal_outcome: str,
@@ -254,11 +267,9 @@ def evaluate_outcome_verdict(
     terminal = terminal_outcome.strip().lower()
     signals: list[OutcomeSignal] = []
     for record in tool_records:
-        for adapter in adapters:
-            signal = adapter.evaluate(record)
-            if signal is not None:
-                signals.append(signal)
-                break
+        signal = evaluate_outcome_signal(record, adapters)
+        if signal is not None:
+            signals.append(signal)
 
     if terminal == "cancelled":
         return OutcomeVerdict(OutcomeStatus.CANCELLED, 1.0, "", tuple(signals))

@@ -6,12 +6,13 @@ from typing import Final
 from memory.contracts import MemoryOperationError
 from memory.ports import MemoryDatabasePort
 
-MEMORY_SCHEMA_VERSION: Final = 3
+MEMORY_SCHEMA_VERSION: Final = 4
 
 MEMORY_GROUP_TABLES = frozenset(
     {
         "memory_schema_version",
         "agent_cases",
+        "agent_case_attempts",
         "memory_records",
         "memory_projection_outbox",
         "experience_usage",
@@ -42,6 +43,20 @@ MEMORY_V1_DDL = (
         created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
     )""",
     "CREATE INDEX IF NOT EXISTS idx_agent_cases_group_created ON agent_cases(group_id, created_at DESC)",
+    """CREATE TABLE IF NOT EXISTS agent_case_attempts (
+        case_id TEXT NOT NULL, ordinal INTEGER NOT NULL,
+        group_id INTEGER NOT NULL, bot_id INTEGER,
+        step_id TEXT NOT NULL, attempt_id TEXT NOT NULL,
+        phase TEXT NOT NULL, action_tool TEXT NOT NULL,
+        action_target TEXT NOT NULL DEFAULT '',
+        observation_status TEXT NOT NULL,
+        observation_summary TEXT NOT NULL DEFAULT '',
+        verifier_adapter TEXT NOT NULL DEFAULT '',
+        verifies_task INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        PRIMARY KEY(case_id, ordinal)
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_agent_case_attempts_group_case ON agent_case_attempts(group_id,case_id,ordinal)",
     """CREATE TABLE IF NOT EXISTS memory_records (
         record_id TEXT PRIMARY KEY, kind TEXT NOT NULL, group_id INTEGER NOT NULL,
         bot_id INTEGER, status TEXT NOT NULL DEFAULT 'active', content TEXT NOT NULL,
@@ -227,6 +242,10 @@ class MemorySchemaManager:
             if current < 3:
                 await connection.execute(
                     "INSERT INTO memory_schema_version(version) VALUES (3)"
+                )
+            if current < 4:
+                await connection.execute(
+                    "INSERT INTO memory_schema_version(version) VALUES (4)"
                 )
             await connection.commit()
         return MEMORY_SCHEMA_VERSION
