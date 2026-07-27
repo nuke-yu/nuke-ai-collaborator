@@ -62,6 +62,27 @@ class MemorySchemaTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stored_version, MEMORY_SCHEMA_VERSION)
         self.assertTrue(MEMORY_GROUP_TABLES <= tables)
         self.assertIn("agent_case_attempts", tables)
+        async with db.connect(self.path) as connection:
+            async with connection.execute(
+                "PRAGMA table_info(agent_cases)"
+            ) as cursor:
+                case_columns = {row[1] for row in await cursor.fetchall()}
+            async with connection.execute(
+                "PRAGMA table_info(memory_records)"
+            ) as cursor:
+                record_columns = {row[1] for row in await cursor.fetchall()}
+        self.assertTrue(
+            {"semantic_cluster_key", "task_family", "task_concepts_json"}
+            <= case_columns
+        )
+        self.assertTrue(
+            {
+                "semantic_cluster_key",
+                "environment_signature",
+                "failure_signature",
+            }
+            <= record_columns
+        )
 
     async def test_ensure_is_idempotent_and_preserves_canonical_records(self) -> None:
         await self.schema.ensure_group(7)

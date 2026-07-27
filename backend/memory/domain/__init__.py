@@ -16,6 +16,7 @@ from .outcome import (
     evaluate_outcome_verdict,
 )
 from .scope import MemoryScope, Principal, ScopeKind
+from .task_identity import TaskIdentity, identify_task
 from .usage import (
     UsageKind,
     UsageState,
@@ -43,9 +44,11 @@ __all__ = [
     "evaluate_outcome_signal",
     "evaluate_outcome_verdict",
     "ScopeKind",
+    "TaskIdentity",
     "UsageKind",
     "UsageState",
     "can_transition_usage",
+    "identify_task",
     "require_adoption_evidence",
     "require_execution_evidence",
     "require_usage_transition",

@@ -65,7 +65,7 @@ async def distill_case(case_id: str, group_id: int | None) -> str | None:
         async with db.execute(
             """SELECT bot_id,task,task_signature,tools_used,files_touched,
                 errors,outcome,summary,outcome_status,verification_adapter,
-                correction_evidence_json
+                correction_evidence_json,semantic_cluster_key
                 FROM agent_cases
                 WHERE case_id=? AND group_id=?""",
             (case_id, group_id),
@@ -104,6 +104,9 @@ async def distill_case(case_id: str, group_id: int | None) -> str | None:
         correction=correction,
         attempt_rows=attempt_rows,
     )
+    semantic_cluster_key = str(row[11] or "")
+    environment_signature = experience["environment"]["signature"]
+    failure_signature = experience["failure"]["signature"]
     now = int(time.time() * 1000)
     target_rid = None
     target_confidence = 0.73
@@ -111,8 +114,16 @@ async def distill_case(case_id: str, group_id: int | None) -> str | None:
         async with db.execute("SELECT record_id,source_ids,supporting_count,contradicting_count,"
                               "confidence,status FROM memory_records "
                               "WHERE group_id=? AND bot_id=? AND kind='experience' "
-                              "AND task_signature=? ORDER BY updated_at DESC LIMIT 1",
-                              (group_id,row[0],row[2])) as cur:
+                              "AND semantic_cluster_key=? "
+                              "AND environment_signature=? AND failure_signature=? "
+                              "ORDER BY updated_at DESC LIMIT 1",
+                              (
+                                  group_id,
+                                  row[0],
+                                  semantic_cluster_key,
+                                  environment_signature,
+                                  failure_signature,
+                              )) as cur:
             existing = await cur.fetchone()
         if existing:
             prev_sources = json.loads(existing[1] or "[]")
@@ -134,6 +145,8 @@ async def distill_case(case_id: str, group_id: int | None) -> str | None:
                 """UPDATE memory_records SET status=?,content=?,
                 supporting_count=?,source_ids=?,confidence=?,
                 metadata_json=?,algorithm_version='experience-v2',
+                semantic_cluster_key=?,environment_signature=?,
+                failure_signature=?,
                 updated_at=? WHERE record_id=?""",
                 (
                     next_status,
@@ -142,6 +155,9 @@ async def distill_case(case_id: str, group_id: int | None) -> str | None:
                     json.dumps(sources),
                     target_confidence,
                     json.dumps(metadata, ensure_ascii=False),
+                    semantic_cluster_key,
+                    environment_signature,
+                    failure_signature,
                     now,
                     existing[0],
                 ),
@@ -153,8 +169,9 @@ async def distill_case(case_id: str, group_id: int | None) -> str | None:
             metadata = _experience_metadata(experience)
             await db.execute("""INSERT INTO memory_records
               (record_id,kind,group_id,bot_id,status,content,task_signature,confidence,importance,
+               semantic_cluster_key,environment_signature,failure_signature,
                supporting_count,source_ids,metadata_json,algorithm_version,created_at,updated_at)
-              VALUES (?, 'experience',?,?, 'active',?,?,0.73,0.6,1,?,?,'experience-v2',?,?)
+              VALUES (?, 'experience',?,?, 'active',?,?,0.73,0.6,?,?,?,1,?,?,'experience-v2',?,?)
               ON CONFLICT(record_id) DO UPDATE SET status='active',content=excluded.content,updated_at=excluded.updated_at""",
               (
                   record_id,
@@ -162,6 +179,9 @@ async def distill_case(case_id: str, group_id: int | None) -> str | None:
                   row[0],
                   content,
                   row[2],
+                  semantic_cluster_key,
+                  environment_signature,
+                  failure_signature,
                   json.dumps([case_id]),
                   json.dumps(metadata, ensure_ascii=False),
                   now,
@@ -257,10 +277,11 @@ def _build_experience_v2(
     environment["signature"] = hashlib.sha256(
         json.dumps(environment, sort_keys=True).encode()
     ).hexdigest()[:16]
-    normalized_failure = " | ".join(error.lower() for error in errors)
-    failure_signature = hashlib.sha256(
-        normalized_failure.encode()
-    ).hexdigest()[:16]
+    failure_signature = _failure_signature(
+        errors,
+        verification_adapter=verification_adapter,
+        target=str(correction.get("target", "")),
+    )
     return {
         "schema_version": "experience-v2",
         "task_pattern": task,
@@ -324,6 +345,38 @@ def _experience_metadata(experience: dict) -> dict:
     }
 
 
+def _failure_signature(
+    errors: list[str], *, verification_adapter: str, target: str
+) -> str:
+    categories = []
+    patterns = (
+        ("permission_denied", r"permission denied|forbidden|unauthorized|权限"),
+        ("timeout", r"timed? ?out|timeout|超时"),
+        ("syntax_error", r"syntax ?error|语法"),
+        ("assertion_failure", r"assert(?:ion)?(?:error| failed)?|断言"),
+        ("dependency_error", r"dependency|module not found|importerror|依赖"),
+        ("connection_error", r"connection|network|dns|连接|网络"),
+        ("not_found", r"not found|no such file|不存在"),
+        ("verification_failure", r"\bfail(?:ed|ure)?\b|\berror\b|失败|错误"),
+    )
+    combined = " | ".join(error.lower() for error in errors)
+    for category, pattern in patterns:
+        if re.search(pattern, combined):
+            categories.append(category)
+    if not categories:
+        normalized = re.sub(r"\b\d+\b", "<n>", combined)
+        normalized = re.sub(r"\s+", " ", normalized).strip()[:300]
+        categories.append(normalized or "unknown_failure")
+    payload = {
+        "adapter": verification_adapter,
+        "target": target,
+        "categories": categories,
+    }
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()[:16]
+
+
 async def reconcile_experience_projections(group_id: int) -> int:
     """Re-enqueue canonical records so hydration repairs a missing vector index."""
     from ai.memory import _memory_db
@@ -363,8 +416,10 @@ async def recall_experiences(*, query: str, run_id: str, group_id: int | None,
     if group_id is None:
         return "", []
     from ai.memory import _memory_db
+    from memory.domain import identify_task
+    query_identity = identify_task(query)
     async with await _memory_db("memory_records", group_id, write=False) as db:
-        async with db.execute("SELECT record_id,content,confidence FROM memory_records "
+        async with db.execute("SELECT record_id,content,confidence,semantic_cluster_key FROM memory_records "
                               "WHERE group_id=? AND bot_id=? AND kind='experience' AND status='active'",
                               (group_id, bot_id)) as cur:
             rows = await cur.fetchall()
@@ -379,10 +434,18 @@ async def recall_experiences(*, query: str, run_id: str, group_id: int | None,
     except Exception:
         pass
     q = _terms(query); ranked = []
-    for record_id, content, confidence in rows:
+    for record_id, content, confidence, semantic_cluster_key in rows:
         terms = _terms(content)
         lexical = len(q & terms) / max(1, len(q | terms))
-        score = 0.55 * lexical + 0.45 * vector_scores.get(record_id, 0.0)
+        cluster_match = float(
+            bool(semantic_cluster_key)
+            and semantic_cluster_key == query_identity.semantic_cluster_key
+        )
+        score = (
+            0.45 * lexical
+            + 0.35 * vector_scores.get(record_id, 0.0)
+            + 0.20 * cluster_match
+        )
         if score:
             ranked.append((score * float(confidence), record_id, content))
     ranked.sort(reverse=True); selected = []; used = 0

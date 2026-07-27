@@ -1,6 +1,5 @@
 """Deterministic Run to Case assembly; no model calls."""
 from __future__ import annotations
-import hashlib
 import json
 import re
 import time
@@ -10,6 +9,7 @@ from memory.domain import (
     OutcomeStatus,
     evaluate_outcome_signal,
     evaluate_outcome_verdict,
+    identify_task,
 )
 
 
@@ -44,8 +44,7 @@ def evaluate_outcome(
 
 
 def task_signature(task: str) -> str:
-    normalized = re.sub(r"\s+", " ", (task or "").strip().lower())[:1000]
-    return hashlib.sha256(normalized.encode()).hexdigest()[:24]
+    return identify_task(task).exact_signature
 
 
 def build_attempt_trace(run_id: str, tool_records: list[dict]) -> list[dict]:
@@ -173,13 +172,21 @@ async def assemble_case(*, run_id: str, group_id: int | None, bot_id: int | None
         f"{len(errors)} errors"
     )
     attempt_trace = build_attempt_trace(run_id, tool_records)
+    identity = identify_task(task)
     async with await _memory_db("agent_cases", group_id, write=True) as db:
         await db.execute("""INSERT INTO agent_cases
-          (case_id,run_id,group_id,bot_id,task,task_signature,tools_used,files_touched,attempts,
+          (case_id,run_id,group_id,bot_id,task,task_signature,
+           semantic_cluster_key,task_family,task_concepts_json,
+           tools_used,files_touched,attempts,
            errors,outcome,outcome_confidence,outcome_status,verification_adapter,
            correction_evidence_json,verification_signals,summary,created_at,updated_at)
-          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-          ON CONFLICT(run_id) DO UPDATE SET outcome=excluded.outcome,
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+          ON CONFLICT(run_id) DO UPDATE SET task=excluded.task,
+          task_signature=excluded.task_signature,
+          semantic_cluster_key=excluded.semantic_cluster_key,
+          task_family=excluded.task_family,
+          task_concepts_json=excluded.task_concepts_json,
+          outcome=excluded.outcome,
           outcome_confidence=excluded.outcome_confidence,
           outcome_status=excluded.outcome_status,
           verification_adapter=excluded.verification_adapter,
@@ -188,8 +195,10 @@ async def assemble_case(*, run_id: str, group_id: int | None, bot_id: int | None
           files_touched=excluded.files_touched, attempts=excluded.attempts, errors=excluded.errors,
           verification_signals=excluded.verification_signals, summary=excluded.summary,
           updated_at=excluded.updated_at""",
-          (case_id,run_id,group_id,bot_id,task[:4000],task_signature(task),json.dumps(tools),
-           json.dumps(files),len(tool_records),json.dumps(errors),outcome,verdict.confidence,
+          (
+           case_id,run_id,group_id,bot_id,task[:4000],identity.exact_signature,
+           identity.semantic_cluster_key,identity.family,json.dumps(identity.concepts),
+           json.dumps(tools),json.dumps(files),len(tool_records),json.dumps(errors),outcome,verdict.confidence,
            verdict.status.value,verdict.primary_adapter,json.dumps(correction),
            json.dumps(signals),summary,now,now))
         await db.execute(

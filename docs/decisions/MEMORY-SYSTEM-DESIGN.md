@@ -64,6 +64,17 @@
 - 已提供 Group 内只读 shadow metrics，用于比较“旧规则会强化”与“新规则有因果证据”
   的数量差异。
 
+#### 2026-07-28 Case / Experience 结构化增量 [CURRENT]
+
+- Case 使用独立 `agent_case_attempts` 保存有序 Attempt Trace，包含稳定 step/attempt ID、
+  phase、action target、短 observation、verifier 与结果状态；不保存原始 CoT；
+- Experience 已升级为 `experience-v2`，包含 environment/failure signature、可观察纠正动作、
+  验证证据、限制和 source Case IDs；未被证据确认的 root cause 明确标记为 unresolved；
+- Task 同时保留 exact signature 与结构化 semantic cluster key，并保存 task family、
+  concepts 和 file extensions；
+- Experience 合并要求 Group/Bot、semantic cluster、environment signature 和 failure
+  signature 同时匹配；召回在 lexical/vector 之外增加有界的 structured-cluster 信号。
+
 仍属于 TARGET 的主要内容包括 Gmail/Outlook、日历和任务系统等具体 Connector、Personal Memory 管理 UI、观点演变的高级关系建模，以及 S2/S3 安全基础设施。Capability Registry、可信验证和完整 Evaluation Harness 按已确认决策继续后置。
 
 当前系统已经具备可插拔的 `MemoryProvider` 接缝：

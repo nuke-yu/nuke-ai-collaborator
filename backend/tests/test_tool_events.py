@@ -333,9 +333,16 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
         await assemble_case(run_id="r1", group_id=7, bot_id=3,
                             task="Fix bug", outcome="completed", tool_records=records)
         async with database.connect(TEST_DB_PATH) as db:
-            async with db.execute("SELECT case_id, attempts, outcome, files_touched FROM agent_cases") as cur:
+            async with db.execute(
+                """SELECT case_id,attempts,outcome,files_touched,
+                    task_family,task_concepts_json,semantic_cluster_key
+                    FROM agent_cases"""
+            ) as cur:
                 rows = await cur.fetchall()
-        self.assertEqual(rows, [(case_id, 2, "completed", '["a.py"]')])
+        self.assertEqual(rows[0][:4], (case_id, 2, "completed", '["a.py"]'))
+        self.assertEqual(rows[0][4], "repair")
+        self.assertEqual(json.loads(rows[0][5]), [])
+        self.assertTrue(rows[0][6])
 
     async def test_case_attempt_trace_preserves_order_and_evidence_ids(self):
         records = _corrected_trace("token ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890 failed")
@@ -459,6 +466,49 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(projected_confidence, confidence)
         self.assertIn("latest failure", canonical_content)
         self.assertNotIn("first failure", canonical_content)
+
+    async def test_semantic_cluster_merges_paraphrases_but_not_failure_types(self):
+        first = await assemble_case(
+            run_id="semantic-1",
+            group_id=7,
+            bot_id=3,
+            task="Fix DB migration issue 123",
+            outcome="completed",
+            tool_records=_corrected_trace("connection timeout"),
+        )
+        paraphrase = await assemble_case(
+            run_id="semantic-2",
+            group_id=7,
+            bot_id=3,
+            task="repair database migration issue 456",
+            outcome="completed",
+            tool_records=_corrected_trace("network timed out"),
+        )
+        different_failure = await assemble_case(
+            run_id="semantic-3",
+            group_id=7,
+            bot_id=3,
+            task="repair database migration issue 789",
+            outcome="completed",
+            tool_records=_corrected_trace("permission denied"),
+        )
+
+        first_record = await distill_case(first, 7)
+        self.assertEqual(first_record, await distill_case(paraphrase, 7))
+        self.assertNotEqual(
+            first_record, await distill_case(different_failure, 7)
+        )
+        async with database.connect(TEST_DB_PATH) as db:
+            async with db.execute(
+                """SELECT supporting_count,semantic_cluster_key,
+                    environment_signature,failure_signature
+                    FROM memory_records ORDER BY record_id"""
+            ) as cur:
+                rows = await cur.fetchall()
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(sorted(row[0] for row in rows), [1, 2])
+        self.assertEqual(len({row[1] for row in rows}), 1)
+        self.assertTrue(all(row[2] and row[3] for row in rows))
 
     async def test_run_completion_is_shadow_telemetry_not_usage_evidence(self):
         case_id = await assemble_case(
@@ -641,9 +691,9 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_experience_reinforcement_contradiction_and_decay(self):
         first = await assemble_case(run_id="e1", group_id=7, bot_id=3, task="fix db",
-                                    outcome="completed", tool_records=_corrected_trace("x"))
+                                    outcome="completed", tool_records=_corrected_trace("verification failed x"))
         second = await assemble_case(run_id="e2", group_id=7, bot_id=3, task="fix db",
-                                     outcome="completed", tool_records=_corrected_trace("y"))
+                                     outcome="completed", tool_records=_corrected_trace("verification failed y"))
         record_id = await distill_case(first, 7)
         self.assertEqual(record_id, await distill_case(second, 7))
         for run_id in ("bad1", "bad2"):
@@ -711,9 +761,9 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_candidate_compiler_requires_repeated_evidence_and_is_declarative(self):
         first = await assemble_case(run_id="s1",group_id=7,bot_id=3,task="fix schema",
-                                    outcome="completed",tool_records=_corrected_trace("x"))
+                                    outcome="completed",tool_records=_corrected_trace("verification failed x"))
         second = await assemble_case(run_id="s2",group_id=7,bot_id=3,task="fix schema",
-                                     outcome="completed",tool_records=_corrected_trace("y"))
+                                     outcome="completed",tool_records=_corrected_trace("verification failed y"))
         record_id = await distill_case(first,7)
         self.assertIsNone(await compile_candidate(record_id,7))
         await distill_case(second,7)
@@ -732,9 +782,9 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_skill_maturity_uses_independent_run_outcomes(self):
         case1=await assemble_case(run_id="k1",group_id=7,bot_id=3,task="repair schema migration",
-                                  outcome="completed",tool_records=_corrected_trace("x"))
+                                  outcome="completed",tool_records=_corrected_trace("verification failed x"))
         case2=await assemble_case(run_id="k2",group_id=7,bot_id=3,task="repair schema migration",
-                                  outcome="completed",tool_records=_corrected_trace("y"))
+                                  outcome="completed",tool_records=_corrected_trace("verification failed y"))
         record_id=await distill_case(case1,7); await distill_case(case2,7)
         async with database.connect(TEST_DB_PATH) as db:
             await db.execute("UPDATE memory_records SET confidence=.8 WHERE record_id=?",(record_id,)); await db.commit()

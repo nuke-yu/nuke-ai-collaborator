@@ -6,7 +6,7 @@ from typing import Final
 from memory.contracts import MemoryOperationError
 from memory.ports import MemoryDatabasePort
 
-MEMORY_SCHEMA_VERSION: Final = 4
+MEMORY_SCHEMA_VERSION: Final = 5
 
 MEMORY_GROUP_TABLES = frozenset(
     {
@@ -33,6 +33,9 @@ MEMORY_V1_DDL = (
     """CREATE TABLE IF NOT EXISTS agent_cases (
         case_id TEXT PRIMARY KEY, run_id TEXT NOT NULL UNIQUE, group_id INTEGER NOT NULL,
         bot_id INTEGER, task TEXT NOT NULL DEFAULT '', task_signature TEXT NOT NULL DEFAULT '',
+        semantic_cluster_key TEXT NOT NULL DEFAULT '',
+        task_family TEXT NOT NULL DEFAULT 'other',
+        task_concepts_json TEXT NOT NULL DEFAULT '[]',
         tools_used TEXT NOT NULL DEFAULT '[]', files_touched TEXT NOT NULL DEFAULT '[]',
         attempts INTEGER NOT NULL DEFAULT 0, errors TEXT NOT NULL DEFAULT '[]',
         outcome TEXT NOT NULL, outcome_confidence REAL NOT NULL DEFAULT 0.0,
@@ -61,6 +64,9 @@ MEMORY_V1_DDL = (
         record_id TEXT PRIMARY KEY, kind TEXT NOT NULL, group_id INTEGER NOT NULL,
         bot_id INTEGER, status TEXT NOT NULL DEFAULT 'active', content TEXT NOT NULL,
         task_signature TEXT NOT NULL DEFAULT '', confidence REAL NOT NULL DEFAULT 0.0,
+        semantic_cluster_key TEXT NOT NULL DEFAULT '',
+        environment_signature TEXT NOT NULL DEFAULT '',
+        failure_signature TEXT NOT NULL DEFAULT '',
         importance REAL NOT NULL DEFAULT 0.0, source_ids TEXT NOT NULL DEFAULT '[]',
         metadata_json TEXT NOT NULL DEFAULT '{}', algorithm_version TEXT NOT NULL DEFAULT 'experience-v1',
         supporting_count INTEGER NOT NULL DEFAULT 1, contradicting_count INTEGER NOT NULL DEFAULT 0,
@@ -68,6 +74,7 @@ MEMORY_V1_DDL = (
         created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
     )""",
     "CREATE INDEX IF NOT EXISTS idx_memory_records_lookup ON memory_records(group_id, bot_id, kind, status)",
+    "CREATE INDEX IF NOT EXISTS idx_memory_records_semantic ON memory_records(group_id,bot_id,kind,status,semantic_cluster_key,environment_signature,failure_signature)",
     """CREATE TABLE IF NOT EXISTS memory_projection_outbox (
         event_id TEXT PRIMARY KEY, projection_type TEXT NOT NULL,
         aggregate_id TEXT NOT NULL, aggregate_version TEXT NOT NULL,
@@ -175,6 +182,19 @@ MEMORY_V3_COLUMNS = {
     ),
 }
 
+MEMORY_V5_COLUMNS = {
+    "agent_cases": (
+        ("semantic_cluster_key", "TEXT NOT NULL DEFAULT ''"),
+        ("task_family", "TEXT NOT NULL DEFAULT 'other'"),
+        ("task_concepts_json", "TEXT NOT NULL DEFAULT '[]'"),
+    ),
+    "memory_records": (
+        ("semantic_cluster_key", "TEXT NOT NULL DEFAULT ''"),
+        ("environment_signature", "TEXT NOT NULL DEFAULT ''"),
+        ("failure_signature", "TEXT NOT NULL DEFAULT ''"),
+    ),
+}
+
 MEMORY_GROUP_DDL = (
     _VERSION_TABLE_DDL,
     *MEMORY_V1_DDL,
@@ -246,6 +266,25 @@ class MemorySchemaManager:
             if current < 4:
                 await connection.execute(
                     "INSERT INTO memory_schema_version(version) VALUES (4)"
+                )
+            if current < 5:
+                for table, columns in MEMORY_V5_COLUMNS.items():
+                    async with connection.execute(
+                        f"PRAGMA table_info({table})"
+                    ) as cursor:
+                        existing = {str(row[1]) for row in await cursor.fetchall()}
+                    for name, declaration in columns:
+                        if name not in existing:
+                            await connection.execute(
+                                f"ALTER TABLE {table} ADD COLUMN {name} {declaration}"
+                            )
+                await connection.execute(
+                    """CREATE INDEX IF NOT EXISTS idx_memory_records_semantic
+                    ON memory_records(group_id,bot_id,kind,status,
+                    semantic_cluster_key,environment_signature,failure_signature)"""
+                )
+                await connection.execute(
+                    "INSERT INTO memory_schema_version(version) VALUES (5)"
                 )
             await connection.commit()
         return MEMORY_SCHEMA_VERSION
