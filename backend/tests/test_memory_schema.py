@@ -62,6 +62,7 @@ class MemorySchemaTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stored_version, MEMORY_SCHEMA_VERSION)
         self.assertTrue(MEMORY_GROUP_TABLES <= tables)
         self.assertIn("agent_case_attempts", tables)
+        self.assertIn("memory_relations", tables)
         async with db.connect(self.path) as connection:
             async with connection.execute(
                 "PRAGMA table_info(agent_cases)"
@@ -71,6 +72,10 @@ class MemorySchemaTest(unittest.IsolatedAsyncioTestCase):
                 "PRAGMA table_info(memory_records)"
             ) as cursor:
                 record_columns = {row[1] for row in await cursor.fetchall()}
+            async with connection.execute(
+                "PRAGMA table_info(memory_relations)"
+            ) as cursor:
+                relation_columns = {row[1] for row in await cursor.fetchall()}
         self.assertTrue(
             {"semantic_cluster_key", "task_family", "task_concepts_json"}
             <= case_columns
@@ -82,6 +87,21 @@ class MemorySchemaTest(unittest.IsolatedAsyncioTestCase):
                 "failure_signature",
             }
             <= record_columns
+        )
+        self.assertTrue(
+            {
+                "relation_id",
+                "group_id",
+                "from_record_id",
+                "to_record_id",
+                "relation_type",
+                "source_type",
+                "source_id",
+                "evidence_json",
+                "effective_from",
+                "valid_to",
+            }
+            <= relation_columns
         )
         self.assertTrue(
             {

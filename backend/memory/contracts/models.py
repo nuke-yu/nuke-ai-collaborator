@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Mapping, Sequence
 
-from memory.domain import MemoryScope, UsageKind, UsageState
+from memory.domain import MemoryRelationType, MemoryScope, UsageKind, UsageState
 
 CONTRACT_VERSION = "memory.v1"
 
@@ -115,6 +115,59 @@ class RecallGroupFacts:
             raise ValueError("limit must be positive")
         if self.char_budget < 1:
             raise ValueError("char_budget must be positive")
+
+
+@dataclass(frozen=True, slots=True)
+class CreateMemoryRelation:
+    scope: MemoryScope
+    from_record_id: str
+    to_record_id: str
+    relation_type: MemoryRelationType
+    source_type: str
+    source_id: str
+    evidence: Mapping[str, Any] = field(default_factory=dict)
+    effective_from: int | None = None
+
+    def __post_init__(self) -> None:
+        if not self.from_record_id.strip():
+            raise ValueError("from_record_id is required")
+        if not self.to_record_id.strip():
+            raise ValueError("to_record_id is required")
+        if self.from_record_id == self.to_record_id:
+            raise ValueError("memory relation endpoints must differ")
+        if not self.source_type.strip():
+            raise ValueError("source_type is required")
+        if not self.source_id.strip():
+            raise ValueError("source_id is required")
+        if self.effective_from is not None and self.effective_from < 0:
+            raise ValueError("effective_from cannot be negative")
+
+
+@dataclass(frozen=True, slots=True)
+class RecallMemoryRelations:
+    scope: MemoryScope
+    record_id: str
+    relation_types: tuple[MemoryRelationType, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not self.record_id.strip():
+            raise ValueError("record_id is required")
+
+
+@dataclass(frozen=True, slots=True)
+class MemoryRelation:
+    relation_id: str
+    group_id: int
+    from_record_id: str
+    to_record_id: str
+    relation_type: MemoryRelationType
+    source_type: str
+    source_id: str
+    evidence: Mapping[str, Any]
+    created_by: str
+    effective_from: int
+    valid_to: int | None
+    status: str
 
 
 @dataclass(frozen=True, slots=True)

@@ -1,6 +1,7 @@
 """Ports implemented by Memory application services and infrastructure."""
 
-from .api import (LearningPort, MemoryCommandPort, MemoryEventPort, MemoryQueryPort,
+from .api import (GroupKnowledgePort, LearningPort, MemoryCommandPort,
+                  MemoryEventPort, MemoryQueryPort, MemoryRelationPort,
                   PersonalKnowledgePort)
 from .infrastructure import (
     AlgorithmDescriptor,
@@ -39,9 +40,11 @@ __all__ = [
     "MemoryACLPort",
     "TemporalGraphPort",
     "LearningPort",
+    "GroupKnowledgePort",
     "MemoryCommandPort",
     "MemoryEventPort",
     "MemoryQueryPort",
+    "MemoryRelationPort",
     "PersonalKnowledgePort",
     "MemoryRepositoryPort",
     "MemorySchemaPort",

@@ -22,6 +22,7 @@ from .ownership import (
     MemoryOwnerType,
     admit_group_fact,
 )
+from .relations import MemoryRelationType
 from .scope import MemoryScope, Principal, ScopeKind
 from .task_identity import TaskIdentity, identify_task
 from .usage import (
@@ -37,6 +38,7 @@ from .usage import (
 __all__ = [
     "MemoryScope",
     "MemoryOwnerType",
+    "MemoryRelationType",
     "OutcomeSignal",
     "OutcomeStatus",
     "OutcomeVerdict",

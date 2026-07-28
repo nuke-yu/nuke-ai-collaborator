@@ -558,6 +558,12 @@ INDEX
 
 第一阶段使用 SQLite 关系表实现，不引入图数据库。
 
+2026-07-28 增量实现：canonical `memory_relations` 已作为 Memory schema
+v7 落地。关系仅连接同一 Group 中已存在的 canonical records，采用带来源的
+幂等 ADD-only 写入，当前词表限定为 duplicate、reinforce、refine、
+contradict、supersede、derive 和 support。它用于证据追溯与时态软替代，
+不参与多跳检索，也不改变现有召回排序；Chroma 仍只是后续可重建投影。
+
 ### 5.3 人的知识蒸馏链
 
 ```text

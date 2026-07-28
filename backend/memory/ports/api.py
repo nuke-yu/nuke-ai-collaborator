@@ -4,12 +4,14 @@ from __future__ import annotations
 from typing import Any, Mapping, Protocol, runtime_checkable
 
 from memory.contracts import (AssembleCase, CompleteExperienceUsage, CompleteSkillUsage,
+                              CreateMemoryRelation,
                               CreatePersonalProjection, CreatePersonalRecord, ForgetMemory,
                               FormatProjectedContext, IngestPersonalKnowledge, MemoryEvent,
                               IngestGroupFact,
                               MarkUsageAdopted, MarkUsageExecuted,
                               ObserveMemory, ObservePersonalHabit, ProcessLearningCase,
-                              RecallExperiences, RecallMemory, RecallResult, RecallSkills,
+                              MemoryRelation, RecallExperiences, RecallMemory,
+                              RecallMemoryRelations, RecallResult, RecallSkills,
                               RecallGroupFacts,
                               VerifyUsage)
 from memory.domain import MemoryScope
@@ -35,6 +37,14 @@ class MemoryEventPort(Protocol):
 class GroupKnowledgePort(Protocol):
     async def ingest_fact(self, command: IngestGroupFact) -> str: ...
     async def recall_facts(self, query: RecallGroupFacts) -> RecallResult: ...
+
+
+@runtime_checkable
+class MemoryRelationPort(Protocol):
+    async def create(self, command: CreateMemoryRelation) -> str: ...
+    async def recall(
+        self, query: RecallMemoryRelations
+    ) -> tuple[MemoryRelation, ...]: ...
 
 
 @runtime_checkable

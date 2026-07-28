@@ -6,7 +6,7 @@ from typing import Final
 from memory.contracts import MemoryOperationError
 from memory.ports import MemoryDatabasePort
 
-MEMORY_SCHEMA_VERSION: Final = 6
+MEMORY_SCHEMA_VERSION: Final = 7
 
 MEMORY_GROUP_TABLES = frozenset(
     {
@@ -14,6 +14,7 @@ MEMORY_GROUP_TABLES = frozenset(
         "agent_cases",
         "agent_case_attempts",
         "memory_records",
+        "memory_relations",
         "memory_projection_outbox",
         "experience_usage",
         "pipeline_jobs",
@@ -83,6 +84,19 @@ MEMORY_V1_DDL = (
     "CREATE INDEX IF NOT EXISTS idx_memory_records_lookup ON memory_records(group_id, bot_id, kind, status)",
     "CREATE INDEX IF NOT EXISTS idx_memory_records_semantic ON memory_records(group_id,bot_id,kind,status,semantic_cluster_key,environment_signature,failure_signature)",
     "CREATE INDEX IF NOT EXISTS idx_memory_records_group_facts ON memory_records(group_id,owner_type,kind,status,subject_key,updated_at DESC)",
+    """CREATE TABLE IF NOT EXISTS memory_relations (
+        relation_id TEXT PRIMARY KEY, group_id INTEGER NOT NULL,
+        from_record_id TEXT NOT NULL, to_record_id TEXT NOT NULL,
+        relation_type TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active',
+        source_type TEXT NOT NULL, source_id TEXT NOT NULL,
+        evidence_json TEXT NOT NULL DEFAULT '{}', created_by TEXT NOT NULL,
+        effective_from INTEGER NOT NULL, valid_to INTEGER,
+        created_at INTEGER NOT NULL,
+        UNIQUE(group_id,from_record_id,to_record_id,relation_type,
+               source_type,source_id)
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_memory_relations_from ON memory_relations(group_id,from_record_id,status,relation_type)",
+    "CREATE INDEX IF NOT EXISTS idx_memory_relations_to ON memory_relations(group_id,to_record_id,status,relation_type)",
     """CREATE TABLE IF NOT EXISTS memory_projection_outbox (
         event_id TEXT PRIMARY KEY, projection_type TEXT NOT NULL,
         aggregate_id TEXT NOT NULL, aggregate_version TEXT NOT NULL,
@@ -324,6 +338,10 @@ class MemorySchemaManager:
                 )
                 await connection.execute(
                     "INSERT INTO memory_schema_version(version) VALUES (6)"
+                )
+            if current < 7:
+                await connection.execute(
+                    "INSERT INTO memory_schema_version(version) VALUES (7)"
                 )
             await connection.commit()
         return MEMORY_SCHEMA_VERSION
