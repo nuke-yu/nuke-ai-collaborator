@@ -1,6 +1,7 @@
 """Bounded execution Reflexion using structured traces, never raw chain-of-thought."""
 from __future__ import annotations
 import hashlib
+import json
 import time
 
 
@@ -38,6 +39,45 @@ async def record(*, run_id: str, group_id: int | None, bot_id: int | None,
           (decision_id,run_id,group_id,bot_id,step_id,failure_class,
            observation[:1000],corrective_plan[:1000],int(time.time()*1000)))
         await db.commit()
+
+
+async def record_memory_injection(
+    *,
+    run_id: str,
+    group_id: int | None,
+    bot_id: int | None,
+    memory_refs: tuple[str, ...],
+) -> str | None:
+    """Persist the exact allowlist injected into one Run, without claiming adoption."""
+    if group_id is None or not memory_refs:
+        return None
+    from ai.memory import _memory_db
+
+    step_id = f"{run_id}:context"
+    decision_id = "decision:" + hashlib.sha256(
+        f"{run_id}:{step_id}:memory_injection".encode()
+    ).hexdigest()[:24]
+    async with await _memory_db("run_decisions", group_id, write=True) as db:
+        await db.execute(
+            """INSERT INTO run_decisions
+               (decision_id,run_id,group_id,bot_id,step_id,decision_type,
+                observation,corrective_plan,memory_refs_json,created_at)
+               VALUES (?,?,?,?,?,'memory_injection',
+                       'learned context injected','',?,?)
+               ON CONFLICT(run_id,step_id,decision_type) DO UPDATE SET
+                 memory_refs_json=excluded.memory_refs_json""",
+            (
+                decision_id,
+                run_id,
+                group_id,
+                bot_id,
+                step_id,
+                json.dumps(list(memory_refs), ensure_ascii=False),
+                int(time.time() * 1000),
+            ),
+        )
+        await db.commit()
+    return decision_id
 
 
 async def maybe_inject(runner, *, iteration: int) -> bool:

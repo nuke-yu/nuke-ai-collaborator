@@ -359,6 +359,7 @@ _GROUP_DDL = [
         run_id         TEXT    NOT NULL DEFAULT '',
         step_id        TEXT    NOT NULL DEFAULT '',
         attempt_id     TEXT    NOT NULL DEFAULT '',
+        memory_refs_json TEXT  NOT NULL DEFAULT '[]',
         -- L4: 0 = not yet folded into a durable summary; 1 = compressed (then
         -- prunable). maybe_compress_tool_events advances this in batches.
         compressed     INTEGER NOT NULL DEFAULT 0
@@ -390,7 +391,8 @@ _GROUP_DDL = [
         decision_id TEXT PRIMARY KEY, run_id TEXT NOT NULL, group_id INTEGER NOT NULL,
         bot_id INTEGER, step_id TEXT NOT NULL, decision_type TEXT NOT NULL,
         failure_class TEXT NOT NULL DEFAULT '', observation TEXT NOT NULL DEFAULT '',
-        corrective_plan TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL,
+        corrective_plan TEXT NOT NULL DEFAULT '',
+        memory_refs_json TEXT NOT NULL DEFAULT '[]', created_at INTEGER NOT NULL,
         UNIQUE(run_id, step_id, decision_type)
     )""",
 ] + list(MEMORY_GROUP_DDL)

@@ -1202,6 +1202,21 @@ async def migration_052(db):
     await db.commit()
 
 
+async def migration_053(db):
+    """Persist validated learned-memory references in decision and tool traces."""
+    await _safe_add_column(
+        db,
+        "ALTER TABLE tool_events ADD COLUMN memory_refs_json "
+        "TEXT NOT NULL DEFAULT '[]'",
+    )
+    await _safe_add_column(
+        db,
+        "ALTER TABLE run_decisions ADD COLUMN memory_refs_json "
+        "TEXT NOT NULL DEFAULT '[]'",
+    )
+    await db.commit()
+
+
 MIGRATIONS: list = [
     migration_001,
     migration_002,
@@ -1255,6 +1270,7 @@ MIGRATIONS: list = [
     migration_050,
     migration_051,
     migration_052,
+    migration_053,
 ]
 
 

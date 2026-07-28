@@ -11,7 +11,7 @@ from memory.contracts import (AssembleCase, CompleteExperienceUsage,
                               CompleteSkillUsage, MemoryOperationError,
                               MarkUsageAdopted, MarkUsageExecuted,
                               ProcessLearningCase, RecallExperiences,
-                              RecallSkills, VerifyUsage)
+                              RecallSkills, ResolveLearningRefs, VerifyUsage)
 from memory.domain import MemoryScope, ScopeKind
 
 
@@ -78,6 +78,27 @@ class LegacyLearningAdapter:
             )
         except aiosqlite.OperationalError:
             return "", []
+
+    async def resolve_learning_refs(
+        self, command: ResolveLearningRefs
+    ) -> tuple[str, ...]:
+        group_id = self._group_id(command.scope)
+        if command.scope.bot_id is None:
+            raise MemoryOperationError(
+                "learning reference resolution requires bot scope"
+            )
+        from memory.application.references import experience_ref
+        from ai.skill_learning import resolve_skill_refs
+
+        experience_refs = tuple(
+            experience_ref(record_id) for record_id in command.experience_ids
+        )
+        skill_refs = await resolve_skill_refs(
+            skill_ids=list(command.skill_ids),
+            group_id=group_id,
+            bot_id=command.scope.bot_id,
+        )
+        return tuple(sorted((*experience_refs, *skill_refs)))
 
     async def complete_skill_usage(self, command: CompleteSkillUsage) -> None:
         group_id = self._group_id(command.scope)

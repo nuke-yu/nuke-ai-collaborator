@@ -325,6 +325,13 @@ class RecallSkills:
 
 
 @dataclass(frozen=True, slots=True)
+class ResolveLearningRefs:
+    scope: MemoryScope
+    experience_ids: tuple[str, ...] = ()
+    skill_ids: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class CompleteSkillUsage:
     scope: MemoryScope
     skill_ids: tuple[str, ...]

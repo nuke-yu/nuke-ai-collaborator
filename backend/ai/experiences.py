@@ -466,9 +466,13 @@ async def recall_experiences(*, query: str, run_id: str, group_id: int | None,
                 (record_id,run_id,group_id,bot_id,"injected",now,now))
         await db.commit()
     formatted_experiences = []
-    for _, snippet in selected:
+    from memory.application.references import experience_ref
+    for record_id, snippet in selected:
         safe_snippet = snippet.replace("</untrusted_learned_experience>", "")
-        formatted_experiences.append(f"<untrusted_learned_experience>\n{safe_snippet}\n</untrusted_learned_experience>")
+        formatted_experiences.append(
+            f'<untrusted_learned_experience memory_ref="{experience_ref(record_id)}">\n'
+            f"{safe_snippet}\n</untrusted_learned_experience>"
+        )
     return "[Relevant prior execution experience]\n" + "\n".join(formatted_experiences), [x[0] for x in selected]
 
 

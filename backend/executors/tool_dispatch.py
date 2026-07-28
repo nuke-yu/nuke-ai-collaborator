@@ -37,6 +37,7 @@ def _record_event_l1(name: str, arguments: dict, result: str, is_error: bool, co
             run_id=context.get("run_id"),
             step_id=context.get("step_id"),
             attempt_id=context.get("attempt_id"),
+            memory_refs=context.get("_validated_memory_refs", ()),
         ))
         _recording_tasks.add(task)
         task.add_done_callback(_recording_tasks.discard)
@@ -63,14 +64,35 @@ async def dispatch_tool(name: str, arguments: dict, context: dict) -> tuple[str,
     for EVERY tool — builtin AND MCP — so it's where the deterministic
     tool_events row is recorded (fire-and-forget; see _record_event_l1).
     """
+    if context is None:
+        context = {}
+    safe_arguments = dict(arguments or {})
+    raw_memory_refs = safe_arguments.pop("_memory_refs", None)
+    context["_executed_arguments"] = safe_arguments
+    try:
+        from memory.application.references import validate_tool_refs
+        memory_refs = validate_tool_refs(
+            raw_memory_refs, context.get("allowed_memory_refs", ())
+        )
+    except ValueError as exc:
+        result = f"Memory reference validation failed: {exc}"
+        context["_validated_memory_refs"] = ()
+        _record_event_l1(name, safe_arguments, result, True, context)
+        return result, True
+    context["_validated_memory_refs"] = memory_refs
+
     if not tool_executor.has_tool(name):
         from executors.tool_router import router as _tool_router
         if _tool_router.has_providers():
-            result, is_error = await _tool_router.execute(name, arguments, context=context)
-            _record_event_l1(name, arguments, result, is_error, context)
+            result, is_error = await _tool_router.execute(
+                name, safe_arguments, context=context
+            )
+            _record_event_l1(name, safe_arguments, result, is_error, context)
             return result, is_error
-    result, is_error = await tool_executor.execute(name, arguments, context=context)
-    _record_event_l1(name, arguments, result, is_error, context)
+    result, is_error = await tool_executor.execute(
+        name, safe_arguments, context=context
+    )
+    _record_event_l1(name, safe_arguments, result, is_error, context)
     return result, is_error
 
 

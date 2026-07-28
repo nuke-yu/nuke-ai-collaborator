@@ -32,8 +32,10 @@ from ai.pipeline import (
     job_stats,
     process_case,
 )
-from ai.reflexion import classify_failure, maybe_inject
-from ai.skill_learning import compile_candidate, complete_skill_usage, promote_skill, recall_skills, validate_declaration
+from ai.reflexion import classify_failure, maybe_inject, record_memory_injection
+from ai.skill_learning import (compile_candidate, complete_skill_usage,
+                               promote_skill, recall_skills,
+                               resolve_skill_refs, validate_declaration)
 from ai.experiences import complete_usage, decay_experiences, distill_case, recall_experiences
 from ai.learning_metrics import collect_learning_shadow_metrics
 from ai.usage_tracking import mark_adopted, mark_executed, mark_verified
@@ -69,14 +71,15 @@ async def _fetch_events(group_id: int) -> list[dict]:
     async with database.connect(TEST_DB_PATH) as db:
         async with db.execute(
             "SELECT ts, group_id, bot_id, thread_id, tool, args_summary, "
-            "result_summary, is_error, files_touched, command, run_id, step_id, attempt_id "
+            "result_summary, is_error, files_touched, command, run_id, step_id, "
+            "attempt_id, memory_refs_json "
             "FROM tool_events WHERE group_id=? ORDER BY id",
             (group_id,),
         ) as cur:
             rows = await cur.fetchall()
     cols = ["ts", "group_id", "bot_id", "thread_id", "tool", "args_summary",
             "result_summary", "is_error", "files_touched", "command", "run_id",
-            "step_id", "attempt_id"]
+            "step_id", "attempt_id", "memory_refs_json"]
     return [dict(zip(cols, r)) for r in rows]
 
 
@@ -218,6 +221,49 @@ class RecordEventTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((row["run_id"], row["step_id"], row["attempt_id"]),
                          ("r1", "r1:step:1", "c1"))
 
+    async def test_dispatch_tool_validates_strips_and_records_memory_refs(self):
+        from executors import tool_dispatch
+        ctx = {
+            "group_id": 42,
+            "bot_id": 5,
+            "run_id": "r1",
+            "allowed_memory_refs": ("exp:allowed",),
+        }
+        execute = AsyncMock(return_value=("done", False))
+        with patch.object(tool_dispatch.tool_executor, "has_tool", return_value=True), \
+             patch.object(tool_dispatch.tool_executor, "execute", new=execute):
+            result = await tool_dispatch.dispatch_tool(
+                "read_file",
+                {"path": "z.py", "_memory_refs": ["exp:allowed"]},
+                ctx,
+            )
+        self.assertEqual(result, ("done", False))
+        self.assertEqual(execute.await_args.args[1], {"path": "z.py"})
+        self.assertEqual(ctx["_executed_arguments"], {"path": "z.py"})
+        self.assertEqual(ctx["_validated_memory_refs"], ("exp:allowed",))
+        if tool_dispatch._recording_tasks:
+            await asyncio.gather(*list(tool_dispatch._recording_tasks))
+        row = (await _fetch_events(42))[0]
+        self.assertEqual(json.loads(row["memory_refs_json"]), ["exp:allowed"])
+
+    async def test_dispatch_tool_rejects_non_injected_memory_ref(self):
+        from executors import tool_dispatch
+        ctx = {
+            "group_id": 42,
+            "bot_id": 5,
+            "allowed_memory_refs": ("exp:allowed",),
+        }
+        execute = AsyncMock(return_value=("should not run", False))
+        with patch.object(tool_dispatch.tool_executor, "has_tool", return_value=True), \
+             patch.object(tool_dispatch.tool_executor, "execute", new=execute):
+            result, is_error = await tool_dispatch.dispatch_tool(
+                "read_file",
+                {"path": "z.py", "_memory_refs": ["exp:other-group"]},
+                ctx,
+            )
+        self.assertTrue(is_error)
+        self.assertIn("not injected", result)
+        execute.assert_not_awaited()
 
     async def test_dispatch_tool_logs_if_event_recording_cannot_be_scheduled(self):
         from executors import tool_dispatch
@@ -301,6 +347,26 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
             group_id=7,
             status=status,
             evidence={"adapter": "test_adapter", "signal": status.value},
+        )
+
+    async def test_memory_injection_decision_persists_exact_allowlist(self):
+        decision_id = await record_memory_injection(
+            run_id="run:refs",
+            group_id=7,
+            bot_id=3,
+            memory_refs=("exp:one", "skill:two@v2"),
+        )
+        self.assertIsNotNone(decision_id)
+        async with database.connect(TEST_DB_PATH) as db:
+            async with db.execute(
+                """SELECT decision_type,memory_refs_json FROM run_decisions
+                   WHERE decision_id=?""",
+                (decision_id,),
+            ) as cur:
+                row = await cur.fetchone()
+        self.assertEqual(row[0], "memory_injection")
+        self.assertEqual(
+            json.loads(row[1]), ["exp:one", "skill:two@v2"]
         )
 
     async def test_run_lifecycle_is_durable_and_resume_safe(self):
@@ -526,6 +592,7 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
             query="数据库迁移怎么修复", run_id="target", group_id=7, bot_id=3)
         self.assertEqual(ids, [record_id])
         self.assertIn("prior execution experience", context)
+        self.assertIn(f'memory_ref="{record_id}"', context)
         async with database.connect(TEST_DB_PATH) as db:
             async with db.execute(
                 "SELECT supporting_count,confidence FROM memory_records "
@@ -930,6 +997,27 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(await promote_skill(skill_id, 7, "active"))
         context,ids=await recall_skills(query="repair schema migration",run_id="new-run",group_id=7,bot_id=3)
         self.assertEqual(ids,[skill_id]); self.assertIn("declarative skills",context)
+        self.assertIn(f'memory_ref="{skill_id}@v1"', context)
+        self.assertEqual(
+            await resolve_skill_refs(skill_ids=ids, group_id=7, bot_id=3),
+            (f"{skill_id}@v1",),
+        )
+        async with database.connect(TEST_DB_PATH) as db:
+            await db.execute(
+                "UPDATE skills SET maturity='trial' WHERE skill_id=?",
+                (skill_id,),
+            )
+            await db.commit()
+        self.assertEqual(
+            await resolve_skill_refs(skill_ids=ids, group_id=7, bot_id=3),
+            (),
+        )
+        async with database.connect(TEST_DB_PATH) as db:
+            await db.execute(
+                "UPDATE skills SET maturity='active' WHERE skill_id=?",
+                (skill_id,),
+            )
+            await db.commit()
         with patch("ai.skill_learning.project_skill",new=AsyncMock(return_value="x")):
             await complete_skill_usage(skill_ids=ids,run_id="new-run",group_id=7,outcome="completed")
             await self._verify_usage(

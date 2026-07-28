@@ -150,6 +150,8 @@ class ToolLoopRunner:
         self.retrieved_experience_ids = []
         self.reflexion_used = False
         self.retrieved_skill_ids = []
+        self.injected_memory_refs = ()
+        self.memory_injection_decision_id = None
 
         self.ruleset = None
         self.use_cached_mc = compact.should_use_cached_microcompact(self.provider)
@@ -226,6 +228,8 @@ class ToolLoopRunner:
                 group_id=self.ctx.group_id,
                 bot_id=self.bot["id"],
                 broadcaster=self.ctx.interaction,
+                run_id=self.run_id,
+                allowed_memory_refs=self.injected_memory_refs,
             )
             await self.ctx.interaction.append_session_event(self.session_id, "child_join", {
                 "child_session_id": child_sid,
@@ -277,6 +281,7 @@ class ToolLoopRunner:
                     "rewake_queue": self.rewake_queue,
                     "runner": self,
                     "run_id": self.run_id,
+                    "allowed_memory_refs": self.injected_memory_refs,
                 }
 
                 _active_schemas = self.tool_schemas

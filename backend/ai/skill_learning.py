@@ -110,16 +110,44 @@ async def recall_skills(*, query: str, run_id: str, group_id: int | None,
                              (skill_id,version,run_id,group_id,now,now))
         await db.commit()
     body=[]
-    for _,_,_,d in selected:
+    from memory.application.references import skill_ref
+    for _,skill_id,version,d in selected:
         clean_trigger = str(d.get('trigger', '')).replace("</untrusted_learned_skill>", "")
         clean_procedure = "; ".join(str(step).replace("</untrusted_learned_skill>", "") for step in d.get("procedure", []))
         body.append(
-            f"<untrusted_learned_skill>\n"
+            f'<untrusted_learned_skill memory_ref="{skill_ref(skill_id, version)}">\n'
             f"Trigger pattern: \"{clean_trigger}\"\n"
             f"Procedure: {clean_procedure}\n"
             f"</untrusted_learned_skill>"
         )
     return "[Learned declarative skills]\n"+"\n".join(body),[x[1] for x in selected]
+
+
+async def resolve_skill_refs(
+    *, skill_ids: list[str], group_id: int, bot_id: int
+) -> tuple[str, ...]:
+    """Resolve canonical IDs to their current injected version without parsing text."""
+    if not skill_ids:
+        return ()
+    from ai.memory import _memory_db
+    from memory.application.references import skill_ref
+
+    placeholders = ",".join("?" for _ in skill_ids)
+    async with await _memory_db("skills", group_id, write=False) as db:
+        async with db.execute(
+            f"""SELECT skill_id,current_version FROM skills
+                WHERE group_id=? AND bot_id=? AND status='active'
+                  AND maturity IN ('active','stable')
+                  AND skill_id IN ({placeholders})""",
+            (group_id, bot_id, *skill_ids),
+        ) as cur:
+            rows = await cur.fetchall()
+    versions = {str(skill_id): int(version) for skill_id, version in rows}
+    return tuple(
+        skill_ref(skill_id, versions[skill_id])
+        for skill_id in skill_ids
+        if skill_id in versions
+    )
 
 
 async def complete_skill_usage(*, skill_ids:list[str],run_id:str,group_id:int|None,

@@ -37,6 +37,7 @@ from .models import (
     RecallMemoryRelations,
     RecallResult,
     RecallSkills,
+    ResolveLearningRefs,
     SynthesizedReflection,
     VerifyUsage,
 )
@@ -78,6 +79,7 @@ __all__ = [
     "RecallMemoryRelations",
     "RecallResult",
     "RecallSkills",
+    "ResolveLearningRefs",
     "SynthesizedReflection",
     "VerifyUsage",
 ]
