@@ -61,7 +61,10 @@ async def _load_observation_event(group_id: int, input_id: str):
     from ai.memory_provider import MemoryEvent, get_memory_provider
     import db as database
 
-    message_id, bot_id = _parse_observation_input(input_id)
+    try:
+        message_id, bot_id = _parse_observation_input(input_id)
+    except ValueError:
+        return None
     async with await _memory_db("messages", group_id, write=False) as conn:
         async with conn.execute(
             """SELECT content,sender_name,sender_provider,sender_model,meta,is_deleted
@@ -69,9 +72,7 @@ async def _load_observation_event(group_id: int, input_id: str):
             (message_id, group_id, bot_id),
         ) as cur:
             row = await cur.fetchone()
-    if not row:
-        raise ValueError(f"observation message not found: {message_id}")
-    if row[5]:
+    if not row or row[5]:
         return None
 
     bot = None

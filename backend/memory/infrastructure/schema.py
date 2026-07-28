@@ -6,7 +6,7 @@ from typing import Final
 from memory.contracts import MemoryOperationError
 from memory.ports import MemoryDatabasePort
 
-MEMORY_SCHEMA_VERSION: Final = 10
+MEMORY_SCHEMA_VERSION: Final = 11
 
 MEMORY_GROUP_TABLES = frozenset(
     {
@@ -85,6 +85,7 @@ MEMORY_V1_DDL = (
     "CREATE INDEX IF NOT EXISTS idx_memory_records_lookup ON memory_records(group_id, bot_id, kind, status)",
     "CREATE INDEX IF NOT EXISTS idx_memory_records_semantic ON memory_records(group_id,bot_id,kind,status,semantic_cluster_key,environment_signature,failure_signature)",
     "CREATE INDEX IF NOT EXISTS idx_memory_records_group_facts ON memory_records(group_id,owner_type,kind,status,subject_key,updated_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_memory_records_rebuild_sort ON memory_records(group_id, owner_type, kind, status, COALESCE(effective_from, created_at), record_id)",
     """CREATE TABLE IF NOT EXISTS memory_relations (
         relation_id TEXT PRIMARY KEY, group_id INTEGER NOT NULL,
         from_record_id TEXT NOT NULL, to_record_id TEXT NOT NULL,
@@ -465,6 +466,14 @@ class MemorySchemaManager:
                 )
                 await connection.execute(
                     "INSERT INTO memory_schema_version(version) VALUES (10)"
+                )
+            if current < 11:
+                await connection.execute(
+                    """CREATE INDEX IF NOT EXISTS idx_memory_records_rebuild_sort
+                    ON memory_records(group_id, owner_type, kind, status, COALESCE(effective_from, created_at), record_id)"""
+                )
+                await connection.execute(
+                    "INSERT INTO memory_schema_version(version) VALUES (11)"
                 )
             await connection.commit()
         return MEMORY_SCHEMA_VERSION

@@ -81,12 +81,17 @@ async def _ensure_schema(db: aiosqlite.Connection) -> None:
             raise RuntimeError("personal vault foreign key check failed")
 
 
-_vault_locks: dict[int, asyncio.Lock] = {}
+import weakref
+
+
+_vault_locks: weakref.WeakValueDictionary[int, asyncio.Lock] = weakref.WeakValueDictionary()
 
 def _get_vault_lock(user_id: int) -> asyncio.Lock:
-    if user_id not in _vault_locks:
-        _vault_locks[user_id] = asyncio.Lock()
-    return _vault_locks[user_id]
+    lock = _vault_locks.get(user_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _vault_locks[user_id] = lock
+    return lock
 
 
 @asynccontextmanager
@@ -303,7 +308,6 @@ async def delete_vault(user_id: int) -> bool:
             "personal_vault_deleted user_id=%d existed=%s deleted_at=%d",
             user_id, existed, now_ms,
         )
-        _vault_locks.pop(user_id, None)
         return existed
 
 
