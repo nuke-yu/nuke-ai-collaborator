@@ -150,9 +150,6 @@ async def mark_verified(
             elif status is UsageState.VERIFIED_SUCCESS:
                 await db.execute(
                     """UPDATE skills SET success_count=success_count+1,
-                    maturity=CASE WHEN maturity='trial' THEN 'active'
-                        WHEN maturity='active' AND success_count+1>=3
-                        THEN 'stable' ELSE maturity END,
                     updated_at=? WHERE skill_id=? AND group_id=?""",
                     (now, item_id, group_id),
                 )

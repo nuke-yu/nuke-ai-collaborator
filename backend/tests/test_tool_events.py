@@ -6,11 +6,13 @@ init_db() (which runs migrations, creating tool_events via migration_025).
 import asyncio
 import json
 import os
-import sqlite3
+import sys
 import time
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import db as database
 from ai import tool_events
@@ -834,7 +836,7 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
                 rows = await cur.fetchall()
         self.assertEqual(rows, [("1", "completed"), ("2", "completed")])
 
-    async def test_pipeline_promotes_qualified_skill_with_immutable_audit(self):
+    async def test_pipeline_leaves_qualified_skill_pending_human_promotion(self):
         for run_id in ("promotion-evidence-1", "promotion-evidence-2"):
             case_id = await assemble_case(
                 run_id=run_id, group_id=7, bot_id=3, task="repair schema migration",
@@ -852,14 +854,20 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
                 "FROM skill_promotion_audit"
             ) as cur:
                 audit = await cur.fetchone()
-            with self.assertRaises(sqlite3.IntegrityError):
-                await db.execute("UPDATE skill_promotion_audit SET reason='rewritten'")
+            async with db.execute(
+                """SELECT output_json FROM pipeline_jobs
+                   WHERE status='completed'"""
+            ) as cur:
+                results = [
+                    json.loads(row[0]) for row in await cur.fetchall()
+                ]
 
-        self.assertEqual(skill[1], "active")
-        self.assertEqual(audit[0], skill[0])
-        self.assertEqual(audit[1], "system:learning_pipeline")
-        self.assertEqual(audit[3:], ("trial", "active"))
-        self.assertIn("repeated-evidence", audit[2])
+        self.assertEqual(skill[1], "trial")
+        self.assertIsNone(audit)
+        promotion_result = next(
+            result for result in results if result["promotion_required"]
+        )
+        self.assertFalse(promotion_result["skill_promoted"])
 
     async def test_dispatcher_recovers_expired_lease_and_reports_backlog(self):
         case_id = await assemble_case(
@@ -1104,7 +1112,43 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
         async with database.connect(TEST_DB_PATH) as db:
             await db.execute("UPDATE memory_records SET confidence=.8 WHERE record_id=?",(record_id,)); await db.commit()
         skill_id=await compile_candidate(record_id,7)
-        self.assertTrue(await promote_skill(skill_id, 7, "active"))
+        now = int(time.time() * 1000)
+        async with database.connect(TEST_DB_PATH) as db:
+            await db.execute(
+                """INSERT INTO skill_usage
+                   (skill_id,version,run_id,group_id,created_at,updated_at)
+                   VALUES (?,1,'trial-evidence',7,?,?)""",
+                (skill_id, now, now),
+            )
+            await db.commit()
+        await self._verify_usage(
+            UsageKind.SKILL,
+            [skill_id],
+            "trial-evidence",
+            UsageState.VERIFIED_SUCCESS,
+        )
+        async with database.connect(TEST_DB_PATH) as db:
+            async with db.execute(
+                "SELECT maturity,success_count FROM skills WHERE skill_id=?",
+                (skill_id,),
+            ) as cur:
+                trial = await cur.fetchone()
+        self.assertEqual(trial, ("trial", 1))
+        with self.assertRaisesRegex(ValueError, "human user"):
+            await promote_skill(
+                skill_id,
+                7,
+                "active",
+                actor_id="system:learning_pipeline",
+                reason="automatic",
+            )
+        self.assertTrue(await promote_skill(
+            skill_id,
+            7,
+            "active",
+            actor_id="user:1",
+            reason="Approved after reviewing evidence",
+        ))
         context,ids=await recall_skills(query="repair schema migration",run_id="new-run",group_id=7,bot_id=3)
         self.assertEqual(ids,[skill_id]); self.assertIn("declarative skills",context)
         self.assertIn(f'memory_ref="{skill_id}@v1"', context)
@@ -1139,9 +1183,19 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
         async with database.connect(TEST_DB_PATH) as db:
             async with db.execute("SELECT maturity,success_count FROM skills WHERE skill_id=?",(skill_id,)) as cur:
                 row=await cur.fetchone()
-        self.assertEqual(row,("active",1))
+            async with db.execute(
+                """SELECT actor_id,reason FROM skill_promotion_audit
+                   WHERE skill_id=?""",
+                (skill_id,),
+            ) as cur:
+                audit = await cur.fetchone()
+        self.assertEqual(row,("active",2))
+        self.assertEqual(
+            audit,
+            ("user:1", "Approved after reviewing evidence"),
+        )
         metrics = await collect_learning_shadow_metrics(7)
-        self.assertEqual(metrics.skill_verified_success, 1)
+        self.assertEqual(metrics.skill_verified_success, 2)
         self.assertEqual(metrics.skill_completion_without_adoption, 0)
 
 

@@ -59,13 +59,19 @@ async def compile_candidate(record_id: str, group_id: int) -> str | None:
     return skill_id
 
 
-async def promote_skill(skill_id: str, group_id: int, target_maturity: str = "active",
-                        actor_id: str = "system:promotion_gate", reason: str = "Shadow evaluation passed") -> bool:
-    """Explicit promotion gate for trial skills (requires valid predecessor maturity and active status)."""
+async def promote_skill(
+    skill_id: str,
+    group_id: int,
+    target_maturity: str = "active",
+    *,
+    actor_id: str,
+    reason: str,
+) -> bool:
+    """Apply an explicit human promotion with immutable audit evidence."""
     if target_maturity not in {"active", "stable"}:
         raise ValueError("Invalid target maturity for promotion")
-    if not actor_id.strip():
-        raise ValueError("Promotion actor_id is required")
+    if not actor_id.startswith("user:") or not actor_id[5:].isdigit():
+        raise ValueError("Promotion requires a human user actor_id")
     if not reason.strip():
         raise ValueError("Promotion reason is required")
     from ai.memory import _memory_db

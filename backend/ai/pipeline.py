@@ -274,15 +274,8 @@ async def _evaluate_case(group_id: int, case_id: str, input_version: str) -> dic
     skill_id = None
     skill_promoted = False
     if record_id:
-        from ai.skill_learning import compile_candidate, promote_skill
+        from ai.skill_learning import compile_candidate
         skill_id = await compile_candidate(record_id, group_id)
-        if skill_id:
-            skill_promoted = await promote_skill(
-                skill_id,
-                group_id,
-                actor_id="system:learning_pipeline",
-                reason="Candidate passed repeated-evidence compilation gate",
-            )
     return {
         "classification": evaluation.classification,
         "information_gain": evaluation.information_gain,
@@ -291,6 +284,7 @@ async def _evaluate_case(group_id: int, case_id: str, input_version: str) -> dic
         "record_id": record_id,
         "skill_id": skill_id,
         "skill_promoted": skill_promoted,
+        "promotion_required": bool(skill_id),
         "input_version": input_version,
     }
 
