@@ -392,7 +392,8 @@ _GROUP_DDL = [
         bot_id INTEGER, step_id TEXT NOT NULL, decision_type TEXT NOT NULL,
         failure_class TEXT NOT NULL DEFAULT '', observation TEXT NOT NULL DEFAULT '',
         corrective_plan TEXT NOT NULL DEFAULT '',
-        memory_refs_json TEXT NOT NULL DEFAULT '[]', created_at INTEGER NOT NULL,
+        memory_refs_json TEXT NOT NULL DEFAULT '[]',
+        evidence_json TEXT NOT NULL DEFAULT '{}', created_at INTEGER NOT NULL,
         UNIQUE(run_id, step_id, decision_type)
     )""",
 ] + list(MEMORY_GROUP_DDL)

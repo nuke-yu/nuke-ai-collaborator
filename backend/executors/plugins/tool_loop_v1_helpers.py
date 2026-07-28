@@ -12,9 +12,11 @@ from core import config
 import permissions
 from ai.client import call_ai_once, AIError
 from memory.contracts import (AssembleCase, CompleteExperienceUsage, CompleteSkillUsage,
-                              FormatProjectedContext, ObserveMemory, ProcessLearningCase,
-                              RecallExperiences, RecallGroupFacts, RecallMemory,
-                              RecallSkills, ResolveLearningRefs)
+                              FormatProjectedContext, MarkUsageAdopted,
+                              MarkUsageExecuted, ObserveMemory,
+                              ProcessLearningCase, RecallExperiences,
+                              RecallGroupFacts, RecallMemory, RecallSkills,
+                              ResolveLearningRefs, VerifyUsage)
 from memory.domain import MemoryScope, Principal
 from core.role_router import build_context_message, build_image_content
 from workspace import load_context_files, format_context_blocks, append_log, archive_run
@@ -217,6 +219,7 @@ async def _run_fork_skill(
     max_iter: int = 8,
     run_id: str | None = None,
     allowed_memory_refs: tuple[str, ...] = (),
+    tool_records: list[dict] | None = None,
 ) -> str:
     """Execute a fork skill as a real, attenuated sub-agent.
 
@@ -270,6 +273,22 @@ async def _run_fork_skill(
             out, _is_err = await dispatch_tool(
                 call["name"], call.get("arguments", {}), child_ctx
             )
+            if tool_records is not None:
+                tool_records.append({
+                    "name": call["name"],
+                    "args": child_ctx.get(
+                        "_executed_arguments",
+                        call.get("arguments", {}),
+                    ),
+                    "result": out,
+                    "is_error": _is_err,
+                    "step_id": child_ctx["step_id"],
+                    "attempt_id": child_ctx["attempt_id"],
+                    "memory_refs": list(
+                        child_ctx.get("_validated_memory_refs", ())
+                    ),
+                    "spawn_depth": spawn_depth + 1,
+                })
             messages.append({
                 "role": "tool",
                 "tool_call_id": call.get("id", ""),
@@ -688,6 +707,78 @@ def _extract_completion_signals(
     return signals
 
 
+async def _finalize_causal_memory_usage(
+    runner,
+    *,
+    scope: MemoryScope,
+    learning_port,
+) -> None:
+    """Advance only cited Memory through the evidence-bearing usage lifecycle."""
+    from ai.reflexion import record_memory_adoption
+    from memory.application.causal_usage import (
+        collect_causal_usages,
+        verification_for_usage,
+    )
+
+    usages = collect_causal_usages(
+        runner.tool_records,
+        getattr(runner, "injected_memory_refs", ()),
+    )
+    if not usages:
+        return
+    decision_id = await record_memory_adoption(
+        run_id=runner.run_id,
+        group_id=runner.ctx.group_id,
+        bot_id=runner.bot["id"],
+        evidence_by_ref={
+            usage.memory_ref: usage.action_evidence_ids
+            for usage in usages
+        },
+    )
+    if decision_id is None:
+        return
+
+    for usage in usages:
+        item_ids = (usage.item_id,)
+        await learning_port.mark_usage_adopted(MarkUsageAdopted(
+            scope=scope,
+            kind=usage.kind,
+            item_ids=item_ids,
+            run_id=runner.run_id,
+            adopted_via="decision_trace",
+            evidence={
+                "decision_id": decision_id,
+                "memory_ref": usage.memory_ref,
+            },
+        ))
+        await learning_port.mark_usage_executed(MarkUsageExecuted(
+            scope=scope,
+            kind=usage.kind,
+            item_ids=item_ids,
+            run_id=runner.run_id,
+            evidence={
+                "action_match": True,
+                "evidence_ids": list(usage.action_evidence_ids),
+                "memory_ref": usage.memory_ref,
+            },
+        ))
+        verification = verification_for_usage(
+            usage,
+            runner.tool_records,
+            terminal_outcome="completed",
+        )
+        if verification is not None:
+            status, evidence = verification
+            await learning_port.verify_usage(VerifyUsage(
+                scope=scope,
+                kind=usage.kind,
+                item_ids=item_ids,
+                run_id=runner.run_id,
+                status=status,
+                evidence=evidence,
+            ))
+
+
 async def cleanup_and_finalize(runner) -> ExecutionResult:
     signals = _extract_completion_signals(
         runner.messages,
@@ -790,6 +881,11 @@ async def cleanup_and_finalize(runner) -> ExecutionResult:
             outcome="completed",
             tool_records=runner.tool_records,
         ))
+        await _finalize_causal_memory_usage(
+            runner,
+            scope=bot_scope,
+            learning_port=learning_port,
+        )
         if case_id:
             await learning_port.process_case(ProcessLearningCase(
                 scope=bot_scope,

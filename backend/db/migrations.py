@@ -1217,6 +1217,16 @@ async def migration_053(db):
     await db.commit()
 
 
+async def migration_054(db):
+    """Store structured evidence behind Memory adoption decisions."""
+    await _safe_add_column(
+        db,
+        "ALTER TABLE run_decisions ADD COLUMN evidence_json "
+        "TEXT NOT NULL DEFAULT '{}'",
+    )
+    await db.commit()
+
+
 MIGRATIONS: list = [
     migration_001,
     migration_002,
@@ -1271,6 +1281,7 @@ MIGRATIONS: list = [
     migration_051,
     migration_052,
     migration_053,
+    migration_054,
 ]
 
 

@@ -32,14 +32,15 @@ from ai.pipeline import (
     job_stats,
     process_case,
 )
-from ai.reflexion import classify_failure, maybe_inject, record_memory_injection
+from ai.reflexion import (classify_failure, maybe_inject,
+                          record_memory_adoption, record_memory_injection)
 from ai.skill_learning import (compile_candidate, complete_skill_usage,
                                promote_skill, recall_skills,
                                resolve_skill_refs, validate_declaration)
 from ai.experiences import complete_usage, decay_experiences, distill_case, recall_experiences
 from ai.learning_metrics import collect_learning_shadow_metrics
 from ai.usage_tracking import mark_adopted, mark_executed, mark_verified
-from memory.domain import UsageKind, UsageState
+from memory.domain import MemoryScope, UsageKind, UsageState
 
 TEST_DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "test_tool_events.db")
 
@@ -369,6 +370,35 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
             json.loads(row[1]), ["exp:one", "skill:two@v2"]
         )
 
+    async def test_memory_adoption_decision_persists_action_evidence(self):
+        decision_id = await record_memory_adoption(
+            run_id="run:adopt",
+            group_id=7,
+            bot_id=3,
+            evidence_by_ref={
+                "exp:one": ("attempt:1",),
+                "skill:two@v2": ("attempt:2", "attempt:2"),
+            },
+        )
+        async with database.connect(TEST_DB_PATH) as db:
+            async with db.execute(
+                """SELECT decision_type,memory_refs_json,evidence_json
+                   FROM run_decisions WHERE decision_id=?""",
+                (decision_id,),
+            ) as cur:
+                row = await cur.fetchone()
+        self.assertEqual(row[0], "memory_adoption")
+        self.assertEqual(
+            json.loads(row[1]), ["exp:one", "skill:two@v2"]
+        )
+        self.assertEqual(
+            json.loads(row[2]),
+            {
+                "exp:one": ["attempt:1"],
+                "skill:two@v2": ["attempt:2"],
+            },
+        )
+
     async def test_run_lifecycle_is_durable_and_resume_safe(self):
         kwargs = dict(
             run_id="session-1", group_id=7, bot_id=3, session_id="session-1",
@@ -664,6 +694,86 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(all(value is not None for value in usage[1:4]))
         self.assertEqual(usage[4], "verified_success")
         self.assertEqual(memory, (2, 0.76))
+
+    async def test_runtime_wiring_verifies_only_memory_cited_by_tool(self):
+        from executors.plugins.tool_loop_v1_helpers import (
+            _finalize_causal_memory_usage,
+        )
+        from memory.adapters.runtime import LegacyLearningAdapter
+
+        case_id = await assemble_case(
+            run_id="causal-source",
+            group_id=7,
+            bot_id=3,
+            task="repair causal migration",
+            outcome="completed",
+            tool_records=_corrected_trace("migration failed"),
+        )
+        record_id = await distill_case(case_id, 7)
+        _, recalled = await recall_experiences(
+            query="repair causal migration",
+            run_id="causal-target",
+            group_id=7,
+            bot_id=3,
+        )
+        self.assertEqual(recalled, [record_id])
+        runner = SimpleNamespace(
+            run_id="causal-target",
+            ctx=SimpleNamespace(group_id=7),
+            bot={"id": 3},
+            injected_memory_refs=(record_id,),
+            tool_records=[
+                {
+                    "name": "write_file",
+                    "args": {"path": "migration.py"},
+                    "result": "updated",
+                    "is_error": False,
+                    "step_id": "causal-target:step:1",
+                    "attempt_id": "attempt:write",
+                    "memory_refs": [record_id],
+                },
+                {
+                    "name": "run_shell",
+                    "args": {"cmd": "python3 -m pytest -q"},
+                    "result": "1 passed",
+                    "is_error": False,
+                    "step_id": "causal-target:step:2",
+                    "attempt_id": "attempt:verify",
+                    "memory_refs": [],
+                },
+            ],
+        )
+        await _finalize_causal_memory_usage(
+            runner,
+            scope=MemoryScope.bot(
+                group_id=7, bot_id=3, actor_id="bot:3"
+            ),
+            learning_port=LegacyLearningAdapter(),
+        )
+
+        async with database.connect(TEST_DB_PATH) as db:
+            async with db.execute(
+                """SELECT state,adopted_via,verification_status
+                   FROM experience_usage
+                   WHERE record_id=? AND run_id=?""",
+                (record_id, "causal-target"),
+            ) as cur:
+                usage = await cur.fetchone()
+            async with db.execute(
+                """SELECT decision_type,evidence_json FROM run_decisions
+                   WHERE run_id=? AND decision_type='memory_adoption'""",
+                ("causal-target",),
+            ) as cur:
+                decision = await cur.fetchone()
+        self.assertEqual(
+            usage,
+            ("verified_success", "decision_trace", "verified_success"),
+        )
+        self.assertEqual(decision[0], "memory_adoption")
+        self.assertEqual(
+            json.loads(decision[1]),
+            {record_id: ["attempt:write"]},
+        )
 
     async def test_outcome_evaluator_and_pipeline_are_idempotent(self):
         self.assertFalse(evaluate_outcome(outcome="completed", errors=[], attempts=1).should_distill)

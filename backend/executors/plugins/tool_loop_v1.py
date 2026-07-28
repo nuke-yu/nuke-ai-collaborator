@@ -230,6 +230,7 @@ class ToolLoopRunner:
                 broadcaster=self.ctx.interaction,
                 run_id=self.run_id,
                 allowed_memory_refs=self.injected_memory_refs,
+                tool_records=self.tool_records,
             )
             await self.ctx.interaction.append_session_event(self.session_id, "child_join", {
                 "child_session_id": child_sid,

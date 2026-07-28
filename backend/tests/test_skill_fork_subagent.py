@@ -33,20 +33,35 @@ class TestForkSubagent(unittest.IsolatedAsyncioTestCase):
             captured["name"] = name
             captured["spawn_depth"] = ctx.get("spawn_depth")
             captured["has_ruleset_key"] = "ruleset" in ctx
+            ctx["_executed_arguments"] = {"path": "x"}
+            ctx["_validated_memory_refs"] = ("exp:fork",)
             return ("file-bytes", False)
 
+        tool_records = []
         with patch("executors.tool_dispatch.dispatch_tool", new=fake_dispatch):
             out = await _run_fork_skill(
                 "skill body", "do it", "deepseek", "deepseek-chat", 0.7, ai,
                 tool_schemas=[{"function": {"name": "read_file"}}],
                 parent_ruleset=None, spawn_depth=0, group_id=1, bot_id=7,
-                broadcaster=None,
+                broadcaster=None, run_id="run:fork",
+                allowed_memory_refs=("exp:fork",),
+                tool_records=tool_records,
             )
 
         self.assertEqual(out, "fork final")
         self.assertEqual(captured["name"], "read_file")
         self.assertEqual(captured["spawn_depth"], 1)   # child runs one level deeper
         self.assertTrue(captured["has_ruleset_key"])   # attenuated ruleset threaded
+        self.assertEqual(tool_records, [{
+            "name": "read_file",
+            "args": {"path": "x"},
+            "result": "file-bytes",
+            "is_error": False,
+            "step_id": "run:fork:fork:1",
+            "attempt_id": "c1",
+            "memory_refs": ["exp:fork"],
+            "spawn_depth": 1,
+        }])
 
     async def test_no_tools_requested_returns_notice_not_silent_exec(self):
         ai = _StubAI([

@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import time
+from typing import Mapping, Sequence
 
 
 def classify_failure(tool: str, result: str) -> str:
@@ -73,6 +74,53 @@ async def record_memory_injection(
                 bot_id,
                 step_id,
                 json.dumps(list(memory_refs), ensure_ascii=False),
+                int(time.time() * 1000),
+            ),
+        )
+        await db.commit()
+    return decision_id
+
+
+async def record_memory_adoption(
+    *,
+    run_id: str,
+    group_id: int | None,
+    bot_id: int | None,
+    evidence_by_ref: Mapping[str, Sequence[str]],
+) -> str | None:
+    """Persist the tool attempts proving that injected Memory was adopted."""
+    if group_id is None or not evidence_by_ref:
+        return None
+    from ai.memory import _memory_db
+
+    memory_refs = tuple(sorted(evidence_by_ref))
+    step_id = f"{run_id}:memory-adoption"
+    decision_id = "decision:" + hashlib.sha256(
+        f"{run_id}:{step_id}:memory_adoption".encode()
+    ).hexdigest()[:24]
+    evidence = {
+        memory_ref: list(dict.fromkeys(str(value) for value in evidence_ids))
+        for memory_ref, evidence_ids in sorted(evidence_by_ref.items())
+    }
+    async with await _memory_db("run_decisions", group_id, write=True) as db:
+        await db.execute(
+            """INSERT INTO run_decisions
+               (decision_id,run_id,group_id,bot_id,step_id,decision_type,
+                observation,corrective_plan,memory_refs_json,evidence_json,
+                created_at)
+               VALUES (?,?,?,?,?,'memory_adoption',
+                       'learned context cited by executed tool calls','',?,?,?)
+               ON CONFLICT(run_id,step_id,decision_type) DO UPDATE SET
+                 memory_refs_json=excluded.memory_refs_json,
+                 evidence_json=excluded.evidence_json""",
+            (
+                decision_id,
+                run_id,
+                group_id,
+                bot_id,
+                step_id,
+                json.dumps(list(memory_refs), ensure_ascii=False),
+                json.dumps(evidence, ensure_ascii=False, sort_keys=True),
                 int(time.time() * 1000),
             ),
         )
