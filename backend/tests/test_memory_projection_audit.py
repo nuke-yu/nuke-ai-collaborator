@@ -32,10 +32,12 @@ from runtime.lifecycle import LifecycleManager
 class _PathDatabase:
     def __init__(self, path: str) -> None:
         self.path = path
+        self.connect_calls: list[tuple[str, bool]] = []
 
     async def connect(
         self, table_name: str, group_id: int | None, *, write: bool
     ) -> AbstractAsyncContextManager[Any]:
+        self.connect_calls.append((table_name, write))
         return db.connect(self.path)
 
 
@@ -527,6 +529,46 @@ class ProjectionRolloutGateTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(failed.consecutive_passes, 0)
         self.assertEqual(failed.qualified_since, 0)
         self.assertTrue(failed.direct_write_enabled)
+
+    async def test_direct_write_lookup_uses_bounded_ttl_cache(self) -> None:
+        monotonic = [100.0]
+        gate = BotMemoryProjectionRolloutGate(
+            self.database,
+            cache_ttl_seconds=5,
+            monotonic=lambda: monotonic[0],
+        )
+        before = self.database.connect_calls.count(
+            ("memory_projection_rollout", False)
+        )
+
+        self.assertTrue(await gate.direct_write_enabled(7))
+        self.assertTrue(await gate.direct_write_enabled(7))
+        cached = self.database.connect_calls.count(
+            ("memory_projection_rollout", False)
+        )
+        monotonic[0] += 5
+        self.assertTrue(await gate.direct_write_enabled(7))
+        expired = self.database.connect_calls.count(
+            ("memory_projection_rollout", False)
+        )
+
+        self.assertEqual(cached - before, 1)
+        self.assertEqual(expired - cached, 1)
+
+    async def test_failure_invalidates_cached_closed_state_before_storage(
+        self,
+    ) -> None:
+        for _ in range(3):
+            await self.gate.record_audit(self._passing())
+        self.assertFalse(await self.gate.direct_write_enabled(7))
+
+        with patch.object(
+            self.gate, "_record", new=AsyncMock(side_effect=RuntimeError("db down"))
+        ):
+            with self.assertRaises(RuntimeError):
+                await self.gate.record_failure(7)
+
+        self.assertTrue(await self.gate.direct_write_enabled(7))
 
 
 if __name__ == "__main__":

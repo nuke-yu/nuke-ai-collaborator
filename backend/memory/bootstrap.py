@@ -33,6 +33,7 @@ from memory.module import MemoryModule
 from memory.ports import MemoryACLPort
 
 _memory_module: MemoryModule | None = None
+_bot_memory_projection_rollout_gate: BotMemoryProjectionRolloutGate | None = None
 
 
 def build_memory_client(bot: dict | None = None) -> LegacyConversationMemoryAdapter:
@@ -88,19 +89,25 @@ def build_bot_memory_projection_auditor() -> BotMemoryProjectionAuditService:
 def build_bot_memory_projection_rollout_gate() -> BotMemoryProjectionRolloutGate:
     from core import config
 
-    return BotMemoryProjectionRolloutGate(
-        legacy_memory_database,
-        required_passes=config.MEMORY_PROJECTION_ROLLOUT_REQUIRED_PASSES,
-        min_observation_seconds=(
-            config.MEMORY_PROJECTION_ROLLOUT_MIN_OBSERVATION_SECONDS
-        ),
-        min_audit_interval_seconds=(
-            config.MEMORY_PROJECTION_ROLLOUT_MIN_AUDIT_INTERVAL_SECONDS
-        ),
-        reopen_cooldown_seconds=(
-            config.MEMORY_PROJECTION_ROLLOUT_REOPEN_COOLDOWN_SECONDS
-        ),
-    )
+    global _bot_memory_projection_rollout_gate
+    if _bot_memory_projection_rollout_gate is None:
+        _bot_memory_projection_rollout_gate = BotMemoryProjectionRolloutGate(
+            legacy_memory_database,
+            required_passes=config.MEMORY_PROJECTION_ROLLOUT_REQUIRED_PASSES,
+            min_observation_seconds=(
+                config.MEMORY_PROJECTION_ROLLOUT_MIN_OBSERVATION_SECONDS
+            ),
+            min_audit_interval_seconds=(
+                config.MEMORY_PROJECTION_ROLLOUT_MIN_AUDIT_INTERVAL_SECONDS
+            ),
+            reopen_cooldown_seconds=(
+                config.MEMORY_PROJECTION_ROLLOUT_REOPEN_COOLDOWN_SECONDS
+            ),
+            cache_ttl_seconds=(
+                config.MEMORY_PROJECTION_ROLLOUT_CACHE_TTL_SECONDS
+            ),
+        )
+    return _bot_memory_projection_rollout_gate
 
 
 def build_canonical_chroma_backfill_client() -> CanonicalChromaBackfillService:

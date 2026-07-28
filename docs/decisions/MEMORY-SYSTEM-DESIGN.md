@@ -177,7 +177,8 @@ Fact/Reflection 停止 legacy Chroma 直写，只保留 canonical transaction + 
 一次 pass 并进入 2 分钟 reopen cooldown，不能在冷却期内重新关闸。Gate 已关闭时，
 canonical 写入会同步尝试定向投递本次 durable event，只有确认完成才跳过 legacy 写；
 投递失败或 canonical 写入失败都在当前请求内 fail-open，因此不依赖分钟级后台轮询维持
-写后可见性。
+写后可见性。数据面读取 Gate 使用进程级、有界的 5 秒 TTL cache；审计状态变更会同步
+刷新，任何失败在持久化前先强制缓存为 fail-open，过期或查询异常也恢复直写。
 
 Fact 冲突解析同时保留旧 projection ID 到最近新 Fact 的确定性对应。命中的旧 canonical
 Fact 不再物理删除，而是原子更新为 `superseded`，写入 `valid_to`/`superseded_by` 并建立

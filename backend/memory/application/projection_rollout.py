@@ -3,8 +3,9 @@ from __future__ import annotations
 
 import logging
 import time
-from dataclasses import asdict, dataclass
 from collections.abc import Callable
+from collections import OrderedDict
+from dataclasses import asdict, dataclass
 
 from memory.ports import MemoryDatabasePort
 
@@ -53,7 +54,10 @@ class BotMemoryProjectionRolloutGate:
         min_observation_seconds: float = 0,
         min_audit_interval_seconds: float = 0,
         reopen_cooldown_seconds: float = 0,
+        cache_ttl_seconds: float = 5,
+        cache_max_entries: int = 4096,
         clock: Callable[[], float] = time.time,
+        monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
         if required_passes < 1:
             raise ValueError("projection rollout required_passes must be positive")
@@ -63,36 +67,56 @@ class BotMemoryProjectionRolloutGate:
             raise ValueError("min_audit_interval_seconds cannot be negative")
         if reopen_cooldown_seconds < 0:
             raise ValueError("reopen_cooldown_seconds cannot be negative")
+        if cache_ttl_seconds < 0:
+            raise ValueError("cache_ttl_seconds cannot be negative")
+        if cache_max_entries < 1:
+            raise ValueError("cache_max_entries must be positive")
         self._database = database
         self._required_passes = required_passes
         self._min_observation_ms = int(min_observation_seconds * 1000)
         self._min_audit_interval_ms = int(min_audit_interval_seconds * 1000)
         self._reopen_cooldown_ms = int(reopen_cooldown_seconds * 1000)
+        self._cache_ttl_seconds = cache_ttl_seconds
+        self._cache_max_entries = cache_max_entries
         self._clock = clock
+        self._monotonic = monotonic
+        self._direct_write_cache: OrderedDict[int, tuple[bool, float]] = (
+            OrderedDict()
+        )
 
     async def record_audit(
         self, result: ProjectionAuditResult
     ) -> ProjectionRolloutState:
         passed, failure_reason = _qualifies_for_rollout(result)
-        return await self._record(
+        if not passed:
+            self._cache_direct_write(result.group_id, True)
+        state = await self._record(
             result.group_id,
             passed=passed,
             failure_reason=failure_reason,
         )
+        self._cache_direct_write(result.group_id, state.direct_write_enabled)
+        return state
 
     async def record_failure(
         self, group_id: int, reason: str = "audit_error"
     ) -> ProjectionRolloutState:
-        return await self._record(
+        self._cache_direct_write(group_id, True)
+        state = await self._record(
             group_id,
             passed=False,
             failure_reason=reason,
         )
+        self._cache_direct_write(group_id, state.direct_write_enabled)
+        return state
 
     async def direct_write_enabled(self, group_id: int) -> bool:
         """Return True on missing state or storage failure to preserve writes."""
         if group_id <= 0:
             return True
+        cached = self._cached_direct_write(group_id)
+        if cached is not None:
+            return cached
         try:
             async with await self._database.connect(
                 "memory_projection_rollout", group_id, write=False
@@ -103,12 +127,40 @@ class BotMemoryProjectionRolloutGate:
                     (group_id,),
                 ) as cursor:
                     row = await cursor.fetchone()
-            return row is None or bool(row[0])
+            enabled = row is None or bool(row[0])
+            self._cache_direct_write(group_id, enabled)
+            return enabled
         except Exception:
             log.exception(
                 "memory rollout gate lookup failed open for group %d", group_id
             )
+            self._cache_direct_write(group_id, True)
             return True
+
+    def invalidate(self, group_id: int) -> None:
+        self._direct_write_cache.pop(group_id, None)
+
+    def _cached_direct_write(self, group_id: int) -> bool | None:
+        cached = self._direct_write_cache.get(group_id)
+        if cached is None:
+            return None
+        enabled, expires_at = cached
+        if self._monotonic() >= expires_at:
+            self._direct_write_cache.pop(group_id, None)
+            return None
+        self._direct_write_cache.move_to_end(group_id)
+        return enabled
+
+    def _cache_direct_write(self, group_id: int, enabled: bool) -> None:
+        if group_id <= 0 or self._cache_ttl_seconds == 0:
+            return
+        self._direct_write_cache[group_id] = (
+            enabled,
+            self._monotonic() + self._cache_ttl_seconds,
+        )
+        self._direct_write_cache.move_to_end(group_id)
+        while len(self._direct_write_cache) > self._cache_max_entries:
+            self._direct_write_cache.popitem(last=False)
 
     async def _record(
         self,
