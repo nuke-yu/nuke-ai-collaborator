@@ -11,9 +11,37 @@ from memory.application.vector_projection import (
     BOT_MEMORY_VECTOR_UPSERT,
     enqueue_bot_memory_projection,
 )
+from memory.application.projection_audit import expected_bot_memory_projection
 from memory.adapters.runtime.sqlite_legacy import legacy_memory_database
 
 log = logging.getLogger(__name__)
+
+
+class LegacyBotMemoryProjectionReader:
+    async def read_by_ids(
+        self, projection_ids: tuple[str, ...]
+    ) -> Mapping[str, Mapping[str, Any]]:
+        if not projection_ids:
+            return {}
+        from ai.memory import ChromaStore
+
+        result = await asyncio.to_thread(
+            ChromaStore.get_by_ids_sync,
+            list(projection_ids),
+        )
+        return _projection_items(result)
+
+    async def scan_group(
+        self, group_id: int, *, limit: int
+    ) -> Mapping[str, Mapping[str, Any]]:
+        from ai.memory import ChromaStore
+
+        result = await asyncio.to_thread(
+            ChromaStore.get_group_bot_memories_sync,
+            group_id,
+            limit,
+        )
+        return _projection_items(result)
 
 
 class LegacyMemoryProjectionDelivery:
@@ -78,45 +106,16 @@ async def _reconcile_bot_memory_projections(group_id: int) -> int:
             rows = await cursor.fetchall()
         for row in rows:
             try:
-                metadata = json.loads(row[6] or "{}")
-                evidence = json.loads(row[7] or "{}")
-                projection_id = str(evidence["legacy_projection_id"])
-                model_info = (
-                    evidence.get("extracted_by")
-                    if row[1] == "fact"
-                    else evidence.get("synthesized_by")
-                ) or {}
-                projection_metadata = {
-                    "bot_id": int(row[2]),
-                    "role": str(metadata.get("role") or ""),
-                    "timestamp": int(row[8]) / 1000,
-                    "importance": float(row[4]),
-                    "mem_type": str(row[1]),
-                    "thread_id": str(metadata.get("thread_id") or ""),
-                    "scored_by_model": (
-                        f"{model_info.get('provider', '')}/"
-                        f"{model_info.get('model', '')}"
-                    ),
-                    "group_id": group_id,
-                }
-                if row[1] == "reflection":
-                    projection_metadata["level"] = int(metadata.get("level") or 1)
-                    projection_metadata["source_ids"] = ",".join(
-                        str(item) for item in json.loads(row[5] or "[]")
-                    )
+                projection_id, item = expected_bot_memory_projection(group_id, row)
                 await enqueue_bot_memory_projection(
                     get_memory_module().projection_outbox,
                     connection,
                     record_id=str(row[0]),
                     group_id=group_id,
                     projection_id=projection_id,
-                    content=str(row[3]),
-                    metadata=projection_metadata,
-                    delete_ids=tuple(
-                        str(item)
-                        for item in evidence.get("legacy_conflict_ids", ())
-                        if str(item)
-                    ),
+                    content=item["content"],
+                    metadata=item["metadata"],
+                    delete_ids=item["delete_ids"],
                     now_ms=now,
                 )
                 count += 1
@@ -132,6 +131,23 @@ async def _reconcile_bot_memory_projections(group_id: int) -> int:
 # Compatibility names retained for callers and tests during module extraction.
 LegacyExperienceProjectionDelivery = LegacyMemoryProjectionDelivery
 LegacyExperienceProjectionReconciler = LegacyMemoryProjectionReconciler
+
+
+def _projection_items(result: Mapping[str, Any] | None) -> dict[str, dict]:
+    ids = (result or {}).get("ids") or []
+    documents = (result or {}).get("documents") or []
+    metadatas = (result or {}).get("metadatas") or []
+    return {
+        str(projection_id): {
+            "content": str(documents[index]) if index < len(documents) else "",
+            "metadata": (
+                dict(metadatas[index])
+                if index < len(metadatas) and metadatas[index]
+                else {}
+            ),
+        }
+        for index, projection_id in enumerate(ids)
+    }
 
 
 def redact_projection_error(message: str) -> str:

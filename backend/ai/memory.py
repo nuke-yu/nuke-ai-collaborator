@@ -214,6 +214,21 @@ class ChromaStore:
         col = cls.get_collection()
         return col.get(ids=ids, include=["documents", "metadatas"])
 
+    @classmethod
+    def get_group_bot_memories_sync(cls, group_id: int, limit: int) -> dict:
+        """Bounded projection scan used only by canonical shadow auditing."""
+        col = cls.get_collection()
+        return col.get(
+            where={
+                "$and": [
+                    {"group_id": {"$eq": group_id}},
+                    {"mem_type": {"$in": ["fact", "reflection"]}},
+                ]
+            },
+            limit=max(1, limit),
+            include=["documents", "metadatas"],
+        )
+
 
 # ── 3. FactExtractor ── 关键事实与噪音快筛
 class FactExtractor:

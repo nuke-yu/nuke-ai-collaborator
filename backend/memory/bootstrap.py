@@ -10,6 +10,7 @@ from memory.adapters.runtime import (
     LegacyConversationMemoryAdapter,
     LegacyMemoryProjectionDelivery,
     LegacyMemoryProjectionReconciler,
+    LegacyBotMemoryProjectionReader,
     LegacyLearningAdapter,
     LegacyPersonalKnowledgeAdapter,
     legacy_memory_database,
@@ -18,6 +19,7 @@ from memory.adapters.runtime import (
 from memory.application import (
     AuthorizedPersonalKnowledgeService,
     BotFactObservationService,
+    BotMemoryProjectionAuditService,
     BotReflectionService,
     CanonicalRelationService,
     GroupFactService,
@@ -68,6 +70,16 @@ def build_bot_reflection_client() -> BotReflectionService:
 
 def build_memory_relation_client() -> CanonicalRelationService:
     return CanonicalRelationService(legacy_memory_database)
+
+
+def build_bot_memory_projection_auditor() -> BotMemoryProjectionAuditService:
+    from core import config
+
+    return BotMemoryProjectionAuditService(
+        legacy_memory_database,
+        LegacyBotMemoryProjectionReader(),
+        limit=config.MEMORY_PROJECTION_AUDIT_LIMIT,
+    )
 
 
 def build_memory_acl() -> MemoryACLPort:

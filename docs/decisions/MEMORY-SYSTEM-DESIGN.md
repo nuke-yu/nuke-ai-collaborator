@@ -145,7 +145,7 @@ forget
 
 | 当前实现 | 目标设计 | 迁移要求 |
 |---|---|---|
-| Fact/Reflection 已有 canonical + durable outbox，在线召回和低延迟写入仍走 Chroma | SQLite canonical，Chroma 是可重建索引 | 补回填统计与 shadow 对账，达标后移除直写并切换读路径 |
+| Fact/Reflection 已有 canonical + durable outbox，在线召回和低延迟写入仍走 Chroma | SQLite canonical，Chroma 是可重建索引 | bounded shadow 对账已接入；完成生产 soak 与门槛评估后移除直写并切换读路径 |
 | 冲突 Fact 被物理删除 | ADD-only + temporal supersede | 保留旧事实、来源、有效时间和替代关系 |
 | `observe()` 内多条临时后台协程 | 持久化 Pipeline Job | 前台仍 fail-soft，后台支持幂等、恢复和 dead-letter |
 | 工具事件按数量压缩 | durable Run → Case → Experience | 先补稳定 run/step/attempt identity |
@@ -159,6 +159,12 @@ Fact/Reflection 的 canonical 写入与 `memory_projection_outbox` intent 已在
 Group SQLite 事务内完成。Worker 周期 drain 负责失败重试，Group hydration 会从仍为
 Provisional 的 canonical Bot records 重建缺失 intent。投影 delivery 使用稳定 Chroma
 ID，因此重复投递为幂等 upsert；旧 Chroma 直写暂时保留到 shadow 对账完成。
+
+Worker 每分钟对活跃 Group 执行只读、限量的 canonical ↔ Chroma shadow audit，
+默认最多深度比较 500 条（`NUKE_MEMORY_PROJECTION_AUDIT_LIMIT`）。审计统计 canonical
+总量/采样量、匹配、缺失、内容差异、metadata 差异、孤儿投影、非法 canonical 记录、
+截断状态和审计错误；结果随 Worker stats 汇总到 Supervisor `/metrics`。审计失败只增加
+错误指标，不触发修复、不阻断 Group hydration，也不改变当前召回结果。
 
 ## 2. 产品目标
 

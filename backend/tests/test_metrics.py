@@ -115,6 +115,52 @@ class TestMetricsCollector(unittest.TestCase):
         self.assertIn('nuke_browsers_connected{group_id="7"} 2.0', out)
         self.assertIn('nuke_browsers_connected{group_id="9"} 1.0', out)
 
+    def test_memory_projection_shadow_audit_metrics(self):
+        sup = _FakeSupervisor()
+        sup._worker_stats = {
+            "w0": {
+                "lifecycle": {
+                    "memory_projection_audits": {
+                        "7": {
+                            "canonical_total": 10,
+                            "canonical_sampled": 10,
+                            "projected_scanned": 9,
+                            "matched": 7,
+                            "missing": 1,
+                            "content_mismatched": 1,
+                            "metadata_mismatched": 1,
+                            "orphaned": 2,
+                            "invalid_canonical": 0,
+                            "truncated": False,
+                            "errors_total": 3,
+                            "last_audited_at": time.time() - 5,
+                        }
+                    }
+                }
+            }
+        }
+        out = self._render(sup)
+        self.assertIn(
+            'nuke_memory_projection_canonical_records'
+            '{group_id="7",worker_id="w0"} 10.0',
+            out,
+        )
+        self.assertIn(
+            'nuke_memory_projection_missing'
+            '{group_id="7",worker_id="w0"} 1.0',
+            out,
+        )
+        self.assertIn(
+            'nuke_memory_projection_audit_errors_total'
+            '{group_id="7",worker_id="w0"} 3.0',
+            out,
+        )
+        self.assertIn(
+            'nuke_memory_projection_audit_truncated'
+            '{group_id="7",worker_id="w0"} 0.0',
+            out,
+        )
+
     def test_missing_attrs_do_not_crash(self):
         # A bare object missing optional dicts must still render the base gauge.
         class Bare:

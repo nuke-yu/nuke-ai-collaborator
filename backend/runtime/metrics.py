@@ -182,6 +182,61 @@ class SupervisorCollector:
         yield writer_tx_max
         yield writer_busy_timeout
 
+        # ── canonical memory ↔ Chroma shadow audit ──────────────────────
+        audit_fields = (
+            ("canonical_total", "canonical_records", "Canonical Bot memory records."),
+            ("canonical_sampled", "canonical_sampled", "Canonical records deeply compared."),
+            ("projected_scanned", "projected_scanned", "Chroma Bot memories scanned."),
+            ("matched", "matched", "Canonical projections matching Chroma."),
+            ("missing", "missing", "Canonical projections missing from Chroma."),
+            ("content_mismatched", "content_mismatches", "Projection content mismatches."),
+            ("metadata_mismatched", "metadata_mismatches", "Projection metadata mismatches."),
+            ("orphaned", "orphaned", "Chroma projections without canonical records."),
+            ("invalid_canonical", "invalid_canonical", "Canonical records that cannot project."),
+            ("errors_total", "audit_errors", "Shadow audit failures since worker start."),
+        )
+        audit_metrics = []
+        for _, suffix, description in audit_fields:
+            family_cls = CounterMetricFamily if suffix == "audit_errors" else GaugeMetricFamily
+            audit_metrics.append(family_cls(
+                f"nuke_memory_projection_{suffix}",
+                description,
+                labels=["worker_id", "group_id"],
+            ))
+        audit_truncated = GaugeMetricFamily(
+            "nuke_memory_projection_audit_truncated",
+            "Whether the bounded shadow audit hit its per-group limit.",
+            labels=["worker_id", "group_id"],
+        )
+        audit_age = GaugeMetricFamily(
+            "nuke_memory_projection_audit_age_seconds",
+            "Seconds since the last successful projection shadow audit.",
+            labels=["worker_id", "group_id"],
+        )
+        for wid, payload in worker_stats.items():
+            audits = _dig(
+                payload, "lifecycle", "memory_projection_audits", default={}
+            )
+            if not isinstance(audits, dict):
+                continue
+            for group_id, snapshot in audits.items():
+                if not isinstance(snapshot, dict):
+                    continue
+                labels = [wid, str(group_id)]
+                for family, (field, _, _) in zip(audit_metrics, audit_fields):
+                    family.add_metric(labels, float(snapshot.get(field, 0) or 0))
+                audit_truncated.add_metric(
+                    labels, 1.0 if snapshot.get("truncated") else 0.0
+                )
+                audited_at = snapshot.get("last_audited_at")
+                if audited_at is not None:
+                    audit_age.add_metric(
+                        labels, max(0.0, now - float(audited_at))
+                    )
+        yield from audit_metrics
+        yield audit_truncated
+        yield audit_age
+
         # ── browser connections per group ────────────────────────────────
         browsers_g = GaugeMetricFamily(
             "nuke_browsers_connected", "Browser clients connected per group.", labels=["group_id"])

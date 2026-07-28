@@ -149,6 +149,17 @@ class ProjectionOutboxPort(Protocol):
 
 
 @runtime_checkable
+class BotMemoryProjectionReaderPort(Protocol):
+    async def read_by_ids(
+        self, projection_ids: Sequence[str]
+    ) -> Mapping[str, Mapping[str, Any]]: ...
+
+    async def scan_group(
+        self, group_id: int, *, limit: int
+    ) -> Mapping[str, Mapping[str, Any]]: ...
+
+
+@runtime_checkable
 class PipelineJobRepositoryPort(Protocol):
     async def enqueue(self, scope: MemoryScope, job_type: str, input_id: str, input_version: str = "1") -> str: ...
     async def claim(self, scope: MemoryScope, job_id: str, lease_seconds: int = 60) -> str | None: ...

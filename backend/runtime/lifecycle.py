@@ -77,6 +77,8 @@ class LifecycleManager:
         self._evicting: dict[int, asyncio.Future] = {}
         self._lock = asyncio.Lock()
         self._locks: dict[int, GroupLock] = {}
+        self._memory_projection_audits: dict[int, dict] = {}
+        self._memory_projection_audit_errors: dict[int, int] = {}
         self._evictor_task: asyncio.Task | None = None
         self._shutting_down = False
 
@@ -103,6 +105,7 @@ class LifecycleManager:
                 await asyncio.sleep(60)
                 await self.sweep_inactive_groups()
                 await self._drain_projection_outboxes()
+                await self._audit_memory_projections()
                 
                 # Run prune once a day (86400 seconds)
                 now = time.time()
@@ -129,6 +132,39 @@ class LifecycleManager:
                     "lifecycle: failed to drain projection outbox for group %d",
                     group_id,
                 )
+
+    async def _audit_memory_projections(
+        self, group_ids: tuple[int, ...] | None = None
+    ) -> None:
+        """Run bounded, read-only canonical↔Chroma shadow comparisons."""
+        from memory.bootstrap import build_bot_memory_projection_auditor
+
+        if group_ids is None:
+            async with self._lock:
+                targets = tuple(self._active_groups)
+        else:
+            targets = group_ids
+        for group_id in targets:
+            try:
+                auditor = build_bot_memory_projection_auditor()
+                result = await auditor.audit(group_id)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                self._memory_projection_audit_errors[group_id] = (
+                    self._memory_projection_audit_errors.get(group_id, 0) + 1
+                )
+                log.exception(
+                    "lifecycle: memory projection shadow audit failed for group %d",
+                    group_id,
+                )
+            else:
+                snapshot = result.as_dict()
+                snapshot["last_audited_at"] = time.time()
+                snapshot["errors_total"] = (
+                    self._memory_projection_audit_errors.get(group_id, 0)
+                )
+                self._memory_projection_audits[group_id] = snapshot
 
     def _group_has_active_tasks(self, gid: int) -> bool:
         try:
@@ -285,6 +321,7 @@ class LifecycleManager:
                         "lifecycle: failed to reconcile memory projections for group %d",
                         group_id,
                     )
+                await self._audit_memory_projections((group_id,))
 
                 # Drain deferred promotions and prune stale worktrees on hydration
                 try:
@@ -483,6 +520,8 @@ class LifecycleManager:
         finally:
             from memory.bootstrap import get_memory_module
             get_memory_module().unregister_group(gid)
+            self._memory_projection_audits.pop(gid, None)
+            self._memory_projection_audit_errors.pop(gid, None)
             # 5. Release file lock
             if glock:
                 glock.release()
@@ -525,6 +564,10 @@ class LifecycleManager:
         return {
             "active_groups_count": len(self._active_groups),
             "active_groups": list(self._active_groups.keys()),
+            "memory_projection_audits": {
+                str(group_id): dict(snapshot)
+                for group_id, snapshot in self._memory_projection_audits.items()
+            },
         }
 
 # Global manager instance

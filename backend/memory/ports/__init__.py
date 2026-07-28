@@ -5,6 +5,7 @@ from .api import (BotFactObservationPort, BotReflectionPort, GroupKnowledgePort,
                   PersonalKnowledgePort)
 from .infrastructure import (
     AlgorithmDescriptor,
+    BotMemoryProjectionReaderPort,
     CaseClusteringPort,
     CaseExtractionPort,
     ContextBudgetPort,
@@ -28,6 +29,7 @@ from .infrastructure import (
 
 __all__ = [
     "AlgorithmDescriptor",
+    "BotMemoryProjectionReaderPort",
     "BotFactObservationPort",
     "BotReflectionPort",
     "MemoryAlgorithmPort",

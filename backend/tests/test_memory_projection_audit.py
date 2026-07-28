@@ -1,0 +1,239 @@
+"""Read-only canonical Bot memory ↔ Chroma shadow reconciliation."""
+from __future__ import annotations
+
+import json
+import os
+import sys
+import tempfile
+import time
+import unittest
+from contextlib import AbstractAsyncContextManager
+from typing import Any, Mapping
+from unittest.mock import AsyncMock, patch
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import db
+from memory.application import BotFactObservationService
+from memory.application.projection_audit import (
+    BotMemoryProjectionAuditService,
+    ProjectionAuditResult,
+)
+from memory.contracts import ExtractedFactObservation, IngestBotFactObservations
+from memory.domain import MemoryScope
+from memory.infrastructure import MemorySchemaManager, ProjectionOutbox
+from runtime.lifecycle import LifecycleManager
+
+
+class _PathDatabase:
+    def __init__(self, path: str) -> None:
+        self.path = path
+
+    async def connect(
+        self, table_name: str, group_id: int | None, *, write: bool
+    ) -> AbstractAsyncContextManager[Any]:
+        return db.connect(self.path)
+
+
+class _Reader:
+    def __init__(
+        self,
+        *,
+        by_id: Mapping[str, Mapping[str, Any]],
+        scanned: Mapping[str, Mapping[str, Any]],
+    ) -> None:
+        self.by_id = dict(by_id)
+        self.scanned = dict(scanned)
+
+    async def read_by_ids(
+        self, projection_ids: tuple[str, ...]
+    ) -> Mapping[str, Mapping[str, Any]]:
+        return {
+            projection_id: self.by_id[projection_id]
+            for projection_id in projection_ids
+            if projection_id in self.by_id
+        }
+
+    async def scan_group(
+        self, group_id: int, *, limit: int
+    ) -> Mapping[str, Mapping[str, Any]]:
+        return dict(list(self.scanned.items())[:limit])
+
+
+def _command(group_id: int = 7) -> IngestBotFactObservations:
+    return IngestBotFactObservations(
+        scope=MemoryScope.bot(
+            group_id=group_id,
+            bot_id=3,
+            actor_id="bot:3",
+            thread_id="discussion:9",
+        ),
+        source_id="message:42",
+        facts=(
+            ExtractedFactObservation(
+                content="API version is 2",
+                importance=0.8,
+                projection_id=f"fact_3_{group_id}_42_0",
+            ),
+            ExtractedFactObservation(
+                content="release branch is main",
+                importance=0.7,
+                projection_id=f"fact_3_{group_id}_42_1",
+            ),
+        ),
+        role="developer",
+        provider="openai",
+        model="gpt-test",
+        thread_id="discussion:9",
+        observed_at=123_000,
+    )
+
+
+class ProjectionAuditServiceTest(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        self.path = tempfile.mktemp(suffix="_memory_projection_audit.db")
+        self.database = _PathDatabase(self.path)
+        await MemorySchemaManager(self.database).ensure_group(7)
+        self.outbox = ProjectionOutbox(self.database, AsyncMock())
+        self.writer = BotFactObservationService(self.database, self.outbox)
+        await self.writer.ingest(_command())
+        async with db.connect(self.path) as connection:
+            async with connection.execute(
+                "SELECT payload_json FROM memory_projection_outbox"
+            ) as cursor:
+                payloads = [json.loads(row[0]) for row in await cursor.fetchall()]
+        self.projected = {
+            payload["projection_id"]: {
+                "content": payload["content"],
+                "metadata": payload["metadata"],
+            }
+            for payload in payloads
+        }
+
+    async def asyncTearDown(self) -> None:
+        for suffix in ("", "-wal", "-shm"):
+            try:
+                os.unlink(self.path + suffix)
+            except FileNotFoundError:
+                pass
+
+    async def test_reports_match_missing_and_orphan_without_mutation(self) -> None:
+        first_id = sorted(self.projected)[0]
+        reader = _Reader(
+            by_id={first_id: self.projected[first_id]},
+            scanned={
+                first_id: self.projected[first_id],
+                "orphan_projection": {"content": "legacy", "metadata": {}},
+            },
+        )
+        result = await BotMemoryProjectionAuditService(
+            self.database, reader, limit=10
+        ).audit(7)
+
+        self.assertEqual(result.canonical_total, 2)
+        self.assertEqual(result.canonical_sampled, 2)
+        self.assertEqual(result.matched, 1)
+        self.assertEqual(result.missing, 1)
+        self.assertEqual(result.orphaned, 1)
+        self.assertFalse(result.truncated)
+        async with db.connect(self.path) as connection:
+            async with connection.execute(
+                "SELECT COUNT(*) FROM memory_projection_outbox"
+            ) as cursor:
+                self.assertEqual((await cursor.fetchone())[0], 2)
+
+    async def test_reports_content_and_metadata_mismatches_separately(self) -> None:
+        ids = sorted(self.projected)
+        actual = {
+            projection_id: {
+                "content": item["content"],
+                "metadata": dict(item["metadata"]),
+            }
+            for projection_id, item in self.projected.items()
+        }
+        actual[ids[0]]["content"] = "stale content"
+        actual[ids[1]]["metadata"]["thread_id"] = "wrong-thread"
+
+        result = await BotMemoryProjectionAuditService(
+            self.database,
+            _Reader(by_id=actual, scanned=actual),
+            limit=10,
+        ).audit(7)
+
+        self.assertEqual(result.missing, 0)
+        self.assertEqual(result.matched, 0)
+        self.assertEqual(result.content_mismatched, 1)
+        self.assertEqual(result.metadata_mismatched, 1)
+
+    async def test_bounded_audit_marks_truncation_and_avoids_false_orphans(self) -> None:
+        first_id = sorted(self.projected)[0]
+        result = await BotMemoryProjectionAuditService(
+            self.database,
+            _Reader(
+                by_id={first_id: self.projected[first_id]},
+                scanned={
+                    "orphan_projection": {"content": "legacy", "metadata": {}},
+                },
+            ),
+            limit=1,
+        ).audit(7)
+
+        self.assertEqual(result.canonical_sampled, 1)
+        self.assertTrue(result.truncated)
+        self.assertEqual(result.orphaned, 0)
+
+    async def test_malformed_canonical_record_is_counted_not_fatal(self) -> None:
+        async with db.connect(self.path) as connection:
+            await connection.execute(
+                """UPDATE memory_records SET evidence_json='{"legacy_projection_id":null}'
+                WHERE record_id=(SELECT record_id FROM memory_records LIMIT 1)"""
+            )
+            await connection.commit()
+        result = await BotMemoryProjectionAuditService(
+            self.database,
+            _Reader(by_id=self.projected, scanned={}),
+            limit=10,
+        ).audit(7)
+
+        self.assertEqual(result.canonical_total, 2)
+        self.assertEqual(result.invalid_canonical, 1)
+        self.assertEqual(result.missing, 0)
+
+    async def test_group_scope_excludes_other_group_records(self) -> None:
+        await self.writer.ingest(_command(group_id=8))
+        result = await BotMemoryProjectionAuditService(
+            self.database,
+            _Reader(by_id=self.projected, scanned=self.projected),
+            limit=10,
+        ).audit(7)
+
+        self.assertEqual(result.canonical_total, 2)
+        self.assertEqual(result.missing, 0)
+
+
+class ProjectionAuditLifecycleTest(unittest.IsolatedAsyncioTestCase):
+    async def test_lifecycle_publishes_latest_snapshot_and_error_count(self) -> None:
+        manager = LifecycleManager()
+        manager._active_groups[7] = time.time()
+        auditor = AsyncMock()
+        auditor.audit.side_effect = [
+            RuntimeError("chroma unavailable"),
+            ProjectionAuditResult(group_id=7, canonical_total=3, missing=1),
+        ]
+        with patch(
+            "memory.bootstrap.build_bot_memory_projection_auditor",
+            return_value=auditor,
+        ):
+            with self.assertLogs("runtime.lifecycle", level="ERROR"):
+                await manager._audit_memory_projections()
+            await manager._audit_memory_projections()
+
+        snapshot = manager.stats()["memory_projection_audits"]["7"]
+        self.assertEqual(snapshot["canonical_total"], 3)
+        self.assertEqual(snapshot["missing"], 1)
+        self.assertEqual(snapshot["errors_total"], 1)
+        self.assertGreater(snapshot["last_audited_at"], 0)
+
+
+if __name__ == "__main__":
+    unittest.main()
