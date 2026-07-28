@@ -12,6 +12,9 @@ log = logging.getLogger(__name__)
 
 import sys
 
+_LEARNING_DISPATCH_INTERVAL_SECONDS = 5.0
+_MAINTENANCE_INTERVAL_SECONDS = 60.0
+
 
 def _projection_sample_is_clean(result) -> bool:
     """Avoid an expensive full scan when the bounded sample already failed."""
@@ -92,6 +95,7 @@ class LifecycleManager:
         self._locks: dict[int, GroupLock] = {}
         self._memory_projection_audits: dict[int, dict] = {}
         self._memory_projection_audit_errors: dict[int, int] = {}
+        self._learning_pipeline_stats: dict[int, dict] = {}
         self._evictor_task: asyncio.Task | None = None
         self._shutting_down = False
 
@@ -111,17 +115,22 @@ class LifecycleManager:
             self._evictor_task = asyncio.create_task(self._background_loop())
 
     async def _background_loop(self) -> None:
-        log.info("lifecycle: starting background eviction and pruning loop")
+        log.info("lifecycle: starting background maintenance and learning dispatch loop")
         last_prune = 0.0
+        last_maintenance = 0.0
         while True:
             try:
-                await asyncio.sleep(60)
-                await self.sweep_inactive_groups()
-                await self._drain_projection_outboxes()
-                await self._audit_memory_projections()
-                
-                # Run prune once a day (86400 seconds)
+                await asyncio.sleep(_LEARNING_DISPATCH_INTERVAL_SECONDS)
+                await self._dispatch_learning_jobs()
+
                 now = time.time()
+                if now - last_maintenance >= _MAINTENANCE_INTERVAL_SECONDS:
+                    await self.sweep_inactive_groups()
+                    await self._drain_projection_outboxes()
+                    await self._audit_memory_projections()
+                    last_maintenance = now
+
+                # Run prune once a day (86400 seconds)
                 if now - last_prune > 86400:
                     await self.prune_resources()
                     last_prune = now
@@ -129,6 +138,32 @@ class LifecycleManager:
                 break
             except Exception:
                 log.exception("lifecycle: error in background loop")
+
+    async def _dispatch_learning_jobs(
+        self, group_ids: tuple[int, ...] | None = None
+    ) -> None:
+        """Consume durable learning jobs only for Groups leased by this Worker."""
+        from ai.pipeline import dispatch_group, job_stats
+
+        if group_ids is None:
+            async with self._lock:
+                targets = tuple(self._active_groups)
+        else:
+            targets = group_ids
+        for group_id in targets:
+            try:
+                result = await dispatch_group(group_id)
+                snapshot = await job_stats(group_id)
+                snapshot.update(result)
+                snapshot["last_dispatched_at"] = time.time()
+                self._learning_pipeline_stats[group_id] = snapshot
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                log.exception(
+                    "lifecycle: failed to dispatch learning jobs for group %d",
+                    group_id,
+                )
 
     async def _drain_projection_outboxes(self) -> None:
         """Deliver durable memory projections for groups owned by this worker."""
@@ -362,6 +397,7 @@ class LifecycleManager:
                         group_id,
                     )
                 await self._audit_memory_projections((group_id,))
+                await self._dispatch_learning_jobs((group_id,))
 
                 # Drain deferred promotions and prune stale worktrees on hydration
                 try:
@@ -562,6 +598,7 @@ class LifecycleManager:
             get_memory_module().unregister_group(gid)
             self._memory_projection_audits.pop(gid, None)
             self._memory_projection_audit_errors.pop(gid, None)
+            self._learning_pipeline_stats.pop(gid, None)
             # 5. Release file lock
             if glock:
                 glock.release()
@@ -607,6 +644,10 @@ class LifecycleManager:
             "memory_projection_audits": {
                 str(group_id): dict(snapshot)
                 for group_id, snapshot in self._memory_projection_audits.items()
+            },
+            "learning_pipeline": {
+                str(group_id): dict(snapshot)
+                for group_id, snapshot in self._learning_pipeline_stats.items()
             },
         }
 

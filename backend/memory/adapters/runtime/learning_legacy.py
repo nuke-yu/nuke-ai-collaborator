@@ -154,6 +154,28 @@ class LegacyPipelineJobAdapter:
             await db.commit()
         return job_id
 
+    async def list_ready(self, scope: MemoryScope, limit: int = 10) -> list[dict[str, Any]]:
+        """Read claim candidates without taking an idle-group writer lock."""
+        group_id = self._group_id(scope)
+        now = int(time.time() * 1000)
+        from ai.memory import _memory_db
+        async with await _memory_db("pipeline_jobs", group_id, write=False) as db:
+            async with db.execute(
+                """SELECT job_id,job_type,input_id,input_version,status,attempt,max_attempts
+                   FROM pipeline_jobs
+                   WHERE group_id=? AND
+                     ((attempt<max_attempts AND status IN ('pending','failed')) OR
+                      (status='running' AND lease_until<?))
+                   ORDER BY created_at,job_id LIMIT ?""",
+                (group_id, now, max(1, limit)),
+            ) as cur:
+                rows = await cur.fetchall()
+        columns = (
+            "job_id", "job_type", "input_id", "input_version",
+            "status", "attempt", "max_attempts",
+        )
+        return [dict(zip(columns, row)) for row in rows]
+
     async def claim(self, scope: MemoryScope, job_id: str, lease_seconds: int = 60) -> str | None:
         group_id = self._group_id(scope)
         now = int(time.time() * 1000)
@@ -161,6 +183,15 @@ class LegacyPipelineJobAdapter:
         lease_token = f"fence:{uuid.uuid4().hex[:12]}"
         from ai.memory import _memory_db
         async with await _memory_db("pipeline_jobs", group_id, write=True) as db:
+            await db.execute(
+                """UPDATE pipeline_jobs
+                   SET status='dead',lease_until=NULL,lease_token=NULL,
+                       error=CASE WHEN error='' THEN 'lease expired after final attempt' ELSE error END,
+                       updated_at=?
+                   WHERE job_id=? AND group_id=? AND status='running'
+                     AND lease_until<? AND attempt>=max_attempts""",
+                (now, job_id, group_id, now),
+            )
             cur = await db.execute("""UPDATE pipeline_jobs SET status='running',attempt=attempt+1,
               lease_until=?,lease_token=?,updated_at=? WHERE job_id=? AND group_id=? AND
               (status='pending' OR (status='running' AND lease_until<?) OR status='failed') AND attempt<max_attempts""",
@@ -197,6 +228,32 @@ class LegacyPipelineJobAdapter:
             cur = await db.execute(query, params)
             await db.commit()
             return cur.rowcount == 1
+
+    async def stats(self, scope: MemoryScope) -> dict[str, int]:
+        group_id = self._group_id(scope)
+        now = int(time.time() * 1000)
+        from ai.memory import _memory_db
+        async with await _memory_db("pipeline_jobs", group_id, write=False) as db:
+            async with db.execute(
+                """SELECT
+                     SUM(CASE WHEN status IN ('pending','failed') OR
+                                      (status='running' AND lease_until<?)
+                              THEN 1 ELSE 0 END),
+                     SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END),
+                     SUM(CASE WHEN status='dead' THEN 1 ELSE 0 END),
+                     SUM(CASE WHEN status='running' AND lease_until<?
+                              THEN 1 ELSE 0 END)
+                   FROM pipeline_jobs WHERE group_id=?""",
+                (now, now, group_id),
+            ) as cur:
+                row = await cur.fetchone()
+        values = row or (0, 0, 0, 0)
+        return {
+            "backlog": int(values[0] or 0),
+            "retry": int(values[1] or 0),
+            "dead": int(values[2] or 0),
+            "expired_lease": int(values[3] or 0),
+        }
 
     @staticmethod
     def _group_id(scope: MemoryScope) -> int:

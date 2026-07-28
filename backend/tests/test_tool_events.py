@@ -7,6 +7,7 @@ import asyncio
 import json
 import os
 import sqlite3
+import time
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -25,7 +26,7 @@ from ai.tool_events import (
 from ai.execution_runs import finish_run, start_run
 from ai.cases import assemble_case, build_attempt_trace, task_signature
 from ai.cases import evaluate_outcome
-from ai.pipeline import process_case
+from ai.pipeline import dispatch_group, job_stats, process_case
 from ai.reflexion import classify_failure, maybe_inject
 from ai.skill_learning import compile_candidate, complete_skill_usage, promote_skill, recall_skills, validate_declaration
 from ai.experiences import complete_usage, decay_experiences, distill_case, recall_experiences
@@ -609,6 +610,13 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
         job_id = await process_case(case_id, 7)
         self.assertEqual(job_id, await process_case(case_id, 7))
         async with database.connect(TEST_DB_PATH) as db:
+            async with db.execute("SELECT status,attempt FROM pipeline_jobs") as cur:
+                queued = await cur.fetchone()
+        self.assertEqual(queued, ("pending", 0))
+
+        result = await dispatch_group(7)
+        self.assertEqual(result, {"claimed": 1, "completed": 1, "failed": 0})
+        async with database.connect(TEST_DB_PATH) as db:
             async with db.execute("SELECT status,attempt,output_json FROM pipeline_jobs") as cur:
                 jobs = await cur.fetchall()
             async with db.execute("SELECT COUNT(*) FROM memory_records") as cur:
@@ -635,6 +643,8 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
         version_two = await process_case(case_id, 7, input_version="2")
 
         self.assertNotEqual(version_one, version_two)
+        result = await dispatch_group(7)
+        self.assertEqual(result["completed"], 2)
         async with database.connect(TEST_DB_PATH) as db:
             async with db.execute(
                 "SELECT input_version,status FROM pipeline_jobs ORDER BY input_version"
@@ -650,6 +660,7 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
                 tool_records=_corrected_trace(),
             )
             await process_case(case_id, 7)
+            await dispatch_group(7)
 
         async with database.connect(TEST_DB_PATH) as db:
             async with db.execute("SELECT skill_id,maturity FROM skills") as cur:
@@ -667,6 +678,60 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(audit[1], "system:learning_pipeline")
         self.assertEqual(audit[3:], ("trial", "active"))
         self.assertIn("repeated-evidence", audit[2])
+
+    async def test_dispatcher_recovers_expired_lease_and_reports_backlog(self):
+        case_id = await assemble_case(
+            run_id="expired-pipeline", group_id=7, bot_id=3,
+            task="recover expired learning lease", outcome="completed",
+            tool_records=[],
+        )
+        job_id = await process_case(case_id, 7)
+        async with database.connect(TEST_DB_PATH) as db:
+            await db.execute(
+                """UPDATE pipeline_jobs SET status='running',attempt=1,
+                   lease_until=?,lease_token='fence:crashed' WHERE job_id=?""",
+                (int(time.time() * 1000) - 1, job_id),
+            )
+            await db.commit()
+
+        before = await job_stats(7)
+        self.assertEqual(before["backlog"], 1)
+        self.assertEqual(before["expired_lease"], 1)
+        result = await dispatch_group(7)
+        self.assertEqual(result, {"claimed": 1, "completed": 1, "failed": 0})
+
+        async with database.connect(TEST_DB_PATH) as db:
+            async with db.execute(
+                "SELECT status,attempt,lease_token FROM pipeline_jobs WHERE job_id=?",
+                (job_id,),
+            ) as cur:
+                row = await cur.fetchone()
+        self.assertEqual(row, ("completed", 2, None))
+
+    async def test_dispatcher_marks_exhausted_crash_lease_dead(self):
+        job_id = await process_case("missing-case", 7)
+        async with database.connect(TEST_DB_PATH) as db:
+            await db.execute(
+                """UPDATE pipeline_jobs SET status='running',attempt=max_attempts,
+                   lease_until=0,lease_token='fence:crashed' WHERE job_id=?""",
+                (job_id,),
+            )
+            await db.commit()
+
+        result = await dispatch_group(7)
+        self.assertEqual(result, {"claimed": 0, "completed": 0, "failed": 0})
+        stats = await job_stats(7)
+        self.assertEqual(stats["dead"], 1)
+        self.assertEqual(stats["expired_lease"], 0)
+        async with database.connect(TEST_DB_PATH) as db:
+            async with db.execute(
+                "SELECT status,error,lease_token FROM pipeline_jobs WHERE job_id=?",
+                (job_id,),
+            ) as cur:
+                row = await cur.fetchone()
+        self.assertEqual(row[0], "dead")
+        self.assertIn("lease expired", row[1])
+        self.assertIsNone(row[2])
 
     async def test_reflexion_is_bounded_and_persists_decision_trace(self):
         self.assertEqual(classify_failure("run_shell", "command failed"), "correctable_execution")

@@ -95,6 +95,32 @@ class TestCell17Lifecycle(unittest.IsolatedAsyncioTestCase):
             async with conn.execute("SELECT name FROM sqlite_master WHERE name='messages'") as cur:
                 self.assertIsNotNone(await cur.fetchone())
 
+    async def test_learning_dispatch_is_scoped_to_worker_owned_groups(self):
+        lm = LifecycleManager()
+        lm._active_groups[7] = time.time()
+        dispatch_result = {"claimed": 1, "completed": 1, "failed": 0}
+        pipeline_stats = {
+            "backlog": 0, "retry": 0, "dead": 0, "expired_lease": 0
+        }
+
+        with patch(
+            "ai.pipeline.dispatch_group",
+            new_callable=AsyncMock,
+            return_value=dispatch_result,
+        ) as dispatch, patch(
+            "ai.pipeline.job_stats",
+            new_callable=AsyncMock,
+            return_value=pipeline_stats,
+        ) as stats:
+            await lm._dispatch_learning_jobs()
+
+        dispatch.assert_awaited_once_with(7)
+        stats.assert_awaited_once_with(7)
+        snapshot = lm.stats()["learning_pipeline"]["7"]
+        self.assertEqual(snapshot["completed"], 1)
+        self.assertEqual(snapshot["backlog"], 0)
+        self.assertIn("last_dispatched_at", snapshot)
+
     async def test_lru_eviction_closes_writer(self):
         lm = LifecycleManager(max_groups=2)
         
