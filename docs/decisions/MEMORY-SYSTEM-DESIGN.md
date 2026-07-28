@@ -1679,4 +1679,21 @@ backend/
 - **设计抉择 (Why)**：
   - **消除锁替换死锁与并发写冲突**：若从普通字典手动 `pop()` 锁，排队中的协程会重新创建并获取到新的锁对象，导致互斥锁崩溃。使用 `WeakValueDictionary` 后，当所有协程执行完读/写/删除退出作用域后，Python 原生 GC 自动从字典中清理无引用 Lock，完美平衡了并发绝对安全与内存零泄漏。
 
+### 17.5 开源项目与模型算法吸收全景对照表 (Open-Source Architecture Comparison)
+
+系统深度参考并吸收了 9 个开源 AI 框架/内存模型的核心算法思想，结合 Nuke 的 Group Isolation、Security Gate 与 Process Topology 形成了统一落地的架构体系：
+
+| 开源项目 / 框架 | 借鉴吸收的核心算法与功能 | Nuke 内存体系代码落点 | 为什么吸收 (Why Absorbed) | 明确拒绝 / 改进的设计 (What Was Excluded/Improved) |
+|---|---|---|---|---|
+| **mem0** | • 事实与经验选择性提炼<br>• 向量与关键词混合打分<br>• 按用户/Group/Bot/用途划分作用域 | `backend/ai/experiences.py`<br>`backend/ai/personal_vault.py`<br>`backend/memory/application/authorized_personal.py` | 避免存储全量对话原文，引入混合打分既保留向量语义搜索，又具备精确关键词匹配能力。 | 拒绝引入其第二套 SDK/runtime，不把所有对话原文无脑抛给向量库。 |
+| **EverOS** | • `Run → Case → Experience → Skill` 4 级分层蒸馏<br>• 数据库为唯一权威，Markdown 为受信任投影<br>• 来源证据可追溯 | `backend/ai/execution_runs.py`<br>`backend/memory/domain/outcome.py`<br>`backend/ai/skill_learning.py` | 建立确定性的知识演进路线，只有真实执行验证通过的经验才能凝练为 Skill。 | 拒绝其 Markdown + SQLite + LanceDB 三写权威体系，Nuke 以 SQLite 为绝对单点权威。 |
+| **Graphiti** | • `valid_from / valid_to` 时间有效性区间<br>• 冲突与反证不直接覆盖旧结论<br>• 来源、说话者与观点主体分离 | `backend/ai/personal_vault.py`<br>`backend/memory/domain/ownership.py`<br>`backend/memory/application/relations.py` | 解决知识图谱的时序有效性与矛盾观点，支持知识的历史回溯与反证。 | 当前暂不引入复杂的重型图数据库（如 Neo4j），在 SQLite 内实现轻量实体关系。 |
+| **AutoGen Task-Centric Memory** | • Task/Run 组装为可学习 Case<br>• 纠正或重试成功比普通成功具备更高学习价值 | `backend/ai/pipeline.py`<br>`backend/ai/execution_runs.py` | 普通一次性成功的任务信息增益低，专注于“失败后重试成功”的案例能提炼出最有价值的防坑经验。 | 拒绝为每个 Task 运行独立的模型训练循环，采用轻量上下文蒸馏。 |
+| **Voyager** | • 成功轨迹提炼 Skill 候选<br>• 按任务签名 (Task Signature) 检索技能<br>• `Trial → Active → Stable` 技能生命周期 | `backend/ai/skill_learning.py`<br>`backend/memory/domain/task_identity.py` | 实现 Agent 的自主进化，把成功经验自动化凝练成可复用的技能。 | 不生成任意可执行代码，只生成 S0/S1 声明式 Safe Skill，杜绝代码注入风险。 |
+| **LangGraph** | • Run/Attempt 持久身份标识<br>• Durable Pipeline Job 机制<br>• 租约锁 (Lease Token)、幂等与崩溃恢复 | `backend/ai/execution_runs.py`<br>`backend/memory/application/jobs.py`<br>`backend/runtime/lifecycle.py` | 保证多步骤 Agent 执行与后台任务在节点崩溃或进程 `SIGKILL` 后能够完全断点续传。 | 拒绝以 LangGraph 替换 Nuke 原生的 Supervisor → Worker → MCP Collector 拓扑。 |
+| **Letta** (MemGPT) | • Core Context 与长期存储分层<br>• 强上下文预算控制 (Char Budget)<br>• 长期知识按需注入 Prompt | `backend/executors/base.py`<br>`backend/ai/personal_vault.py` | 解决上下文窗口溢出问题，保证注入 Prompt 的知识永远在固定 Token 预算约束内。 | 不允许 Agent 任意无限制自我改写 Prompt 核心区，避免 Prompt 注入攻击。 |
+| **OpenMemory** | • Personal Knowledge Vault 物理隔离<br>• 显式 Projection 投影机制<br>• 物理存储与执行面分离 | `backend/ai/personal_vault.py`<br>`backend/runtime/dbpaths.py` | 实现个人隐私数据绝对物理隔离，不在 Group DB 中留存个人敏感私密。 | 拒绝其已 Sunset 的 MCP 架构，改为 WorkUnit + JWT 安全映射。 |
+| **Ruflo / claude-flow** | • 执行证据优先于 Agent 自评<br>• 确定性蒸馏门槛与迟滞回线 (Hysteresis)<br>• 弱因果关系自动阻止升级 | `backend/memory/application/causal_usage.py`<br>`backend/memory/application/projection_rollout.py` | 杜绝大模型自吹自擂（Self-Reward），完全依靠底层 Tool 执行结果和 Test 结果来判定晋升。 | 拒绝其宣称的“神经网络式分布式共识”，采用简洁高效的本地物理门禁。 |
+
+
 
