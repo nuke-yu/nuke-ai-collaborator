@@ -344,6 +344,7 @@ class LegacyReflectionDualWriteTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_rollout_group_skips_legacy_direct_chroma_write(self) -> None:
         mirror = AsyncMock()
+        mirror.ingest.return_value = ("record-1",)
         legacy_write = MagicMock()
         legacy_delete = MagicMock()
         with (
@@ -372,6 +373,11 @@ class LegacyReflectionDualWriteTest(unittest.IsolatedAsyncioTestCase):
                 "_legacy_chroma_direct_write_enabled",
                 new=AsyncMock(return_value=False),
             ),
+            patch.object(
+                memory,
+                "_deliver_canonical_projection_events",
+                new=AsyncMock(return_value=True),
+            ) as deliver,
             patch.object(memory.ChromaStore, "write_fact_sync", legacy_write),
             patch.object(memory.ChromaStore, "delete_ids_sync", legacy_delete),
             patch.object(
@@ -388,8 +394,64 @@ class LegacyReflectionDualWriteTest(unittest.IsolatedAsyncioTestCase):
             )
 
         mirror.ingest.assert_awaited_once()
+        deliver.assert_awaited_once_with(7, ("record-1",))
         legacy_write.assert_not_called()
         legacy_delete.assert_not_called()
+
+    async def test_rollout_group_falls_back_when_projection_delivery_fails(
+        self,
+    ) -> None:
+        mirror = AsyncMock()
+        mirror.ingest.return_value = ("record-1",)
+        legacy_write = MagicMock()
+        with (
+            patch.object(
+                memory.ChromaStore,
+                "get_unconsolidated_memories_sync",
+                return_value=self._unconsolidated(),
+            ),
+            patch.object(
+                memory.ConflictResolver,
+                "resolve_batch",
+                new=AsyncMock(return_value=[]),
+            ),
+            patch(
+                "ai.client.call_ai_once",
+                new=AsyncMock(
+                    return_value={"type": "text", "content": "stable insight|0.8"}
+                ),
+            ),
+            patch(
+                "memory.bootstrap.build_bot_reflection_client",
+                return_value=mirror,
+            ),
+            patch.object(
+                memory,
+                "_legacy_chroma_direct_write_enabled",
+                new=AsyncMock(return_value=False),
+            ),
+            patch.object(
+                memory,
+                "_deliver_canonical_projection_events",
+                new=AsyncMock(return_value=False),
+            ),
+            patch.object(memory.ChromaStore, "write_fact_sync", legacy_write),
+            patch.object(memory.ChromaStore, "delete_ids_sync"),
+            patch.object(
+                memory,
+                "_get_all_reflection_watermarks",
+                new=AsyncMock(return_value={}),
+            ),
+            patch.object(memory, "_set_reflection_watermark", new=AsyncMock()),
+        ):
+            with self.assertLogs("ai.memory", level="WARNING"):
+                await memory.maybe_reflect(
+                    group_id=7,
+                    bot_id=3,
+                    role="developer",
+                )
+
+        legacy_write.assert_called_once()
 
     async def test_canonical_failure_does_not_block_legacy_chroma(self) -> None:
         mirror = AsyncMock()

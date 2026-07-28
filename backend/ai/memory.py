@@ -544,7 +544,7 @@ async def add_to_chroma(message_id: int, content: str, role: str, bot_id: int, g
     # 3. 复用同一批抽取结果双写 canonical SQLite。它是 Bot-owned provisional
     # observation，不会进入 Active Group Fact；迁移期保持 fail-soft，避免 canonical
     # schema 暂不可用时阻断现有 Chroma 写路径。
-    canonical_written = await _mirror_facts_to_canonical(
+    canonical_record_ids = await _mirror_facts_to_canonical(
         message_id=message_id,
         facts=facts,
         role=role,
@@ -557,16 +557,22 @@ async def add_to_chroma(message_id: int, content: str, role: str, bot_id: int, g
         legacy_conflict_ids=del_ids,
         legacy_conflict_replacements=conflict_replacements,
     )
-    if (
-        canonical_written
-        and group_id is not None
-        and not await _legacy_chroma_direct_write_enabled(group_id)
-    ):
-        log.info(
-            "memory: skipped legacy direct fact projection for rollout group %d",
-            group_id,
-        )
-        return
+    if canonical_record_ids and group_id is not None:
+        if not await _legacy_chroma_direct_write_enabled(group_id):
+            delivered = await _deliver_canonical_projection_events(
+                group_id, canonical_record_ids
+            )
+            if delivered:
+                log.info(
+                    "memory: skipped legacy direct fact projection for rollout group %d",
+                    group_id,
+                )
+                return
+            log.warning(
+                "memory: canonical fact projection was not delivered immediately; "
+                "falling back to legacy direct write for rollout group %d",
+                group_id,
+            )
 
     loop = asyncio.get_running_loop()
 
@@ -618,9 +624,9 @@ async def _mirror_facts_to_canonical(
     timestamp: float | None,
     legacy_conflict_ids: list[str],
     legacy_conflict_replacements: tuple[tuple[str, str], ...],
-) -> bool:
+) -> tuple[str, ...] | None:
     if group_id is None:
-        return False
+        return None
     try:
         from executors.redaction import redact_secrets
         from memory.bootstrap import build_bot_fact_observation_client
@@ -639,7 +645,7 @@ async def _mirror_facts_to_canonical(
             )
             for index, (fact, score) in enumerate(facts)
         )
-        await build_bot_fact_observation_client().ingest(
+        return await build_bot_fact_observation_client().ingest(
             IngestBotFactObservations(
                 scope=MemoryScope.bot(
                     group_id=group_id,
@@ -659,7 +665,6 @@ async def _mirror_facts_to_canonical(
                 legacy_conflict_replacements=legacy_conflict_replacements,
             )
         )
-        return True
     except asyncio.CancelledError:
         raise
     except Exception:
@@ -668,6 +673,36 @@ async def _mirror_facts_to_canonical(
             group_id,
             bot_id,
             message_id,
+        )
+        return None
+
+
+async def _deliver_canonical_projection_events(
+    group_id: int, record_ids: tuple[str, ...]
+) -> bool:
+    """Deliver this write's durable intents before relying on canonical-only mode."""
+    try:
+        from memory.application.vector_projection import (
+            bot_memory_projection_event_id,
+        )
+        from memory.bootstrap import get_memory_module
+
+        outbox = get_memory_module().projection_outbox
+        for record_id in record_ids:
+            result = await outbox.drain(
+                group_id,
+                limit=1,
+                event_id=bot_memory_projection_event_id(record_id),
+            )
+            if result.completed != 1:
+                return False
+        return True
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        log.exception(
+            "canonical projection immediate delivery failed (group_id=%s)",
+            group_id,
         )
         return False
 
@@ -1006,7 +1041,7 @@ async def maybe_reflect(group_id: int, bot_id: int, role: str,
                 refl_id = f"refl_{bot_id}_{group_id}_{int(refl_ts * 1000)}_{idx_triggered}_{idx}"
                 projections.append((refl_id, insight, score, refl_ts))
 
-            canonical_written = await _mirror_reflections_to_canonical(
+            canonical_record_ids = await _mirror_reflections_to_canonical(
                 projections=projections,
                 source_projection_ids=source_projection_ids,
                 level=new_level,
@@ -1019,9 +1054,21 @@ async def maybe_reflect(group_id: int, bot_id: int, role: str,
                 legacy_conflict_ids=tuple(del_ids),
             )
             direct_write_enabled = (
-                not canonical_written
+                not canonical_record_ids
                 or await _legacy_chroma_direct_write_enabled(group_id)
             )
+            if not direct_write_enabled:
+                projection_delivered = await _deliver_canonical_projection_events(
+                    group_id, canonical_record_ids
+                )
+                if not projection_delivered:
+                    direct_write_enabled = True
+                    log.warning(
+                        "memory: canonical reflection projection was not delivered "
+                        "immediately; falling back to legacy direct write for "
+                        "rollout group %d",
+                        group_id,
+                    )
 
             if direct_write_enabled:
                 for refl_id, insight, score, refl_ts in projections:
@@ -1077,9 +1124,9 @@ async def _mirror_reflections_to_canonical(
     model: str,
     thread_id: str,
     legacy_conflict_ids: tuple[str, ...],
-) -> bool:
+) -> tuple[str, ...] | None:
     if group_id is None:
-        return False
+        return None
     try:
         from executors.redaction import redact_secrets
         from memory.bootstrap import build_bot_reflection_client
@@ -1097,7 +1144,7 @@ async def _mirror_reflections_to_canonical(
             )
             for projection_id, content, importance, timestamp in projections
         )
-        await build_bot_reflection_client().ingest(
+        return await build_bot_reflection_client().ingest(
             IngestBotReflections(
                 scope=MemoryScope.bot(
                     group_id=group_id,
@@ -1114,7 +1161,6 @@ async def _mirror_reflections_to_canonical(
                 legacy_conflict_ids=legacy_conflict_ids,
             )
         )
-        return True
     except asyncio.CancelledError:
         raise
     except Exception:
@@ -1125,7 +1171,7 @@ async def _mirror_reflections_to_canonical(
             bot_id,
             thread_id,
         )
-        return False
+        return None
 
 
 async def get_memory_links(memory_id: str) -> list[dict]:

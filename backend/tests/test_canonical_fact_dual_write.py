@@ -284,6 +284,7 @@ class LegacyFactDualWriteTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_rollout_group_skips_legacy_direct_chroma_write(self) -> None:
         mirror = AsyncMock()
+        mirror.ingest.return_value = ("record-1",)
         write = unittest.mock.MagicMock()
         delete = unittest.mock.MagicMock()
         with (
@@ -306,6 +307,11 @@ class LegacyFactDualWriteTest(unittest.IsolatedAsyncioTestCase):
                 "_legacy_chroma_direct_write_enabled",
                 new=AsyncMock(return_value=False),
             ),
+            patch.object(
+                memory,
+                "_deliver_canonical_projection_events",
+                new=AsyncMock(return_value=True),
+            ) as deliver,
             patch.object(memory.ChromaStore, "write_fact_sync", write),
             patch.object(memory.ChromaStore, "delete_ids_sync", delete),
             patch("random.random", return_value=0.0),
@@ -319,8 +325,54 @@ class LegacyFactDualWriteTest(unittest.IsolatedAsyncioTestCase):
             )
 
         mirror.ingest.assert_awaited_once()
+        deliver.assert_awaited_once_with(7, ("record-1",))
         write.assert_not_called()
         delete.assert_not_called()
+
+    async def test_rollout_group_falls_back_when_projection_delivery_fails(
+        self,
+    ) -> None:
+        mirror = AsyncMock()
+        mirror.ingest.return_value = ("record-1",)
+        write = unittest.mock.MagicMock()
+        with (
+            patch.object(
+                memory.FactExtractor,
+                "extract",
+                new=AsyncMock(return_value=[("API is v2", 0.8)]),
+            ),
+            patch.object(
+                memory.ConflictResolver,
+                "resolve_batch",
+                new=AsyncMock(return_value=[]),
+            ),
+            patch(
+                "memory.bootstrap.build_bot_fact_observation_client",
+                return_value=mirror,
+            ),
+            patch.object(
+                memory,
+                "_legacy_chroma_direct_write_enabled",
+                new=AsyncMock(return_value=False),
+            ),
+            patch.object(
+                memory,
+                "_deliver_canonical_projection_events",
+                new=AsyncMock(return_value=False),
+            ),
+            patch.object(memory.ChromaStore, "write_fact_sync", write),
+            patch("random.random", return_value=1.0),
+        ):
+            with self.assertLogs("ai.memory", level="WARNING"):
+                await memory.add_to_chroma(
+                    message_id=42,
+                    content="The API is now v2",
+                    role="developer",
+                    bot_id=3,
+                    group_id=7,
+                )
+
+        write.assert_called_once()
 
     async def test_canonical_failure_does_not_block_legacy_chroma(self) -> None:
         mirror = AsyncMock()
