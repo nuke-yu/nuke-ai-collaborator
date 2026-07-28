@@ -12,6 +12,19 @@ log = logging.getLogger(__name__)
 
 import sys
 
+
+def _projection_sample_is_clean(result) -> bool:
+    """Avoid an expensive full scan when the bounded sample already failed."""
+    return (
+        result.canonical_total > 0
+        and result.outbox_pending == 0
+        and result.missing == 0
+        and result.content_mismatched == 0
+        and result.metadata_mismatched == 0
+        and result.invalid_canonical == 0
+    )
+
+
 class GroupLock:
     def __init__(self, group_id: int):
         self.fd = None
@@ -152,7 +165,10 @@ class LifecycleManager:
             try:
                 auditor = build_bot_memory_projection_auditor()
                 result = await auditor.audit(group_id)
-                rollout = await rollout_gate.record_audit(result)
+                qualification = result
+                if result.truncated and _projection_sample_is_clean(result):
+                    qualification = await auditor.audit_for_rollout(group_id)
+                rollout = await rollout_gate.record_audit(qualification)
             except asyncio.CancelledError:
                 raise
             except Exception:

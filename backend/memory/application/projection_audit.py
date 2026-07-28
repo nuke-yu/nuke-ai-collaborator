@@ -22,6 +22,7 @@ class ProjectionAuditResult:
     invalid_canonical: int = 0
     outbox_pending: int = 0
     truncated: bool = False
+    snapshot_changed: bool = False
 
     def as_dict(self) -> dict[str, int | bool]:
         return asdict(self)
@@ -124,6 +125,134 @@ class BotMemoryProjectionAuditService:
             outbox_pending=outbox_pending,
             truncated=truncated,
         )
+
+    async def audit_for_rollout(self, group_id: int) -> ProjectionAuditResult:
+        """Exhaustively audit a stable DB generation in bounded I/O pages."""
+        if group_id <= 0:
+            raise ValueError("group_id must be positive")
+
+        expected_ids: set[str] = set()
+        matched = missing = content_mismatched = metadata_mismatched = 0
+        invalid = canonical_sampled = 0
+        async with await self._database.connect(
+            "memory_records", group_id, write=False
+        ) as connection:
+            start_version = await _data_version(connection)
+            canonical_total = await _canonical_count(connection, group_id)
+            initial_pending = await _outbox_pending(connection, group_id)
+
+            offset = 0
+            while True:
+                rows = await _canonical_page(
+                    connection, group_id, limit=self._limit, offset=offset
+                )
+                if not rows:
+                    break
+                canonical_sampled += len(rows)
+                expected: dict[str, dict[str, Any]] = {}
+                for row in rows:
+                    try:
+                        projection_id, item = expected_bot_memory_projection(
+                            group_id, row
+                        )
+                    except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+                        invalid += 1
+                        continue
+                    expected[projection_id] = item
+                    expected_ids.add(projection_id)
+
+                actual = await self._reader.read_by_ids(tuple(expected))
+                for projection_id, item in expected.items():
+                    projected = actual.get(projection_id)
+                    if projected is None:
+                        missing += 1
+                        continue
+                    content_ok = (
+                        str(projected.get("content") or "") == item["content"]
+                    )
+                    metadata_ok = _metadata_matches(
+                        item["metadata"], projected.get("metadata") or {}
+                    )
+                    if not content_ok:
+                        content_mismatched += 1
+                    if not metadata_ok:
+                        metadata_mismatched += 1
+                    if content_ok and metadata_ok:
+                        matched += 1
+                offset += len(rows)
+
+            projected_ids: set[str] = set()
+            offset = 0
+            while True:
+                projected = await self._reader.scan_group(
+                    group_id, limit=self._limit, offset=offset
+                )
+                projected_ids.update(projected)
+                page_size = len(projected)
+                if page_size < self._limit:
+                    break
+                offset += page_size
+
+            final_pending = await _outbox_pending(connection, group_id)
+            end_version = await _data_version(connection)
+
+        return ProjectionAuditResult(
+            group_id=group_id,
+            canonical_total=canonical_total,
+            canonical_sampled=canonical_sampled,
+            projected_scanned=len(projected_ids),
+            matched=matched,
+            missing=missing,
+            content_mismatched=content_mismatched,
+            metadata_mismatched=metadata_mismatched,
+            orphaned=len(projected_ids - expected_ids),
+            invalid_canonical=invalid,
+            outbox_pending=max(initial_pending, final_pending),
+            truncated=False,
+            snapshot_changed=start_version != end_version,
+        )
+
+
+async def _data_version(connection: Any) -> int:
+    async with connection.execute("PRAGMA data_version") as cursor:
+        return int((await cursor.fetchone())[0])
+
+
+async def _canonical_count(connection: Any, group_id: int) -> int:
+    async with connection.execute(
+        """SELECT COUNT(*) FROM memory_records
+        WHERE group_id=? AND kind IN ('fact','reflection')
+        AND owner_type='bot' AND status='provisional'""",
+        (group_id,),
+    ) as cursor:
+        return int((await cursor.fetchone())[0])
+
+
+async def _outbox_pending(connection: Any, group_id: int) -> int:
+    async with connection.execute(
+        """SELECT COUNT(*) FROM memory_projection_outbox
+        WHERE group_id=? AND projection_type IN (
+            'bot_memory_vector_upsert','bot_memory_vector_delete'
+        )
+        AND status!='completed'""",
+        (group_id,),
+    ) as cursor:
+        return int((await cursor.fetchone())[0])
+
+
+async def _canonical_page(
+    connection: Any, group_id: int, *, limit: int, offset: int
+) -> list[tuple[Any, ...]]:
+    async with connection.execute(
+        """SELECT record_id,kind,bot_id,content,importance,source_ids,
+            metadata_json,evidence_json,COALESCE(effective_from,created_at)
+        FROM memory_records
+        WHERE group_id=? AND kind IN ('fact','reflection')
+        AND owner_type='bot' AND status='provisional'
+        ORDER BY updated_at DESC,record_id LIMIT ? OFFSET ?""",
+        (group_id, limit, offset),
+    ) as cursor:
+        return await cursor.fetchall()
 
 
 def expected_bot_memory_projection(

@@ -171,6 +171,8 @@ def _qualifies_for_rollout(
 ) -> tuple[bool, str]:
     if result.truncated:
         return False, "truncated"
+    if result.snapshot_changed:
+        return False, "snapshot_changed"
     if result.canonical_total <= 0:
         return False, "no_canonical_records"
     if result.canonical_sampled != result.canonical_total:

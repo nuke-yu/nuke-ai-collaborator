@@ -48,6 +48,7 @@ class _Reader:
     ) -> None:
         self.by_id = dict(by_id)
         self.scanned = dict(scanned)
+        self.scan_offsets: list[int] = []
 
     async def read_by_ids(
         self, projection_ids: tuple[str, ...]
@@ -59,9 +60,10 @@ class _Reader:
         }
 
     async def scan_group(
-        self, group_id: int, *, limit: int
+        self, group_id: int, *, limit: int, offset: int = 0
     ) -> Mapping[str, Mapping[str, Any]]:
-        return dict(list(self.scanned.items())[:limit])
+        self.scan_offsets.append(offset)
+        return dict(list(self.scanned.items())[offset:offset + limit])
 
 
 def _command(group_id: int = 7) -> IngestBotFactObservations:
@@ -204,6 +206,24 @@ class ProjectionAuditServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.truncated)
         self.assertEqual(result.orphaned, 0)
 
+    async def test_rollout_audit_pages_past_sample_limit(self) -> None:
+        await self.outbox.drain(7)
+        reader = _Reader(by_id=self.projected, scanned=self.projected)
+
+        result = await BotMemoryProjectionAuditService(
+            self.database, reader, limit=1
+        ).audit_for_rollout(7)
+
+        self.assertEqual(result.canonical_total, 2)
+        self.assertEqual(result.canonical_sampled, 2)
+        self.assertEqual(result.projected_scanned, 2)
+        self.assertEqual(result.matched, 2)
+        self.assertEqual(result.orphaned, 0)
+        self.assertEqual(result.outbox_pending, 0)
+        self.assertFalse(result.truncated)
+        self.assertFalse(result.snapshot_changed)
+        self.assertEqual(reader.scan_offsets, [0, 1, 2])
+
     async def test_malformed_canonical_record_is_counted_not_fatal(self) -> None:
         async with db.connect(self.path) as connection:
             await connection.execute(
@@ -283,6 +303,56 @@ class ProjectionAuditLifecycleTest(unittest.IsolatedAsyncioTestCase):
         rollout.record_failure.assert_awaited_once_with(7)
         self.assertGreater(snapshot["last_audited_at"], 0)
 
+    async def test_lifecycle_uses_complete_audit_for_clean_truncated_sample(
+        self,
+    ) -> None:
+        manager = LifecycleManager()
+        sample = ProjectionAuditResult(
+            group_id=7,
+            canonical_total=501,
+            canonical_sampled=500,
+            projected_scanned=500,
+            matched=500,
+            truncated=True,
+        )
+        complete = ProjectionAuditResult(
+            group_id=7,
+            canonical_total=501,
+            canonical_sampled=501,
+            projected_scanned=501,
+            matched=501,
+        )
+        auditor = AsyncMock()
+        auditor.audit.return_value = sample
+        auditor.audit_for_rollout.return_value = complete
+        rollout = AsyncMock()
+        rollout.record_audit.return_value = ProjectionRolloutState(
+            group_id=7,
+            consecutive_passes=1,
+            required_passes=3,
+            direct_write_enabled=True,
+            last_audit_passed=True,
+            last_audited_at=123,
+            last_failure_reason="",
+        )
+        with (
+            patch(
+                "memory.bootstrap.build_bot_memory_projection_auditor",
+                return_value=auditor,
+            ),
+            patch(
+                "memory.bootstrap.build_bot_memory_projection_rollout_gate",
+                return_value=rollout,
+            ),
+        ):
+            await manager._audit_memory_projections((7,))
+
+        auditor.audit_for_rollout.assert_awaited_once_with(7)
+        rollout.record_audit.assert_awaited_once_with(complete)
+        self.assertTrue(
+            manager.stats()["memory_projection_audits"]["7"]["truncated"]
+        )
+
 
 class ProjectionRolloutGateTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
@@ -359,6 +429,21 @@ class ProjectionRolloutGateTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(truncated.last_failure_reason, "truncated")
         self.assertEqual(empty.last_failure_reason, "no_canonical_records")
         self.assertTrue(empty.direct_write_enabled)
+
+    async def test_changed_snapshot_does_not_qualify(self) -> None:
+        changed = await self.gate.record_audit(
+            ProjectionAuditResult(
+                group_id=7,
+                canonical_total=2,
+                canonical_sampled=2,
+                projected_scanned=2,
+                matched=2,
+                snapshot_changed=True,
+            )
+        )
+
+        self.assertEqual(changed.last_failure_reason, "snapshot_changed")
+        self.assertTrue(changed.direct_write_enabled)
 
 
 if __name__ == "__main__":
