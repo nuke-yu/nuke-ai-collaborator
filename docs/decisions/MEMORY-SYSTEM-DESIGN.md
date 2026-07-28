@@ -146,7 +146,7 @@ forget
 | 当前实现 | 目标设计 | 迁移要求 |
 |---|---|---|
 | Fact/Reflection 已有 canonical + durable outbox，在线召回和低延迟写入仍走 Chroma | SQLite canonical，Chroma 是可重建索引 | bounded shadow 对账已接入；完成生产 soak 与门槛评估后移除直写并切换读路径 |
-| 冲突 Fact 被物理删除 | ADD-only + temporal supersede | 保留旧事实、来源、有效时间和替代关系 |
+| canonical Fact 已 ADD-only + temporal supersede；legacy Chroma 仍物理移除失效投影 | SQLite 保留历史，Chroma 只索引当前有效 Fact | 冲突映射保留旧事实、来源、有效时间和替代关系；durable tombstone 防止旧 upsert 竞态复活 |
 | `observe()` 内多条临时后台协程 | 持久化 Pipeline Job | 前台仍 fail-soft，后台支持幂等、恢复和 dead-letter |
 | 工具事件按数量压缩 | durable Run → Case → Experience | 先补稳定 run/step/attempt identity |
 | `maybe_reflect()` 只从 Fact 归纳 | Execution Reflexion + Consolidation Reflection | 两类反思分别建模，不共用模糊状态 |
@@ -171,6 +171,13 @@ Worker 每分钟对活跃 Group 执行只读、限量的 canonical ↔ Chroma sh
 Fact/Reflection 停止 legacy Chroma 直写，只保留 canonical transaction + durable outbox。
 任一次不达标或审计异常都会清零连续次数并立即恢复该 Group 的直写。canonical 写入本身
 失败时也始终保留直写兜底，因此 gate 状态或 SQLite 短暂故障不会丢失当前请求的记忆。
+
+Fact 冲突解析同时保留旧 projection ID 到最近新 Fact 的确定性对应。命中的旧 canonical
+Fact 不再物理删除，而是原子更新为 `superseded`，写入 `valid_to`/`superseded_by` 并建立
+`supersedes` 关系。相同事务会把旧 Fact 的 projection outbox 事件替换为 durable delete
+tombstone；即使旧 upsert 已被其他 Worker claim，其旧 aggregate version 也不能确认新
+tombstone，后续 drain 会再次删除 Chroma 中的失效投影。无法找到 canonical 对应项的
+legacy Chroma 冲突仍由新投影 payload 幂等清理。
 
 存量 Chroma Fact/Reflection 可通过
 `python3 -m scripts.backfill_canonical_bot_memory --group-id <id>` 生成 dry-run

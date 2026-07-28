@@ -196,6 +196,7 @@ class IngestBotFactObservations:
     thread_id: str = ""
     observed_at: int | None = None
     legacy_conflict_ids: tuple[str, ...] = ()
+    legacy_conflict_replacements: tuple[tuple[str, str], ...] = ()
 
     def __post_init__(self) -> None:
         if not self.source_id.strip():
@@ -204,6 +205,16 @@ class IngestBotFactObservations:
             raise ValueError("at least one extracted fact is required")
         if self.observed_at is not None and self.observed_at < 0:
             raise ValueError("observed_at cannot be negative")
+        projection_ids = {fact.projection_id for fact in self.facts}
+        for old_projection_id, replacement_projection_id in (
+            self.legacy_conflict_replacements
+        ):
+            if not old_projection_id.strip():
+                raise ValueError("legacy conflict projection ID is required")
+            if replacement_projection_id not in projection_ids:
+                raise ValueError(
+                    "legacy conflict replacement must reference an ingested fact"
+                )
 
 
 @dataclass(frozen=True, slots=True)

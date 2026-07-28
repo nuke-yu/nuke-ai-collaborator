@@ -29,7 +29,7 @@ class CanonicalRelationService:
         to_record_id = command.to_record_id.strip()
         source_type = command.source_type.strip()
         source_id = command.source_id.strip()
-        relation_id = _relation_id(
+        relation_id = memory_relation_id(
             group_id,
             from_record_id,
             to_record_id,
@@ -139,7 +139,7 @@ def _require_group_scope(kind: ScopeKind, group_id: int | None) -> int:
     return group_id
 
 
-def _relation_id(
+def memory_relation_id(
     group_id: int,
     from_record_id: str,
     to_record_id: str,

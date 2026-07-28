@@ -8,6 +8,7 @@ import time
 from typing import Any, Mapping
 
 from memory.application.vector_projection import (
+    BOT_MEMORY_VECTOR_DELETE,
     BOT_MEMORY_VECTOR_UPSERT,
     enqueue_bot_memory_projection,
 )
@@ -74,6 +75,14 @@ class LegacyMemoryProjectionDelivery:
             ]
             if delete_ids:
                 await asyncio.to_thread(ChromaStore.delete_ids_sync, delete_ids)
+            return
+        if projection_type == BOT_MEMORY_VECTOR_DELETE:
+            from ai.memory import ChromaStore
+
+            await asyncio.to_thread(
+                ChromaStore.delete_ids_sync,
+                [str(payload["projection_id"])],
+            )
             return
         raise ValueError(f"unsupported memory projection type: {projection_type}")
 

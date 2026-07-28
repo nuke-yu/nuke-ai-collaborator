@@ -8,6 +8,7 @@ from typing import Any, Mapping
 from memory.ports import ProjectionOutboxPort
 
 BOT_MEMORY_VECTOR_UPSERT = "bot_memory_vector_upsert"
+BOT_MEMORY_VECTOR_DELETE = "bot_memory_vector_delete"
 
 
 async def enqueue_bot_memory_projection(
@@ -42,6 +43,29 @@ async def enqueue_bot_memory_projection(
 
 def bot_memory_projection_event_id(record_id: str) -> str:
     return f"bot-memory-vector:{record_id}"
+
+
+async def enqueue_bot_memory_projection_delete(
+    outbox: ProjectionOutboxPort,
+    connection: Any,
+    *,
+    record_id: str,
+    group_id: int,
+    projection_id: str,
+    now_ms: int,
+) -> None:
+    """Replace any in-flight upsert for a superseded record with a tombstone."""
+    payload = {"projection_id": projection_id}
+    await outbox.enqueue(
+        connection,
+        event_id=bot_memory_projection_event_id(record_id),
+        projection_type=BOT_MEMORY_VECTOR_DELETE,
+        aggregate_id=record_id,
+        aggregate_version=_projection_version(payload),
+        group_id=group_id,
+        payload=payload,
+        now_ms=now_ms,
+    )
 
 
 def _projection_version(payload: Mapping[str, Any]) -> str:

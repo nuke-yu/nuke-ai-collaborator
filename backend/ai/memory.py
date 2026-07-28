@@ -285,9 +285,21 @@ class FactExtractor:
             return []
 
 
+class ConflictResolution(list[str]):
+    """Backward-compatible conflict IDs plus their nearest new-fact index."""
+
+    def __init__(
+        self,
+        conflict_ids: list[str],
+        replacement_indexes: dict[str, int],
+    ) -> None:
+        super().__init__(conflict_ids)
+        self.replacement_indexes = replacement_indexes
+
+
 # ── 4. ConflictResolver ── 批量语义冲突消解 (优化 LLM 调用扇出)
 class ConflictResolver:
-    """批量比对新事实与相似的历史事实，检测排他性冲突并返回被覆盖/应删除的旧记忆 ID 列表。"""
+    """Detect stale projections and retain their nearest replacement fact."""
 
     @staticmethod
     async def resolve_batch(facts: list[str], bot_id: int, group_id: int | None,
@@ -300,6 +312,7 @@ class ConflictResolver:
 
         # 1. 召回每个新事实的 Top-3 相似历史记录作为候选（解决只看最近邻 1 条的漏检问题）
         candidates = {}  # id -> document
+        nearest_replacements: dict[str, tuple[float, int]] = {}
         try:
             if group_id is not None:
                 where = {"$and": [{"bot_id": {"$eq": bot_id}}, {"group_id": {"$eq": group_id}}]}
@@ -326,6 +339,9 @@ class ConflictResolver:
                     # 仅将语义距离够近的记录纳入排他性冲突审查（阈值可配，换模型/度量空间时调整）
                     if dist < config.MEMORY_CONFLICT_MAX_DISTANCE:
                         candidates[item_id] = doc
+                        previous = nearest_replacements.get(str(item_id))
+                        if previous is None or dist < previous[0]:
+                            nearest_replacements[str(item_id)] = (dist, qi)
         except Exception:
             log.exception("ConflictResolver: failed to fetch candidates for conflict check")
             return []
@@ -359,7 +375,19 @@ class ConflictResolver:
             ids_to_delete = json.loads(response)
             if isinstance(ids_to_delete, list):
                 # 校验 ID 是否确实在召回的候选池中，防止 LLM 幻觉产生误删
-                return [str(item_id) for item_id in ids_to_delete if str(item_id) in candidates]
+                conflict_ids = [
+                    str(item_id)
+                    for item_id in ids_to_delete
+                    if str(item_id) in candidates
+                ]
+                return ConflictResolution(
+                    conflict_ids,
+                    {
+                        item_id: nearest_replacements[item_id][1]
+                        for item_id in conflict_ids
+                        if item_id in nearest_replacements
+                    },
+                )
         except Exception:
             log.exception("ConflictResolver: failed to resolve conflicts via batch LLM")
             
@@ -499,7 +527,19 @@ async def add_to_chroma(message_id: int, content: str, role: str, bot_id: int, g
         return
 
     # 2. 批量消解冲突
-    del_ids = await ConflictResolver.resolve_batch([f[0] for f in facts], bot_id, group_id, provider, model)
+    conflicts = await ConflictResolver.resolve_batch(
+        [f[0] for f in facts], bot_id, group_id, provider, model
+    )
+    del_ids = list(conflicts)
+    replacement_indexes = getattr(conflicts, "replacement_indexes", {})
+    conflict_replacements = tuple(
+        (
+            old_projection_id,
+            f"fact_{bot_id}_{group_id}_{message_id}_{replacement_index}",
+        )
+        for old_projection_id, replacement_index in replacement_indexes.items()
+        if 0 <= replacement_index < len(facts)
+    )
 
     # 3. 复用同一批抽取结果双写 canonical SQLite。它是 Bot-owned provisional
     # observation，不会进入 Active Group Fact；迁移期保持 fail-soft，避免 canonical
@@ -515,6 +555,7 @@ async def add_to_chroma(message_id: int, content: str, role: str, bot_id: int, g
         thread_id=thread_id,
         timestamp=timestamp,
         legacy_conflict_ids=del_ids,
+        legacy_conflict_replacements=conflict_replacements,
     )
     if (
         canonical_written
@@ -576,6 +617,7 @@ async def _mirror_facts_to_canonical(
     thread_id: str | None,
     timestamp: float | None,
     legacy_conflict_ids: list[str],
+    legacy_conflict_replacements: tuple[tuple[str, str], ...],
 ) -> bool:
     if group_id is None:
         return False
@@ -614,6 +656,7 @@ async def _mirror_facts_to_canonical(
                 thread_id=thread_id or "",
                 observed_at=observed_at,
                 legacy_conflict_ids=tuple(legacy_conflict_ids),
+                legacy_conflict_replacements=legacy_conflict_replacements,
             )
         )
         return True

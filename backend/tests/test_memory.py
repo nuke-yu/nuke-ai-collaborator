@@ -1091,6 +1091,10 @@ class TestMemoryAuditFixes(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(mock_col.query.call_args[1]["query_texts"], ["新事实1", "新事实2"])
         self.assertIn("10_0", del_ids)
         self.assertIn("20_0", del_ids)
+        self.assertEqual(
+            del_ids.replacement_indexes,
+            {"10_0": 0, "20_0": 1},
+        )
 
     @patch("ai.client.call_ai_once", new_callable=AsyncMock)
     async def test_extract_keeps_short_config_facts(self, mock_call_once):

@@ -142,6 +142,76 @@ class BotFactObservationServiceTest(unittest.IsolatedAsyncioTestCase):
             ) as cursor:
                 self.assertEqual((await cursor.fetchone())[0], "rejected")
 
+    async def test_conflict_soft_supersedes_old_fact_and_enqueues_tombstone(
+        self,
+    ) -> None:
+        old_command = replace(
+            _command(),
+            source_id="message:10",
+            facts=(
+                ExtractedFactObservation(
+                    content="The API uses version 1",
+                    importance=0.8,
+                    projection_id="fact_3_7_10_0",
+                ),
+            ),
+            legacy_conflict_ids=(),
+        )
+        old_record_id = (await self.service.ingest(old_command))[0]
+        new_command = replace(
+            _command(),
+            facts=(_command().facts[0],),
+            legacy_conflict_replacements=(
+                ("fact_3_7_10_0", "fact_3_7_42_0"),
+            ),
+        )
+        new_record_id = (await self.service.ingest(new_command))[0]
+
+        async with db.connect(self.path) as connection:
+            async with connection.execute(
+                """SELECT status,valid_to,superseded_by
+                FROM memory_records WHERE record_id=?""",
+                (old_record_id,),
+            ) as cursor:
+                old_status, valid_to, superseded_by = await cursor.fetchone()
+            async with connection.execute(
+                """SELECT status FROM memory_records WHERE record_id=?""",
+                (new_record_id,),
+            ) as cursor:
+                new_status = (await cursor.fetchone())[0]
+            async with connection.execute(
+                """SELECT from_record_id,to_record_id,relation_type,
+                    source_type,evidence_json FROM memory_relations"""
+            ) as cursor:
+                relation = await cursor.fetchone()
+            async with connection.execute(
+                """SELECT projection_type,status,payload_json
+                FROM memory_projection_outbox WHERE aggregate_id=?""",
+                (old_record_id,),
+            ) as cursor:
+                tombstone = await cursor.fetchone()
+
+        self.assertEqual(old_status, "superseded")
+        self.assertIsNotNone(valid_to)
+        self.assertEqual(superseded_by, new_record_id)
+        self.assertEqual(new_status, "provisional")
+        self.assertEqual(
+            relation[:4],
+            (new_record_id, old_record_id, "supersedes", "fact_conflict"),
+        )
+        self.assertIn(
+            '"replacement_projection_id": "fact_3_7_42_0"',
+            relation[4],
+        )
+        self.assertEqual(tombstone[:2], ("bot_memory_vector_delete", "pending"))
+        self.assertIn('"projection_id": "fact_3_7_10_0"', tombstone[2])
+
+        await self.outbox.drain(7)
+        self.delivery.deliver.assert_any_await(
+            "bot_memory_vector_delete",
+            {"projection_id": "fact_3_7_10_0"},
+        )
+
     async def test_same_source_identity_remains_group_isolated(self) -> None:
         group_seven = await self.service.ingest(_command())
         group_eight = await self.service.ingest(replace(

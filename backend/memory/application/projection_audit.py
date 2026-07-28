@@ -68,7 +68,9 @@ class BotMemoryProjectionAuditService:
                 rows = await cursor.fetchall()
             async with connection.execute(
                 """SELECT COUNT(*) FROM memory_projection_outbox
-                WHERE group_id=? AND projection_type='bot_memory_vector_upsert'
+                WHERE group_id=? AND projection_type IN (
+                    'bot_memory_vector_upsert','bot_memory_vector_delete'
+                )
                 AND status!='completed'""",
                 (group_id,),
             ) as cursor:

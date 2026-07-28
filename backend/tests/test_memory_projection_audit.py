@@ -170,6 +170,23 @@ class ProjectionAuditServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.content_mismatched, 1)
         self.assertEqual(result.metadata_mismatched, 1)
 
+    async def test_pending_projection_tombstones_block_rollout(self) -> None:
+        async with db.connect(self.path) as connection:
+            await connection.execute(
+                """UPDATE memory_projection_outbox
+                SET projection_type='bot_memory_vector_delete'
+                WHERE event_id=(SELECT event_id FROM memory_projection_outbox LIMIT 1)"""
+            )
+            await connection.commit()
+
+        result = await BotMemoryProjectionAuditService(
+            self.database,
+            _Reader(by_id=self.projected, scanned=self.projected),
+            limit=10,
+        ).audit(7)
+
+        self.assertEqual(result.outbox_pending, 2)
+
     async def test_bounded_audit_marks_truncation_and_avoids_false_orphans(self) -> None:
         first_id = sorted(self.projected)[0]
         result = await BotMemoryProjectionAuditService(
