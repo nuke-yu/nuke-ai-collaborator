@@ -6,7 +6,7 @@ from typing import Final
 from memory.contracts import MemoryOperationError
 from memory.ports import MemoryDatabasePort
 
-MEMORY_SCHEMA_VERSION: Final = 8
+MEMORY_SCHEMA_VERSION: Final = 9
 
 MEMORY_GROUP_TABLES = frozenset(
     {
@@ -118,6 +118,8 @@ MEMORY_V1_DDL = (
             CHECK(last_audit_passed IN (0,1)),
         last_audited_at INTEGER NOT NULL DEFAULT 0,
         last_failure_reason TEXT NOT NULL DEFAULT '',
+        qualified_since INTEGER NOT NULL DEFAULT 0,
+        cooldown_until INTEGER NOT NULL DEFAULT 0,
         updated_at INTEGER NOT NULL DEFAULT 0
     )""",
     """CREATE TABLE IF NOT EXISTS experience_usage (
@@ -242,6 +244,13 @@ MEMORY_V6_COLUMNS = {
     ),
 }
 
+MEMORY_V9_COLUMNS = {
+    "memory_projection_rollout": (
+        ("qualified_since", "INTEGER NOT NULL DEFAULT 0"),
+        ("cooldown_until", "INTEGER NOT NULL DEFAULT 0"),
+    ),
+}
+
 MEMORY_GROUP_DDL = (
     _VERSION_TABLE_DDL,
     *MEMORY_V1_DDL,
@@ -359,6 +368,22 @@ class MemorySchemaManager:
             if current < 8:
                 await connection.execute(
                     "INSERT INTO memory_schema_version(version) VALUES (8)"
+                )
+            if current < 9:
+                async with connection.execute(
+                    "PRAGMA table_info(memory_projection_rollout)"
+                ) as cursor:
+                    existing = {str(row[1]) for row in await cursor.fetchall()}
+                for name, declaration in MEMORY_V9_COLUMNS[
+                    "memory_projection_rollout"
+                ]:
+                    if name not in existing:
+                        await connection.execute(
+                            "ALTER TABLE memory_projection_rollout ADD COLUMN "
+                            f"{name} {declaration}"
+                        )
+                await connection.execute(
+                    "INSERT INTO memory_schema_version(version) VALUES (9)"
                 )
             await connection.commit()
         return MEMORY_SCHEMA_VERSION

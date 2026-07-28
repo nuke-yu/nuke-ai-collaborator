@@ -76,6 +76,10 @@ class MemorySchemaTest(unittest.IsolatedAsyncioTestCase):
                 "PRAGMA table_info(memory_relations)"
             ) as cursor:
                 relation_columns = {row[1] for row in await cursor.fetchall()}
+            async with connection.execute(
+                "PRAGMA table_info(memory_projection_rollout)"
+            ) as cursor:
+                rollout_columns = {row[1] for row in await cursor.fetchall()}
         self.assertTrue(
             {"semantic_cluster_key", "task_family", "task_concepts_json"}
             <= case_columns
@@ -87,6 +91,9 @@ class MemorySchemaTest(unittest.IsolatedAsyncioTestCase):
                 "failure_signature",
             }
             <= record_columns
+        )
+        self.assertTrue(
+            {"qualified_since", "cooldown_until"} <= rollout_columns
         )
         self.assertTrue(
             {
@@ -115,6 +122,49 @@ class MemorySchemaTest(unittest.IsolatedAsyncioTestCase):
             }
             <= record_columns
         )
+
+    async def test_v8_rollout_state_is_upgraded_for_hysteresis(self) -> None:
+        async with db.connect(self.path) as connection:
+            await connection.execute(
+                """CREATE TABLE memory_schema_version (
+                    version INTEGER PRIMARY KEY,
+                    applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )"""
+            )
+            for version in range(1, 9):
+                await connection.execute(
+                    "INSERT INTO memory_schema_version(version) VALUES (?)",
+                    (version,),
+                )
+            await connection.execute(
+                """CREATE TABLE memory_projection_rollout (
+                    group_id INTEGER PRIMARY KEY,
+                    consecutive_passes INTEGER NOT NULL DEFAULT 0,
+                    required_passes INTEGER NOT NULL DEFAULT 3,
+                    direct_write_enabled INTEGER NOT NULL DEFAULT 1,
+                    last_audit_passed INTEGER NOT NULL DEFAULT 0,
+                    last_audited_at INTEGER NOT NULL DEFAULT 0,
+                    last_failure_reason TEXT NOT NULL DEFAULT '',
+                    updated_at INTEGER NOT NULL DEFAULT 0
+                )"""
+            )
+            await connection.execute(
+                """INSERT INTO memory_projection_rollout
+                (group_id,consecutive_passes,direct_write_enabled)
+                VALUES (7,2,1)"""
+            )
+            await connection.commit()
+
+        await self.schema.ensure_group(7)
+
+        async with db.connect(self.path) as connection:
+            async with connection.execute(
+                """SELECT consecutive_passes,direct_write_enabled,
+                    qualified_since,cooldown_until
+                FROM memory_projection_rollout WHERE group_id=7"""
+            ) as cursor:
+                row = await cursor.fetchone()
+        self.assertEqual(tuple(row), (2, 1, 0, 0))
 
     async def test_ensure_is_idempotent_and_preserves_canonical_records(self) -> None:
         await self.schema.ensure_group(7)

@@ -445,6 +445,89 @@ class ProjectionRolloutGateTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(changed.last_failure_reason, "snapshot_changed")
         self.assertTrue(changed.direct_write_enabled)
 
+    async def test_requires_spaced_audits_and_minimum_observation_window(
+        self,
+    ) -> None:
+        now = [1_000.0]
+        gate = BotMemoryProjectionRolloutGate(
+            self.database,
+            required_passes=3,
+            min_observation_seconds=120,
+            min_audit_interval_seconds=30,
+            clock=lambda: now[0],
+        )
+
+        first = await gate.record_audit(self._passing())
+        now[0] += 10
+        ignored = await gate.record_audit(self._passing())
+        now[0] += 20
+        second = await gate.record_audit(self._passing())
+        now[0] += 30
+        third = await gate.record_audit(self._passing())
+        now[0] += 60
+        observed = await gate.record_audit(self._passing())
+
+        self.assertEqual(first.consecutive_passes, 1)
+        self.assertEqual(ignored.consecutive_passes, 1)
+        self.assertEqual(second.consecutive_passes, 2)
+        self.assertEqual(third.consecutive_passes, 3)
+        self.assertTrue(third.direct_write_enabled)
+        self.assertFalse(observed.direct_write_enabled)
+
+    async def test_transient_failure_reopens_with_decay_and_cooldown(
+        self,
+    ) -> None:
+        now = [1_000.0]
+        gate = BotMemoryProjectionRolloutGate(
+            self.database,
+            required_passes=3,
+            min_audit_interval_seconds=10,
+            reopen_cooldown_seconds=60,
+            clock=lambda: now[0],
+        )
+        for _ in range(3):
+            await gate.record_audit(self._passing())
+            now[0] += 10
+
+        reopened = await gate.record_audit(
+            ProjectionAuditResult(
+                group_id=7,
+                canonical_total=2,
+                canonical_sampled=2,
+                projected_scanned=2,
+                matched=2,
+                snapshot_changed=True,
+            )
+        )
+        now[0] += 10
+        cooling = await gate.record_audit(self._passing())
+        now[0] += 50
+        recovered = await gate.record_audit(self._passing())
+
+        self.assertTrue(reopened.direct_write_enabled)
+        self.assertEqual(reopened.consecutive_passes, 2)
+        self.assertTrue(cooling.direct_write_enabled)
+        self.assertFalse(recovered.direct_write_enabled)
+
+    async def test_consistency_failure_resets_qualification_history(self) -> None:
+        for _ in range(2):
+            await self.gate.record_audit(self._passing())
+
+        failed = await self.gate.record_audit(
+            ProjectionAuditResult(
+                group_id=7,
+                canonical_total=2,
+                canonical_sampled=2,
+                projected_scanned=1,
+                matched=1,
+                missing=1,
+            )
+        )
+
+        self.assertEqual(failed.consecutive_passes, 0)
+        self.assertEqual(failed.qualified_since, 0)
+        self.assertTrue(failed.direct_write_enabled)
+
 
 if __name__ == "__main__":
     unittest.main()

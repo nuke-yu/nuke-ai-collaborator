@@ -164,13 +164,20 @@ Worker 每分钟对活跃 Group 执行只读、限量的 canonical ↔ Chroma sh
 默认最多深度比较 500 条（`NUKE_MEMORY_PROJECTION_AUDIT_LIMIT`）。审计统计 canonical
 总量/采样量、匹配、缺失、内容差异、metadata 差异、孤儿投影、非法 canonical 记录、
 未投递 outbox、截断状态和审计错误；结果随 Worker stats 汇总到 Supervisor `/metrics`。
+限量结果只承担低成本观测，不能直接证明大 Group 已完成迁移。干净但被截断的 sample
+会触发独立的分页全量资格审计；审计前后校验 SQLite data generation 和 outbox 状态，
+快照发生变化时 fail-open，避免把并发写入期间的撕裂视图当成达标。
 
 每个 Group 独立维护 `memory_projection_rollout` gate。只有非空 canonical 集合完成
 全量审计、outbox 无待投递项且所有记录完全一致时才记一次达标；连续达标次数达到
 `NUKE_MEMORY_PROJECTION_ROLLOUT_REQUIRED_PASSES`（默认 3）后，该 Group 的
 Fact/Reflection 停止 legacy Chroma 直写，只保留 canonical transaction + durable outbox。
-任一次不达标或审计异常都会清零连续次数并立即恢复该 Group 的直写。canonical 写入本身
-失败时也始终保留直写兜底，因此 gate 状态或 SQLite 短暂故障不会丢失当前请求的记忆。
+生产默认还要求审计至少间隔 30 秒并覆盖 5 分钟稳定观察期。任何失败都会立即恢复直写；
+缺失、内容/metadata 差异、孤儿等一致性失败会清零资格，瞬时 outbox/快照/审计故障只衰减
+一次 pass 并进入 2 分钟 reopen cooldown，不能在冷却期内重新关闸。Gate 已关闭时，
+canonical 写入会同步尝试定向投递本次 durable event，只有确认完成才跳过 legacy 写；
+投递失败或 canonical 写入失败都在当前请求内 fail-open，因此不依赖分钟级后台轮询维持
+写后可见性。
 
 Fact 冲突解析同时保留旧 projection ID 到最近新 Fact 的确定性对应。命中的旧 canonical
 Fact 不再物理删除，而是原子更新为 `superseded`，写入 `valid_to`/`superseded_by` 并建立

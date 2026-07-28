@@ -91,6 +91,15 @@ def build_bot_memory_projection_rollout_gate() -> BotMemoryProjectionRolloutGate
     return BotMemoryProjectionRolloutGate(
         legacy_memory_database,
         required_passes=config.MEMORY_PROJECTION_ROLLOUT_REQUIRED_PASSES,
+        min_observation_seconds=(
+            config.MEMORY_PROJECTION_ROLLOUT_MIN_OBSERVATION_SECONDS
+        ),
+        min_audit_interval_seconds=(
+            config.MEMORY_PROJECTION_ROLLOUT_MIN_AUDIT_INTERVAL_SECONDS
+        ),
+        reopen_cooldown_seconds=(
+            config.MEMORY_PROJECTION_ROLLOUT_REOPEN_COOLDOWN_SECONDS
+        ),
     )
 
 
