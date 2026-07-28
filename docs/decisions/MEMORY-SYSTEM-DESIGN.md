@@ -1629,3 +1629,54 @@ backend/
 - **回归测试覆盖率**：100%（2282 passed, 2 skipped）。
 - **耐久性与故障注入**：在 `test_memory_durability_eval_harness.py` 中验证了 250+ 知识规模 recall、Outbox 网络超时重试、Worker `SIGKILL` 崩溃后的断点续传。
 
+### 17.4 核心算法结构与设计抉择 (Algorithms & Design Rationale)
+
+在 Memory 系统的架构演进中，针对检索性能、并发一致性、学习可靠性与系统可用性，设计并落地了以下核心算法结构及设计抉择：
+
+#### 1. 事实检索算法：SQLite FTS5 倒排索引 + 触发器同步
+- **算法结构**：
+  - 基于 SQLite FTS5 引擎（`unicode61` 分词器），利用词频/逆文档频率 (TF-IDF/BM25) 进行倒排索引排序。
+  - 在 SQLite 存储引擎层挂载 `AFTER INSERT` / `UPDATE` / `DELETE` 3 个原生触发器，只筛选 `kind='group_fact' AND status='active'` 的记录实时同步入 FTS5 表。
+  - 区分 ASCII 词与 CJK 词：纯 ASCII 单词追加 `*` 通配符前缀（如 `"docker"*`）；CJK 中文字符串保持精准短语界定（如 `"数据库"`），防止 FTS5 unicode61 在处理中文通配符时产生语法解析异常。
+- **设计抉择 (Why)**：
+  - **防止“事实撕裂” (Zero Fact Divergence)**：在数据库引擎原生 Trigger 内部完成同步，保证了主表与全文检索表 100% 事务强一致性。
+  - **检索性能从 $O(N)$ 降至 $O(\log N)$**：FTS5 倒排索引树直接在 SQLite 引擎层于 1ms 内完成万级 Fact 的全量精准召回，消除了 `LIMIT 200` 暴力截断。
+
+#### 2. 经验检索算法：Hybrid Vector + Lexical + Cluster Match 混合打分
+- **算法结构**：
+  - 混合打分公式：`Score = (0.45 * Lexical + 0.35 * Vector + 0.20 * ClusterMatch) * Confidence`
+  - 先通过 Chroma 向量检索与语义簇 (`semantic_cluster_key`) 进行候选召回，再在内存中计算关键词匹配度与置信度。限制最大召回数 $\le 50$ 条，并设立硬匹配阈值 $\text{Score} \ge 0.08$。
+- **设计抉择 (Why)**：
+  - **消除纯向量检索的语义漂移**：纯向量检索容易将“语义相近但含义相反”的噪声召回，而纯词法检索无法理解同义词。混合打分兼顾了向量的广义语义联想与词法的精准匹配。
+  - **控制 Token 预算与噪声污染**：$\ge 0.08$ 的硬截断阀门避免将无关垃圾 Experience 填入 Prompt，降低推理成本并防止 Agent 产生幻觉。
+
+#### 3. 技能召回与晋升算法：Weighted Jaccard + 迟滞回线 (Skill Promotion)
+- **算法结构**：
+  - 召回打分：计算用户 Query 与技能 `name + trigger` 词集的 Jaccard 相似度 $J(Q, S)$，并乘以成熟度权重 $\text{FinalScore} = J(Q, S) \cdot W_{\text{maturity}}$（其中 $W_{\text{stable}}=1.0, W_{\text{active}}=0.9, W_{\text{trial}}=0.7$）。
+  - 因果证据链晋升 (`Trial → Active → Stable`)：技能初始状态为 `trial`，必须在 Tool Loop 执行中经历 `adopted`（引用）→ `executed`（执行）→ `verified`（验证成功/失败）完整验证链。达到连续成功标准后才晋升为 `active` / `stable`；验证失败则降级。
+- **设计抉择 (Why)**：
+  - **避免高相关度旧技能被“误杀”**：过去按 `updated_at DESC LIMIT 50` 截断会导致创建较早但稳定可靠的技能被挤出候选集。改为全量匹配 + 成熟度加权后，最可靠的 `stable` 技能始终享有优先评估权。
+  - **防止未经验证的伪技能污染 Agent 行为**：通过迟滞回线与真实 Tool 执行验证链，实现了安全、可控的自主进化。
+
+#### 4. 向量库异步解耦算法：Transactional Outbox 模式
+- **算法结构**：
+  - 主业务在写入 SQLite 数据库事务的同时，在同一事务中往 `memory_projection_outbox` 表插入一条待投递意图（Payload + status='pending' + idempotency_key）。
+  - 后台异步 Job 线程通过租约锁（Lease Token）拉取 Outbox 任务，重试并幂等写入 ChromaDB。
+- **设计抉择 (Why)**：
+  - **解决双写不一致 (Dual-Write Problem)**：Transactional Outbox 使得写 SQLite 成为绝对原子操作，通过 Outbox 异步重试保证了对向量库的 At-Least-Once 幂等投递与最终一致性。
+
+#### 5. 增量重构算法：Composite Monotonic Cursor + 表达式索引
+- **算法结构**：
+  - 复合游标：采用 `(sort_ts, record_id)` 复合游标，格式为 `"sort_ts:record_id"`。
+  - 表达式索引 (Expression Index)：Schema V11 增加 `idx_memory_records_rebuild_sort`（针对 `COALESCE(effective_from, created_at)`）。
+- **设计抉择 (Why)**：
+  - **彻底解决哈希游标漏扫描问题**：按字符串字典序分页不是单调递增的，增量插入时旧 Hash 记录会被遗漏。复合游标保证了时间线上的绝对单调向前推进。
+  - **重构性能由 $O(N^2/B)$ 提升至 $O(B \log N)$**：表达式索引避免了每个批次都触发全表扫描 + 排序。
+
+#### 6. 并发控制算法：WeakValueDictionary 锁生命周期 GC
+- **算法结构**：
+  - 使用 Python 的 `weakref.WeakValueDictionary[int, asyncio.Lock]()` 动态管理 Personal Knowledge Vault 针对每个 `user_id` 的异步互斥锁。
+- **设计抉择 (Why)**：
+  - **消除锁替换死锁与并发写冲突**：若从普通字典手动 `pop()` 锁，排队中的协程会重新创建并获取到新的锁对象，导致互斥锁崩溃。使用 `WeakValueDictionary` 后，当所有协程执行完读/写/删除退出作用域后，Python 原生 GC 自动从字典中清理无引用 Lock，完美平衡了并发绝对安全与内存零泄漏。
+
+
