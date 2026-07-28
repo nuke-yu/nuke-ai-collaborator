@@ -134,7 +134,18 @@ class BotMemoryProjectionRebuildService:
         now_ms = int(start_time * 1000)
         cutoff_time = start_time + (time_budget_ms / 1000.0)
 
-        cursor_id = status_report.cursor_record_id
+        cursor_ts = 0
+        cursor_id = ""
+        raw_cursor = status_report.cursor_record_id
+        if ":" in raw_cursor:
+            try:
+                ts_part, cursor_id = raw_cursor.split(":", 1)
+                cursor_ts = int(ts_part)
+            except ValueError:
+                cursor_id = raw_cursor
+        else:
+            cursor_id = raw_cursor
+
         processed = status_report.processed_records
         enqueued = status_report.enqueued_intents
         mode = status_report.mode
@@ -143,17 +154,20 @@ class BotMemoryProjectionRebuildService:
         async with await self._database.connect(
             "memory_records", group_id, write=True
         ) as connection:
-            while time.time() < cutoff_time:
+            first_iteration = True
+            while first_iteration or time.time() < cutoff_time:
+                first_iteration = False
                 async with connection.execute(
                     """SELECT record_id, kind, bot_id, content, importance,
                         source_ids, metadata_json, evidence_json,
-                        COALESCE(effective_from, created_at)
+                        COALESCE(effective_from, created_at) AS sort_ts
                     FROM memory_records
                     WHERE group_id=? AND kind IN ('fact','reflection')
                       AND owner_type='bot' AND status='provisional'
-                      AND record_id > ?
-                    ORDER BY record_id ASC LIMIT ?""",
-                    (group_id, cursor_id, batch_size),
+                      AND (COALESCE(effective_from, created_at) > ?
+                           OR (COALESCE(effective_from, created_at) = ? AND record_id > ?))
+                    ORDER BY sort_ts ASC, record_id ASC LIMIT ?""",
+                    (group_id, cursor_ts, cursor_ts, cursor_id, batch_size),
                 ) as cursor:
                     rows = await cursor.fetchall()
 
@@ -174,6 +188,7 @@ class BotMemoryProjectionRebuildService:
                     bot_id = int(row[2])
                     content = str(row[3])
                     importance = float(row[4])
+                    sort_ts = int(row[8])
 
                     if kind == "fact":
                         proj_id = f"fact_{bot_id}_{group_id}_{rec_id}"
@@ -205,9 +220,11 @@ class BotMemoryProjectionRebuildService:
                     )
                     enqueued += 1
                     processed += 1
+                    cursor_ts = sort_ts
                     cursor_id = rec_id
 
-                is_completed = (processed >= total)
+                composite_cursor = f"{cursor_ts}:{cursor_id}"
+                is_completed = len(rows) < batch_size
                 new_status = "completed" if is_completed else "running"
                 completed_timestamp = now_ms if is_completed else None
 
@@ -216,10 +233,11 @@ class BotMemoryProjectionRebuildService:
                     SET cursor_record_id=?, processed_records=?, enqueued_intents=?,
                         status=?, updated_at=?, completed_at=?
                     WHERE group_id=?""",
-                    (cursor_id, processed, enqueued, new_status, now_ms, completed_timestamp, group_id),
+                    (composite_cursor, processed, enqueued, new_status, now_ms, completed_timestamp, group_id),
                 )
                 await connection.commit()
-                break
+                if is_completed:
+                    break
 
         return await self.get_status(group_id)
 

@@ -455,7 +455,7 @@ async def recall_experiences(*, query: str, run_id: str, group_id: int | None,
         async with db.execute(
             """SELECT record_id,content,confidence,semantic_cluster_key FROM memory_records
                 WHERE group_id=? AND bot_id=? AND kind='experience' AND status='active'
-                  AND (semantic_cluster_key=? OR 1=1)
+                  AND semantic_cluster_key=?
                 ORDER BY updated_at DESC LIMIT 50""",
             (group_id, bot_id, query_identity.semantic_cluster_key),
         ) as cur:

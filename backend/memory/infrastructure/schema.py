@@ -457,10 +457,11 @@ class MemorySchemaManager:
                 )
                 await connection.execute(
                     """INSERT INTO memory_records_fts(record_id, group_id, subject_key, content)
-                    SELECT record_id, group_id, subject_key, content
-                    FROM memory_records
-                    WHERE kind='group_fact' AND owner_type='group' AND status='active'
-                      AND record_id NOT IN (SELECT record_id FROM memory_records_fts)"""
+                    SELECT r.record_id, r.group_id, r.subject_key, r.content
+                    FROM memory_records r
+                    LEFT JOIN memory_records_fts fts ON r.record_id = fts.record_id
+                    WHERE r.kind='group_fact' AND r.owner_type='group' AND r.status='active'
+                      AND fts.record_id IS NULL"""
                 )
                 await connection.execute(
                     "INSERT INTO memory_schema_version(version) VALUES (10)"

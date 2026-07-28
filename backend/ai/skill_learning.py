@@ -236,8 +236,7 @@ async def recall_skills(*, query: str, run_id: str, group_id: int | None,
                FROM skills s
                JOIN skill_versions v ON v.skill_id=s.skill_id AND v.version=s.current_version
                WHERE s.group_id=? AND (s.bot_id=? OR s.bot_id IS NULL)
-                 AND s.status='active' AND s.maturity IN ('trial', 'active', 'stable')
-               ORDER BY s.updated_at DESC LIMIT 50""",
+                 AND s.status='active' AND s.maturity IN ('trial', 'active', 'stable')""",
             (group_id, bot_id),
         ) as cur:
             rows = await cur.fetchall()

@@ -289,7 +289,7 @@ def _build_fts_query(raw_query: str) -> str:
     tokens = [t for t in cleaned.split() if len(t) > 0][:10]
     if not tokens:
         return ""
-    return " OR ".join(f'"{t}"*' if t.isalnum() else f'"{t}"' for t in tokens)
+    return " OR ".join(f'"{t}"*' if t.isascii() and t.isalnum() else f'"{t}"' for t in tokens)
 
 
 def _normalize_subject_safe(value: str) -> str:

@@ -62,8 +62,8 @@ class ProjectionRebuildTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status.total_records, 5)
         self.assertEqual(status.processed_records, 0)
 
-        # 2. Step 1 (batch_size=2)
-        step1 = await self.rebuild_service.step_rebuild(7, batch_size=2, time_budget_ms=5000)
+        # 2. Step 1 (batch_size=2 with 0 time budget for single batch)
+        step1 = await self.rebuild_service.step_rebuild(7, batch_size=2, time_budget_ms=0)
         self.assertEqual(step1.status, "running")
         self.assertEqual(step1.processed_records, 2)
         self.assertNotEqual(step1.cursor_record_id, "")

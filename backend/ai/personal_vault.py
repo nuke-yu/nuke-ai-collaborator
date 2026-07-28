@@ -7,31 +7,31 @@ import time
 import aiosqlite
 
 
-_DDL = """
-CREATE TABLE IF NOT EXISTS personal_records (
- record_id TEXT PRIMARY KEY,user_id INTEGER NOT NULL,kind TEXT NOT NULL,content TEXT NOT NULL,
- speaker TEXT NOT NULL DEFAULT '',subject TEXT NOT NULL DEFAULT '',authority TEXT NOT NULL,
- sensitivity TEXT NOT NULL DEFAULT 'private',status TEXT NOT NULL DEFAULT 'active',
- source_type TEXT NOT NULL,source_id TEXT NOT NULL DEFAULT '',confidence REAL NOT NULL DEFAULT 0.5,
- explicit INTEGER NOT NULL DEFAULT 0,valid_from INTEGER NOT NULL,valid_to INTEGER,
- created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL);
-CREATE INDEX IF NOT EXISTS idx_personal_records_active ON personal_records(user_id,kind,status);
-CREATE TABLE IF NOT EXISTS personal_projections (
- projection_id TEXT PRIMARY KEY,record_id TEXT NOT NULL,group_id INTEGER NOT NULL,bot_id INTEGER,
- purpose TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'active',expires_at INTEGER,
- created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL,UNIQUE(record_id,group_id,bot_id,purpose),
- FOREIGN KEY(record_id) REFERENCES personal_records(record_id) ON DELETE CASCADE);
-CREATE TABLE IF NOT EXISTS personal_sources (
- source_key TEXT PRIMARY KEY,user_id INTEGER NOT NULL,source_type TEXT NOT NULL,source_id TEXT NOT NULL,
- speaker TEXT NOT NULL DEFAULT '',subject TEXT NOT NULL DEFAULT '',context_kind TEXT NOT NULL DEFAULT '',
- observed_at INTEGER NOT NULL,content_hash TEXT NOT NULL,created_at INTEGER NOT NULL);
-CREATE TABLE IF NOT EXISTS habit_evidence (
- id INTEGER PRIMARY KEY AUTOINCREMENT,record_id TEXT NOT NULL,source_key TEXT NOT NULL,
- context_kind TEXT NOT NULL,polarity TEXT NOT NULL,observed_at INTEGER NOT NULL,
- UNIQUE(record_id,source_key),
- FOREIGN KEY(record_id) REFERENCES personal_records(record_id) ON DELETE CASCADE);
-CREATE TABLE IF NOT EXISTS _schema_version(version INTEGER NOT NULL,applied_at INTEGER NOT NULL);
-"""
+_DDL_STATEMENTS = (
+    """CREATE TABLE IF NOT EXISTS personal_records (
+     record_id TEXT PRIMARY KEY,user_id INTEGER NOT NULL,kind TEXT NOT NULL,content TEXT NOT NULL,
+     speaker TEXT NOT NULL DEFAULT '',subject TEXT NOT NULL DEFAULT '',authority TEXT NOT NULL,
+     sensitivity TEXT NOT NULL DEFAULT 'private',status TEXT NOT NULL DEFAULT 'active',
+     source_type TEXT NOT NULL,source_id TEXT NOT NULL DEFAULT '',confidence REAL NOT NULL DEFAULT 0.5,
+     explicit INTEGER NOT NULL DEFAULT 0,valid_from INTEGER NOT NULL,valid_to INTEGER,
+     created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL)""",
+    "CREATE INDEX IF NOT EXISTS idx_personal_records_active ON personal_records(user_id,kind,status)",
+    """CREATE TABLE IF NOT EXISTS personal_projections (
+     projection_id TEXT PRIMARY KEY,record_id TEXT NOT NULL,group_id INTEGER NOT NULL,bot_id INTEGER,
+     purpose TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'active',expires_at INTEGER,
+     created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL,UNIQUE(record_id,group_id,bot_id,purpose),
+     FOREIGN KEY(record_id) REFERENCES personal_records(record_id) ON DELETE CASCADE)""",
+    """CREATE TABLE IF NOT EXISTS personal_sources (
+     source_key TEXT PRIMARY KEY,user_id INTEGER NOT NULL,source_type TEXT NOT NULL,source_id TEXT NOT NULL,
+     speaker TEXT NOT NULL DEFAULT '',subject TEXT NOT NULL DEFAULT '',context_kind TEXT NOT NULL DEFAULT '',
+     observed_at INTEGER NOT NULL,content_hash TEXT NOT NULL,created_at INTEGER NOT NULL)""",
+    """CREATE TABLE IF NOT EXISTS habit_evidence (
+     id INTEGER PRIMARY KEY AUTOINCREMENT,record_id TEXT NOT NULL,source_key TEXT NOT NULL,
+     context_kind TEXT NOT NULL,polarity TEXT NOT NULL,observed_at INTEGER NOT NULL,
+     UNIQUE(record_id,source_key),
+     FOREIGN KEY(record_id) REFERENCES personal_records(record_id) ON DELETE CASCADE)""",
+    "CREATE TABLE IF NOT EXISTS _schema_version(version INTEGER NOT NULL,applied_at INTEGER NOT NULL)",
+)
 
 _MIGRATE_V2 = """
 PRAGMA foreign_keys=OFF;
@@ -62,39 +62,53 @@ PRAGMA foreign_keys=ON;
 """
 
 
-async def _ensure_schema(db:aiosqlite.Connection) -> None:
-    await db.executescript(_DDL)
+async def _ensure_schema(db: aiosqlite.Connection) -> None:
+    for stmt in _DDL_STATEMENTS:
+        await db.execute(stmt)
+    await db.commit()
     async with db.execute("SELECT MAX(version) FROM _schema_version") as cur:
-        version=(await cur.fetchone())[0]
+        version = (await cur.fetchone())[0]
     if version is None:
-        await db.execute("INSERT INTO _schema_version(version,applied_at) VALUES(2,?)",
-                         (int(time.time()*1000),))
+        await db.execute(
+            "INSERT INTO _schema_version(version,applied_at) VALUES(2,?)",
+            (int(time.time() * 1000),),
+        )
         await db.commit()
-    elif version<2:
+    elif version < 2:
         await db.executescript(_MIGRATE_V2)
     async with db.execute("PRAGMA foreign_key_check") as cur:
         if await cur.fetchone() is not None:
             raise RuntimeError("personal vault foreign key check failed")
 
 
+_vault_locks: dict[int, asyncio.Lock] = {}
+
+def _get_vault_lock(user_id: int) -> asyncio.Lock:
+    if user_id not in _vault_locks:
+        _vault_locks[user_id] = asyncio.Lock()
+    return _vault_locks[user_id]
+
+
 @asynccontextmanager
-async def connect(user_id:int):
-    from runtime.dbpaths import personal_db_path
-    path=personal_db_path(user_id)
-    from pathlib import Path
-    Path(path).parent.mkdir(parents=True,exist_ok=True)
-    db=await aiosqlite.connect(path,timeout=5.0)
-    try:
-        await db.execute("PRAGMA busy_timeout=5000")
-        await db.execute("PRAGMA foreign_keys=ON")
-        async with db.execute("PRAGMA journal_mode") as cur:
-            journal_mode=(await cur.fetchone())[0]
-        if str(journal_mode).lower()!="wal":
-            await db.execute("PRAGMA journal_mode=WAL")
-        await _ensure_schema(db)
-        yield db
-    finally:
-        await db.close()
+async def connect(user_id: int):
+    lock = _get_vault_lock(user_id)
+    async with lock:
+        from runtime.dbpaths import personal_db_path
+        path = personal_db_path(user_id)
+        from pathlib import Path
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        db = await aiosqlite.connect(path, timeout=5.0)
+        try:
+            await db.execute("PRAGMA busy_timeout=5000")
+            await db.execute("PRAGMA foreign_keys=ON")
+            async with db.execute("PRAGMA journal_mode") as cur:
+                journal_mode = (await cur.fetchone())[0]
+            if str(journal_mode).lower() != "wal":
+                await db.execute("PRAGMA journal_mode=WAL")
+            await _ensure_schema(db)
+            yield db
+        finally:
+            await db.close()
 
 
 async def add_record(*,user_id:int,kind:str,content:str,source_type:str,source_id:str="",
@@ -289,6 +303,7 @@ async def delete_vault(user_id: int) -> bool:
             "personal_vault_deleted user_id=%d existed=%s deleted_at=%d",
             user_id, existed, now_ms,
         )
+        _vault_locks.pop(user_id, None)
         return existed
 
 

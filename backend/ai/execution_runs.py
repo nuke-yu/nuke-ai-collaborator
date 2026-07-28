@@ -45,8 +45,22 @@ async def finish_run(
         await db.commit()
 
 
+async def touch_run(*, run_id: str, group_id: int | None) -> None:
+    """Heartbeat update to prevent active long-running agent tasks from timing out."""
+    if group_id is None or not run_id:
+        return
+    from ai.memory import _memory_db
+    now = int(time.time() * 1000)
+    async with await _memory_db("agent_runs", group_id, write=True) as db:
+        await db.execute(
+            "UPDATE agent_runs SET updated_at=? WHERE run_id=? AND group_id=? AND status='running'",
+            (now, run_id, group_id),
+        )
+        await db.commit()
+
+
 async def recover_abandoned_runs(
-    group_id: int, *, timeout_seconds: int = 300
+    group_id: int, *, timeout_seconds: int = 600
 ) -> int:
     """Recover stale running runs left behind after worker crashes."""
     if group_id <= 0:

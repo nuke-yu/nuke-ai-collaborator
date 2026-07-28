@@ -239,16 +239,25 @@ class LifecycleManager:
                 targets = tuple(self._active_groups)
         else:
             targets = group_ids
-        for group_id in targets:
-            try:
-                await recover_abandoned_runs(group_id, timeout_seconds=300)
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                log.exception(
-                    "lifecycle: failed to recover abandoned runs for group %d",
-                    group_id,
-                )
+
+        if not targets:
+            return
+
+        sem = asyncio.Semaphore(10)
+
+        async def _recover_single(gid: int) -> None:
+            async with sem:
+                try:
+                    await recover_abandoned_runs(gid, timeout_seconds=600)
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    log.exception(
+                        "lifecycle: failed to recover abandoned runs for group %d",
+                        gid,
+                    )
+
+        await asyncio.gather(*[_recover_single(g) for g in targets], return_exceptions=True)
 
     async def _drain_projection_outboxes(self) -> None:
         """Deliver durable memory projections for groups owned by this worker."""

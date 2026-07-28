@@ -136,8 +136,8 @@ class MemoryDurabilityEvalHarnessTest(unittest.IsolatedAsyncioTestCase):
         # Start rebuild
         await self.rebuild_service.start_rebuild(self.group_id, mode="full_rebuild")
 
-        # Step 1: process 4 records
-        step1 = await self.rebuild_service.step_rebuild(self.group_id, batch_size=4, time_budget_ms=5000)
+        # Step 1: process 1 batch of 4 records with 0 time budget
+        step1 = await self.rebuild_service.step_rebuild(self.group_id, batch_size=4, time_budget_ms=0)
         self.assertEqual(step1.processed_records, 4)
         self.assertEqual(step1.status, "running")
 
