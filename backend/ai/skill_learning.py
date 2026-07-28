@@ -220,42 +220,73 @@ async def promote_skill(
 
 
 async def recall_skills(*, query: str, run_id: str, group_id: int | None,
-                        bot_id: int | None, limit: int = 2) -> tuple[str,list[str]]:
+                        bot_id: int | None, limit: int = 2) -> tuple[str, list[str]]:
     if group_id is None:
-        return "",[]
+        return "", []
     from ai.memory import _memory_db
     from ai.experiences import _terms
-    async with await _memory_db("skills",group_id,write=False) as db:
-        async with db.execute("""SELECT s.skill_id,s.current_version,v.declaration_json
-          FROM skills s JOIN skill_versions v ON v.skill_id=s.skill_id AND v.version=s.current_version
-          WHERE s.group_id=? AND s.bot_id=? AND s.status='active' AND s.maturity IN ('active','stable')""",
-          (group_id,bot_id)) as cur:
-            rows=await cur.fetchall()
-    q=_terms(query); ranked=[]
-    for skill_id,version,raw in rows:
-        declaration=json.loads(raw); terms=_terms(declaration.get("trigger",""))
-        score=len(q&terms)/max(1,len(q|terms))
-        if score: ranked.append((score,skill_id,version,declaration))
-    ranked.sort(reverse=True); selected=ranked[:limit]; now=int(time.time()*1000)
-    if not selected: return "",[]
-    async with await _memory_db("skill_usage",group_id,write=True) as db:
-        for _,skill_id,version,_ in selected:
-            await db.execute("INSERT INTO skill_usage(skill_id,version,run_id,group_id,created_at,updated_at) "
-                             "VALUES(?,?,?,?,?,?) ON CONFLICT(skill_id,run_id) DO NOTHING",
-                             (skill_id,version,run_id,group_id,now,now))
+
+    q = _terms(query)
+    if not q:
+        return "", []
+
+    async with await _memory_db("skills", group_id, write=False) as db:
+        async with db.execute(
+            """SELECT s.skill_id, s.current_version, s.maturity, v.declaration_json
+               FROM skills s
+               JOIN skill_versions v ON v.skill_id=s.skill_id AND v.version=s.current_version
+               WHERE s.group_id=? AND (s.bot_id=? OR s.bot_id IS NULL)
+                 AND s.status='active' AND s.maturity IN ('trial', 'active', 'stable')
+               ORDER BY s.updated_at DESC LIMIT 50""",
+            (group_id, bot_id),
+        ) as cur:
+            rows = await cur.fetchall()
+
+    maturity_weights = {"stable": 1.0, "active": 0.9, "trial": 0.7}
+    ranked = []
+
+    for skill_id, version, maturity, raw in rows:
+        declaration = json.loads(raw)
+        trigger_text = str(declaration.get("trigger", ""))
+        name_text = str(declaration.get("name", ""))
+        terms = _terms(f"{name_text} {trigger_text}")
+        lexical = len(q & terms) / max(1, len(q | terms)) if terms else 0.0
+        weight = maturity_weights.get(maturity, 0.7)
+        score = lexical * weight
+
+        if score >= 0.08 or lexical >= 0.15:
+            ranked.append((score, skill_id, version, declaration))
+
+    ranked.sort(reverse=True)
+    selected = ranked[:limit]
+    if not selected:
+        return "", []
+
+    now = int(time.time() * 1000)
+    async with await _memory_db("skill_usage", group_id, write=True) as db:
+        for _, skill_id, version, _ in selected:
+            await db.execute(
+                "INSERT INTO skill_usage(skill_id,version,run_id,group_id,created_at,updated_at) "
+                "VALUES(?,?,?,?,?,?) ON CONFLICT(skill_id,run_id) DO NOTHING",
+                (skill_id, version, run_id, group_id, now, now),
+            )
         await db.commit()
-    body=[]
+
+    body = []
     from memory.application.references import skill_ref
-    for _,skill_id,version,d in selected:
-        clean_trigger = str(d.get('trigger', '')).replace("</untrusted_learned_skill>", "")
-        clean_procedure = "; ".join(str(step).replace("</untrusted_learned_skill>", "") for step in d.get("procedure", []))
+    for _, skill_id, version, d in selected:
+        clean_trigger = str(d.get("trigger", "")).replace("</untrusted_learned_skill>", "")
+        clean_procedure = "; ".join(
+            str(step).replace("</untrusted_learned_skill>", "")
+            for step in d.get("procedure", [])
+        )
         body.append(
             f'<untrusted_learned_skill memory_ref="{skill_ref(skill_id, version)}">\n'
-            f"Trigger pattern: \"{clean_trigger}\"\n"
+            f'Trigger pattern: "{clean_trigger}"\n'
             f"Procedure: {clean_procedure}\n"
             f"</untrusted_learned_skill>"
         )
-    return "[Learned declarative skills]\n"+"\n".join(body),[x[1] for x in selected]
+    return "[Learned declarative skills]\n" + "\n".join(body), [x[1] for x in selected]
 
 
 async def resolve_skill_refs(
