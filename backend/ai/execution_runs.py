@@ -32,7 +32,7 @@ async def finish_run(
 ) -> None:
     if group_id is None or not run_id:
         return
-    if status not in {"completed", "failed", "cancelled"}:
+    if status not in {"completed", "failed", "cancelled", "abandoned"}:
         raise ValueError(f"invalid terminal run status: {status}")
     from ai.memory import _memory_db
     now = int(time.time() * 1000)
@@ -43,3 +43,25 @@ async def finish_run(
             (status, now, iterations, input_tokens, output_tokens, error_summary[:2000], now, run_id, group_id),
         )
         await db.commit()
+
+
+async def recover_abandoned_runs(
+    group_id: int, *, timeout_seconds: int = 300
+) -> int:
+    """Recover stale running runs left behind after worker crashes."""
+    if group_id <= 0:
+        return 0
+    from ai.memory import _memory_db
+
+    now = int(time.time() * 1000)
+    cutoff = now - (timeout_seconds * 1000)
+
+    async with await _memory_db("agent_runs", group_id, write=True) as db:
+        cursor = await db.execute(
+            """UPDATE agent_runs
+            SET status='abandoned', completed_at=?, error_summary='abandoned_stale_worker_timeout', updated_at=?
+            WHERE group_id=? AND status='running' AND updated_at < ?""",
+            (now, now, group_id, cutoff),
+        )
+        await db.commit()
+        return cursor.rowcount

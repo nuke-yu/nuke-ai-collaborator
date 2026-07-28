@@ -804,7 +804,7 @@ async def migration_032(db):
             thread_id       TEXT NOT NULL DEFAULT '',
             session_id      TEXT NOT NULL,
             status          TEXT NOT NULL DEFAULT 'running'
-                            CHECK(status IN ('running', 'completed', 'failed', 'cancelled')),
+                            CHECK(status IN ('running', 'completed', 'failed', 'cancelled', 'abandoned')),
             provider        TEXT NOT NULL DEFAULT '',
             model           TEXT NOT NULL DEFAULT '',
             executor        TEXT NOT NULL DEFAULT '',

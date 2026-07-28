@@ -127,6 +127,7 @@ class LifecycleManager:
                 if now - last_maintenance >= _MAINTENANCE_INTERVAL_SECONDS:
                     await self._repair_turn_observation_gaps()
                     await self._repair_skill_projection_gaps()
+                    await self._recover_abandoned_execution_runs()
                     await self.sweep_inactive_groups()
                     await self._drain_projection_outboxes()
                     await self._audit_memory_projections()
@@ -224,6 +225,28 @@ class LifecycleManager:
             except Exception:
                 log.exception(
                     "lifecycle: failed to repair Skill projections for group %d",
+                    group_id,
+                )
+
+    async def _recover_abandoned_execution_runs(
+        self, group_ids: tuple[int, ...] | None = None
+    ) -> None:
+        """Recover stale running execution runs left behind after worker crashes."""
+        from ai.execution_runs import recover_abandoned_runs
+
+        if group_ids is None:
+            async with self._lock:
+                targets = tuple(self._active_groups)
+        else:
+            targets = group_ids
+        for group_id in targets:
+            try:
+                await recover_abandoned_runs(group_id, timeout_seconds=300)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                log.exception(
+                    "lifecycle: failed to recover abandoned runs for group %d",
                     group_id,
                 )
 
