@@ -676,6 +676,23 @@ async def cleanup_and_finalize(runner) -> ExecutionResult:
         "cache_read_tokens": runner.ai_service.usage.cache_read_tokens or None,
         "cache_creation_tokens": runner.ai_service.usage.cache_creation_tokens or None,
     }
+    import core.workflow as _wf
+    try:
+        observation_thread_id = _wf.current_thread_id(runner.ctx.group_id)
+    except Exception:
+        observation_thread_id = None
+        logger.warning(
+            "failed to resolve observation thread for group %s",
+            runner.ctx.group_id,
+            exc_info=True,
+        )
+    save_kwargs["meta"] = {
+        "memory_observation": {
+            "thread_id": observation_thread_id,
+            "run_id": runner.run_id,
+            "version": "1",
+        }
+    }
     if attached:
         save_kwargs["file_url"] = attached["url"]
         save_kwargs["file_name"] = attached["name"]
@@ -762,26 +779,24 @@ async def cleanup_and_finalize(runner) -> ExecutionResult:
     # background side effects are spawned. Otherwise a memory/archive task can
     # acquire the lock between snapshot and status and leave the foreground run
     # indefinitely reported as running.
-    import core.workflow as _wf
-    bg.spawn(runner.memory.observe(ObserveMemory(
-        scope=MemoryScope.bot(
-            group_id=runner.ctx.group_id,
-            bot_id=runner.bot["id"],
-            actor_id=f"bot:{runner.bot['id']}",
-            thread_id=_wf.current_thread_id(runner.ctx.group_id),
-            run_id=runner.run_id,
-            purpose="task_result_observation",
-        ),
-        source_id=f"message:{msg_id}",
-        content=runner.full_text,
-        metadata={
-            "message_id": msg_id,
-            "role": runner.bot.get("role") or "",
-            "bot_name": runner.bot["name"],
-            "provider": runner.provider,
-            "model": runner.model_name,
-        },
-    )))
+    try:
+        await runner.memory.observe(ObserveMemory(
+            scope=MemoryScope.bot(
+                group_id=runner.ctx.group_id,
+                bot_id=runner.bot["id"],
+                actor_id=f"bot:{runner.bot['id']}",
+                thread_id=observation_thread_id,
+                run_id=runner.run_id,
+                purpose="task_result_observation",
+            ),
+            source_id=f"message:{msg_id}",
+            content=runner.full_text,
+            metadata={"message_id": msg_id},
+        ))
+    except Exception:
+        logger.exception(
+            "failed to enqueue durable memory observation for message %s", msg_id
+        )
     bg.spawn(bus.publish(CompactionTriggered(
         group_id=runner.ctx.group_id,
         bot_id=runner.bot["id"],

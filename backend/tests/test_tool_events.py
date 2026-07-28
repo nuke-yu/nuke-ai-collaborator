@@ -26,7 +26,12 @@ from ai.tool_events import (
 from ai.execution_runs import finish_run, start_run
 from ai.cases import assemble_case, build_attempt_trace, task_signature
 from ai.cases import evaluate_outcome
-from ai.pipeline import dispatch_group, job_stats, process_case
+from ai.pipeline import (
+    dispatch_group,
+    enqueue_missing_turn_observations,
+    job_stats,
+    process_case,
+)
 from ai.reflexion import classify_failure, maybe_inject
 from ai.skill_learning import compile_candidate, complete_skill_usage, promote_skill, recall_skills, validate_declaration
 from ai.experiences import complete_usage, decay_experiences, distill_case, recall_experiences
@@ -732,6 +737,74 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(row[0], "dead")
         self.assertIn("lease expired", row[1])
         self.assertIsNone(row[2])
+
+    async def test_turn_observation_gap_repair_fans_out_durable_stages(self):
+        async with database.connect(TEST_DB_PATH) as db:
+            await db.execute("INSERT INTO groups(id,name) VALUES(7,'g')")
+            await db.execute(
+                """INSERT INTO members
+                   (id,group_id,name,type,role,model_provider,model_name)
+                   VALUES(3,7,'DevBot','bot','developer','claude','opus')"""
+            )
+            await db.execute(
+                """INSERT INTO messages
+                   (id,group_id,member_id,content,sender_name,sender_type,
+                    sender_provider,sender_model,meta)
+                   VALUES(42,7,3,'Use React 19','DevBot','bot','claude','opus',?)""",
+                (json.dumps({
+                    "memory_observation": {
+                        "thread_id": "disc:7:architecture",
+                        "run_id": "run:42",
+                        "version": "1",
+                    }
+                }),),
+            )
+            await db.commit()
+
+        self.assertEqual(await enqueue_missing_turn_observations(7), 1)
+        self.assertEqual(await enqueue_missing_turn_observations(7), 0)
+        parent = await dispatch_group(7)
+        self.assertEqual(parent["completed"], 1)
+
+        with patch("ai.memory.add_to_chroma", new_callable=AsyncMock) as fact, \
+             patch("ai.memory.maybe_summarize", new_callable=AsyncMock) as summary, \
+             patch("ai.memory.maybe_reflect", new_callable=AsyncMock) as reflection, \
+             patch(
+                 "ai.tool_events.maybe_compress_tool_events",
+                 new_callable=AsyncMock,
+             ) as compression:
+            reflection.side_effect = RuntimeError("temporary model failure")
+            first_children = await dispatch_group(7)
+            reflection.side_effect = None
+            retry = await dispatch_group(7)
+
+        self.assertEqual(
+            first_children, {"claimed": 4, "completed": 3, "failed": 1}
+        )
+        self.assertEqual(retry, {"claimed": 1, "completed": 1, "failed": 0})
+        fact.assert_awaited_once_with(
+            42, "Use React 19", "developer", 3, 7,
+            "claude", "opus", "disc:7:architecture", strict=True,
+        )
+        summary.assert_awaited_once_with(
+            7, 3, "developer", [3], "disc:7:architecture", strict=True
+        )
+        reflection.assert_awaited_with(
+            7, 3, "developer", "claude", "opus", strict=True
+        )
+        self.assertEqual(reflection.await_count, 2)
+        compression.assert_awaited_once_with(
+            7, 3, "developer", "disc:7:architecture", "claude", "opus",
+            strict=True,
+        )
+        async with database.connect(TEST_DB_PATH) as db:
+            async with db.execute(
+                """SELECT job_type,status FROM pipeline_jobs
+                   WHERE job_type LIKE 'observe_turn%' ORDER BY job_type"""
+            ) as cur:
+                rows = await cur.fetchall()
+        self.assertEqual(len(rows), 5)
+        self.assertTrue(all(status == "completed" for _, status in rows))
 
     async def test_reflexion_is_bounded_and_persists_decision_trace(self):
         self.assertEqual(classify_failure("run_shell", "command failed"), "correctable_execution")

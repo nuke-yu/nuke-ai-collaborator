@@ -56,6 +56,8 @@ class MemoryProvider(Protocol):
 class NullMemoryProvider:
     """禁用记忆：读返回空串，写/删 no-op。bot 循环完全无需感知。"""
 
+    durable_observation_enabled = False
+
     async def recall(self, ctx: MemoryContext) -> str:
         return ""
 
@@ -74,6 +76,8 @@ class ChromaMemoryProvider:
     三条子 pipeline 并发执行、互不阻塞；单条失败被隔离记日志，不影响其余（与原先三个独立
     bg.spawn 的容错语义一致）。
     """
+
+    durable_observation_enabled = True
 
     async def recall(self, ctx: MemoryContext) -> str:
         from ai.memory import get_memory_context

@@ -121,6 +121,21 @@ class TestCell17Lifecycle(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(snapshot["backlog"], 0)
         self.assertIn("last_dispatched_at", snapshot)
 
+    async def test_observation_gap_repair_is_scoped_to_worker_owned_groups(self):
+        lm = LifecycleManager()
+        lm._active_groups[7] = time.time()
+        with patch(
+            "ai.pipeline.enqueue_missing_turn_observations",
+            new_callable=AsyncMock,
+            return_value=2,
+        ) as repair:
+            await lm._repair_turn_observation_gaps()
+
+        repair.assert_awaited_once_with(7)
+        self.assertEqual(
+            lm.stats()["learning_pipeline"]["7"]["observation_jobs_repaired"], 2
+        )
+
     async def test_lru_eviction_closes_writer(self):
         lm = LifecycleManager(max_groups=2)
         

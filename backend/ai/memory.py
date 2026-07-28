@@ -520,7 +520,8 @@ class QueryRewriter:
 
 async def add_to_chroma(message_id: int, content: str, role: str, bot_id: int, group_id: int | None = None,
                         provider: str = "deepseek", model: str = "deepseek-chat",
-                        thread_id: str | None = None, timestamp: float | None = None):
+                        thread_id: str | None = None, timestamp: float | None = None,
+                        strict: bool = False):
     # 1. 噪声快筛与事实提取
     facts = await FactExtractor.extract(content, provider, model)
     if not facts:
@@ -556,6 +557,7 @@ async def add_to_chroma(message_id: int, content: str, role: str, bot_id: int, g
         timestamp=timestamp,
         legacy_conflict_ids=del_ids,
         legacy_conflict_replacements=conflict_replacements,
+        strict=strict,
     )
     if canonical_record_ids and group_id is not None:
         if not await _legacy_chroma_direct_write_enabled(group_id):
@@ -624,6 +626,7 @@ async def _mirror_facts_to_canonical(
     timestamp: float | None,
     legacy_conflict_ids: list[str],
     legacy_conflict_replacements: tuple[tuple[str, str], ...],
+    strict: bool = False,
 ) -> tuple[str, ...] | None:
     if group_id is None:
         return None
@@ -668,6 +671,8 @@ async def _mirror_facts_to_canonical(
     except asyncio.CancelledError:
         raise
     except Exception:
+        if strict:
+            raise
         log.exception(
             "canonical fact dual-write failed (group_id=%s, bot_id=%s, message_id=%s)",
             group_id,
@@ -790,7 +795,7 @@ async def _memory_db(table_name: str, group_id: int | None, *, write: bool):
 
 
 async def maybe_summarize(group_id: int, bot_id: int, role: str, member_ids: list,
-                          thread_id: str | None = None):
+                          thread_id: str | None = None, strict: bool = False):
     from ai.client import call_ai
     if not member_ids:
         return
@@ -833,7 +838,7 @@ async def maybe_summarize(group_id: int, bot_id: int, role: str, member_ids: lis
             await db.commit()
     except Exception as e:
         from db.errors import is_missing_schema_error
-        if is_missing_schema_error(e):
+        if strict or is_missing_schema_error(e):
             raise  # 缺列/缺表是迁移缺口，必须响亮上抛而非当成"没数据"咽下
         log.exception("maybe_summarize failed (bot_id=%s, group_id=%s)", bot_id, group_id)
 
@@ -892,7 +897,8 @@ _reflect_in_flight: set[tuple[int, int | None]] = set()
 
 
 async def maybe_reflect(group_id: int, bot_id: int, role: str,
-                        provider: str = "deepseek", model: str = "deepseek-chat") -> None:
+                        provider: str = "deepseek", model: str = "deepseek-chat",
+                        strict: bool = False) -> None:
     """巩固层：把自上次反思以来积累的零散事实周期性归纳为高层语义洞察。
 
     重要性累积触发；产出的洞察作为 mem_type=reflection 写回 Chroma，靠高 importance +
@@ -1107,6 +1113,8 @@ async def maybe_reflect(group_id: int, bot_id: int, role: str,
             bot_id, group_id, len(triggered), len(groups), total_kept, total_insights,
         )
     except Exception:
+        if strict:
+            raise
         log.exception("maybe_reflect failed (bot_id=%s, group_id=%s)", bot_id, group_id)
     finally:
         _reflect_in_flight.discard(key)

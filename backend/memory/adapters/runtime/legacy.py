@@ -62,24 +62,21 @@ class LegacyConversationMemoryAdapter:
 
     async def observe(self, command: ObserveMemory) -> None:
         bot_id = self._require_bot_scope(command.scope.kind, command.scope.bot_id)
-        from ai.memory_provider import MemoryEvent
-
         metadata = command.metadata
         message_id = metadata.get("message_id")
         if not isinstance(message_id, int) or isinstance(message_id, bool) or message_id <= 0:
             raise MemoryOperationError("legacy conversation observe requires a positive message_id")
-        event = MemoryEvent(
-            bot_id=bot_id,
-            group_id=command.scope.group_id,
-            role=str(metadata.get("role", "")),
-            bot_name=str(metadata.get("bot_name", "")),
+        if not getattr(self._provider, "durable_observation_enabled", True):
+            return
+        group_id = command.scope.group_id
+        if group_id is None:
+            raise MemoryOperationError("legacy conversation observe requires group scope")
+        from ai.pipeline import enqueue_turn_observation
+        await enqueue_turn_observation(
             message_id=message_id,
-            text=command.content,
-            provider=str(metadata.get("provider", "")),
-            model=str(metadata.get("model", "")),
-            thread_id=command.scope.thread_id,
+            bot_id=bot_id,
+            group_id=group_id,
         )
-        await self._provider.observe(event)
 
 
     async def forget(self, command: ForgetMemory) -> None:

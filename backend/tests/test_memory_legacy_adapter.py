@@ -37,24 +37,29 @@ class TestLegacyConversationMemoryAdapter(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((ctx.bot_id, ctx.group_id, ctx.thread_id), (5, 9, "disc:9:abc"))
         self.assertEqual((ctx.role, ctx.query, ctx.history), ("dev", "React version", ["previous"]))
 
-    async def test_observe_translates_all_legacy_fields(self):
+    @patch("ai.pipeline.enqueue_turn_observation", new_callable=AsyncMock)
+    async def test_observe_durably_enqueues_stable_message_identity(self, enqueue):
         await self.adapter.observe(
             ObserveMemory(
-                scope=self.scope,
-                source_id="message:42",
-                content="Use React 19",
-                metadata={
-                    "message_id": 42,
-                    "role": "dev",
-                    "bot_name": "Developer",
-                    "provider": "claude",
-                    "model": "opus",
-                },
+                scope=self.scope, source_id="message:42",
+                content="Use React 19", metadata={"message_id": 42},
             )
         )
-        event = self.provider.observe.await_args.args[0]
-        self.assertEqual((event.message_id, event.text, event.bot_id), (42, "Use React 19", 5))
-        self.assertEqual((event.provider, event.model, event.thread_id), ("claude", "opus", "disc:9:abc"))
+        enqueue.assert_awaited_once_with(message_id=42, bot_id=5, group_id=9)
+        self.provider.observe.assert_not_awaited()
+
+    async def test_disabled_provider_does_not_enqueue_observation(self):
+        self.provider.durable_observation_enabled = False
+        with patch(
+            "ai.pipeline.enqueue_turn_observation", new_callable=AsyncMock
+        ) as enqueue:
+            await self.adapter.observe(
+                ObserveMemory(
+                    scope=self.scope, source_id="message:42",
+                    content="Use React 19", metadata={"message_id": 42},
+                )
+            )
+        enqueue.assert_not_awaited()
 
     async def test_observe_rejects_missing_legacy_message_identity(self):
         with self.assertRaisesRegex(MemoryOperationError, "message_id"):

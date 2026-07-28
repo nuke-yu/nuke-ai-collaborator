@@ -336,7 +336,8 @@ def _parse_insights(text: str, cap: int) -> list[tuple[str, float]]:
 async def maybe_compress_tool_events(group_id: int, bot_id: int, role: str = "",
                                      thread_id: str | None = None,
                                      provider: str = "deepseek",
-                                     model: str = "deepseek-chat") -> None:
+                                     model: str = "deepseek-chat",
+                                     strict: bool = False) -> None:
     """L4：条数门控压缩。未达阈值即早退（不调模型）。fail-soft，schema 缺口上抛。"""
     if group_id is None or bot_id is None:
         return
@@ -408,7 +409,7 @@ async def maybe_compress_tool_events(group_id: int, bot_id: int, role: str = "",
         from db.errors import is_missing_schema_error
         import sys
         e = sys.exc_info()[1]
-        if e is not None and is_missing_schema_error(e):
+        if strict or (e is not None and is_missing_schema_error(e)):
             raise
         log.debug("maybe_compress_tool_events swallowed (group=%s, bot=%s)",
                   group_id, bot_id, exc_info=True)

@@ -146,6 +146,13 @@ MEMORY_V1_DDL = (
         updated_at INTEGER NOT NULL, completed_at INTEGER
     )""",
     "CREATE INDEX IF NOT EXISTS idx_pipeline_jobs_ready ON pipeline_jobs(group_id, status, updated_at)",
+    """CREATE INDEX IF NOT EXISTS idx_pipeline_jobs_input
+       ON pipeline_jobs(group_id,job_type,input_id,input_version)""",
+    """CREATE TABLE IF NOT EXISTS memory_observation_scan_state (
+        group_id INTEGER PRIMARY KEY,
+        scan_after_message_id INTEGER NOT NULL DEFAULT 0,
+        updated_at INTEGER NOT NULL DEFAULT 0
+    )""",
     """CREATE TABLE IF NOT EXISTS skills (
         skill_id TEXT PRIMARY KEY, group_id INTEGER NOT NULL, bot_id INTEGER,
         name TEXT NOT NULL, maturity TEXT NOT NULL DEFAULT 'candidate', risk_level TEXT NOT NULL,
