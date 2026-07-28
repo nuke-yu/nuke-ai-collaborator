@@ -238,6 +238,7 @@ class IngestBotReflections:
     provider: str = ""
     model: str = ""
     thread_id: str = ""
+    legacy_conflict_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.reflections:

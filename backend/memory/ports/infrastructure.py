@@ -133,6 +133,22 @@ class MemoryRepositoryPort(Protocol):
 
 
 @runtime_checkable
+class ProjectionOutboxPort(Protocol):
+    async def enqueue(
+        self,
+        connection: Any,
+        *,
+        event_id: str,
+        projection_type: str,
+        aggregate_id: str,
+        aggregate_version: str,
+        group_id: int,
+        payload: Mapping[str, Any],
+        now_ms: int | None = None,
+    ) -> None: ...
+
+
+@runtime_checkable
 class PipelineJobRepositoryPort(Protocol):
     async def enqueue(self, scope: MemoryScope, job_type: str, input_id: str, input_version: str = "1") -> str: ...
     async def claim(self, scope: MemoryScope, job_id: str, lease_seconds: int = 60) -> str | None: ...

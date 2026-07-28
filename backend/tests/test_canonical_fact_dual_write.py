@@ -21,7 +21,7 @@ from memory.contracts import (
     MemoryAuthorizationError,
 )
 from memory.domain import MemoryScope
-from memory.infrastructure import MemorySchemaManager
+from memory.infrastructure import MemorySchemaManager, ProjectionOutbox
 
 
 class _PathDatabase:
@@ -69,7 +69,9 @@ class BotFactObservationServiceTest(unittest.IsolatedAsyncioTestCase):
         self.path = tempfile.mktemp(suffix="_canonical_fact_mirror.db")
         self.database = _PathDatabase(self.path)
         await MemorySchemaManager(self.database).ensure_group(7)
-        self.service = BotFactObservationService(self.database)
+        self.delivery = AsyncMock()
+        self.outbox = ProjectionOutbox(self.database, self.delivery)
+        self.service = BotFactObservationService(self.database, self.outbox)
 
     async def asyncTearDown(self) -> None:
         for suffix in ("", "-wal", "-shm"):
@@ -100,8 +102,20 @@ class BotFactObservationServiceTest(unittest.IsolatedAsyncioTestCase):
             self.assertIn(row[9], {0.7, 0.8})
             self.assertEqual(row[10], '["message:42"]')
             self.assertIn('"legacy_conflict_ids": ["fact_3_7_10_0"]', row[11])
-            self.assertIn('"projection_state": "legacy_chroma_direct_write"', row[12])
+            self.assertIn(
+                '"projection_state": "legacy_direct_write_with_durable_outbox"',
+                row[12],
+            )
             self.assertEqual(row[13], 123_000)
+        async with db.connect(self.path) as connection:
+            async with connection.execute(
+                """SELECT projection_type,status,COUNT(*)
+                FROM memory_projection_outbox GROUP BY projection_type,status"""
+            ) as cursor:
+                self.assertEqual(
+                    await cursor.fetchone(),
+                    ("bot_memory_vector_upsert", "pending", 2),
+                )
 
     async def test_source_replay_is_idempotent_and_does_not_reactivate(self) -> None:
         record_ids = await self.service.ingest(_command())

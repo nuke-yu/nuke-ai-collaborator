@@ -7,14 +7,21 @@ import time
 
 from memory.contracts import IngestBotFactObservations, MemoryAuthorizationError
 from memory.domain import ScopeKind
-from memory.ports import MemoryDatabasePort
+from memory.ports import MemoryDatabasePort, ProjectionOutboxPort
+
+from .vector_projection import enqueue_bot_memory_projection
 
 
 class BotFactObservationService:
     """Mirror legacy extraction as Bot-owned provisional canonical records."""
 
-    def __init__(self, database: MemoryDatabasePort) -> None:
+    def __init__(
+        self,
+        database: MemoryDatabasePort,
+        projection_outbox: ProjectionOutboxPort,
+    ) -> None:
         self._database = database
+        self._projection_outbox = projection_outbox
 
     async def ingest(self, command: IngestBotFactObservations) -> tuple[str, ...]:
         scope = command.scope
@@ -67,9 +74,9 @@ class BotFactObservationService:
                     "schema_version": "bot-fact-observation-v1",
                     "role": command.role,
                     "thread_id": command.thread_id,
-                    "projection_state": "legacy_chroma_direct_write",
+                    "projection_state": "legacy_direct_write_with_durable_outbox",
                 }
-                await db.execute(
+                cursor = await db.execute(
                     """INSERT OR IGNORE INTO memory_records
                     (record_id,kind,group_id,bot_id,status,content,
                      task_signature,confidence,importance,source_ids,
@@ -93,6 +100,36 @@ class BotFactObservationService:
                         now,
                         now,
                     ),
+                )
+                if cursor.rowcount == 0:
+                    async with db.execute(
+                        "SELECT status FROM memory_records WHERE record_id=?",
+                        (record_id,),
+                    ) as existing_cursor:
+                        existing = await existing_cursor.fetchone()
+                    if existing is None or existing[0] != "provisional":
+                        record_ids.append(record_id)
+                        continue
+                projection_metadata = {
+                    "bot_id": scope.bot_id,
+                    "role": command.role,
+                    "timestamp": effective_from / 1000,
+                    "importance": fact.importance,
+                    "mem_type": "fact",
+                    "scored_by_model": f"{command.provider}/{command.model}",
+                    "thread_id": command.thread_id,
+                    "group_id": scope.group_id,
+                }
+                await enqueue_bot_memory_projection(
+                    self._projection_outbox,
+                    db,
+                    record_id=record_id,
+                    group_id=scope.group_id,
+                    projection_id=fact.projection_id,
+                    content=fact.content.strip()[:4000],
+                    metadata=projection_metadata,
+                    delete_ids=conflict_ids,
+                    now_ms=now,
                 )
                 record_ids.append(record_id)
             await db.commit()

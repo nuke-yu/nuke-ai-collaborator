@@ -8,6 +8,7 @@ import time
 import unittest
 from contextlib import AbstractAsyncContextManager
 from dataclasses import replace
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -16,13 +17,17 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import db
 from ai import memory
 from memory.application import BotReflectionService
+from memory.adapters.runtime.projection_legacy import (
+    LegacyMemoryProjectionDelivery,
+    _reconcile_bot_memory_projections,
+)
 from memory.contracts import (
     IngestBotReflections,
     MemoryAuthorizationError,
     SynthesizedReflection,
 )
 from memory.domain import MemoryScope
-from memory.infrastructure import MemorySchemaManager
+from memory.infrastructure import MemorySchemaManager, ProjectionOutbox
 
 
 class _PathDatabase:
@@ -69,7 +74,9 @@ class BotReflectionServiceTest(unittest.IsolatedAsyncioTestCase):
         self.path = tempfile.mktemp(suffix="_canonical_reflection_mirror.db")
         self.database = _PathDatabase(self.path)
         await MemorySchemaManager(self.database).ensure_group(7)
-        self.service = BotReflectionService(self.database)
+        self.delivery = AsyncMock()
+        self.outbox = ProjectionOutbox(self.database, self.delivery)
+        self.service = BotReflectionService(self.database, self.outbox)
 
     async def asyncTearDown(self) -> None:
         for suffix in ("", "-wal", "-shm"):
@@ -115,6 +122,17 @@ class BotReflectionServiceTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIn('"level": 1', row[12])
         self.assertEqual(row[13], 123_001)
+        async with db.connect(self.path) as connection:
+            async with connection.execute(
+                """SELECT projection_type,status,payload_json
+                FROM memory_projection_outbox"""
+            ) as cursor:
+                projection_type, status, payload = await cursor.fetchone()
+        self.assertEqual(
+            (projection_type, status),
+            ("bot_memory_vector_upsert", "pending"),
+        )
+        self.assertIn('"projection_id": "refl_3_7_123001_0_0"', payload)
 
     async def test_replay_is_idempotent_and_does_not_reactivate(self) -> None:
         record_ids = await self.service.ingest(_command())
@@ -156,6 +174,97 @@ class BotReflectionServiceTest(unittest.IsolatedAsyncioTestCase):
     async def test_actor_must_match_owning_bot(self) -> None:
         with self.assertRaisesRegex(MemoryAuthorizationError, "match"):
             await self.service.ingest(_command(actor_id="bot:4"))
+
+    async def test_canonical_write_and_projection_intent_are_atomic(self) -> None:
+        failing_outbox = AsyncMock()
+        failing_outbox.enqueue.side_effect = RuntimeError("outbox unavailable")
+        service = BotReflectionService(self.database, failing_outbox)
+
+        with self.assertRaisesRegex(RuntimeError, "outbox unavailable"):
+            await service.ingest(_command())
+
+        async with db.connect(self.path) as connection:
+            async with connection.execute(
+                "SELECT COUNT(*) FROM memory_records"
+            ) as cursor:
+                self.assertEqual((await cursor.fetchone())[0], 0)
+
+    async def test_failed_chroma_projection_remains_retryable(self) -> None:
+        outbox = ProjectionOutbox(
+            self.database,
+            LegacyMemoryProjectionDelivery(),
+            error_sanitizer=lambda message: message,
+        )
+        service = BotReflectionService(self.database, outbox)
+        command = replace(
+            _command(),
+            legacy_conflict_ids=("refl_3_7_old",),
+        )
+        with patch.object(
+            memory.ChromaStore,
+            "write_fact_sync",
+            side_effect=RuntimeError("chroma unavailable"),
+        ):
+            await service.ingest(command)
+            failed = await outbox.drain(7)
+
+        self.assertEqual(
+            (failed.claimed, failed.completed, failed.failed),
+            (1, 0, 1),
+        )
+        async with db.connect(self.path) as connection:
+            async with connection.execute(
+                """SELECT status,attempt_count,last_error
+                FROM memory_projection_outbox"""
+            ) as cursor:
+                status, attempts, error = await cursor.fetchone()
+            await connection.execute(
+                "UPDATE memory_projection_outbox SET next_attempt_at=0"
+            )
+            await connection.commit()
+        self.assertEqual((status, attempts), ("pending", 1))
+        self.assertIn("RuntimeError", error)
+
+        with (
+            patch.object(memory.ChromaStore, "write_fact_sync") as write,
+            patch.object(memory.ChromaStore, "delete_ids_sync") as delete,
+        ):
+            recovered = await outbox.drain(7)
+
+        self.assertEqual(
+            (recovered.claimed, recovered.completed, recovered.failed),
+            (1, 1, 0),
+        )
+        write.assert_called_once()
+        delete.assert_called_once_with(["refl_3_7_old"])
+
+    async def test_reconciliation_rebuilds_missing_projection_intent(self) -> None:
+        await self.service.ingest(_command())
+        async with db.connect(self.path) as connection:
+            await connection.execute("DELETE FROM memory_projection_outbox")
+            await connection.commit()
+
+        with (
+            patch(
+                "memory.adapters.runtime.projection_legacy."
+                "legacy_memory_database",
+                self.database,
+            ),
+            patch(
+                "memory.bootstrap.get_memory_module",
+                return_value=SimpleNamespace(projection_outbox=self.outbox),
+            ),
+        ):
+            self.assertEqual(await _reconcile_bot_memory_projections(7), 1)
+
+        async with db.connect(self.path) as connection:
+            async with connection.execute(
+                """SELECT status,payload_json FROM memory_projection_outbox"""
+            ) as cursor:
+                status, payload = await cursor.fetchone()
+        self.assertEqual(status, "pending")
+        self.assertIn('"mem_type": "reflection"', payload)
+        self.assertIn('"source_ids": "fact_3_7_40_0,fact_3_7_41_0"', payload)
 
 
 class LegacyReflectionDualWriteTest(unittest.IsolatedAsyncioTestCase):

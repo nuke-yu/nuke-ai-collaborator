@@ -110,8 +110,8 @@ forget
 
 | 当前能力 | 存储/实现 | 当前语义 |
 |---|---|---|
-| 原子事实 | canonical SQLite + Chroma `mem_type=fact` | 同一抽取结果保存为 Bot-owned Provisional Fact，并继续写入兼容 Chroma 投影 |
-| 高阶反思 | canonical SQLite + Chroma `mem_type=reflection` | 同一归纳结果先保存为 Bot-owned Provisional Reflection，再直接写入兼容 Chroma 投影；带 legacy source IDs |
+| 原子事实 | canonical SQLite + durable outbox + Chroma `mem_type=fact` | Bot-owned Provisional Fact 与 projection intent 同事务提交；迁移期仍保留低延迟 Chroma 直写 |
+| 高阶反思 | canonical SQLite + durable outbox + Chroma `mem_type=reflection` | Provisional Reflection 与 projection intent 同事务提交；带 legacy source IDs，迁移期仍保留 Chroma 直写 |
 | 工具经验 | SQLite `tool_events` + Chroma `tool_episode` | 工具事件确定性记录，达到条数门槛后批量压缩 |
 | 会话摘要 | Group SQLite `role_summaries` | 按 Bot、Group、Thread 保存和召回 |
 | 反思进度 | Group SQLite `reflection_state` | 按 Bot/Thread 水位线增量处理 |
@@ -145,7 +145,7 @@ forget
 
 | 当前实现 | 目标设计 | 迁移要求 |
 |---|---|---|
-| Fact/Reflection 已双写 canonical 与 Chroma，召回仍读 Chroma | SQLite canonical，Chroma 是可重建索引 | 补 durable outbox、回填与对账后再切换投影和读路径 |
+| Fact/Reflection 已有 canonical + durable outbox，在线召回和低延迟写入仍走 Chroma | SQLite canonical，Chroma 是可重建索引 | 补回填统计与 shadow 对账，达标后移除直写并切换读路径 |
 | 冲突 Fact 被物理删除 | ADD-only + temporal supersede | 保留旧事实、来源、有效时间和替代关系 |
 | `observe()` 内多条临时后台协程 | 持久化 Pipeline Job | 前台仍 fail-soft，后台支持幂等、恢复和 dead-letter |
 | 工具事件按数量压缩 | durable Run → Case → Experience | 先补稳定 run/step/attempt identity |
@@ -154,6 +154,11 @@ forget
 | 仅 Group/Bot 记忆 | 增加独立 Personal Knowledge Vault | Person 数据不落 Group DB，通过 Scoped Projection 使用 |
 
 迁移期间不允许直接删除存量 Chroma、`role_summaries`、`reflection_state` 或 `tool_events`。任何切换必须具备回填统计、dry-run、幂等重跑、隔离验证和回滚路径。
+
+Fact/Reflection 的 canonical 写入与 `memory_projection_outbox` intent 已在同一
+Group SQLite 事务内完成。Worker 周期 drain 负责失败重试，Group hydration 会从仍为
+Provisional 的 canonical Bot records 重建缺失 intent。投影 delivery 使用稳定 Chroma
+ID，因此重复投递为幂等 upsert；旧 Chroma 直写暂时保留到 shadow 对账完成。
 
 ## 2. 产品目标
 

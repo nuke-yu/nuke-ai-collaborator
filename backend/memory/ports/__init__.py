@@ -18,6 +18,7 @@ from .infrastructure import (
     MemorySchemaPort,
     PipelineJobRepositoryPort,
     ProjectionDeliveryPort,
+    ProjectionOutboxPort,
     ProjectionReconcilerPort,
     RerankPort,
     SkillExtractionPort,
@@ -53,5 +54,6 @@ __all__ = [
     "MemoryDatabasePort",
     "PipelineJobRepositoryPort",
     "ProjectionDeliveryPort",
+    "ProjectionOutboxPort",
     "ProjectionReconcilerPort",
 ]

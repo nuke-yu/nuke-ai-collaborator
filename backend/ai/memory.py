@@ -928,6 +928,7 @@ async def maybe_reflect(group_id: int, bot_id: int, role: str,
                 provider=provider,
                 model=model,
                 thread_id=tid,
+                legacy_conflict_ids=tuple(del_ids),
             )
 
             for refl_id, insight, score, refl_ts in projections:
@@ -976,6 +977,7 @@ async def _mirror_reflections_to_canonical(
     provider: str,
     model: str,
     thread_id: str,
+    legacy_conflict_ids: tuple[str, ...],
 ) -> None:
     if group_id is None:
         return
@@ -1010,6 +1012,7 @@ async def _mirror_reflections_to_canonical(
                 provider=provider,
                 model=model,
                 thread_id=thread_id,
+                legacy_conflict_ids=legacy_conflict_ids,
             )
         )
     except asyncio.CancelledError:

@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from memory.adapters.runtime import (
     LegacyConversationMemoryAdapter,
-    LegacyExperienceProjectionDelivery,
-    LegacyExperienceProjectionReconciler,
+    LegacyMemoryProjectionDelivery,
+    LegacyMemoryProjectionReconciler,
     LegacyLearningAdapter,
     LegacyPersonalKnowledgeAdapter,
     legacy_memory_database,
@@ -53,11 +53,17 @@ def build_group_knowledge_client() -> GroupFactService:
 
 
 def build_bot_fact_observation_client() -> BotFactObservationService:
-    return BotFactObservationService(legacy_memory_database)
+    return BotFactObservationService(
+        legacy_memory_database,
+        get_memory_module().projection_outbox,
+    )
 
 
 def build_bot_reflection_client() -> BotReflectionService:
-    return BotReflectionService(legacy_memory_database)
+    return BotReflectionService(
+        legacy_memory_database,
+        get_memory_module().projection_outbox,
+    )
 
 
 def build_memory_relation_client() -> CanonicalRelationService:
@@ -73,7 +79,7 @@ def build_memory_acl() -> MemoryACLPort:
 
 def build_memory_module(*, drain_interval_seconds: float = 60.0) -> MemoryModule:
     """Compose an embeddable Memory runtime from host-specific adapters."""
-    delivery = LegacyExperienceProjectionDelivery()
+    delivery = LegacyMemoryProjectionDelivery()
     outbox = ProjectionOutbox(
         legacy_memory_database,
         delivery,
@@ -83,7 +89,7 @@ def build_memory_module(*, drain_interval_seconds: float = 60.0) -> MemoryModule
         legacy_memory_database,
         MemorySchemaManager(legacy_memory_database),
         outbox,
-        LegacyExperienceProjectionReconciler(),
+        LegacyMemoryProjectionReconciler(),
         drain_interval_seconds=drain_interval_seconds,
     )
 
