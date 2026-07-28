@@ -129,29 +129,67 @@ class GroupFactService:
         if scope.kind not in {ScopeKind.GROUP, ScopeKind.BOT} or scope.group_id is None:
             raise MemoryAuthorizationError("Group Fact recall requires group scope")
         terms = _terms(query.query)
+        fts_query = _build_fts_query(query.query)
+        rows: list[tuple[Any, ...]] = []
+        candidate_source = "fts"
+
         async with await self._database.connect(
             "memory_records", scope.group_id, write=False
         ) as db:
-            async with db.execute(
-                """SELECT record_id,content,confidence,authority,subject_key,
-                    source_ids,updated_at FROM memory_records
-                WHERE group_id=? AND owner_type='group'
-                  AND kind='group_fact' AND status='active'
-                  AND sensitivity IN ('public','group')
-                ORDER BY updated_at DESC LIMIT 200""",
-                (scope.group_id,),
-            ) as cursor:
-                rows = await cursor.fetchall()
+            if fts_query:
+                try:
+                    async with db.execute(
+                        """SELECT r.record_id, r.content, r.confidence, r.authority,
+                            r.subject_key, r.source_ids, r.updated_at, fts.rank
+                        FROM memory_records_fts fts
+                        JOIN memory_records r ON fts.record_id = r.record_id
+                        WHERE fts MATCH ? AND r.group_id=? AND r.owner_type='group'
+                          AND r.kind='group_fact' AND r.status='active'
+                          AND r.sensitivity IN ('public','group')
+                        ORDER BY fts.rank LIMIT 500""",
+                        (fts_query, scope.group_id),
+                    ) as cursor:
+                        rows = await cursor.fetchall()
+                except Exception:
+                    rows = []
+
+            # Fallback scan across active group facts if FTS returned no rows or errored
+            if not rows:
+                candidate_source = "fallback_scan"
+                async with db.execute(
+                    """SELECT record_id, content, confidence, authority,
+                        subject_key, source_ids, updated_at, 0.0 as rank
+                    FROM memory_records
+                    WHERE group_id=? AND owner_type='group'
+                      AND kind='group_fact' AND status='active'
+                      AND sensitivity IN ('public','group')
+                    ORDER BY updated_at DESC LIMIT 1000""",
+                    (scope.group_id,),
+                ) as cursor:
+                    rows = await cursor.fetchall()
+
         ranked = []
+        now_ms = time.time() * 1000
+        norm_query_subject = _normalize_subject_safe(query.query)
+
         for row in rows:
             candidate_terms = _terms(f"{row[4]} {row[1]}")
-            lexical = len(terms & candidate_terms) / max(
-                1, len(terms | candidate_terms)
+            lexical = (
+                len(terms & candidate_terms) / max(1, len(terms | candidate_terms))
+                if terms
+                else 0.1
             )
-            if lexical <= 0:
-                continue
-            score = 0.75 * lexical + 0.25 * float(row[2])
-            ranked.append((score, row))
+            subject_boost = (
+                0.3
+                if norm_query_subject and norm_query_subject in str(row[4]).lower()
+                else 0.0
+            )
+            age_days = max(0.0, (now_ms - float(row[6])) / (86400 * 1000))
+            recency = max(0.0, 0.1 * (1.0 - (age_days / 30.0)))
+            score = 0.5 * lexical + subject_boost + 0.15 * float(row[2]) + recency
+            if lexical > 0 or subject_boost > 0 or candidate_source == "fallback_scan":
+                ranked.append((score, row))
+
         ranked.sort(key=lambda item: (item[0], item[1][6]), reverse=True)
 
         hits = []
@@ -194,8 +232,8 @@ class GroupFactService:
             rendered_context=context,
             algorithm_trace=(
                 {
-                    "algorithm_id": "nuke.group_fact.lexical",
-                    "version": "v1",
+                    "algorithm_id": f"nuke.group_fact.{candidate_source}",
+                    "version": "v2_fts5",
                     "candidate_count": len(rows),
                 },
             ),
@@ -244,3 +282,16 @@ def _terms(value: str) -> set[str]:
         for index in range(max(0, len(chinese) - 1))
     )
     return terms
+
+
+def _build_fts_query(raw_query: str) -> str:
+    cleaned = re.sub(r"[^\w\s\u4e00-\u9fff]", " ", raw_query.strip())
+    tokens = [t for t in cleaned.split() if len(t) > 0][:10]
+    if not tokens:
+        return ""
+    return " OR ".join(f'"{t}"*' if t.isalnum() else f'"{t}"' for t in tokens)
+
+
+def _normalize_subject_safe(value: str) -> str:
+    return re.sub(r"[^a-z0-9_.:/-]+", "-", value.strip().lower()).strip("-")
+

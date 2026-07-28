@@ -6,7 +6,7 @@ from typing import Final
 from memory.contracts import MemoryOperationError
 from memory.ports import MemoryDatabasePort
 
-MEMORY_SCHEMA_VERSION: Final = 9
+MEMORY_SCHEMA_VERSION: Final = 10
 
 MEMORY_GROUP_TABLES = frozenset(
     {
@@ -192,6 +192,33 @@ MEMORY_V1_DDL = (
     """CREATE TRIGGER IF NOT EXISTS skill_promotion_audit_no_delete
         BEFORE DELETE ON skill_promotion_audit BEGIN
         SELECT RAISE(ABORT, 'skill promotion audit is immutable'); END""",
+    """CREATE VIRTUAL TABLE IF NOT EXISTS memory_records_fts USING fts5(
+        record_id UNINDEXED,
+        group_id UNINDEXED,
+        subject_key,
+        content,
+        tokenize='unicode61 remove_diacritics 2'
+    )""",
+    """CREATE TRIGGER IF NOT EXISTS memory_records_fts_insert
+        AFTER INSERT ON memory_records
+        WHEN NEW.kind='group_fact' AND NEW.owner_type='group' AND NEW.status='active'
+        BEGIN
+            INSERT INTO memory_records_fts(record_id, group_id, subject_key, content)
+            VALUES (NEW.record_id, NEW.group_id, NEW.subject_key, NEW.content);
+        END""",
+    """CREATE TRIGGER IF NOT EXISTS memory_records_fts_update
+        AFTER UPDATE ON memory_records
+        BEGIN
+            DELETE FROM memory_records_fts WHERE record_id = OLD.record_id;
+            INSERT INTO memory_records_fts(record_id, group_id, subject_key, content)
+            SELECT NEW.record_id, NEW.group_id, NEW.subject_key, NEW.content
+            WHERE NEW.kind='group_fact' AND NEW.owner_type='group' AND NEW.status='active';
+        END""",
+    """CREATE TRIGGER IF NOT EXISTS memory_records_fts_delete
+        AFTER DELETE ON memory_records
+        BEGIN
+            DELETE FROM memory_records_fts WHERE record_id = OLD.record_id;
+        END""",
 )
 
 MEMORY_V2_COLUMNS = {
@@ -391,6 +418,52 @@ class MemorySchemaManager:
                         )
                 await connection.execute(
                     "INSERT INTO memory_schema_version(version) VALUES (9)"
+                )
+            if current < 10:
+                await connection.execute(
+                    """CREATE VIRTUAL TABLE IF NOT EXISTS memory_records_fts USING fts5(
+                        record_id UNINDEXED,
+                        group_id UNINDEXED,
+                        subject_key,
+                        content,
+                        tokenize='unicode61 remove_diacritics 2'
+                    )"""
+                )
+                await connection.execute(
+                    """CREATE TRIGGER IF NOT EXISTS memory_records_fts_insert
+                        AFTER INSERT ON memory_records
+                        WHEN NEW.kind='group_fact' AND NEW.owner_type='group' AND NEW.status='active'
+                        BEGIN
+                            INSERT INTO memory_records_fts(record_id, group_id, subject_key, content)
+                            VALUES (NEW.record_id, NEW.group_id, NEW.subject_key, NEW.content);
+                        END"""
+                )
+                await connection.execute(
+                    """CREATE TRIGGER IF NOT EXISTS memory_records_fts_update
+                        AFTER UPDATE ON memory_records
+                        BEGIN
+                            DELETE FROM memory_records_fts WHERE record_id = OLD.record_id;
+                            INSERT INTO memory_records_fts(record_id, group_id, subject_key, content)
+                            SELECT NEW.record_id, NEW.group_id, NEW.subject_key, NEW.content
+                            WHERE NEW.kind='group_fact' AND NEW.owner_type='group' AND NEW.status='active';
+                        END"""
+                )
+                await connection.execute(
+                    """CREATE TRIGGER IF NOT EXISTS memory_records_fts_delete
+                        AFTER DELETE ON memory_records
+                        BEGIN
+                            DELETE FROM memory_records_fts WHERE record_id = OLD.record_id;
+                        END"""
+                )
+                await connection.execute(
+                    """INSERT INTO memory_records_fts(record_id, group_id, subject_key, content)
+                    SELECT record_id, group_id, subject_key, content
+                    FROM memory_records
+                    WHERE kind='group_fact' AND owner_type='group' AND status='active'
+                      AND record_id NOT IN (SELECT record_id FROM memory_records_fts)"""
+                )
+                await connection.execute(
+                    "INSERT INTO memory_schema_version(version) VALUES (10)"
                 )
             await connection.commit()
         return MEMORY_SCHEMA_VERSION
