@@ -1,5 +1,6 @@
 """Physically isolated Personal Knowledge Vault and explicit Group projections."""
 from __future__ import annotations
+import asyncio
 from contextlib import asynccontextmanager
 import hashlib
 import time
@@ -135,110 +136,160 @@ async def add_record(*,user_id:int,kind:str,content:str,source_type:str,source_i
     return record_id
 
 
-async def project(*,user_id:int,record_id:str,group_id:int,bot_id:int|None,purpose:str,
-                  expires_at:int|None=None) -> str:
+_vault_locks: dict[int, asyncio.Lock] = {}
+
+def _get_vault_lock(user_id: int) -> asyncio.Lock:
+    if user_id not in _vault_locks:
+        _vault_locks[user_id] = asyncio.Lock()
+    return _vault_locks[user_id]
+
+
+async def project(*, user_id: int, record_id: str, group_id: int, bot_id: int | None, purpose: str,
+                  expires_at: int | None = None, allow_restricted: bool = False) -> str:
     async with connect(user_id) as db:
-        async with db.execute("SELECT sensitivity,status FROM personal_records WHERE record_id=? AND user_id=?",
-                              (record_id,user_id)) as cur: row=await cur.fetchone()
-        if not row:raise ValueError("personal record not found")
-        if row[0]=="secret":raise ValueError("secret personal knowledge cannot be projected")
-        if row[1] not in {"active","provisional"}:raise ValueError("inactive record cannot be projected")
-        key=f"{record_id}:{group_id}:{bot_id}:{purpose}"
-        projection_id="projection:"+hashlib.sha256(key.encode()).hexdigest()[:24]; now=int(time.time()*1000)
+        async with db.execute(
+            "SELECT sensitivity, status, explicit FROM personal_records WHERE record_id=? AND user_id=?",
+            (record_id, user_id),
+        ) as cur:
+            row = await cur.fetchone()
+        if not row:
+            raise ValueError("personal record not found")
+        sensitivity, status, explicit = str(row[0]), str(row[1]), bool(row[2])
+        if sensitivity == "secret":
+            raise ValueError("secret personal knowledge cannot be projected")
+        if sensitivity == "restricted" and not (allow_restricted or explicit):
+            raise ValueError("restricted personal knowledge requires explicit confirmation")
+        if status not in {"active", "provisional"}:
+            raise ValueError("inactive record cannot be projected")
+
+        key = f"{record_id}:{group_id}:{bot_id}:{purpose}"
+        projection_id = "projection:" + hashlib.sha256(key.encode()).hexdigest()[:24]
+        now = int(time.time() * 1000)
         await db.execute("""INSERT INTO personal_projections
           (projection_id,record_id,group_id,bot_id,purpose,expires_at,created_at,updated_at)
           VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(projection_id)
           DO UPDATE SET status='active',expires_at=excluded.expires_at,updated_at=excluded.updated_at""",
-          (projection_id,record_id,group_id,bot_id,purpose,expires_at,now,now)); await db.commit()
+          (projection_id, record_id, group_id, bot_id, purpose, expires_at, now, now))
+        await db.commit()
     return projection_id
 
 
-async def projected_context(*,user_id:int,group_id:int,bot_id:int|None,purpose:str,limit:int=20)->list[dict]:
-    now=int(time.time()*1000)
+async def projected_context(*, user_id: int, group_id: int, bot_id: int | None, purpose: str, limit: int = 20) -> list[dict]:
+    now = int(time.time() * 1000)
     async with connect(user_id) as db:
-        async with db.execute("""SELECT r.record_id,r.kind,r.content,r.authority,r.confidence
+        async with db.execute("""SELECT r.record_id,r.kind,r.content,r.authority,r.confidence,r.status,r.explicit
           FROM personal_projections p JOIN personal_records r ON r.record_id=p.record_id
           WHERE r.user_id=? AND p.group_id=? AND (p.bot_id IS NULL OR p.bot_id=?) AND p.purpose=?
-          AND p.status='active' AND r.status IN ('active','provisional')
+          AND p.status='active' AND r.status IN ('active','provisional') AND r.sensitivity != 'secret'
           AND (p.expires_at IS NULL OR p.expires_at>?) ORDER BY r.explicit DESC,r.confidence DESC LIMIT ?""",
-          (user_id,group_id,bot_id,purpose,now,max(1,min(limit,100)))) as cur: rows=await cur.fetchall()
-    return [{"record_id":r[0],"kind":r[1],"content":r[2],"authority":r[3],"confidence":r[4]} for r in rows]
+          (user_id, group_id, bot_id, purpose, now, max(1, min(limit, 100)))) as cur:
+            rows = await cur.fetchall()
+    return [{
+        "record_id": r[0],
+        "kind": r[1],
+        "content": r[2],
+        "authority": r[3],
+        "confidence": r[4],
+        "status": r[5],
+        "explicit": bool(r[6]),
+    } for r in rows]
 
 
-async def ingest_knowledge(*,user_id:int,kind:str,statement:str,source_type:str,source_id:str,
-                           speaker:str,subject:str,context_kind:str,observed_at:int|None=None,
-                           asserted_by_user:bool=False,sensitivity:str="private") -> str:
+async def ingest_knowledge(*, user_id: int, kind: str, statement: str, source_type: str, source_id: str,
+                            speaker: str, subject: str, context_kind: str, observed_at: int | None = None,
+                            asserted_by_user: bool = False, sensitivity: str = "private") -> str:
     """Ingest an extracted statement, never an email/chat credential or raw mailbox dump."""
-    observed=observed_at or int(time.time()*1000)
-    authority="user_statement" if asserted_by_user and str(subject)==str(user_id) else (
-        "third_party" if str(subject)!=str(user_id) else "observed")
-    record_id=await add_record(user_id=user_id,kind=kind,content=statement,source_type=source_type,
-                               source_id=source_id,speaker=speaker,subject=subject,authority=authority,
-                               sensitivity=sensitivity,confidence=1.0 if authority=="user_statement" else .45,
-                               explicit=authority=="user_statement")
-    source_key=f"{source_type}:{source_id}"
+    observed = observed_at or int(time.time() * 1000)
+    authority = "user_statement" if asserted_by_user and str(subject) == str(user_id) else (
+        "third_party" if str(subject) != str(user_id) else "observed")
+    record_id = await add_record(user_id=user_id, kind=kind, content=statement, source_type=source_type,
+                                 source_id=source_id, speaker=speaker, subject=subject, authority=authority,
+                                 sensitivity=sensitivity, confidence=1.0 if authority == "user_statement" else .45,
+                                 explicit=authority == "user_statement")
+    source_key = f"{source_type}:{source_id}"
     async with connect(user_id) as db:
         await db.execute("""INSERT INTO personal_sources
           (source_key,user_id,source_type,source_id,speaker,subject,context_kind,observed_at,content_hash,created_at)
           VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(source_key) DO NOTHING""",
-          (source_key,user_id,source_type,source_id,speaker,subject,context_kind,observed,
-           hashlib.sha256(statement.encode()).hexdigest(),int(time.time()*1000))); await db.commit()
+          (source_key, user_id, source_type, source_id, speaker, subject, context_kind, observed,
+           hashlib.sha256(statement.encode()).hexdigest(), int(time.time() * 1000)))
+        await db.commit()
     return record_id
 
 
-async def observe_habit(*,user_id:int,habit_key:str,statement:str,source_type:str,source_id:str,
-                        context_kind:str,observed_at:int,polarity:str="support") -> str:
-    if polarity not in {"support","contradict"}:raise ValueError("invalid habit evidence polarity")
-    record_id="habit:"+hashlib.sha256(f"{user_id}:{habit_key}".encode()).hexdigest()[:24]
-    now=int(time.time()*1000); source_key=f"{source_type}:{source_id}"
+async def observe_habit(*, user_id: int, habit_key: str, statement: str, source_type: str, source_id: str,
+                        context_kind: str, observed_at: int, polarity: str = "support") -> str:
+    if polarity not in {"support", "contradict"}:
+        raise ValueError("invalid habit evidence polarity")
+    record_id = "habit:" + hashlib.sha256(f"{user_id}:{habit_key}".encode()).hexdigest()[:24]
+    now = int(time.time() * 1000)
+    source_key = f"{source_type}:{source_id}"
     async with connect(user_id) as db:
         await db.execute("""INSERT INTO personal_records
           (record_id,user_id,kind,content,authority,sensitivity,status,source_type,source_id,
            confidence,explicit,valid_from,created_at,updated_at) VALUES(?,?,'habit',?,'observed','private',
            'provisional',?,?,.35,0,?,?,?) ON CONFLICT(record_id) DO UPDATE SET updated_at=excluded.updated_at""",
-          (record_id,user_id,statement,source_type,source_id,observed_at,now,now))
+          (record_id, user_id, statement, source_type, source_id, observed_at, now, now))
         await db.execute("""INSERT INTO habit_evidence(record_id,source_key,context_kind,polarity,observed_at)
           VALUES(?,?,?,?,?) ON CONFLICT(record_id,source_key) DO UPDATE SET polarity=excluded.polarity,
           context_kind=excluded.context_kind,observed_at=excluded.observed_at""",
-          (record_id,source_key,context_kind,polarity,observed_at))
+          (record_id, source_key, context_kind, polarity, observed_at))
         async with db.execute("""SELECT COUNT(DISTINCT CASE WHEN polarity='support' THEN source_key END),
           COUNT(DISTINCT CASE WHEN polarity='support' THEN context_kind END),
           MIN(CASE WHEN polarity='support' THEN observed_at END),MAX(CASE WHEN polarity='support' THEN observed_at END),
           COUNT(CASE WHEN polarity='contradict' THEN 1 END) FROM habit_evidence WHERE record_id=?""",
-          (record_id,)) as cur: evidence=await cur.fetchone()
-        samples,contexts,first,last,contradictions=evidence
-        eligible=samples>=3 and contexts>=2 and first is not None and last-first>=14*86_400_000 and contradictions==0
-        confidence=min(.9,.35+.12*samples-.15*contradictions)
+          (record_id,)) as cur:
+            evidence = await cur.fetchone()
+        samples, contexts, first, last, contradictions = evidence
+        eligible = samples >= 3 and contexts >= 2 and first is not None and last - first >= 14 * 86_400_000 and contradictions == 0
+        confidence = min(.9, .35 + .12 * samples - .15 * contradictions)
         await db.execute("UPDATE personal_records SET status=?,confidence=?,updated_at=? WHERE record_id=?",
-                         ("active" if eligible else "provisional",confidence,now,record_id)); await db.commit()
+                         ("active" if eligible else "provisional", confidence, now, record_id))
+        await db.commit()
     return record_id
 
 
-async def export_vault(user_id:int) -> dict:
+async def export_vault(user_id: int) -> dict:
     async with connect(user_id) as db:
         async with db.execute("SELECT record_id,kind,content,speaker,subject,authority,sensitivity,status,"
                               "source_type,source_id,confidence,explicit,valid_from,valid_to FROM personal_records "
-                              "WHERE user_id=? ORDER BY created_at",(user_id,)) as cur:
-            records=await cur.fetchall()
+                              "WHERE user_id=? ORDER BY created_at", (user_id,)) as cur:
+            records = await cur.fetchall()
         async with db.execute("SELECT projection_id,record_id,group_id,bot_id,purpose,status,expires_at "
                               "FROM personal_projections ORDER BY created_at") as cur:
-            projections=await cur.fetchall()
-    fields=("record_id","kind","content","speaker","subject","authority","sensitivity","status",
-            "source_type","source_id","confidence","explicit","valid_from","valid_to")
-    pfields=("projection_id","record_id","group_id","bot_id","purpose","status","expires_at")
-    return {"schema_version":1,"user_id":user_id,"records":[dict(zip(fields,r)) for r in records],
-            "projections":[dict(zip(pfields,r)) for r in projections]}
+            projections = await cur.fetchall()
+    fields = ("record_id", "kind", "content", "speaker", "subject", "authority", "sensitivity", "status",
+              "source_type", "source_id", "confidence", "explicit", "valid_from", "valid_to")
+    pfields = ("projection_id", "record_id", "group_id", "bot_id", "purpose", "status", "expires_at")
+    return {"schema_version": 1, "user_id": user_id, "records": [dict(zip(fields, r)) for r in records],
+            "projections": [dict(zip(pfields, r)) for r in projections]}
 
 
-async def delete_vault(user_id:int) -> bool:
+async def delete_vault(user_id: int) -> bool:
+    """Safe, concurrency-guarded personal vault deletion with zero-content audit logging."""
     from runtime.dbpaths import personal_db_path
     from pathlib import Path
-    path=Path(personal_db_path(user_id)); existed=path.exists()
-    if existed:path.unlink()
-    for suffix in ("-wal","-shm"):
-        sidecar=Path(str(path)+suffix)
-        if sidecar.exists():sidecar.unlink()
-    return existed
+    import logging
+
+    audit_log = logging.getLogger("audit.personal_vault")
+    lock = _get_vault_lock(user_id)
+
+    async with lock:
+        path = Path(personal_db_path(user_id))
+        existed = path.exists()
+        if existed:
+            path.unlink(missing_ok=True)
+        for suffix in ("-wal", "-shm"):
+            sidecar = Path(str(path) + suffix)
+            if sidecar.exists():
+                sidecar.unlink(missing_ok=True)
+
+        now_ms = int(time.time() * 1000)
+        audit_log.info(
+            "personal_vault_deleted user_id=%d existed=%s deleted_at=%d",
+            user_id, existed, now_ms,
+        )
+        return existed
 
 
 async def rebuild_vault(user_id:int) -> dict:
