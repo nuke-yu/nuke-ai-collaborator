@@ -1145,6 +1145,28 @@ async def migration_050(db):
     await db.commit()
 
 
+async def migration_051(db):
+    """Persist the per-group canonical-memory projection rollout gate."""
+    cur = await db.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='memory_records'"
+    )
+    if await cur.fetchone() is None:
+        return
+    await db.execute("""CREATE TABLE IF NOT EXISTS memory_projection_rollout (
+        group_id INTEGER PRIMARY KEY,
+        consecutive_passes INTEGER NOT NULL DEFAULT 0,
+        required_passes INTEGER NOT NULL DEFAULT 3,
+        direct_write_enabled INTEGER NOT NULL DEFAULT 1
+            CHECK(direct_write_enabled IN (0,1)),
+        last_audit_passed INTEGER NOT NULL DEFAULT 0
+            CHECK(last_audit_passed IN (0,1)),
+        last_audited_at INTEGER NOT NULL DEFAULT 0,
+        last_failure_reason TEXT NOT NULL DEFAULT '',
+        updated_at INTEGER NOT NULL DEFAULT 0
+    )""")
+    await db.commit()
+
+
 MIGRATIONS: list = [
     migration_001,
     migration_002,
@@ -1196,6 +1218,7 @@ MIGRATIONS: list = [
     migration_048,
     migration_049,
     migration_050,
+    migration_051,
 ]
 
 

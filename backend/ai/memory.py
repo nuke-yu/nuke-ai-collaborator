@@ -504,7 +504,7 @@ async def add_to_chroma(message_id: int, content: str, role: str, bot_id: int, g
     # 3. 复用同一批抽取结果双写 canonical SQLite。它是 Bot-owned provisional
     # observation，不会进入 Active Group Fact；迁移期保持 fail-soft，避免 canonical
     # schema 暂不可用时阻断现有 Chroma 写路径。
-    await _mirror_facts_to_canonical(
+    canonical_written = await _mirror_facts_to_canonical(
         message_id=message_id,
         facts=facts,
         role=role,
@@ -516,6 +516,16 @@ async def add_to_chroma(message_id: int, content: str, role: str, bot_id: int, g
         timestamp=timestamp,
         legacy_conflict_ids=del_ids,
     )
+    if (
+        canonical_written
+        and group_id is not None
+        and not await _legacy_chroma_direct_write_enabled(group_id)
+    ):
+        log.info(
+            "memory: skipped legacy direct fact projection for rollout group %d",
+            group_id,
+        )
+        return
 
     loop = asyncio.get_running_loop()
 
@@ -566,9 +576,9 @@ async def _mirror_facts_to_canonical(
     thread_id: str | None,
     timestamp: float | None,
     legacy_conflict_ids: list[str],
-) -> None:
+) -> bool:
     if group_id is None:
-        return
+        return False
     try:
         from executors.redaction import redact_secrets
         from memory.bootstrap import build_bot_fact_observation_client
@@ -606,6 +616,7 @@ async def _mirror_facts_to_canonical(
                 legacy_conflict_ids=tuple(legacy_conflict_ids),
             )
         )
+        return True
     except asyncio.CancelledError:
         raise
     except Exception:
@@ -615,6 +626,16 @@ async def _mirror_facts_to_canonical(
             bot_id,
             message_id,
         )
+        return False
+
+
+async def _legacy_chroma_direct_write_enabled(group_id: int) -> bool:
+    """Fail open unless this group has earned the canonical-only rollout."""
+    from memory.bootstrap import build_bot_memory_projection_rollout_gate
+
+    return await build_bot_memory_projection_rollout_gate().direct_write_enabled(
+        group_id
+    )
 
 
 async def retrieve_relevant(bot_id: int, group_id: int | None, query: str, top_k: int = 3, thread_id: str | None = None) -> list:
@@ -942,7 +963,7 @@ async def maybe_reflect(group_id: int, bot_id: int, role: str,
                 refl_id = f"refl_{bot_id}_{group_id}_{int(refl_ts * 1000)}_{idx_triggered}_{idx}"
                 projections.append((refl_id, insight, score, refl_ts))
 
-            await _mirror_reflections_to_canonical(
+            canonical_written = await _mirror_reflections_to_canonical(
                 projections=projections,
                 source_projection_ids=source_projection_ids,
                 level=new_level,
@@ -954,28 +975,39 @@ async def maybe_reflect(group_id: int, bot_id: int, role: str,
                 thread_id=tid,
                 legacy_conflict_ids=tuple(del_ids),
             )
+            direct_write_enabled = (
+                not canonical_written
+                or await _legacy_chroma_direct_write_enabled(group_id)
+            )
 
-            for refl_id, insight, score, refl_ts in projections:
-                metadata = {
-                    "bot_id": bot_id,
-                    "role": role or "",
-                    "timestamp": refl_ts,
-                    "importance": score,
-                    "mem_type": "reflection",
-                    "level": new_level,         # 反思层级 (P3)，封顶后不再被归纳
-                    "source_ids": source_ids,   # A-MEM 链接：本反思由哪些记忆提炼而来
-                    "thread_id": tid,           # 反思承袭来源话题，召回时按 topic 归位
-                    "scored_by_model": f"{provider}/{model}",
-                }
-                if group_id is not None:
-                    metadata["group_id"] = group_id
+            if direct_write_enabled:
+                for refl_id, insight, score, refl_ts in projections:
+                    metadata = {
+                        "bot_id": bot_id,
+                        "role": role or "",
+                        "timestamp": refl_ts,
+                        "importance": score,
+                        "mem_type": "reflection",
+                        "level": new_level,         # 反思层级 (P3)，封顶后不再被归纳
+                        "source_ids": source_ids,   # A-MEM 链接：本反思由哪些记忆提炼而来
+                        "thread_id": tid,           # 反思承袭来源话题，召回时按 topic 归位
+                        "scored_by_model": f"{provider}/{model}",
+                    }
+                    if group_id is not None:
+                        metadata["group_id"] = group_id
 
-                await loop.run_in_executor(
-                    None, partial(ChromaStore.write_fact_sync, refl_id, insight, metadata)
+                    await loop.run_in_executor(
+                        None, partial(ChromaStore.write_fact_sync, refl_id, insight, metadata)
+                    )
+
+                if del_ids:
+                    await loop.run_in_executor(None, partial(ChromaStore.delete_ids_sync, del_ids))
+            else:
+                log.info(
+                    "memory: skipped legacy direct reflection projection "
+                    "for rollout group %d",
+                    group_id,
                 )
-
-            if del_ids:
-                await loop.run_in_executor(None, partial(ChromaStore.delete_ids_sync, del_ids))
 
             # 推进该 thread 水位线
             await _set_reflection_watermark(bot_id, group_id, tid, max_thread_ts)
@@ -1002,9 +1034,9 @@ async def _mirror_reflections_to_canonical(
     model: str,
     thread_id: str,
     legacy_conflict_ids: tuple[str, ...],
-) -> None:
+) -> bool:
     if group_id is None:
-        return
+        return False
     try:
         from executors.redaction import redact_secrets
         from memory.bootstrap import build_bot_reflection_client
@@ -1039,6 +1071,7 @@ async def _mirror_reflections_to_canonical(
                 legacy_conflict_ids=legacy_conflict_ids,
             )
         )
+        return True
     except asyncio.CancelledError:
         raise
     except Exception:
@@ -1049,6 +1082,7 @@ async def _mirror_reflections_to_canonical(
             bot_id,
             thread_id,
         )
+        return False
 
 
 async def get_memory_links(memory_id: str) -> list[dict]:

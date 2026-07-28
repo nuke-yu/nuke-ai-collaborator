@@ -20,6 +20,7 @@ class ProjectionAuditResult:
     metadata_mismatched: int = 0
     orphaned: int = 0
     invalid_canonical: int = 0
+    outbox_pending: int = 0
     truncated: bool = False
 
     def as_dict(self) -> dict[str, int | bool]:
@@ -65,6 +66,13 @@ class BotMemoryProjectionAuditService:
                 (group_id, self._limit),
             ) as cursor:
                 rows = await cursor.fetchall()
+            async with connection.execute(
+                """SELECT COUNT(*) FROM memory_projection_outbox
+                WHERE group_id=? AND projection_type='bot_memory_vector_upsert'
+                AND status!='completed'""",
+                (group_id,),
+            ) as cursor:
+                outbox_pending = int((await cursor.fetchone())[0])
 
         expected: dict[str, dict[str, Any]] = {}
         invalid = 0
@@ -111,6 +119,7 @@ class BotMemoryProjectionAuditService:
             metadata_mismatched=metadata_mismatched,
             orphaned=orphaned,
             invalid_canonical=invalid,
+            outbox_pending=outbox_pending,
             truncated=truncated,
         )
 

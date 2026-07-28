@@ -131,6 +131,11 @@ class TestMetricsCollector(unittest.TestCase):
                             "metadata_mismatched": 1,
                             "orphaned": 2,
                             "invalid_canonical": 0,
+                            "outbox_pending": 0,
+                            "consecutive_passes": 2,
+                            "required_passes": 3,
+                            "direct_write_enabled": True,
+                            "last_audit_passed": True,
                             "truncated": False,
                             "errors_total": 3,
                             "last_audited_at": time.time() - 5,
@@ -158,6 +163,11 @@ class TestMetricsCollector(unittest.TestCase):
         self.assertIn(
             'nuke_memory_projection_audit_truncated'
             '{group_id="7",worker_id="w0"} 0.0',
+            out,
+        )
+        self.assertIn(
+            'nuke_memory_projection_direct_write_enabled'
+            '{group_id="7",worker_id="w0"} 1.0',
             out,
         )
 

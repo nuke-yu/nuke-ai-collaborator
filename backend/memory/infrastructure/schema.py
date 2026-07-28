@@ -6,7 +6,7 @@ from typing import Final
 from memory.contracts import MemoryOperationError
 from memory.ports import MemoryDatabasePort
 
-MEMORY_SCHEMA_VERSION: Final = 7
+MEMORY_SCHEMA_VERSION: Final = 8
 
 MEMORY_GROUP_TABLES = frozenset(
     {
@@ -16,6 +16,7 @@ MEMORY_GROUP_TABLES = frozenset(
         "memory_records",
         "memory_relations",
         "memory_projection_outbox",
+        "memory_projection_rollout",
         "experience_usage",
         "pipeline_jobs",
         "skills",
@@ -107,6 +108,18 @@ MEMORY_V1_DDL = (
         created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, completed_at INTEGER
     )""",
     "CREATE INDEX IF NOT EXISTS idx_memory_projection_outbox_ready ON memory_projection_outbox(group_id,status,next_attempt_at,updated_at)",
+    """CREATE TABLE IF NOT EXISTS memory_projection_rollout (
+        group_id INTEGER PRIMARY KEY,
+        consecutive_passes INTEGER NOT NULL DEFAULT 0,
+        required_passes INTEGER NOT NULL DEFAULT 3,
+        direct_write_enabled INTEGER NOT NULL DEFAULT 1
+            CHECK(direct_write_enabled IN (0,1)),
+        last_audit_passed INTEGER NOT NULL DEFAULT 0
+            CHECK(last_audit_passed IN (0,1)),
+        last_audited_at INTEGER NOT NULL DEFAULT 0,
+        last_failure_reason TEXT NOT NULL DEFAULT '',
+        updated_at INTEGER NOT NULL DEFAULT 0
+    )""",
     """CREATE TABLE IF NOT EXISTS experience_usage (
         id INTEGER PRIMARY KEY AUTOINCREMENT, record_id TEXT NOT NULL, run_id TEXT NOT NULL,
         group_id INTEGER NOT NULL, bot_id INTEGER, state TEXT NOT NULL,
@@ -342,6 +355,10 @@ class MemorySchemaManager:
             if current < 7:
                 await connection.execute(
                     "INSERT INTO memory_schema_version(version) VALUES (7)"
+                )
+            if current < 8:
+                await connection.execute(
+                    "INSERT INTO memory_schema_version(version) VALUES (8)"
                 )
             await connection.commit()
         return MEMORY_SCHEMA_VERSION

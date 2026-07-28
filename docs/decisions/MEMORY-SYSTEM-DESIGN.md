@@ -163,8 +163,14 @@ ID，因此重复投递为幂等 upsert；旧 Chroma 直写暂时保留到 shado
 Worker 每分钟对活跃 Group 执行只读、限量的 canonical ↔ Chroma shadow audit，
 默认最多深度比较 500 条（`NUKE_MEMORY_PROJECTION_AUDIT_LIMIT`）。审计统计 canonical
 总量/采样量、匹配、缺失、内容差异、metadata 差异、孤儿投影、非法 canonical 记录、
-截断状态和审计错误；结果随 Worker stats 汇总到 Supervisor `/metrics`。审计失败只增加
-错误指标，不触发修复、不阻断 Group hydration，也不改变当前召回结果。
+未投递 outbox、截断状态和审计错误；结果随 Worker stats 汇总到 Supervisor `/metrics`。
+
+每个 Group 独立维护 `memory_projection_rollout` gate。只有非空 canonical 集合完成
+全量审计、outbox 无待投递项且所有记录完全一致时才记一次达标；连续达标次数达到
+`NUKE_MEMORY_PROJECTION_ROLLOUT_REQUIRED_PASSES`（默认 3）后，该 Group 的
+Fact/Reflection 停止 legacy Chroma 直写，只保留 canonical transaction + durable outbox。
+任一次不达标或审计异常都会清零连续次数并立即恢复该 Group 的直写。canonical 写入本身
+失败时也始终保留直写兜底，因此 gate 状态或 SQLite 短暂故障不会丢失当前请求的记忆。
 
 存量 Chroma Fact/Reflection 可通过
 `python3 -m scripts.backfill_canonical_bot_memory --group-id <id>` 生成 dry-run

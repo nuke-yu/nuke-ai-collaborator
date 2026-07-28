@@ -19,6 +19,10 @@ from memory.application.projection_audit import (
     BotMemoryProjectionAuditService,
     ProjectionAuditResult,
 )
+from memory.application.projection_rollout import (
+    BotMemoryProjectionRolloutGate,
+    ProjectionRolloutState,
+)
 from memory.contracts import ExtractedFactObservation, IngestBotFactObservations
 from memory.domain import MemoryScope
 from memory.infrastructure import MemorySchemaManager, ProjectionOutbox
@@ -135,6 +139,7 @@ class ProjectionAuditServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.matched, 1)
         self.assertEqual(result.missing, 1)
         self.assertEqual(result.orphaned, 1)
+        self.assertEqual(result.outbox_pending, 2)
         self.assertFalse(result.truncated)
         async with db.connect(self.path) as connection:
             async with connection.execute(
@@ -220,9 +225,34 @@ class ProjectionAuditLifecycleTest(unittest.IsolatedAsyncioTestCase):
             RuntimeError("chroma unavailable"),
             ProjectionAuditResult(group_id=7, canonical_total=3, missing=1),
         ]
-        with patch(
-            "memory.bootstrap.build_bot_memory_projection_auditor",
-            return_value=auditor,
+        rollout = AsyncMock()
+        rollout.record_audit.return_value = ProjectionRolloutState(
+            group_id=7,
+            consecutive_passes=0,
+            required_passes=3,
+            direct_write_enabled=True,
+            last_audit_passed=False,
+            last_audited_at=123,
+            last_failure_reason="missing",
+        )
+        rollout.record_failure.return_value = ProjectionRolloutState(
+            group_id=7,
+            consecutive_passes=0,
+            required_passes=3,
+            direct_write_enabled=True,
+            last_audit_passed=False,
+            last_audited_at=122,
+            last_failure_reason="audit_error",
+        )
+        with (
+            patch(
+                "memory.bootstrap.build_bot_memory_projection_auditor",
+                return_value=auditor,
+            ),
+            patch(
+                "memory.bootstrap.build_bot_memory_projection_rollout_gate",
+                return_value=rollout,
+            ),
         ):
             with self.assertLogs("runtime.lifecycle", level="ERROR"):
                 await manager._audit_memory_projections()
@@ -232,7 +262,86 @@ class ProjectionAuditLifecycleTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(snapshot["canonical_total"], 3)
         self.assertEqual(snapshot["missing"], 1)
         self.assertEqual(snapshot["errors_total"], 1)
+        self.assertTrue(snapshot["direct_write_enabled"])
+        rollout.record_failure.assert_awaited_once_with(7)
         self.assertGreater(snapshot["last_audited_at"], 0)
+
+
+class ProjectionRolloutGateTest(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        self.path = tempfile.mktemp(suffix="_memory_projection_rollout.db")
+        self.database = _PathDatabase(self.path)
+        await MemorySchemaManager(self.database).ensure_group(7)
+        self.gate = BotMemoryProjectionRolloutGate(
+            self.database, required_passes=3
+        )
+
+    async def asyncTearDown(self) -> None:
+        for suffix in ("", "-wal", "-shm"):
+            try:
+                os.unlink(self.path + suffix)
+            except FileNotFoundError:
+                pass
+
+    @staticmethod
+    def _passing(group_id: int = 7) -> ProjectionAuditResult:
+        return ProjectionAuditResult(
+            group_id=group_id,
+            canonical_total=2,
+            canonical_sampled=2,
+            projected_scanned=2,
+            matched=2,
+        )
+
+    async def test_disables_direct_write_after_consecutive_passes(self) -> None:
+        first = await self.gate.record_audit(self._passing())
+        second = await self.gate.record_audit(self._passing())
+        third = await self.gate.record_audit(self._passing())
+
+        self.assertEqual(first.consecutive_passes, 1)
+        self.assertTrue(first.direct_write_enabled)
+        self.assertEqual(second.consecutive_passes, 2)
+        self.assertTrue(second.direct_write_enabled)
+        self.assertEqual(third.consecutive_passes, 3)
+        self.assertFalse(third.direct_write_enabled)
+        self.assertFalse(await self.gate.direct_write_enabled(7))
+        self.assertTrue(await self.gate.direct_write_enabled(8))
+
+    async def test_nonqualifying_audit_resets_streak_and_reopens(self) -> None:
+        for _ in range(3):
+            await self.gate.record_audit(self._passing())
+
+        state = await self.gate.record_audit(
+            ProjectionAuditResult(
+                group_id=7,
+                canonical_total=2,
+                canonical_sampled=2,
+                projected_scanned=1,
+                matched=1,
+                missing=1,
+            )
+        )
+
+        self.assertEqual(state.consecutive_passes, 0)
+        self.assertTrue(state.direct_write_enabled)
+        self.assertEqual(state.last_failure_reason, "missing")
+
+    async def test_truncated_and_empty_audits_do_not_qualify(self) -> None:
+        truncated = await self.gate.record_audit(
+            ProjectionAuditResult(
+                group_id=7,
+                canonical_total=2,
+                canonical_sampled=2,
+                projected_scanned=2,
+                matched=2,
+                truncated=True,
+            )
+        )
+        empty = await self.gate.record_audit(ProjectionAuditResult(group_id=7))
+
+        self.assertEqual(truncated.last_failure_reason, "truncated")
+        self.assertEqual(empty.last_failure_reason, "no_canonical_records")
+        self.assertTrue(empty.direct_write_enabled)
 
 
 if __name__ == "__main__":

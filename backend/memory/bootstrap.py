@@ -21,6 +21,7 @@ from memory.application import (
     AuthorizedPersonalKnowledgeService,
     BotFactObservationService,
     BotMemoryProjectionAuditService,
+    BotMemoryProjectionRolloutGate,
     BotReflectionService,
     CanonicalChromaBackfillService,
     CanonicalRelationService,
@@ -81,6 +82,15 @@ def build_bot_memory_projection_auditor() -> BotMemoryProjectionAuditService:
         legacy_memory_database,
         LegacyBotMemoryProjectionReader(),
         limit=config.MEMORY_PROJECTION_AUDIT_LIMIT,
+    )
+
+
+def build_bot_memory_projection_rollout_gate() -> BotMemoryProjectionRolloutGate:
+    from core import config
+
+    return BotMemoryProjectionRolloutGate(
+        legacy_memory_database,
+        required_passes=config.MEMORY_PROJECTION_ROLLOUT_REQUIRED_PASSES,
     )
 
 

@@ -137,7 +137,10 @@ class LifecycleManager:
         self, group_ids: tuple[int, ...] | None = None
     ) -> None:
         """Run bounded, read-only canonical↔Chroma shadow comparisons."""
-        from memory.bootstrap import build_bot_memory_projection_auditor
+        from memory.bootstrap import (
+            build_bot_memory_projection_auditor,
+            build_bot_memory_projection_rollout_gate,
+        )
 
         if group_ids is None:
             async with self._lock:
@@ -145,9 +148,11 @@ class LifecycleManager:
         else:
             targets = group_ids
         for group_id in targets:
+            rollout_gate = build_bot_memory_projection_rollout_gate()
             try:
                 auditor = build_bot_memory_projection_auditor()
                 result = await auditor.audit(group_id)
+                rollout = await rollout_gate.record_audit(result)
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -158,8 +163,27 @@ class LifecycleManager:
                     "lifecycle: memory projection shadow audit failed for group %d",
                     group_id,
                 )
+                try:
+                    reopened = await rollout_gate.record_failure(group_id)
+                except Exception:
+                    log.exception(
+                        "lifecycle: failed to reopen memory direct writes for group %d",
+                        group_id,
+                    )
+                else:
+                    snapshot = dict(
+                        self._memory_projection_audits.get(group_id, {})
+                    )
+                    rollout_snapshot = reopened.as_dict()
+                    rollout_snapshot.pop("last_audited_at", None)
+                    snapshot.update(rollout_snapshot)
+                    snapshot["errors_total"] = (
+                        self._memory_projection_audit_errors[group_id]
+                    )
+                    self._memory_projection_audits[group_id] = snapshot
             else:
                 snapshot = result.as_dict()
+                snapshot.update(rollout.as_dict())
                 snapshot["last_audited_at"] = time.time()
                 snapshot["errors_total"] = (
                     self._memory_projection_audit_errors.get(group_id, 0)

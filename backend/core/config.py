@@ -125,6 +125,9 @@ MEMORY_THREAD_AFFINITY_BONUS = float(os.environ.get("NUKE_MEMORY_THREAD_AFFINITY
 MEMORY_PROJECTION_AUDIT_LIMIT = int(
     os.environ.get("NUKE_MEMORY_PROJECTION_AUDIT_LIMIT") or 500
 )
+MEMORY_PROJECTION_ROLLOUT_REQUIRED_PASSES = int(
+    os.environ.get("NUKE_MEMORY_PROJECTION_ROLLOUT_REQUIRED_PASSES") or 3
+)
 
 # 多层反思 (P3)：默认关闭（单层，只反思原子事实，防误差放大）。开启后允许对既有反思
 # 再归纳，形成反思树；REFLECT_MAX_LEVEL 封顶层数，到顶的反思不再被纳入下一层归纳。

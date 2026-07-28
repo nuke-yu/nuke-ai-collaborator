@@ -212,6 +212,46 @@ class LegacyFactDualWriteTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(command.legacy_conflict_ids, ("fact_3_7_10_0",))
         self.assertEqual(command.observed_at, 123_000)
 
+    async def test_rollout_group_skips_legacy_direct_chroma_write(self) -> None:
+        mirror = AsyncMock()
+        write = unittest.mock.MagicMock()
+        delete = unittest.mock.MagicMock()
+        with (
+            patch.object(
+                memory.FactExtractor,
+                "extract",
+                new=AsyncMock(return_value=[("API is v2", 0.8)]),
+            ),
+            patch.object(
+                memory.ConflictResolver,
+                "resolve_batch",
+                new=AsyncMock(return_value=["fact_3_7_10_0"]),
+            ),
+            patch(
+                "memory.bootstrap.build_bot_fact_observation_client",
+                return_value=mirror,
+            ),
+            patch.object(
+                memory,
+                "_legacy_chroma_direct_write_enabled",
+                new=AsyncMock(return_value=False),
+            ),
+            patch.object(memory.ChromaStore, "write_fact_sync", write),
+            patch.object(memory.ChromaStore, "delete_ids_sync", delete),
+            patch("random.random", return_value=0.0),
+        ):
+            await memory.add_to_chroma(
+                message_id=42,
+                content="The API is now v2",
+                role="developer",
+                bot_id=3,
+                group_id=7,
+            )
+
+        mirror.ingest.assert_awaited_once()
+        write.assert_not_called()
+        delete.assert_not_called()
+
     async def test_canonical_failure_does_not_block_legacy_chroma(self) -> None:
         mirror = AsyncMock()
         mirror.ingest.side_effect = RuntimeError("canonical unavailable")
