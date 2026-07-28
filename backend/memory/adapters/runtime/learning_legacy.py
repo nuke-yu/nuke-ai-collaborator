@@ -7,11 +7,14 @@ import uuid
 from typing import Any
 
 import aiosqlite
-from memory.contracts import (AssembleCase, CompleteExperienceUsage,
+from memory.contracts import (ApproveSkillCandidate, AssembleCase,
+                              CompleteExperienceUsage,
                               CompleteSkillUsage, MemoryOperationError,
                               MarkUsageAdopted, MarkUsageExecuted,
+                              ListSkillCandidates,
                               ProcessLearningCase, RecallExperiences,
-                              RecallSkills, ResolveLearningRefs, VerifyUsage)
+                              RecallSkills, ResolveLearningRefs,
+                              SkillCandidate, VerifyUsage)
 from memory.domain import MemoryScope, ScopeKind
 
 
@@ -99,6 +102,37 @@ class LegacyLearningAdapter:
             bot_id=command.scope.bot_id,
         )
         return tuple(sorted((*experience_refs, *skill_refs)))
+
+    async def list_skill_candidates(
+        self, command: ListSkillCandidates
+    ) -> tuple[SkillCandidate, ...]:
+        group_id = self._group_id(command.scope)
+        if command.scope.bot_id is None:
+            raise MemoryOperationError("Skill candidates require bot scope")
+        from ai.skill_learning import list_skill_candidates
+
+        rows = await list_skill_candidates(
+            group_id=group_id,
+            bot_id=command.scope.bot_id,
+        )
+        return tuple(SkillCandidate(**row) for row in rows)
+
+    async def approve_skill_candidate(
+        self, command: ApproveSkillCandidate
+    ) -> bool:
+        group_id = self._group_id(command.scope)
+        if command.scope.bot_id is None or command.scope.user_id is None:
+            raise MemoryOperationError("Skill approval requires user bot scope")
+        from ai.skill_learning import promote_skill
+
+        return await promote_skill(
+            command.skill_id,
+            group_id,
+            "active",
+            bot_id=command.scope.bot_id,
+            actor_id=command.scope.actor_id,
+            reason=command.reason,
+        )
 
     async def complete_skill_usage(self, command: CompleteSkillUsage) -> None:
         group_id = self._group_id(command.scope)

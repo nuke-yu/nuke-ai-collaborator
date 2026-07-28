@@ -59,11 +59,48 @@ async def compile_candidate(record_id: str, group_id: int) -> str | None:
     return skill_id
 
 
+async def list_skill_candidates(
+    *, group_id: int, bot_id: int
+) -> list[dict]:
+    """Return reviewable canonical trial Skills for one Group-owned Bot."""
+    from ai.memory import _memory_db
+
+    async with await _memory_db("skills", group_id, write=False) as db:
+        async with db.execute(
+            """SELECT s.skill_id,s.name,s.maturity,s.risk_level,
+                      s.current_version,s.success_count,s.failure_count,
+                      v.declaration_json,v.evidence_ids
+               FROM skills s
+               JOIN skill_versions v
+                 ON v.skill_id=s.skill_id AND v.version=s.current_version
+               WHERE s.group_id=? AND s.bot_id=? AND s.status='active'
+                 AND s.maturity='trial'
+               ORDER BY s.updated_at DESC,s.skill_id""",
+            (group_id, bot_id),
+        ) as cur:
+            rows = await cur.fetchall()
+    return [
+        {
+            "skill_id": str(row[0]),
+            "name": str(row[1]),
+            "maturity": str(row[2]),
+            "risk_level": str(row[3]),
+            "version": int(row[4]),
+            "success_count": int(row[5]),
+            "failure_count": int(row[6]),
+            "declaration": json.loads(row[7]),
+            "evidence_ids": tuple(json.loads(row[8] or "[]")),
+        }
+        for row in rows
+    ]
+
+
 async def promote_skill(
     skill_id: str,
     group_id: int,
     target_maturity: str = "active",
     *,
+    bot_id: int | None = None,
     actor_id: str,
     reason: str,
 ) -> bool:
@@ -78,9 +115,20 @@ async def promote_skill(
     now = int(time.time() * 1000)
     expected_prev = "trial" if target_maturity == "active" else "active"
     async with await _memory_db("skills", group_id, write=True) as db:
-        cur = await db.execute("""UPDATE skills SET maturity=?, updated_at=?
-                               WHERE skill_id=? AND group_id=? AND status='active' AND maturity=?""",
-                               (target_maturity, now, skill_id, group_id, expected_prev))
+        sql = """UPDATE skills SET maturity=?, updated_at=?
+                 WHERE skill_id=? AND group_id=? AND status='active'
+                   AND maturity=?"""
+        params: tuple = (
+            target_maturity,
+            now,
+            skill_id,
+            group_id,
+            expected_prev,
+        )
+        if bot_id is not None:
+            sql += " AND bot_id=?"
+            params += (bot_id,)
+        cur = await db.execute(sql, params)
         if cur.rowcount == 1:
             await db.execute("""INSERT INTO skill_promotion_audit
               (skill_id,group_id,actor_id,reason,from_maturity,to_maturity,created_at)

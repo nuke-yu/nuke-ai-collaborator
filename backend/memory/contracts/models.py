@@ -332,6 +332,48 @@ class ResolveLearningRefs:
 
 
 @dataclass(frozen=True, slots=True)
+class SkillCandidate:
+    skill_id: str
+    name: str
+    maturity: str
+    risk_level: str
+    version: int
+    success_count: int
+    failure_count: int
+    declaration: Mapping[str, Any]
+    evidence_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ListSkillCandidates:
+    scope: MemoryScope
+
+    def __post_init__(self) -> None:
+        if self.scope.group_id is None or self.scope.bot_id is None:
+            raise ValueError("Skill candidates require bot scope")
+
+
+@dataclass(frozen=True, slots=True)
+class ApproveSkillCandidate:
+    scope: MemoryScope
+    skill_id: str
+    reason: str
+
+    def __post_init__(self) -> None:
+        if self.scope.group_id is None or self.scope.bot_id is None:
+            raise ValueError("Skill approval requires bot scope")
+        if (
+            self.scope.user_id is None
+            or self.scope.actor_id != f"user:{self.scope.user_id}"
+        ):
+            raise ValueError("Skill approval requires authenticated user scope")
+        if not self.skill_id.startswith("skill:"):
+            raise ValueError("canonical skill_id is required")
+        if not self.reason.strip():
+            raise ValueError("approval reason is required")
+
+
+@dataclass(frozen=True, slots=True)
 class CompleteSkillUsage:
     scope: MemoryScope
     skill_ids: tuple[str, ...]

@@ -3,7 +3,8 @@ from __future__ import annotations
 
 from typing import Any, Mapping, Protocol, runtime_checkable
 
-from memory.contracts import (AssembleCase, CompleteExperienceUsage, CompleteSkillUsage,
+from memory.contracts import (ApproveSkillCandidate, AssembleCase,
+                              CompleteExperienceUsage, CompleteSkillUsage,
                               CreateMemoryRelation,
                               CreatePersonalProjection, CreatePersonalRecord, ForgetMemory,
                               FormatProjectedContext, IngestPersonalKnowledge, MemoryEvent,
@@ -11,10 +12,12 @@ from memory.contracts import (AssembleCase, CompleteExperienceUsage, CompleteSki
                               IngestBotFactObservations,
                               IngestBotReflections,
                               MarkUsageAdopted, MarkUsageExecuted,
+                              ListSkillCandidates,
                               ObserveMemory, ObservePersonalHabit, ProcessLearningCase,
                               MemoryRelation, RecallExperiences, RecallMemory,
                               RecallMemoryRelations, RecallResult, RecallSkills,
                               ResolveLearningRefs,
+                              SkillCandidate,
                               RecallGroupFacts,
                               VerifyUsage)
 from memory.domain import MemoryScope
@@ -72,6 +75,8 @@ class LearningPort(Protocol):
     async def complete_experience_usage(self, command: CompleteExperienceUsage) -> None: ...
     async def recall_skills(self, command: RecallSkills) -> tuple[str, list[str]]: ...
     async def resolve_learning_refs(self, command: ResolveLearningRefs) -> tuple[str, ...]: ...
+    async def list_skill_candidates(self, command: ListSkillCandidates) -> tuple[SkillCandidate, ...]: ...
+    async def approve_skill_candidate(self, command: ApproveSkillCandidate) -> bool: ...
     async def complete_skill_usage(self, command: CompleteSkillUsage) -> None: ...
     async def mark_usage_adopted(self, command: MarkUsageAdopted) -> int: ...
     async def mark_usage_executed(self, command: MarkUsageExecuted) -> int: ...

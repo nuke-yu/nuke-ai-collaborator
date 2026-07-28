@@ -7,9 +7,11 @@ from unittest.mock import AsyncMock, patch
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from memory.adapters.runtime import LegacyLearningAdapter, LegacyPipelineJobAdapter
-from memory.contracts import (AssembleCase, ClaimPipelineJob, CompleteExperienceUsage,
+from memory.contracts import (ApproveSkillCandidate, AssembleCase,
+                              ClaimPipelineJob, CompleteExperienceUsage,
                               CompletePipelineJob, CompleteSkillUsage, EnqueuePipelineJob,
-                              FailPipelineJob, MemoryOperationError, ProcessLearningCase,
+                              FailPipelineJob, ListSkillCandidates,
+                              MemoryOperationError, ProcessLearningCase,
                               RecallExperiences, RecallSkills)
 from memory.domain import MemoryScope
 from memory.ports import LearningPort, PipelineJobRepositoryPort
@@ -74,6 +76,56 @@ class TestLegacyLearningAdapter(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self.adapter.recall_skills(command), ("[skill]", ["skill:1"]))
         recall.assert_awaited_once_with(
             query="fix error", run_id="run:1", group_id=9, bot_id=5, limit=2
+        )
+
+    @patch("ai.skill_learning.list_skill_candidates", new_callable=AsyncMock)
+    async def test_list_skill_candidates_routes_through_bot_scope(self, listing):
+        listing.return_value = [{
+            "skill_id": "skill:1",
+            "name": "candidate",
+            "maturity": "trial",
+            "risk_level": "S0",
+            "version": 1,
+            "success_count": 2,
+            "failure_count": 0,
+            "declaration": {"trigger": "x"},
+            "evidence_ids": ("case:1",),
+        }]
+        command = ListSkillCandidates(
+            scope=MemoryScope.bot(
+                group_id=9,
+                bot_id=5,
+                actor_id="user:7",
+                user_id=7,
+            )
+        )
+        candidates = await self.adapter.list_skill_candidates(command)
+        self.assertEqual(candidates[0].skill_id, "skill:1")
+        listing.assert_awaited_once_with(group_id=9, bot_id=5)
+
+    @patch("ai.skill_learning.promote_skill", new_callable=AsyncMock)
+    async def test_approve_skill_candidate_preserves_human_scope(self, promote):
+        promote.return_value = True
+        command = ApproveSkillCandidate(
+            scope=MemoryScope.bot(
+                group_id=9,
+                bot_id=5,
+                actor_id="user:7",
+                user_id=7,
+            ),
+            skill_id="skill:1",
+            reason="Reviewed evidence",
+        )
+        self.assertTrue(
+            await self.adapter.approve_skill_candidate(command)
+        )
+        promote.assert_awaited_once_with(
+            "skill:1",
+            9,
+            "active",
+            bot_id=5,
+            actor_id="user:7",
+            reason="Reviewed evidence",
         )
 
     async def test_personal_scope_cannot_enter_group_learning(self):

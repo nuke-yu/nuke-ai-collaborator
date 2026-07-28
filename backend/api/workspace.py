@@ -1,9 +1,16 @@
-from fastapi import APIRouter, HTTPException
+from dataclasses import asdict
+
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 import asyncio
 from pathlib import Path
+from core import auth
 from core.auth import verify_token
-from db import get_db, get_member
+from db import ensure_group_db_ready, get_db, get_member, global_db
+from memory.bootstrap import build_learning_client
+from memory.contracts import ApproveSkillCandidate, ListSkillCandidates
+from memory.domain import MemoryScope
+from runtime.dbpaths import group_db_path
 from workspace import layout
 from workspace import (
     list_workspace_tree, read_file, write_file, make_dir, delete_path, bot_workspace, init_bot_workspace,
@@ -21,6 +28,32 @@ router = APIRouter()
 # tab can't send an Authorization header, so this endpoint self-authenticates via
 # the JWT carried in the URL path. main.py includes it without get_current_user.
 preview_router = APIRouter()
+
+
+async def _authorized_memory_skill_scope(
+    member_id: int, user: dict
+) -> MemoryScope:
+    uid = int(user["uid"])
+    async with global_db() as db:
+        bot = await get_member(db, member_id)
+        if not bot or bot["type"] != "bot":
+            raise HTTPException(404, "Bot not found")
+        async with db.execute(
+            """SELECT 1 FROM group_memberships
+               WHERE user_id=? AND group_id=?""",
+            (uid, bot["group_id"]),
+        ) as cur:
+            membership = await cur.fetchone()
+    if membership is None:
+        raise HTTPException(404, "Bot not found")
+    await ensure_group_db_ready(group_db_path(int(bot["group_id"])))
+    return MemoryScope.bot(
+        group_id=int(bot["group_id"]),
+        bot_id=member_id,
+        actor_id=f"user:{uid}",
+        user_id=uid,
+        purpose="canonical_skill_review",
+    )
 
 
 @router.get("/api/members/{member_id}/workspace")
@@ -113,6 +146,46 @@ async def get_skills(member_id: int, group_id: int | None = None):
     # 不信任可缺省的 query 参数，否则私有技能落 group_{gid}/bots/ 却按扁平路径去找会漏。
     skills = await list_skills_all(member_id, group_id=bot["group_id"], role=bot.get("role"))
     return {"skills": skills}
+
+
+@router.get("/api/members/{member_id}/memory-skills/candidates")
+async def get_memory_skill_candidates(
+    member_id: int,
+    user=Depends(auth.get_current_user),
+):
+    scope = await _authorized_memory_skill_scope(member_id, user)
+    candidates = await build_learning_client().list_skill_candidates(
+        ListSkillCandidates(scope=scope)
+    )
+    return {"candidates": [asdict(candidate) for candidate in candidates]}
+
+
+@router.post(
+    "/api/members/{member_id}/memory-skills/{skill_id}/approve"
+)
+async def approve_memory_skill_candidate(
+    member_id: int,
+    skill_id: str,
+    body: dict,
+    user=Depends(auth.get_current_user),
+):
+    scope = await _authorized_memory_skill_scope(member_id, user)
+    reason = str(body.get("reason") or "").strip()
+    if not reason:
+        raise HTTPException(400, "approval reason is required")
+    try:
+        approved = await build_learning_client().approve_skill_candidate(
+            ApproveSkillCandidate(
+                scope=scope,
+                skill_id=skill_id,
+                reason=reason,
+            )
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if not approved:
+        raise HTTPException(409, "Skill candidate is no longer reviewable")
+    return {"ok": True, "skill_id": skill_id, "maturity": "active"}
 
 
 @router.put("/api/members/{member_id}/skills/{skill_name}/status")

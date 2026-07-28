@@ -2,6 +2,7 @@
 
 from .models import (
     CONTRACT_VERSION,
+    ApproveSkillCandidate,
     AssembleCase,
     ClaimPipelineJob,
     CompleteExperienceUsage,
@@ -19,6 +20,7 @@ from .models import (
     IngestGroupFact,
     IngestBotFactObservations,
     IngestBotReflections,
+    ListSkillCandidates,
     MemoryEvent,
     MemoryEventType,
     MemoryHit,
@@ -38,12 +40,14 @@ from .models import (
     RecallResult,
     RecallSkills,
     ResolveLearningRefs,
+    SkillCandidate,
     SynthesizedReflection,
     VerifyUsage,
 )
 
 __all__ = [
     "CONTRACT_VERSION",
+    "ApproveSkillCandidate",
     "AssembleCase",
     "ClaimPipelineJob",
     "CompleteExperienceUsage",
@@ -61,6 +65,7 @@ __all__ = [
     "IngestGroupFact",
     "IngestBotFactObservations",
     "IngestBotReflections",
+    "ListSkillCandidates",
     "MemoryEvent",
     "MemoryEventType",
     "MemoryHit",
@@ -80,6 +85,7 @@ __all__ = [
     "RecallResult",
     "RecallSkills",
     "ResolveLearningRefs",
+    "SkillCandidate",
     "SynthesizedReflection",
     "VerifyUsage",
 ]

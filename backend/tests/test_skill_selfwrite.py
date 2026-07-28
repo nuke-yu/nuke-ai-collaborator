@@ -99,8 +99,18 @@ class TestSkillSelfWrite(unittest.IsolatedAsyncioTestCase):
             shutil.rmtree(_TEST_WS_ROOT)
 
         await database.init_db()
+        await database.init_central_db(_TEST_DB_PATH)
         async with database.get_db() as db:
+            await db.execute(
+                """INSERT INTO users
+                   (id,username,password_hash) VALUES (1,'test','x')"""
+            )
             await db.execute(f"INSERT INTO groups (id, name) VALUES ({_GROUP_ID}, 'TestGroup')")
+            await db.execute(
+                """INSERT INTO group_memberships(user_id,group_id,role)
+                   VALUES (1,?,'owner')""",
+                (_GROUP_ID,),
+            )
             await db.commit()
 
     async def asyncTearDown(self):
@@ -165,6 +175,84 @@ class TestSkillSelfWrite(unittest.IsolatedAsyncioTestCase):
         skill = next((s for s in r.json()["skills"] if s["name"] == "code-reviewer"), None)
         self.assertIsNotNone(skill)
         self.assertEqual(skill["status"], "active")
+
+    async def test_canonical_candidate_requires_group_member_approval(self):
+        async with AsyncClient(app=app, base_url="http://test") as ac:
+            bot_id = await _create_bot(ac)
+        skill_id = "skill:canonical-review"
+        declaration = (
+            '{"allowed_tools":[],"limitations":"","procedure":["review"],'
+            '"risk_level":"S0","trigger":"schema repair","verification":[]}'
+        )
+        now = 1_700_000_000_000
+        async with database.get_db() as db:
+            await db.execute(
+                """INSERT INTO skills
+                   (skill_id,group_id,bot_id,name,maturity,risk_level,
+                    current_version,created_at,updated_at)
+                   VALUES (?,?,?,'canonical-review','trial','S0',1,?,?)""",
+                (skill_id, _GROUP_ID, bot_id, now, now),
+            )
+            await db.execute(
+                """INSERT INTO skill_versions
+                   (skill_id,version,declaration_json,content_hash,
+                    evidence_ids,created_at)
+                   VALUES (?,1,?,'hash','[]',?)""",
+                (skill_id, declaration, now),
+            )
+            await db.commit()
+
+        async with AsyncClient(app=app, base_url="http://test") as ac:
+            candidates = await ac.get(
+                f"/api/members/{bot_id}/memory-skills/candidates"
+            )
+            approved = await ac.post(
+                f"/api/members/{bot_id}/memory-skills/{skill_id}/approve",
+                json={"reason": "Reviewed execution evidence"},
+            )
+        self.assertEqual(candidates.status_code, 200)
+        self.assertEqual(
+            candidates.json()["candidates"][0]["skill_id"], skill_id
+        )
+        self.assertEqual(approved.status_code, 200)
+
+        async with database.get_db() as db:
+            async with db.execute(
+                "SELECT maturity FROM skills WHERE skill_id=?",
+                (skill_id,),
+            ) as cur:
+                maturity = (await cur.fetchone())[0]
+            async with db.execute(
+                """SELECT actor_id,reason FROM skill_promotion_audit
+                   WHERE skill_id=?""",
+                (skill_id,),
+            ) as cur:
+                audit = await cur.fetchone()
+        self.assertEqual(maturity, "active")
+        self.assertEqual(
+            audit,
+            ("user:1", "Reviewed execution evidence"),
+        )
+
+    async def test_canonical_candidates_are_hidden_from_non_members(self):
+        from core import auth as _auth
+
+        async with AsyncClient(app=app, base_url="http://test") as ac:
+            bot_id = await _create_bot(ac)
+        async with database.get_db() as db:
+            await db.execute(
+                """INSERT INTO users
+                   (id,username,password_hash) VALUES (2,'outsider','x')"""
+            )
+            await db.commit()
+        app.dependency_overrides[_auth.get_current_user] = (
+            lambda: {"uid": 2, "sub": "outsider"}
+        )
+        async with AsyncClient(app=app, base_url="http://test") as ac:
+            response = await ac.get(
+                f"/api/members/{bot_id}/memory-skills/candidates"
+            )
+        self.assertEqual(response.status_code, 404)
 
     # ── 3. 拒绝：删除草稿 ────────────────────────────────────────────────────
 
