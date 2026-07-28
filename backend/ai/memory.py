@@ -477,9 +477,25 @@ async def add_to_chroma(message_id: int, content: str, role: str, bot_id: int, g
     # 2. 批量消解冲突
     del_ids = await ConflictResolver.resolve_batch([f[0] for f in facts], bot_id, group_id, provider, model)
 
+    # 3. 复用同一批抽取结果双写 canonical SQLite。它是 Bot-owned provisional
+    # observation，不会进入 Active Group Fact；迁移期保持 fail-soft，避免 canonical
+    # schema 暂不可用时阻断现有 Chroma 写路径。
+    await _mirror_facts_to_canonical(
+        message_id=message_id,
+        facts=facts,
+        role=role,
+        bot_id=bot_id,
+        group_id=group_id,
+        provider=provider,
+        model=model,
+        thread_id=thread_id,
+        timestamp=timestamp,
+        legacy_conflict_ids=del_ids,
+    )
+
     loop = asyncio.get_running_loop()
 
-    # 3. 写入全部新事实并保存重要性评分与访问频次统计
+    # 4. 写入全部新事实并保存重要性评分与访问频次统计
     for idx, (fact, score) in enumerate(facts):
         metadata = {
             "bot_id": bot_id,
@@ -499,7 +515,7 @@ async def add_to_chroma(message_id: int, content: str, role: str, bot_id: int, g
             partial(ChromaStore.write_fact_sync, fact_id, fact, metadata)
         )
 
-    # 4. 一次性删除被新事实整体覆盖而失效的旧记忆。del_ids 是一组陈旧记忆 ID，
+    # 5. 一次性删除被新事实整体覆盖而失效的旧记忆。del_ids 是一组陈旧记忆 ID，
     #    与具体哪条新事实没有位置对应关系，故必须批量删除（不能按 facts 下标配对，
     #    否则 len(del_ids) > len(facts) 时多出的冲突 ID 永不删除、陈旧事实残留）。
     if del_ids:
@@ -508,10 +524,73 @@ async def add_to_chroma(message_id: int, content: str, role: str, bot_id: int, g
             partial(ChromaStore.delete_ids_sync, del_ids)
         )
 
-    # 5. 遗忘机制：写入时有 10% 的概率被动在后台运行过期记忆的 TTL 清理，防爆库
+    # 6. 遗忘机制：写入时有 10% 的概率被动在后台运行过期记忆的 TTL 清理，防爆库
     import random
     if random.random() < 0.1:
         loop.run_in_executor(None, ChromaStore.prune_expired_memories_sync)
+
+
+async def _mirror_facts_to_canonical(
+    *,
+    message_id: int,
+    facts: list[tuple[str, float]],
+    role: str,
+    bot_id: int,
+    group_id: int | None,
+    provider: str,
+    model: str,
+    thread_id: str | None,
+    timestamp: float | None,
+    legacy_conflict_ids: list[str],
+) -> None:
+    if group_id is None:
+        return
+    try:
+        from executors.redaction import redact_secrets
+        from memory.bootstrap import build_bot_fact_observation_client
+        from memory.contracts import (
+            ExtractedFactObservation,
+            IngestBotFactObservations,
+        )
+        from memory.domain import MemoryScope
+
+        observed_at = None if timestamp is None else max(0, int(timestamp * 1000))
+        observations = tuple(
+            ExtractedFactObservation(
+                content=redact_secrets(fact)[0],
+                importance=score,
+                projection_id=f"fact_{bot_id}_{group_id}_{message_id}_{index}",
+            )
+            for index, (fact, score) in enumerate(facts)
+        )
+        await build_bot_fact_observation_client().ingest(
+            IngestBotFactObservations(
+                scope=MemoryScope.bot(
+                    group_id=group_id,
+                    bot_id=bot_id,
+                    actor_id=f"bot:{bot_id}",
+                    thread_id=thread_id,
+                    purpose="legacy_fact_dual_write",
+                ),
+                source_id=f"message:{message_id}",
+                facts=observations,
+                role=role or "",
+                provider=provider,
+                model=model,
+                thread_id=thread_id or "",
+                observed_at=observed_at,
+                legacy_conflict_ids=tuple(legacy_conflict_ids),
+            )
+        )
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        log.exception(
+            "canonical fact dual-write failed (group_id=%s, bot_id=%s, message_id=%s)",
+            group_id,
+            bot_id,
+            message_id,
+        )
 
 
 async def retrieve_relevant(bot_id: int, group_id: int | None, query: str, top_k: int = 3, thread_id: str | None = None) -> list:

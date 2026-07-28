@@ -564,6 +564,13 @@ v7 落地。关系仅连接同一 Group 中已存在的 canonical records，采�
 contradict、supersede、derive 和 support。它用于证据追溯与时态软替代，
 不参与多跳检索，也不改变现有召回排序；Chroma 仍只是后续可重建投影。
 
+同日第二个迁移增量：legacy Chroma Fact pipeline 会复用已经完成的抽取结果，
+双写一份 canonical `kind=fact` 记录。该记录固定为 Bot-owned、
+`bot_observation`、`provisional`，不能直接进入 Active Group Fact 召回。
+SQLite 暂不可用时旧 Chroma 路径继续 fail-soft 运行；Chroma 的批量冲突结果
+只作为待校准 evidence 保存，在无法确定新旧事实一一对应时不伪造
+`supersedes` 关系，也不物理删除 canonical 历史。
+
 ### 5.3 人的知识蒸馏链
 
 ```text

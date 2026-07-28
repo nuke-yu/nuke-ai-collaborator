@@ -171,6 +171,42 @@ class MemoryRelation:
 
 
 @dataclass(frozen=True, slots=True)
+class ExtractedFactObservation:
+    content: str
+    importance: float
+    projection_id: str
+
+    def __post_init__(self) -> None:
+        if not self.content.strip():
+            raise ValueError("fact content is required")
+        if not 0.0 <= self.importance <= 1.0:
+            raise ValueError("fact importance must be between 0 and 1")
+        if not self.projection_id.strip():
+            raise ValueError("projection_id is required")
+
+
+@dataclass(frozen=True, slots=True)
+class IngestBotFactObservations:
+    scope: MemoryScope
+    source_id: str
+    facts: tuple[ExtractedFactObservation, ...]
+    role: str = ""
+    provider: str = ""
+    model: str = ""
+    thread_id: str = ""
+    observed_at: int | None = None
+    legacy_conflict_ids: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not self.source_id.strip():
+            raise ValueError("source_id is required")
+        if not self.facts:
+            raise ValueError("at least one extracted fact is required")
+        if self.observed_at is not None and self.observed_at < 0:
+            raise ValueError("observed_at cannot be negative")
+
+
+@dataclass(frozen=True, slots=True)
 class ProcessLearningCase:
     scope: MemoryScope
     case_id: str
