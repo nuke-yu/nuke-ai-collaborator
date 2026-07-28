@@ -175,7 +175,6 @@ class BotMemoryProjectionRolloutGate:
         async with await self._database.connect(
             "memory_projection_rollout", group_id, write=True
         ) as connection:
-            await connection.execute("BEGIN IMMEDIATE")
             async with connection.execute(
                 """SELECT consecutive_passes,last_audited_at,
                     qualified_since,cooldown_until
@@ -194,7 +193,6 @@ class BotMemoryProjectionRolloutGate:
                 and last_audited_at
                 and now - last_audited_at < self._min_audit_interval_ms
             ):
-                await connection.rollback()
                 return await self._state(group_id)
 
             if passed:
