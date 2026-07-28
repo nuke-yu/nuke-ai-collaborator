@@ -908,11 +908,29 @@ async def maybe_reflect(group_id: int, bot_id: int, role: str,
 
             # provenance 边：只记本话题实际被归纳的记忆 id
             source_ids = ",".join(str(m[3]) for m in members)
+            source_projection_ids = tuple(str(m[3]) for m in members)
             new_level = min(max(m[4] for m in members) + 1, config.REFLECT_MAX_LEVEL)
-            
+
             # 使用 last fact ts + offset 作为新反思的 timestamp 杜绝冲突并支撑多层反思 (P3)
+            projections = []
             for idx, (insight, score) in enumerate(insights):
                 refl_ts = max_thread_ts + (idx + 1) * 0.001
+                refl_id = f"refl_{bot_id}_{group_id}_{int(refl_ts * 1000)}_{idx_triggered}_{idx}"
+                projections.append((refl_id, insight, score, refl_ts))
+
+            await _mirror_reflections_to_canonical(
+                projections=projections,
+                source_projection_ids=source_projection_ids,
+                level=new_level,
+                role=role,
+                bot_id=bot_id,
+                group_id=group_id,
+                provider=provider,
+                model=model,
+                thread_id=tid,
+            )
+
+            for refl_id, insight, score, refl_ts in projections:
                 metadata = {
                     "bot_id": bot_id,
                     "role": role or "",
@@ -926,8 +944,7 @@ async def maybe_reflect(group_id: int, bot_id: int, role: str,
                 }
                 if group_id is not None:
                     metadata["group_id"] = group_id
-                
-                refl_id = f"refl_{bot_id}_{group_id}_{int(refl_ts * 1000)}_{idx_triggered}_{idx}"
+
                 await loop.run_in_executor(
                     None, partial(ChromaStore.write_fact_sync, refl_id, insight, metadata)
                 )
@@ -946,6 +963,65 @@ async def maybe_reflect(group_id: int, bot_id: int, role: str,
         log.exception("maybe_reflect failed (bot_id=%s, group_id=%s)", bot_id, group_id)
     finally:
         _reflect_in_flight.discard(key)
+
+
+async def _mirror_reflections_to_canonical(
+    *,
+    projections: list[tuple[str, str, float, float]],
+    source_projection_ids: tuple[str, ...],
+    level: int,
+    role: str,
+    bot_id: int,
+    group_id: int | None,
+    provider: str,
+    model: str,
+    thread_id: str,
+) -> None:
+    if group_id is None:
+        return
+    try:
+        from executors.redaction import redact_secrets
+        from memory.bootstrap import build_bot_reflection_client
+        from memory.contracts import IngestBotReflections, SynthesizedReflection
+        from memory.domain import MemoryScope
+
+        reflections = tuple(
+            SynthesizedReflection(
+                content=redact_secrets(content)[0],
+                importance=importance,
+                projection_id=projection_id,
+                source_projection_ids=source_projection_ids,
+                level=level,
+                observed_at=max(0, int(timestamp * 1000)),
+            )
+            for projection_id, content, importance, timestamp in projections
+        )
+        await build_bot_reflection_client().ingest(
+            IngestBotReflections(
+                scope=MemoryScope.bot(
+                    group_id=group_id,
+                    bot_id=bot_id,
+                    actor_id=f"bot:{bot_id}",
+                    thread_id=thread_id,
+                    purpose="legacy_reflection_dual_write",
+                ),
+                reflections=reflections,
+                role=role or "",
+                provider=provider,
+                model=model,
+                thread_id=thread_id,
+            )
+        )
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        log.exception(
+            "canonical reflection dual-write failed "
+            "(group_id=%s, bot_id=%s, thread_id=%s)",
+            group_id,
+            bot_id,
+            thread_id,
+        )
 
 
 async def get_memory_links(memory_id: str) -> list[dict]:

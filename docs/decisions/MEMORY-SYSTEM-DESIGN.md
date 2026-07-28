@@ -110,8 +110,8 @@ forget
 
 | 当前能力 | 存储/实现 | 当前语义 |
 |---|---|---|
-| 原子事实 | Chroma `mem_type=fact` | 从 Bot 最终回复抽取，带 importance、timestamp、bot/group/thread |
-| 高阶反思 | Chroma `mem_type=reflection` | 按水位线从多条 Fact 归纳，带 source IDs |
+| 原子事实 | canonical SQLite + Chroma `mem_type=fact` | 同一抽取结果保存为 Bot-owned Provisional Fact，并继续写入兼容 Chroma 投影 |
+| 高阶反思 | canonical SQLite + Chroma `mem_type=reflection` | 同一归纳结果先保存为 Bot-owned Provisional Reflection，再直接写入兼容 Chroma 投影；带 legacy source IDs |
 | 工具经验 | SQLite `tool_events` + Chroma `tool_episode` | 工具事件确定性记录，达到条数门槛后批量压缩 |
 | 会话摘要 | Group SQLite `role_summaries` | 按 Bot、Group、Thread 保存和召回 |
 | 反思进度 | Group SQLite `reflection_state` | 按 Bot/Thread 水位线增量处理 |
@@ -145,7 +145,7 @@ forget
 
 | 当前实现 | 目标设计 | 迁移要求 |
 |---|---|---|
-| Chroma 是 Fact/Reflection 的主要记录 | SQLite canonical，Chroma 是可重建索引 | 先建 canonical record 和回填，再切换读写 |
+| Fact/Reflection 已双写 canonical 与 Chroma，召回仍读 Chroma | SQLite canonical，Chroma 是可重建索引 | 补 durable outbox、回填与对账后再切换投影和读路径 |
 | 冲突 Fact 被物理删除 | ADD-only + temporal supersede | 保留旧事实、来源、有效时间和替代关系 |
 | `observe()` 内多条临时后台协程 | 持久化 Pipeline Job | 前台仍 fail-soft，后台支持幂等、恢复和 dead-letter |
 | 工具事件按数量压缩 | durable Run → Case → Experience | 先补稳定 run/step/attempt identity |

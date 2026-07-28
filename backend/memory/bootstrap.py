@@ -18,6 +18,7 @@ from memory.adapters.runtime import (
 from memory.application import (
     AuthorizedPersonalKnowledgeService,
     BotFactObservationService,
+    BotReflectionService,
     CanonicalRelationService,
     GroupFactService,
 )
@@ -53,6 +54,10 @@ def build_group_knowledge_client() -> GroupFactService:
 
 def build_bot_fact_observation_client() -> BotFactObservationService:
     return BotFactObservationService(legacy_memory_database)
+
+
+def build_bot_reflection_client() -> BotReflectionService:
+    return BotReflectionService(legacy_memory_database)
 
 
 def build_memory_relation_client() -> CanonicalRelationService:

@@ -9,6 +9,7 @@ from memory.contracts import (AssembleCase, CompleteExperienceUsage, CompleteSki
                               FormatProjectedContext, IngestPersonalKnowledge, MemoryEvent,
                               IngestGroupFact,
                               IngestBotFactObservations,
+                              IngestBotReflections,
                               MarkUsageAdopted, MarkUsageExecuted,
                               ObserveMemory, ObservePersonalHabit, ProcessLearningCase,
                               MemoryRelation, RecallExperiences, RecallMemory,
@@ -52,6 +53,13 @@ class MemoryRelationPort(Protocol):
 class BotFactObservationPort(Protocol):
     async def ingest(
         self, command: IngestBotFactObservations
+    ) -> tuple[str, ...]: ...
+
+
+@runtime_checkable
+class BotReflectionPort(Protocol):
+    async def ingest(
+        self, command: IngestBotReflections
     ) -> tuple[str, ...]: ...
 
 

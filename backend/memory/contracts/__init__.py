@@ -18,6 +18,7 @@ from .models import (
     IngestPersonalKnowledge,
     IngestGroupFact,
     IngestBotFactObservations,
+    IngestBotReflections,
     MemoryEvent,
     MemoryEventType,
     MemoryHit,
@@ -36,6 +37,7 @@ from .models import (
     RecallMemoryRelations,
     RecallResult,
     RecallSkills,
+    SynthesizedReflection,
     VerifyUsage,
 )
 
@@ -57,6 +59,7 @@ __all__ = [
     "IngestPersonalKnowledge",
     "IngestGroupFact",
     "IngestBotFactObservations",
+    "IngestBotReflections",
     "MemoryEvent",
     "MemoryEventType",
     "MemoryHit",
@@ -75,5 +78,6 @@ __all__ = [
     "RecallMemoryRelations",
     "RecallResult",
     "RecallSkills",
+    "SynthesizedReflection",
     "VerifyUsage",
 ]

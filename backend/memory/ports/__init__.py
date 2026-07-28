@@ -1,6 +1,6 @@
 """Ports implemented by Memory application services and infrastructure."""
 
-from .api import (BotFactObservationPort, GroupKnowledgePort, LearningPort, MemoryCommandPort,
+from .api import (BotFactObservationPort, BotReflectionPort, GroupKnowledgePort, LearningPort, MemoryCommandPort,
                   MemoryEventPort, MemoryQueryPort, MemoryRelationPort,
                   PersonalKnowledgePort)
 from .infrastructure import (
@@ -28,6 +28,7 @@ from .infrastructure import (
 __all__ = [
     "AlgorithmDescriptor",
     "BotFactObservationPort",
+    "BotReflectionPort",
     "MemoryAlgorithmPort",
     "FactExtractionPort",
     "CaseExtractionPort",

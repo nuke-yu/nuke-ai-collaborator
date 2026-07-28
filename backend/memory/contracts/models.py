@@ -207,6 +207,44 @@ class IngestBotFactObservations:
 
 
 @dataclass(frozen=True, slots=True)
+class SynthesizedReflection:
+    content: str
+    importance: float
+    projection_id: str
+    source_projection_ids: tuple[str, ...]
+    level: int
+    observed_at: int
+
+    def __post_init__(self) -> None:
+        if not self.content.strip():
+            raise ValueError("reflection content is required")
+        if not 0.0 <= self.importance <= 1.0:
+            raise ValueError("reflection importance must be between 0 and 1")
+        if not self.projection_id.strip():
+            raise ValueError("projection_id is required")
+        if not any(source.strip() for source in self.source_projection_ids):
+            raise ValueError("reflection source_projection_ids are required")
+        if self.level < 1:
+            raise ValueError("reflection level must be positive")
+        if self.observed_at < 0:
+            raise ValueError("observed_at cannot be negative")
+
+
+@dataclass(frozen=True, slots=True)
+class IngestBotReflections:
+    scope: MemoryScope
+    reflections: tuple[SynthesizedReflection, ...]
+    role: str = ""
+    provider: str = ""
+    model: str = ""
+    thread_id: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.reflections:
+            raise ValueError("at least one reflection is required")
+
+
+@dataclass(frozen=True, slots=True)
 class ProcessLearningCase:
     scope: MemoryScope
     case_id: str
