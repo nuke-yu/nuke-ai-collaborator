@@ -32,7 +32,7 @@ class LegacyBotMemoryProjectionReader:
         return _projection_items(result)
 
     async def scan_group(
-        self, group_id: int, *, limit: int
+        self, group_id: int, *, limit: int, offset: int = 0
     ) -> Mapping[str, Mapping[str, Any]]:
         from ai.memory import ChromaStore
 
@@ -40,6 +40,7 @@ class LegacyBotMemoryProjectionReader:
             ChromaStore.get_group_bot_memories_sync,
             group_id,
             limit,
+            offset,
         )
         return _projection_items(result)
 
@@ -155,4 +156,11 @@ def redact_projection_error(message: str) -> str:
     from executors.redaction import redact_secrets
 
     redacted, _ = redact_secrets(message)
+    return redacted
+
+
+def redact_projection_content(content: str) -> str:
+    from executors.redaction import redact_secrets
+
+    redacted, _ = redact_secrets(content)
     return redacted

@@ -14,6 +14,7 @@ from memory.adapters.runtime import (
     LegacyLearningAdapter,
     LegacyPersonalKnowledgeAdapter,
     legacy_memory_database,
+    redact_projection_content,
     redact_projection_error,
 )
 from memory.application import (
@@ -21,6 +22,7 @@ from memory.application import (
     BotFactObservationService,
     BotMemoryProjectionAuditService,
     BotReflectionService,
+    CanonicalChromaBackfillService,
     CanonicalRelationService,
     GroupFactService,
 )
@@ -79,6 +81,14 @@ def build_bot_memory_projection_auditor() -> BotMemoryProjectionAuditService:
         legacy_memory_database,
         LegacyBotMemoryProjectionReader(),
         limit=config.MEMORY_PROJECTION_AUDIT_LIMIT,
+    )
+
+
+def build_canonical_chroma_backfill_client() -> CanonicalChromaBackfillService:
+    return CanonicalChromaBackfillService(
+        legacy_memory_database,
+        LegacyBotMemoryProjectionReader(),
+        redact_projection_content,
     )
 
 

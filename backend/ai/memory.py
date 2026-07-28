@@ -215,17 +215,26 @@ class ChromaStore:
         return col.get(ids=ids, include=["documents", "metadatas"])
 
     @classmethod
-    def get_group_bot_memories_sync(cls, group_id: int, limit: int) -> dict:
+    def get_group_bot_memories_sync(
+        cls, group_id: int, limit: int, offset: int = 0
+    ) -> dict:
         """Bounded projection scan used only by canonical shadow auditing."""
         col = cls.get_collection()
         return col.get(
             where={
                 "$and": [
                     {"group_id": {"$eq": group_id}},
-                    {"mem_type": {"$in": ["fact", "reflection"]}},
+                    {"$or": [
+                        {"mem_type": {"$eq": "reflection"}},
+                        {"$and": [
+                            {"mem_type": {"$ne": "tool_episode"}},
+                            {"mem_type": {"$ne": "experience"}},
+                        ]},
+                    ]},
                 ]
             },
             limit=max(1, limit),
+            offset=max(0, offset),
             include=["documents", "metadatas"],
         )
 

@@ -8,6 +8,7 @@ from .projection_legacy import (LegacyExperienceProjectionDelivery,
                                 LegacyBotMemoryProjectionReader,
                                 LegacyMemoryProjectionDelivery,
                                 LegacyMemoryProjectionReconciler,
+                                redact_projection_content,
                                 redact_projection_error)
 from .sqlite_legacy import LegacySQLiteMemoryDatabase, legacy_memory_database
 
@@ -16,4 +17,5 @@ __all__ = ["LegacyConversationMemoryAdapter", "LegacyLearningAdapter", "LegacyMe
            "LegacyExperienceProjectionDelivery", "LegacyExperienceProjectionReconciler",
            "LegacyBotMemoryProjectionReader",
            "LegacyMemoryProjectionDelivery", "LegacyMemoryProjectionReconciler",
-           "LegacySQLiteMemoryDatabase", "legacy_memory_database", "redact_projection_error"]
+           "LegacySQLiteMemoryDatabase", "legacy_memory_database",
+           "redact_projection_content", "redact_projection_error"]

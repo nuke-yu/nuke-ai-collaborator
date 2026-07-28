@@ -155,7 +155,7 @@ class BotMemoryProjectionReaderPort(Protocol):
     ) -> Mapping[str, Mapping[str, Any]]: ...
 
     async def scan_group(
-        self, group_id: int, *, limit: int
+        self, group_id: int, *, limit: int, offset: int = 0
     ) -> Mapping[str, Mapping[str, Any]]: ...
 
 

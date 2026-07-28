@@ -166,6 +166,15 @@ Worker 每分钟对活跃 Group 执行只读、限量的 canonical ↔ Chroma sh
 截断状态和审计错误；结果随 Worker stats 汇总到 Supervisor `/metrics`。审计失败只增加
 错误指标，不触发修复、不阻断 Group hydration，也不改变当前召回结果。
 
+存量 Chroma Fact/Reflection 可通过
+`python3 -m scripts.backfill_canonical_bot_memory --group-id <id>` 生成 dry-run
+报告，确认后追加 `--apply` 写入 canonical SQLite。命令要求显式列出 Group，支持
+`--bot-id` 和分页大小；不会调用模型、不会删除或修改 Chroma，也不会覆盖/复活已有
+canonical 记录。缺少 Group/Bot/timestamp、跨 Group metadata 或缺少 Reflection
+source IDs 的条目只计入 invalid。写入前继续执行 secret redaction；迁移产生的记录标记
+`legacy_chroma_backfilled`，后续 Group hydration 会按正常 reconciliation 重建 durable
+projection intent。
+
 ## 2. 产品目标
 
 ### 2.1 理解项目

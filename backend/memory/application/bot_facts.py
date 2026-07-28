@@ -54,7 +54,7 @@ class BotFactObservationService:
             "memory_records", scope.group_id, write=True
         ) as db:
             for fact in command.facts:
-                record_id = _record_id(
+                record_id = bot_fact_record_id(
                     scope.group_id,
                     scope.bot_id,
                     command.source_id,
@@ -136,7 +136,7 @@ class BotFactObservationService:
         return tuple(record_ids)
 
 
-def _record_id(
+def bot_fact_record_id(
     group_id: int,
     bot_id: int,
     source_id: str,

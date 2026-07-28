@@ -49,7 +49,7 @@ class BotReflectionService:
             "memory_records", scope.group_id, write=True
         ) as db:
             for reflection in command.reflections:
-                record_id = _record_id(
+                record_id = bot_reflection_record_id(
                     scope.group_id,
                     scope.bot_id,
                     reflection.projection_id,
@@ -138,6 +138,8 @@ class BotReflectionService:
         return tuple(record_ids)
 
 
-def _record_id(group_id: int, bot_id: int, projection_id: str) -> str:
+def bot_reflection_record_id(
+    group_id: int, bot_id: int, projection_id: str
+) -> str:
     raw = f"{group_id}:{bot_id}:{projection_id}"
     return "bot-reflection:" + hashlib.sha256(raw.encode()).hexdigest()[:24]
