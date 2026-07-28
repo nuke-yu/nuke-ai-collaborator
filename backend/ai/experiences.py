@@ -418,44 +418,85 @@ async def recall_experiences(*, query: str, run_id: str, group_id: int | None,
     from ai.memory import _memory_db
     from memory.domain import identify_task
     query_identity = identify_task(query)
-    async with await _memory_db("memory_records", group_id, write=False) as db:
-        async with db.execute("SELECT record_id,content,confidence,semantic_cluster_key FROM memory_records "
-                              "WHERE group_id=? AND bot_id=? AND kind='experience' AND status='active'",
-                              (group_id, bot_id)) as cur:
-            rows = await cur.fetchall()
+
     vector_scores = {}
+    vector_candidate_ids: set[str] = set()
     try:
         from ai.memory import ChromaStore
         where = {"$and":[{"group_id":{"$eq":group_id}},{"bot_id":{"$eq":bot_id or 0}},
                           {"mem_type":{"$eq":"experience"}}]}
-        result = await asyncio.to_thread(ChromaStore.query_similar_sync, query, where, max(limit * 4, 8))
-        ids = (result.get("ids") or [[]])[0]; distances = (result.get("distances") or [[]])[0]
-        vector_scores = {rid:max(0.0,1.0-float(dist)) for rid,dist in zip(ids,distances)}
+        result = await asyncio.to_thread(ChromaStore.query_similar_sync, query, where, max(limit * 4, 16))
+        ids = (result.get("ids") or [[]])[0]
+        distances = (result.get("distances") or [[]])[0]
+        for rid, dist in zip(ids, distances):
+            v_score = max(0.0, 1.0 - float(dist))
+            if v_score >= 0.1:
+                vector_scores[rid] = v_score
+                vector_candidate_ids.add(rid)
     except Exception:
         pass
-    q = _terms(query); ranked = []
+
+    # Bounded candidate retrieval: vector candidates + cluster key candidates + recent fallback
+    async with await _memory_db("memory_records", group_id, write=False) as db:
+        candidate_ids = list(vector_candidate_ids[:32]) if isinstance(vector_candidate_ids, list) else list(vector_candidate_ids)
+        rows = []
+        if candidate_ids:
+            placeholders = ",".join("?" for _ in candidate_ids)
+            async with db.execute(
+                f"""SELECT record_id,content,confidence,semantic_cluster_key FROM memory_records
+                    WHERE group_id=? AND bot_id=? AND kind='experience' AND status='active'
+                      AND record_id IN ({placeholders})""",
+                (group_id, bot_id, *candidate_ids),
+            ) as cur:
+                rows.extend(await cur.fetchall())
+
+        fetched_ids = {str(row[0]) for row in rows}
+        # Supplement with cluster match and recent active experiences up to 50 candidates max
+        async with db.execute(
+            """SELECT record_id,content,confidence,semantic_cluster_key FROM memory_records
+                WHERE group_id=? AND bot_id=? AND kind='experience' AND status='active'
+                  AND (semantic_cluster_key=? OR 1=1)
+                ORDER BY updated_at DESC LIMIT 50""",
+            (group_id, bot_id, query_identity.semantic_cluster_key),
+        ) as cur:
+            for row in await cur.fetchall():
+                if str(row[0]) not in fetched_ids:
+                    rows.append(row)
+                    fetched_ids.add(str(row[0]))
+
+    q = _terms(query)
+    ranked = []
     for record_id, content, confidence, semantic_cluster_key in rows:
         terms = _terms(content)
-        lexical = len(q & terms) / max(1, len(q | terms))
+        lexical = len(q & terms) / max(1, len(q | terms)) if terms and q else 0.0
         cluster_match = float(
             bool(semantic_cluster_key)
             and semantic_cluster_key == query_identity.semantic_cluster_key
         )
+        vector_score = vector_scores.get(record_id, 0.0)
         score = (
             0.45 * lexical
-            + 0.35 * vector_scores.get(record_id, 0.0)
+            + 0.35 * vector_score
             + 0.20 * cluster_match
-        )
-        if score:
-            ranked.append((score * float(confidence), record_id, content))
-    ranked.sort(reverse=True); selected = []; used = 0
+        ) * float(confidence)
+
+        # Minimum score threshold to prevent irrelevance
+        if score >= 0.08 or (lexical >= 0.15 or vector_score >= 0.3):
+            ranked.append((score, record_id, content))
+
+    ranked.sort(reverse=True)
+    selected = []
+    used = 0
     for _, record_id, content in ranked[:limit]:
         snippet = content[:1200]
         if used + len(snippet) > char_budget:
             break
-        selected.append((record_id, snippet)); used += len(snippet)
+        selected.append((record_id, snippet))
+        used += len(snippet)
+
     if not selected:
         return "", []
+
     now = int(time.time() * 1000)
     async with await _memory_db("experience_usage", group_id, write=True) as db:
         for record_id, _ in selected:
@@ -465,6 +506,7 @@ async def recall_experiences(*, query: str, run_id: str, group_id: int | None,
                 "WHERE experience_usage.state='injected'",
                 (record_id,run_id,group_id,bot_id,"injected",now,now))
         await db.commit()
+
     formatted_experiences = []
     from memory.application.references import experience_ref
     for record_id, snippet in selected:
