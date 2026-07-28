@@ -289,8 +289,24 @@ async def _evaluate_case(group_id: int, case_id: str, input_version: str) -> dic
     }
 
 
+async def _project_skill(
+    group_id: int, skill_id: str, input_version: str
+) -> dict:
+    from ai.skill_learning import project_skill
+
+    path = await project_skill(skill_id, group_id)
+    if path is None:
+        raise ValueError(f"Skill not found for projection: {skill_id}")
+    return {
+        "skill_id": skill_id,
+        "path": path,
+        "input_version": input_version,
+    }
+
+
 _HANDLERS: Mapping[str, _JobHandler] = {
     "evaluate_case": _evaluate_case,
+    "project_skill": _project_skill,
     "observe_turn": _observe_turn,
     "observe_turn_fact": _observe_turn_fact,
     "observe_turn_summary": _observe_turn_summary,

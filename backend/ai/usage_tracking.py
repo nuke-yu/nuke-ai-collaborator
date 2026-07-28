@@ -161,6 +161,22 @@ async def mark_verified(
                     updated_at=? WHERE skill_id=? AND group_id=?""",
                     (now, item_id, group_id),
                 )
+                async with db.execute(
+                    """SELECT current_version,maturity,status FROM skills
+                       WHERE skill_id=? AND group_id=?""",
+                    (item_id, group_id),
+                ) as cur:
+                    projection = await cur.fetchone()
+                if projection is not None:
+                    from ai.skill_learning import _enqueue_skill_projection
+                    await _enqueue_skill_projection(
+                        db,
+                        skill_id=item_id,
+                        group_id=group_id,
+                        version=int(projection[0]),
+                        maturity=str(projection[1]),
+                        status=str(projection[2]),
+                    )
         await db.commit()
     return len(changed_ids)
 

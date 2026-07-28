@@ -1,7 +1,6 @@
 """Compatibility boundary for the existing durable learning pipeline."""
 from __future__ import annotations
 
-import hashlib
 import time
 import uuid
 from typing import Any
@@ -175,11 +174,6 @@ class LegacyLearningAdapter:
             status=command.status,
             evidence=command.evidence,
         )
-        if changed and command.kind.value == "skill":
-            from ai.skill_learning import project_skill
-            group_id = self._group_id(command.scope)
-            for skill_id in command.item_ids:
-                await project_skill(skill_id, group_id)
         return changed
 
     @staticmethod
@@ -197,8 +191,11 @@ class LegacyPipelineJobAdapter:
         # This raw key format and the derived ID are persisted API: changing
         # either creates a second job for inputs already queued by older
         # releases. Keep the canonical representation stable across upgrades.
-        key = f"{job_type}:{group_id}:{input_id}:{input_version}"
-        job_id = "job:" + hashlib.sha256(key.encode()).hexdigest()[:24]
+        from memory.application.jobs import pipeline_job_identity
+
+        job_id, key = pipeline_job_identity(
+            job_type, group_id, input_id, input_version
+        )
         now = int(time.time() * 1000)
         from ai.memory import _memory_db
         async with await _memory_db("pipeline_jobs", group_id, write=True) as db:

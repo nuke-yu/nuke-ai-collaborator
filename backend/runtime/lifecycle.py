@@ -126,6 +126,7 @@ class LifecycleManager:
                 now = time.time()
                 if now - last_maintenance >= _MAINTENANCE_INTERVAL_SECONDS:
                     await self._repair_turn_observation_gaps()
+                    await self._repair_skill_projection_gaps()
                     await self.sweep_inactive_groups()
                     await self._drain_projection_outboxes()
                     await self._audit_memory_projections()
@@ -192,6 +193,37 @@ class LifecycleManager:
             except Exception:
                 log.exception(
                     "lifecycle: failed to repair observation jobs for group %d",
+                    group_id,
+                )
+
+    async def _repair_skill_projection_gaps(
+        self, group_ids: tuple[int, ...] | None = None
+    ) -> None:
+        """Requeue deleted or stale derived Skill workspace projections."""
+        from ai.skill_learning import enqueue_missing_skill_projections
+
+        if group_ids is None:
+            async with self._lock:
+                targets = tuple(self._active_groups)
+        else:
+            targets = group_ids
+        for group_id in targets:
+            try:
+                repaired = await enqueue_missing_skill_projections(group_id)
+                if repaired:
+                    snapshot = self._learning_pipeline_stats.setdefault(
+                        group_id, {}
+                    )
+                    snapshot["skill_projection_jobs_repaired"] = (
+                        int(snapshot.get(
+                            "skill_projection_jobs_repaired", 0
+                        )) + repaired
+                    )
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                log.exception(
+                    "lifecycle: failed to repair Skill projections for group %d",
                     group_id,
                 )
 
@@ -428,6 +460,7 @@ class LifecycleManager:
                     )
                 await self._audit_memory_projections((group_id,))
                 await self._repair_turn_observation_gaps((group_id,))
+                await self._repair_skill_projection_gaps((group_id,))
                 await self._dispatch_learning_jobs((group_id,))
 
                 # Drain deferred promotions and prune stale worktrees on hydration

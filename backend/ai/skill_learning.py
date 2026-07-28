@@ -2,7 +2,9 @@
 from __future__ import annotations
 import hashlib
 import json
+import os
 import re
+import tempfile
 import time
 
 _SAFE_TOOL = re.compile(r"^[a-zA-Z][a-zA-Z0-9_]{0,79}$")
@@ -23,6 +25,57 @@ def validate_declaration(value: dict) -> None:
     encoded = json.dumps(value, ensure_ascii=False).lower()
     if "bypasspermissions" in encoded or "bypass_permissions" in encoded:
         raise ValueError("permission bypass is forbidden")
+
+
+def _projection_input_version(
+    version: int, maturity: str, status: str
+) -> str:
+    return f"{version}:{maturity}:{status}"
+
+
+async def _enqueue_skill_projection(
+    db,
+    *,
+    skill_id: str,
+    group_id: int,
+    version: int,
+    maturity: str,
+    status: str,
+    reopen_completed: bool = False,
+) -> str:
+    from memory.application.jobs import pipeline_job_identity
+
+    input_version = _projection_input_version(version, maturity, status)
+    job_id, key = pipeline_job_identity(
+        "project_skill", group_id, skill_id, input_version
+    )
+    now = int(time.time() * 1000)
+    await db.execute(
+        """INSERT INTO pipeline_jobs
+           (job_id,job_type,group_id,input_id,input_version,
+            idempotency_key,created_at,updated_at)
+           VALUES (?,'project_skill',?,?,?,?,?,?)
+           ON CONFLICT(idempotency_key) DO NOTHING""",
+        (
+            job_id,
+            group_id,
+            skill_id,
+            input_version,
+            key,
+            now,
+            now,
+        ),
+    )
+    if reopen_completed:
+        await db.execute(
+            """UPDATE pipeline_jobs
+               SET status='pending',attempt=0,lease_until=NULL,
+                   lease_token=NULL,error='',output_json='{}',updated_at=?,
+                   completed_at=NULL
+               WHERE idempotency_key=? AND status='completed'""",
+            (now, key),
+        )
+    return job_id
 
 
 async def compile_candidate(record_id: str, group_id: int) -> str | None:
@@ -55,6 +108,20 @@ async def compile_candidate(record_id: str, group_id: int) -> str | None:
           (skill_id,version,declaration_json,content_hash,evidence_ids,created_at) VALUES (?,?,?,?,?,?)
           ON CONFLICT(skill_id,version) DO NOTHING""",
           (skill_id,1,canonical,digest,row[5],now))
+        async with db.execute(
+            """SELECT current_version,maturity,status FROM skills
+               WHERE skill_id=? AND group_id=?""",
+            (skill_id, group_id),
+        ) as cur:
+            projection = await cur.fetchone()
+        await _enqueue_skill_projection(
+            db,
+            skill_id=skill_id,
+            group_id=group_id,
+            version=int(projection[0]),
+            maturity=str(projection[1]),
+            status=str(projection[2]),
+        )
         await db.commit()
     return skill_id
 
@@ -134,6 +201,20 @@ async def promote_skill(
               (skill_id,group_id,actor_id,reason,from_maturity,to_maturity,created_at)
               VALUES (?,?,?,?,?,?,?)""",
               (skill_id,group_id,actor_id,reason,expected_prev,target_maturity,now))
+            async with db.execute(
+                """SELECT current_version,maturity,status FROM skills
+                   WHERE skill_id=? AND group_id=?""",
+                (skill_id, group_id),
+            ) as projection_cur:
+                projection = await projection_cur.fetchone()
+            await _enqueue_skill_projection(
+                db,
+                skill_id=skill_id,
+                group_id=group_id,
+                version=int(projection[0]),
+                maturity=str(projection[1]),
+                status=str(projection[2]),
+            )
         await db.commit()
         return cur.rowcount == 1
 
@@ -230,6 +311,9 @@ async def project_skill(skill_id:str,group_id:int) -> str|None:
     if not row:return None
     from skills.constants import bot_ws
     from skills.lifecycle import file_lock
+    from skills.metadata import _is_safe_name
+    if not _is_safe_name(str(row[1])):
+        raise ValueError("canonical Skill has unsafe projection name")
     folder="active" if row[2] in {"active","stable"} and row[3]=="active" else "draft"
     learned=bot_ws(row[0],group_id)/"skills"/"learned"
     path=learned/folder/f"{row[1]}.md"
@@ -239,9 +323,109 @@ async def project_skill(skill_id:str,group_id:int) -> str|None:
              f"risk_level: {declaration['risk_level']}\ncanonical_skill_id: {skill_id}\nversion: {row[4]}\n---\n\n"
              f"## Trigger\n\n{declaration['trigger']}\n\n## Procedure\n\n"+
              "\n".join(f"{i+1}. {step}" for i,step in enumerate(declaration["procedure"]))+"\n")
-    with file_lock(path):
-        path.parent.mkdir(parents=True,exist_ok=True); path.write_text(content,encoding="utf-8")
-    if alternate.exists():
-        with file_lock(alternate):
-            if alternate.exists(): alternate.unlink()
+    learned.mkdir(parents=True, exist_ok=True)
+    projection_lock = learned / f".{row[1]}.projection"
+    temp_path = None
+    with file_lock(projection_lock):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=path.parent,
+                prefix=f".{path.name}.",
+                suffix=".tmp",
+                delete=False,
+            ) as temp_file:
+                temp_file.write(content)
+                temp_file.flush()
+                os.fsync(temp_file.fileno())
+                temp_path = temp_file.name
+            os.replace(temp_path, path)
+            temp_path = None
+            if alternate.exists():
+                alternate.unlink()
+        finally:
+            if temp_path is not None:
+                try:
+                    os.unlink(temp_path)
+                except FileNotFoundError:
+                    pass
     return str(path)
+
+
+def _projection_matches(
+    *,
+    bot_id: int,
+    group_id: int,
+    name: str,
+    maturity: str,
+    status: str,
+    version: int,
+    skill_id: str,
+) -> bool:
+    from skills.constants import bot_ws
+    from skills.metadata import _is_safe_name
+
+    if not _is_safe_name(name):
+        return False
+    folder = (
+        "active"
+        if maturity in {"active", "stable"} and status == "active"
+        else "draft"
+    )
+    learned = bot_ws(bot_id, group_id) / "skills" / "learned"
+    path = learned / folder / f"{name}.md"
+    alternate = learned / (
+        "draft" if folder == "active" else "active"
+    ) / f"{name}.md"
+    try:
+        header = path.read_text(encoding="utf-8")[:2048]
+    except (OSError, UnicodeError):
+        return False
+    return (
+        f"canonical_skill_id: {skill_id}\n" in header
+        and f"version: {version}\n" in header
+        and not alternate.exists()
+    )
+
+
+async def enqueue_missing_skill_projections(group_id: int) -> int:
+    """Repair canonical commit → workspace projection gaps."""
+    from ai.memory import _memory_db
+
+    async with await _memory_db("skills", group_id, write=False) as db:
+        async with db.execute(
+            """SELECT skill_id,bot_id,name,maturity,status,current_version
+               FROM skills WHERE group_id=?""",
+            (group_id,),
+        ) as cur:
+            rows = await cur.fetchall()
+    missing = [
+        row
+        for row in rows
+        if not _projection_matches(
+            skill_id=str(row[0]),
+            bot_id=int(row[1]),
+            group_id=group_id,
+            name=str(row[2]),
+            maturity=str(row[3]),
+            status=str(row[4]),
+            version=int(row[5]),
+        )
+    ]
+    if not missing:
+        return 0
+    async with await _memory_db("pipeline_jobs", group_id, write=True) as db:
+        for skill_id, _bot_id, _name, maturity, status, version in missing:
+            await _enqueue_skill_projection(
+                db,
+                skill_id=str(skill_id),
+                group_id=group_id,
+                version=int(version),
+                maturity=str(maturity),
+                status=str(status),
+                reopen_completed=True,
+            )
+        await db.commit()
+    return len(missing)

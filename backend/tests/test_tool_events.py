@@ -7,8 +7,10 @@ import asyncio
 import json
 import os
 import sys
+import tempfile
 import time
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -37,6 +39,7 @@ from ai.pipeline import (
 from ai.reflexion import (classify_failure, maybe_inject,
                           record_memory_adoption, record_memory_injection)
 from ai.skill_learning import (compile_candidate, complete_skill_usage,
+                               enqueue_missing_skill_projections,
                                promote_skill, recall_skills,
                                resolve_skill_refs, validate_declaration)
 from ai.experiences import complete_usage, decay_experiences, distill_case, recall_experiences
@@ -1103,6 +1106,76 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError):
             validate_declaration({"risk_level":"S1","trigger":"x","procedure":["x"],"allowed_tools":["run_shell"]})
 
+    async def test_skill_projection_job_rebuilds_draft_and_active_files(self):
+        case1 = await assemble_case(
+            run_id="projection-1",
+            group_id=7,
+            bot_id=3,
+            task="repair projection schema",
+            outcome="completed",
+            tool_records=_corrected_trace("verification failed x"),
+        )
+        case2 = await assemble_case(
+            run_id="projection-2",
+            group_id=7,
+            bot_id=3,
+            task="repair projection schema",
+            outcome="completed",
+            tool_records=_corrected_trace("verification failed y"),
+        )
+        record_id = await distill_case(case1, 7)
+        await distill_case(case2, 7)
+        async with database.connect(TEST_DB_PATH) as db:
+            await db.execute(
+                "UPDATE memory_records SET confidence=.8 WHERE record_id=?",
+                (record_id,),
+            )
+            await db.commit()
+        skill_id = await compile_candidate(record_id, 7)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir) / "bot"
+            with patch(
+                "skills.constants.bot_ws",
+                return_value=workspace,
+            ):
+                projected = await dispatch_group(7)
+                self.assertEqual(projected["completed"], 1)
+                draft = next(
+                    (workspace / "skills" / "learned" / "draft").glob(
+                        "*.md"
+                    )
+                )
+                self.assertIn(
+                    f"canonical_skill_id: {skill_id}",
+                    draft.read_text(encoding="utf-8"),
+                )
+
+                self.assertTrue(await promote_skill(
+                    skill_id,
+                    7,
+                    "active",
+                    bot_id=3,
+                    actor_id="user:1",
+                    reason="Reviewed projection evidence",
+                ))
+                promoted = await dispatch_group(7)
+                self.assertEqual(promoted["completed"], 1)
+                active = (
+                    workspace / "skills" / "learned" / "active"
+                    / draft.name
+                )
+                self.assertTrue(active.exists())
+                self.assertFalse(draft.exists())
+
+                active.unlink()
+                self.assertEqual(
+                    await enqueue_missing_skill_projections(7), 1
+                )
+                rebuilt = await dispatch_group(7)
+                self.assertEqual(rebuilt["completed"], 1)
+                self.assertTrue(active.exists())
+
     async def test_skill_maturity_uses_independent_run_outcomes(self):
         case1=await assemble_case(run_id="k1",group_id=7,bot_id=3,task="repair schema migration",
                                   outcome="completed",tool_records=_corrected_trace("verification failed x"))
@@ -1172,14 +1245,13 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
                 (skill_id,),
             )
             await db.commit()
-        with patch("ai.skill_learning.project_skill",new=AsyncMock(return_value="x")):
-            await complete_skill_usage(skill_ids=ids,run_id="new-run",group_id=7,outcome="completed")
-            await self._verify_usage(
-                UsageKind.SKILL,
-                ids,
-                "new-run",
-                UsageState.VERIFIED_SUCCESS,
-            )
+        await complete_skill_usage(skill_ids=ids,run_id="new-run",group_id=7,outcome="completed")
+        await self._verify_usage(
+            UsageKind.SKILL,
+            ids,
+            "new-run",
+            UsageState.VERIFIED_SUCCESS,
+        )
         async with database.connect(TEST_DB_PATH) as db:
             async with db.execute("SELECT maturity,success_count FROM skills WHERE skill_id=?",(skill_id,)) as cur:
                 row=await cur.fetchone()

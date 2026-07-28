@@ -136,6 +136,24 @@ class TestCell17Lifecycle(unittest.IsolatedAsyncioTestCase):
             lm.stats()["learning_pipeline"]["7"]["observation_jobs_repaired"], 2
         )
 
+    async def test_skill_projection_repair_is_scoped_to_owned_groups(self):
+        lm = LifecycleManager()
+        lm._active_groups[7] = time.time()
+        with patch(
+            "ai.skill_learning.enqueue_missing_skill_projections",
+            new_callable=AsyncMock,
+            return_value=2,
+        ) as repair:
+            await lm._repair_skill_projection_gaps()
+
+        repair.assert_awaited_once_with(7)
+        self.assertEqual(
+            lm.stats()["learning_pipeline"]["7"][
+                "skill_projection_jobs_repaired"
+            ],
+            2,
+        )
+
     async def test_lru_eviction_closes_writer(self):
         lm = LifecycleManager(max_groups=2)
         
