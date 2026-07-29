@@ -131,7 +131,7 @@ export default function GroupList({
       )}
 
       <div className="flex-1 overflow-y-auto px-2 space-y-0.5">
-        {groups.map((g) => (
+        {groups.filter((g) => !g.name?.startsWith('Coding Agent:')).map((g) => (
           <div key={g.id}>
             <div className={`group/grp flex items-center gap-1 rounded text-sm transition-colors ${
               activeGroupId === g.id ? 'bg-indigo-600' : 'hover:bg-gray-800'

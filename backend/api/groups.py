@@ -121,14 +121,24 @@ _MEMBER_DATA = (
 
 
 @router.get("/api/groups")
-async def get_all_groups():
-    async with get_db() as db:
-        async with db.execute("""
-            SELECT g.id, g.name, g.created_at, COUNT(m.id) as member_count
-            FROM groups g
-            LEFT JOIN members m ON m.group_id = g.id
-            GROUP BY g.id ORDER BY g.id
-        """) as cur:
+async def get_all_groups(include_jobs: bool = False):
+    async with global_db() as db:
+        if include_jobs:
+            sql = """
+                SELECT g.id, g.name, g.created_at, COUNT(m.id) as member_count
+                FROM groups g
+                LEFT JOIN members m ON m.group_id = g.id
+                GROUP BY g.id ORDER BY g.id
+            """
+        else:
+            sql = """
+                SELECT g.id, g.name, g.created_at, COUNT(m.id) as member_count
+                FROM groups g
+                LEFT JOIN members m ON m.group_id = g.id
+                WHERE g.name NOT LIKE 'Coding Agent:%'
+                GROUP BY g.id ORDER BY g.id
+            """
+        async with db.execute(sql) as cur:
             rows = await cur.fetchall()
     return [{"id": r[0], "name": r[1], "created_at": r[2], "member_count": r[3]} for r in rows]
 
