@@ -206,7 +206,8 @@ async def _before_finalize_hook(
                 reviewer_prompt,
                 [{"role": "user", "content": f"【用户问题】\n{user_message}\n\n【待审查回复】\n{cur_draft}"}],
                 model_name, provider, temperature, 512,
-                auto_compact=False
+                auto_compact=False,
+                operation="before_finalize_review",
             )
             feedback = review["content"] if review["type"] == "text" else ""
             approved = not feedback.strip().upper().startswith("REJECTED")
@@ -232,7 +233,8 @@ async def _before_finalize_hook(
         try:
             regen = await ai_service.call(
                 system_prompt, cur_messages, model_name, provider, temperature, max_tokens,
-                auto_compact=False
+                auto_compact=False,
+                operation="before_finalize_regeneration",
             )
             if regen["type"] == "text":
                 cur_draft = regen["content"]
@@ -292,6 +294,7 @@ async def _run_fork_skill(
             result = await ai_service.call(
                 skill_content, messages, model, provider, temperature, 4096,
                 tools=tool_schemas or None, auto_compact=True,
+                operation="skill_fork",
             )
         except Exception as e:
             return f"[fork skill 执行错误] {e}"
@@ -686,7 +689,8 @@ async def finalize_reply(runner) -> None:
     try:
         gen = await runner.ai_service.call(
             runner.system_prompt, snap, runner.model_name, runner.provider,
-            runner.temperature, runner.max_tokens, reinject_fn=runner._build_reinject
+            runner.temperature, runner.max_tokens, reinject_fn=runner._build_reinject,
+            operation="final_draft",
         )
         draft = gen["content"] if gen["type"] == "text" else ""
     except Exception:

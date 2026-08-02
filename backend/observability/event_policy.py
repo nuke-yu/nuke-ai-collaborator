@@ -108,6 +108,21 @@ _EVENT_POLICIES: dict[str, EventPolicy] = {
         RetentionPolicy.EXECUTION_90_DAYS, PayloadPolicy.SUMMARY,
         True, False, "consumes billable model capacity and advances execution",
     ),
+    "model_request_started": _policy(
+        (EventClass.DIAGNOSTIC,), (EffectClass.BILLABLE,),
+        RetentionPolicy.EXECUTION_90_DAYS, PayloadPolicy.SUMMARY,
+        False, False, "opens a request-level usage ledger entry before provider I/O",
+    ),
+    "model_request_completed": _policy(
+        (EventClass.TIMELINE, EventClass.METRIC), (EffectClass.BILLABLE,),
+        RetentionPolicy.EXECUTION_90_DAYS, PayloadPolicy.SUMMARY,
+        True, False, "closes one billable model request with exact provider usage",
+    ),
+    "model_request_failed": _policy(
+        (EventClass.TIMELINE, EventClass.METRIC), (EffectClass.BILLABLE,),
+        RetentionPolicy.EXECUTION_90_DAYS, PayloadPolicy.SUMMARY,
+        True, False, "closes one model request failure without inventing token usage",
+    ),
     "child_fork": _policy(
         (EventClass.TIMELINE,), (EffectClass.CONTROL_FLOW, EffectClass.LIFECYCLE),
         RetentionPolicy.GROUP_LIFETIME, PayloadPolicy.SUMMARY,

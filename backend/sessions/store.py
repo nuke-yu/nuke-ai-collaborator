@@ -48,6 +48,15 @@ async def append_event(session_id: str, event_type: str, payload: dict) -> int:
             (session_id, event_type, json.dumps(prepared.payload, ensure_ascii=False)),
         ) as cursor:
             session_event_id = int(cursor.lastrowid)
+        if event_type.startswith("model_request_"):
+            from sessions.model_usage import project_model_usage_event
+            await project_model_usage_event(
+                conn,
+                session_event_id=session_event_id,
+                session_id=session_id,
+                event_type=event_type,
+                payload=payload,
+            )
         await insert_event_evidence_links(
             conn,
             session_event_id=session_event_id,

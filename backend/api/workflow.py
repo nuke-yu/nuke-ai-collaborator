@@ -12,6 +12,7 @@ from runtime import ipc
 from observability.timeline import get_group_timeline
 from observability.payload_policy import PayloadArtifactError, get_artifact
 from sessions.evidence import get_evidence_events
+from sessions.model_usage import get_model_usage_ledger
 
 router = APIRouter()
 
@@ -77,6 +78,19 @@ async def get_linked_evidence_events(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"evidence_ref": evidence_ref, "items": items}
+
+
+@router.get("/api/groups/{group_id}/observability/model-usage")
+async def get_request_model_usage(
+    group_id: int,
+    session_id: str | None = None,
+    limit: int = Query(200, ge=1, le=1000),
+    _user: dict = Depends(require_group_member_ready),
+):
+    with db.bind_db(group_db_path(group_id)):
+        return await get_model_usage_ledger(
+            group_id, session_id=session_id, limit=limit
+        )
 
 
 @router.get("/api/groups/{group_id}/workflow", dependencies=[Depends(ensure_group_ready)])

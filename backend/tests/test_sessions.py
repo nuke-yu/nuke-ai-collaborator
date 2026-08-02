@@ -214,6 +214,112 @@ class TestSessionStore(unittest.IsolatedAsyncioTestCase):
             })
         self.assertEqual(await get_events("bad-evidence"), [])
 
+    async def test_model_request_ledger_is_atomic_with_session_totals(self):
+        from sessions.store import create_session, append_event, get_session
+        from sessions.model_usage import get_model_usage_ledger
+
+        await create_session(
+            session_id="usage-session", bot_id=1, group_id=1,
+            config={"provider": "deepseek", "model_name": "deepseek-chat"},
+            user_message="bill me",
+        )
+        await append_event("usage-session", "model_request_started", {
+            "request_id": "req-1", "request_ordinal": 1,
+            "provider": "deepseek", "model": "deepseek-chat",
+            "operation": "inference", "streaming": False, "ticket_id": "T-1",
+        })
+        await append_event("usage-session", "model_request_completed", {
+            "request_id": "req-1", "provider": "deepseek", "model": "deepseek-chat",
+            "ticket_id": "T-1",
+            "response_type": "tool_calls", "duration_ms": 125,
+            "input_tokens": 100, "output_tokens": 20,
+            "cache_read_tokens": 40, "cache_creation_tokens": 0,
+        })
+
+        ledger = await get_model_usage_ledger(1, session_id="usage-session")
+        self.assertEqual(ledger["totals"]["requests"], 1)
+        self.assertEqual(ledger["totals"]["completed_requests"], 1)
+        self.assertEqual(ledger["totals"]["failed_requests"], 0)
+        self.assertEqual(ledger["totals"]["open_requests"], 0)
+        self.assertEqual(ledger["totals"]["input_tokens"], 100)
+        self.assertEqual(ledger["totals"]["duration_ms"], 125)
+        self.assertGreater(ledger["totals"]["cost_usd"], 0)
+        row = ledger["items"][0]
+        self.assertEqual(row["status"], "completed")
+        self.assertEqual(row["ticket_id"], "T-1")
+        self.assertEqual(row["response_type"], "tool_calls")
+        self.assertEqual(row["duration_ms"], 125)
+        session = await get_session("usage-session")
+        self.assertEqual(session["input_tokens"], 100)
+        self.assertEqual(session["output_tokens"], 20)
+        self.assertEqual(session["cache_read_tokens"], 40)
+        self.assertAlmostEqual(session["cost_usd"], row["cost_usd"], places=12)
+
+    async def test_failed_model_request_has_no_invented_usage(self):
+        from sessions.store import create_session, append_event, get_session
+        from sessions.model_usage import get_model_usage_ledger
+
+        await create_session(
+            session_id="failed-usage", bot_id=1, group_id=1,
+            config={}, user_message="fail",
+        )
+        await append_event("failed-usage", "model_request_started", {
+            "request_id": "req-fail", "request_ordinal": 1,
+            "provider": "openai", "model": "gpt-4o", "streaming": True,
+        })
+        await append_event("failed-usage", "model_request_failed", {
+            "request_id": "req-fail", "provider": "openai", "model": "gpt-4o",
+            "duration_ms": 5, "error_type": "AIError",
+        })
+        ledger = await get_model_usage_ledger(1, session_id="failed-usage")
+        self.assertEqual(ledger["items"][0]["status"], "failed")
+        self.assertEqual(ledger["items"][0]["error_type"], "AIError")
+        self.assertEqual(ledger["totals"]["input_tokens"], 0)
+        self.assertEqual((await get_session("failed-usage"))["input_tokens"], 0)
+
+    async def test_duplicate_model_terminal_rolls_back_event_and_totals(self):
+        from sessions.store import create_session, append_event, get_events, get_session
+
+        await create_session(
+            session_id="duplicate-usage", bot_id=1, group_id=1,
+            config={}, user_message="once",
+        )
+        start = {
+            "request_id": "req-once", "request_ordinal": 1,
+            "provider": "deepseek", "model": "deepseek-chat",
+        }
+        terminal = {
+            "request_id": "req-once", "provider": "deepseek", "model": "deepseek-chat",
+            "input_tokens": 10, "output_tokens": 2,
+        }
+        await append_event("duplicate-usage", "model_request_started", start)
+        await append_event("duplicate-usage", "model_request_completed", terminal)
+        with self.assertRaisesRegex(ValueError, "already terminal"):
+            await append_event("duplicate-usage", "model_request_completed", terminal)
+        events = await get_events("duplicate-usage")
+        self.assertEqual(len(events), 2)
+        self.assertEqual((await get_session("duplicate-usage"))["input_tokens"], 10)
+
+    async def test_recovered_model_service_ordinal_continues_session_sequence(self):
+        from sessions.store import create_session, append_event
+        from sessions.model_usage import get_model_usage_ledger
+
+        await create_session(
+            session_id="resumed-usage", bot_id=1, group_id=1,
+            config={}, user_message="resume",
+        )
+        for request_id in ("req-before-restart", "req-after-restart"):
+            await append_event("resumed-usage", "model_request_started", {
+                "request_id": request_id,
+                # A newly constructed AIService starts its local counter at one.
+                "request_ordinal": 1,
+                "provider": "deepseek", "model": "deepseek-chat",
+            })
+        ledger = await get_model_usage_ledger(1, session_id="resumed-usage")
+        by_request = {row["request_id"]: row for row in ledger["items"]}
+        self.assertEqual(by_request["req-before-restart"]["request_ordinal"], 1)
+        self.assertEqual(by_request["req-after-restart"]["request_ordinal"], 2)
+
     async def test_large_payload_is_projected_and_hydrated_for_recovery(self):
         from sessions.store import create_session, append_event, get_events
         await create_session(

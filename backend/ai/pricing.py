@@ -14,6 +14,8 @@ Provider cache accounting differs:
 """
 
 # Rates in USD per 1,000,000 tokens.
+PRICING_VERSION = 1
+
 #   input        — full-price prompt tokens
 #   output       — completion tokens
 #   cache_read   — tokens served from cache (discounted)

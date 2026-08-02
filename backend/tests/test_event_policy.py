@@ -103,6 +103,17 @@ class TestEventPolicy(unittest.TestCase):
         self.assertEqual(policy.event_classes, (EventClass.TIMELINE,))
         self.assertEqual(policy.retention, RetentionPolicy.EXECUTION_90_DAYS)
 
+    def test_model_request_policy_separates_open_from_billable_close(self):
+        started = classify_event("model_request_started", {})
+        completed = classify_event("model_request_completed", {})
+        failed = classify_event("model_request_failed", {})
+        self.assertFalse(started.business_significant)
+        self.assertEqual(started.event_classes, (EventClass.DIAGNOSTIC,))
+        for terminal in (completed, failed):
+            self.assertTrue(terminal.business_significant)
+            self.assertIn(EventClass.METRIC, terminal.event_classes)
+            self.assertEqual(terminal.effect_classes, (EffectClass.BILLABLE,))
+
     def test_unknown_event_is_sampled_diagnostic(self):
         policy = classify_event("internal_cache_tick", {})
         self.assertEqual(policy.event_classes, (EventClass.DIAGNOSTIC,))

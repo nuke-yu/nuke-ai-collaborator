@@ -6,11 +6,12 @@ from sessions.store import (
 )
 from sessions.recovery import recover_all, resume_session
 from sessions.evidence import get_event_evidence, get_evidence_events
+from sessions.model_usage import get_model_usage_ledger
 
 __all__ = [
     "create_session", "append_event", "get_session",
     "get_events", "update_session_status", "get_orphaned_sessions", "add_tokens",
     "save_snapshot", "recover_all", "resume_session", "get_group_sessions",
     "get_event_evidence", "get_evidence_events",
+    "get_model_usage_ledger",
 ]
-

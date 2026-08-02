@@ -996,12 +996,52 @@ Artifact，独立关联表和 Timeline 顶层 `evidence_links` 仍可直接查�
 不会形成孤立事件。第九阶段定向测试覆盖迁移与 Schema Split、正反遍历、事务回滚、Timeline
 投影、Memory/Skill 类型识别、文件 Skill 稳定哈希和 Event Policy。
 
-### 12.12 尚未实现的边界
+### 12.12 Request-level Model Usage Ledger（第十阶段）
 
-第一阶段完成的是“分类、标注和 Session 生命周期接入”，以下仍属于后续工作：
+第十阶段把原先只累加在 Session 上的 Token 总数，升级为逐次 Provider 请求可核对的账本。
+每一次经 Session-bound `AIService` 发出的请求都会先写 `model_request_started`，再以
+`model_request_completed` 或 `model_request_failed` 关闭；上下文溢出后的重试是新的
+`request_id`，通过 `retry_of` 指向原请求，避免把两次真实 Provider I/O 合并成一次。
+
+账本逐请求保存：
+
+- 稳定 `request_id`、Session 内单调序号、`session_id` 和可选 `ticket_id` 归属。
+- 实际使用的 `provider` / `model`，不再用 Bot 默认模型代替路由后的真实模型。
+- `operation`：`tool_loop_iteration`、`final_response`、`final_draft`、审查、重写和
+  `skill_fork` 等业务用途。
+- 流式标记、响应类型、耗时、成功/失败状态与有界 `error_type`。
+- input、output、cache read、cache creation 四个 Token 维度。
+- 按实际 Provider/Model 计算的 USD 成本和 `pricing_version`，为未来价格表变化保留审计依据。
+
+`session_events`、`model_usage_ledger` 投影、Session Token 汇总和 Ticket 成本更新共用同一个
+Group SQLite Writer 事务。终态重复、缺失 start、Provider/Model 身份不一致或非法负数都会使
+整个事件事务回滚，不会出现“事件成功但账本失败”或重复计费。Session 恢复后即使新的
+`AIService` 本地序号重新从 1 开始，持久化投影也会延续数据库中的单调序号。
+
+失败请求只记录状态、耗时与错误类别，不臆造 Token 或费用；事件和账本均不保存 prompt、
+response 正文或异常消息。完成事件仍进入 Event Policy Registry，成为可进入 Timeline 和
+Metric 的 billable 业务事件；start 仅作为可采样 Diagnostic，减少产品时间线噪声。
+
+经 Group membership 校验后，可读取逐请求明细和不受分页 `limit` 影响的精确汇总：
+
+```http
+GET /api/groups/{group_id}/observability/model-usage
+GET /api/groups/{group_id}/observability/model-usage?session_id={session_id}&limit=200
+```
+
+汇总包含总请求、完成、失败、仍打开请求、四类 Token、总费用和总耗时。当前覆盖范围是
+绑定 Agent Session 的主推理、最终输出、质量审查/重写和 fork 子 Agent 请求；独立后台摘要
+等未绑定 Session、直接调用底层 Provider client 的维护任务不进入此 Session 账本，后续若要
+统一计费，应先为它们定义独立 workload identity，而不是伪挂到某个用户 Session。
+
+第十阶段定向测试覆盖非流式/流式请求、真实模型身份、失败零用量、溢出重试关联、Session
+恢复序号、原子汇总、重复终态回滚、迁移、Schema Split、Event Policy 和旧 Token 接口兼容。
+
+### 12.13 尚未实现的边界
+
+前十阶段已经形成分类、持久化、关联查询和请求计量闭环，以下仍属于后续工作：
 
 - Retention Policy 的定时清理和归档执行器。
-- Request 级 Model Usage Ledger。
 - OpenTelemetry Exporter。
 - Prometheus 对 Event Policy 的低基数聚合。
 

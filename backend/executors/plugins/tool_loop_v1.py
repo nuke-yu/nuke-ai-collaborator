@@ -348,7 +348,8 @@ class ToolLoopRunner:
                             self.system_prompt, self.messages, _iter_model, self.provider,
                             self.temperature, self.max_tokens, _active_schemas,
                             use_cached_microcompact=self.use_cached_mc,
-                            reinject_fn=self._build_reinject
+                            reinject_fn=self._build_reinject,
+                            operation="tool_loop_iteration",
                         )
                     except AIError as e:
                         self.execution_error = str(e)

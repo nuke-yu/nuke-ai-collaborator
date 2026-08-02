@@ -77,6 +77,10 @@ class TestSchemaSplit(unittest.IsolatedAsyncioTestCase):
             await _fk_targets(self.group, "session_evidence_links"),
             {"agent_sessions", "session_events"},
         )
+        self.assertEqual(
+            await _fk_targets(self.group, "model_usage_ledger"),
+            {"agent_sessions", "session_events"},
+        )
         # central-internal FK survives
         self.assertEqual(await _fk_targets(self.central, "permission_rules"), {"members"})
 
