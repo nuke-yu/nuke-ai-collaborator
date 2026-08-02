@@ -1,4 +1,4 @@
-"""Business-significant execution event policies."""
+"""Business-significant execution event policies and exporters."""
 
 from .event_policy import (
     EVENT_POLICY_VERSION,
@@ -28,6 +28,11 @@ from .payload_policy import (
     prepare_payload,
 )
 from .retention import enforce_group_retention
+from .otel_exporter import (
+    OtelSpan,
+    OtelTraceExporter,
+    get_otel_exporter,
+)
 
 __all__ = [
     "EVENT_POLICY_VERSION",
@@ -53,4 +58,7 @@ __all__ = [
     "persist_artifact",
     "prepare_payload",
     "enforce_group_retention",
+    "OtelSpan",
+    "OtelTraceExporter",
+    "get_otel_exporter",
 ]
