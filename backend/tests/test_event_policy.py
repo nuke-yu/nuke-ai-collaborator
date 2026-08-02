@@ -91,6 +91,12 @@ class TestToolEffectPolicy(unittest.TestCase):
 
 
 class TestEventPolicy(unittest.TestCase):
+    def test_stream_transport_event_expires_with_stream(self):
+        policy = classify_event("stream_buffer_flushed", {})
+        self.assertEqual(policy.event_classes, (EventClass.EPHEMERAL,))
+        self.assertEqual(policy.retention, RetentionPolicy.STREAM_LIFETIME)
+        self.assertFalse(policy.business_significant)
+
     def test_session_start_is_lifecycle_timeline(self):
         policy = classify_event("session_start", {"user_content": "hello"})
         self.assertEqual(policy.effect_classes, (EffectClass.LIFECYCLE,))

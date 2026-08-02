@@ -89,11 +89,32 @@ class TestCell17Lifecycle(unittest.IsolatedAsyncioTestCase):
         # Hydrate
         path = await lm.hydrate(gid)
         self.assertTrue(os.path.exists(path))
-        
+
         # Verify schema
         async with db.connect(path) as conn:
             async with conn.execute("SELECT name FROM sqlite_master WHERE name='messages'") as cur:
                 self.assertIsNotNone(await cur.fetchone())
+
+    async def test_retention_runs_only_for_owned_groups_and_updates_stats(self):
+        lm = LifecycleManager()
+        lm._active_groups[7] = time.time()
+        retained = {
+            "group_id": 7, "run_id": "retention_test", "dry_run": False,
+            "session_events_archived": 2, "workflow_observations_archived": 1,
+            "model_requests_deleted": 0, "artifacts_deleted": 1,
+        }
+        with patch(
+            "observability.retention.enforce_group_retention",
+            new=AsyncMock(return_value=retained),
+        ) as enforce, patch(
+            "runtime.lifecycle.group_db_path", return_value="/tmp/group-7.db"
+        ):
+            await lm.enforce_observability_retention()
+
+        enforce.assert_awaited_once_with(7)
+        stats = lm.stats()["observability_retention"]["7"]
+        self.assertEqual(stats["run_id"], "retention_test")
+        self.assertIn("last_enforced_at", stats)
 
     async def test_learning_dispatch_is_scoped_to_worker_owned_groups(self):
         lm = LifecycleManager()

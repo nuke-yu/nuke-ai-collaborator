@@ -98,6 +98,11 @@ def _policy(
 
 
 _EVENT_POLICIES: dict[str, EventPolicy] = {
+    "stream_buffer_flushed": _policy(
+        (EventClass.EPHEMERAL,), (EffectClass.NONE,),
+        RetentionPolicy.STREAM_LIFETIME, PayloadPolicy.SUMMARY,
+        False, True, "transient stream transport detail has no post-stream business value",
+    ),
     "session_start": _policy(
         (EventClass.TIMELINE,), (EffectClass.LIFECYCLE,),
         RetentionPolicy.GROUP_LIFETIME, PayloadPolicy.REDACTED,

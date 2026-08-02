@@ -1037,11 +1037,55 @@ GET /api/groups/{group_id}/observability/model-usage?session_id={session_id}&lim
 第十阶段定向测试覆盖非流式/流式请求、真实模型身份、失败零用量、溢出重试关联、Session
 恢复序号、原子汇总、重复终态回滚、迁移、Schema Split、Event Policy 和旧 Token 接口兼容。
 
-### 12.13 尚未实现的边界
+### 12.13 Retention Policy Executor（第十一阶段）
 
-前十阶段已经形成分类、持久化、关联查询和请求计量闭环，以下仍属于后续工作：
+第十一阶段把 Event Policy Registry 中的 `retention` 从声明变为实际存储行为。Worker 对自己
+持有 lease 的 Group 在 hydration 后立即执行一次，此后随 Lifecycle Maintenance 每日执行；
+不会由主进程跨库扫描，也不会让两个 Worker 同时维护同一个 Group。
 
-- Retention Policy 的定时清理和归档执行器。
+当前策略语义为：
+
+| Policy | 执行动作 |
+|---|---|
+| `stream_lifetime` | Session 已终态后立即从持久化观察流移除 |
+| `diagnostic_14_days` | 14 天后归档凭证并删除事件正文 |
+| `execution_90_days` | 90 天后归档凭证并删除事件正文 |
+| `group_lifetime` | 执行器不自动删除，随 Group 生命周期保留 |
+| `security_audit` | 执行器不自动删除，避免安全审计记录被普通清理策略降级 |
+
+这里的“归档”不是把过期敏感正文换一个表继续无限保存。`observability_retention_archive` 只留下
+`source`、原行 ID、稳定 Event ID、事件类型、Retention Policy、发生时间和原存储正文的
+SHA-256；不保存 Payload、Prompt、Response、工具结果或异常信息。这既能证明某事件在何时按
+什么策略被清理，又真正兑现数据最小化。归档凭证自身随 Group 保留。
+
+清理使用 Group SQLite 的单 Writer，在一个事务内完成：
+
+```text
+INSERT payload-free retention receipts
+  → DELETE model_usage_ledger（适用时）
+  → DELETE session_events / workflow_observations
+  → CASCADE session_evidence_links
+  → DELETE 对应 observation_artifacts
+COMMIT
+```
+
+只有 `completed / failed / cancelled / abandoned / superseded / expired` 等明确终态 Session 才会
+清理 Session Event；运行中、等待恢复和正在恢复的 Session 即使超过时间阈值也保持完整，避免
+破坏 WAL 重建。Model Request 的 start、terminal 和 request ledger 作为一个生命周期整体到期，
+不会留下半条请求或悬空外键；Session/Ticket 已结算的累计值不会反向扣减。
+
+执行器同时兼容带 v1 `_observability` / Workflow `policy` 的新事件和没有元数据的历史事件；
+后者通过同一 deterministic classifier 回算策略。大批量 ID 查询和删除采用有界 SQL batch，
+支持 `dry_run` 预演，重复执行幂等。Lifecycle Stats 会暴露最近一次每 Group 的清理计数和时间。
+
+第十一阶段定向测试覆盖 14/90 天边界、stream lifetime、Security/Group 永久保留、活跃 Session
+保护、Payload-free Receipt、Artifact/Evidence 收敛、Model Ledger 原子过期、Workflow 事件、
+dry-run、幂等重跑、Migration、Schema Split 和 Worker lease 调度。
+
+### 12.14 尚未实现的边界
+
+前十一阶段已经形成分类、持久化、关联查询、请求计量和 Retention 闭环，以下仍属于后续工作：
+
 - OpenTelemetry Exporter。
 - Prometheus 对 Event Policy 的低基数聚合。
 

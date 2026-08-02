@@ -96,6 +96,7 @@ class LifecycleManager:
         self._memory_projection_audits: dict[int, dict] = {}
         self._memory_projection_audit_errors: dict[int, int] = {}
         self._learning_pipeline_stats: dict[int, dict] = {}
+        self._observability_retention_stats: dict[int, dict] = {}
         self._evictor_task: asyncio.Task | None = None
         self._shutting_down = False
 
@@ -135,6 +136,7 @@ class LifecycleManager:
 
                 # Run prune once a day (86400 seconds)
                 if now - last_prune > 86400:
+                    await self.enforce_observability_retention()
                     await self.prune_resources()
                     last_prune = now
             except asyncio.CancelledError:
@@ -423,6 +425,31 @@ class LifecycleManager:
         except Exception:
             log.exception("lifecycle: error pruning temp workspaces")
 
+    async def enforce_observability_retention(
+        self, group_ids: tuple[int, ...] | None = None
+    ) -> None:
+        """Apply Event Policy retention only to Groups leased by this Worker."""
+        from observability.retention import enforce_group_retention
+
+        if group_ids is None:
+            async with self._lock:
+                targets = tuple(self._active_groups)
+        else:
+            targets = group_ids
+        for group_id in targets:
+            try:
+                with db.bind_db(group_db_path(group_id)):
+                    result = await enforce_group_retention(group_id)
+                result["last_enforced_at"] = time.time()
+                self._observability_retention_stats[group_id] = result
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                log.exception(
+                    "lifecycle: failed to enforce observability retention for group %d",
+                    group_id,
+                )
+
     async def hydrate(self, group_id: int) -> str:
         """Ensure a group is ready for work. Returns the DB path."""
         path = group_db_path(group_id)
@@ -535,6 +562,11 @@ class LifecycleManager:
                     await sessions.recover_all(group_id=group_id)
                 except Exception:
                     log.exception("lifecycle: failed to recover group %d", group_id)
+
+                # Enforce once on hydration as well as daily. This prevents a
+                # newly leased Group from waiting almost 24 hours if it became
+                # active just after the Worker's daily maintenance tick.
+                await self.enforce_observability_retention((group_id,))
 
             to_evict = None
             async with self._lock:
@@ -695,6 +727,7 @@ class LifecycleManager:
             self._memory_projection_audits.pop(gid, None)
             self._memory_projection_audit_errors.pop(gid, None)
             self._learning_pipeline_stats.pop(gid, None)
+            self._observability_retention_stats.pop(gid, None)
             # 5. Release file lock
             if glock:
                 glock.release()
@@ -744,6 +777,10 @@ class LifecycleManager:
             "learning_pipeline": {
                 str(group_id): dict(snapshot)
                 for group_id, snapshot in self._learning_pipeline_stats.items()
+            },
+            "observability_retention": {
+                str(group_id): dict(snapshot)
+                for group_id, snapshot in self._observability_retention_stats.items()
             },
         }
 

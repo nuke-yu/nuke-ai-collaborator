@@ -27,6 +27,7 @@ from .payload_policy import (
     persist_artifact,
     prepare_payload,
 )
+from .retention import enforce_group_retention
 
 __all__ = [
     "EVENT_POLICY_VERSION",
@@ -51,4 +52,5 @@ __all__ = [
     "hydrate_payload",
     "persist_artifact",
     "prepare_payload",
+    "enforce_group_retention",
 ]

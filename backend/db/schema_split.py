@@ -37,7 +37,7 @@ GROUP_TABLES = frozenset({
     "messages", "role_summaries", "message_embeddings", "member_read",
     "message_reactions", "pinned_messages", "agent_sessions", "session_events", "session_evidence_links",
     "model_usage_ledger",
-    "workflow_state", "workflow_observations", "observation_artifacts", "group_locks", "tickets", "reflection_state", "tool_events",
+    "workflow_state", "workflow_observations", "observation_artifacts", "observability_retention_archive", "group_locks", "tickets", "reflection_state", "tool_events",
     "agent_runs", "run_decisions",
 }) | MEMORY_GROUP_TABLES
 
@@ -390,6 +390,19 @@ _GROUP_DDL = [
         created_at TEXT DEFAULT (datetime('now'))
     )""",
     "CREATE INDEX IF NOT EXISTS idx_observation_artifacts_event ON observation_artifacts(group_id,event_id)",
+    """CREATE TABLE IF NOT EXISTS observability_retention_archive (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        source TEXT NOT NULL CHECK(source IN ('session','workflow')),
+        source_row_id INTEGER NOT NULL,
+        event_id TEXT NOT NULL,
+        event_type TEXT NOT NULL,
+        retention TEXT NOT NULL,
+        occurred_at INTEGER NOT NULL,
+        content_sha256 TEXT NOT NULL,
+        archived_at TEXT DEFAULT (datetime('now')),
+        UNIQUE(source,source_row_id)
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_retention_archive_policy ON observability_retention_archive(retention,archived_at)",
     # group_locks: DROP FK group_id->groups, bot_id->members (cross-domain).
     """CREATE TABLE IF NOT EXISTS group_locks (
         group_id  INTEGER PRIMARY KEY,

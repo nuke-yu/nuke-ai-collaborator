@@ -32,6 +32,7 @@ from db.migrations import (
     migration_056,
     migration_057,
     migration_058,
+    migration_059,
     run_migrations,
 )
 from db.schema import init_db
@@ -825,6 +826,23 @@ class TestMigration058(MigrationTestCase):
         async with self._connect() as conn:
             await migration_058(conn)
             self.assertFalse(await _has_table(conn, "model_usage_ledger"))
+
+
+class TestMigration059(MigrationTestCase):
+    async def test_creates_retention_archive_idempotently(self):
+        async with self._connect() as conn:
+            await conn.execute("CREATE TABLE session_events (id INTEGER PRIMARY KEY)")
+            await migration_059(conn)
+            await migration_059(conn)
+            self.assertTrue(await _has_table(conn, "observability_retention_archive"))
+            columns = await _table_columns(conn, "observability_retention_archive")
+            self.assertIn("content_sha256", columns)
+            self.assertNotIn("payload", columns)
+
+    async def test_skips_central_database_without_session_events(self):
+        async with self._connect() as conn:
+            await migration_059(conn)
+            self.assertFalse(await _has_table(conn, "observability_retention_archive"))
 
 
 if __name__ == "__main__":
