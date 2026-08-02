@@ -34,10 +34,28 @@ async def upload_file(file: UploadFile = File(...), group_id: int = Form(...)):
     dest_dir.mkdir(parents=True, exist_ok=True)
     (dest_dir / filename).write_bytes(contents)
     ref = media.canonical_ref(group_id, "uploads", filename)
+    art_id = None
+    try:
+        from artifacts import register_artifact, ArtifactOrigin, calculate_checksum
+        with db.bind_db(db.group_db_path(group_id) if hasattr(db, "group_db_path") else None):
+            checksum = calculate_checksum(contents)
+            artifact = await register_artifact(
+                group_id=group_id,
+                display_name=file.filename or filename,
+                origin=ArtifactOrigin.UPLOAD,
+                storage_locator=ref,
+                mime_type=file.content_type,
+                size_bytes=len(contents),
+                checksum_sha256=checksum,
+            )
+            art_id = artifact.artifact_id
+    except Exception as e:
+        pass
+
     # `url` is the canonical ref to persist in the message; `preview_url` is a
     # freshly-signed URL for immediate client-side preview before the message is sent.
     return {"url": ref, "preview_url": media.presign(ref), "name": file.filename,
-            "size": len(contents), "type": file.content_type}
+            "size": len(contents), "type": file.content_type, "artifact_id": art_id}
 
 
 @router.get("/api/members/{member_id}/unread")

@@ -954,7 +954,29 @@ async def _handle_read_file(path: str, offset: int | None = None, limit: int | N
 async def _handle_write_file(path: str, content: str, context: dict = None) -> str:
     ctx = context or {}
     bot_id = ctx.get("bot_id")
-    return await _ws.write_file(bot_id, path, content, group_id=ctx.get("group_id")) if bot_id else "[错误] 缺少 bot_id"
+    if not bot_id:
+        return "[错误] 缺少 bot_id"
+    res = await _ws.write_file(bot_id, path, content, group_id=ctx.get("group_id"))
+    if "[已写入" in res or "成功" in res or not res.startswith("["):
+        try:
+            from artifacts import register_artifact, ArtifactOrigin, calculate_checksum
+            group_id = ctx.get("group_id")
+            if group_id:
+                content_bytes = content.encode("utf-8")
+                checksum = calculate_checksum(content_bytes)
+                await register_artifact(
+                    group_id=group_id,
+                    display_name=os.path.basename(path),
+                    origin=ArtifactOrigin.WORKSPACE,
+                    storage_locator=path,
+                    size_bytes=len(content_bytes),
+                    checksum_sha256=checksum,
+                    bot_id=bot_id,
+                    session_id=ctx.get("session_id"),
+                )
+        except Exception as e:
+            log.warning("Failed to auto-register artifact for write_file %s: %s", path, e)
+    return res
 
 
 async def _handle_edit_file(path: str, old_string: str = None, new_string: str = None,
