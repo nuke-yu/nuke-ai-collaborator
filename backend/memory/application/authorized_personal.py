@@ -73,6 +73,14 @@ class AuthorizedPersonalKnowledgeService:
         await self._authorize(scope, "delete")
         return await self._delegate.delete(scope)
 
+    async def delete_record(self, scope: MemoryScope, record_id: str) -> bool:
+        await self._authorize(scope, "delete")
+        return await self._delegate.delete_record(scope, record_id)
+
+    async def revoke_projection(self, scope: MemoryScope, projection_id: str) -> bool:
+        await self._authorize(scope, "delete")
+        return await self._delegate.revoke_projection(scope, projection_id)
+
     async def _authorize(self, scope: MemoryScope, action: str) -> None:
         if scope.actor_id != self._principal.actor_id:
             raise MemoryAuthorizationError(

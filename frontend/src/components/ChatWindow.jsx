@@ -27,6 +27,7 @@ import PermissionRequestModal from './PermissionRequestModal'
 import RecapBanner from './RecapBanner'
 import SuggestionBar from './SuggestionBar'
 import ExecutionTimelineDrawer from './ExecutionTimelineDrawer'
+import PersonalVaultModal from './PersonalVaultModal'
 
 export default function ChatWindow({ memberId, theme, onThemeChange, onLogout }) {
   const { t } = useTranslation()
@@ -103,6 +104,7 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
   const [showSearch, setShowSearch] = useState(false)
   const [showWorkspace, setShowWorkspace] = useState(false)
   const [showTimeline, setShowTimeline] = useState(false)
+  const [showPersonalVault, setShowPersonalVault] = useState(false)
   const [activeTimelineSession, setActiveTimelineSession] = useState(null)
   const [replyingTo, setReplyingTo] = useState(null)
   const [mobileTab, setMobileTab] = useState('chat')
@@ -676,7 +678,7 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
         onDragOver={(e) => e.preventDefault()}
         onDrop={(e) => { e.preventDefault(); dragCounter.current = 0; setDragging(false); const f = e.dataTransfer.files[0]; if (f) messageInputRef.current?.uploadFile(f) }}
       >
-        <ChatHeader onLogout={onLogout}
+        <ChatHeader
           activeGroupId={activeGroupId}
           group={group}
           members={members}
@@ -689,6 +691,8 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
           onShowWorkflowStart={() => {
             setShowWorkflowStart(true)
           }}
+          onShowPersonalVault={() => setShowPersonalVault(true)}
+          onLogout={onLogout}
         />
 
         {dragging && (
@@ -855,6 +859,12 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
           sessionId={activeTimelineSession}
           groupId={activeGroupId}
           onClose={() => setActiveTimelineSession(null)}
+        />
+      )}
+      {showPersonalVault && (
+        <PersonalVaultModal
+          groups={useGroupStore.getState().groups || []}
+          onClose={() => setShowPersonalVault(false)}
         />
       )}
       </div>

@@ -15,6 +15,7 @@ export default function ChatHeader({
   onShowStats, onLogout,
   onShowBotLogs,
   onShowTimeline,
+  onShowPersonalVault,
 }) {
   const { t } = useTranslation()
   const [editingGroupName, setEditingGroupName] = useState(false)
@@ -107,6 +108,11 @@ export default function ChatHeader({
           className="text-sm px-2 py-1 rounded text-gray-500 hover:text-gray-300 transition-colors"
           title={t(K.chat.header.botLogsTitle)}
         >📜</button>
+        <button
+          onClick={() => onShowPersonalVault?.()}
+          className="text-sm px-2 py-1 rounded text-gray-500 hover:text-indigo-400 transition-colors"
+          title="个人知识库控制台 (Personal Vault)"
+        >🧠</button>
         <button
           onClick={() => onShowTimeline()}
           className="text-sm px-2 py-1 rounded text-gray-500 hover:text-gray-300 transition-colors"

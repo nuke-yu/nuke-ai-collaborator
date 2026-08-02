@@ -311,6 +311,28 @@ async def delete_vault(user_id: int) -> bool:
         return existed
 
 
+async def delete_record(user_id: int, record_id: str) -> bool:
+    """Delete a specific personal record and its projections from the vault."""
+    async with connect(user_id) as db:
+        cur = await db.execute(
+            "DELETE FROM personal_records WHERE user_id = ? AND record_id = ?",
+            (user_id, record_id),
+        )
+        await db.commit()
+        return cur.rowcount > 0
+
+
+async def revoke_projection(user_id: int, projection_id: str) -> bool:
+    """Revoke/delete a specific memory projection to a group or bot."""
+    async with connect(user_id) as db:
+        cur = await db.execute(
+            "DELETE FROM personal_projections WHERE projection_id = ?",
+            (projection_id,),
+        )
+        await db.commit()
+        return cur.rowcount > 0
+
+
 async def rebuild_vault(user_id:int) -> dict:
     now=int(time.time()*1000)
     async with connect(user_id) as db:

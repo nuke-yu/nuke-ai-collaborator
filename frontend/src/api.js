@@ -55,6 +55,43 @@ export async function fetchGroupArtifacts(groupId, { origin, sessionId, botId, l
   return res.json()
 }
 
+export async function fetchPersonalMemory({ signal } = {}) {
+  const res = await authFetch('/api/personal/memory', { signal })
+  return res.json()
+}
+
+export async function createPersonalRecord(body) {
+  const res = await authFetch('/api/personal/memory/records', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  return res.json()
+}
+
+export async function createPersonalProjection(body) {
+  const res = await authFetch('/api/personal/memory/projections', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  return res.json()
+}
+
+export async function deletePersonalRecord(recordId) {
+  const res = await authFetch(`/api/personal/memory/records/${recordId}`, {
+    method: 'DELETE',
+  })
+  return res.json()
+}
+
+export async function revokePersonalProjection(projectionId) {
+  const res = await authFetch(`/api/personal/memory/projections/${projectionId}`, {
+    method: 'DELETE',
+  })
+  return res.json()
+}
+
 export async function toggleReaction(msgId, memberId, emoji) {
   // memberId kept in the signature for caller compatibility but ignored:
   // the server uses the authenticated connection's member_id.

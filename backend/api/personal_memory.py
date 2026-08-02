@@ -96,3 +96,21 @@ async def delete_personal_memory(user=Depends(auth.get_current_user)):
     deleted=await _personal_client(uid).delete(MemoryScope.personal(
         user_id=uid,actor_id=f"user:{uid}",purpose="personal_memory_deletion"))
     return {"deleted":deleted}
+
+@router.delete("/api/personal/memory/records/{record_id}")
+async def delete_personal_record(record_id: str, user=Depends(auth.get_current_user)):
+    uid=int(user["uid"])
+    deleted=await _personal_client(uid).delete_record(MemoryScope.personal(
+        user_id=uid,actor_id=f"user:{uid}",purpose="personal_record_deletion"), record_id)
+    if not deleted:
+        raise HTTPException(404, "Personal record not found")
+    return {"status": "ok", "deleted_record_id": record_id}
+
+@router.delete("/api/personal/memory/projections/{projection_id}")
+async def revoke_personal_projection(projection_id: str, user=Depends(auth.get_current_user)):
+    uid=int(user["uid"])
+    revoked=await _personal_client(uid).revoke_projection(MemoryScope.personal(
+        user_id=uid,actor_id=f"user:{uid}",purpose="personal_projection_revocation"), projection_id)
+    if not revoked:
+        raise HTTPException(404, "Personal projection not found")
+    return {"status": "ok", "revoked_projection_id": projection_id}
