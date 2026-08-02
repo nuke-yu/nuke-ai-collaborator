@@ -63,6 +63,29 @@ main.py (FastAPI / WS entry)
 
 ---
 
+## Engineering Quality & Architecture Principles (Architect Directives)
+
+### 1. 架构三问与全局视角 (Architectural Pre-Check)
+在动笔编码前，必须显式走查：
+- **进程拓扑**：代码运行在 Supervisor、Worker 还是 MCP Collector？跨进程数据汇总必须通过结构化 IPC 字典/增量（如 `obs_metrics_snapshot`），严禁跨进程直接拼接原始 Exposition 文本。
+- **事务与副作用**：遥测发送（OTel/Prometheus）、外部通知与状态变更必须置于 SQLite 事务提交（`await db.commit()`）之后，严禁在数据清洗/预览函数（如 `prepare_payload()`）内触发遥测。
+- **安全脱敏边界**：数据在进入存储或链路追踪前，必须强制经过 `redact_secrets()` 屏蔽敏感词（Token/Key/PEM/Password），并做字符串长度截断。
+
+### 2. 契约优先与防御性编码 (Contract & Defensive Coding)
+- **拒绝凭空假设签名**：引用项目 Helper 函数（如 `redact_secrets`）前，必须确认确切返回类型（如处理返回 `(text, count)` 元组的情况）。
+- **输入规范化**：入口处必须做规范化清洗（如 Trace ID 必须剥离 UUID 连字符强制转换为符合 W3C 的 32 位 Hex 字符串；支持 tuple/list 自动解包）。
+- **非阻塞异步防线**：任何遥测、日志导出或网络 HTTP 请求，严禁阻塞 Worker 的主 asyncio 事件循环（必须使用 `run_in_executor` 后台线程池与 Drop Counter）。
+
+### 3. 真实边界与破坏性测试 (Destructive & Production-Real Testing)
+- **必须注入真实敏感数据**：单元测试必须包含真实敏感字符串（如 `Authorization: Bearer ...`），验证脱敏引擎真正生效。
+- **必须模拟极限与失败场景**：测试 Buffer 蓄满（如 1000 条 `flush()`）、网络导出失败（HTTP 500 / 超时）、字符串转义（`\`, `"`, `\n`）等边界。
+
+### 4. 独立可检出的原子 Commit (Bisect-Safe Commits)
+- 保证每个 Commit 独立可检出、独立测试 100% 绿色。
+- 先提交底层独立模块及其测试，再提交依赖上层的应用接入代码。严禁在旧 Commit 的 `__init__.py` 中提前引用后续 Commit 才创建的模块。
+
+---
+
 ## Known Open Issues
 
 See [`docs/TOOL-LAYER-GAP-ANALYSIS.md`](docs/TOOL-LAYER-GAP-ANALYSIS.md). Highest-priority unresolved items:
