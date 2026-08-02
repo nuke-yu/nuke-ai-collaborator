@@ -10,8 +10,26 @@ from runtime.dbpaths import group_db_path
 from runtime import supervisor as sup_mod
 from runtime import ipc
 from observability.timeline import get_group_timeline
+from observability.payload_policy import PayloadArtifactError, get_artifact
 
 router = APIRouter()
+
+
+@router.get("/api/groups/{group_id}/observability/artifacts/{artifact_id}")
+async def get_observation_artifact(
+    group_id: int,
+    artifact_id: str,
+    _user: dict = Depends(require_group_member_ready),
+):
+    try:
+        with db.bind_db(group_db_path(group_id)):
+            async with db.get_db() as conn:
+                artifact = await get_artifact(conn, group_id, artifact_id)
+    except PayloadArtifactError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if artifact is None:
+        raise HTTPException(status_code=404, detail="Artifact not found")
+    return artifact
 
 
 @router.get("/api/groups/{group_id}/timeline")

@@ -8,7 +8,7 @@ import time
 from typing import Any, Iterable, Mapping
 
 from db import get_db, write_connect
-from .event_policy import classify_event
+from .payload_policy import PayloadArtifact, persist_artifact, prepare_payload
 
 
 log = logging.getLogger(__name__)
@@ -21,6 +21,15 @@ def build_workflow_observation(
     descriptor: Mapping[str, Any],
 ) -> dict[str, Any]:
     """Build the canonical envelope from a side-effect-free transition descriptor."""
+    envelope, _artifact = _prepare_workflow_observation(group_id, orchestrator_id, descriptor)
+    return envelope
+
+
+def _prepare_workflow_observation(
+    group_id: int,
+    orchestrator_id: str,
+    descriptor: Mapping[str, Any],
+) -> tuple[dict[str, Any], PayloadArtifact | None]:
     event_type = str(descriptor.get("event_type") or "").strip()
     workflow_id = str(descriptor.get("workflow_id") or "").strip()
     if not event_type:
@@ -31,7 +40,8 @@ def build_workflow_observation(
     payload = descriptor.get("payload")
     if not isinstance(payload, Mapping):
         payload = {}
-    policy = classify_event(event_type, payload).to_metadata()
+    prepared = prepare_payload(event_type, payload)
+    policy = dict(prepared.payload.pop("_observability"))
     envelope = {
         "schema_version": WORKFLOW_OBSERVATION_SCHEMA_VERSION,
         "event_id": policy["event_id"],
@@ -52,10 +62,10 @@ def build_workflow_observation(
             "session_id": str(descriptor.get("session_id") or ""),
         },
         "actor": dict(descriptor.get("actor") or {"type": "system"}),
-        "payload": dict(payload),
+        "payload": prepared.payload,
         "policy": policy,
     }
-    return envelope
+    return envelope, prepared.artifact
 
 
 async def record_workflow_observations(
@@ -65,13 +75,16 @@ async def record_workflow_observations(
 ) -> list[dict[str, Any]]:
     """Persist envelopes without letting telemetry failure alter orchestration."""
     try:
-        envelopes = [
-            build_workflow_observation(group_id, orchestrator_id, descriptor)
+        prepared_observations = [
+            _prepare_workflow_observation(group_id, orchestrator_id, descriptor)
             for descriptor in descriptors
         ]
+        envelopes = [item[0] for item in prepared_observations]
         if not envelopes:
             return []
         async with write_connect() as db:
+            for _envelope, artifact in prepared_observations:
+                await persist_artifact(db, group_id, artifact)
             await db.executemany(
                 """INSERT OR IGNORE INTO workflow_observations
                    (observation_id,group_id,workflow_id,event_type,stage_id,

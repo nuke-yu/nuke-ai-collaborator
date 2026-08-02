@@ -613,7 +613,7 @@ Collaborator 的外部 Executor/Orchestrator Python 会直接 import 到运行�
 ## 12. 可观测性事件政策实现状态
 
 > 实现日期：2026-08-02
-> 状态：第五阶段 Timeline 产品界面已进入运行链路（CURRENT）
+> 状态：第六阶段 Payload Policy Enforcement 已进入运行链路（CURRENT）
 
 已新增可执行的 Event Policy Registry：
 
@@ -885,12 +885,57 @@ Timeline 已在主聊天界面接入独立侧栏，可从 Header 的指南针入
 Vite production build passed
 ```
 
-### 12.8 尚未实现的边界
+### 12.8 Payload Policy Enforcement（第六阶段）
+
+Event Policy Registry 中原本只是声明性的 `payload_policy`，现在已在 Session Event
+和 Workflow Observation 两个持久化入口集中执行：
+
+```text
+原始 Payload
+  → 确定 Event Policy
+  → 递归 Secret Redaction
+  → inline / summary / reference-only 判定
+  ├─ 小 Payload：直接保存脱敏结构
+  └─ 大 Payload：公开事件保存摘要 + Artifact Reference
+                  Group 私有 Artifact 保存完整脱敏 JSON
+```
+
+三种策略的执行语义：
+
+- `redacted`：递归处理字符串、对象和数组；超过 16 KiB 后自动 Artifact 化。
+- `summary`：4 KiB 内保留脱敏结构；超过阈值后仅保留关联字段、2,000 字符有界摘要
+  和 `_artifact` 引用。
+- `reference_only`：无论大小都不内联正文，只保存 Artifact 引用。
+
+Artifact 表位于 Group 私有 SQLite，保存 `artifact_id`、`event_id`、Policy、SHA-256、
+字节数和完整脱敏 JSON。Artifact 与 Session Event / Workflow Observation 在同一数据库
+事务写入；摘要引用携带相同 SHA-256。读取时会验证存储摘要和引用摘要，缺失或篡改时
+抛出 `PayloadArtifactError`，不会把不完整上下文静默用于恢复。
+
+Session Recovery 显式使用 `hydrate_artifacts=true` 读取完整脱敏 Payload；普通 Session API
+和 Unified Timeline 默认只返回公开摘要，因此执行恢复能力与产品可见数据最小化可以同时
+成立。经 Group membership 校验后，可通过以下接口按需读取 Artifact：
+
+```http
+GET /api/groups/{group_id}/observability/artifacts/{artifact_id}
+```
+
+当前集中脱敏复用执行器已有的 PEM、JWT、AWS、GitHub、OpenAI、Anthropic、Slack、Google、
+Bearer、凭据 URL 和 Secret Assignment 高精度规则，不另建一套容易漂移的正则。
+
+第六阶段定向回归覆盖三种 Policy、嵌套 Secret、Session 摘要/水合、缺失 Artifact fail-closed、
+Workflow Artifact、迁移、Schema Split、Timeline 与 Recovery：
+
+```text
+180 passed
+1 dependency deprecation warning
+```
+
+### 12.9 尚未实现的边界
 
 第一阶段完成的是“分类、标注和 Session 生命周期接入”，以下仍属于后续工作：
 
 - Retention Policy 的定时清理和归档执行器。
-- Payload Policy 的集中脱敏、摘要和 Artifact 引用强制执行。
 - 非默认 Orchestrator 插件的完整 Stage/Gate Observation 覆盖。
 - Workflow State Snapshot 与 Observation 的同一 SQLite 事务原子提交。
 - Memory/Skill 使用证据与 Session Event 的双向关联。

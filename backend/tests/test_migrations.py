@@ -29,6 +29,7 @@ from db.migrations import (
     migration_031,
     migration_043,
     migration_055,
+    migration_056,
     run_migrations,
 )
 from db.schema import init_db
@@ -768,6 +769,23 @@ class TestMigration055(MigrationTestCase):
         async with self._connect() as conn:
             await migration_055(conn)
             self.assertFalse(await _has_table(conn, "workflow_observations"))
+
+
+class TestMigration056(MigrationTestCase):
+    async def test_creates_group_payload_artifact_store_idempotently(self):
+        async with self._connect() as conn:
+            await conn.execute("CREATE TABLE session_events (id INTEGER PRIMARY KEY)")
+            await migration_056(conn)
+            await migration_056(conn)
+            self.assertTrue(await _has_table(conn, "observation_artifacts"))
+            columns = await _table_columns(conn, "observation_artifacts")
+            self.assertIn("content_sha256", columns)
+            self.assertIn("payload_policy", columns)
+
+    async def test_skips_central_database_without_session_events(self):
+        async with self._connect() as conn:
+            await migration_056(conn)
+            self.assertFalse(await _has_table(conn, "observation_artifacts"))
 
 
 if __name__ == "__main__":

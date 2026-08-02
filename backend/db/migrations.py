@@ -1254,6 +1254,28 @@ async def migration_055(db):
     await db.commit()
 
 
+async def migration_056(db):
+    """Add group-local payload artifacts for enforced observability projections."""
+    cur = await db.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='session_events'"
+    )
+    if await cur.fetchone() is None:
+        return
+    await db.execute("""CREATE TABLE IF NOT EXISTS observation_artifacts (
+        artifact_id TEXT PRIMARY KEY,
+        group_id INTEGER NOT NULL,
+        event_id TEXT NOT NULL,
+        payload_policy TEXT NOT NULL,
+        content_sha256 TEXT NOT NULL,
+        byte_size INTEGER NOT NULL,
+        content_json TEXT NOT NULL,
+        created_at TEXT DEFAULT (datetime('now'))
+    )""")
+    await db.execute("""CREATE INDEX IF NOT EXISTS idx_observation_artifacts_event
+        ON observation_artifacts(group_id,event_id)""")
+    await db.commit()
+
+
 MIGRATIONS: list = [
     migration_001,
     migration_002,
@@ -1310,6 +1332,7 @@ MIGRATIONS: list = [
     migration_053,
     migration_054,
     migration_055,
+    migration_056,
 ]
 
 

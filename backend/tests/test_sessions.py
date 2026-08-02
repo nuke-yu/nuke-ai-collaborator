@@ -162,6 +162,51 @@ class TestSessionStore(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(tool_observability["effects"], ["read"])
         self.assertFalse(tool_observability["business_significant"])
 
+    async def test_large_payload_is_projected_and_hydrated_for_recovery(self):
+        from sessions.store import create_session, append_event, get_events
+        await create_session(
+            session_id="artifact-session", bot_id=1, group_id=1,
+            config={"system_prompt": "", "provider": "deepseek", "model_name": "deepseek-chat"},
+            user_message="test",
+        )
+        secret = "sk-" + "a" * 30
+        await append_event("artifact-session", "llm_response", {
+            "content": secret + (" result" * 1_000),
+            "model": "test-model",
+        })
+
+        projected = (await get_events("artifact-session"))[0]["payload"]
+        self.assertIn("_artifact", projected)
+        self.assertIn("_summary", projected)
+        self.assertNotIn("content", projected)
+
+        hydrated = (await get_events("artifact-session", hydrate_artifacts=True))[0]["payload"]
+        self.assertIn("content", hydrated)
+        self.assertNotIn(secret, hydrated["content"])
+        self.assertIn("[REDACTED]", hydrated["content"])
+
+        import aiosqlite
+        async with aiosqlite.connect(_TEST_DB) as conn:
+            async with conn.execute(
+                "SELECT COUNT(*) FROM observation_artifacts WHERE group_id = 1"
+            ) as cur:
+                self.assertEqual((await cur.fetchone())[0], 1)
+
+    async def test_missing_recovery_artifact_fails_closed(self):
+        from observability import PayloadArtifactError
+        from sessions.store import create_session, append_event, get_events
+        await create_session(
+            session_id="missing-artifact", bot_id=1, group_id=1,
+            config={"system_prompt": ""}, user_message="test",
+        )
+        await append_event("missing-artifact", "llm_response", {"content": "x" * 10_000})
+        import aiosqlite
+        async with aiosqlite.connect(_TEST_DB) as conn:
+            await conn.execute("DELETE FROM observation_artifacts WHERE group_id = 1")
+            await conn.commit()
+        with self.assertRaises(PayloadArtifactError):
+            await get_events("missing-artifact", hydrate_artifacts=True)
+
     async def test_update_session_status(self):
         from sessions.store import create_session, update_session_status, get_events, get_session
         await create_session(

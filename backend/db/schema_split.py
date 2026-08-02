@@ -36,7 +36,7 @@ CENTRAL_TABLES = frozenset({
 GROUP_TABLES = frozenset({
     "messages", "role_summaries", "message_embeddings", "member_read",
     "message_reactions", "pinned_messages", "agent_sessions", "session_events",
-    "workflow_state", "workflow_observations", "group_locks", "tickets", "reflection_state", "tool_events",
+    "workflow_state", "workflow_observations", "observation_artifacts", "group_locks", "tickets", "reflection_state", "tool_events",
     "agent_runs", "run_decisions",
 }) | MEMORY_GROUP_TABLES
 
@@ -332,6 +332,17 @@ _GROUP_DDL = [
     )""",
     "CREATE INDEX IF NOT EXISTS idx_workflow_observations_flow ON workflow_observations(group_id,workflow_id,id)",
     "CREATE INDEX IF NOT EXISTS idx_workflow_observations_type ON workflow_observations(group_id,event_type,occurred_at)",
+    """CREATE TABLE IF NOT EXISTS observation_artifacts (
+        artifact_id TEXT PRIMARY KEY,
+        group_id INTEGER NOT NULL,
+        event_id TEXT NOT NULL,
+        payload_policy TEXT NOT NULL,
+        content_sha256 TEXT NOT NULL,
+        byte_size INTEGER NOT NULL,
+        content_json TEXT NOT NULL,
+        created_at TEXT DEFAULT (datetime('now'))
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_observation_artifacts_event ON observation_artifacts(group_id,event_id)",
     # group_locks: DROP FK group_id->groups, bot_id->members (cross-domain).
     """CREATE TABLE IF NOT EXISTS group_locks (
         group_id  INTEGER PRIMARY KEY,

@@ -623,12 +623,14 @@ class TestWorkflowStoreDB(unittest.IsolatedAsyncioTestCase):
             await conn.execute("INSERT OR IGNORE INTO groups (id, name) VALUES (?, ?)", (901, "wf-test"))
             await conn.execute("DELETE FROM workflow_state WHERE group_id = ?", (901,))
             await conn.execute("DELETE FROM workflow_observations WHERE group_id = ?", (901,))
+            await conn.execute("DELETE FROM observation_artifacts WHERE group_id = ?", (901,))
             await conn.commit()
 
     async def asyncTearDown(self):
         async with database.connect() as conn:
             await conn.execute("DELETE FROM workflow_state WHERE group_id = ?", (901,))
             await conn.execute("DELETE FROM workflow_observations WHERE group_id = ?", (901,))
+            await conn.execute("DELETE FROM observation_artifacts WHERE group_id = ?", (901,))
             await conn.commit()
 
     async def test_save_load_clear_roundtrip(self):
@@ -685,6 +687,23 @@ class TestWorkflowStoreDB(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(envelope["context"]["session_id"], "session_test_1")
         self.assertEqual(envelope["policy"]["effects"], ["authorization"])
         self.assertFalse(envelope["policy"]["allow_sampling"])
+
+    async def test_large_workflow_payload_is_artifact_backed(self):
+        from observability.payload_policy import get_artifact
+        from observability.workflow import record_workflow_observations
+
+        saved = await record_workflow_observations(901, "workflow_v1", [{
+            "event_type": "stage_completed",
+            "workflow_id": "wf_large_901",
+            "stage_id": "build",
+            "payload": {"evidence": "verified " * 2_000},
+        }])
+        reference = saved[0]["payload"]["_artifact"]
+        async with database.connect() as conn:
+            artifact = await get_artifact(conn, 901, reference["artifact_id"])
+        self.assertIsNotNone(artifact)
+        self.assertIn("evidence", artifact["payload"])
+        self.assertEqual(artifact["sha256"], reference["sha256"])
 
 
 class TestRecoveryWorkflowCoordination(unittest.IsolatedAsyncioTestCase):

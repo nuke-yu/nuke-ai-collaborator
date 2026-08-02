@@ -27,16 +27,23 @@ async def create_session(
 
 
 async def append_event(session_id: str, event_type: str, payload: dict) -> None:
-    from observability import enrich_event_payload
+    from observability import persist_artifact, prepare_payload
     from runtime.tracing import get_trace_id
 
-    enriched_payload = enrich_event_payload(
+    prepared = prepare_payload(
         event_type, payload, trace_id=get_trace_id()
     )
     async with _db.write_connect() as conn:
+        async with conn.execute(
+            "SELECT group_id FROM agent_sessions WHERE id = ?", (session_id,)
+        ) as cur:
+            session_row = await cur.fetchone()
+        if session_row is None:
+            raise ValueError(f"Session not found: {session_id}")
+        await persist_artifact(conn, int(session_row[0]), prepared.artifact)
         await conn.execute(
             "INSERT INTO session_events (session_id, event_type, payload) VALUES (?, ?, ?)",
-            (session_id, event_type, json.dumps(enriched_payload, ensure_ascii=False)),
+            (session_id, event_type, json.dumps(prepared.payload, ensure_ascii=False)),
         )
         await conn.execute(
             "UPDATE agent_sessions SET updated_at = datetime('now') WHERE id = ?",
@@ -98,24 +105,32 @@ def _session_cost(session: dict) -> float:
     )
 
 
-async def get_events(session_id: str) -> list[dict]:
+async def get_events(session_id: str, *, hydrate_artifacts: bool = False) -> list[dict]:
+    from observability import hydrate_payload
+
     async with _db.connect() as conn:
         conn.row_factory = aiosqlite.Row
         async with conn.execute(
-            "SELECT * FROM session_events WHERE session_id = ? ORDER BY id ASC",
+            """SELECT se.*, s.group_id AS artifact_group_id
+               FROM session_events se JOIN agent_sessions s ON s.id = se.session_id
+               WHERE se.session_id = ? ORDER BY se.id ASC""",
             (session_id,),
         ) as cur:
             rows = await cur.fetchall()
-    result = []
-    for r in rows:
-        d = dict(r)
-        d["payload"] = json.loads(d.get("payload", "{}"))
-        result.append(d)
+        result = []
+        for r in rows:
+            d = dict(r)
+            group_id = int(d.pop("artifact_group_id"))
+            payload = json.loads(d.get("payload", "{}"))
+            if hydrate_artifacts:
+                payload = await hydrate_payload(conn, group_id, payload)
+            d["payload"] = payload
+            result.append(d)
     return result
 
 
 async def update_session_status(session_id: str, status: str) -> None:
-    from observability import enrich_event_payload
+    from observability import prepare_payload
     from runtime.tracing import get_trace_id
 
     async with _db.write_connect() as conn:
@@ -129,11 +144,11 @@ async def update_session_status(session_id: str, status: str) -> None:
             (status, session_id),
         )
         if previous_status is not None and previous_status != status:
-            event_payload = enrich_event_payload(
+            event_payload = prepare_payload(
                 "session_status",
                 {"from_status": previous_status, "status": status},
                 trace_id=get_trace_id(),
-            )
+            ).payload
             await conn.execute(
                 "INSERT INTO session_events (session_id, event_type, payload) VALUES (?, ?, ?)",
                 (

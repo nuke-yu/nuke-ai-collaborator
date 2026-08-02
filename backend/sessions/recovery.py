@@ -100,7 +100,7 @@ async def recover_all(dispatcher=None, group_id: int | None = None) -> None:
             
             # Reconstruct session messages and handle dangling tool calls
             config = session["config"]
-            events = await get_events(sid)
+            events = await get_events(sid, hydrate_artifacts=True)
             
             committed_results: set[str] = {
                 e["payload"]["tool_call_id"]
@@ -157,7 +157,7 @@ async def _recover_one(session: dict, dispatcher) -> None:
         messages = json.loads(snapshot_json)
         log.info("found full snapshot for session %s, using it for recovery", sid)
     else:
-        events = await get_events(sid)
+        events = await get_events(sid, hydrate_artifacts=True)
         # Detect dangling tool_call (written before execution, no matching tool_result)
         committed_results: set[str] = {
             e["payload"]["tool_call_id"]
@@ -217,7 +217,7 @@ async def resume_session(session_id: str) -> bool:
         import json
         messages = json.loads(snapshot_json)
     else:
-        events = await get_events(session_id)
+        events = await get_events(session_id, hydrate_artifacts=True)
         messages = reconstruct_messages(config, events)
 
     payload = {
