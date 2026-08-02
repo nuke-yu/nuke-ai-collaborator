@@ -24,6 +24,7 @@ export default function MessageList({
   onUnpin,
   onConfirmGate,
   onReviseGate,
+  onShowSessionTimeline,
 }) {
   const messages = useChatStore((s) => s.messages)
   const typing = useChatStore((s) => s.typing)
@@ -137,6 +138,7 @@ export default function MessageList({
                 onReply={onReply}
                 reactions={reactionMap[String(msg.id)] || EMPTY_REACTIONS}
                 onReact={(emoji) => onReact(msg.id, emoji)}
+                onShowSessionTimeline={onShowSessionTimeline}
                 isPinned={pinsSet.has(msg.id)}
                 onPin={(id) => onPin(id)}
                 onUnpin={(id) => onUnpin(id)}

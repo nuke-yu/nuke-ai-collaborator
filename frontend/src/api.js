@@ -39,6 +39,22 @@ export async function fetchReactions(groupId, { signal } = {}) {
   return wsrpc.request({ query: 'reactions', group_id: groupId }, { signal })
 }
 
+export async function fetchSessionTimeline(sessionId, groupId, { signal } = {}) {
+  const res = await authFetch(`/api/sessions/${sessionId}/timeline?group_id=${groupId}`, { signal })
+  return res.json()
+}
+
+export async function fetchGroupArtifacts(groupId, { origin, sessionId, botId, limit = 100, offset = 0 } = {}, { signal } = {}) {
+  const params = new URLSearchParams()
+  if (origin) params.append('origin', origin)
+  if (sessionId) params.append('session_id', sessionId)
+  if (botId) params.append('bot_id', botId)
+  params.append('limit', limit)
+  params.append('offset', offset)
+  const res = await authFetch(`/api/artifacts/group/${groupId}?${params.toString()}`, { signal })
+  return res.json()
+}
+
 export async function toggleReaction(msgId, memberId, emoji) {
   // memberId kept in the signature for caller compatibility but ignored:
   // the server uses the authenticated connection's member_id.

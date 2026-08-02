@@ -26,6 +26,7 @@ import WorkspacePanel from './WorkspacePanel'
 import PermissionRequestModal from './PermissionRequestModal'
 import RecapBanner from './RecapBanner'
 import SuggestionBar from './SuggestionBar'
+import ExecutionTimelineDrawer from './ExecutionTimelineDrawer'
 
 export default function ChatWindow({ memberId, theme, onThemeChange, onLogout }) {
   const { t } = useTranslation()
@@ -100,8 +101,9 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
   const [workspaceBot, setWorkspaceBot] = useState(null)
   const [showWorkflowStart, setShowWorkflowStart] = useState(false)
   const [showSearch, setShowSearch] = useState(false)
-  const [showBotLogs, setShowBotLogs] = useState(false)
+  const [showWorkspace, setShowWorkspace] = useState(false)
   const [showTimeline, setShowTimeline] = useState(false)
+  const [activeTimelineSession, setActiveTimelineSession] = useState(null)
   const [replyingTo, setReplyingTo] = useState(null)
   const [mobileTab, setMobileTab] = useState('chat')
   const [drafts, setDrafts] = useState({})
@@ -785,6 +787,7 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
           onUnpin={(id) => unpinMessage(activeGroupId, id)}
           onConfirmGate={handleConfirmGate}
           onReviseGate={handleReviseGate}
+          onShowSessionTimeline={(sessId) => setActiveTimelineSession(sessId)}
         />
         {isStreaming && (
           <div className="px-4 py-1 flex justify-center">
@@ -846,6 +849,13 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
       )}
       {showTimeline && activeGroupId && (
         <TimelinePanel groupId={activeGroupId} onClose={() => setShowTimeline(false)} />
+      )}
+      {activeTimelineSession && activeGroupId && (
+        <ExecutionTimelineDrawer
+          sessionId={activeTimelineSession}
+          groupId={activeGroupId}
+          onClose={() => setActiveTimelineSession(null)}
+        />
       )}
       </div>
 
