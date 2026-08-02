@@ -17,6 +17,7 @@ from .workflow import (
     get_workflow_observations,
     record_workflow_observations,
 )
+from .timeline import TIMELINE_SCHEMA_VERSION, get_group_timeline
 
 __all__ = [
     "EVENT_POLICY_VERSION",
@@ -32,4 +33,6 @@ __all__ = [
     "build_workflow_observation",
     "get_workflow_observations",
     "record_workflow_observations",
+    "TIMELINE_SCHEMA_VERSION",
+    "get_group_timeline",
 ]

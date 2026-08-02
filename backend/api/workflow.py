@@ -1,7 +1,7 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Query
 import db
 from db import get_db, get_members
-from api.deps import ensure_group_ready
+from api.deps import ensure_group_ready, require_group_member_ready
 from ws_manager import manager
 import core.workflow as wf
 from core import workflow_store
@@ -9,8 +9,39 @@ from core.orchestration import registry as orch_registry
 from runtime.dbpaths import group_db_path
 from runtime import supervisor as sup_mod
 from runtime import ipc
+from observability.timeline import get_group_timeline
 
 router = APIRouter()
+
+
+@router.get("/api/groups/{group_id}/timeline")
+async def get_timeline(
+    group_id: int,
+    limit: int = Query(50, ge=1, le=200),
+    cursor: str | None = None,
+    source: list[str] | None = Query(None),
+    event_type: list[str] | None = Query(None),
+    event_class: list[str] | None = Query(None),
+    business_significant: bool | None = True,
+    workflow_id: str | None = None,
+    session_id: str | None = None,
+    _user: dict = Depends(require_group_member_ready),
+):
+    try:
+        with db.bind_db(group_db_path(group_id)):
+            return await get_group_timeline(
+                group_id,
+                limit=limit,
+                cursor=cursor,
+                sources=source or (),
+                event_types=event_type or (),
+                event_classes=event_class or (),
+                business_significant=business_significant,
+                workflow_id=workflow_id,
+                session_id=session_id,
+            )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/api/groups/{group_id}/workflow", dependencies=[Depends(ensure_group_ready)])

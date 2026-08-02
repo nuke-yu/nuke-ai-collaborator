@@ -613,7 +613,7 @@ Collaborator 的外部 Executor/Orchestrator Python 会直接 import 到运行�
 ## 12. 可观测性事件政策实现状态
 
 > 实现日期：2026-08-02
-> 状态：第三阶段 Workflow Observation 已进入运行链路（CURRENT）
+> 状态：第四阶段 Unified Timeline API 已进入运行链路（CURRENT）
 
 已新增可执行的 Event Policy Registry：
 
@@ -818,7 +818,57 @@ Workflow Observation 复用 Event Policy Registry，不在编排器中重新定�
 1 dependency deprecation warning
 ```
 
-### 12.7 尚未实现的边界
+### 12.7 Unified Timeline API（第四阶段）
+
+已新增 Group 级统一查询接口：
+
+```http
+GET /api/groups/{group_id}/timeline
+```
+
+它不是简单拼接两张表，而是在读取边界把三类业务对象归一为同一种 Envelope：
+
+```text
+workflow_observations ────────────────┐
+                                      ├─ Unified Timeline Envelope
+session_events ──普通执行事件────────┤
+               └─ permission_* ──────┘  source = permission
+```
+
+统一结果包含 `schema_version`、`event_id`、`occurred_at`、`source`、`event_type`、
+`aggregate`、`context`、`actor`、`payload` 和 `policy`。其中 Permission 仍存储在
+Session WAL 内，以保持权限决策与实际工具调用的事务邻近性；查询时则提升为独立的
+`source = permission`，并以稳定的 `permission_id` 作为 aggregate ID。
+
+默认只返回 `business_significant = true` 的事件，因此安全读取等可采样 Diagnostic
+不会淹没产品时间线。API 支持：
+
+- `source`：`workflow` / `session` / `permission`，可重复传入。
+- `event_type` 与 `event_class` 筛选。
+- `business_significant=true|false` 精确筛选。
+- `workflow_id` / `session_id` 关联下钻。
+- `limit`（1–200）和不透明 `cursor`，按 `occurred_at + source rank + row id`
+  稳定倒序翻页，避免同毫秒事件丢失或重复。
+
+Group 隔离在 SQL 层执行，而不是只相信请求参数：Session 分支必须通过
+`session_events JOIN agent_sessions` 且匹配 `agent_sessions.group_id`；Workflow 分支
+必须匹配 `workflow_observations.group_id`。路由还会先在中央库验证当前用户的
+`group_memberships`，未授权时返回 404，并且不会初始化或打开目标 Group DB；验证通过后
+才绑定该 Group 的私有 SQLite，不会查询其他 Group DB。
+
+读取器兼容第一阶段以前没有 `_observability` 元数据的历史 Session Event：查询时用
+同一 Event Policy Registry 确定性补充分级，并用本地行 ID 生成稳定兼容 ID，不会在
+每次翻页时产生不同身份。损坏或非对象 JSON Payload 会降级为空对象，不影响整条时间线。
+
+第四阶段定向测试覆盖跨来源排序、Permission 提升、默认业务筛选、Diagnostic 查询、
+关联筛选、游标无重复/无遗漏、无效输入和 SQL 层 Group 隔离：
+
+```text
+11 passed
+1 dependency deprecation warning
+```
+
+### 12.8 尚未实现的边界
 
 第一阶段完成的是“分类、标注和 Session 生命周期接入”，以下仍属于后续工作：
 
@@ -828,7 +878,7 @@ Workflow Observation 复用 Event Policy Registry，不在编排器中重新定�
 - Workflow State Snapshot 与 Observation 的同一 SQLite 事务原子提交。
 - Memory/Skill 使用证据与 Session Event 的双向关联。
 - Request 级 Model Usage Ledger。
-- Timeline API 和前端界面。
+- Timeline 前端界面。
 - OpenTelemetry Exporter。
 - Prometheus 对 Event Policy 的低基数聚合。
 

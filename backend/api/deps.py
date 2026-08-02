@@ -1,5 +1,8 @@
 """Shared FastAPI dependencies for group-scoped routes."""
-from db import ensure_group_db_ready
+from fastapi import Depends, HTTPException
+
+from core import auth
+from db import ensure_group_db_ready, global_db
 from runtime.dbpaths import group_db_path
 
 
@@ -17,3 +20,29 @@ async def ensure_group_ready(group_id: int | None = None) -> None:
     if group_id is None:
         return
     await ensure_group_db_ready(group_db_path(group_id))
+
+
+async def require_group_member(
+    group_id: int,
+    user: dict = Depends(auth.get_current_user),
+) -> dict:
+    """Authorize a human against central membership without opening the group DB."""
+    async with global_db() as conn:
+        async with conn.execute(
+            "SELECT 1 FROM group_memberships WHERE user_id = ? AND group_id = ?",
+            (int(user["uid"]), group_id),
+        ) as cur:
+            membership = await cur.fetchone()
+    if membership is None:
+        # Do not reveal whether a non-member group exists.
+        raise HTTPException(status_code=404, detail="Group not found")
+    return user
+
+
+async def require_group_member_ready(
+    group_id: int,
+    user: dict = Depends(require_group_member),
+) -> dict:
+    """Authorize first, then initialize the one private DB the route may read."""
+    await ensure_group_db_ready(group_db_path(group_id))
+    return user
