@@ -75,36 +75,9 @@ async def record_workflow_observations(
 ) -> list[dict[str, Any]]:
     """Persist envelopes without letting telemetry failure alter orchestration."""
     try:
-        prepared_observations = [
-            _prepare_workflow_observation(group_id, orchestrator_id, descriptor)
-            for descriptor in descriptors
-        ]
-        envelopes = [item[0] for item in prepared_observations]
-        if not envelopes:
-            return []
         async with write_connect() as db:
-            for _envelope, artifact in prepared_observations:
-                await persist_artifact(db, group_id, artifact)
-            await db.executemany(
-                """INSERT OR IGNORE INTO workflow_observations
-                   (observation_id,group_id,workflow_id,event_type,stage_id,
-                    gate_id,gate_instance_id,session_id,envelope_json,occurred_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?)""",
-                [
-                    (
-                        envelope["event_id"],
-                        group_id,
-                        envelope["context"]["workflow_id"],
-                        envelope["event_type"],
-                        envelope["context"]["stage_id"],
-                        envelope["context"]["gate_id"],
-                        envelope["context"]["gate_instance_id"],
-                        envelope["context"]["session_id"],
-                        json.dumps(envelope, ensure_ascii=False),
-                        envelope["occurred_at"],
-                    )
-                    for envelope in envelopes
-                ],
+            envelopes = await insert_workflow_observations(
+                db, group_id, orchestrator_id, descriptors
             )
             await db.commit()
     except Exception:
@@ -114,6 +87,45 @@ async def record_workflow_observations(
             orchestrator_id,
         )
         return []
+    return envelopes
+
+
+async def insert_workflow_observations(
+    conn,
+    group_id: int,
+    orchestrator_id: str,
+    descriptors: Iterable[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """Strict no-commit insert primitive for a caller-owned SQLite transaction."""
+    prepared_observations = [
+        _prepare_workflow_observation(group_id, orchestrator_id, descriptor)
+        for descriptor in descriptors
+    ]
+    envelopes = [item[0] for item in prepared_observations]
+    for _envelope, artifact in prepared_observations:
+        await persist_artifact(conn, group_id, artifact)
+    if envelopes:
+        await conn.executemany(
+            """INSERT OR IGNORE INTO workflow_observations
+               (observation_id,group_id,workflow_id,event_type,stage_id,
+                gate_id,gate_instance_id,session_id,envelope_json,occurred_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            [
+                (
+                    envelope["event_id"],
+                    group_id,
+                    envelope["context"]["workflow_id"],
+                    envelope["event_type"],
+                    envelope["context"]["stage_id"],
+                    envelope["context"]["gate_id"],
+                    envelope["context"]["gate_instance_id"],
+                    envelope["context"]["session_id"],
+                    json.dumps(envelope, ensure_ascii=False),
+                    envelope["occurred_at"],
+                )
+                for envelope in envelopes
+            ],
+        )
     return envelopes
 
 

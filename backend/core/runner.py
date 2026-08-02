@@ -127,21 +127,6 @@ async def apply_step(
     group_id: int, orch, step, *, workspace_task_id: str | None = None
 ) -> None:
     """把 OrchestratorStep 翻译成副作用。编排层决定，runner 执行。"""
-    for ann in step.announcements:
-        await _post_system_msg(group_id, ann.sender_bot_id, ann.text)
-    if step.confirm_gate:
-        await _post_confirm_gate(group_id, step.confirm_gate)
-    # A terminal observe() may already have removed the orchestrator's in-memory
-    # state. Publishing that empty snapshot before the authoritative done event
-    # produces {active:false, done:false}, which the dashboard correctly treats
-    # as failure and then retires before {done:true} arrives. Terminal steps only
-    # publish the single authoritative completion event below.
-    if step.broadcast_state and not step.done:
-        await _publish_workflow_state(group_id, orch)
-        blob = orch.serialize(group_id)
-        if blob is not None:
-            await workflow_store.save_state(
-                group_id, getattr(orch, "orchestrator_id", "workflow_v1"), blob)
     # Worktree disposition is part of the task transaction.  It must finish
     # before clients are told that the workflow is complete.
     if step.workspace_action:
@@ -149,18 +134,35 @@ async def apply_step(
             group_id, workspace_task_id or "", step.workspace_action
         )
 
+    observations = getattr(step, "observations", None) or []
+    orchestrator_id = getattr(orch, "orchestrator_id", "workflow_v1")
+    blob = (
+        orch.serialize(group_id)
+        if not step.done and (step.broadcast_state or observations)
+        else None
+    )
+    if observations:
+        await workflow_store.commit_transition(
+            group_id, orchestrator_id,
+            state=blob,
+            observations=observations,
+            clear=step.done,
+        )
+    elif step.done:
+        await workflow_store.clear_state(group_id)
+    elif blob is not None:
+        await workflow_store.save_state(group_id, orchestrator_id, blob)
+
+    for ann in step.announcements:
+        await _post_system_msg(group_id, ann.sender_bot_id, ann.text)
+    if step.confirm_gate:
+        await _post_confirm_gate(group_id, step.confirm_gate)
+
+    # Publish only after the durable state + observation transaction commits.
+    if step.broadcast_state and not step.done:
+        await _publish_workflow_state(group_id, orch)
     if step.done:
         await bus.publish(WorkflowUpdate(group_id=group_id, active=False, done=True))
-        await workflow_store.clear_state(group_id)
-
-    observations = getattr(step, "observations", None) or []
-    if observations:
-        from observability.workflow import record_workflow_observations
-        await record_workflow_observations(
-            group_id,
-            getattr(orch, "orchestrator_id", "workflow_v1"),
-            observations,
-        )
     
     # Decoupled Event Trigger: Publish WorkflowPaused event when workflow gets gated or finishes
     if step.confirm_gate or step.done:
@@ -352,14 +354,15 @@ async def resume_workflows(group_id: int | None = None) -> None:
         # Persist IDs added while upgrading legacy snapshots before any resumed
         # execution can produce a transition, then record the recovery boundary.
         restored = orch.serialize(group_id)
-        if restored is not None:
-            await workflow_store.save_state(group_id, orchestrator_id, restored)
         recovery = orch.recovery_observation(group_id)
         if recovery:
-            from observability.workflow import record_workflow_observations
-            await record_workflow_observations(
-                group_id, orchestrator_id, [recovery]
+            await workflow_store.commit_transition(
+                group_id, orchestrator_id,
+                state=restored,
+                observations=[recovery],
             )
+        elif restored is not None:
+            await workflow_store.save_state(group_id, orchestrator_id, restored)
         await _publish_workflow_state(group_id, orch)
         for unit in orch.resume_units(group_id):
             if unit.executor_id == "tool_loop_v1":

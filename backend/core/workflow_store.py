@@ -13,20 +13,24 @@ import json
 import db as _db
 
 
+async def _upsert_state(conn, group_id: int, orchestrator_id: str, state: dict) -> None:
+    await conn.execute(
+        """INSERT INTO workflow_state (group_id, orchestrator_id, state_json, status, updated_at)
+           VALUES (?, ?, ?, 'active', datetime('now'))
+           ON CONFLICT(group_id) DO UPDATE SET
+               orchestrator_id = excluded.orchestrator_id,
+               state_json      = excluded.state_json,
+               status          = 'active',
+               updated_at      = datetime('now')""",
+        (group_id, orchestrator_id, json.dumps(state, ensure_ascii=False)),
+    )
+
+
 async def save_state(group_id: int, orchestrator_id: str, state: dict) -> None:
     """整行覆写某个 group 的编排快照（status 置 active）。"""
     # 写操作必须走串行化 writer（DFT-053），避免绕过单锁导致 database is locked。
     async with _db.write_connect() as conn:
-        await conn.execute(
-            """INSERT INTO workflow_state (group_id, orchestrator_id, state_json, status, updated_at)
-               VALUES (?, ?, ?, 'active', datetime('now'))
-               ON CONFLICT(group_id) DO UPDATE SET
-                   orchestrator_id = excluded.orchestrator_id,
-                   state_json      = excluded.state_json,
-                   status          = 'active',
-                   updated_at      = datetime('now')""",
-            (group_id, orchestrator_id, json.dumps(state, ensure_ascii=False)),
-        )
+        await _upsert_state(conn, group_id, orchestrator_id, state)
         await conn.commit()
 
 
@@ -35,6 +39,29 @@ async def clear_state(group_id: int) -> None:
     async with _db.write_connect() as conn:
         await conn.execute("DELETE FROM workflow_state WHERE group_id = ?", (group_id,))
         await conn.commit()
+
+
+async def commit_transition(
+    group_id: int,
+    orchestrator_id: str,
+    *,
+    state: dict | None,
+    observations: list[dict],
+    clear: bool = False,
+) -> list[dict]:
+    """Atomically persist one state-machine transition and its observations."""
+    from observability.workflow import insert_workflow_observations
+
+    async with _db.write_connect() as conn:
+        if clear:
+            await conn.execute("DELETE FROM workflow_state WHERE group_id = ?", (group_id,))
+        elif state is not None:
+            await _upsert_state(conn, group_id, orchestrator_id, state)
+        envelopes = await insert_workflow_observations(
+            conn, group_id, orchestrator_id, observations
+        )
+        await conn.commit()
+    return envelopes
 
 
 async def load_all_active(group_id: int | None = None) -> list[dict]:

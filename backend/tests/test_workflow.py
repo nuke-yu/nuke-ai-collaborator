@@ -705,6 +705,59 @@ class TestWorkflowStoreDB(unittest.IsolatedAsyncioTestCase):
         self.assertIn("evidence", artifact["payload"])
         self.assertEqual(artifact["sha256"], reference["sha256"])
 
+    async def test_state_and_observation_commit_atomically(self):
+        state = {"workflow_id": "wf_atomic_901", "current": 1}
+        envelopes = await self.store.commit_transition(
+            901,
+            "workflow_v1",
+            state=state,
+            observations=[{
+                "event_type": "stage_entered",
+                "workflow_id": "wf_atomic_901",
+                "stage_id": "build",
+            }],
+        )
+        rows = await self.store.load_all_active(group_id=901)
+        self.assertEqual(rows[0]["state"], state)
+        self.assertEqual(envelopes[0]["event_type"], "stage_entered")
+
+        async with database.connect() as conn:
+            async with conn.execute(
+                "SELECT COUNT(*) FROM workflow_observations WHERE observation_id = ?",
+                (envelopes[0]["event_id"],),
+            ) as cur:
+                self.assertEqual((await cur.fetchone())[0], 1)
+
+    async def test_invalid_observation_rolls_back_state_change(self):
+        original = {"workflow_id": "wf_rollback_901", "current": 0}
+        await self.store.save_state(901, "workflow_v1", original)
+        with self.assertRaisesRegex(ValueError, "requires workflow_id"):
+            await self.store.commit_transition(
+                901,
+                "workflow_v1",
+                state={**original, "current": 1},
+                observations=[{"event_type": "stage_entered"}],
+            )
+        rows = await self.store.load_all_active(group_id=901)
+        self.assertEqual(rows[0]["state"], original)
+
+    async def test_terminal_observation_and_state_clear_are_atomic(self):
+        await self.store.save_state(
+            901, "workflow_v1", {"workflow_id": "wf_done_901", "current": 1}
+        )
+        envelopes = await self.store.commit_transition(
+            901,
+            "workflow_v1",
+            state=None,
+            clear=True,
+            observations=[{
+                "event_type": "workflow_completed",
+                "workflow_id": "wf_done_901",
+            }],
+        )
+        self.assertEqual(await self.store.load_all_active(group_id=901), [])
+        self.assertEqual(envelopes[0]["event_type"], "workflow_completed")
+
 
 class TestRecoveryWorkflowCoordination(unittest.IsolatedAsyncioTestCase):
     """崩溃恢复与工作流编排的协同：recover_all 走 _dispatch_recovery 绕过了
@@ -1143,6 +1196,39 @@ class TestConfirmGateGlue(unittest.IsolatedAsyncioTestCase):
         msgs = [b for b in bcast if b.get("type") == "message"]
         self.assertEqual(len(msgs), 1)
         self.assertEqual(msgs[0]["meta"]["kind"], "confirm_gate")
+
+    async def test_apply_step_commits_transition_before_state_publish(self):
+        from core import runner
+        from core.orchestration.base import OrchestratorStep
+
+        calls = []
+
+        async def commit(*_args, **kwargs):
+            calls.append(("commit", kwargs))
+
+        async def publish(*_args):
+            calls.append(("publish", {}))
+
+        class StubOrch:
+            orchestrator_id = "workflow_v1"
+            def serialize(self, _gid):
+                return {"workflow_id": "wf_atomic", "current": 1}
+
+        step = OrchestratorStep(
+            broadcast_state=True,
+            observations=[{
+                "event_type": "stage_entered",
+                "workflow_id": "wf_atomic",
+                "stage_id": "build",
+            }],
+        )
+        with patch.object(runner.workflow_store, "commit_transition", new=commit), \
+             patch.object(runner, "_publish_workflow_state", new=publish):
+            await runner.apply_step(1, StubOrch(), step)
+
+        self.assertEqual([name for name, _ in calls], ["commit", "publish"])
+        self.assertEqual(calls[0][1]["state"]["current"], 1)
+        self.assertEqual(calls[0][1]["observations"], step.observations)
 
     async def test_confirm_marks_gate_confirmed(self):
         # 接线：wf.confirm 推进过门后，调用 runner.mark_gate_confirmed 持久化卡片状态。

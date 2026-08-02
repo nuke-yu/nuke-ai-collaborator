@@ -613,7 +613,7 @@ Collaborator 的外部 Executor/Orchestrator Python 会直接 import 到运行�
 ## 12. 可观测性事件政策实现状态
 
 > 实现日期：2026-08-02
-> 状态：第六阶段 Payload Policy Enforcement 已进入运行链路（CURRENT）
+> 状态：第七阶段 Workflow Atomic Transition 已进入运行链路（CURRENT）
 
 已新增可执行的 Event Policy Registry：
 
@@ -931,13 +931,37 @@ Workflow Artifact、迁移、Schema Split、Timeline 与 Recovery：
 1 dependency deprecation warning
 ```
 
-### 12.9 尚未实现的边界
+### 12.9 Workflow Atomic Transition（第七阶段）
+
+Workflow Runner 不再依次执行“保存状态 → 提交 Observation”两个独立事务，而是通过
+`workflow_store.commit_transition()` 在同一个 Group 私有 SQLite Writer 和事务内完成：
+
+```text
+BEGIN
+  UPSERT workflow_state  或  DELETE terminal workflow_state
+  INSERT observation_artifacts（需要时）
+  INSERT workflow_observations
+COMMIT
+```
+
+如果 Envelope 构造、Artifact 或 Observation 写入失败，复用 Writer 的异常回滚机制撤销
+整个事务，不会留下新状态配旧事件或旧状态配新事件。Runner 只有在事务成功提交后才发布
+`workflow_update`；终态会在同一事务删除快照并保存 `workflow_completed`。崩溃恢复时补写的
+稳定 ID 快照和 `workflow_recovered` 也已合并为同一次原子提交。
+
+不产生 Observation 的旧插件仍走兼容的 `save_state()` / `clear_state()`，下一阶段完成插件
+Observation 覆盖后会自然进入原子路径。Worktree promotion 仍先于 terminal transaction，
+防止代码合并失败却把 Workflow 标记为完成。
+
+第七阶段定向测试覆盖正常提交、非法 Observation 整体回滚、终态清理与完成事件原子性、
+Runner Gate/Workspace 顺序和恢复路径。
+
+### 12.10 尚未实现的边界
 
 第一阶段完成的是“分类、标注和 Session 生命周期接入”，以下仍属于后续工作：
 
 - Retention Policy 的定时清理和归档执行器。
 - 非默认 Orchestrator 插件的完整 Stage/Gate Observation 覆盖。
-- Workflow State Snapshot 与 Observation 的同一 SQLite 事务原子提交。
 - Memory/Skill 使用证据与 Session Event 的双向关联。
 - Request 级 Model Usage Ledger。
 - OpenTelemetry Exporter。
