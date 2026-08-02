@@ -57,3 +57,19 @@ async def api_cancel_recovery(session_id: str, group_id: int | None = None):
         await update_session_status(session_id, "failed")
         return {"status": "ok", "message": "会话恢复已取消，已释放群组锁"}
 
+
+@router.get("/{session_id}/timeline", dependencies=[Depends(ensure_group_ready)])
+async def api_get_session_timeline(session_id: str, group_id: int | None = None):
+    if not group_id:
+        raise HTTPException(status_code=400, detail="Missing group_id query parameter")
+    try:
+        from observability.timeline_projector import project_session_timeline
+        with db.bind_db(group_db_path(group_id)):
+            projection = await project_session_timeline(group_id=group_id, session_id=session_id)
+            return projection.to_dict()
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
