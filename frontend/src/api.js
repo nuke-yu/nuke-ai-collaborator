@@ -241,3 +241,20 @@ export async function saveMcpConfig(data, etag) {
   const config = await res.json()
   return { config, etag: newEtag }
 }
+
+export async function fetchGroupTimeline(groupId, options = {}) {
+  const params = new URLSearchParams()
+  if (options.limit) params.set('limit', String(options.limit))
+  if (options.cursor) params.set('cursor', options.cursor)
+  if (options.businessSignificant !== undefined) {
+    params.set('business_significant', String(options.businessSignificant))
+  }
+  for (const source of options.sources || []) params.append('source', source)
+  for (const eventType of options.eventTypes || []) params.append('event_type', eventType)
+  for (const eventClass of options.eventClasses || []) params.append('event_class', eventClass)
+  if (options.workflowId) params.set('workflow_id', options.workflowId)
+  if (options.sessionId) params.set('session_id', options.sessionId)
+  const query = params.toString()
+  const res = await authFetch(`/api/groups/${groupId}/timeline${query ? `?${query}` : ''}`)
+  return res.json()
+}

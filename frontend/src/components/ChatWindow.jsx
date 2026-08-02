@@ -15,6 +15,7 @@ import MemberList from './MemberList'
 import MessageInput from './MessageInput'
 import SearchPanel from './SearchPanel'
 import BotLogPanel from './BotLogPanel'
+import TimelinePanel from './TimelinePanel'
 import ApiKeyManager from './ApiKeyManager'
 import McpManager from './McpManager'
 import PinnedBar from './PinnedBar'
@@ -100,6 +101,7 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
   const [showWorkflowStart, setShowWorkflowStart] = useState(false)
   const [showSearch, setShowSearch] = useState(false)
   const [showBotLogs, setShowBotLogs] = useState(false)
+  const [showTimeline, setShowTimeline] = useState(false)
   const [replyingTo, setReplyingTo] = useState(null)
   const [mobileTab, setMobileTab] = useState('chat')
   const [drafts, setDrafts] = useState({})
@@ -678,8 +680,9 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
           members={members}
           reconnecting={reconnecting}
           workflow={workflow}
-          onShowSearch={() => { setShowSearch(s => !s); setShowBotLogs(false); }}
-          onShowBotLogs={() => { setShowBotLogs(s => !s); setShowSearch(false); }}
+          onShowSearch={() => { setShowSearch(s => !s); setShowBotLogs(false); setShowTimeline(false); }}
+          onShowBotLogs={() => { setShowBotLogs(s => !s); setShowSearch(false); setShowTimeline(false); }}
+          onShowTimeline={() => { setShowTimeline(s => !s); setShowSearch(false); setShowBotLogs(false); }}
           onShowStats={(s) => { setStats(s); setShowStats(true); }}
           onShowWorkflowStart={() => {
             setShowWorkflowStart(true)
@@ -840,6 +843,9 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
       )}
       {showBotLogs && activeGroupId && (
         <BotLogPanel groupId={activeGroupId} onClose={() => setShowBotLogs(false)} />
+      )}
+      {showTimeline && activeGroupId && (
+        <TimelinePanel groupId={activeGroupId} onClose={() => setShowTimeline(false)} />
       )}
       </div>
 

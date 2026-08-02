@@ -14,6 +14,7 @@ export default function ChatHeader({
   onStartRequirement,
   onShowStats, onLogout,
   onShowBotLogs,
+  onShowTimeline,
 }) {
   const { t } = useTranslation()
   const [editingGroupName, setEditingGroupName] = useState(false)
@@ -106,6 +107,11 @@ export default function ChatHeader({
           className="text-sm px-2 py-1 rounded text-gray-500 hover:text-gray-300 transition-colors"
           title={t(K.chat.header.botLogsTitle)}
         >📜</button>
+        <button
+          onClick={() => onShowTimeline()}
+          className="text-sm px-2 py-1 rounded text-gray-500 hover:text-gray-300 transition-colors"
+          title="业务时间线"
+        >🧭</button>
       </div>
     </div>
   )

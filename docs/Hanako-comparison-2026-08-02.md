@@ -613,7 +613,7 @@ Collaborator 的外部 Executor/Orchestrator Python 会直接 import 到运行�
 ## 12. 可观测性事件政策实现状态
 
 > 实现日期：2026-08-02
-> 状态：第四阶段 Unified Timeline API 已进入运行链路（CURRENT）
+> 状态：第五阶段 Timeline 产品界面已进入运行链路（CURRENT）
 
 已新增可执行的 Event Policy Registry：
 
@@ -868,6 +868,23 @@ Group 隔离在 SQL 层执行，而不是只相信请求参数：Session 分支�
 1 dependency deprecation warning
 ```
 
+Timeline 已在主聊天界面接入独立侧栏，可从 Header 的指南针入口打开。界面提供：
+
+- Workflow / Session / Permission 三类来源切换。
+- 业务事件与 Diagnostic 事件范围切换。
+- Event Policy effect 标签和本地时间展示。
+- Workflow / Session / Permission 关联 ID 下钻。
+- Payload 按需展开，默认不占用主时间线视觉空间。
+- 基于后端不透明 Cursor 的“加载更早事件”。
+- 加载、空数据、错误重试和手动刷新状态。
+
+前端定向验证：
+
+```text
+4 passed
+Vite production build passed
+```
+
 ### 12.8 尚未实现的边界
 
 第一阶段完成的是“分类、标注和 Session 生命周期接入”，以下仍属于后续工作：
@@ -878,7 +895,6 @@ Group 隔离在 SQL 层执行，而不是只相信请求参数：Session 分支�
 - Workflow State Snapshot 与 Observation 的同一 SQLite 事务原子提交。
 - Memory/Skill 使用证据与 Session Event 的双向关联。
 - Request 级 Model Usage Ledger。
-- Timeline 前端界面。
 - OpenTelemetry Exporter。
 - Prometheus 对 Event Policy 的低基数聚合。
 
