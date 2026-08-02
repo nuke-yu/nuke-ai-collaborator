@@ -1,0 +1,39 @@
+appId: com.nuke.ai.collaborator
+productName: Nuke AI Collaborator
+copyright: Copyright © 2026 Nuke AI
+directories:
+  output: dist/
+  buildResources: build
+files:
+  - desktop/**/*
+  - frontend/dist/**/*
+  - package.json
+mac:
+  target:
+    - target: dmg
+      arch:
+        - arm64
+        - x64
+  category: public.app-category.productivity
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  extraResources:
+    - from: backend/dist/collaborator-backend
+      to: sidecar/collaborator-backend
+dmg:
+  title: Nuke AI Collaborator
+  contents:
+    - x: 130
+      y: 220
+    - x: 410
+      y: 220
+      type: link
+      path: /Applications
+win:
+  target: nsis
+  icon: desktop/icons/icon.ico
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true

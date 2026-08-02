@@ -1,4 +1,5 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Barlow:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&display=swap');
+@import "./styles/themes.css";
 @import "tailwindcss";
 
 body {
@@ -29,63 +30,228 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 /* ==========================================================================
-   DYNAMIC THEME VARIABLES (Tailwind CSS v4 overrides)
+   DYNAMIC THEME VARIABLES (Tailwind CSS v4 overrides for all themes)
    ========================================================================== */
 
-/* --- 1. DEFAULT DARK --- */
-html.theme-default-dark {
-  --color-gray-950: oklch(10.12% 0.015 253.1);
-  --color-gray-900: oklch(14.75% 0.024 255.22);
-  --color-gray-800: oklch(22.82% 0.028 253.37);
-  --color-gray-750: oklch(27.42% 0.031 254.12);
-  --color-gray-700: oklch(32.02% 0.033 254.87);
-  --color-gray-600: oklch(47.53% 0.025 253.84);
-  --color-gray-500: oklch(62.3% 0.02 254.13);
-  --color-gray-400: oklch(77.01% 0.013 255.4);
-  --color-gray-300: oklch(89.87% 0.006 254.3);
-  --color-gray-200: oklch(95.9% 0.003 254.1);
-  --color-gray-100: oklch(98.81% 0.001 254.1);
-  --color-gray-50:  oklch(99.4% 0.001 254.1);
-  
-  --color-indigo-950: oklch(18.66% 0.057 262.24);
-  --color-indigo-900: oklch(23.27% 0.088 261.27);
-  --color-indigo-800: oklch(32.49% 0.145 261.2);
-  --color-indigo-700: oklch(40.23% 0.198 261.64);
-  --color-indigo-600: oklch(51.13% 0.234 262.7);
-  --color-indigo-500: oklch(61.86% 0.214 263.26);
-  --color-indigo-400: oklch(73.53% 0.176 263.53);
-  --color-indigo-300: oklch(82.68% 0.125 264.4);
-  --color-indigo-200: oklch(90.11% 0.076 265.4);
+/* --- 1. DEFAULT DARK / OBSIDIAN --- */
+html.theme-default-dark, html.theme-dark-obsidian, html[data-theme="dark-obsidian"] {
+  --color-gray-950: #09090b;
+  --color-gray-900: #0d0d10;
+  --color-gray-800: #121215;
+  --color-gray-750: #1c1c21;
+  --color-gray-700: #27272a;
+  --color-gray-600: #3f3f46;
+  --color-gray-500: #71717a;
+  --color-gray-400: #a1a1aa;
+  --color-gray-300: #d4d4d8;
+  --color-gray-200: #e4e4e7;
+  --color-gray-100: #fafafa;
+  --color-gray-50:  #ffffff;
+
+  --color-indigo-900: rgba(99, 102, 241, 0.15);
+  --color-indigo-800: #3730a3;
+  --color-indigo-700: #4338ca;
+  --color-indigo-600: #6366f1;
+  --color-indigo-500: #818cf8;
+  --color-indigo-400: #a5b4fc;
 }
 
-/* --- 2. ELEGANT LIGHT --- */
-html.theme-elegant-light {
-  --color-gray-950: oklch(98.5% 0.002 247.839);
-  --color-gray-900: oklch(97.3% 0.003 256.4);
-  --color-gray-800: oklch(94.5% 0.005 256.4);
-  --color-gray-750: oklch(90.0% 0.008 256.4);
-  --color-gray-700: oklch(88.0% 0.01 256.4);
-  --color-gray-600: oklch(75.0% 0.015 256.4);
-  --color-gray-500: oklch(50.0% 0.02 256.4);
-  --color-gray-400: oklch(35.0% 0.025 256.4);
-  --color-gray-300: oklch(20.0% 0.03 256.4);
-  --color-gray-200: oklch(12.0% 0.035 256.4);
-  --color-gray-100: oklch(5.0% 0.04 256.4);
-  --color-gray-50:  oklch(2.0% 0.04 256.4);
-  
-  --color-indigo-950: oklch(95.5% 0.015 262.7);
-  --color-indigo-900: oklch(90.5% 0.03 262.7);
-  --color-indigo-800: oklch(75.5% 0.08 262.7);
-  --color-indigo-700: oklch(60.5% 0.15 262.7);
-  --color-indigo-600: oklch(48.5% 0.21 262.7);
-  --color-indigo-500: oklch(40.5% 0.22 262.7);
-  --color-indigo-400: oklch(30.5% 0.22 262.7);
-  --color-indigo-300: oklch(20.5% 0.22 262.7);
-  --color-indigo-200: oklch(95.5% 0.02 262.7);
+/* --- 2. OPENHANA WARM PAPER (暖纸书香) --- */
+html.theme-openhana-warm-paper, html[data-theme="openhana-warm-paper"] {
+  --color-gray-950: #f9f6f0;
+  --color-gray-900: #f4f0ea;
+  --color-gray-800: #e9e4dc;
+  --color-gray-750: #dfd9cf;
+  --color-gray-700: #d4cdbf;
+  --color-gray-600: #a39b8c;
+  --color-gray-500: #78726a;
+  --color-gray-400: #544e47;
+  --color-gray-300: #3d3732;
+  --color-gray-200: #2c2a29;
+  --color-gray-100: #1a1918;
+  --color-gray-50:  #000000;
+
+  --color-indigo-900: rgba(140, 109, 88, 0.12);
+  --color-indigo-800: #6e5240;
+  --color-indigo-700: #7d5e4a;
+  --color-indigo-600: #8c6d58;
+  --color-indigo-500: #a07d67;
+  --color-indigo-400: #8c6d58;
+}
+html.theme-openhana-warm-paper body {
+  background-color: #f4f0ea;
+  color: #2c2a29;
+}
+html.theme-openhana-warm-paper .border-gray-700,
+html.theme-openhana-warm-paper .border-gray-800 {
+  border-color: rgba(140, 109, 88, 0.18) !important;
 }
 
-/* --- 3. ELEVENLABS PREMIUM --- */
-html.theme-elevenlabs {
+/* --- 3. OPENHANA MIDNIGHT (青夜沉思) --- */
+html.theme-openhana-midnight, html[data-theme="openhana-midnight"] {
+  --color-gray-950: #2b373f;
+  --color-gray-900: #34424b;
+  --color-gray-800: #3b4a54;
+  --color-gray-750: #445560;
+  --color-gray-700: #4b5a63;
+  --color-gray-600: #5d6f7a;
+  --color-gray-500: #7c919e;
+  --color-gray-400: #a3b5c0;
+  --color-gray-300: #c8d6e0;
+  --color-gray-200: #e1eaf0;
+  --color-gray-100: #ffffff;
+
+  --color-indigo-900: rgba(201, 154, 175, 0.15);
+  --color-indigo-600: #c99aaf;
+  --color-indigo-500: #d8acc0;
+  --color-indigo-400: #c99aaf;
+}
+html.theme-openhana-midnight body {
+  background-color: #34424b;
+  color: #e1eaf0;
+}
+html.theme-openhana-midnight .border-gray-700,
+html.theme-openhana-midnight .border-gray-800 {
+  border-color: rgba(201, 154, 175, 0.18) !important;
+}
+
+/* --- 4. OPENHANA GRASS AROMA (草木芳华) --- */
+html.theme-openhana-grass-aroma, html[data-theme="openhana-grass-aroma"] {
+  --color-gray-950: #1c2620;
+  --color-gray-900: #24312a;
+  --color-gray-800: #2b3a32;
+  --color-gray-750: #34463c;
+  --color-gray-700: #3d5246;
+  --color-gray-600: #4e695a;
+  --color-gray-500: #6f8c7b;
+  --color-gray-400: #9ab0a2;
+  --color-gray-300: #c2d4c7;
+  --color-gray-200: #e2ebd8;
+  --color-gray-100: #ffffff;
+
+  --color-indigo-900: rgba(140, 199, 144, 0.15);
+  --color-indigo-600: #8cc790;
+  --color-indigo-500: #9ed6a2;
+  --color-indigo-400: #8cc790;
+}
+html.theme-openhana-grass-aroma body {
+  background-color: #24312a;
+  color: #e2ebd8;
+}
+
+/* --- 5. OPENHANA CORAL (珊瑚落日) --- */
+html.theme-openhana-coral, html[data-theme="openhana-coral"] {
+  --color-gray-950: #2d2123;
+  --color-gray-900: #392d2f;
+  --color-gray-800: #423537;
+  --color-gray-750: #4d3e40;
+  --color-gray-700: #59484b;
+  --color-gray-600: #735d61;
+  --color-gray-500: #947b7f;
+  --color-gray-400: #bca8aa;
+  --color-gray-300: #ddcecf;
+  --color-gray-200: #f4e8e8;
+  --color-gray-100: #ffffff;
+
+  --color-indigo-900: rgba(234, 178, 160, 0.15);
+  --color-indigo-600: #eab2a0;
+  --color-indigo-500: #f0c4b5;
+  --color-indigo-400: #eab2a0;
+}
+html.theme-openhana-coral body {
+  background-color: #392d2f;
+  color: #f4e8e8;
+}
+
+/* --- 6. SHADCN VIOLET (霓虹紫夜) --- */
+html.theme-shadcn-violet, html[data-theme="shadcn-violet"] {
+  --color-gray-950: #06040a;
+  --color-gray-900: #090610;
+  --color-gray-800: #0b0813;
+  --color-gray-750: #130f23;
+  --color-gray-700: #1c1733;
+  --color-gray-600: #2b234d;
+  --color-gray-500: #6d58b7;
+  --color-gray-400: #a78bfa;
+  --color-gray-300: #c4b5fd;
+  --color-gray-200: #f5f3ff;
+  --color-gray-100: #ffffff;
+
+  --color-indigo-900: rgba(139, 92, 246, 0.18);
+  --color-indigo-600: #8b5cf6;
+  --color-indigo-500: #a78bfa;
+  --color-indigo-400: #c4b5fd;
+}
+
+/* --- 7. SHADCN ZINC (极客中性灰) --- */
+html.theme-shadcn-zinc, html[data-theme="shadcn-zinc"] {
+  --color-gray-950: #09090b;
+  --color-gray-900: #121215;
+  --color-gray-800: #18181b;
+  --color-gray-750: #27272a;
+  --color-gray-700: #3f3f46;
+  --color-gray-600: #52525b;
+  --color-gray-500: #71717a;
+  --color-gray-400: #a1a1aa;
+  --color-gray-300: #d4d4d8;
+  --color-gray-200: #f4f4f5;
+  --color-gray-100: #ffffff;
+
+  --color-indigo-900: rgba(16, 185, 129, 0.12);
+  --color-indigo-600: #10b981;
+  --color-indigo-500: #34d399;
+  --color-indigo-400: #6ee7b1;
+}
+
+/* --- 8. CATPPUCCIN MOCHA --- */
+html.theme-catppuccin-mocha, html[data-theme="catppuccin-mocha"] {
+  --color-gray-950: #11111b;
+  --color-gray-900: #181825;
+  --color-gray-800: #1e1e2e;
+  --color-gray-750: #313244;
+  --color-gray-700: #45475a;
+  --color-gray-600: #585b70;
+  --color-gray-500: #7f849c;
+  --color-gray-400: #a6adc8;
+  --color-gray-300: #bac2de;
+  --color-gray-200: #cdd6f4;
+  --color-gray-100: #ffffff;
+
+  --color-indigo-900: rgba(245, 194, 231, 0.15);
+  --color-indigo-600: #f5c2e7;
+  --color-indigo-500: #f5c2e7;
+  --color-indigo-400: #f5c2e7;
+}
+
+/* --- 9. ELEGANT LIGHT / DAYLIGHT --- */
+html.theme-elegant-light, html.theme-clean-daylight, html[data-theme="clean-daylight"] {
+  --color-gray-950: #ffffff;
+  --color-gray-900: #f8fafc;
+  --color-gray-800: #f1f5f9;
+  --color-gray-750: #e2e8f0;
+  --color-gray-700: #cbd5e1;
+  --color-gray-600: #94a3b8;
+  --color-gray-500: #64748b;
+  --color-gray-400: #475569;
+  --color-gray-300: #334155;
+  --color-gray-200: #1e293b;
+  --color-gray-100: #0f172a;
+  --color-gray-50:  #000000;
+
+  --color-indigo-900: rgba(37, 99, 235, 0.1);
+  --color-indigo-800: #1e40af;
+  --color-indigo-700: #1d4ed8;
+  --color-indigo-600: #2563eb;
+  --color-indigo-500: #3b82f6;
+  --color-indigo-400: #2563eb;
+}
+html.theme-clean-daylight body {
+  background-color: #f8fafc;
+  color: #0f172a;
+}
+
+/* --- 10. ELEVENLABS --- */
+html.theme-elevenlabs, html[data-theme="elevenlabs"] {
   --color-gray-950: #080808;
   --color-gray-900: #0f0f0e;
   --color-gray-800: #181816;
@@ -97,32 +263,15 @@ html.theme-elevenlabs {
   --color-gray-300: #e5e5e3;
   --color-gray-200: #fafaf9;
   --color-gray-100: #ffffff;
-  --color-gray-50:  #ffffff;
 
-  --color-indigo-950: rgba(16, 185, 129, 0.08);
   --color-indigo-900: rgba(16, 185, 129, 0.15);
-  --color-indigo-800: #047857;
-  --color-indigo-700: #059669;
   --color-indigo-600: #10b981;
   --color-indigo-500: #34d399;
   --color-indigo-400: #6ee7b1;
-  --color-indigo-300: #a7f3d0;
-  --color-indigo-200: #d1fae5;
-}
-html.theme-elevenlabs body {
-  background-color: #080808;
-}
-html.theme-elevenlabs, html.theme-elevenlabs body {
-  font-family: 'Outfit', 'Inter', system-ui, sans-serif !important;
-}
-html.theme-elevenlabs button,
-html.theme-elevenlabs input,
-html.theme-elevenlabs textarea {
-  border-radius: 8px;
 }
 
-/* --- 4. HSBC BUSINESS RED --- */
-html.theme-hsbc {
+/* --- 11. HSBC --- */
+html.theme-hsbc, html[data-theme="hsbc"] {
   --color-gray-950: #ffffff;
   --color-gray-900: #ffffff;
   --color-gray-800: #f5f5f7;
@@ -134,77 +283,39 @@ html.theme-hsbc {
   --color-gray-300: #1a1a1a;
   --color-gray-200: #0a0a0a;
   --color-gray-100: #000000;
-  --color-gray-50:  #000000;
 
-  --color-indigo-950: rgba(219, 0, 17, 0.06);
   --color-indigo-900: rgba(219, 0, 17, 0.12);
-  --color-indigo-800: #a80010;
-  --color-indigo-700: #c2000f;
   --color-indigo-600: #db0011;
   --color-indigo-500: #e32634;
   --color-indigo-400: #db0011;
-  --color-indigo-300: #ff4d5a;
-  --color-indigo-200: #ffccd0;
 }
 html.theme-hsbc body {
   background-color: #ffffff;
-}
-html.theme-hsbc, html.theme-hsbc body {
-  font-family: 'Barlow', 'Inter', sans-serif !important;
-}
-html.theme-hsbc .border-gray-700 {
-  border-color: #dbdce0 !important;
-}
-html.theme-hsbc button,
-html.theme-hsbc input,
-html.theme-hsbc textarea {
-  border-radius: 4px;
+  color: #1e293b;
 }
 
-/* --- 5. CYBERPUNK SYNTHWAVE --- */
-html.theme-cyberpunk {
-  --color-gray-950: #070514;
-  --color-gray-900: #0b091a;
-  --color-gray-800: #14102d;
+/* --- 12. CYBERPUNK --- */
+html.theme-cyberpunk, html[data-theme="cyberpunk"] {
+  --color-gray-950: #050508;
+  --color-gray-900: #0a0a12;
+  --color-gray-800: #141424;
   --color-gray-750: #211a47;
   --color-gray-700: #342b6b;
   --color-gray-600: #ff007f;
   --color-gray-500: #00f0ff;
-  --color-gray-400: #a88be0;
+  --color-gray-400: #00ffcc;
   --color-gray-300: #e2cfea;
-  --color-gray-200: #f1e9f6;
+  --color-gray-200: #00ffcc;
   --color-gray-100: #ffffff;
-  --color-gray-50:  #ffffff;
 
-  --color-indigo-950: rgba(255, 0, 127, 0.1);
-  --color-indigo-900: rgba(255, 0, 127, 0.15);
-  --color-indigo-800: #d6006c;
-  --color-indigo-700: #eb0076;
-  --color-indigo-600: #ff007f;
+  --color-indigo-900: rgba(255, 0, 85, 0.2);
+  --color-indigo-600: #ff0055;
   --color-indigo-500: #ff3399;
   --color-indigo-400: #00f0ff;
-  --color-indigo-300: #00f0ff;
-  --color-indigo-200: #e0faff;
-}
-html.theme-cyberpunk body {
-  background-color: #070514;
-}
-html.theme-cyberpunk, html.theme-cyberpunk body {
-  font-family: 'Outfit', 'JetBrains Mono', sans-serif !important;
-}
-html.theme-cyberpunk .border-gray-700 {
-  border-color: #342b6b !important;
-}
-html.theme-cyberpunk .text-indigo-400 {
-  color: #00f0ff !important;
-  text-shadow: 0 0 4px rgba(0, 240, 255, 0.4);
-}
-html.theme-cyberpunk .bg-indigo-600 {
-  box-shadow: 0 0 10px rgba(255, 0, 127, 0.5);
 }
 
-/* --- 6. GLASSMORPHISM FROST --- */
-html.theme-glass {
+/* --- 13. GLASS --- */
+html.theme-glass, html[data-theme="glass"] {
   --color-gray-950: rgba(10, 15, 30, 0.55);
   --color-gray-900: rgba(15, 23, 42, 0.45);
   --color-gray-800: rgba(30, 41, 59, 0.35);
@@ -216,47 +327,11 @@ html.theme-glass {
   --color-gray-300: #f8fafc;
   --color-gray-200: #ffffff;
   --color-gray-100: #ffffff;
-  --color-gray-50:  #ffffff;
 
-  --color-indigo-950: rgba(99, 102, 241, 0.15);
   --color-indigo-900: rgba(99, 102, 241, 0.25);
-  --color-indigo-800: rgba(79, 70, 229, 0.6);
-  --color-indigo-700: rgba(79, 70, 229, 0.7);
   --color-indigo-600: rgba(99, 102, 241, 0.65);
   --color-indigo-500: rgba(99, 102, 241, 0.8);
   --color-indigo-400: #a5b4fc;
-  --color-indigo-300: #c7d2fe;
-  --color-indigo-200: #e0e7ff;
-}
-html.theme-glass body {
-  background: radial-gradient(circle at 10% 20%, rgba(99, 102, 241, 0.18) 0%, transparent 40%),
-              radial-gradient(circle at 90% 80%, rgba(244, 63, 94, 0.14) 0%, transparent 45%),
-              radial-gradient(circle at 50% 50%, rgba(168, 85, 247, 0.12) 0%, transparent 50%),
-              #070a13;
-  background-size: 200% 200%;
-  animation: gradientShifting 18s ease infinite;
-}
-html.theme-glass, html.theme-glass body {
-  font-family: 'Outfit', 'Inter', system-ui, sans-serif !important;
-}
-html.theme-glass .bg-gray-900,
-html.theme-glass .bg-gray-800,
-html.theme-glass .bg-gray-750,
-html.theme-glass .bg-gray-700 {
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-}
-html.theme-glass .border-gray-700 {
-  border-color: rgba(255, 255, 255, 0.08) !important;
-}
-html.theme-glass .border-gray-800 {
-  border-color: rgba(255, 255, 255, 0.05) !important;
-}
-
-@keyframes gradientShifting {
-  0% { background-position: 0% 50% }
-  50% { background-position: 100% 50% }
-  100% { background-position: 0% 50% }
 }
 
 /* Smooth color transitions when toggling theme */
@@ -281,4 +356,3 @@ html.theme-glass .border-gray-800 {
 .animate-scale-up {
   animation: scaleUp 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
-

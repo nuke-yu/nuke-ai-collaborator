@@ -9,7 +9,19 @@ export async function authFetch(url, options = {}) {
   const res = await fetch(url, { ...options, headers })
   if (res.status === 401 && !url.includes('/api/auth/')) {
     localStorage.removeItem('token')
-    window.location.reload()
+    throw new Error('登录凭证已失效，请重新登录')
+  }
+  if (!res.ok) {
+    const errorText = await res.text().catch(() => '')
+    try {
+      const errorJson = JSON.parse(errorText)
+      throw new Error(errorJson.detail || errorJson.message || `请求失败 (${res.status})`)
+    } catch (e) {
+      if (e.message && !e.message.startsWith('Unexpected token')) {
+        throw e
+      }
+      throw new Error(`服务器响应异常 (${res.status}): ${errorText.slice(0, 100)}`)
+    }
   }
   return res
 }

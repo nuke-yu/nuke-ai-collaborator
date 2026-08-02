@@ -524,7 +524,7 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
     mobileTab === tab ? '' : 'hidden md:flex'
 
   return (
-    <div className="flex h-screen bg-gray-900 relative">
+    <div className="flex h-full w-full bg-gray-900 relative overflow-hidden">
       {showTemplates && (
         <TemplateManager
           onClose={() => setShowTemplates(false)}

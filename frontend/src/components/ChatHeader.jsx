@@ -33,7 +33,7 @@ export default function ChatHeader({
   }
 
   return (
-    <div className="h-14 bg-gray-900 border-b border-gray-700 flex items-center px-4 gap-2 flex-shrink-0">
+    <div className="h-14 bg-gray-900 border-b border-gray-700 flex items-center gap-2 px-4 flex-shrink-0 select-none">
       {editingGroupName ? (
         <input
           autoFocus
@@ -60,7 +60,7 @@ export default function ChatHeader({
       {reconnecting && (
         <span className="text-xs text-yellow-400 animate-pulse">⚠ {t(K.chat.header.reconnecting)}</span>
       )}
-      <div className="ml-auto flex items-center gap-1">
+      <div className="ml-auto flex items-center gap-1.5">
         {members.some(m => m.type === 'bot') && !workflow?.active && (
           <button
             onClick={() => onShowWorkflowStart()}

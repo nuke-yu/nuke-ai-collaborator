@@ -4,15 +4,7 @@ import { K } from '../i18n/keys'
 import AutoReplyModal from './AutoReplyModal'
 import { useGroupStore } from '../store/groupStore'
 import { useChatStore } from '../store/chatStore'
-
-const THEMES = [
-  { id: 'default-dark', icon: '🌙' },
-  { id: 'elegant-light', icon: '☀️' },
-  { id: 'elevenlabs', icon: '🎙️' },
-  { id: 'hsbc', icon: '🏦' },
-  { id: 'cyberpunk', icon: '👾' },
-  { id: 'glass', icon: '🔮' }
-]
+import ThemeSelector from './ThemeSelector'
 
 export default function GroupList({
   onSelect, onCreateGroup, onDeleteGroup, onOpenTemplates, onOpenApiKeys, onOpenMcp,
@@ -32,19 +24,11 @@ export default function GroupList({
   const [newName, setNewName] = useState('')
   const [expandedGroups, setExpandedGroups] = useState(new Set())
   const [autoReplyTarget, setAutoReplyTarget] = useState(null)
-  const [showThemeMenu, setShowThemeMenu] = useState(false)
   const [confirmDeleteGroupId, setConfirmDeleteGroupId] = useState(null)
 
   useEffect(() => {
     if (activeGroupId) setExpandedGroups(prev => new Set([...prev, activeGroupId]))
   }, [activeGroupId])
-
-  useEffect(() => {
-    if (!showThemeMenu) return
-    const handleClose = () => setShowThemeMenu(false)
-    window.addEventListener('click', handleClose)
-    return () => window.removeEventListener('click', handleClose)
-  }, [showThemeMenu])
 
   const handleCreate = async () => {
     if (!newName.trim()) return
@@ -62,47 +46,17 @@ export default function GroupList({
   return (
     <>
     <div className={`w-full md:w-56 bg-gray-900 text-white flex flex-col flex-shrink-0 ${className}`}>
-      <div className="p-4 border-b border-gray-800 flex-shrink-0">
-        <h1 className="text-white font-bold text-sm mb-2">Nuke AI Collaborator</h1>
-        <div className="flex items-center gap-2">
-          <div className="relative">
-            <button
-              onClick={(e) => { e.stopPropagation(); setShowThemeMenu(prev => !prev) }}
-              className="text-gray-500 hover:text-white text-xs transition-colors flex items-center gap-0.5"
-              title={t(K.sidebar.themeTitle)}
-            >
-              🎨 {t(K.themes[THEMES.find(th => th.id === theme)?.id]) || t(K.sidebar.theme)}
-            </button>
-            {showThemeMenu && (
-              <div className="absolute left-0 top-full mt-1.5 bg-gray-800 border border-gray-700 rounded-lg shadow-xl overflow-hidden z-50 w-36 py-1 animate-scale-up">
-                {THEMES.map((th) => (
-                  <button
-                    key={th.id}
-                    onClick={() => {
-                      onThemeChange(th.id)
-                      setShowThemeMenu(false)
-                    }}
-                    className={`w-full text-left px-3 py-1.5 text-xs flex items-center gap-1.5 transition-colors ${
-                      theme === th.id
-                        ? 'bg-indigo-600/30 text-indigo-400 font-semibold'
-                        : 'text-gray-300 hover:bg-gray-700 hover:text-white'
-                    }`}
-                  >
-                    <span>{th.icon}</span>
-                    <span>{t(K.themes[th.id])}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
+      <div className="px-3 py-2.5 border-b border-gray-800 flex-shrink-0 flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <ThemeSelector />
           <span className="text-gray-700 select-none">|</span>
-          <button onClick={onOpenApiKeys} className="text-gray-500 hover:text-white text-xs transition-colors" title={t(K.sidebar.apiKeys)}>🔑</button>
-          <button onClick={onOpenMcp} className="text-gray-500 hover:text-white text-xs transition-colors" title={i18n.language?.startsWith('zh') ? "MCP服务器配置" : "MCP Servers Config"}>🔌</button>
-          <button onClick={onOpenTemplates} className="text-gray-500 hover:text-white text-xs transition-colors" title={t(K.sidebar.templates)}>⚙️</button>
-          <button onClick={toggleLang} className="text-gray-500 hover:text-white text-xs transition-colors font-medium">
-            {t(K.sidebar.switchLang)}
-          </button>
+          <button onClick={onOpenApiKeys} className="text-gray-400 hover:text-white text-xs transition-colors" title={t(K.sidebar.apiKeys)}>🔑</button>
+          <button onClick={onOpenMcp} className="text-gray-400 hover:text-white text-xs transition-colors" title={i18n.language?.startsWith('zh') ? "MCP服务器配置" : "MCP Servers Config"}>🔌</button>
+          <button onClick={onOpenTemplates} className="text-gray-400 hover:text-white text-xs transition-colors" title={t(K.sidebar.templates)}>⚙️</button>
         </div>
+        <button onClick={toggleLang} className="text-gray-400 hover:text-white text-xs transition-colors font-medium">
+          {t(K.sidebar.switchLang)}
+        </button>
       </div>
 
       <div className="flex items-center justify-between px-3 pt-3 pb-1 flex-shrink-0">

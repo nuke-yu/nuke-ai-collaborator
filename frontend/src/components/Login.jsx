@@ -12,6 +12,26 @@ export default function Login({ onLogin }) {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
+  const handleQuickLogin = async () => {
+    setError('')
+    setLoading(true)
+    const quickUser = localStorage.getItem('default-username') || 'NukeDesktop'
+    const quickPass = 'NukeDesktop123!'
+    try {
+      try {
+        await register(quickUser, quickPass)
+      } catch (e) {
+        // User already exists, proceed to login
+      }
+      const data = await login(quickUser, quickPass)
+      onLogin(data)
+    } catch (err) {
+      setError('一键登录尝试失败，请尝试注册新用户名：' + err.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const handleSubmit = async (e) => {
     e.preventDefault()
     setError('')
@@ -20,13 +40,15 @@ export default function Login({ onLogin }) {
       if (isRegister) {
         await register(username, password, email)
         setIsRegister(false)
-        setError(t(K.auth.register.successMessage))
+        setError('注册成功！正在为您自动登录...')
+        const loginData = await login(username, password)
+        onLogin(loginData)
       } else {
         const data = await login(username, password)
         onLogin(data)
       }
     } catch (err) {
-      setError(err.message)
+      setError(err.message || '用户名或密码错误，请注册新账号或使用一键登录')
     } finally {
       setLoading(false)
     }
@@ -83,6 +105,15 @@ export default function Login({ onLogin }) {
             className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg py-2.5 text-sm font-medium transition-colors shadow-lg shadow-indigo-900/20"
           >
             {loading ? t(K.auth.login.loading) : (isRegister ? t(K.auth.register.button) : t(K.auth.login.button))}
+          </button>
+
+          <button
+            type="button"
+            onClick={handleQuickLogin}
+            disabled={loading}
+            className="w-full bg-emerald-600/90 hover:bg-emerald-500 text-white rounded-lg py-2 text-xs font-semibold transition-all border border-emerald-400/30 flex items-center justify-center gap-1.5"
+          >
+            ⚡ 一键免密体验登录
           </button>
         </form>
 

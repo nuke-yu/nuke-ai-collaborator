@@ -1,0 +1,359 @@
+/* ==========================================================================
+   Nuke AI Collaborator - 统一全量主题皮肤库 (融合原版 6 套 + openhanako 4 套 + shadcn/ui 4 套)
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   1. [dark-obsidian / default-dark] 深空黑曜石 (默认暗黑)
+   -------------------------------------------------------------------------- */
+[data-theme="dark-obsidian"], .theme-default-dark, :root {
+  --background: #09090b;
+  --foreground: #fafafa;
+  --card: #121215;
+  --card-foreground: #fafafa;
+  --popover: #121215;
+  --popover-foreground: #fafafa;
+  --primary: #6366f1;
+  --primary-foreground: #ffffff;
+  --secondary: #27272a;
+  --secondary-foreground: #fafafa;
+  --muted: #27272a;
+  --muted-foreground: #a1a1aa;
+  --accent: #27272a;
+  --accent-foreground: #fafafa;
+  --destructive: #ef4444;
+  --border: rgba(255, 255, 255, 0.08);
+  --input: #27272a;
+  --ring: #6366f1;
+  --sidebar-background: #0d0d10;
+  --sidebar-foreground: #f4f4f5;
+  --sidebar-border: rgba(255, 255, 255, 0.06);
+}
+
+/* --------------------------------------------------------------------------
+   2. [openhana-midnight] 青夜沉思 (openhanako 经典: 深青蓝 + 暖玫瑰)
+   -------------------------------------------------------------------------- */
+[data-theme="openhana-midnight"] {
+  --background: #3b4a54;
+  --foreground: #e1eaf0;
+  --card: #445560;
+  --card-foreground: #e1eaf0;
+  --popover: #445560;
+  --popover-foreground: #e1eaf0;
+  --primary: #c99aaf;
+  --primary-foreground: #26323a;
+  --secondary: #4b5a63;
+  --secondary-foreground: #e1eaf0;
+  --muted: #4b5a63;
+  --muted-foreground: #a3b5c0;
+  --accent: rgba(201, 154, 175, 0.15);
+  --accent-foreground: #c99aaf;
+  --destructive: #c77070;
+  --border: rgba(170, 121, 141, 0.2);
+  --input: #4b5a63;
+  --ring: #c99aaf;
+  --sidebar-background: #34424b;
+  --sidebar-foreground: #e1eaf0;
+  --sidebar-border: rgba(170, 121, 141, 0.15);
+}
+
+/* --------------------------------------------------------------------------
+   3. [openhana-warm-paper] 暖纸书香 (openhanako 经典: 柔和米黄 + 墨茶)
+   -------------------------------------------------------------------------- */
+[data-theme="openhana-warm-paper"] {
+  --background: #f4f0ea;
+  --foreground: #2c2a29;
+  --card: #e9e4dc;
+  --card-foreground: #2c2a29;
+  --popover: #e9e4dc;
+  --popover-foreground: #2c2a29;
+  --primary: #8c6d58;
+  --primary-foreground: #ffffff;
+  --secondary: #dfd9cf;
+  --secondary-foreground: #2c2a29;
+  --muted: #dfd9cf;
+  --muted-foreground: #78726a;
+  --accent: rgba(140, 109, 88, 0.12);
+  --accent-foreground: #8c6d58;
+  --destructive: #bc5a45;
+  --border: rgba(140, 109, 88, 0.15);
+  --input: #dfd9cf;
+  --ring: #8c6d58;
+  --sidebar-background: #ebd8c8;
+  --sidebar-foreground: #2c2a29;
+  --sidebar-border: rgba(140, 109, 88, 0.18);
+}
+
+/* --------------------------------------------------------------------------
+   4. [openhana-grass-aroma] 草木芳华 (openhanako 经典: 苔藓森林深绿)
+   -------------------------------------------------------------------------- */
+[data-theme="openhana-grass-aroma"] {
+  --background: #2b3a32;
+  --foreground: #e2ebd8;
+  --card: #34463c;
+  --card-foreground: #e2ebd8;
+  --popover: #34463c;
+  --popover-foreground: #e2ebd8;
+  --primary: #8cc790;
+  --primary-foreground: #1c2620;
+  --secondary: #3d5246;
+  --secondary-foreground: #e2ebd8;
+  --muted: #3d5246;
+  --muted-foreground: #9ab0a2;
+  --accent: rgba(140, 199, 144, 0.14);
+  --accent-foreground: #8cc790;
+  --destructive: #d96b6b;
+  --border: rgba(140, 199, 144, 0.18);
+  --input: #3d5246;
+  --ring: #8cc790;
+  --sidebar-background: #24312a;
+  --sidebar-foreground: #e2ebd8;
+  --sidebar-border: rgba(140, 199, 144, 0.15);
+}
+
+/* --------------------------------------------------------------------------
+   5. [openhana-coral] 珊瑚落日 (openhanako 经典: 深赤红 + 暖橘粉)
+   -------------------------------------------------------------------------- */
+[data-theme="openhana-coral"] {
+  --background: #423537;
+  --foreground: #f4e8e8;
+  --card: #4d3e40;
+  --card-foreground: #f4e8e8;
+  --popover: #4d3e40;
+  --popover-foreground: #f4e8e8;
+  --primary: #eab2a0;
+  --primary-foreground: #2d2123;
+  --secondary: #59484b;
+  --secondary-foreground: #f4e8e8;
+  --muted: #59484b;
+  --muted-foreground: #bca8aa;
+  --accent: rgba(234, 178, 160, 0.15);
+  --accent-foreground: #eab2a0;
+  --destructive: #db6b6b;
+  --border: rgba(234, 178, 160, 0.18);
+  --input: #59484b;
+  --ring: #eab2a0;
+  --sidebar-background: #392d2f;
+  --sidebar-foreground: #f4e8e8;
+  --sidebar-border: rgba(234, 178, 160, 0.15);
+}
+
+/* --------------------------------------------------------------------------
+   6. [elevenlabs] ElevenLabs (原版经典黑青)
+   -------------------------------------------------------------------------- */
+[data-theme="elevenlabs"], .theme-elevenlabs {
+  --background: #0f1419;
+  --foreground: #f3f4f6;
+  --card: #18222d;
+  --card-foreground: #f3f4f6;
+  --popover: #18222d;
+  --popover-foreground: #f3f4f6;
+  --primary: #00d2ff;
+  --primary-foreground: #000000;
+  --secondary: #22303c;
+  --secondary-foreground: #f3f4f6;
+  --muted: #22303c;
+  --muted-foreground: #8b98a5;
+  --accent: rgba(0, 210, 255, 0.15);
+  --accent-foreground: #00d2ff;
+  --destructive: #f4212e;
+  --border: rgba(0, 210, 255, 0.2);
+  --input: #22303c;
+  --ring: #00d2ff;
+  --sidebar-background: #111923;
+  --sidebar-foreground: #f3f4f6;
+  --sidebar-border: rgba(0, 210, 255, 0.15);
+}
+
+/* --------------------------------------------------------------------------
+   7. [hsbc] HSBC 银行红 (原版经典商务)
+   -------------------------------------------------------------------------- */
+[data-theme="hsbc"], .theme-hsbc {
+  --background: #f8fafc;
+  --foreground: #1e293b;
+  --card: #ffffff;
+  --card-foreground: #1e293b;
+  --popover: #ffffff;
+  --popover-foreground: #1e293b;
+  --primary: #db0011; /* HSBC Red */
+  --primary-foreground: #ffffff;
+  --secondary: #e2e8f0;
+  --secondary-foreground: #1e293b;
+  --muted: #f1f5f9;
+  --muted-foreground: #64748b;
+  --accent: rgba(219, 0, 17, 0.08);
+  --accent-foreground: #db0011;
+  --destructive: #db0011;
+  --border: #cbd5e1;
+  --input: #e2e8f0;
+  --ring: #db0011;
+  --sidebar-background: #000000;
+  --sidebar-foreground: #ffffff;
+  --sidebar-border: #334155;
+}
+
+/* --------------------------------------------------------------------------
+   8. [glass] 磨砂玻璃 (原版经典 Glassmorphism)
+   -------------------------------------------------------------------------- */
+[data-theme="glass"], .theme-glass {
+  --background: #0a0e17;
+  --foreground: #e2e8f0;
+  --card: rgba(30, 41, 59, 0.7);
+  --card-foreground: #e2e8f0;
+  --popover: rgba(15, 23, 42, 0.85);
+  --popover-foreground: #e2e8f0;
+  --primary: #38bdf8;
+  --primary-foreground: #0f172a;
+  --secondary: rgba(51, 65, 85, 0.5);
+  --secondary-foreground: #e2e8f0;
+  --muted: rgba(51, 65, 85, 0.5);
+  --muted-foreground: #94a3b8;
+  --accent: rgba(56, 189, 248, 0.15);
+  --accent-foreground: #38bdf8;
+  --destructive: #f43f5e;
+  --border: rgba(255, 255, 255, 0.12);
+  --input: rgba(51, 65, 85, 0.5);
+  --ring: #38bdf8;
+  --sidebar-background: rgba(15, 23, 42, 0.75);
+  --sidebar-foreground: #f8fafc;
+  --sidebar-border: rgba(255, 255, 255, 0.1);
+}
+
+/* --------------------------------------------------------------------------
+   9. [shadcn-violet] 霓虹紫夜 (shadcn/ui 紫罗兰)
+   -------------------------------------------------------------------------- */
+[data-theme="shadcn-violet"] {
+  --background: #0b0813;
+  --foreground: #f5f3ff;
+  --card: #130f23;
+  --card-foreground: #f5f3ff;
+  --popover: #130f23;
+  --popover-foreground: #f5f3ff;
+  --primary: #8b5cf6;
+  --primary-foreground: #ffffff;
+  --secondary: #1c1733;
+  --secondary-foreground: #f5f3ff;
+  --muted: #1c1733;
+  --muted-foreground: #a78bfa;
+  --accent: rgba(139, 92, 246, 0.18);
+  --accent-foreground: #c4b5fd;
+  --destructive: #f43f5e;
+  --border: rgba(139, 92, 246, 0.2);
+  --input: #1c1733;
+  --ring: #8b5cf6;
+  --sidebar-background: #090610;
+  --sidebar-foreground: #f5f3ff;
+  --sidebar-border: rgba(139, 92, 246, 0.15);
+}
+
+/* --------------------------------------------------------------------------
+   10. [shadcn-zinc] 极客中性灰 (OpenAI 风格)
+   -------------------------------------------------------------------------- */
+[data-theme="shadcn-zinc"] {
+  --background: #18181b;
+  --foreground: #f4f4f5;
+  --card: #27272a;
+  --card-foreground: #f4f4f5;
+  --popover: #27272a;
+  --popover-foreground: #f4f4f5;
+  --primary: #10b981;
+  --primary-foreground: #042f2e;
+  --secondary: #3f3f46;
+  --secondary-foreground: #f4f4f5;
+  --muted: #3f3f46;
+  --muted-foreground: #a1a1aa;
+  --accent: rgba(16, 185, 129, 0.12);
+  --accent-foreground: #34d399;
+  --destructive: #f87171;
+  --border: rgba(255, 255, 255, 0.1);
+  --input: #3f3f46;
+  --ring: #10b981;
+  --sidebar-background: #121215;
+  --sidebar-foreground: #f4f4f5;
+  --sidebar-border: rgba(255, 255, 255, 0.08);
+}
+
+/* --------------------------------------------------------------------------
+   11. [catppuccin-mocha] 摩卡摩卡 (Catppuccin 社区顶流)
+   -------------------------------------------------------------------------- */
+[data-theme="catppuccin-mocha"] {
+  --background: #1e1e2e;
+  --foreground: #cdd6f4;
+  --card: #181825;
+  --card-foreground: #cdd6f4;
+  --popover: #181825;
+  --popover-foreground: #cdd6f4;
+  --primary: #f5c2e7;
+  --primary-foreground: #11111b;
+  --secondary: #313244;
+  --secondary-foreground: #cdd6f4;
+  --muted: #313244;
+  --muted-foreground: #a6adc8;
+  --accent: rgba(245, 194, 231, 0.15);
+  --accent-foreground: #f5c2e7;
+  --destructive: #f38ba8;
+  --border: rgba(245, 194, 231, 0.15);
+  --input: #313244;
+  --ring: #f5c2e7;
+  --sidebar-background: #11111b;
+  --sidebar-foreground: #cdd6f4;
+  --sidebar-border: rgba(255, 255, 255, 0.08);
+}
+
+/* --------------------------------------------------------------------------
+   12. [cyberpunk] 赛博霓虹 (原版 + 炫彩黑客风)
+   -------------------------------------------------------------------------- */
+[data-theme="cyberpunk"], .theme-cyberpunk {
+  --background: #050508;
+  --foreground: #00ffcc;
+  --card: #0a0a12;
+  --card-foreground: #00ffcc;
+  --popover: #0a0a12;
+  --popover-foreground: #00ffcc;
+  --primary: #ff0055;
+  --primary-foreground: #ffffff;
+  --secondary: #141424;
+  --secondary-foreground: #00ffcc;
+  --muted: #141424;
+  --muted-foreground: #00b388;
+  --accent: rgba(255, 0, 85, 0.2);
+  --accent-foreground: #ff0055;
+  --destructive: #ff0055;
+  --border: rgba(0, 255, 204, 0.25);
+  --input: #141424;
+  --ring: #00ffcc;
+  --sidebar-background: #020204;
+  --sidebar-foreground: #00ffcc;
+  --sidebar-border: rgba(0, 255, 204, 0.2);
+}
+
+/* --------------------------------------------------------------------------
+   13. [clean-daylight / elegant-light] 雅致白 (原版 + 极简日间)
+   -------------------------------------------------------------------------- */
+[data-theme="clean-daylight"], .theme-elegant-light {
+  --background: #f8fafc;
+  --foreground: #0f172a;
+  --card: #ffffff;
+  --card-foreground: #0f172a;
+  --popover: #ffffff;
+  --popover-foreground: #0f172a;
+  --primary: #2563eb;
+  --primary-foreground: #ffffff;
+  --secondary: #f1f5f9;
+  --secondary-foreground: #0f172a;
+  --muted: #f1f5f9;
+  --muted-foreground: #64748b;
+  --accent: #eff6ff;
+  --accent-foreground: #2563eb;
+  --destructive: #ef4444;
+  --border: #e2e8f0;
+  --input: #e2e8f0;
+  --ring: #2563eb;
+  --sidebar-background: #f1f5f9;
+  --sidebar-foreground: #0f172a;
+  --sidebar-border: #e2e8f0;
+}
+
+/* 渐变过渡全量动效 */
+body, div, nav, aside, header, section, button {
+  transition: background-color 0.25s ease, border-color 0.25s ease, color 0.25s ease;
+}

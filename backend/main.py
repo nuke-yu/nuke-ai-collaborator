@@ -536,3 +536,21 @@ if _FRONTEND_DIST and os.path.isdir(_FRONTEND_DIST):
             if target.is_file() and (target == _DIST or _DIST in target.parents):
                 return FileResponse(str(target))
         return FileResponse(str(_DIST / "index.html"))
+
+
+if __name__ == "__main__":
+    import sys
+    import uvicorn
+
+    port = 8000
+    if "--port" in sys.argv:
+        try:
+            idx = sys.argv.index("--port")
+            if idx + 1 < len(sys.argv):
+                port = int(sys.argv[idx + 1])
+        except (ValueError, IndexError):
+            pass
+
+    print(f"[Backend] Starting FastAPI Uvicorn server on http://127.0.0.1:{port}")
+    uvicorn.run("main:app", host="127.0.0.1", port=port, log_level="info")
+
