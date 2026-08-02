@@ -36,7 +36,7 @@ CENTRAL_TABLES = frozenset({
 GROUP_TABLES = frozenset({
     "messages", "role_summaries", "message_embeddings", "member_read",
     "message_reactions", "pinned_messages", "agent_sessions", "session_events", "session_evidence_links",
-    "model_usage_ledger",
+    "model_usage_ledger", "group_artifacts",
     "workflow_state", "workflow_observations", "observation_artifacts", "observability_retention_archive", "group_locks", "tickets", "reflection_state", "tool_events",
     "agent_runs", "run_decisions",
 }) | MEMORY_GROUP_TABLES
@@ -356,6 +356,25 @@ _GROUP_DDL = [
     )""",
     "CREATE INDEX IF NOT EXISTS idx_model_usage_session ON model_usage_ledger(session_id,request_ordinal)",
     "CREATE INDEX IF NOT EXISTS idx_model_usage_status ON model_usage_ledger(status,started_at)",
+    """CREATE TABLE IF NOT EXISTS group_artifacts (
+        artifact_id          TEXT PRIMARY KEY,
+        group_id             INTEGER NOT NULL,
+        session_id           TEXT DEFAULT NULL,
+        bot_id               INTEGER DEFAULT NULL,
+        workflow_run_id      TEXT DEFAULT NULL,
+        origin               TEXT NOT NULL,
+        mime_type            TEXT NOT NULL,
+        display_name         TEXT NOT NULL,
+        storage_locator      TEXT NOT NULL,
+        checksum_sha256      TEXT NOT NULL,
+        size_bytes           INTEGER NOT NULL DEFAULT 0,
+        authorization_scope  TEXT NOT NULL DEFAULT 'group',
+        metadata_json        TEXT DEFAULT '{}',
+        created_at           TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at           TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_artifacts_group ON group_artifacts(group_id)",
+    "CREATE INDEX IF NOT EXISTS idx_artifacts_session ON group_artifacts(session_id)",
     # workflow_state: DROP FK group_id->groups (cross-domain).
     """CREATE TABLE IF NOT EXISTS workflow_state (
         group_id        INTEGER PRIMARY KEY,

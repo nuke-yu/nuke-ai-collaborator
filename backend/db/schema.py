@@ -237,6 +237,27 @@ async def init_db():
                 FOREIGN KEY (task_id) REFERENCES agent_tasks(task_id) ON DELETE CASCADE
             )
         """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS group_artifacts (
+                artifact_id          TEXT PRIMARY KEY,
+                group_id             INTEGER NOT NULL,
+                session_id           TEXT DEFAULT NULL,
+                bot_id               INTEGER DEFAULT NULL,
+                workflow_run_id      TEXT DEFAULT NULL,
+                origin               TEXT NOT NULL,
+                mime_type            TEXT NOT NULL,
+                display_name         TEXT NOT NULL,
+                storage_locator      TEXT NOT NULL,
+                checksum_sha256      TEXT NOT NULL,
+                size_bytes           INTEGER NOT NULL DEFAULT 0,
+                authorization_scope  TEXT NOT NULL DEFAULT 'group',
+                metadata_json        TEXT DEFAULT '{}',
+                created_at           TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at           TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_artifacts_group ON group_artifacts(group_id)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_artifacts_session ON group_artifacts(session_id)")
         await conn.commit()
         await run_migrations(conn)
         await _seed_templates(conn)
