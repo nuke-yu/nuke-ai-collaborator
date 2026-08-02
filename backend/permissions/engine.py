@@ -16,11 +16,17 @@ import fnmatch
 import functools
 import hashlib
 import json
+import logging
 import uuid
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from .models import Rule, Ruleset, _PendingRequest
 from .patterns import synthesize_args_pattern
+
+
+log = logging.getLogger(__name__)
+PermissionEventRecorder = Callable[[str, dict[str, Any]], Awaitable[None]]
 
 
 # Default-deny an unanswered ask after this many seconds. Backstops the case
@@ -50,6 +56,60 @@ def _args_hash(arguments: dict) -> str:
     return hashlib.sha256(
         json.dumps(arguments, sort_keys=True, default=str).encode()
     ).hexdigest()
+
+
+async def _record_permission_event(
+    recorder: PermissionEventRecorder | None,
+    event_type: str,
+    *,
+    permission_id: str,
+    tool_name: str,
+    arguments: dict,
+    bot_id: int,
+    group_id: int,
+    spawn_depth: int,
+    decision_source: str | None = None,
+    persistence: str | None = None,
+    force_ask: bool = False,
+) -> None:
+    """Best-effort audit hook; observability must never change authorization.
+
+    Raw tool arguments are intentionally omitted.  The existing tool_call WAL
+    event owns those details; permission events carry only a deterministic
+    fingerprint for correlation without duplicating secrets into the audit log.
+    """
+    if recorder is None:
+        return
+    # A safe read can pass through the permission function for policy
+    # consistency without crossing a meaningful authorization boundary.  Do
+    # not turn every read_file/list_workspace call into a security-audit event.
+    # Human prompts and every denial remain auditable; non-human approvals reuse
+    # the central tool-effect policy to decide whether they carry business value.
+    if event_type == "permission_approved" and decision_source != "human_response":
+        from observability import classify_tool_effect
+        if not classify_tool_effect(tool_name, arguments).business_significant:
+            return
+    payload: dict[str, Any] = {
+        "permission_id": permission_id,
+        "tool_name": tool_name,
+        "arguments_sha256": _args_hash(arguments),
+        "bot_id": bot_id,
+        "group_id": group_id,
+        "spawn_depth": spawn_depth,
+        "force_ask": force_ask,
+    }
+    if decision_source:
+        payload["decision_source"] = decision_source
+    if persistence:
+        payload["persistence"] = persistence
+    try:
+        await recorder(event_type, payload)
+    except Exception:
+        log.exception(
+            "permission audit recorder failed event=%s permission_id=%s",
+            event_type,
+            permission_id,
+        )
 
 
 @functools.lru_cache(maxsize=1024)
@@ -172,6 +232,7 @@ async def check(
     spawn_depth: int = 0,
     workspace_confined: bool = False,
     force_ask: bool = False,
+    event_recorder: PermissionEventRecorder | None = None,
 ) -> dict:
     """
     Returns one of:
@@ -190,14 +251,46 @@ async def check(
     grant can silently pre-clear it. Deny rules (step 2) still win, an exact
     once-grant (step 4) is honored, and a sub-agent that cannot prompt is denied.
     """
+    permission_id = f"perm_{uuid.uuid4().hex}"
+
+    async def decide(
+        action: str,
+        source: str,
+        *,
+        reason: str | None = None,
+        persistence: str | None = None,
+        persist_rule: Rule | None = None,
+    ) -> dict:
+        await _record_permission_event(
+            event_recorder,
+            "permission_approved" if action == "allow" else "permission_denied",
+            permission_id=permission_id,
+            tool_name=tool_name,
+            arguments=arguments,
+            bot_id=bot_id,
+            group_id=group_id,
+            spawn_depth=spawn_depth,
+            decision_source=source,
+            persistence=persistence,
+            force_ask=force_ask,
+        )
+        result = {"action": action}
+        if reason:
+            result["reason"] = reason
+        if persist_rule is not None:
+            result["persist_rule"] = persist_rule
+        return result
+
     # 1. bypassPermissions → allow everything
     if ruleset.mode == "bypassPermissions":
-        return {"action": "allow"}
+        return await decide("allow", "bypass_permissions")
 
     # 2. deny rules take priority
     for rule in ruleset.rules:
         if rule.action == "deny" and _matches(rule, tool_name, arguments):
-            return {"action": "deny", "reason": f"规则拒绝: {rule.tool_pattern}"}
+            return await decide(
+                "deny", "deny_rule", reason=f"规则拒绝: {rule.tool_pattern}"
+            )
 
     # 3. persistent allow rules (skipped for force_ask: a standing/scoped grant —
     #    e.g. a `git reset *` synthesized from approving a benign `git reset` —
@@ -205,32 +298,52 @@ async def check(
     if not force_ask:
         for rule in ruleset.rules:
             if rule.action == "allow" and _matches(rule, tool_name, arguments):
-                return {"action": "allow"}
+                return await decide("allow", "allow_rule")
 
     # 3.5. workspace-confined auto-allow: sandbox already restricts the blast
     # radius to the group workspace; no human prompt needed. force_ask opts out —
     # confinement does not bound a destructive-git blast radius.
     if workspace_confined and not force_ask:
-        return {"action": "allow"}
+        return await decide("allow", "workspace_confined")
 
     # 4. once-grant for this exact (bot, group, tool, args) — consumed on use
     if _consume_once_grant(bot_id, group_id, tool_name, arguments):
-        return {"action": "allow"}
+        return await decide("allow", "once_grant", persistence="once")
 
     # 5. dontAsk → deny without prompting
     if ruleset.mode == "dontAsk":
-        return {"action": "deny", "reason": "dontAsk 模式：未授权工具调用被拒绝"}
+        return await decide(
+            "deny", "dont_ask",
+            reason="dontAsk 模式：未授权工具调用被拒绝",
+        )
 
     # 6. Sub-agents can't show UI
     if spawn_depth > 0:
-        return {"action": "deny", "reason": "子 Agent 无法请求权限：工具未预授权"}
+        return await decide(
+            "deny", "subagent_attenuation",
+            reason="子 Agent 无法请求权限：工具未预授权",
+        )
 
     # 7. ask — suspend and wait for user response
-    request_id = str(uuid.uuid4())
+    request_id = permission_id
     future: asyncio.Future = asyncio.get_running_loop().create_future()
-    _pending[request_id] = _PendingRequest(
+    _pending_request = _PendingRequest(
         future=future, bot_id=bot_id, group_id=group_id,
         tool_name=tool_name, arguments=arguments,
+    )
+    _pending[request_id] = _pending_request
+
+    await _record_permission_event(
+        event_recorder,
+        "permission_requested",
+        permission_id=permission_id,
+        tool_name=tool_name,
+        arguments=arguments,
+        bot_id=bot_id,
+        group_id=group_id,
+        spawn_depth=spawn_depth,
+        decision_source="human_required",
+        force_ask=force_ask,
     )
 
     await broadcaster.broadcast(group_id, {
@@ -243,28 +356,37 @@ async def check(
     try:
         approved, persistence = await asyncio.wait_for(future, _ASK_TIMEOUT_SECONDS)
     except asyncio.TimeoutError:
-        return {"action": "deny",
-                "reason": f"权限请求超时（{_ASK_TIMEOUT_SECONDS}s 未响应），已自动拒绝"}
+        return await decide(
+            "deny", "timeout",
+            reason=f"权限请求超时（{_ASK_TIMEOUT_SECONDS}s 未响应），已自动拒绝",
+        )
     finally:
         _pending.pop(request_id, None)
 
     if not approved:
-        return {"action": "deny", "reason": "用户拒绝授权"}
+        source = _pending_request.resolution_source
+        reason = "连接已断开，权限请求自动拒绝" if source == "group_disconnected" else "用户拒绝授权"
+        return await decide("deny", source, reason=reason, persistence=persistence)
 
     if persistence == "once":
         _once_grants.setdefault((bot_id, group_id), []).append(
             (tool_name, _args_hash(arguments))
         )
-        return {"action": "allow"}
+        return await decide(
+            "allow", _pending_request.resolution_source, persistence="once"
+        )
     # persistence == "always" → caller saves to DB. Scope the rule to the *kind*
     # of call approved (e.g. `git push *`) instead of a blanket allow-all-args —
     # otherwise approving one shell command auto-allows every future one.
-    return {"action": "allow",
-            "persist_rule": Rule(
-                tool_pattern=tool_name,
-                args_pattern=synthesize_args_pattern(tool_name, arguments),
-                action="allow",
-            )}
+    persist_rule = Rule(
+        tool_pattern=tool_name,
+        args_pattern=synthesize_args_pattern(tool_name, arguments),
+        action="allow",
+    )
+    return await decide(
+        "allow", _pending_request.resolution_source,
+        persistence="always", persist_rule=persist_rule,
+    )
 
 
 def resolve(request_id: str, approved: bool, persistence: str = "once",
@@ -282,6 +404,7 @@ def resolve(request_id: str, approved: bool, persistence: str = "once",
         return None
     if group_id is not None and req.group_id != group_id:
         return None
+    req.resolution_source = "human_response"
     req.future.set_result((approved, persistence))
     return req
 
@@ -313,6 +436,7 @@ def cancel_pending_for_group(group_id: int) -> int:
     n = 0
     for req in list(_pending.values()):
         if req.group_id == group_id and not req.future.done():
+            req.resolution_source = "group_disconnected"
             req.future.set_result((False, "once"))
             n += 1
     return n

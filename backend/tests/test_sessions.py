@@ -155,9 +155,15 @@ class TestSessionStore(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(events), 2)
         self.assertEqual(events[0]["event_type"], "session_start")
         self.assertEqual(events[1]["event_type"], "tool_call")
+        start_observability = events[0]["payload"]["_observability"]
+        self.assertEqual(start_observability["classes"], ["timeline"])
+        self.assertTrue(start_observability["business_significant"])
+        tool_observability = events[1]["payload"]["_observability"]
+        self.assertEqual(tool_observability["effects"], ["read"])
+        self.assertFalse(tool_observability["business_significant"])
 
     async def test_update_session_status(self):
-        from sessions.store import create_session, update_session_status, get_session
+        from sessions.store import create_session, update_session_status, get_events, get_session
         await create_session(
             session_id="s3", bot_id=1, group_id=1,
             config={"system_prompt": "", "provider": "deepseek",
@@ -167,6 +173,14 @@ class TestSessionStore(unittest.IsolatedAsyncioTestCase):
         await update_session_status("s3", "completed")
         row = await get_session("s3")
         self.assertEqual(row["status"], "completed")
+        events = await get_events("s3")
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["event_type"], "session_status")
+        self.assertEqual(events[0]["payload"]["from_status"], "running")
+        self.assertEqual(events[0]["payload"]["status"], "completed")
+        self.assertEqual(
+            events[0]["payload"]["_observability"]["effects"], ["lifecycle"]
+        )
 
     async def test_get_orphaned_sessions(self):
         from sessions.store import create_session, get_orphaned_sessions
@@ -331,6 +345,8 @@ class TestMessageReconstruction(unittest.IsolatedAsyncioTestCase):
             self._make_event("session_start", {"user_content": "do it"}),
             self._make_event("tool_call", {"tool_name": "read_file"}),
             self._make_event("child_fork", {"child_session_id": "c1"}),
+            self._make_event("permission_requested", {"permission_id": "perm_1"}),
+            self._make_event("permission_approved", {"permission_id": "perm_1"}),
         ]
         logger = logging.getLogger("sessions.recovery")
         with self.assertNoLogs(logger, level="WARNING"):

@@ -402,6 +402,7 @@ class McpClientToolProvider(ToolProvider):
             broadcaster=context.get("broadcaster"),
             group_id=context.get("group_id"),
             spawn_depth=context.get("spawn_depth", 0),
+            event_recorder=context.get("permission_event_recorder"),
         )
         if result["action"] == "deny":
             return f"[MCP权限拒绝] {result.get('reason', '权限拒绝')}"

@@ -26,3 +26,6 @@ class _PendingRequest:
     group_id: int
     tool_name: str
     arguments: dict
+    # Set by resolve/cancellation paths so the suspended checker can produce an
+    # accurate audit event without changing the Future's public tuple contract.
+    resolution_source: str = "human_response"

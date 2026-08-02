@@ -1,0 +1,812 @@
+# Nuke AI Collaborator 与 OpenHanako 横向对比
+
+> 状态：讨论稿（Draft）
+> 日期：2026-08-02
+> 目的：用于后续讨论、校准优先级，并最终形成产品与架构决策版本。
+
+## 1. 执行摘要
+
+Nuke AI Collaborator 与 OpenHanako 并不是同一类产品的两种实现。
+
+- OpenHanako 的核心是“一个人的长期 Agent OS”：围绕 Agent、Session、个人记忆、工具、自动化和跨渠道连续性展开。
+- Collaborator 的核心是“以 Group 为边界的 AI 团队协作平台”：围绕多用户、多角色 Bot、项目隔离、共享工作区、工作流和组织知识展开。
+
+因此，Collaborator 不应整体模仿 OpenHanako。更合理的方向是保留自身的 Group、Workflow、Memory、Worker 和权限架构，同时吸收 Hanako 在以下方面的成熟能力：
+
+1. 执行能力快照与可复现性。
+2. 统一 Artifact / SessionFile 资源模型。
+3. 版本化事件协议与断线恢复。
+4. 集中的 Model / Provider Registry。
+5. 用户可理解的执行时间线、检查点和恢复界面。
+6. 跨渠道 Channel Adapter。
+7. 持久化资产登记和迁移治理。
+8. 个人记忆的可见性、授权和撤回体验。
+
+其中最需要避免照搬的部分是：冻结整个 Group 上下文、超大 SessionCoordinator、以 Markdown 代替 canonical memory、在没有代码隔离前扩张插件能力，以及巨型前端全局 Store。
+
+## 2. 对比范围与口径
+
+本次对比基于两边实际代码，而不只依据 README 功能列表。
+
+仓库位置：
+
+- Collaborator：`/Users/Nuke/claudeFolder/nuke-ai-collaborator`
+- OpenHanako：`/Users/Nuke/openhanako`
+
+对 Collaborator 的判断区分为三种状态：
+
+- **CURRENT**：已有代码路径支撑，可视为当前实现。
+- **TRANSITION**：已有部分实现，但仍处于迁移、双写或产品化过程中。
+- **TARGET**：设计文档或路线图中的目标，不视为当前已交付功能。
+
+当前工作树中的 Electron、Onboarding 和主题相关文件仍有未提交内容，因此本文不把它们视为 Collaborator 已稳定交付的桌面能力。
+
+## 3. 根本产品模型
+
+### 3.1 OpenHanako
+
+```text
+用户
+  → Agent
+      → 长期会话
+          → 记忆 / 工具 / 自动化 / 外部渠道
+```
+
+核心资产是一个持续成长、理解个人、能够跨会话和渠道存在的 Agent。
+
+在 Hanako 中，Session 是主要产品对象。系统围绕 Session 提供稳定身份、恢复、分支、休眠、能力快照和媒体资源管理。
+
+### 3.2 Collaborator
+
+```text
+人类成员
+  → Group
+      → 多角色 Bot
+          → Workflow / Shared Workspace / Project Memory
+```
+
+核心资产是一个持续积累项目知识、能够分工协作和恢复执行的 AI 团队。
+
+在 Collaborator 中：
+
+- Group 是用户可见的长期协作空间。
+- 群消息是公共讨论记录。
+- `agent_session` 更接近一次 Bot 执行或工作流单元的 WAL。
+- Bot 必须读取 Group 中其他成员的最新交付，不能把整个项目现实冻结在旧会话中。
+
+因此，可以借鉴 Hanako 的会话能力快照，但不能把 Collaborator 的 Group 简化为一个冻结会话。
+
+## 4. 功能横向矩阵
+
+| 维度 | Nuke AI Collaborator | OpenHanako | 判断 |
+|---|---|---|---|
+| 产品定位 | AI 项目团队、群聊协作 | 个人长期 AI 助手 / Agent OS | 定位不同，不应互相替代 |
+| 真实用户 | JWT、多用户、Group membership | 主要面向本地单用户 | Collaborator 更适合团队 |
+| 核心协作单位 | Group | Agent Session / Channel | 各自匹配产品定位 |
+| Bot 组织 | BA、Dev、QA、PM 等角色共同参与 | 多 Agent，主要围绕个人任务 | Collaborator 更强 |
+| 数据隔离 | 每 Group 独立 SQLite、Workspace 和 Worker 路由 | Agent 目录隔离，部分个人数据全局共享 | Collaborator 隔离更彻底 |
+| 群聊功能 | @、回复、撤回、置顶、Reaction、已读、公告、Recap | 以 Agent 会话管理为中心 | Collaborator 团队体验更强 |
+| 会话能力 | Bot 执行 WAL、事件、parent、恢复 | 稳定 ID、locator、branch、fork、hibernate、快照 | Hanako 更成熟 |
+| 多 Agent 编排 | 声明式 workflow、stage、gate、恢复、Coding Agent | workflow、subagent、后台任务 | Collaborator 更适合业务流程 |
+| 子 Agent | 同步/后台派生、最大深度、权限衰减 | 子 Agent、任务线程、隔离会话 | 能力接近 |
+| 长期记忆 | SQLite canonical + outbox + Chroma + Fact/Reflection/Tool Episode | SQLite FTS + Summary/Markdown 编译 | Collaborator 模型更先进 |
+| 个人记忆 | Vault/API 边界已有，产品 UI 不完整 | 个人资料、Pinned Memory、长期画像更成熟 | Hanako 产品化更完整 |
+| 自学习 | Experience → Draft Skill → 审批 → Active | 有 Skills/Experience，治理链较弱 | Collaborator 更强 |
+| Skills | System/Role/Group/Learned/External 分层与懒加载 | 多来源 Skill 与会话快照 | Collaborator 更适合组织复用 |
+| Tool Loop | 多轮工具调用、并发、compact、WAL | 成熟 AgentSession + Tool Loop | 接近 |
+| MCP | 独立 Collector 持有连接，Worker 通过 Proxy 调用 | Server 进程内统一管理 | Collaborator 多进程边界更清晰 |
+| 权限 | HIL、持久化规则、Shell 守卫、子 Agent 权限衰减 | read-only/ask/auto/operate + OS sandbox | 各有所长 |
+| 沙箱 | Group Workspace、容器沙箱、路径守卫 | Seatbelt/bwrap/Windows restricted token | Hanako 跨平台成熟，Collaborator 项目隔离更强 |
+| 插件 | Python Executor/Orchestrator/PluginHost | SDK、协议、Tool、Route、Provider、页面、Widget | Hanako 功能更完整 |
+| 插件安全 | 动态 Python 代码运行在主运行时 | 插件 JavaScript 同样缺少真正代码沙箱 | 两边都有高风险边界 |
+| 外部渠道 | WebSocket Web UI；GitHub/Jira 属于工具集成 | Telegram、飞书、QQ、微信、钉钉 | Hanako 明显更强 |
+| 自动化 | Cron、Workflow、Coding Agent Task | Heartbeat、Automation、Scheduler | Hanako 更偏个人主动性 |
+| 模型管理 | 多模型支持，兼容逻辑仍较分散 | ModelManager、Provider Registry、OAuth 和兼容层 | Hanako 更成熟 |
+| 文件与媒体 | 上传、图片、文档、Workspace 文件 | 统一 SessionFile/Media，跨入口复用 | Hanako 抽象更成熟 |
+| 前端 | 群聊体验丰富，Group/Chat Store | 复杂 Agent/Session 控制台，多 Slice Store | 各自匹配产品重心 |
+| 部署与伸缩 | Supervisor + Worker × N + MCP Collector | Electron + 独立 Server 子进程 | Collaborator 更适合服务化 |
+| 崩溃恢复 | Group 分片、Worker 恢复、Session WAL、Workflow State | UI/Server 分离、Session 恢复与休眠 | Collaborator 后端拓扑更强 |
+| 可观察性 | trace_id、metrics、session event、workflow state | Usage ledger、session timeline、checkpoint | 可以互补 |
+
+## 5. Collaborator 已形成的相对优势
+
+### 5.1 Group 是物理隔离边界
+
+Collaborator 不只是用 `group_id` 做逻辑过滤，而是把 Group 映射到独立 SQLite 和 Workspace，并由 Supervisor 做 Worker 路由。
+
+关键代码：
+
+- `backend/runtime/dbpaths.py`
+- `backend/runtime/supervisor.py`
+- `backend/runtime/worker.py`
+- `backend/workspace/layout.py`
+- `backend/api/groups.py`
+
+由此形成的能力包括：
+
+- Group 独立 DB。
+- Group 独立 Workspace。
+- Bot 私有目录和 Group 共享目录。
+- Worker affinity。
+- Group 级任务取消和恢复。
+- Group 删除时清理对应 DB 与 Workspace。
+- 记忆召回强制带 `group_id + bot_id` 过滤。
+
+这比 Hanako 的个人多 Agent 模型更适合企业和项目隔离，不能为了复制 Hanako 的个人连续性而弱化。
+
+### 5.2 多 Bot 协作是执行编排，不只是对话模拟
+
+Collaborator 已有：
+
+- 声明式 Orchestrator。
+- Workflow Stage。
+- 人工确认 Gate。
+- Structured Completion Signal。
+- Workflow State 持久化。
+- 崩溃恢复。
+- Coding Agent Task。
+- Side-effectful Session WAL。
+
+关键代码：
+
+- `backend/core/orchestration/declarative.py`
+- `backend/core/workflow.py`
+- `backend/core/workflow_store.py`
+- `backend/core/runner.py`
+- `backend/plugins/agent_dashboard/orchestrator.py`
+- `backend/sessions/recovery.py`
+
+Hanako 的 workflow 更接近个人 Agent 的长任务；Collaborator 已开始形成面向团队业务的工作流运行时。
+
+### 5.3 记忆真相源与向量索引分离
+
+Collaborator 当前的记忆演进方向是：
+
+```text
+Per-Group SQLite canonical records
+  → durable projection outbox
+      → Chroma projection
+          → semantic recall
+```
+
+关键代码：
+
+- `backend/memory/module.py`
+- `backend/memory/application/bot_facts.py`
+- `backend/memory/application/reflections.py`
+- `backend/memory/infrastructure/projection_outbox.py`
+- `backend/ai/memory_provider.py`
+
+这一设计支持：
+
+- Fact/Reflection 的 provenance。
+- `active → superseded → expired/deprecated` 生命周期。
+- Durable outbox。
+- Projection 重建。
+- 旧 projection tombstone。
+- Group/Bot ownership。
+- 语义召回和结构化真相源分离。
+
+Hanako 的 Markdown + FTS 更简单、透明，但 Collaborator 不应退回以文本文件为 canonical memory 的实现。
+
+### 5.4 MCP 单进程原则更适合多 Worker
+
+Collaborator 明确由 MCP Collector 独占 MCP 连接：
+
+```text
+Worker
+  → MCP_CALL
+      → Supervisor
+          → MCP Collector
+              → MCP Server
+```
+
+关键代码：
+
+- `backend/runtime/mcp_collector.py`
+- `backend/executors/mcp_bridge.py`
+- `backend/executors/providers/mcp_proxy.py`
+
+这个设计规避了 MCP/anyio 连接跨任务和跨进程生命周期问题，也比在每个 Worker 直接建立连接更节省资源。
+
+## 6. 值得借鉴的能力
+
+### 6.1 P0：Execution Capability Manifest
+
+Hanako 创建 Session 时会固定模型、Provider、System Prompt、Skills、Tools、权限、Thinking Level、记忆版本和授权目录。
+
+这解决的是可复现性问题：同一个任务为什么在重试后产生不同结果？
+
+Collaborator 已通过 `agent_sessions.config_json` 保存部分执行配置，但还缺少完整、版本化、可核验的能力清单。建议在现有 Session 模型上增加 `execution capability manifest`，例如：
+
+```json
+{
+  "manifest_version": 1,
+  "executor": "tool_loop_v1@3",
+  "provider": "anthropic",
+  "model": "claude-x",
+  "system_prompt_hash": "sha256:...",
+  "traits": [
+    {"name": "python_dev", "version": "2", "hash": "sha256:..."}
+  ],
+  "skills": [
+    {"name": "code_review", "version": "4", "hash": "sha256:..."}
+  ],
+  "tool_schema_hash": "sha256:...",
+  "permission_rules_hash": "sha256:...",
+  "memory_revision": 381,
+  "sandbox_policy": "group-container-v2"
+}
+```
+
+冻结边界必须适配 Collaborator：
+
+| 应冻结 | 应保持动态 |
+|---|---|
+| Model / Provider | 最新群聊消息 |
+| Prompt / Trait 版本 | BOARD / SPEC |
+| Skill 版本 | Group 共享文件 |
+| Tool Schema | 项目代码 |
+| Permission Policy | 其他 Bot 的最新交付 |
+| Executor 版本 | Group 当前有效事实 |
+
+原则是：**冻结 Bot 的执行能力，不冻结 Group 的协作现实。**
+
+### 6.2 P0：统一 Artifact 模型
+
+Collaborator 当前存在多种资源路径：
+
+- 消息附件。
+- Workspace 文件。
+- Bot 交付物。
+- 工具生成文件。
+- Git Worktree 文件。
+- 将来的外部渠道附件。
+
+建议参考 Hanako 的 SessionFile/Media 抽象，建立稳定 Artifact ID：
+
+```text
+Artifact
+├── artifact_id
+├── group_id
+├── bot_id / session_id / workflow_run_id
+├── origin: upload | tool | workspace | connector
+├── mime_type
+├── checksum
+├── storage_locator
+├── display_name
+├── authorization_scope
+├── created_by
+└── lifecycle
+```
+
+价值包括：
+
+- 外部渠道文件可直接进入工具链。
+- Bot 报告可作为聊天交付卡片发送。
+- Workflow 可把 Artifact 作为阶段输入输出。
+- 文件移动后仍可通过稳定 ID 引用。
+- 审计可以追踪文件由谁、在哪个步骤产生。
+- 多 Bot 可以显式交接产物，而不是依靠不稳定路径字符串。
+
+### 6.3 P0：版本化事件协议与断线 Cursor
+
+Collaborator 的 Python 服务端和 React 前端之间存在大量手写事件：
+
+- message / typing
+- tool event
+- permission request / response
+- workflow state
+- recap
+- skill draft
+- resource update
+
+建议建立共享协议目录：
+
+```text
+protocol/
+├── envelope.schema.json
+├── message.schema.json
+├── tool-event.schema.json
+├── workflow-event.schema.json
+├── permission.schema.json
+└── resource-event.schema.json
+```
+
+从同一份 Schema 生成：
+
+- Python/Pydantic 类型。
+- TypeScript 类型。
+- 运行时 Validator。
+- Protocol Version。
+- Event Cursor。
+- Reconnect / Catch-up 语义。
+
+这能减少服务端事件已变化、前端却静默忽略的协议漂移问题。
+
+### 6.4 P1：Model / Provider Registry
+
+建议集中管理：
+
+- `provider_id + model_id` 唯一身份。
+- Tool Calling 能力。
+- Vision 能力。
+- Thinking 参数映射。
+- Context Window。
+- OAuth / API Key。
+- Provider 特殊字段兼容。
+- 定价。
+- 模型废弃与替换关系。
+
+Bot 配置只保存稳定标识和策略，不让各执行路径自行判断 Provider 差异。
+
+### 6.5 P1：把 Session WAL 产品化为 Execution Timeline
+
+Collaborator 已有：
+
+- `agent_sessions`
+- `session_events`
+- snapshot
+- crash recovery
+- parent session
+- token usage
+
+这些目前主要服务后端恢复。可以进一步提供用户可理解的执行详情：
+
+```text
+需求输入
+  → 使用了哪些上下文
+  → 采用哪版 Skill
+  → 调用了哪些工具
+  → 权限在哪一步批准
+  → 修改了哪些文件
+  → 执行了哪些测试
+  → 产生了哪些记忆或 Experience
+  → 最终交付了哪些 Artifact
+```
+
+Execution Timeline 可以同时承担：
+
+- 审计记录。
+- 失败定位。
+- Workflow 重试入口。
+- Experience 学习证据。
+- 用户信任界面。
+
+不建议为普通群聊引入任意分支；优先为 Coding Task、Workflow Run 和长任务提供 checkpoint/fork。
+
+### 6.6 P1：Channel Adapter
+
+OpenHanako 已有 Telegram、飞书、QQ、微信和钉钉适配。Collaborator 当前的 `integrations/` 主要是 Git/GitHub/Jira 工具集成，还没有真正的聊天渠道归一化层。
+
+适合 Collaborator 的输入模型：
+
+```text
+InboundEnvelope
+├── connector
+├── external_tenant
+├── external_channel
+├── external_user
+├── mapped_group_id
+├── mapped_member_id
+├── message
+├── mentions
+├── artifacts
+└── reply_context
+```
+
+归一化后复用现有链路：
+
+```text
+select_triggered_bots
+  → dispatch
+      → workflow
+          → group broadcast / connector reply
+```
+
+建议先选择飞书或 Slack 中的一个完成端到端验证，不同时铺开多个渠道。
+
+### 6.7 P1：Persistence Store Registry
+
+Collaborator 已有多种持久化载体：
+
+- Central SQLite。
+- Per-Group SQLite。
+- Chroma。
+- Workspace Markdown。
+- Skill 文件。
+- Session WAL。
+- Workflow State。
+- Plugin Task Store。
+- Projection Outbox。
+- Git Worktree。
+
+建议增加统一 Store Registry，描述：
+
+- Owner。
+- Scope。
+- Canonical / Projection 属性。
+- 生命周期。
+- 迁移方式。
+- 恢复方式。
+- 是否可重建。
+- 是否允许 quarantine。
+- 删除和导出语义。
+
+示例：
+
+```text
+memory_records       canonical
+Chroma               rebuildable projection
+MEMORY.md            human-readable projection
+session_events       ADD-only execution evidence
+workflow_state       recoverable runtime state
+deliverables         project artifacts
+```
+
+### 6.8 P2：Personal Knowledge Vault 产品化
+
+Collaborator 已有 Personal Memory 后端接口与授权边界：
+
+- `backend/api/personal_memory.py`
+- `backend/ai/personal_vault.py`
+- `backend/memory/application/authorized_personal.py`
+
+但还缺少用户可感知的完整体验：
+
+- 系统记住了什么。
+- 记忆来自哪里。
+- 哪些 Group/Bot 可以使用。
+- 何时被使用过。
+- 删除后影响什么。
+- 用户固定事实与模型推断如何区分。
+
+应继续使用 Collaborator 自己的授权模型：
+
+```text
+Person Fact
+  → 用户授权
+      → Scoped Projection
+          → 指定 Group / Bot / Purpose
+```
+
+不应照搬 Hanako 把全局个人画像默认注入所有 Agent 的方式。
+
+## 7. 不建议照搬的部分
+
+### 7.1 不冻结整个 Group 上下文
+
+如果冻结 BOARD、SPEC、共享代码、其他 Bot 交付和 Group Facts，Bot 会在协作中读取旧现实。只应冻结执行能力和权限版本。
+
+### 7.2 不创建超大 CollaborationCoordinator
+
+Hanako 的 `core/session-coordinator.ts` 已超过 8,000 行，同时承担创建、恢复、分支、工具、持久化、媒体和插件等多种职责。
+
+Collaborator 已经拥有 runtime、orchestration、session、memory、tool、permission 等边界，应继续保持分层，不要增加一个统管所有协作行为的中心类。
+
+### 7.3 不用 Markdown 取代 Canonical Memory
+
+Markdown 可以作为人类可读投影，但不应取代已有的 canonical record、provenance、relation、validity 和 outbox。
+
+### 7.4 不在代码隔离前扩张插件能力
+
+Collaborator 的外部 Executor/Orchestrator Python 会直接 import 到运行时；Hanako 的 restricted 插件同样不是代码沙箱。
+
+正确演进顺序应是：
+
+```text
+独立插件进程
+  → Capability Manifest
+      → 结构化 IPC
+          → 权限与资源额度
+              → 生命周期管理
+                  → UI / Route / Provider Contributions
+```
+
+### 7.5 不复制巨型前端 Store
+
+会话产品化后，应继续按 Group、Chat、Workflow、Execution、Artifact、Memory 分领域管理状态，避免全部进入一个全局 Store。
+
+## 8. 推荐实施路线
+
+### 阶段一：提高可复现性和可信度
+
+1. 在现有 `agent_sessions` 上增加 Capability Manifest。
+2. 保存 Model、Prompt、Trait、Skill、Tool、Permission 和 Executor 版本 Hash。
+3. 建立 Execution Timeline API 和基础 UI。
+4. 将 Skill 学习证据绑定到 Session、Tool Event 和 Test Result。
+5. 给 WebSocket 协议增加版本与 Cursor。
+
+### 阶段二：统一协作资源
+
+1. 引入 Artifact ID。
+2. 统一上传、Workspace 文件、工具输出和 Workflow Deliverable。
+3. Artifact 接入权限、审计和生命周期体系。
+4. 为外部渠道预留 `origin` 和 `external_locator`。
+
+### 阶段三：扩展入口与生态
+
+1. 建立 Channel Adapter。
+2. 先接入一个真实企业聊天平台。
+3. 插件迁移到独立进程。
+4. 建立 Provider Registry。
+5. 在安全边界稳定后，再开放页面、Widget、Connector、Provider 等插件贡献点。
+
+### 阶段四：个人连续性
+
+1. Personal Knowledge Vault UI。
+2. 展示记忆来源、置信度、授权和撤回。
+3. 跨 Group 使用必须经过 Scoped Projection。
+4. Scheduler 执行绑定 Bot Identity、Permission Snapshot 和审计记录。
+5. 将主动提醒通过 Web/飞书等 Channel 投递。
+
+## 9. 建议优先级
+
+| 优先级 | 项目 | 主要价值 | 主要风险 |
+|---|---|---|---|
+| P0 | Capability Manifest | 可复现、可审计、支持可靠重试 | 快照与动态 Group 状态边界需要定义清楚 |
+| P0 | Artifact Model | 统一多 Bot 交付、附件和渠道文件 | 需要迁移现有路径引用 |
+| P0 | Versioned Event Protocol | 降低前后端协议漂移，增强断线恢复 | 需要兼容旧客户端 |
+| P1 | Execution Timeline | 增强信任、调试、学习证据 | UI 容易过度暴露底层噪声 |
+| P1 | Provider Registry | 降低模型兼容分散和重复判断 | 需要迁移现有 Bot 配置 |
+| P1 | Store Registry | 降低迁移、灾备和删除语义风险 | 需要持续维护，不应只写一次文档 |
+| P1 | Channel Adapter | 让 AI 团队进入真实工作沟通渠道 | 身份映射、权限和消息幂等复杂 |
+| P1 | Plugin Process Isolation | 控制第三方代码风险 | IPC、调试和兼容成本较高 |
+| P2 | Personal Vault UI | 增强个人连续性和记忆可控性 | 必须严格遵守跨 Group 授权 |
+
+## 10. 待讨论决策
+
+以下问题需要在 Final 版本前明确：
+
+1. Capability Manifest 的边界是每次 Bot Run、每个 Workflow Stage，还是可复用的 Execution Profile？
+2. Skill 运行时是否严格锁定版本，还是只记录实际内容 Hash？
+3. Group Memory 的哪一部分参与执行快照，哪一部分始终动态读取？
+4. Artifact 的 canonical locator 放在 Group DB、Central DB，还是独立 Metadata Store？
+5. Artifact 是否需要版本关系和派生关系，例如 `report-v2 derives_from report-v1`？
+6. Execution Timeline 面向普通用户和管理员是否需要两种视图？
+7. Channel 第一优先级是飞书、Slack，还是企业微信？
+8. 外部渠道身份如何映射到 Central User、Group Member 和 Personal Vault？
+9. 插件隔离采用长期 Worker、每插件子进程，还是按调用启动的 Sandbox Process？
+10. Provider Registry 是否同时承担费用预算、模型路由和降级策略？
+11. Personal Projection 默认是 deny、ask，还是按 Group 显式配置？
+12. 是否把 Store Registry 实现为可执行注册表和测试，而不只是设计文档？
+
+## 11. 代码索引
+
+### Collaborator
+
+- `backend/runtime/supervisor.py`：Supervisor 与 Group/Worker 路由。
+- `backend/runtime/worker.py`：Worker 生命周期和消息分发。
+- `backend/runtime/mcp_collector.py`：MCP 单进程连接所有权。
+- `backend/runtime/dbpaths.py`：Per-Group DB 路径。
+- `backend/executors/base.py`：ExecutionContext、Executor、PluginManifest 基础协议。
+- `backend/executors/plugins/tool_loop_v1.py`：主 Tool Loop。
+- `backend/executors/plugins/tool_loop_v1_helpers.py`：上下文、子 Agent 和恢复辅助逻辑。
+- `backend/executors/plugins/workspace_tools.py`：Workspace、Shell、Spawn Agent 和权限 Hook。
+- `backend/permissions/engine.py`：权限决策与子 Agent 权限衰减。
+- `backend/core/orchestration/declarative.py`：声明式 Orchestrator。
+- `backend/core/orchestration/prompt_builder.py`：Prompt、Traits 和 Skills 组装。
+- `backend/core/workflow_store.py`：Workflow 状态恢复。
+- `backend/sessions/store.py`：Session WAL。
+- `backend/sessions/recovery.py`：崩溃恢复。
+- `backend/memory/`：Canonical Memory bounded context。
+- `backend/ai/memory_provider.py`：Tool Loop 与 Memory Provider 接缝。
+- `backend/plugins/host.py`：Plugin Host。
+- `backend/plugins/agent_dashboard/orchestrator.py`：Coding Agent Task。
+- `backend/api/personal_memory.py`：Personal Memory API。
+
+### OpenHanako
+
+- `core/engine.ts`：总装配和运行时门面。
+- `core/agent.ts`：Agent 初始化、人格和 Prompt。
+- `core/session-coordinator.ts`：Session 生命周期核心。
+- `core/session-manifest/store.ts`：稳定 Session ID、locator 和 capability snapshot。
+- `core/desktop-session-submit.ts`：统一桌面会话提交。
+- `lib/memory/fact-store.ts`：SQLite/FTS Fact Store。
+- `lib/memory/memory-ticker.ts`：长期记忆定时处理。
+- `lib/memory/compile.ts`：Markdown 记忆编译。
+- `lib/bridge/bridge-manager.ts`：外部渠道桥接。
+- `core/plugin-manager.ts`：插件管理。
+- `shared/persistence/store-registry.ts`：持久化资产登记。
+- `desktop/src/react/services/websocket.ts`：前端 WebSocket 与重连。
+
+## 12. 可观测性事件政策实现状态
+
+> 实现日期：2026-08-02
+> 状态：第二阶段权限审计接入已进入运行链路（CURRENT）
+
+已新增可执行的 Event Policy Registry：
+
+- `backend/observability/event_policy.py`
+- `backend/observability/__init__.py`
+
+当前实现不是让模型判断事件是否重要，而是由平台根据事件类型、工具名称和实际参数进行确定性分类。
+
+### 12.1 当前事件分类
+
+```text
+EventClass
+├── audit
+├── timeline
+├── diagnostic
+├── metric
+└── ephemeral
+
+EffectClass
+├── read
+├── durable_write
+├── external_write
+├── authorization
+├── control_flow
+├── recovery
+├── billable
+├── learning
+├── verification
+├── lifecycle
+└── unknown
+```
+
+每条已持久化的 Session Event 会自动获得：
+
+- `event_id`
+- `policy_version`
+- `classes`
+- `effects`
+- `retention`
+- `payload_policy`
+- `business_significant`
+- `allow_sampling`
+- `reason`
+- 当前 Trace Context 存在时的 `trace_id`
+
+元数据写入现有 Payload 的保留字段 `_observability`，因此无需数据库迁移，也不破坏现有 Session Recovery 格式。
+
+### 12.2 当前 Tool Effect 分类
+
+工具不是只按名称统一分类。`run_shell` 会结合实际命令区分：
+
+| 示例 | 分类 |
+|---|---|
+| `ls -la` | Diagnostic / Read |
+| `git status -sb` | Diagnostic / Read |
+| `pytest -q` | Timeline + Metric / Verification |
+| `python3 -m pytest` | Timeline + Metric / Verification |
+| `npm run build` | Timeline + Metric / Verification |
+| `write_file` | Audit + Timeline / Durable Write |
+| `git push origin main` | Audit + Timeline / External Write |
+| `cat ~/.ssh/id_rsa` | Security Audit / Sensitive Read |
+| `sed -i ...` | Audit + Timeline / Durable Write |
+| 复合或重定向 Shell | Security Audit / Unknown，保守处理 |
+| 未登记的插件工具 | Security Audit / Unknown，默认不采样 |
+
+### 12.3 Session 生命周期事件
+
+`sessions.update_session_status()` 现在会在状态真正发生变化时，以同一数据库事务写入 `session_status` 事件。
+
+以下状态被视为业务事件：
+
+- `completed` / `failed`：Timeline + Metric / Lifecycle。
+- `needs_review` / `awaiting_recovery` / `recovering`：Audit + Timeline / Recovery。
+- 其他非终态变化：Diagnostic / Lifecycle。
+
+`session_status` 已被 Session Recovery 明确识别为非对话 WAL 事件，恢复时不会污染模型消息，也不会产生未知事件警告。
+
+### 12.4 当前验证
+
+已新增和更新：
+
+- `backend/tests/test_event_policy.py`
+- `backend/tests/test_sessions.py`
+- `backend/tests/test_permissions.py`
+
+第一阶段定向回归覆盖 Event Policy、Session Store、Token Tracking、Interaction、Executor 解耦、后台 finalize 和 Recovery Resume：
+
+```text
+49 passed
+3 subtests passed
+1 dependency deprecation warning
+```
+
+第二阶段定向回归覆盖权限引擎、builtin/shell 权限 hook、MCP proxy/provider、Session Recovery 与 Event Policy：
+
+```text
+153 passed
+3 subtests passed
+1 dependency deprecation warning
+```
+
+### 12.5 Permission 审计事件（第二阶段）
+
+权限引擎现在通过 Worker runner 注入的异步 Event Recorder 写入当前 Session，不直接依赖数据库，也不跨越 Supervisor / Worker / Collector 的进程边界。
+
+事件包括：
+
+- `permission_requested`：真正需要人工决策时产生。
+- `permission_approved`：人工批准始终产生；持久规则、once grant、workspace confinement 或 bypass 模式自动放行时，仅在 Tool Effect Policy 判定该工具具有业务意义时产生。
+- `permission_denied`：人工拒绝、deny rule、dontAsk、子 Agent 权限衰减、超时或客户端断线时产生。
+
+每一次权限判断生成一个稳定的 `permission_id`。需要人工确认时，WebSocket 的 `request_id`、请求事件和最终决策事件使用同一个 `perm_*` ID，因此可以从 UI 请求一路关联到 Session Timeline。
+
+权限事件保存：
+
+- `permission_id`
+- `tool_name`
+- `arguments_sha256`
+- `bot_id` / `group_id` / `spawn_depth`
+- `decision_source`
+- `persistence`（`once` / `always`，存在时）
+- `force_ask`
+
+原始工具参数不会复制到权限审计事件，只保存确定性 SHA-256 指纹；参数正文仍由既有 `tool_call` WAL 事件负责。这样既可做同一次调用的关联，又减少 token、密钥和命令正文被重复写入安全审计日志的风险。
+
+`decision_source` 当前可区分：
+
+- `human_required` / `human_response`
+- `allow_rule` / `deny_rule`
+- `once_grant`
+- `workspace_confined`
+- `bypass_permissions` / `dont_ask`
+- `subagent_attenuation`
+- `timeout`
+- `group_disconnected`
+
+权限事件均由 Event Policy Registry 标记为 `Audit + Timeline / Authorization`、`security_audit` retention、禁止采样。Session Recovery 将它们视为控制面元数据，不会把它们还原成模型对话，也不会产生未知事件警告。
+
+为了避免把“经过权限函数”误判成“具有业务意义”，安全读取的自动放行不会生成权限审计事件。例如 `read_file` 和 `list_workspace` 仍可保留为可采样 Diagnostic Tool Event，但不会额外产生 `permission_approved`；人工请求、任何拒绝，以及写入、外部副作用、验证、控制流等有业务意义工具的自动批准仍会记录。
+
+事件记录采用 fail-open observability：Event Recorder 故障会记录服务端异常，但不会改变权限引擎已经依据安全规则做出的允许或拒绝结果。这里的 fail-open 仅指“可观测性写入失败不改变授权语义”，不是授权检查本身 fail-open。
+
+### 12.6 尚未实现的边界
+
+第一阶段完成的是“分类、标注和 Session 生命周期接入”，以下仍属于后续工作：
+
+- Retention Policy 的定时清理和归档执行器。
+- Payload Policy 的集中脱敏、摘要和 Artifact 引用强制执行。
+- Workflow Stage/Gate 的统一 Observation Envelope。
+- Memory/Skill 使用证据与 Session Event 的双向关联。
+- Request 级 Model Usage Ledger。
+- Timeline API 和前端界面。
+- OpenTelemetry Exporter。
+- Prometheus 对 Event Policy 的低基数聚合。
+
+这些后续能力应继续使用当前 Registry，而不是在各模块重新硬编码一套“重要事件”判断。
+
+## 13. 当前结论
+
+Collaborator 的长期护城河应当是：
+
+```text
+项目事实
++ 多角色 Bot
++ 可恢复 Workflow
++ 可验证 Experience / Skill Learning
++ Group 级安全隔离
+```
+
+OpenHanako 的主要优势是：
+
+```text
+个人 Agent 连续性
++ Session 产品化
++ 跨渠道存在感
++ 统一资源与 Provider 管理
+```
+
+两者最合理的结合方向是：
+
+```text
+保留 Collaborator 的 Group / Workflow / Memory / Worker 架构
+  +
+吸收 Hanako 的 Capability Manifest / Artifact / Channel / Provider / Timeline
+  =
+兼具团队协作能力与长期连续性的 AI 项目组织系统
+```
+
+本文仍是讨论稿。Final 版本应在“待讨论决策”得到结论后，进一步补充：
+
+- 明确的产品边界。
+- 目标架构图。
+- 数据模型草案。
+- 分阶段交付范围。
+- 兼容迁移方案。
+- 可验收的成功指标。

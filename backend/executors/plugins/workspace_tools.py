@@ -910,6 +910,7 @@ async def _permission_check_hook(name: str, arguments: dict, context: dict) -> d
         spawn_depth=context.get("spawn_depth", 0),
         workspace_confined=workspace_confined,
         force_ask=force_ask,
+        event_recorder=context.get("permission_event_recorder"),
     )
 
     if result["action"] == "deny":

@@ -1,4 +1,5 @@
 import asyncio
+import functools
 import uuid
 import json
 import aiosqlite
@@ -283,6 +284,10 @@ class ToolLoopRunner:
                     "runner": self,
                     "run_id": self.run_id,
                     "allowed_memory_refs": self.injected_memory_refs,
+                    "permission_event_recorder": functools.partial(
+                        self.ctx.interaction.append_session_event,
+                        self.session_id,
+                    ),
                 }
 
                 _active_schemas = self.tool_schemas

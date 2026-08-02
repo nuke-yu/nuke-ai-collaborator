@@ -19,6 +19,14 @@ class _MockBroadcaster:
         self.sent.append(message)
 
 
+class _EventRecorder:
+    def __init__(self):
+        self.events = []
+
+    async def __call__(self, event_type, payload):
+        self.events.append((event_type, payload))
+
+
 def _run(coro):
     return asyncio.run(coro)
 
@@ -102,6 +110,109 @@ class TestDecisionPipeline:
         rs = Ruleset(mode="bypassPermissions")
         r = _run(engine.check("unknown_tool", {}, rs, 99, None, 1))
         assert r["action"] == "allow"
+
+
+# ---------------------------------------------------------------------------
+# Permission observability
+# ---------------------------------------------------------------------------
+
+class TestPermissionAuditEvents:
+    def setup_method(self):
+        engine._once_grants.clear()
+        engine._pending.clear()
+
+    def test_human_approval_records_correlated_request_and_decision(self):
+        rs = Ruleset(mode="default")
+        broadcaster = _MockBroadcaster()
+        recorder = _EventRecorder()
+        arguments = {"cmd": "deploy --token super-secret"}
+
+        async def run():
+            task = asyncio.create_task(engine.check(
+                "run_shell", arguments, rs, 42, broadcaster, 7,
+                event_recorder=recorder,
+            ))
+            await asyncio.sleep(0)
+            request_id = broadcaster.sent[0]["request_id"]
+            engine.resolve(
+                request_id, approved=True, persistence="always", group_id=7
+            )
+            return request_id, await task
+
+        request_id, result = _run(run())
+
+        assert result["action"] == "allow"
+        assert [kind for kind, _ in recorder.events] == [
+            "permission_requested", "permission_approved",
+        ]
+        requested = recorder.events[0][1]
+        approved = recorder.events[1][1]
+        assert requested["permission_id"] == request_id
+        assert approved["permission_id"] == request_id
+        assert approved["decision_source"] == "human_response"
+        assert approved["persistence"] == "always"
+        assert requested["arguments_sha256"] == approved["arguments_sha256"]
+        assert "arguments" not in requested
+        assert "super-secret" not in json.dumps(recorder.events)
+
+    def test_rule_denial_records_decision_without_request(self):
+        rs = Ruleset(rules=[Rule(tool_pattern="write_file", action="deny")])
+        recorder = _EventRecorder()
+
+        result = _run(engine.check(
+            "write_file", {"path": "secret.txt"}, rs, 3, None, 9,
+            event_recorder=recorder,
+        ))
+
+        assert result["action"] == "deny"
+        assert len(recorder.events) == 1
+        kind, payload = recorder.events[0]
+        assert kind == "permission_denied"
+        assert payload["decision_source"] == "deny_rule"
+        assert payload["permission_id"].startswith("perm_")
+
+    def test_safe_read_auto_approval_is_not_a_business_event(self):
+        recorder = _EventRecorder()
+
+        result = _run(engine.check(
+            "read_file", {"path": "README.md"}, Ruleset(mode="default"),
+            3, None, 9, workspace_confined=True, event_recorder=recorder,
+        ))
+
+        assert result["action"] == "allow"
+        assert recorder.events == []
+
+    def test_disconnect_denial_has_non_human_source(self):
+        rs = Ruleset(mode="default")
+        broadcaster = _MockBroadcaster()
+        recorder = _EventRecorder()
+
+        async def run():
+            task = asyncio.create_task(engine.check(
+                "run_shell", {"cmd": "git push"}, rs, 3, broadcaster, 9,
+                event_recorder=recorder,
+            ))
+            await asyncio.sleep(0)
+            engine.cancel_pending_for_group(9)
+            return await task
+
+        result = _run(run())
+
+        assert result["action"] == "deny"
+        assert recorder.events[-1][0] == "permission_denied"
+        assert recorder.events[-1][1]["decision_source"] == "group_disconnected"
+
+    def test_recorder_failure_does_not_change_authorization(self):
+        async def broken_recorder(_event_type, _payload):
+            raise RuntimeError("audit backend unavailable")
+
+        result = _run(engine.check(
+            "write_file", {"path": "output.txt"},
+            Ruleset(mode="bypassPermissions"), 1, None, 1,
+            event_recorder=broken_recorder,
+        ))
+
+        assert result["action"] == "allow"
 
 
 # ---------------------------------------------------------------------------

@@ -25,14 +25,17 @@ def is_idempotent(tool_name: str) -> bool:
 # Event types that are recorded for metadata/WAL purposes but intentionally
 # do NOT contribute a message during reconstruction. Anything seen that is
 # neither handled below nor listed here is unexpected and gets logged.
-_IGNORED_EVENT_TYPES = frozenset({"tool_call", "child_fork", "child_join"})
+_IGNORED_EVENT_TYPES = frozenset({
+    "tool_call", "child_fork", "child_join", "session_status",
+    "permission_requested", "permission_approved", "permission_denied",
+})
 
 
 def reconstruct_messages(config: dict, events: list[dict]) -> list[dict]:
     """Rebuild the messages array from the session event log.
 
     Handles: session_start, llm_response, tool_result.
-    Skips:   tool_call (WAL marker only), child_fork, child_join.
+    Skips:   tool_call and observability/control-plane metadata events.
     Unknown event types are skipped with a warning — if a new event type is
     added without updating this function, recovery would silently drop it.
     """

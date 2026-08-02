@@ -1008,12 +1008,17 @@ async def execute_parallel_tools(runner, calls, iteration=None) -> None:
             "_executed_arguments", call["arguments"]
         )
         tool_result, _ = _check_and_attach_file(runner, tool_result)
+        from observability import classify_tool_effect
         await runner.ctx.interaction.append_session_event(runner.session_id, "tool_result", {
             "tool_call_id": call["id"],
             "tool_name": call["name"],
             "result": tool_result,
             "is_error": is_error,
             "memory_refs": memory_refs,
+            "duration_ms": int(_duration * 1000),
+            "_observability": classify_tool_effect(
+                call["name"], executed_arguments
+            ).to_metadata(),
         })
         runner._track_vfs_modifications(call["name"], executed_arguments)
 
@@ -1087,12 +1092,17 @@ async def execute_serial_tools(runner, calls, iteration=None) -> None:
         tool_result, _ = _check_and_attach_file(runner, tool_result)
         _duration = round(asyncio.get_running_loop().time() - _t0, 2)
 
+        from observability import classify_tool_effect
         await runner.ctx.interaction.append_session_event(runner.session_id, "tool_result", {
             "tool_call_id": call["id"],
             "tool_name": call["name"],
             "result": tool_result,
             "is_error": is_error,
             "memory_refs": memory_refs,
+            "duration_ms": int(_duration * 1000),
+            "_observability": classify_tool_effect(
+                call["name"], executed_arguments
+            ).to_metadata(),
         })
 
         runner._track_vfs_modifications(call["name"], executed_arguments)

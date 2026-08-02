@@ -27,10 +27,16 @@ async def create_session(
 
 
 async def append_event(session_id: str, event_type: str, payload: dict) -> None:
+    from observability import enrich_event_payload
+    from runtime.tracing import get_trace_id
+
+    enriched_payload = enrich_event_payload(
+        event_type, payload, trace_id=get_trace_id()
+    )
     async with _db.write_connect() as conn:
         await conn.execute(
             "INSERT INTO session_events (session_id, event_type, payload) VALUES (?, ?, ?)",
-            (session_id, event_type, json.dumps(payload, ensure_ascii=False)),
+            (session_id, event_type, json.dumps(enriched_payload, ensure_ascii=False)),
         )
         await conn.execute(
             "UPDATE agent_sessions SET updated_at = datetime('now') WHERE id = ?",
@@ -109,11 +115,33 @@ async def get_events(session_id: str) -> list[dict]:
 
 
 async def update_session_status(session_id: str, status: str) -> None:
+    from observability import enrich_event_payload
+    from runtime.tracing import get_trace_id
+
     async with _db.write_connect() as conn:
+        async with conn.execute(
+            "SELECT status FROM agent_sessions WHERE id = ?", (session_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+        previous_status = row[0] if row else None
         await conn.execute(
             "UPDATE agent_sessions SET status = ?, updated_at = datetime('now') WHERE id = ?",
             (status, session_id),
         )
+        if previous_status is not None and previous_status != status:
+            event_payload = enrich_event_payload(
+                "session_status",
+                {"from_status": previous_status, "status": status},
+                trace_id=get_trace_id(),
+            )
+            await conn.execute(
+                "INSERT INTO session_events (session_id, event_type, payload) VALUES (?, ?, ?)",
+                (
+                    session_id,
+                    "session_status",
+                    json.dumps(event_payload, ensure_ascii=False),
+                ),
+            )
         await conn.commit()
 
 
