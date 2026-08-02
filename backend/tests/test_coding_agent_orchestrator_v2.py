@@ -22,6 +22,13 @@ class TestBegin(unittest.TestCase):
         self.assertIn("Build API", unit.trigger_msg)
         self.assertIn("pytest", unit.trigger_msg)
         self.assertTrue(unit.is_workflow)
+        workflow_id = orch.current_workflow_id(1)
+        self.assertTrue(workflow_id.startswith("wf_"))
+        self.assertEqual(
+            [event["event_type"] for event in step.observations],
+            ["workflow_started", "stage_entered"],
+        )
+        self.assertTrue(all(event["workflow_id"] == workflow_id for event in step.observations))
 
     def test_begin_empty_bots_marks_done(self):
         orch = CodingAgentOrchestrator()
@@ -47,6 +54,10 @@ class TestObserve(unittest.TestCase):
         step = orch.observe(1, 5, "All done!",
                             signals=[{"name": "signal_stage_done", "arguments": {"reason": "completed"}}])
         self.assertTrue(step.done)
+        self.assertEqual(
+            [event["event_type"] for event in step.observations],
+            ["stage_completed", "workflow_completed"],
+        )
 
     def test_dashboard_task_requires_successful_create_pr(self):
         orch = CodingAgentOrchestrator()
@@ -67,6 +78,8 @@ class TestObserve(unittest.TestCase):
         self.assertFalse(step.done)
         self.assertEqual(step.workflow_paused.reason, "pull_request_missing")
         self.assertIsNone(step.workspace_action)
+        self.assertEqual(step.observations[0]["event_type"], "workflow_paused")
+        self.assertEqual(step.observations[0]["payload"]["reason"], "pull_request_missing")
 
     def test_dashboard_task_completes_after_successful_create_pr(self):
         orch = CodingAgentOrchestrator()
@@ -95,6 +108,7 @@ class TestObserve(unittest.TestCase):
         self.assertIsNotNone(step.workflow_paused)
         self.assertEqual(step.workflow_paused.reason, "completion_signal_missing")
         self.assertIsNone(step.workspace_action)
+        self.assertEqual(step.observations[0]["event_type"], "workflow_paused")
 
     def test_observe_signal_rework_keeps_active(self):
         """signal_rework keeps workflow active for retry."""
@@ -108,6 +122,7 @@ class TestObserve(unittest.TestCase):
         self.assertIsNotNone(step.workflow_paused)
         self.assertEqual(step.workflow_paused.reason, "rework_requested")
         self.assertEqual(step.workflow_paused.details, "tests failing")
+        self.assertEqual(step.observations[0]["payload"]["reason"], "rework_requested")
 
 class TestParseSpec(unittest.TestCase):
 
@@ -152,6 +167,10 @@ class TestPersistence(unittest.TestCase):
         orch2 = CodingAgentOrchestrator()
         orch2.restore(1, state)
         self.assertEqual(orch2.current_bot(1)["id"], 5)
+        self.assertEqual(orch2.current_workflow_id(1), state["workflow_id"])
+        recovered = orch2.recovery_observation(1)
+        self.assertEqual(recovered["event_type"], "workflow_recovered")
+        self.assertEqual(recovered["workflow_id"], state["workflow_id"])
 
     def test_resume_units_for_started_task(self):
         orch = CodingAgentOrchestrator()

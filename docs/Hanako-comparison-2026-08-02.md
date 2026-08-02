@@ -613,7 +613,7 @@ Collaborator 的外部 Executor/Orchestrator Python 会直接 import 到运行�
 ## 12. 可观测性事件政策实现状态
 
 > 实现日期：2026-08-02
-> 状态：第七阶段 Workflow Atomic Transition 已进入运行链路（CURRENT）
+> 状态：第八阶段 Non-default Orchestrator Observation Coverage 已进入运行链路（CURRENT）
 
 已新增可执行的 Event Policy Registry：
 
@@ -956,12 +956,27 @@ Observation 覆盖后会自然进入原子路径。Worktree promotion 仍先于 
 第七阶段定向测试覆盖正常提交、非法 Observation 整体回滚、终态清理与完成事件原子性、
 Runner Gate/Workspace 顺序和恢复路径。
 
-### 12.10 尚未实现的边界
+### 12.10 Non-default Orchestrator Observation Coverage（第八阶段）
+
+第八阶段已把同一套 Workflow Observation 契约扩展到 Worker 实际注册的全部非默认
+Orchestrator：`round_robin_v1`、`discussion_v1` 和 `coding_agent_v1`。三者现在都会生成并
+持久化稳定的 `workflow_id`，在开始、业务阶段进入/完成、暂停、完成和崩溃恢复时返回纯
+Observation descriptor，因此自动复用第七阶段的状态—事件原子事务。
+
+这里刻意按业务阶段而非执行次数建模：Round Robin 的多轮 Bot 发言属于一个
+`round_robin` Stage；Discussion 只在 `discussion → summary` 时产生 Stage 边界；Coding
+Agent 使用单一 `implementation` Stage。轮次、参与者数量、完成来源和暂停原因进入 payload，
+既能定位执行上下文，又不会把每个 Bot 回合误报成具有业务意义的 Stage 迁移。现有旧快照在
+恢复时会补铸 `workflow_id`，随后与 `workflow_recovered` 在同一事务回写，完成兼容升级。
+
+第八阶段定向测试覆盖三种 Orchestrator 的稳定 ID、生命周期事件、Discussion 阶段切换、
+暂停原因、终态事件与恢复关联。
+
+### 12.11 尚未实现的边界
 
 第一阶段完成的是“分类、标注和 Session 生命周期接入”，以下仍属于后续工作：
 
 - Retention Policy 的定时清理和归档执行器。
-- 非默认 Orchestrator 插件的完整 Stage/Gate Observation 覆盖。
 - Memory/Skill 使用证据与 Session Event 的双向关联。
 - Request 级 Model Usage Ledger。
 - OpenTelemetry Exporter。

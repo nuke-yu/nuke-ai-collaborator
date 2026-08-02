@@ -10,6 +10,7 @@ spec = {"bots": [bot_dict, ...], "rounds": int}
 """
 from core.orchestration.base import Orchestrator, OrchestratorStep, WorkUnit
 import datetime
+import uuid
 
 
 class RoundRobinOrchestrator(Orchestrator):
@@ -34,7 +35,24 @@ class RoundRobinOrchestrator(Orchestrator):
         bot = s["bots"][s["idx"]]
         return OrchestratorStep(next_units=[self._unit(group_id, bot)], broadcast_state=True)
 
-    def _advance_cursor(self, group_id: int) -> OrchestratorStep:
+    @staticmethod
+    def _observation(state: dict, event_type: str, *, actor: dict | None = None,
+                     payload: dict | None = None) -> dict:
+        return {
+            "event_type": event_type,
+            "workflow_id": state["workflow_id"],
+            "stage_id": "round_robin",
+            "stage_index": 0,
+            "actor": actor or {"type": "system"},
+            "payload": {
+                "stage_name": "Round Robin",
+                "round": state.get("round", 1),
+                "rounds": state.get("rounds", 1),
+                **(payload or {}),
+            },
+        }
+
+    def _advance_cursor(self, group_id: int, *, actor: dict | None = None) -> OrchestratorStep:
         """游标前移一位，跑满 rounds 轮则结束。"""
         s = self._state.get(group_id)
         if not s:
@@ -44,8 +62,20 @@ class RoundRobinOrchestrator(Orchestrator):
             s["idx"] = 0
             s["round"] += 1
         if s["round"] > s["rounds"]:
+            observations = [
+                self._observation(
+                    s, "stage_completed",
+                    actor=actor,
+                    payload={"completion_source": "all_rounds_completed"},
+                ),
+                self._observation(
+                    s, "workflow_completed",
+                    actor=actor,
+                    payload={"completed_rounds": s["rounds"]},
+                ),
+            ]
             self.end(group_id)
-            return OrchestratorStep(done=True)
+            return OrchestratorStep(done=True, observations=observations)
         return self._step_to_current(group_id)
 
     # ── 契约：决策 ──────────────────────────────────────────────────────────────
@@ -56,6 +86,7 @@ class RoundRobinOrchestrator(Orchestrator):
         if not bots or rounds < 1:
             return OrchestratorStep()
         self._state[group_id] = {
+            "workflow_id": f"wf_{uuid.uuid4().hex}",
             "bots": bots,
             "rounds": rounds,
             "idx": 0,
@@ -63,7 +94,17 @@ class RoundRobinOrchestrator(Orchestrator):
             "started": False,
             "start_time": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
         }
-        return OrchestratorStep(broadcast_state=True)
+        state = self._state[group_id]
+        return OrchestratorStep(
+            broadcast_state=True,
+            observations=[
+                self._observation(
+                    state, "workflow_started",
+                    payload={"participant_count": len(bots)},
+                ),
+                self._observation(state, "stage_entered"),
+            ],
+        )
 
     async def dispatch(self, group_id: int, message: dict, members: list, recent: list) -> OrchestratorStep:
         """User's first message triggers the first round; subsequent messages are ignored."""
@@ -84,10 +125,10 @@ class RoundRobinOrchestrator(Orchestrator):
         s = self._state.get(group_id)
         if not s or s["bots"][s["idx"]].get("id") != bot_id:
             return OrchestratorStep()
-        return self._advance_cursor(group_id)
+        return self._advance_cursor(group_id, actor={"type": "bot", "id": bot_id})
 
     def advance(self, group_id: int, prev_output: str = "") -> OrchestratorStep:
-        return self._advance_cursor(group_id)
+        return self._advance_cursor(group_id, actor={"type": "human"})
 
     def end(self, group_id: int) -> None:
         self._state.pop(group_id, None)
@@ -97,6 +138,10 @@ class RoundRobinOrchestrator(Orchestrator):
     def current_bot(self, group_id: int) -> dict | None:
         s = self._state.get(group_id)
         return s["bots"][s["idx"]] if s else None
+
+    def current_workflow_id(self, group_id: int) -> str | None:
+        s = self._state.get(group_id)
+        return str(s.get("workflow_id")) if s else None
 
     def system_suffix(self, group_id: int) -> str:
         s = self._state.get(group_id)
@@ -111,6 +156,7 @@ class RoundRobinOrchestrator(Orchestrator):
             return {"active": False}
         return {
             "active": True, "type": "round_robin",
+            "workflow_id": s.get("workflow_id"),
             "round": s["round"], "rounds": s["rounds"], "current": s["idx"],
             "bots": [{"id": b.get("id"), "name": b.get("name", "")} for b in s["bots"]],
         }
@@ -121,7 +167,17 @@ class RoundRobinOrchestrator(Orchestrator):
         return self._state.get(group_id)
 
     def restore(self, group_id: int, state: dict) -> None:
+        state.setdefault("workflow_id", f"wf_{uuid.uuid4().hex}")
         self._state[group_id] = state
+
+    def recovery_observation(self, group_id: int) -> dict | None:
+        s = self._state.get(group_id)
+        if not s:
+            return None
+        return self._observation(
+            s, "workflow_recovered",
+            payload={"started": bool(s.get("started"))},
+        )
 
     def resume_units(self, group_id: int) -> list:
         s = self._state.get(group_id)

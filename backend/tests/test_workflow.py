@@ -1025,6 +1025,13 @@ class TestRoundRobinOrchestrator(unittest.TestCase):
         self.assertTrue(step.broadcast_state)
         self.assertEqual(len(step.next_units), 0)
         self.assertEqual(self.orch.current_bot(10)["id"], 1)
+        workflow_id = self.orch.current_workflow_id(10)
+        self.assertTrue(workflow_id.startswith("wf_"))
+        self.assertEqual(
+            [event["event_type"] for event in step.observations],
+            ["workflow_started", "stage_entered"],
+        )
+        self.assertTrue(all(event["workflow_id"] == workflow_id for event in step.observations))
 
     def test_observe_rotates_and_wraps_rounds(self):
         self.orch.begin(11, {"bots": self.bots, "rounds": 2})
@@ -1042,6 +1049,11 @@ class TestRoundRobinOrchestrator(unittest.TestCase):
         self.orch.observe(12, 1, "a")
         step = self.orch.observe(12, 2, "b")                   # 1 轮跑满
         self.assertTrue(step.done)
+        self.assertEqual(
+            [event["event_type"] for event in step.observations],
+            ["stage_completed", "workflow_completed"],
+        )
+        self.assertEqual(step.observations[0]["actor"], {"type": "bot", "id": 2})
         self.assertEqual(self.orch.snapshot(12), {"active": False})  # end 已清状态
 
     def test_observe_ignores_wrong_bot(self):
@@ -1061,6 +1073,10 @@ class TestRoundRobinOrchestrator(unittest.TestCase):
         fresh = type(self.orch)()
         fresh.restore(14, blob)
         self.assertEqual(fresh.current_bot(14)["id"], 2)
+        self.assertEqual(fresh.current_workflow_id(14), blob["workflow_id"])
+        recovered = fresh.recovery_observation(14)
+        self.assertEqual(recovered["event_type"], "workflow_recovered")
+        self.assertEqual(recovered["workflow_id"], blob["workflow_id"])
         units = fresh.resume_units(14)
         self.assertEqual([u.bot["id"] for u in units], [2])
 
@@ -1079,6 +1095,12 @@ class TestDiscussionOrchestrator(unittest.TestCase):
         self.assertTrue(step.broadcast_state)
         self.assertEqual(len(step.next_units), 0)
         self.assertEqual(self.orch.current_bot(20)["id"], 1)
+        workflow_id = self.orch.current_workflow_id(20)
+        self.assertTrue(workflow_id.startswith("wf_"))
+        self.assertEqual(
+            [event["event_type"] for event in step.observations],
+            ["workflow_started", "stage_entered"],
+        )
 
     def test_observe_rotates_discussion_and_transitions_to_summary(self):
         self.orch.begin(21, {"bots": self.bots, "rounds": 1, "summarizer_id": 2})
@@ -1091,6 +1113,12 @@ class TestDiscussionOrchestrator(unittest.TestCase):
         # Round 1 - Bot B speaks -> Round 2 starts, round > rounds, transitions to summary phase
         s2 = self.orch.observe(21, 2, "r1 b")
         self.assertEqual(s2.next_units[0].bot["id"], 2)       # Summary targeted at Bot B (summarizer)
+        self.assertEqual(
+            [event["event_type"] for event in s2.observations],
+            ["stage_completed", "stage_entered"],
+        )
+        self.assertEqual(s2.observations[0]["stage_id"], "discussion")
+        self.assertEqual(s2.observations[1]["stage_id"], "summary")
         
         snap = self.orch.snapshot(21)
         self.assertEqual(snap["phase"], "summary")
@@ -1099,6 +1127,10 @@ class TestDiscussionOrchestrator(unittest.TestCase):
         # Summary finishes
         s3 = self.orch.observe(21, 2, "final summary")
         self.assertTrue(s3.done)
+        self.assertEqual(
+            [event["event_type"] for event in s3.observations],
+            ["stage_completed", "workflow_completed"],
+        )
 
     def test_serialize_restore_resume(self):
         self.orch.begin(22, {"bots": self.bots, "rounds": 2, "summarizer_id": 1})
@@ -1110,6 +1142,8 @@ class TestDiscussionOrchestrator(unittest.TestCase):
         fresh.restore(22, blob)
         
         self.assertEqual(fresh.current_bot(22)["id"], 2)
+        self.assertEqual(fresh.current_workflow_id(22), blob["workflow_id"])
+        self.assertEqual(fresh.recovery_observation(22)["event_type"], "workflow_recovered")
         units = fresh.resume_units(22)
         self.assertEqual([u.bot["id"] for u in units], [2])
 

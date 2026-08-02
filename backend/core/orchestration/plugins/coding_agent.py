@@ -17,6 +17,7 @@ Unlike the BA→Dev→QA pipeline:
 """
 import datetime
 import logging
+import uuid
 
 from core.orchestration.base import Orchestrator, OrchestratorStep, WorkUnit
 from core.orchestration.signals import (
@@ -43,6 +44,22 @@ class CodingAgentOrchestrator(Orchestrator):
         # group_id → state dict
         self._state: dict[int, dict] = {}
 
+    @staticmethod
+    def _observation(state: dict, event_type: str, *, actor: dict | None = None,
+                     payload: dict | None = None) -> dict:
+        return {
+            "event_type": event_type,
+            "workflow_id": state["workflow_id"],
+            "stage_id": "implementation",
+            "stage_index": 0,
+            "actor": actor or {"type": "system"},
+            "payload": {
+                "stage_name": "Implementation",
+                "task_id": state.get("task_id", ""),
+                **(payload or {}),
+            },
+        }
+
     def begin(self, group_id: int, spec) -> OrchestratorStep:
         """Start the coding agent workflow.
 
@@ -65,6 +82,7 @@ class CodingAgentOrchestrator(Orchestrator):
         require_pull_request = bool(spec.get("require_pull_request", False))
 
         self._state[group_id] = {
+            "workflow_id": f"wf_{uuid.uuid4().hex}",
             "bot": bot,
             "started": True,
             "done": False,
@@ -88,6 +106,13 @@ class CodingAgentOrchestrator(Orchestrator):
                 is_workflow=True,
                 tag={"ticket_id": task_id} if task_id else {},
             )],
+            observations=[
+                self._observation(
+                    self._state[group_id], "workflow_started",
+                    payload={"participant_count": 1},
+                ),
+                self._observation(self._state[group_id], "stage_entered"),
+            ],
         )
 
     async def dispatch(self, group_id: int, message: dict, members: list, recent: list) -> OrchestratorStep:
@@ -140,6 +165,11 @@ class CodingAgentOrchestrator(Orchestrator):
                     details=reason,
                 ),
                 workspace_action=None,
+                observations=[self._observation(
+                    s, "workflow_paused",
+                    actor={"type": "bot", "id": bot_id},
+                    payload={"reason": "execution_failed", "details": reason},
+                )],
             )
 
         # Check for completion signals (using unified WorkflowSignal schema)
@@ -170,13 +200,30 @@ class CodingAgentOrchestrator(Orchestrator):
                             # Keep the task worktree intact so retry/recovery can
                             # create the missing PR without losing implementation.
                             workspace_action=None,
+                            observations=[self._observation(
+                                s, "workflow_paused",
+                                actor={"type": "bot", "id": bot_id},
+                                payload={"reason": "pull_request_missing"},
+                            )],
                         )
                     s["done"] = True
+                    observations = [
+                        self._observation(
+                            s, "stage_completed",
+                            actor={"type": "bot", "id": bot_id},
+                            payload={"completion_source": "signal_stage_done"},
+                        ),
+                        self._observation(
+                            s, "workflow_completed",
+                            actor={"type": "bot", "id": bot_id},
+                        ),
+                    ]
                     self.end(group_id)
                     return OrchestratorStep(
                         done=True,
                         broadcast_state=True,
                         workspace_action="promote",  # Success: merge changes
+                        observations=observations,
                     )
                 if is_signal_rework(sig):
                     log.info("coding_agent_v1: group %d reported rework needed", group_id)
@@ -192,6 +239,11 @@ class CodingAgentOrchestrator(Orchestrator):
                             details=reason,
                         ),
                         workspace_action="discard",  # Failure: discard changes
+                        observations=[self._observation(
+                            s, "workflow_paused",
+                            actor={"type": "bot", "id": bot_id},
+                            payload={"reason": "rework_requested"},
+                        )],
                     )
 
         # No completion signal — this is an incomplete run
@@ -211,6 +263,11 @@ class CodingAgentOrchestrator(Orchestrator):
             # Preserve partial implementation for retry/recovery. A missing
             # control signal is a protocol failure, not proof the code is useless.
             workspace_action=None,
+            observations=[self._observation(
+                s, "workflow_paused",
+                actor={"type": "bot", "id": bot_id},
+                payload={"reason": "completion_signal_missing"},
+            )],
         )
 
     def end(self, group_id: int) -> None:
@@ -222,6 +279,10 @@ class CodingAgentOrchestrator(Orchestrator):
         s = self._state.get(group_id)
         return s["bot"] if s else None
 
+    def current_workflow_id(self, group_id: int) -> str | None:
+        s = self._state.get(group_id)
+        return str(s.get("workflow_id")) if s else None
+
     def system_suffix(self, group_id: int) -> str:
         return ""
 
@@ -231,6 +292,7 @@ class CodingAgentOrchestrator(Orchestrator):
             return {"active": False}
         return {
             "active": not s.get("done", False),
+            "workflow_id": s.get("workflow_id"),
             "type": "coding_agent",
             "bot": {"id": s["bot"].get("id"), "name": s["bot"].get("name", "")},
             "done": s.get("done", False),
@@ -242,7 +304,17 @@ class CodingAgentOrchestrator(Orchestrator):
         return self._state.get(group_id)
 
     def restore(self, group_id: int, state: dict) -> None:
+        state.setdefault("workflow_id", f"wf_{uuid.uuid4().hex}")
         self._state[group_id] = state
+
+    def recovery_observation(self, group_id: int) -> dict | None:
+        s = self._state.get(group_id)
+        if not s:
+            return None
+        return self._observation(
+            s, "workflow_recovered",
+            payload={"started": bool(s.get("started"))},
+        )
 
     def resume_units(self, group_id: int) -> list:
         s = self._state.get(group_id)

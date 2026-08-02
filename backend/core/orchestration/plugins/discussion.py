@@ -42,15 +42,43 @@ class DiscussionOrchestrator(Orchestrator):
             bot = s["bots"][s["idx"]]
         return OrchestratorStep(next_units=[self._unit(group_id, bot)], broadcast_state=True)
 
-    def _advance_cursor(self, group_id: int) -> OrchestratorStep:
+    @staticmethod
+    def _observation(state: dict, event_type: str, *, phase: str | None = None,
+                     actor: dict | None = None, payload: dict | None = None) -> dict:
+        selected_phase = phase or state.get("phase", "discussion")
+        return {
+            "event_type": event_type,
+            "workflow_id": state["workflow_id"],
+            "stage_id": selected_phase,
+            "stage_index": 0 if selected_phase == "discussion" else 1,
+            "actor": actor or {"type": "system"},
+            "payload": {
+                "stage_name": "Discussion" if selected_phase == "discussion" else "Summary & Pros/Cons",
+                "round": state.get("round", 1),
+                "rounds": state.get("rounds", 1),
+                **(payload or {}),
+            },
+        }
+
+    def _advance_cursor(self, group_id: int, *, actor: dict | None = None) -> OrchestratorStep:
         s = self._state.get(group_id)
         if not s:
             return OrchestratorStep()
 
         if s["phase"] == "summary":
             # Summarizer bot finished speaking, end the workflow
+            observations = [
+                self._observation(
+                    s, "stage_completed", phase="summary",
+                    actor=actor,
+                    payload={"completion_source": "summary_completed"},
+                ),
+                self._observation(
+                    s, "workflow_completed", phase="summary", actor=actor,
+                ),
+            ]
             self.end(group_id)
-            return OrchestratorStep(done=True)
+            return OrchestratorStep(done=True, observations=observations)
 
         # Discussion phase: advance turn cursor to the next bot
         s["idx"] += 1
@@ -61,6 +89,18 @@ class DiscussionOrchestrator(Orchestrator):
         if s["round"] > s["rounds"]:
             # Transition to the summary phase
             s["phase"] = "summary"
+            step = self._step_to_current(group_id)
+            step.observations = [
+                self._observation(
+                    s, "stage_completed", phase="discussion",
+                    actor=actor,
+                    payload={"completion_source": "all_rounds_completed"},
+                ),
+                self._observation(
+                    s, "stage_entered", phase="summary", actor=actor,
+                ),
+            ]
+            return step
 
         return self._step_to_current(group_id)
 
@@ -85,6 +125,7 @@ class DiscussionOrchestrator(Orchestrator):
             return OrchestratorStep()
 
         self._state[group_id] = {
+            "workflow_id": f"wf_{uuid.uuid4().hex}",
             "bots": bots,
             "rounds": rounds,
             "idx": 0,
@@ -95,7 +136,17 @@ class DiscussionOrchestrator(Orchestrator):
             "start_time": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
         }
         # Do NOT dispatch here — wait for user's first message (the topic)
-        return OrchestratorStep(broadcast_state=True)
+        state = self._state[group_id]
+        return OrchestratorStep(
+            broadcast_state=True,
+            observations=[
+                self._observation(
+                    state, "workflow_started",
+                    payload={"participant_count": len(bots)},
+                ),
+                self._observation(state, "stage_entered"),
+            ],
+        )
 
     async def dispatch(self, group_id: int, message: dict, members: list, recent: list) -> OrchestratorStep:
         """User's first message after start becomes the discussion topic trigger."""
@@ -126,10 +177,10 @@ class DiscussionOrchestrator(Orchestrator):
         if not current_active_bot or current_active_bot.get("id") != bot_id:
             return OrchestratorStep()
 
-        return self._advance_cursor(group_id)
+        return self._advance_cursor(group_id, actor={"type": "bot", "id": bot_id})
 
     def advance(self, group_id: int, prev_output: str = "") -> OrchestratorStep:
-        return self._advance_cursor(group_id)
+        return self._advance_cursor(group_id, actor={"type": "human"})
 
     def end(self, group_id: int) -> None:
         self._state.pop(group_id, None)
@@ -148,6 +199,10 @@ class DiscussionOrchestrator(Orchestrator):
         """当前讨论 topic 的作用域键；topic 尚未给出（或无讨论）时为 None。"""
         s = self._state.get(group_id)
         return s.get("thread_id") if s else None
+
+    def current_workflow_id(self, group_id: int) -> str | None:
+        s = self._state.get(group_id)
+        return str(s.get("workflow_id")) if s else None
 
     def system_suffix(self, group_id: int) -> str:
         s = self._state.get(group_id)
@@ -214,6 +269,7 @@ class DiscussionOrchestrator(Orchestrator):
         current = 0 if state["phase"] == "discussion" else 1
         return {
             "active": True,
+            "workflow_id": state.get("workflow_id"),
             "type": "discussion",
             "stages": stages,
             "current": current,
@@ -231,7 +287,17 @@ class DiscussionOrchestrator(Orchestrator):
         return self._state.get(group_id)
 
     def restore(self, group_id: int, state: dict) -> None:
+        state.setdefault("workflow_id", f"wf_{uuid.uuid4().hex}")
         self._state[group_id] = state
+
+    def recovery_observation(self, group_id: int) -> dict | None:
+        s = self._state.get(group_id)
+        if not s:
+            return None
+        return self._observation(
+            s, "workflow_recovered",
+            payload={"started": bool(s.get("started"))},
+        )
 
     def resume_units(self, group_id: int) -> list:
         s = self._state.get(group_id)
