@@ -28,6 +28,7 @@ from db.migrations import (
     migration_030,
     migration_031,
     migration_043,
+    migration_055,
     run_migrations,
 )
 from db.schema import init_db
@@ -745,6 +746,28 @@ class TestMigration043(MigrationTestCase):
 
             cur = await conn.execute("SELECT COUNT(*) FROM group_memberships")
             self.assertEqual((await cur.fetchone())[0], 0)
+
+
+class TestMigration055(MigrationTestCase):
+    async def test_creates_workflow_observation_store_idempotently(self):
+        async with self._connect() as conn:
+            await conn.execute(
+                "CREATE TABLE workflow_state (group_id INTEGER PRIMARY KEY)"
+            )
+
+            await migration_055(conn)
+            await migration_055(conn)
+
+            self.assertTrue(await _has_table(conn, "workflow_observations"))
+            columns = await _table_columns(conn, "workflow_observations")
+            self.assertIn("observation_id", columns)
+            self.assertIn("gate_instance_id", columns)
+            self.assertIn("envelope_json", columns)
+
+    async def test_skips_central_database_without_workflow_state(self):
+        async with self._connect() as conn:
+            await migration_055(conn)
+            self.assertFalse(await _has_table(conn, "workflow_observations"))
 
 
 if __name__ == "__main__":

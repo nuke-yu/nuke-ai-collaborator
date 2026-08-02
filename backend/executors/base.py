@@ -160,6 +160,7 @@ class ExecutionResult:
     full_text: str
     msg_id: int | None
     signals: list[dict] = field(default_factory=list)
+    session_id: str | None = None
 
 
 class ToolProvider(ABC):

@@ -148,6 +148,66 @@ _EVENT_POLICIES: dict[str, EventPolicy] = {
         RetentionPolicy.GROUP_LIFETIME, PayloadPolicy.SUMMARY,
         True, False, "terminates a recoverable execution successfully",
     ),
+    "workflow_started": _policy(
+        (EventClass.TIMELINE,), (EffectClass.LIFECYCLE, EffectClass.CONTROL_FLOW),
+        RetentionPolicy.GROUP_LIFETIME, PayloadPolicy.SUMMARY,
+        True, False, "starts a durable multi-agent workflow",
+    ),
+    "stage_entered": _policy(
+        (EventClass.TIMELINE,), (EffectClass.CONTROL_FLOW,),
+        RetentionPolicy.GROUP_LIFETIME, PayloadPolicy.SUMMARY,
+        True, False, "assigns responsibility for the active workflow stage",
+    ),
+    "stage_completed": _policy(
+        (EventClass.TIMELINE, EventClass.METRIC),
+        (EffectClass.CONTROL_FLOW, EffectClass.VERIFICATION),
+        RetentionPolicy.GROUP_LIFETIME, PayloadPolicy.SUMMARY,
+        True, False, "records accepted stage completion evidence",
+    ),
+    "gate_requested": _policy(
+        (EventClass.AUDIT, EventClass.TIMELINE), (EffectClass.AUTHORIZATION,),
+        RetentionPolicy.SECURITY_AUDIT, PayloadPolicy.SUMMARY,
+        True, False, "workflow progression is suspended for human authorization",
+    ),
+    "gate_approved": _policy(
+        (EventClass.AUDIT, EventClass.TIMELINE),
+        (EffectClass.AUTHORIZATION, EffectClass.CONTROL_FLOW),
+        RetentionPolicy.SECURITY_AUDIT, PayloadPolicy.SUMMARY,
+        True, False, "human authorization changes workflow control flow",
+    ),
+    "gate_revision_requested": _policy(
+        (EventClass.AUDIT, EventClass.TIMELINE),
+        (EffectClass.AUTHORIZATION, EffectClass.CONTROL_FLOW),
+        RetentionPolicy.SECURITY_AUDIT, PayloadPolicy.SUMMARY,
+        True, False, "human review rejects the current output and requests revision",
+    ),
+    "stage_rework_started": _policy(
+        (EventClass.AUDIT, EventClass.TIMELINE),
+        (EffectClass.RECOVERY, EffectClass.CONTROL_FLOW),
+        RetentionPolicy.GROUP_LIFETIME, PayloadPolicy.SUMMARY,
+        True, False, "rewinds responsibility to an earlier workflow stage",
+    ),
+    "workflow_paused": _policy(
+        (EventClass.AUDIT, EventClass.TIMELINE), (EffectClass.CONTROL_FLOW,),
+        RetentionPolicy.GROUP_LIFETIME, PayloadPolicy.SUMMARY,
+        True, False, "suspends autonomous workflow progression",
+    ),
+    "workflow_completed": _policy(
+        (EventClass.TIMELINE, EventClass.METRIC), (EffectClass.LIFECYCLE,),
+        RetentionPolicy.GROUP_LIFETIME, PayloadPolicy.SUMMARY,
+        True, False, "terminates a workflow successfully",
+    ),
+    "workflow_failed": _policy(
+        (EventClass.AUDIT, EventClass.TIMELINE, EventClass.METRIC),
+        (EffectClass.LIFECYCLE,),
+        RetentionPolicy.GROUP_LIFETIME, PayloadPolicy.SUMMARY,
+        True, False, "terminates a workflow unsuccessfully",
+    ),
+    "workflow_recovered": _policy(
+        (EventClass.AUDIT, EventClass.TIMELINE), (EffectClass.RECOVERY,),
+        RetentionPolicy.GROUP_LIFETIME, PayloadPolicy.SUMMARY,
+        True, False, "restores a durable workflow after process interruption",
+    ),
 }
 
 

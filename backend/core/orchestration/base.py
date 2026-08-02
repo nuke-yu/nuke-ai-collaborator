@@ -45,6 +45,8 @@ class OrchestratorStep:
     workspace_action: str | None = None                 # P0-3: Worktree action after task completion:
                                                         # "promote" (merge changes), "discard" (delete),
                                                         # "retain" (keep for inspection), or None (no action)
+    observations: list[dict] = field(default_factory=list)  # Pure transition descriptors;
+                                                            # runner persists canonical envelopes.
 
 
 class Orchestrator(ABC):
@@ -109,6 +111,14 @@ class Orchestrator(ABC):
     def current_thread_id(self, group_id: int) -> str | None:
         """当前讨论 topic 的作用域键（无 topic 语义的编排器恒为 None）。
         记忆按此键作用域读写摘要：None → 自由聊天，不强制注入历史摘要。"""
+        return None
+
+    def current_workflow_id(self, group_id: int) -> str | None:
+        """Stable ID for one workflow instance, if the orchestrator supports it."""
+        return None
+
+    def recovery_observation(self, group_id: int) -> dict | None:
+        """Descriptor emitted after restoring a durable workflow snapshot."""
         return None
 
     def is_awaiting_confirm(self, group_id: int) -> bool:

@@ -44,6 +44,7 @@ async def _post_confirm_gate(group_id: int, gate: dict) -> None:
     bot_id = gate.get("bot_id") or 0
     label = gate.get("label", "请确认")
     meta = {"kind": "confirm_gate", "gate_id": gate.get("gate_id"),
+            "gate_instance_id": gate.get("gate_instance_id"),
             "stage_name": gate.get("stage_name", ""), "status": "pending"}
     async with write_connect() as db:
         mid = await save_message(db, group_id, bot_id, label, meta=meta)
@@ -84,6 +85,15 @@ async def mark_gate_confirmed(group_id: int, gate_id: str) -> None:
 
 
 _WORKFLOW_UPDATE_FIELDS = {f.name for f in dataclasses.fields(WorkflowUpdate)}
+
+
+def _attach_session_to_observations(step, result) -> None:
+    """Correlate workflow transitions to an executor session when supported."""
+    session_id = getattr(result, "session_id", None)
+    if not session_id:
+        return
+    for descriptor in (getattr(step, "observations", None) or []):
+        descriptor.setdefault("session_id", session_id)
 
 
 async def _publish_workflow_state(group_id: int, orch) -> None:
@@ -142,6 +152,15 @@ async def apply_step(
     if step.done:
         await bus.publish(WorkflowUpdate(group_id=group_id, active=False, done=True))
         await workflow_store.clear_state(group_id)
+
+    observations = getattr(step, "observations", None) or []
+    if observations:
+        from observability.workflow import record_workflow_observations
+        await record_workflow_observations(
+            group_id,
+            getattr(orch, "orchestrator_id", "workflow_v1"),
+            observations,
+        )
     
     # Decoupled Event Trigger: Publish WorkflowPaused event when workflow gets gated or finishes
     if step.confirm_gate or step.done:
@@ -300,6 +319,7 @@ async def _run_unit_body(group_id: int, unit, orch) -> None:
         )
     except TypeError:
         step = orch.observe(group_id, unit.bot["id"], result.full_text or "")
+    _attach_session_to_observations(step, result)
     await apply_step(
         group_id,
         orch,
@@ -329,6 +349,17 @@ async def resume_workflows(group_id: int | None = None) -> None:
             continue
         # Route subsequent live observe (check_and_advance) to the right orchestrator.
         wf.bind(group_id, orchestrator_id)
+        # Persist IDs added while upgrading legacy snapshots before any resumed
+        # execution can produce a transition, then record the recovery boundary.
+        restored = orch.serialize(group_id)
+        if restored is not None:
+            await workflow_store.save_state(group_id, orchestrator_id, restored)
+        recovery = orch.recovery_observation(group_id)
+        if recovery:
+            from observability.workflow import record_workflow_observations
+            await record_workflow_observations(
+                group_id, orchestrator_id, [recovery]
+            )
         await _publish_workflow_state(group_id, orch)
         for unit in orch.resume_units(group_id):
             if unit.executor_id == "tool_loop_v1":

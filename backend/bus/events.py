@@ -260,10 +260,13 @@ class ReactObservation:
 class WorkflowUpdate:
     group_id: int
     active:   bool
+    workflow_id: str | None = None
     stages:   list | None = None
     current:  int | None  = None
+    stage_id: str | None = None
     done:     bool        = False
     awaiting_confirm: str | None = None   # gate_id 时表示该群正挂在人确认门上
+    gate_instance_id: str | None = None
 
 
 @event("workflow_paused", critical=True)

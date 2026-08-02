@@ -613,7 +613,7 @@ Collaborator 的外部 Executor/Orchestrator Python 会直接 import 到运行�
 ## 12. 可观测性事件政策实现状态
 
 > 实现日期：2026-08-02
-> 状态：第二阶段权限审计接入已进入运行链路（CURRENT）
+> 状态：第三阶段 Workflow Observation 已进入运行链路（CURRENT）
 
 已新增可执行的 Event Policy Registry：
 
@@ -756,13 +756,76 @@ EffectClass
 
 事件记录采用 fail-open observability：Event Recorder 故障会记录服务端异常，但不会改变权限引擎已经依据安全规则做出的允许或拒绝结果。这里的 fail-open 仅指“可观测性写入失败不改变授权语义”，不是授权检查本身 fail-open。
 
-### 12.6 尚未实现的边界
+### 12.6 Workflow Observation Envelope（第三阶段）
+
+默认编排器 `workflow_v1` 已将 Stage / Gate 状态转换接入独立的 group-local `workflow_observations` 存储。这些事件不绑定某一个 Bot Session，因为一个 Workflow 可能跨越多个 Bot、多个 Session 和多次人工门禁。
+
+统一 Envelope 包含：
+
+- `schema_version`
+- `event_id`
+- `occurred_at`
+- `event_type`
+- `aggregate.type = workflow`
+- `aggregate.id = workflow_id`
+- `context.group_id`
+- `context.orchestrator_id`
+- `context.workflow_id`
+- `context.stage_id` / `stage_index`
+- `context.gate_id` / `gate_instance_id`
+- `context.session_id`
+- `actor`
+- `payload`
+- `policy`
+
+关联 ID 的语义为：
+
+```text
+group_id
+└─ workflow_id                 一次完整工作流实例
+   ├─ stage_id                 逻辑阶段
+   ├─ gate_id                  前端兼容的逻辑门 ID
+   ├─ gate_instance_id         每次真实挂门的唯一实例
+   └─ session_id               引发该转换的 Bot Session（存在时）
+```
+
+`gate_id` 继续保持原有的 `{group}-{stage}` 格式，不破坏前端确认卡片协议。新增的 `gate_instance_id = gate_*` 用来区分同一阶段在修订、返工和多次进入时产生的不同门禁实例。
+
+当前已接入的事件：
+
+- `workflow_started`
+- `stage_entered`
+- `stage_completed`
+- `gate_requested`
+- `gate_approved`
+- `gate_revision_requested`
+- `stage_rework_started`
+- `workflow_paused`
+- `workflow_completed`
+- `workflow_recovered`
+
+`ExecutionResult` 现在可携带 `session_id`。Runner 在 Bot 产出导致 Stage/Gate 转换时，会把该 Session ID 写入 Envelope，因此可以从 Workflow Timeline 下钻到 Session Event，再从 Session Event 下钻到 Tool Call / Permission Decision。
+
+崩溃恢复时，存量 Workflow 若没有 `workflow_id` 或挂起门没有 `gate_instance_id`，恢复器会补齐并立即回写快照，然后产生 `workflow_recovered` 事件。
+
+Workflow Observation 复用 Event Policy Registry，不在编排器中重新定义 retention/sampling 规则。其持久化同样采用 fail-open observability：观测存储故障会记录服务端异常，但不会阻止工作流推进或改变 Gate 决策。
+
+第三阶段定向回归覆盖 Workflow 状态机、Envelope 持久化、Schema Split、DB Migration 与 Event Policy：
+
+```text
+195 passed
+3 subtests passed
+1 dependency deprecation warning
+```
+
+### 12.7 尚未实现的边界
 
 第一阶段完成的是“分类、标注和 Session 生命周期接入”，以下仍属于后续工作：
 
 - Retention Policy 的定时清理和归档执行器。
 - Payload Policy 的集中脱敏、摘要和 Artifact 引用强制执行。
-- Workflow Stage/Gate 的统一 Observation Envelope。
+- 非默认 Orchestrator 插件的完整 Stage/Gate Observation 覆盖。
+- Workflow State Snapshot 与 Observation 的同一 SQLite 事务原子提交。
 - Memory/Skill 使用证据与 Session Event 的双向关联。
 - Request 级 Model Usage Ledger。
 - Timeline API 和前端界面。

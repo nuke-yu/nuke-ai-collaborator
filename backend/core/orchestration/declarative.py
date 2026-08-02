@@ -10,6 +10,7 @@ core.orchestration.stages 里按名注册的 StageType handler 决定。
 加一个新阶段类型不需要改本文件，只需注册一个 StageType。
 """
 import logging
+import uuid
 from core.orchestration.base import Orchestrator, OrchestratorStep, WorkUnit
 from core.orchestration import locks
 from core.orchestration.stages import StageCtx, stage_handler
@@ -21,6 +22,37 @@ class DeclarativeOrchestrator(Orchestrator):
     def __init__(self) -> None:
         # group_id -> { stages: [...], current: int }
         self._state: dict[int, dict] = {}
+
+    @staticmethod
+    def _observation(
+        state: dict,
+        event_type: str,
+        *,
+        stage_index: int | None = None,
+        gate_id: str = "",
+        gate_instance_id: str = "",
+        actor: dict | None = None,
+        payload: dict | None = None,
+    ) -> dict:
+        """Create a pure transition descriptor; runner adds policy + event ID."""
+        stages = state.get("stages") or []
+        idx = state.get("current", 0) if stage_index is None else stage_index
+        stage = stages[idx] if isinstance(idx, int) and 0 <= idx < len(stages) else {}
+        descriptor = {
+            "event_type": event_type,
+            "workflow_id": state["workflow_id"],
+            "stage_id": str(stage.get("stage_id") or f"stage_{idx}"),
+            "stage_index": idx,
+            "gate_id": gate_id,
+            "gate_instance_id": gate_instance_id,
+            "actor": actor or {"type": "system"},
+            "payload": {
+                "stage_name": stage.get("name", ""),
+                "stage_type": stage.get("stage_type", "single"),
+                **(payload or {}),
+            },
+        }
+        return descriptor
 
     # ── 上下文构造 ──────────────────────────────────────────────────────────────
 
@@ -60,6 +92,10 @@ class DeclarativeOrchestrator(Orchestrator):
     def is_awaiting_confirm(self, group_id: int) -> bool:
         s = self._state.get(group_id)
         return bool(s.get("awaiting_confirm")) if s else False
+
+    def current_workflow_id(self, group_id: int) -> str | None:
+        state = self._state.get(group_id)
+        return str(state.get("workflow_id")) if state else None
 
     def system_suffix(self, group_id: int) -> str:
         ctx = self._ctx(group_id)
@@ -104,9 +140,16 @@ class DeclarativeOrchestrator(Orchestrator):
         pending = state.get("awaiting_confirm")
         return {
             "active": True,
+            "workflow_id": state.get("workflow_id"),
             "stages": [stage_handler(st).snapshot(st) for st in stages],
             "current": state.get("current", 0),
             "awaiting_confirm": pending["gate_id"] if pending else None,
+            "gate_instance_id": pending.get("gate_instance_id") if pending else None,
+            "stage_id": (
+                str(stages[state.get("current", 0)].get("stage_id")
+                    or f"stage_{state.get('current', 0)}")
+                if stages and 0 <= state.get("current", 0) < len(stages) else None
+            ),
         }
 
     # ── 持久化 / 崩溃恢复 ───────────────────────────────────────────────────────
@@ -115,9 +158,26 @@ class DeclarativeOrchestrator(Orchestrator):
         return self._state.get(group_id)
 
     def restore(self, group_id: int, state: dict) -> None:
+        state.setdefault("workflow_id", f"wf_{uuid.uuid4().hex}")
+        pending = state.get("awaiting_confirm")
+        if pending:
+            pending.setdefault("gate_instance_id", f"gate_{uuid.uuid4().hex}")
         for st in state.get("stages", []):
             stage_handler(st).rehydrate(st)
         self._state[group_id] = state
+
+    def recovery_observation(self, group_id: int) -> dict | None:
+        state = self._state.get(group_id)
+        if not state:
+            return None
+        pending = state.get("awaiting_confirm") or {}
+        return self._observation(
+            state,
+            "workflow_recovered",
+            gate_id=pending.get("gate_id", ""),
+            gate_instance_id=pending.get("gate_instance_id", ""),
+            payload={"awaiting_confirm": bool(pending)},
+        )
 
     def resume_units(self, group_id: int) -> list:
         ctx = self._ctx(group_id)
@@ -129,8 +189,22 @@ class DeclarativeOrchestrator(Orchestrator):
 
     def begin(self, group_id: int, spec) -> OrchestratorStep:
         ordered_stages = spec["stages"] if isinstance(spec, dict) else spec
-        self._state[group_id] = {"stages": ordered_stages, "current": 0}
-        return OrchestratorStep(broadcast_state=True)
+        state = {
+            "workflow_id": f"wf_{uuid.uuid4().hex}",
+            "stages": ordered_stages,
+            "current": 0,
+        }
+        self._state[group_id] = state
+        return OrchestratorStep(
+            broadcast_state=True,
+            observations=[
+                self._observation(
+                    state, "workflow_started",
+                    payload={"stage_count": len(ordered_stages)},
+                ),
+                self._observation(state, "stage_entered"),
+            ],
+        )
 
     def end(self, group_id: int) -> None:
         self._state.pop(group_id, None)
@@ -150,8 +224,17 @@ class DeclarativeOrchestrator(Orchestrator):
                         return stage_handler(ctx.stage).observe(ctx, bot_id, f"\n{done_kw}\n")
                     
                     if ctx.stage.get("gate"):
-                        return self._raise_gate(ctx, sig["arguments"].get("reason", response))
-                    return self._advance(ctx.group_id, prev_output=sig["arguments"].get("reason", response))
+                        return self._raise_gate(
+                            ctx,
+                            sig["arguments"].get("reason", response),
+                            actor={"type": "bot", "id": bot_id},
+                        )
+                    return self._advance(
+                        ctx.group_id,
+                        prev_output=sig["arguments"].get("reason", response),
+                        completion_source="signal_stage_done",
+                        actor={"type": "bot", "id": bot_id},
+                    )
                 
                 elif sig["name"] == "signal_rework":
                     target_stage_name = sig["arguments"].get("target_stage")
@@ -172,7 +255,12 @@ class DeclarativeOrchestrator(Orchestrator):
                         target_idx = ctx.stage.get("rework_to")
                         
                     if target_idx is not None:
-                        return self._raise_gate(ctx, reason, rework_to=target_idx)
+                        return self._raise_gate(
+                            ctx,
+                            reason,
+                            rework_to=target_idx,
+                            actor={"type": "bot", "id": bot_id},
+                        )
 
         # Compatibility for direct, pre-signal Python callers.  Runtime always
         # supplies a list (including []), enforced by ExecutionResult + runner.
@@ -190,34 +278,72 @@ class DeclarativeOrchestrator(Orchestrator):
                     "or signal_rework"
                 ),
             ),
+            observations=[self._observation(
+                self._state[group_id],
+                "workflow_paused",
+                actor={"type": "bot", "id": bot_id},
+                payload={"reason": "completion_signal_missing"},
+            )],
         )
 
     def advance(self, group_id: int, prev_output: str = "") -> OrchestratorStep:
         """手动推进（API /next 用）。"""
-        return self._advance(group_id, prev_output)
+        return self._advance(
+            group_id,
+            prev_output,
+            completion_source="manual_advance",
+            actor={"type": "human"},
+        )
 
     # ── 内部 ──────────────────────────────────────────────────────────────────
 
-    def _advance(self, group_id: int, prev_output: str = "") -> OrchestratorStep:
+    def _advance(
+        self,
+        group_id: int,
+        prev_output: str = "",
+        *,
+        completion_source: str = "manual_advance",
+        actor: dict | None = None,
+    ) -> OrchestratorStep:
         s = self._state.get(group_id)
         if not s:
             return OrchestratorStep()
+        completed_idx = s["current"]
+        observations = [self._observation(
+            s,
+            "stage_completed",
+            stage_index=completed_idx,
+            actor=actor,
+            payload={"completion_source": completion_source},
+        )]
         s.pop("awaiting_confirm", None)  # 推进即离开当前门
         s["current"] += 1
         if s["current"] >= len(s["stages"]):
+            observations.append(self._observation(
+                s,
+                "workflow_completed",
+                stage_index=completed_idx,
+                actor=actor,
+                payload={"stage_count": len(s["stages"])},
+            ))
             self.end(group_id)
-            return OrchestratorStep(done=True)
+            return OrchestratorStep(done=True, observations=observations)
         ctx = self._ctx(group_id)
-        return stage_handler(ctx.stage).enter(ctx, prev_output)
+        step = stage_handler(ctx.stage).enter(ctx, prev_output)
+        step.observations = observations + [
+            self._observation(s, "stage_entered", actor=actor)
+        ] + step.observations
+        return step
 
     def _rewind(self, group_id: int, target_idx: int, prev_output: str = "",
-                note: str = "") -> OrchestratorStep:
+                note: str = "", actor: dict | None = None) -> OrchestratorStep:
         """返工：把当前阶段回退到 target_idx（如 QA → Dev）并重新进入。给被回退到的
         bot 的 trigger 前面加一句【返工】说明，让它知道是按上游报告修复而非从头开发。
         note 非空 → 人在「修改」门补充了意见，一并拼进 trigger。"""
         s = self._state.get(group_id)
         if not s:
             return OrchestratorStep()
+        from_idx = s["current"]
         s.pop("awaiting_confirm", None)
         s["current"] = target_idx
         ctx = self._ctx(group_id)
@@ -231,9 +357,26 @@ class DeclarativeOrchestrator(Orchestrator):
                 "完成后重新自测，并按原要求在最后一行输出完成标记。"
                 + note_block + "\n\n" + u.trigger_msg
             )
+        step.observations = [self._observation(
+            s,
+            "stage_rework_started",
+            stage_index=target_idx,
+            actor=actor,
+            payload={
+                "from_stage_index": from_idx,
+                "target_stage_index": target_idx,
+                "note_present": bool(note and note.strip()),
+            },
+        )] + step.observations
         return step
 
-    def _redo(self, group_id: int, prev_output: str = "", note: str = "") -> OrchestratorStep:
+    def _redo(
+        self,
+        group_id: int,
+        prev_output: str = "",
+        note: str = "",
+        actor: dict | None = None,
+    ) -> OrchestratorStep:
         """完成门上人点了「修改」：不推进，原地重做当前阶段，把人工意见拼进 trigger，
         让在岗 bot 按反馈修订自己的产出（而非交棒下一阶段）。"""
         s = self._state.get(group_id)
@@ -251,9 +394,26 @@ class DeclarativeOrchestrator(Orchestrator):
                 "完成后按原要求在最后一行输出完成标记。"
                 + note_block + "\n\n" + u.trigger_msg
             )
+        step.observations = [self._observation(
+            s,
+            "stage_rework_started",
+            actor=actor,
+            payload={
+                "from_stage_index": s["current"],
+                "target_stage_index": s["current"],
+                "revision": True,
+                "note_present": bool(note and note.strip()),
+            },
+        )] + step.observations
         return step
 
-    def _raise_gate(self, ctx: StageCtx, response: str, rework_to: int | None = None) -> OrchestratorStep:
+    def _raise_gate(
+        self,
+        ctx: StageCtx,
+        response: str,
+        rework_to: int | None = None,
+        actor: dict | None = None,
+    ) -> OrchestratorStep:
         """bot 在带 gate 的阶段说出了完成/返工关键词：挂起本阶段、广播一张确认卡片，
         等用户 confirm() 才真正推进。response 暂存为下一步的 prev_output。
 
@@ -265,7 +425,13 @@ class DeclarativeOrchestrator(Orchestrator):
         stage = ctx.stage
         is_rework = rework_to is not None
         gate_id = f"{ctx.group_id}-{s['current']}" + ("-rework" if is_rework else "")
-        s["awaiting_confirm"] = {"gate_id": gate_id, "prev_output": response, "rework_to": rework_to}
+        gate_instance_id = f"gate_{uuid.uuid4().hex}"
+        s["awaiting_confirm"] = {
+            "gate_id": gate_id,
+            "gate_instance_id": gate_instance_id,
+            "prev_output": response,
+            "rework_to": rework_to,
+        }
         if is_rework:
             label = stage.get("fail_gate_label") or f"「{stage.get('name', '')}」未通过，是否打回上一步修复？"
         else:
@@ -274,10 +440,22 @@ class DeclarativeOrchestrator(Orchestrator):
             broadcast_state=True,
             confirm_gate={
                 "gate_id": gate_id,
+                "gate_instance_id": gate_instance_id,
                 "label": label,
                 "bot_id": stage.get("id"),
                 "stage_name": stage.get("name", ""),
             },
+            observations=[self._observation(
+                s,
+                "gate_requested",
+                gate_id=gate_id,
+                gate_instance_id=gate_instance_id,
+                actor=actor,
+                payload={
+                    "gate_kind": "rework" if is_rework else "completion",
+                    "rework_to": rework_to,
+                },
+            )],
         )
 
     def confirm(self, group_id: int, gate_id: str | None = None,
@@ -293,13 +471,41 @@ class DeclarativeOrchestrator(Orchestrator):
             return OrchestratorStep()
         prev_output = pending.get("prev_output", "")
         rework_to = pending.get("rework_to")
+        gate_event = self._observation(
+            s,
+            "gate_revision_requested" if revise else "gate_approved",
+            gate_id=pending["gate_id"],
+            gate_instance_id=pending.get("gate_instance_id", ""),
+            actor={"type": "human"},
+            payload={
+                "gate_kind": "rework" if rework_to is not None else "completion",
+                "note_present": bool(note and note.strip()),
+            },
+        )
         # rework 门：确认或修改都打回目标阶段；修改额外把人工意见拼进 trigger。
         if rework_to is not None:
-            return self._rewind(group_id, rework_to, prev_output=prev_output, note=note)
+            step = self._rewind(
+                group_id, rework_to, prev_output=prev_output, note=note,
+                actor={"type": "human"},
+            )
+            step.observations.insert(0, gate_event)
+            return step
         # 完成门：「修改」不推进，原地重做当前阶段并附人工意见；「确认」正常推进。
         if revise:
-            return self._redo(group_id, prev_output=prev_output, note=note)
-        return self._advance(group_id, prev_output=prev_output)
+            step = self._redo(
+                group_id, prev_output=prev_output, note=note,
+                actor={"type": "human"},
+            )
+            step.observations.insert(0, gate_event)
+            return step
+        step = self._advance(
+            group_id,
+            prev_output=prev_output,
+            completion_source="gate_approved",
+            actor={"type": "human"},
+        )
+        step.observations.insert(0, gate_event)
+        return step
 
     async def dispatch(self, group_id: int, message: dict, members: list, recent: list) -> OrchestratorStep:
         """DFT-071: Unified dispatch entry point for both workflow and free-form chat."""

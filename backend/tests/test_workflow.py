@@ -46,6 +46,20 @@ class TestOrchestratorFlow(unittest.TestCase):
         self.assertEqual(len(step.next_units), 1)
         self.assertEqual(step.next_units[0].bot["id"], 2)
 
+    def test_begin_emits_stable_workflow_and_stage_observations(self):
+        step = self.orch.begin(1, [self._single(1, "A"), self._single(2, "B")])
+
+        workflow_id = self.orch.get(1)["workflow_id"]
+        self.assertTrue(workflow_id.startswith("wf_"))
+        self.assertEqual(
+            [item["event_type"] for item in step.observations],
+            ["workflow_started", "stage_entered"],
+        )
+        self.assertTrue(all(
+            item["workflow_id"] == workflow_id for item in step.observations
+        ))
+        self.assertEqual(step.observations[1]["stage_id"], "stage_0")
+
     def test_runtime_empty_signal_list_never_accepts_text_sentinel(self):
         self.orch.begin(1, [self._gated(1, "A"), self._single(2, "B")])
 
@@ -94,6 +108,27 @@ class TestOrchestratorFlow(unittest.TestCase):
         # 仍停在第 0 阶段，快照标记挂起
         self.assertEqual(self.orch.get(1)["current"], 0)
         self.assertEqual(self.orch.snapshot(1)["awaiting_confirm"], "1-0")
+
+    def test_gate_request_and_approval_share_unique_instance_id(self):
+        self.orch.begin(1, [self._gated(1, "BA"), self._single(2, "Dev")])
+        raised = self.orch.observe(1, 1, "完毕")
+        gate = raised.confirm_gate
+
+        self.assertTrue(gate["gate_instance_id"].startswith("gate_"))
+        self.assertEqual(
+            raised.observations[0]["gate_instance_id"],
+            gate["gate_instance_id"],
+        )
+        advanced = self.orch.confirm(1, gate["gate_id"])
+        self.assertEqual(advanced.observations[0]["event_type"], "gate_approved")
+        self.assertEqual(
+            advanced.observations[0]["gate_instance_id"],
+            gate["gate_instance_id"],
+        )
+        self.assertEqual(
+            [item["event_type"] for item in advanced.observations[1:]],
+            ["stage_completed", "stage_entered"],
+        )
 
     def test_confirm_advances_past_gate(self):
         self.orch.begin(1, [self._gated(1, "BA"), self._single(2, "Dev")])
@@ -587,11 +622,13 @@ class TestWorkflowStoreDB(unittest.IsolatedAsyncioTestCase):
         async with database.connect() as conn:
             await conn.execute("INSERT OR IGNORE INTO groups (id, name) VALUES (?, ?)", (901, "wf-test"))
             await conn.execute("DELETE FROM workflow_state WHERE group_id = ?", (901,))
+            await conn.execute("DELETE FROM workflow_observations WHERE group_id = ?", (901,))
             await conn.commit()
 
     async def asyncTearDown(self):
         async with database.connect() as conn:
             await conn.execute("DELETE FROM workflow_state WHERE group_id = ?", (901,))
+            await conn.execute("DELETE FROM workflow_observations WHERE group_id = ?", (901,))
             await conn.commit()
 
     async def test_save_load_clear_roundtrip(self):
@@ -613,6 +650,41 @@ class TestWorkflowStoreDB(unittest.IsolatedAsyncioTestCase):
         await self.store.clear_state(901)
         rows = await self.store.load_all_active()
         self.assertEqual([r for r in rows if r["group_id"] == 901], [])
+
+    async def test_workflow_observation_envelope_roundtrip(self):
+        from observability.workflow import (
+            get_workflow_observations,
+            record_workflow_observations,
+        )
+
+        descriptors = [{
+            "event_type": "gate_requested",
+            "workflow_id": "wf_test_901",
+            "stage_id": "stage_2",
+            "stage_index": 2,
+            "gate_id": "901-2",
+            "gate_instance_id": "gate_test_1",
+            "session_id": "session_test_1",
+            "actor": {"type": "bot", "id": 17},
+            "payload": {"gate_kind": "completion"},
+        }]
+        saved = await record_workflow_observations(
+            901, "workflow_v1", descriptors
+        )
+        rows = await get_workflow_observations(
+            901, workflow_id="wf_test_901"
+        )
+
+        self.assertEqual(rows, saved)
+        envelope = rows[0]
+        self.assertTrue(envelope["event_id"].startswith("evt_"))
+        self.assertEqual(envelope["aggregate"], {
+            "type": "workflow", "id": "wf_test_901",
+        })
+        self.assertEqual(envelope["context"]["gate_instance_id"], "gate_test_1")
+        self.assertEqual(envelope["context"]["session_id"], "session_test_1")
+        self.assertEqual(envelope["policy"]["effects"], ["authorization"])
+        self.assertFalse(envelope["policy"]["allow_sampling"])
 
 
 class TestRecoveryWorkflowCoordination(unittest.IsolatedAsyncioTestCase):
@@ -1066,6 +1138,23 @@ class TestConfirmGateGlue(unittest.IsolatedAsyncioTestCase):
             await wf.confirm(group_id=1, gate_id="1-0")
 
         mark.assert_awaited_once_with(1, "1-0")
+
+    def test_workflow_observation_inherits_executor_session_id(self):
+        from core.runner import _attach_session_to_observations
+        from core.orchestration.base import OrchestratorStep
+        from executors.base import ExecutionResult
+
+        step = OrchestratorStep(observations=[{
+            "event_type": "stage_completed",
+            "workflow_id": "wf_1",
+        }])
+        result = ExecutionResult(
+            full_text="done", msg_id=1, session_id="session_1"
+        )
+
+        _attach_session_to_observations(step, result)
+
+        self.assertEqual(step.observations[0]["session_id"], "session_1")
 
 
 class TestStartRdPipeline(unittest.IsolatedAsyncioTestCase):

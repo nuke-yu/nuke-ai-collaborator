@@ -118,6 +118,16 @@ class TestEventPolicy(unittest.TestCase):
         self.assertIn(EventClass.TIMELINE, policy.event_classes)
         self.assertFalse(policy.allow_sampling)
 
+    def test_workflow_gate_and_stage_events_are_business_significant(self):
+        gate = classify_event("gate_requested", {})
+        stage = classify_event("stage_completed", {})
+        self.assertEqual(gate.effect_classes, (EffectClass.AUTHORIZATION,))
+        self.assertEqual(gate.retention, RetentionPolicy.SECURITY_AUDIT)
+        self.assertFalse(gate.allow_sampling)
+        self.assertIn(EffectClass.VERIFICATION, stage.effect_classes)
+        self.assertIn(EventClass.METRIC, stage.event_classes)
+        self.assertTrue(stage.business_significant)
+
     def test_enrichment_is_non_mutating_and_idempotent(self):
         original = {"tool_name": "write_file", "arguments": {"path": "x.py"}}
         enriched = enrich_event_payload("tool_call", original, trace_id="trace-1")

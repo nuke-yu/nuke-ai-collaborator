@@ -500,7 +500,7 @@ class ToolLoopRunner:
                 "type": "stream_error", "temp_id": self.temp_id, "message": str(e),
                 "session_id": self.session_id,
             })
-            return ExecutionResult(full_text="", msg_id=None)
+            return ExecutionResult(full_text="", msg_id=None, session_id=self.session_id)
 
         return await self._cleanup_and_finalize()
 

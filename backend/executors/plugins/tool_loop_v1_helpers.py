@@ -796,7 +796,10 @@ async def cleanup_and_finalize(runner) -> ExecutionResult:
         runner.messages.append({"role": "assistant", "content": runner.full_text})
         await runner.ctx.interaction.save_session_snapshot(runner.session_id, runner.messages)
         await runner.ctx.interaction.update_session_status(runner.session_id, "completed")
-        return ExecutionResult(full_text=runner.full_text, msg_id=None, signals=signals)
+        return ExecutionResult(
+            full_text=runner.full_text, msg_id=None, signals=signals,
+            session_id=runner.session_id,
+        )
 
     attached = runner.execution_ctx.get("attached_file")
     save_kwargs = {
@@ -960,7 +963,10 @@ async def cleanup_and_finalize(runner) -> ExecutionResult:
             model=runner.model_name,
             executor=runner.executor.executor_id,
         ))
-    return ExecutionResult(full_text=runner.full_text, msg_id=msg_id, signals=signals)
+    return ExecutionResult(
+        full_text=runner.full_text, msg_id=msg_id, signals=signals,
+        session_id=runner.session_id,
+    )
 
 
 async def execute_parallel_tools(runner, calls, iteration=None) -> None:
