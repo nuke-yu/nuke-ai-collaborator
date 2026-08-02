@@ -6,6 +6,7 @@ from .metadata import skill_path, parse_skill_meta, strip_context_window_suffix
 from .discovery import list_skills, list_skills_all, available_skills_for_bot
 from .processor import process_skill_content
 from workspace import layout
+from memory.application.references import file_skill_ref
 
 # Budget for always-on (常驻) skill bodies injected into every system prompt.
 # Without a cap, many/large always-skills silently balloon the prompt.
@@ -62,11 +63,22 @@ async def load_always_skills(bot_id: int, group_id: int | None = None,
         if not (path and kind == "md" and path.exists()):
             continue
         try:
-            body = _fold_home(path.read_text(encoding="utf-8"))
+            raw_body = path.read_text(encoding="utf-8")
+            body = _fold_home(raw_body)
         except Exception:
             continue
 
         name = skill["name"]
+        evidence = {
+            "kind": "skill",
+            "ref": file_skill_ref(skill.get("layer", "personal"), name, raw_body),
+            "relation": "injected",
+            "metadata": {
+                "name": name,
+                "layer": skill.get("layer", "personal") or "personal",
+                "degraded": False,
+            },
+        }
         remaining = _MAX_ALWAYS_TOTAL_CHARS - total
         if len(body) > _MAX_SKILL_BODY_CHARS or len(body) > remaining:
             desc = skill.get("description", "")
@@ -75,11 +87,15 @@ async def load_always_skills(bot_id: int, group_id: int | None = None,
                 f"此处仅注入摘要；需要全文请调用 run_skill(name=\"{name}\")）"
                 + (f"\n摘要：{desc}" if desc else "")
             )
-            result.append({"name": name, "content": summary, "degraded": True})
+            evidence["metadata"]["degraded"] = True
+            result.append({
+                "name": name, "content": summary, "degraded": True,
+                "evidence_link": evidence,
+            })
             total += len(summary)
             continue
 
-        result.append({"name": name, "content": body})
+        result.append({"name": name, "content": body, "evidence_link": evidence})
         total += len(body)
     return result
 
@@ -109,10 +125,24 @@ async def run_skill(bot_id: int, name: str, args: str = "", ctx: dict | None = N
     if not path or not path.exists():
         return f"[未找到技能 '{name}']"
 
+    raw = path.read_text(encoding="utf-8")
+    if ctx is not None:
+        ctx["skill_evidence_link"] = {
+            "kind": "skill",
+            "ref": file_skill_ref(
+                skill_entry.get("layer", "personal"), name, raw
+            ),
+            "relation": "invoked",
+            "metadata": {
+                "name": name,
+                "layer": skill_entry.get("layer", "personal") or "personal",
+                "context": skill_entry.get("context", "inline"),
+            },
+        }
+
     if kind == "py":
         return f"[{name}.py] 请使用 run_shell 执行此脚本：{path}"
 
-    raw = path.read_text(encoding="utf-8")
     skill_dir = path.parent
 
     # Env-aware templating is opt-in (`template: true`); only then do we expose a

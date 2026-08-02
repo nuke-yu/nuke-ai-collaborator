@@ -11,6 +11,7 @@ from runtime import supervisor as sup_mod
 from runtime import ipc
 from observability.timeline import get_group_timeline
 from observability.payload_policy import PayloadArtifactError, get_artifact
+from sessions.evidence import get_evidence_events
 
 router = APIRouter()
 
@@ -60,6 +61,22 @@ async def get_timeline(
             )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/api/groups/{group_id}/observability/evidence/events")
+async def get_linked_evidence_events(
+    group_id: int,
+    evidence_ref: str = Query(..., min_length=1, max_length=512),
+    limit: int = Query(100, ge=1, le=500),
+    _user: dict = Depends(require_group_member_ready),
+):
+    """Reverse lookup from one Memory/Skill reference to its Session Events."""
+    try:
+        with db.bind_db(group_db_path(group_id)):
+            items = await get_evidence_events(group_id, evidence_ref, limit=limit)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"evidence_ref": evidence_ref, "items": items}
 
 
 @router.get("/api/groups/{group_id}/workflow", dependencies=[Depends(ensure_group_ready)])

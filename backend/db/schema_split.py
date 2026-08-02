@@ -35,7 +35,7 @@ CENTRAL_TABLES = frozenset({
 })
 GROUP_TABLES = frozenset({
     "messages", "role_summaries", "message_embeddings", "member_read",
-    "message_reactions", "pinned_messages", "agent_sessions", "session_events",
+    "message_reactions", "pinned_messages", "agent_sessions", "session_events", "session_evidence_links",
     "workflow_state", "workflow_observations", "observation_artifacts", "group_locks", "tickets", "reflection_state", "tool_events",
     "agent_runs", "run_decisions",
 }) | MEMORY_GROUP_TABLES
@@ -309,6 +309,21 @@ _GROUP_DDL = [
         FOREIGN KEY (session_id) REFERENCES agent_sessions(id)
     )""",
     "CREATE INDEX IF NOT EXISTS idx_session_events ON session_events(session_id, id)",
+    """CREATE TABLE IF NOT EXISTS session_evidence_links (
+        id               INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_event_id INTEGER NOT NULL,
+        session_id       TEXT NOT NULL,
+        evidence_kind    TEXT NOT NULL CHECK(evidence_kind IN ('memory','skill')),
+        evidence_ref     TEXT NOT NULL,
+        relation         TEXT NOT NULL CHECK(relation IN ('injected','cited','invoked')),
+        metadata_json    TEXT NOT NULL DEFAULT '{}',
+        created_at       TEXT DEFAULT (datetime('now')),
+        UNIQUE(session_event_id,evidence_kind,evidence_ref,relation),
+        FOREIGN KEY (session_event_id) REFERENCES session_events(id) ON DELETE CASCADE,
+        FOREIGN KEY (session_id) REFERENCES agent_sessions(id) ON DELETE CASCADE
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_session_evidence_ref ON session_evidence_links(evidence_ref,id)",
+    "CREATE INDEX IF NOT EXISTS idx_session_evidence_session ON session_evidence_links(session_id,session_event_id)",
     # workflow_state: DROP FK group_id->groups (cross-domain).
     """CREATE TABLE IF NOT EXISTS workflow_state (
         group_id        INTEGER PRIMARY KEY,

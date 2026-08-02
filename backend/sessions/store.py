@@ -26,10 +26,12 @@ async def create_session(
     return session_id
 
 
-async def append_event(session_id: str, event_type: str, payload: dict) -> None:
+async def append_event(session_id: str, event_type: str, payload: dict) -> int:
     from observability import persist_artifact, prepare_payload
     from runtime.tracing import get_trace_id
+    from sessions.evidence import insert_event_evidence_links, normalize_evidence_links
 
+    evidence_links = normalize_evidence_links(payload.get("evidence_links"))
     prepared = prepare_payload(
         event_type, payload, trace_id=get_trace_id()
     )
@@ -41,15 +43,23 @@ async def append_event(session_id: str, event_type: str, payload: dict) -> None:
         if session_row is None:
             raise ValueError(f"Session not found: {session_id}")
         await persist_artifact(conn, int(session_row[0]), prepared.artifact)
-        await conn.execute(
+        async with conn.execute(
             "INSERT INTO session_events (session_id, event_type, payload) VALUES (?, ?, ?)",
             (session_id, event_type, json.dumps(prepared.payload, ensure_ascii=False)),
+        ) as cursor:
+            session_event_id = int(cursor.lastrowid)
+        await insert_event_evidence_links(
+            conn,
+            session_event_id=session_event_id,
+            session_id=session_id,
+            links=evidence_links,
         )
         await conn.execute(
             "UPDATE agent_sessions SET updated_at = datetime('now') WHERE id = ?",
             (session_id,),
         )
         await conn.commit()
+    return session_event_id
 
 
 async def get_session(session_id: str) -> dict | None:
@@ -117,6 +127,24 @@ async def get_events(session_id: str, *, hydrate_artifacts: bool = False) -> lis
             (session_id,),
         ) as cur:
             rows = await cur.fetchall()
+        event_ids = [int(row["id"]) for row in rows]
+        links_by_event: dict[int, list[dict]] = {event_id: [] for event_id in event_ids}
+        if event_ids:
+            placeholders = ",".join("?" for _ in event_ids)
+            async with conn.execute(
+                f"""SELECT session_event_id,evidence_kind,evidence_ref,relation,metadata_json
+                      FROM session_evidence_links
+                     WHERE session_event_id IN ({placeholders}) ORDER BY id""",
+                event_ids,
+            ) as link_cur:
+                link_rows = await link_cur.fetchall()
+            for link in link_rows:
+                links_by_event[int(link[0])].append({
+                    "kind": link[1],
+                    "ref": link[2],
+                    "relation": link[3],
+                    "metadata": json.loads(link[4] or "{}"),
+                })
         result = []
         for r in rows:
             d = dict(r)
@@ -125,6 +153,7 @@ async def get_events(session_id: str, *, hydrate_artifacts: bool = False) -> lis
             if hydrate_artifacts:
                 payload = await hydrate_payload(conn, group_id, payload)
             d["payload"] = payload
+            d["evidence_links"] = links_by_event.get(int(d["id"]), [])
             result.append(d)
     return result
 

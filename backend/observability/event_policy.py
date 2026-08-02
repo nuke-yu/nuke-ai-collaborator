@@ -118,6 +118,12 @@ _EVENT_POLICIES: dict[str, EventPolicy] = {
         RetentionPolicy.GROUP_LIFETIME, PayloadPolicy.SUMMARY,
         True, False, "joins delegated work back into the parent execution",
     ),
+    "context_evidence_injected": _policy(
+        (EventClass.TIMELINE,), (EffectClass.LEARNING,),
+        RetentionPolicy.EXECUTION_90_DAYS, PayloadPolicy.SUMMARY,
+        True, False,
+        "records Memory/Skill context available to a run without claiming causal adoption",
+    ),
     "permission_requested": _policy(
         (EventClass.AUDIT, EventClass.TIMELINE), (EffectClass.AUTHORIZATION,),
         RetentionPolicy.SECURITY_AUDIT, PayloadPolicy.REDACTED,

@@ -9,6 +9,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from memory.application.references import (
     add_tool_ref_parameter,
     experience_ref,
+    file_skill_ref,
     skill_ref,
     validate_tool_refs,
 )
@@ -25,6 +26,37 @@ class TestMemoryRefs(unittest.TestCase):
         self.assertEqual(skill_ref("skill:def", 3), "skill:def@v3")
         with self.assertRaisesRegex(ValueError, "experience"):
             experience_ref('memory_ref="exp:forged"')
+        first = file_skill_ref("group", "review", "body")
+        self.assertEqual(first, file_skill_ref("group", "review", "body"))
+        self.assertNotEqual(first, file_skill_ref("group", "review", "changed"))
+
+    def test_tool_evidence_links_distinguish_memory_and_skill(self):
+        from executors.plugins.tool_loop_v1_helpers import _tool_evidence_links
+
+        links = _tool_evidence_links(
+            ["exp:abc", "skill:def@v3"],
+            {"skill_evidence_link": {
+                "kind": "skill", "ref": "skill:file:group:lint@sha256:abc",
+                "relation": "invoked", "metadata": {"name": "lint"},
+            }},
+        )
+        self.assertEqual(
+            [(link["kind"], link["relation"]) for link in links],
+            [("memory", "cited"), ("skill", "cited"), ("skill", "invoked")],
+        )
+
+    def test_context_links_mark_availability_not_causal_use(self):
+        from executors.plugins.tool_loop_v1_helpers import _context_evidence_links
+
+        links = _context_evidence_links(
+            ("exp:abc", "skill:def@v3"),
+            [{"evidence_link": {
+                "kind": "skill", "ref": "skill:file:system:base@sha256:abc",
+                "relation": "injected", "metadata": {"name": "base"},
+            }}],
+        )
+        self.assertTrue(all(link["relation"] == "injected" for link in links))
+        self.assertEqual([link["kind"] for link in links], ["memory", "skill", "skill"])
 
     def test_tool_ref_allowlist_rejects_unknown_and_malformed_values(self):
         self.assertEqual(

@@ -613,7 +613,7 @@ Collaborator 的外部 Executor/Orchestrator Python 会直接 import 到运行�
 ## 12. 可观测性事件政策实现状态
 
 > 实现日期：2026-08-02
-> 状态：第八阶段 Non-default Orchestrator Observation Coverage 已进入运行链路（CURRENT）
+> 状态：第九阶段 Memory/Skill Evidence Links 已进入运行链路（CURRENT）
 
 已新增可执行的 Event Policy Registry：
 
@@ -972,12 +972,35 @@ Agent 使用单一 `implementation` Stage。轮次、参与者数量、完成来
 第八阶段定向测试覆盖三种 Orchestrator 的稳定 ID、生命周期事件、Discussion 阶段切换、
 暂停原因、终态事件与恢复关联。
 
-### 12.11 尚未实现的边界
+### 12.11 Memory/Skill Evidence Links（第九阶段）
+
+第九阶段新增 group-local `session_evidence_links`，把 Session Event 与稳定的 Memory/Skill
+reference 建成可查询的多对多关系。链接同时保留 `session_event_id → evidence` 正向遍历和
+`evidence_ref → Session Events` 反向遍历；反查 API 为
+`GET /api/groups/{group_id}/observability/evidence/events?evidence_ref=...`，沿用 Group 成员
+鉴权和 Group DB 绑定，不允许跨 Group 查询。
+
+证据关系明确区分三种语义：
+
+- `injected`：Memory/Skill 被放进模型上下文，只证明“模型可见”，不证明模型采用。
+- `cited`：模型在通过 allowlist 校验的工具参数中引用了该 reference，可作为因果使用证据。
+- `invoked`：`run_skill` 实际解析并装载了对应 Skill。
+
+Learned Experience/Skill 继续使用 canonical `exp:*` / `skill:*@vN`；文件型 Skill 使用不暴露
+本地路径的 content-addressed reference：`skill:file:{layer}:{name}@sha256:{digest}`。常驻
+Skill 在注入时记录，动态 Skill 在实际调用后记录；工具执行的 Memory refs 只有通过现有
+allowlist 验证后才落 `cited` 链接。Session Event payload 即使因 Payload Policy 被投影成
+Artifact，独立关联表和 Timeline 顶层 `evidence_links` 仍可直接查询，不依赖全文水合。
+
+链接与 Session Event 在同一个 Writer 事务提交，非法 kind/ref/relation 会在事件写入前失败，
+不会形成孤立事件。第九阶段定向测试覆盖迁移与 Schema Split、正反遍历、事务回滚、Timeline
+投影、Memory/Skill 类型识别、文件 Skill 稳定哈希和 Event Policy。
+
+### 12.12 尚未实现的边界
 
 第一阶段完成的是“分类、标注和 Session 生命周期接入”，以下仍属于后续工作：
 
 - Retention Policy 的定时清理和归档执行器。
-- Memory/Skill 使用证据与 Session Event 的双向关联。
 - Request 级 Model Usage Ledger。
 - OpenTelemetry Exporter。
 - Prometheus 对 Event Policy 的低基数聚合。

@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import copy
+import hashlib
+from urllib.parse import quote
 from collections.abc import Iterable
 
 
@@ -15,6 +17,18 @@ def skill_ref(skill_id: str, version: int) -> str:
     if not skill_id.startswith("skill:") or version < 1:
         raise ValueError("invalid skill reference")
     return f"{skill_id}@v{version}"
+
+
+def file_skill_ref(layer: str, name: str, content: str) -> str:
+    """Content-address one executable file skill without exposing its path."""
+    raw_layer = str(layer or "personal").strip().lower()
+    raw_name = str(name or "").strip().lower()
+    if not raw_layer or not raw_name:
+        raise ValueError("invalid file skill identity")
+    safe_layer = quote(raw_layer, safe="-_")
+    safe_name = quote(raw_name, safe="-_")
+    digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
+    return f"skill:file:{safe_layer}:{safe_name}@sha256:{digest}"
 
 
 def validate_tool_refs(

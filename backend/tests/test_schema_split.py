@@ -73,6 +73,10 @@ class TestSchemaSplit(unittest.IsolatedAsyncioTestCase):
         # group-internal FKs survive
         self.assertEqual(await _fk_targets(self.group, "message_reactions"), {"messages"})
         self.assertEqual(await _fk_targets(self.group, "session_events"), {"agent_sessions"})
+        self.assertEqual(
+            await _fk_targets(self.group, "session_evidence_links"),
+            {"agent_sessions", "session_events"},
+        )
         # central-internal FK survives
         self.assertEqual(await _fk_targets(self.central, "permission_rules"), {"members"})
 

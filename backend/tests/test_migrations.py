@@ -30,6 +30,7 @@ from db.migrations import (
     migration_043,
     migration_055,
     migration_056,
+    migration_057,
     run_migrations,
 )
 from db.schema import init_db
@@ -786,6 +787,24 @@ class TestMigration056(MigrationTestCase):
         async with self._connect() as conn:
             await migration_056(conn)
             self.assertFalse(await _has_table(conn, "observation_artifacts"))
+
+
+class TestMigration057(MigrationTestCase):
+    async def test_creates_session_evidence_links_idempotently(self):
+        async with self._connect() as conn:
+            await conn.execute("CREATE TABLE session_events (id INTEGER PRIMARY KEY)")
+            await migration_057(conn)
+            await migration_057(conn)
+            self.assertTrue(await _has_table(conn, "session_evidence_links"))
+            columns = await _table_columns(conn, "session_evidence_links")
+            self.assertIn("session_event_id", columns)
+            self.assertIn("evidence_ref", columns)
+            self.assertIn("relation", columns)
+
+    async def test_skips_central_database_without_session_events(self):
+        async with self._connect() as conn:
+            await migration_057(conn)
+            self.assertFalse(await _has_table(conn, "session_evidence_links"))
 
 
 if __name__ == "__main__":

@@ -162,6 +162,58 @@ class TestSessionStore(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(tool_observability["effects"], ["read"])
         self.assertFalse(tool_observability["business_significant"])
 
+    async def test_evidence_links_support_forward_and_reverse_traversal(self):
+        from sessions.store import create_session, append_event, get_events
+        from sessions.evidence import get_event_evidence, get_evidence_events
+
+        await create_session(
+            session_id="evidence-session", bot_id=1, group_id=1,
+            config={"system_prompt": ""}, user_message="use memory",
+        )
+        event_id = await append_event("evidence-session", "tool_result", {
+            "tool_call_id": "call-1",
+            "tool_name": "edit_file",
+            "result": "ok",
+            "evidence_links": [
+                {
+                    "kind": "memory", "ref": "exp:checkout-fix",
+                    "relation": "cited", "metadata": {"source": "tool_argument"},
+                },
+                {
+                    "kind": "skill", "ref": "skill:review@v2",
+                    "relation": "invoked", "metadata": {"name": "review"},
+                },
+            ],
+        })
+
+        events = await get_events("evidence-session")
+        self.assertEqual(events[0]["id"], event_id)
+        self.assertEqual(
+            [link["ref"] for link in events[0]["evidence_links"]],
+            ["exp:checkout-fix", "skill:review@v2"],
+        )
+        forward = await get_event_evidence(event_id)
+        self.assertEqual(forward[0]["metadata"], {"source": "tool_argument"})
+        reverse = await get_evidence_events(1, "exp:checkout-fix")
+        self.assertEqual(len(reverse), 1)
+        self.assertEqual(reverse[0]["session_event_id"], event_id)
+        self.assertEqual(reverse[0]["evidence"]["relation"], "cited")
+
+    async def test_invalid_evidence_link_rolls_back_event(self):
+        from sessions.store import create_session, append_event, get_events
+
+        await create_session(
+            session_id="bad-evidence", bot_id=1, group_id=1,
+            config={"system_prompt": ""}, user_message="bad",
+        )
+        with self.assertRaisesRegex(ValueError, "invalid evidence relation"):
+            await append_event("bad-evidence", "tool_result", {
+                "evidence_links": [{
+                    "kind": "memory", "ref": "exp:1", "relation": "guessed",
+                }],
+            })
+        self.assertEqual(await get_events("bad-evidence"), [])
+
     async def test_large_payload_is_projected_and_hydrated_for_recovery(self):
         from sessions.store import create_session, append_event, get_events
         await create_session(

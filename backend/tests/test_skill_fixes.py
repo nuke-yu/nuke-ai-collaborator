@@ -215,6 +215,12 @@ class TestAlwaysSkillBudget(_SkillDirFixture):
         self.assertIn("small", by_name)
         self.assertFalse(by_name["small"].get("degraded"))
         self.assertIn("short body", by_name["small"]["content"])
+        self.assertEqual(by_name["small"]["evidence_link"]["relation"], "injected")
+        self.assertTrue(
+            by_name["small"]["evidence_link"]["ref"].startswith(
+                "skill:file:system:small@sha256:"
+            )
+        )
 
     async def test_total_budget_degrades_overflow(self):
         # Three skills each ~7000 chars (< per-skill cap) but together > 24000

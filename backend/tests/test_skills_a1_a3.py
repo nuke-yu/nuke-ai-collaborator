@@ -152,6 +152,14 @@ status: active
         content = await run_skill(bot_id=1, name="build-helper", ctx=ctx)
         self.assertIn("Group build-helper body", content)
         self.assertEqual(ctx.get("skill_allowed_tools"), ["run_shell"])
+        evidence = ctx["skill_evidence_link"]
+        self.assertEqual(evidence["kind"], "skill")
+        self.assertEqual(evidence["relation"], "invoked")
+        self.assertTrue(
+            evidence["ref"].startswith(
+                "skill:file:personal:build-helper@sha256:"
+            )
+        )
 
     def test_filter_skills_by_context_b1(self):
         from skills.filter import filter_skills_by_context

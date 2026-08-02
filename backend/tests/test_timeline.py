@@ -68,6 +68,20 @@ class TestGroupTimeline(unittest.IsolatedAsyncioTestCase):
                         ),
                     ],
                 )
+                async with conn.execute(
+                    "SELECT id FROM session_events WHERE session_id='session-7' "
+                    "AND event_type='session_start'"
+                ) as cur:
+                    start_event_id = (await cur.fetchone())[0]
+                await conn.execute(
+                    """INSERT INTO session_evidence_links
+                       (session_event_id,session_id,evidence_kind,evidence_ref,relation,metadata_json)
+                       VALUES (?,?,?,?,?,?)""",
+                    (
+                        start_event_id, "session-7", "memory", "exp:timeline",
+                        "injected", '{"source":"recall"}',
+                    ),
+                )
                 envelope = {
                     "schema_version": 1,
                     "event_id": "evt_workflow_7",
@@ -121,6 +135,15 @@ class TestGroupTimeline(unittest.IsolatedAsyncioTestCase):
             event_classes=("diagnostic",),
         )
         self.assertEqual([item["event_type"] for item in diagnostic["items"]], ["tool_call"])
+
+    async def test_session_item_exposes_forward_evidence_links(self):
+        result = await self._timeline(event_types=("session_start",))
+        self.assertEqual(result["items"][0]["evidence_links"], [{
+            "kind": "memory",
+            "ref": "exp:timeline",
+            "relation": "injected",
+            "metadata": {"source": "recall"},
+        }])
 
     async def test_cursor_pagination_has_no_gaps_or_duplicates(self):
         first = await self._timeline(limit=2)

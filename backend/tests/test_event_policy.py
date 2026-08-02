@@ -97,6 +97,12 @@ class TestEventPolicy(unittest.TestCase):
         self.assertEqual(policy.event_classes, (EventClass.TIMELINE,))
         self.assertTrue(policy.business_significant)
 
+    def test_context_evidence_injection_is_timeline_without_claiming_adoption(self):
+        policy = classify_event("context_evidence_injected", {"causal_usage": False})
+        self.assertEqual(policy.effect_classes, (EffectClass.LEARNING,))
+        self.assertEqual(policy.event_classes, (EventClass.TIMELINE,))
+        self.assertEqual(policy.retention, RetentionPolicy.EXECUTION_90_DAYS)
+
     def test_unknown_event_is_sampled_diagnostic(self):
         policy = classify_event("internal_cache_tick", {})
         self.assertEqual(policy.event_classes, (EventClass.DIAGNOSTIC,))

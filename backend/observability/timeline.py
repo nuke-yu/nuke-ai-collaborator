@@ -98,9 +98,20 @@ def _session_item(row: Mapping[str, Any]) -> dict[str, Any]:
         },
         "actor": _permission_actor(payload, bot_id) if is_permission else {"type": "bot", "id": bot_id},
         "payload": payload,
+        "evidence_links": _json_array(row.get("evidence_links_json")),
         "policy": policy,
         "_cursor_key": (int(row["occurred_at"]), _SOURCE_RANK["session"], row_id),
     }
+
+
+def _json_array(raw: Any) -> list[Any]:
+    if isinstance(raw, list):
+        return raw
+    try:
+        value = json.loads(raw or "[]")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return []
+    return value if isinstance(value, list) else []
 
 
 def _workflow_item(row: Mapping[str, Any]) -> dict[str, Any]:
@@ -187,7 +198,15 @@ async def _read_chunk(
                    se.event_type, se.payload AS body_json,
                    COALESCE(CAST(strftime('%s', se.created_at) AS INTEGER) * 1000, 0) AS occurred_at,
                    se.session_id, s.bot_id, s.group_id,
-                   '' AS observation_id, '' AS workflow_id
+                   '' AS observation_id, '' AS workflow_id,
+                   COALESCE((
+                       SELECT json_group_array(json_object(
+                           'kind',sel.evidence_kind,'ref',sel.evidence_ref,
+                           'relation',sel.relation,'metadata',json(sel.metadata_json)
+                       ))
+                         FROM session_evidence_links sel
+                        WHERE sel.session_event_id=se.id
+                   ), '[]') AS evidence_links_json
               FROM session_events se
               JOIN agent_sessions s ON s.id = se.session_id
              WHERE {' AND '.join(session_where)}
@@ -195,7 +214,7 @@ async def _read_chunk(
             SELECT 'workflow' AS storage_source, 1 AS source_rank, wo.id AS row_id,
                    wo.event_type, wo.envelope_json AS body_json, wo.occurred_at,
                    wo.session_id, 0 AS bot_id, wo.group_id,
-                   wo.observation_id, wo.workflow_id
+                   wo.observation_id, wo.workflow_id, '[]' AS evidence_links_json
               FROM workflow_observations wo
              WHERE {' AND '.join(workflow_where)}
         ) timeline

@@ -66,6 +66,46 @@ def _attach_untrusted_learning_data(user_content: Any, contexts: list[str]) -> A
     return prefix + str(user_content)
 
 
+def _tool_evidence_links(memory_refs: list[str], dispatch_context: dict) -> list[dict]:
+    """Build explicit causal links after arguments have passed provenance validation."""
+    from sessions.evidence import evidence_kind
+
+    links = [
+        {
+            "kind": evidence_kind(ref),
+            "ref": ref,
+            "relation": "cited",
+            "metadata": {"source": "validated_tool_argument"},
+        }
+        for ref in memory_refs
+    ]
+    skill_link = dispatch_context.get("skill_evidence_link")
+    if isinstance(skill_link, dict):
+        links.append(skill_link)
+    return links
+
+
+def _context_evidence_links(memory_refs, always_skills: list[dict]) -> list[dict]:
+    """Describe availability separately from later causal citation/adoption."""
+    from sessions.evidence import evidence_kind
+
+    links = [
+        {
+            "kind": evidence_kind(ref),
+            "ref": ref,
+            "relation": "injected",
+            "metadata": {"source": "learned_context_recall"},
+        }
+        for ref in memory_refs
+    ]
+    links.extend(
+        skill["evidence_link"]
+        for skill in always_skills
+        if isinstance(skill.get("evidence_link"), dict)
+    )
+    return links
+
+
 def _acc_usage(target: list, result: dict) -> None:
     """Append usage from a call_ai_once result into a shared accumulator list."""
     u = result.get("usage") or {}
@@ -518,6 +558,21 @@ async def setup_session(runner) -> None:
         await runner.ctx.interaction.append_session_event(runner.session_id, "session_start", {
             "user_content": user_content if isinstance(user_content, str) else json.dumps(user_content, ensure_ascii=False),
         })
+
+    context_evidence_links = _context_evidence_links(
+        runner.injected_memory_refs, runner.always_skills
+    )
+    if context_evidence_links:
+        await runner.ctx.interaction.append_session_event(
+            runner.session_id,
+            "context_evidence_injected",
+            {
+                "evidence_links": context_evidence_links,
+                "reference_count": len(context_evidence_links),
+                "causal_usage": False,
+                "recovery_resume": _resuming,
+            },
+        )
 
     from ai.execution_runs import start_run
     try:
@@ -1021,6 +1076,7 @@ async def execute_parallel_tools(runner, calls, iteration=None) -> None:
             "result": tool_result,
             "is_error": is_error,
             "memory_refs": memory_refs,
+            "evidence_links": _tool_evidence_links(memory_refs, dispatch_context),
             "duration_ms": int(_duration * 1000),
             "_observability": classify_tool_effect(
                 call["name"], executed_arguments
@@ -1105,6 +1161,7 @@ async def execute_serial_tools(runner, calls, iteration=None) -> None:
             "result": tool_result,
             "is_error": is_error,
             "memory_refs": memory_refs,
+            "evidence_links": _tool_evidence_links(memory_refs, dispatch_context),
             "duration_ms": int(_duration * 1000),
             "_observability": classify_tool_effect(
                 call["name"], executed_arguments
