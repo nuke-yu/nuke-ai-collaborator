@@ -33,6 +33,10 @@ from .otel_exporter import (
     OtelTraceExporter,
     get_otel_exporter,
 )
+from .prometheus_exporter import (
+    LowCardinalityMetricsCollector,
+    get_prometheus_metrics,
+)
 
 __all__ = [
     "EVENT_POLICY_VERSION",
@@ -61,4 +65,6 @@ __all__ = [
     "OtelSpan",
     "OtelTraceExporter",
     "get_otel_exporter",
+    "LowCardinalityMetricsCollector",
+    "get_prometheus_metrics",
 ]

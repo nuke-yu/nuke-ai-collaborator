@@ -68,6 +68,18 @@ async def append_event(session_id: str, event_type: str, payload: dict) -> int:
             (session_id,),
         )
         await conn.commit()
+
+    # Record telemetry after successful persistence in DB
+    try:
+        from observability import classify_event, get_otel_exporter, get_prometheus_metrics
+        resolved = classify_event(event_type, prepared.payload)
+        get_otel_exporter().record_event_policy(event_type, prepared.payload, resolved, trace_id=get_trace_id())
+        duration_s = float(payload.get("duration_s") or payload.get("elapsed_s") or 0.0)
+        status_str = "error" if "error" in payload or payload.get("is_error") else "success"
+        get_prometheus_metrics().record_event_policy(event_type, resolved, duration_s=duration_s, status=status_str)
+    except Exception:
+        pass
+
     return session_event_id
 
 

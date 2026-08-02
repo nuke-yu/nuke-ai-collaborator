@@ -208,6 +208,7 @@ async def execute(name: str, arguments: dict, context: dict | None = None) -> tu
     Point 1: Accurate Error Tracking (DFT-034).
     """
     ctx = context or {}
+    t0 = time.time()
 
     # Before hooks — first block wins; skipped when condition doesn't match.
     for entry in list(_before_hooks):
@@ -269,6 +270,19 @@ async def execute(name: str, arguments: dict, context: dict | None = None) -> tu
     except Exception as e:
         tool_result = f"[执行错误] {e}"
         is_error = True
+
+    duration_s = time.time() - t0
+
+    # Record tool execution metrics & duration
+    try:
+        from observability import classify_tool_effect, get_prometheus_metrics
+        effect_policy = classify_tool_effect(name, arguments, tool_result)
+        status_str = "error" if is_error else "success"
+        get_prometheus_metrics().record_event_policy(
+            "tool_effect", effect_policy, duration_s=duration_s, status=status_str
+        )
+    except Exception:
+        pass
 
     # After hooks
     for entry in list(_after_hooks):

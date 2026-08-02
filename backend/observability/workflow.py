@@ -80,6 +80,19 @@ async def record_workflow_observations(
                 db, group_id, orchestrator_id, descriptors
             )
             await db.commit()
+
+        try:
+            from .event_policy import classify_event
+            from .otel_exporter import get_otel_exporter
+            from .prometheus_exporter import get_prometheus_metrics
+            for desc in descriptors:
+                ev_type = str(desc.get("event_type") or "workflow_observation")
+                ev_payload = desc.get("payload") or {}
+                resolved = classify_event(ev_type, ev_payload)
+                get_otel_exporter().record_event_policy(ev_type, ev_payload, resolved)
+                get_prometheus_metrics().record_event_policy(ev_type, resolved, status="success")
+        except Exception:
+            pass
     except Exception:
         log.exception(
             "workflow observation persistence failed group=%s orchestrator=%s",

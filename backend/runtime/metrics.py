@@ -260,6 +260,22 @@ def render_metrics(supervisor):
     Uses a fresh registry per call so the pull-based collector reads live state
     and nothing leaks across scrapes. Returns (body_bytes, content_type).
     """
+    from observability.prometheus_exporter import get_prometheus_metrics
     registry = CollectorRegistry()
     registry.register(SupervisorCollector(supervisor))
-    return generate_latest(registry), CONTENT_TYPE_LATEST
+    base_bytes = generate_latest(registry)
+
+    local_prom = get_prometheus_metrics()
+    if supervisor is not None and hasattr(supervisor, "_worker_stats"):
+        worker_stats = dict(getattr(supervisor, "_worker_stats", {}) or {})
+        for w_payload in worker_stats.values():
+            if isinstance(w_payload, dict):
+                snapshot = w_payload.get("obs_metrics_snapshot")
+                if snapshot:
+                    local_prom.merge_snapshot(snapshot)
+
+    obs_text = local_prom.generate_exposition_text()
+
+    if obs_text:
+        return base_bytes + obs_text.encode("utf-8"), CONTENT_TYPE_LATEST
+    return base_bytes, CONTENT_TYPE_LATEST

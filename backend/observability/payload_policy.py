@@ -129,6 +129,18 @@ def prepare_payload(
         PayloadPolicy.REDACTED: REDACTED_INLINE_BYTES,
         PayloadPolicy.REFERENCE_ONLY: 0,
     }[resolved.payload_policy]
+
+    # Automatically record event to OpenTelemetry & Prometheus exporters
+    try:
+        from .otel_exporter import get_otel_exporter
+        from .prometheus_exporter import get_prometheus_metrics
+
+        get_otel_exporter().record_event_policy(event_type, sanitized, resolved, trace_id=trace_id)
+        status_str = "error" if "error" in sanitized else "success"
+        get_prometheus_metrics().record_event_policy(event_type, resolved, status=status_str)
+    except Exception:
+        pass
+
     if byte_size <= threshold:
         return PreparedPayload(payload=sanitized)
 

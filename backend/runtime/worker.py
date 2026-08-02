@@ -107,15 +107,18 @@ class Worker:
         from core import bg
         import permissions
         from runtime.lifecycle import manager as lifecycle
-        
+        from observability.prometheus_exporter import get_prometheus_metrics
+
         while True:
             try:
+                snapshot = get_prometheus_metrics().get_metrics_snapshot()
                 stats = {
                     "bg": bg.stats(),
                     "permissions": permissions.pending_stats(),
                     "lifecycle": lifecycle.stats(),
                     "sqlite_writer": db.writer_stats(),
                     "worker_id": self.worker_id,
+                    "obs_metrics_snapshot": snapshot,
                 }
                 await ipc.send_msg(self._writer, ipc.protocol.envelope(
                     ipc.protocol.STATS_REPORT, group_id=0, payload=stats

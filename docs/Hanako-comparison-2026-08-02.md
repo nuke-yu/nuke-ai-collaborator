@@ -1082,14 +1082,14 @@ COMMIT
 保护、Payload-free Receipt、Artifact/Evidence 收敛、Model Ledger 原子过期、Workflow 事件、
 dry-run、幂等重跑、Migration、Schema Split 和 Worker lease 调度。
 
-### 12.14 尚未实现的边界
+### 12.14 已完成的可观测性导出支持
 
-前十一阶段已经形成分类、持久化、关联查询、请求计量和 Retention 闭环，以下仍属于后续工作：
+前十二阶段已经形成分类、持久化、关联查询、请求计量、Retention 闭环以及导出器：
 
-- OpenTelemetry Exporter。
-- Prometheus 对 Event Policy 的低基数聚合。
+- OpenTelemetry OTLP/HTTP Trace Exporter (`backend/observability/otel_exporter.py`)。
+- Prometheus 对 Event Policy 的低基数聚合与 Worker 进程跨进程 IPC 汇总 (`backend/observability/prometheus_exporter.py`)。
 
-这些后续能力应继续使用当前 Registry，而不是在各模块重新硬编码一套“重要事件”判断。
+这些导出能力统一使用当前 Registry 规则，确保不破坏敏感数据脱敏与上下文安全边界。
 
 ## 13. 当前结论
 
