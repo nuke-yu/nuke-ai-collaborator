@@ -1,12 +1,23 @@
 import * as wsrpc from './wsrpc'
 
+export function getApiUrl(url) {
+  if (url.startsWith('http://') || url.startsWith('https://')) {
+    return url
+  }
+  if (typeof window !== 'undefined' && (window.location.protocol === 'file:' || !window.location.host)) {
+    return `http://127.0.0.1:8000${url.startsWith('/') ? url : `/${url}`}`
+  }
+  return url
+}
+
 export async function authFetch(url, options = {}) {
   const token = localStorage.getItem('token')
   const headers = { ...options.headers }
   if (token) {
     headers['Authorization'] = 'Bearer ' + token
   }
-  const res = await fetch(url, { ...options, headers })
+  const fullUrl = getApiUrl(url)
+  const res = await fetch(fullUrl, { ...options, headers })
   if (res.status === 401 && !url.includes('/api/auth/')) {
     localStorage.removeItem('token')
     throw new Error('登录凭证已失效，请重新登录')
