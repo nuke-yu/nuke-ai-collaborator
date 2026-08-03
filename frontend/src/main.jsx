@@ -11,9 +11,21 @@ import App from './App.jsx'
 // sets the header, so we only add it when it's missing.
 const _origFetch = window.fetch.bind(window)
 window.fetch = (input, init = {}) => {
-  const url = typeof input === 'string' ? input : (input && input.url) || ''
+  let url = typeof input === 'string' ? input : (input && input.url) || ''
+  
+  // Under file:// protocol in production Electron, resolve relative /api/ and /uploads/ to http://127.0.0.1:8000
+  const isFileProto = typeof window !== 'undefined' && (window.location.protocol === 'file:' || !window.location.host)
+  if (isFileProto && (url.startsWith('/api/') || url.startsWith('/uploads/'))) {
+    url = `http://127.0.0.1:8000${url}`
+    if (typeof input === 'string') {
+      input = url
+    } else if (input && typeof input === 'object') {
+      input = new Request(url, input)
+    }
+  }
+
   const token = localStorage.getItem('token')
-  const isApi = url.startsWith('/api/') || url.includes(`//${window.location.host}/api/`)
+  const isApi = url.startsWith('/api/') || url.includes('/api/')
   if (isApi && token) {
     const headers = new Headers(init.headers || (typeof input !== 'string' ? input.headers : undefined))
     if (!headers.has('Authorization')) {
