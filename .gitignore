@@ -34,7 +34,8 @@ backend/test_skills_api_ws/
 backend/.env
 backend/app_config.json
 
-# Frontend build
+# Frontend & Electron build
+dist/
 frontend/node_modules/
 frontend/dist/
 
