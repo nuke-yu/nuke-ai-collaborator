@@ -141,7 +141,7 @@ const stripSentinels = (text) =>
     ? text.replace(/[\[【]{1,2}\s*[A-Za-z_]*_DONE\s*[\]】]{1,2}/g, '').replace(/\n{3,}/g, '\n\n').trim()
     : text
 
-function MessageBubble({ msg, isTyping, currentMemberId, members = [], readMap = {}, onReply, reactions = {}, onReact, isPinned, onPin, onUnpin, highlighted = false, onConfirmGate, onReviseGate }) {
+function MessageBubble({ msg, isTyping, currentMemberId, members = [], readMap = {}, onReply, reactions = {}, onReact, isPinned, onPin, onUnpin, highlighted = false, onConfirmGate, onReviseGate, onShowSessionTimeline }) {
   const { t, i18n } = useTranslation()
   const [editing, setEditing] = useState(false)
   const [editText, setEditText] = useState(msg.content)
@@ -151,6 +151,8 @@ function MessageBubble({ msg, isTyping, currentMemberId, members = [], readMap =
   const [reviseNote, setReviseNote] = useState('')
   const editRef = useRef(null)
   const isOwn = msg.member_id === currentMemberId
+  const sender = members.find(m => m.id === msg.member_id)
+  const isBot = msg.sender_type === 'bot' || sender?.type === 'bot'
   const closeEmojiPicker = useCallback(() => setShowEmojiPicker(false), [])
 
   const mdComponents = useMemo(() => ({
@@ -475,7 +477,7 @@ function MessageBubble({ msg, isTyping, currentMemberId, members = [], readMap =
         {msg.edited && !msg.is_deleted && (
           <span className="text-xs text-gray-600 mt-0.5 block">({t(K.message.edited)})</span>
         )}
-        {(sender?.type === 'bot' || msg.session_id || msg.meta?.session_id) && onShowSessionTimeline && (
+        {(isBot || msg.session_id || msg.meta?.session_id) && onShowSessionTimeline && (
           <div className="mt-2 flex items-center gap-2">
             <button
               type="button"
