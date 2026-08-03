@@ -477,11 +477,11 @@ function MessageBubble({ msg, isTyping, currentMemberId, members = [], readMap =
         {msg.edited && !msg.is_deleted && (
           <span className="text-xs text-gray-600 mt-0.5 block">({t(K.message.edited)})</span>
         )}
-        {(isBot || msg.session_id || msg.meta?.session_id) && onShowSessionTimeline && (
+        {(msg.session_id || msg.meta?.session_id) && onShowSessionTimeline && (
           <div className="mt-2 flex items-center gap-2">
             <button
               type="button"
-              onClick={() => onShowSessionTimeline(msg.session_id || msg.meta?.session_id || `sess_${msg.id}`)}
+              onClick={() => onShowSessionTimeline(msg.session_id || msg.meta?.session_id)}
               className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium text-indigo-300 bg-indigo-500/10 border border-indigo-500/20 hover:bg-indigo-500/20 transition-colors"
               title="查看执行时间线"
             >

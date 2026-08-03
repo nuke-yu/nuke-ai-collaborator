@@ -100,7 +100,7 @@ export default function ExecutionTimelineDrawer({ sessionId, groupId, onClose })
           {error && (
             <div className="p-4 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-300 text-xs">
               <p className="font-semibold">加载失败</p>
-              <p className="mt-1">{error}</p>
+              <p className="mt-1">{error.includes('Not Found') || error.includes('404') ? '未找到当前 Session 的详细执行记录' : error}</p>
             </div>
           )}
 
