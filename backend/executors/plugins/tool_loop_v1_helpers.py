@@ -878,6 +878,7 @@ async def cleanup_and_finalize(runner) -> ExecutionResult:
             exc_info=True,
         )
     save_kwargs["meta"] = {
+        "session_id": runner.session_id,
         "memory_observation": {
             "thread_id": observation_thread_id,
             "run_id": runner.run_id,

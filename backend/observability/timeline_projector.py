@@ -163,8 +163,10 @@ async def project_session_timeline(
     session_id: str,
 ) -> ExecutionTimelineProjection:
     """Fetch raw events for a session and project into a structured ExecutionTimelineProjection."""
+    from runtime.dbpaths import group_db_path
+
     # Verify session belongs to group_id
-    async with _db.connect() as conn:
+    async with _db.connect(group_db_path(group_id)) as conn:
         async with conn.execute(
             "SELECT group_id, bot_id, status, created_at FROM agent_sessions WHERE id = ? AND group_id = ?",
             (session_id, group_id),
