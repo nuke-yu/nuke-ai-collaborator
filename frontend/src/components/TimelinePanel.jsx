@@ -138,7 +138,13 @@ export default function TimelinePanel({ groupId, onClose }) {
       setCursor(result.next_cursor || null)
       setHasMore(Boolean(result.has_more))
     } catch (requestError) {
-      setError(requestError.message || '时间线加载失败')
+      const msg = requestError.message || ''
+      if (msg.includes('Not Found') || msg.includes('404') || msg.includes('Group not found')) {
+        setItems([])
+        setError('')
+      } else {
+        setError(msg || '时间线加载失败')
+      }
     } finally {
       if (!quiet) setLoading(false)
     }
