@@ -14,8 +14,11 @@ def main():
 
     print(f"[BuildBinary] Compiling {entry_point} into standalone binary...")
 
+    venv_pyinstaller = os.path.join(backend_dir, "venv", "bin", "pyinstaller")
+    pyinstaller_cmd = venv_pyinstaller if os.path.exists(venv_pyinstaller) else "pyinstaller"
+
     cmd = [
-        "pyinstaller",
+        pyinstaller_cmd,
         "--noconfirm",
         "--onedir",
         "--name", "collaborator-backend",

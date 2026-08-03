@@ -2,9 +2,11 @@
 __pycache__/
 *.py[cod]
 *.pyo
+*.spec
 .venv/
 venv/
 env/
+backend/build/
 
 # Database & data — SQLite DBs and WAL/SHM sidecars anywhere (recreated from schema)
 *.db

@@ -12,13 +12,13 @@
     "dev:desktop": "concurrently -k \"npm run dev:frontend\" \"wait-on http://localhost:5173 && electron .\"",
     "build:frontend": "npm --prefix frontend run build",
     "build:backend": "python3 backend/build_binary.py",
-    "dist:mac": "npm run build:frontend && electron-builder --mac",
-    "dist:win": "npm run build:frontend && electron-builder --win"
+    "dist:mac": "npm run build:frontend && npx electron-builder --mac",
+    "dist:win": "npm run build:frontend && npx electron-builder --win"
   },
   "devDependencies": {
     "concurrently": "^9.1.2",
-    "electron": "^34.3.0",
-    "electron-builder": "^25.1.8",
+    "electron": "34.3.0",
+    "electron-builder": "25.1.8",
     "wait-on": "^8.0.2"
   }
 }
