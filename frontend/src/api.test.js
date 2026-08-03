@@ -5,7 +5,7 @@ describe('ackPersonalRecap (TOCTOU fix wiring)', () => {
   beforeEach(() => {
     global.localStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} }
     global.fetch = vi.fn(() =>
-      Promise.resolve({ status: 200, json: () => Promise.resolve({ ok: true }) })
+      Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ ok: true }), text: () => Promise.resolve('') })
     )
   })
   afterEach(() => {
