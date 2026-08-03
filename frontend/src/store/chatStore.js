@@ -81,6 +81,7 @@ export const useChatStore = create((set, get) => ({
             sender_name: data.sender_name,
             sender_type: data.sender_type,
             avatar_color: data.avatar_color,
+            session_id: data.session_id,
             content: '',
             streaming: true,
           },
@@ -106,7 +107,8 @@ export const useChatStore = create((set, get) => ({
                 temp_id: undefined,
                 file_url: data.file_url,
                 file_name: data.file_name,
-                file_type: data.file_type
+                file_type: data.file_type,
+                session_id: data.session_id || m.session_id,
               }
             : m
         )
