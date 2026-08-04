@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { fetchSessionTimeline } from '../api'
 
 const NODE_ICONS = {
+  thinking: '💡',
   context_injected: '🧠',
   tool_execution: '🛠️',
   permission_approved: '🔐',
@@ -11,6 +12,7 @@ const NODE_ICONS = {
 }
 
 const NODE_COLORS = {
+  thinking: 'border-purple-500/30 bg-purple-500/10 text-purple-300',
   context_injected: 'border-sky-500/30 bg-sky-500/10 text-sky-300',
   tool_execution: 'border-indigo-500/30 bg-indigo-500/10 text-indigo-300',
   permission_approved: 'border-amber-500/30 bg-amber-500/10 text-amber-300',
@@ -51,13 +53,13 @@ export default function ExecutionTimelineDrawer({ sessionId, groupId, onClose })
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-black/50 backdrop-blur-xs transition-opacity animate-fade-in">
-      <div className="relative w-full max-w-lg h-full bg-gray-900 border-l border-gray-800 shadow-2xl flex flex-col overflow-hidden animate-slide-left">
+      <div className="relative w-full max-w-xl h-full bg-gray-900 border-l border-gray-800 shadow-2xl flex flex-col overflow-hidden animate-slide-left">
         {/* Drawer Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-800 bg-gray-900/90 backdrop-blur-md">
           <div className="flex items-center gap-2">
             <span className="text-xl">⚡</span>
             <div>
-              <h3 className="font-semibold text-gray-100 text-sm">Session 执行时间线</h3>
+              <h3 className="font-semibold text-gray-100 text-sm">Session 执行过程与时间线</h3>
               <p className="text-xs text-gray-400 font-mono">ID: {sessionId}</p>
             </div>
           </div>
@@ -74,7 +76,7 @@ export default function ExecutionTimelineDrawer({ sessionId, groupId, onClose })
         {timeline && (
           <div className="flex items-center justify-between px-5 py-2.5 bg-gray-950/60 border-b border-gray-800 text-xs">
             <div className="flex items-center gap-2">
-              <span className="text-gray-400">状态:</span>
+              <span className="text-gray-400">运行状态:</span>
               <span className="px-2 py-0.5 rounded-full font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
                 {timeline.status}
               </span>
@@ -113,6 +115,10 @@ export default function ExecutionTimelineDrawer({ sessionId, groupId, onClose })
           {timeline && timeline.nodes.map((node, idx) => {
             const icon = NODE_ICONS[node.type] || '⚡'
             const badgeClass = NODE_COLORS[node.type] || NODE_COLORS.system_event
+            const isTool = node.type === 'tool_execution'
+            const isThinking = node.type === 'thinking'
+            const hasArgs = node.metadata?.arguments && Object.keys(node.metadata.arguments).length > 0
+            const hasResult = Boolean(node.metadata?.result)
 
             return (
               <div key={node.node_id || idx} className="relative pl-6 pb-2 border-l border-gray-800 last:border-l-0">
@@ -120,7 +126,7 @@ export default function ExecutionTimelineDrawer({ sessionId, groupId, onClose })
                   {icon}
                 </span>
 
-                <div className="rounded-xl border border-gray-800 bg-gray-850/80 p-3 shadow-xs hover:border-gray-700 transition-all">
+                <div className="rounded-xl border border-gray-800 bg-gray-850/80 p-3.5 shadow-xs hover:border-gray-700 transition-all space-y-2">
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex items-center gap-2">
                       <span className={`px-2 py-0.5 rounded-md text-[10px] font-medium border ${badgeClass}`}>
@@ -130,19 +136,56 @@ export default function ExecutionTimelineDrawer({ sessionId, groupId, onClose })
                     </div>
 
                     {node.duration_s !== null && (
-                      <span className="text-[10px] font-mono text-indigo-400 bg-indigo-500/10 px-1.5 py-0.5 rounded-md">
-                        {node.duration_s}s
+                      <span className="text-[10px] font-mono text-indigo-400 bg-indigo-500/10 px-1.5 py-0.5 rounded-md border border-indigo-500/20">
+                        ⚡ {node.duration_s}s
                       </span>
                     )}
                   </div>
 
-                  <p className="mt-2 text-xs text-gray-300 leading-relaxed font-mono whitespace-pre-wrap">
-                    {node.detail}
-                  </p>
+                  {/* Summary / Detail Text */}
+                  {!isThinking && (
+                    <p className="text-xs text-gray-300 leading-relaxed font-mono whitespace-pre-wrap">
+                      {node.detail}
+                    </p>
+                  )}
+
+                  {/* Thinking Section */}
+                  {isThinking && (
+                    <div className="text-xs italic text-purple-200/90 bg-purple-950/30 border border-purple-800/30 rounded-lg p-2.5 leading-relaxed font-serif">
+                      💡 {node.detail}
+                    </div>
+                  )}
+
+                  {/* Input Arguments Section */}
+                  {isTool && hasArgs && (
+                    <div className="text-[11px] rounded-lg bg-gray-950/80 border border-gray-800 p-2.5">
+                      <span className="text-[10px] text-gray-400 font-semibold block mb-1">工具输入参数 (Input Args):</span>
+                      <pre className="font-mono text-indigo-300 whitespace-pre-wrap leading-relaxed max-h-36 overflow-y-auto">
+                        {typeof node.metadata.arguments === 'string'
+                          ? node.metadata.arguments
+                          : JSON.stringify(node.metadata.arguments, null, 2)}
+                      </pre>
+                    </div>
+                  )}
+
+                  {/* Console Execution Result Section */}
+                  {isTool && hasResult && (
+                    <div className="text-[11px] rounded-lg bg-black/90 border border-gray-800 p-2.5">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[10px] text-emerald-400 font-semibold">控制台输出 (Console Output):</span>
+                        {node.status === 'failed' && (
+                          <span className="text-[10px] text-rose-400 font-semibold">❌ 执行异常</span>
+                        )}
+                      </div>
+                      <pre className="font-mono text-gray-300 whitespace-pre-wrap leading-relaxed max-h-48 overflow-y-auto text-[10px]">
+                        {node.metadata.result.slice(0, 1500)}
+                      </pre>
+                    </div>
+                  )}
 
                   {/* Artifact Badges */}
                   {node.artifact_ids && node.artifact_ids.length > 0 && (
-                    <div className="mt-2 pt-2 border-t border-gray-800/80 flex flex-wrap gap-1.5">
+                    <div className="pt-2 border-t border-gray-800/80 flex flex-wrap gap-1.5">
                       {node.artifact_ids.map((artId) => (
                         <span key={artId} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 font-mono">
                           📄 {artId}
