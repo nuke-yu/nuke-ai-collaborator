@@ -165,27 +165,28 @@ async def project_session_timeline(
     """Fetch raw events for a session and project into a structured ExecutionTimelineProjection."""
     from runtime.dbpaths import group_db_path
 
-    # Verify session belongs to group_id
-    async with _db.connect(group_db_path(group_id)) as conn:
-        async with conn.execute(
-            "SELECT group_id, bot_id, status, created_at FROM agent_sessions WHERE id = ? AND group_id = ?",
-            (session_id, group_id),
-        ) as cursor:
-            session_row = await cursor.fetchone()
+    with _db.bind_db(group_db_path(group_id)):
+        # Verify session belongs to group_id
+        async with _db.connect(group_db_path(group_id)) as conn:
+            async with conn.execute(
+                "SELECT group_id, bot_id, status, created_at FROM agent_sessions WHERE id = ? AND group_id = ?",
+                (session_id, group_id),
+            ) as cursor:
+                session_row = await cursor.fetchone()
 
-    if session_row is None:
-        raise ValueError(f"Session not found or group mismatch: {session_id} (group={group_id})")
+        if session_row is None:
+            raise ValueError(f"Session not found or group mismatch: {session_id} (group={group_id})")
 
-    bot_id = session_row[1]
-    status = str(session_row[2] or "completed")
+        bot_id = session_row[1]
+        status = str(session_row[2] or "completed")
 
-    # Fetch raw timeline items via existing get_group_timeline (business_significant=None to include all session events)
-    raw_timeline = await get_group_timeline(
-        group_id=group_id,
-        session_id=session_id,
-        business_significant=None,
-        limit=500,
-    )
+        # Fetch raw timeline items via existing get_group_timeline (business_significant=None to include all session events)
+        raw_timeline = await get_group_timeline(
+            group_id=group_id,
+            session_id=session_id,
+            business_significant=None,
+            limit=500,
+        )
 
     items = raw_timeline.get("items") or []
     # Reverse to present chronological order (oldest -> newest)
