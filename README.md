@@ -45,11 +45,7 @@
 ### 🐝 Demo 2: Nuke AI Swarm 多智能体集群演练
 
 <div align="center">
-  <a href="https://github.com/nuke-yu/nuke-ai-collaborator/blob/main/vedio/Nuke-AI-swarm.mp4" target="_blank">
-    <img src="home-page.png" width="100%" alt="点击播放 Demo 2" style="border-radius: 8px; border: 1px solid #30363d;" />
-    <br/><br/>
-    <b>▶️ 点击在线播放 Demo 2 (7.8MB MP4)</b>
-  </a>
+  <video src="https://github.com/user-attachments/assets/e834a604-c05e-4d69-a40c-a6a61a89a0b1" controls="controls" width="100%"></video>
   <p><i>▶️ 多智能体并发流水线编排与任务接力实战演示</i></p>
 </div>
 
