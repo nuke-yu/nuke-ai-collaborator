@@ -313,7 +313,11 @@ class WSClientProxy:
     async def send(self, payload: dict):
         # Supervisor calls this when it receives an upstream BROADCAST frame
         # from a worker. We fan it out to all browsers in this group.
-        await manager.broadcast(self.group_id, payload)
+        from runtime.event_envelope import make_event_envelope
+        await manager.broadcast(
+            self.group_id,
+            make_event_envelope(payload, group_id=self.group_id),
+        )
 
     async def close(self):
         """Called by Supervisor when this client is evicted (H-4)."""
@@ -555,4 +559,3 @@ if __name__ == "__main__":
 
     print(f"[Backend] Starting FastAPI Uvicorn server on http://127.0.0.1:{port}")
     uvicorn.run("main:app", host="127.0.0.1", port=port, log_level="info")
-
