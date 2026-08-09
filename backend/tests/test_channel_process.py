@@ -3,7 +3,7 @@ import json
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from channels import ChannelProcessClient, ChannelProcessManifest
+from channels import ChannelProcessClient, ChannelProcessError, ChannelProcessManifest
 from channels.core import ChannelConversation, ChannelIdentity, DeliveryReceipt, OutboundEnvelope
 
 
@@ -28,7 +28,17 @@ class FakeProcess:
     def __init__(self, response):
         self.stdin = FakeStream()
         self.stdout = FakeStream(response)
-        self.terminate = lambda: None
+        self.terminate_calls = 0
+        self.kill_calls = 0
+
+        def terminate():
+            self.terminate_calls += 1
+
+        def kill():
+            self.kill_calls += 1
+
+        self.terminate = terminate
+        self.kill = kill
 
     async def wait(self):
         return 0
@@ -62,8 +72,32 @@ class TestChannelProcess(unittest.IsolatedAsyncioTestCase):
             identity=ChannelIdentity("slack", "tenant-a"), conversation=ChannelConversation("chat-1"),
             event_type="task_stuck", payload={"message": "x" * 1_000}, idempotency_key="event-2",
         )
-        with self.assertRaises(Exception):
+        with self.assertRaises(ChannelProcessError):
             await client.send(envelope)
+
+    async def test_timeout_stops_old_process_before_next_request(self):
+        process = FakeProcess(b"")
+        process.stdout.readline = AsyncMock(side_effect=asyncio.TimeoutError)
+        client = ChannelProcessClient(["channel-worker"], ChannelProcessManifest("slack:prod", max_seconds=0.01))
+        envelope = OutboundEnvelope(
+            identity=ChannelIdentity("slack", "tenant-a"), conversation=ChannelConversation("chat-1"),
+            event_type="task_stuck", payload={}, idempotency_key="event-timeout",
+        )
+        with patch("channels.process.asyncio.create_subprocess_exec", new=AsyncMock(return_value=process)) as start:
+            with self.assertRaises(ChannelProcessError):
+                await client.send(envelope)
+        self.assertEqual(process.terminate_calls, 1)
+        start.assert_awaited_once()
+        self.assertEqual(start.await_args.kwargs["limit"], 256_000)
+
+    async def test_close_kills_process_when_terminate_does_not_finish(self):
+        process = FakeProcess(b"")
+        process.wait = AsyncMock(side_effect=asyncio.TimeoutError)
+        client = ChannelProcessClient(["channel-worker"], ChannelProcessManifest("slack:prod"))
+        client._process = process
+        await client.close()
+        self.assertEqual(process.terminate_calls, 1)
+        self.assertEqual(process.kill_calls, 1)
 
 
 if __name__ == "__main__":

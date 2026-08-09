@@ -50,18 +50,17 @@ class ChannelProcessClient:
             group_id=envelope.group_id,
         )
         frame = {"bridge": bridge.to_dict(), "manifest": {"channel_instance_id": self.manifest.channel_instance_id, "version": self.manifest.version}}
-        encoded = (json.dumps(frame, ensure_ascii=False, separators=(",", ":")) + "\n").encode()
-        if len(encoded) > self.manifest.max_frame_bytes:
-            raise ChannelProcessError("channel process frame exceeds limit")
         async with self._lock:
-            await self._start()
-            if self._process is None or self._process.stdin is None or self._process.stdout is None:
-                raise ChannelProcessError("channel process is not ready")
             self._request_id += 1
             request_id = f"{self.manifest.channel_instance_id}:{self._request_id}"
             frame["request_id"] = request_id
             encoded = (json.dumps(frame, ensure_ascii=False, separators=(",", ":")) + "\n").encode()
+            if len(encoded) > self.manifest.max_frame_bytes:
+                raise ChannelProcessError("channel process frame exceeds limit")
             try:
+                await self._start()
+                if self._process is None or self._process.stdin is None or self._process.stdout is None:
+                    raise ChannelProcessError("channel process is not ready")
                 self._process.stdin.write(encoded)
                 await self._process.stdin.drain()
                 raw = await asyncio.wait_for(self._process.stdout.readline(), timeout=self.manifest.max_seconds)
@@ -80,7 +79,11 @@ class ChannelProcessClient:
                     if isinstance(value, str):
                         safe[key] = redact_secrets(value)[0]
                 return DeliveryReceipt(**safe)
-            except (asyncio.TimeoutError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            except ChannelProcessError:
+                await self._stop_process()
+                raise
+            except (asyncio.TimeoutError, BrokenPipeError, ConnectionError, OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+                await self._stop_process()
                 raise ChannelProcessError("channel process response failed") from exc
 
     async def _start(self) -> None:
@@ -90,9 +93,23 @@ class ChannelProcessClient:
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,
+                limit=self.manifest.max_frame_bytes,
             )
 
+    async def _stop_process(self) -> None:
+        process = self._process
+        self._process = None
+        if process is None or process.returncode is not None:
+            return
+        try:
+            process.terminate()
+            await asyncio.wait_for(process.wait(), timeout=1)
+        except (asyncio.TimeoutError, ProcessLookupError, OSError):
+            try:
+                process.kill()
+                await asyncio.wait_for(process.wait(), timeout=1)
+            except (asyncio.TimeoutError, ProcessLookupError, OSError):
+                pass
+
     async def close(self) -> None:
-        if self._process is not None and self._process.returncode is None:
-            self._process.terminate()
-            await self._process.wait()
+        await self._stop_process()
