@@ -550,6 +550,20 @@ async def setup_session(runner) -> None:
             "temperature": runner.temperature,
             "max_tokens": runner.max_tokens,
         }
+        from sessions.manifest import build_capability_manifest
+        runner.capability_manifest, runner.manifest_hash = build_capability_manifest(
+            provider=runner.provider,
+            model=runner.model_name,
+            executor_id=runner.executor.executor_id,
+            executor_version=getattr(runner.executor.manifest, "version", "1"),
+            system_prompt=runner.system_prompt,
+            bot=runner.bot,
+            tool_schemas=runner.tool_schemas,
+            skills=runner.skills_snapshot,
+            permission_rules=runner.ruleset,
+            sandbox_policy={"permission_mode": runner.ruleset.mode if runner.ruleset else "default"},
+            memory_revision=";".join(sorted(str(ref) for ref in runner.injected_memory_refs)),
+        )
         await runner.ctx.interaction.create_session(
             session_id=runner.session_id,
             bot_id=runner.bot["id"],
@@ -557,9 +571,13 @@ async def setup_session(runner) -> None:
             config=_session_config,
             user_message=runner.ctx.user_message,
             executor_id=runner.executor.executor_id,
+            manifest=runner.capability_manifest,
+            manifest_hash=runner.manifest_hash,
+            manifest_version=runner.capability_manifest["manifest_version"],
         )
         await runner.ctx.interaction.append_session_event(runner.session_id, "session_start", {
             "user_content": user_content if isinstance(user_content, str) else json.dumps(user_content, ensure_ascii=False),
+            "manifest_hash": runner.manifest_hash,
         })
 
     context_evidence_links = _context_evidence_links(

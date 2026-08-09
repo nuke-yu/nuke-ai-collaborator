@@ -1356,6 +1356,17 @@ async def migration_059(db):
     await db.commit()
 
 
+async def migration_060(db):
+    """Persist the immutable capability identity captured at Session start."""
+    for statement in (
+        "ALTER TABLE agent_sessions ADD COLUMN manifest_json TEXT NOT NULL DEFAULT '{}'",
+        "ALTER TABLE agent_sessions ADD COLUMN manifest_hash TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE agent_sessions ADD COLUMN manifest_version INTEGER NOT NULL DEFAULT 1",
+    ):
+        await _safe_add_column(db, statement)
+    await db.commit()
+
+
 MIGRATIONS: list = [
     migration_001,
     migration_002,
@@ -1416,6 +1427,7 @@ MIGRATIONS: list = [
     migration_057,
     migration_058,
     migration_059,
+    migration_060,
 ]
 
 

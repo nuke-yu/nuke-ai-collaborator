@@ -141,6 +141,19 @@ class TestSessionStore(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(row["status"], "running")
         self.assertEqual(row["bot_id"], 1)
 
+    async def test_create_session_persists_capability_manifest(self):
+        from sessions.store import create_session, get_session
+        manifest = {"manifest_version": 1, "tool_schema_hash": "sha256:test"}
+        await create_session(
+            session_id="manifest-session",
+            bot_id=1, group_id=1, config={}, user_message="hello",
+            manifest=manifest, manifest_hash="sha256:manifest", manifest_version=1,
+        )
+        row = await get_session("manifest-session")
+        self.assertEqual(row["manifest"], manifest)
+        self.assertEqual(row["manifest_hash"], "sha256:manifest")
+        self.assertEqual(row["manifest_version"], 1)
+
     async def test_append_and_get_events(self):
         from sessions.store import create_session, append_event, get_events
         await create_session(

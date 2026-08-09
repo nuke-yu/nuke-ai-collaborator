@@ -299,6 +299,9 @@ _GROUP_DDL = [
         cache_read_tokens INTEGER NOT NULL DEFAULT 0,
         cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
         last_snapshot_json TEXT
+        ,manifest_json TEXT NOT NULL DEFAULT '{}'
+        ,manifest_hash TEXT NOT NULL DEFAULT ''
+        ,manifest_version INTEGER NOT NULL DEFAULT 1
     )""",
     # within-group FK to agent_sessions: kept
     """CREATE TABLE IF NOT EXISTS session_events (

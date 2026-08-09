@@ -13,14 +13,20 @@ async def create_session(
     user_message: str,
     parent_id: str | None = None,
     executor_id: str = "tool_loop_v1",
+    manifest: dict | None = None,
+    manifest_hash: str = "",
+    manifest_version: int = 1,
 ) -> str:
     async with _db.write_connect() as conn:
         await conn.execute(
             """INSERT INTO agent_sessions
-               (id, parent_id, bot_id, group_id, executor_id, config_json, user_message)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+               (id, parent_id, bot_id, group_id, executor_id, config_json, user_message,
+                manifest_json, manifest_hash, manifest_version)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (session_id, parent_id, bot_id, group_id, executor_id,
-             json.dumps(config, ensure_ascii=False), user_message),
+             json.dumps(config, ensure_ascii=False), user_message,
+             json.dumps(manifest or {}, ensure_ascii=False, sort_keys=True),
+             manifest_hash, manifest_version),
         )
         await conn.commit()
     return session_id
@@ -94,6 +100,7 @@ async def get_session(session_id: str) -> dict | None:
         return None
     d = dict(row)
     d["config"] = json.loads(d.pop("config_json", "{}"))
+    d["manifest"] = json.loads(d.pop("manifest_json", "{}"))
     if d.get("last_snapshot_json"):
         try:
             d["last_snapshot"] = json.loads(d["last_snapshot_json"])
