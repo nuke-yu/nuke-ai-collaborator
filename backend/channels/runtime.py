@@ -4,12 +4,16 @@ from __future__ import annotations
 import time
 from typing import Protocol
 
-from channels.core import ChannelConversation, ChannelIdentity, OutboundEnvelope
+from channels.core import ChannelConversation, ChannelIdentity, DeliveryReceipt, OutboundEnvelope
 from channels.stores import ChannelStore
 
 
 class ChannelConnector(Protocol):
     async def send(self, envelope: OutboundEnvelope): ...
+
+
+class ChannelDeliveryError(RuntimeError):
+    """A connector response cannot be accepted as a successful delivery."""
 
 
 class ChannelDeliveryDispatcher:
@@ -38,7 +42,17 @@ class ChannelDeliveryDispatcher:
         )
         try:
             receipt = await self.connector.send(envelope)
-            await self.store.mark_sent(key, receipt.external_message_id or "")
+            if not isinstance(receipt, DeliveryReceipt):
+                raise ChannelDeliveryError("connector returned an invalid delivery receipt")
+            if receipt.channel != envelope.identity.channel:
+                raise ChannelDeliveryError("delivery receipt channel mismatch")
+            if receipt.idempotency_key != envelope.idempotency_key:
+                raise ChannelDeliveryError("delivery receipt idempotency key mismatch")
+            if receipt.status != "sent" or not receipt.external_message_id:
+                detail = receipt.error_message or receipt.error_code or f"connector returned status={receipt.status}"
+                raise ChannelDeliveryError(detail)
+            if not await self.store.mark_sent(key, receipt.external_message_id):
+                raise ChannelDeliveryError("delivery state changed before success could be recorded")
             await self.store.record_audit(key, "delivery.sent", {"attempt": item["attempts"]})
         except Exception as exc:
             attempt = int(item["attempts"])

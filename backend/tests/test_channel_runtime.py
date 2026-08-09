@@ -5,7 +5,7 @@ import unittest
 
 from channels.connectors import ConnectorError
 from channels.core import ChannelConversation, ChannelIdentity, DeliveryReceipt, OutboundEnvelope
-from channels.runtime import ChannelDeliveryDispatcher
+from channels.runtime import ChannelDeliveryDispatcher, ChannelDeliveryError
 from channels.stores import ChannelStore, DeliveryState
 
 
@@ -58,6 +58,28 @@ class TestChannelRuntime(unittest.IsolatedAsyncioTestCase):
         stored = await self.store.get_delivery("event-1")
         self.assertEqual(stored["state"], DeliveryState.DEAD_LETTER)
         self.assertEqual((await self.store.list_audit("event-1"))[-1]["event_type"], "delivery.dead_letter")
+
+    async def test_failed_receipt_never_becomes_sent(self):
+        class FailedReceiptConnector:
+            async def send(self, envelope):
+                return DeliveryReceipt("slack", envelope.idempotency_key, "failed", error_code="rate_limited")
+
+        dispatcher = ChannelDeliveryDispatcher(self.store, FailedReceiptConnector(), max_attempts=1)
+        await dispatcher.run_once()
+        stored = await self.store.get_delivery("event-1")
+        self.assertEqual(stored["state"], DeliveryState.DEAD_LETTER)
+        self.assertIsNone(stored["external_message_id"])
+
+    async def test_mismatched_receipt_is_rejected(self):
+        class MismatchedConnector:
+            async def send(self, envelope):
+                return DeliveryReceipt("other", envelope.idempotency_key, "sent", external_message_id="remote")
+
+        dispatcher = ChannelDeliveryDispatcher(self.store, MismatchedConnector(), max_attempts=1)
+        await dispatcher.run_once()
+        stored = await self.store.get_delivery("event-1")
+        self.assertEqual(stored["state"], DeliveryState.DEAD_LETTER)
+        self.assertIn("channel mismatch", stored["last_error"])
 
 
 if __name__ == "__main__":
