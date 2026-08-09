@@ -1,6 +1,6 @@
 # Nuke AI 完整开发路线与 Channel 独立集成计划
 
-> 基线：2026-08-09，后端全量测试 `2541 passed, 2 skipped, 57 warnings, 40 subtests passed`（在允许本地 Unix/TCP socket 的环境执行）。
+> 基线：2026-08-09，后端全量测试 `2542 passed, 2 skipped, 57 warnings, 40 subtests passed`（在允许本地 Unix/TCP socket 的环境执行）。
 >
 > 本文汇总当前已交付能力、未完成治理事项，以及 Channel 从独立模块演进为 Group 集成成员的完整开发路线。
 
@@ -28,7 +28,7 @@ C0–C8 的基础代码已按顺序提交，但经 Review 校准，不能把“�
 
 Review 修复 commits：`cf35651`（回执校验）、`ba9b2e4`（存储边界脱敏）、`c66bd83`（delivery lease）、`ecdd9fe`（状态/审计原子事务）、`057d380`（canonical event_id）、`f633bf9`（ProcessClient 故障恢复）、`a4c4939`（Group durable outbox relay）、`a87fbff`（持久化入站去重）、`458e53c`（协议版本和无碰撞 key）、`5bb0370`（raw bytes 验签/replay）、`45cd48c`（Binding/Member/Router 状态一致性）、`3475b40`（payload fail-closed/lease heartbeat）。
 
-第二轮 Review 修复 commits：`f74c5e3`（生产 Connector Manifest 注册和 active Binding fail-fast）、`7c7bcd0`（持久化投影队列与 Supervisor 补偿）、`572e9c3`（instance ID canonical migration/quarantine）、`a549001`（source event lineage）、`d4417e4`（Group relay dead-letter/审计/指标）、`c432e42`（可恢复健康语义）、`43228e5`（封死 Binding 审批逃生口）。
+第二轮 Review 修复 commits：`f74c5e3`（生产 Connector Manifest 注册和 active Binding fail-fast）、`7f011d6`（历史 open delivery 缺 Connector 时 fail-fast）、`7c7bcd0`（持久化投影队列与 Supervisor 补偿）、`572e9c3`（instance ID canonical migration/quarantine）、`a549001`（source event lineage）、`d4417e4`（Group relay dead-letter/审计/指标）、`c432e42`（可恢复健康语义）、`43228e5`（封死 Binding 审批逃生口）。
 
 当前已完成 Channel 核心模块、持久化补偿投影、Group Outbox/Relay、Dispatcher 生命周期、配置驱动的 Process Connector 注册、控制面和 Docker 测试环境基础。仍不能宣称“真实渠道生产完成”：仓库尚未选择并交付飞书/Slack/企业微信中的一个平台 Connector executable，外部平台授权、限流/重放 E2E 和 go/no-go 演练仍是发布前置条件。云平台隔离作为未来阶段。
 
