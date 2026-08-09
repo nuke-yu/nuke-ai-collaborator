@@ -41,7 +41,7 @@
       <a href="https://github.com/nuke-yu/nuke-ai-collaborator/blob/main/vedio/Nuke-ai-collaborator.mp4" target="_blank">
         <img src="./Home%20page.png" width="100%" alt="点击播放 Demo 1" style="border-radius: 8px; border: 1px solid #30363d;" />
         <br/><br/>
-        <b>▶️ 点击在线播放 Demo 1 (MP4)</b>
+        <b>▶️ 点击在线播放 Demo 1 (5.2MB MP4)</b>
       </a>
       <br/>
       <sub>展示群组讨论、多角色 AI 员工接力与共享看板</sub>
@@ -49,10 +49,10 @@
     <td align="center" width="50%">
       <b>🐝 Demo 2: Nuke AI Swarm 多智能体集群演练</b>
       <br/><br/>
-      <a href="https://github.com/nuke-yu/nuke-ai-collaborator/blob/main/vedio/Nuke%20AI%20swarm.mov" target="_blank">
+      <a href="https://github.com/nuke-yu/nuke-ai-collaborator/blob/main/vedio/Nuke-AI-swarm.mp4" target="_blank">
         <img src="./Home%20page.png" width="100%" alt="点击播放 Demo 2" style="border-radius: 8px; border: 1px solid #30363d;" />
         <br/><br/>
-        <b>▶️ 点击在线播放 Demo 2 (Swarm)</b>
+        <b>▶️ 点击在线播放 Demo 2 (7.8MB MP4)</b>
       </a>
       <br/>
       <sub>展示多智能体并发流水线编排与任务接力实战</sub>
