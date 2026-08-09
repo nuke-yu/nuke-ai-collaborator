@@ -1,0 +1,201 @@
+"""Persisted Channel-Group binding state machine.
+
+The store contains only opaque Group/Bot identifiers.  It does not import or
+open Group persistence, so a standalone Channel remains independently runnable.
+"""
+from __future__ import annotations
+
+import json
+import time
+from dataclasses import dataclass, field
+from enum import StrEnum
+from pathlib import Path
+from typing import Any, Mapping
+
+import aiosqlite
+
+
+class BindingStatus(StrEnum):
+    CONFIGURED = "configured"
+    PENDING_APPROVAL = "pending_approval"
+    ACTIVE = "active"
+    SUSPENDED = "suspended"
+    REVOKED = "revoked"
+
+
+_TRANSITIONS: dict[BindingStatus, frozenset[BindingStatus]] = {
+    BindingStatus.CONFIGURED: frozenset({BindingStatus.PENDING_APPROVAL, BindingStatus.REVOKED}),
+    BindingStatus.PENDING_APPROVAL: frozenset({BindingStatus.ACTIVE, BindingStatus.REVOKED}),
+    BindingStatus.ACTIVE: frozenset({BindingStatus.SUSPENDED, BindingStatus.REVOKED}),
+    BindingStatus.SUSPENDED: frozenset({BindingStatus.ACTIVE, BindingStatus.REVOKED}),
+    BindingStatus.REVOKED: frozenset(),
+}
+
+
+@dataclass(frozen=True, slots=True)
+class ChannelBinding:
+    binding_id: str
+    channel_instance_id: str
+    external_tenant_id: str
+    external_conversation_id: str
+    group_id: int
+    default_bot_id: int
+    allowed_bot_ids: tuple[int, ...] = ()
+    mention_required: bool = False
+    inbound_policy: Mapping[str, Any] = field(default_factory=dict)
+    outbound_policy: Mapping[str, Any] = field(default_factory=dict)
+    status: BindingStatus = BindingStatus.CONFIGURED
+    config_version: int = 1
+    created_by: str = ""
+
+    def __post_init__(self) -> None:
+        for field_name in (
+            "binding_id", "channel_instance_id", "external_tenant_id",
+            "external_conversation_id", "created_by",
+        ):
+            value = str(getattr(self, field_name) or "").strip()
+            if field_name != "created_by" and not value:
+                raise ValueError(f"{field_name} is required")
+            object.__setattr__(self, field_name, value)
+        if self.group_id <= 0 or self.default_bot_id <= 0:
+            raise ValueError("group_id and default_bot_id must be positive")
+        allowed = tuple(dict.fromkeys(int(bot_id) for bot_id in self.allowed_bot_ids))
+        if any(bot_id <= 0 for bot_id in allowed):
+            raise ValueError("allowed_bot_ids must be positive")
+        if self.default_bot_id not in allowed:
+            allowed = (self.default_bot_id, *allowed)
+        object.__setattr__(self, "allowed_bot_ids", allowed)
+        if self.config_version <= 0:
+            raise ValueError("config_version must be positive")
+        if not isinstance(self.status, BindingStatus):
+            object.__setattr__(self, "status", BindingStatus(str(self.status)))
+        for name in ("inbound_policy", "outbound_policy"):
+            value = getattr(self, name)
+            if not isinstance(value, Mapping):
+                raise ValueError(f"{name} must be an object")
+            json.dumps(value, ensure_ascii=False)
+            object.__setattr__(self, name, dict(value))
+
+    def can_transition_to(self, target: BindingStatus) -> bool:
+        if not isinstance(target, BindingStatus):
+            target = BindingStatus(str(target))
+        return target in _TRANSITIONS[self.status]
+
+    def transitioned(self, target: BindingStatus) -> "ChannelBinding":
+        if not self.can_transition_to(target):
+            raise ValueError(f"invalid binding transition: {self.status} -> {target}")
+        return ChannelBinding(**({**self.to_dict(), "status": target}))
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "binding_id": self.binding_id,
+            "channel_instance_id": self.channel_instance_id,
+            "external_tenant_id": self.external_tenant_id,
+            "external_conversation_id": self.external_conversation_id,
+            "group_id": self.group_id,
+            "default_bot_id": self.default_bot_id,
+            "allowed_bot_ids": list(self.allowed_bot_ids),
+            "mention_required": self.mention_required,
+            "inbound_policy": dict(self.inbound_policy),
+            "outbound_policy": dict(self.outbound_policy),
+            "status": self.status,
+            "config_version": self.config_version,
+            "created_by": self.created_by,
+        }
+
+
+class ChannelBindingStore:
+    def __init__(self, path: str | Path):
+        self.path = str(path)
+        if not self.path.strip():
+            raise ValueError("binding store path is required")
+
+    async def initialize(self) -> None:
+        Path(self.path).parent.mkdir(parents=True, exist_ok=True)
+        async with aiosqlite.connect(self.path) as db:
+            await db.execute(
+                """CREATE TABLE IF NOT EXISTS channel_bindings (
+                   binding_id TEXT PRIMARY KEY,
+                   channel_instance_id TEXT NOT NULL,
+                   external_tenant_id TEXT NOT NULL,
+                   external_conversation_id TEXT NOT NULL,
+                   group_id INTEGER NOT NULL,
+                   default_bot_id INTEGER NOT NULL,
+                   allowed_bot_ids_json TEXT NOT NULL,
+                   mention_required INTEGER NOT NULL DEFAULT 0,
+                   inbound_policy_json TEXT NOT NULL DEFAULT '{}',
+                   outbound_policy_json TEXT NOT NULL DEFAULT '{}',
+                   status TEXT NOT NULL,
+                   config_version INTEGER NOT NULL,
+                   created_by TEXT NOT NULL DEFAULT '',
+                   created_at INTEGER NOT NULL,
+                   updated_at INTEGER NOT NULL,
+                   UNIQUE(channel_instance_id, external_tenant_id, external_conversation_id)
+                )"""
+            )
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_channel_bindings_group ON channel_bindings(group_id, status)")
+            await db.commit()
+
+    async def create(self, binding: ChannelBinding) -> ChannelBinding:
+        now = int(time.time() * 1000)
+        try:
+            async with aiosqlite.connect(self.path) as db:
+                await db.execute(
+                    """INSERT INTO channel_bindings
+                       (binding_id,channel_instance_id,external_tenant_id,external_conversation_id,
+                        group_id,default_bot_id,allowed_bot_ids_json,mention_required,
+                        inbound_policy_json,outbound_policy_json,status,config_version,created_by,
+                        created_at,updated_at)
+                       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (
+                        binding.binding_id, binding.channel_instance_id, binding.external_tenant_id,
+                        binding.external_conversation_id, binding.group_id, binding.default_bot_id,
+                        json.dumps(binding.allowed_bot_ids), int(binding.mention_required),
+                        json.dumps(binding.inbound_policy, ensure_ascii=False),
+                        json.dumps(binding.outbound_policy, ensure_ascii=False), binding.status,
+                        binding.config_version, binding.created_by, now, now,
+                    ),
+                )
+                await db.commit()
+        except aiosqlite.IntegrityError as exc:
+            raise ValueError("channel binding already exists") from exc
+        return binding
+
+    async def get(self, binding_id: str) -> ChannelBinding | None:
+        async with aiosqlite.connect(self.path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("SELECT * FROM channel_bindings WHERE binding_id=?", (binding_id,)) as cursor:
+                row = await cursor.fetchone()
+        return self._from_row(dict(row)) if row else None
+
+    async def transition(self, binding_id: str, target: BindingStatus) -> ChannelBinding:
+        current = await self.get(binding_id)
+        if current is None:
+            raise KeyError(f"unknown channel binding: {binding_id}")
+        updated = current.transitioned(target)
+        now = int(time.time() * 1000)
+        async with aiosqlite.connect(self.path) as db:
+            await db.execute(
+                "UPDATE channel_bindings SET status=?, config_version=?, updated_at=? WHERE binding_id=? AND status=?",
+                (updated.status, updated.config_version + 1, now, binding_id, current.status),
+            )
+            await db.commit()
+        return ChannelBinding(**{**updated.to_dict(), "config_version": updated.config_version + 1})
+
+    @staticmethod
+    def _from_row(row: dict[str, Any]) -> ChannelBinding:
+        return ChannelBinding(
+            binding_id=row["binding_id"],
+            channel_instance_id=row["channel_instance_id"],
+            external_tenant_id=row["external_tenant_id"],
+            external_conversation_id=row["external_conversation_id"],
+            group_id=int(row["group_id"]),
+            default_bot_id=int(row["default_bot_id"]),
+            allowed_bot_ids=tuple(json.loads(row["allowed_bot_ids_json"])),
+            mention_required=bool(row["mention_required"]),
+            inbound_policy=json.loads(row["inbound_policy_json"]),
+            outbound_policy=json.loads(row["outbound_policy_json"]),
+            status=BindingStatus(row["status"]),
+            config_version=int(row["config_version"]),
+            created_by=row["created_by"],
+        )
