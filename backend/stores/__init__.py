@@ -1,3 +1,3 @@
-from .registry import StoreDescriptor, StoreRegistry, store_registry
+from .registry import StoreDescriptor, StoreGovernanceError, StoreRegistry, store_registry
 
-__all__ = ["StoreDescriptor", "StoreRegistry", "store_registry"]
+__all__ = ["StoreDescriptor", "StoreGovernanceError", "StoreRegistry", "store_registry"]
