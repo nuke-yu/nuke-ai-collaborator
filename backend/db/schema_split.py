@@ -373,6 +373,12 @@ _GROUP_DDL = [
         size_bytes           INTEGER NOT NULL DEFAULT 0,
         authorization_scope  TEXT NOT NULL DEFAULT 'group',
         metadata_json        TEXT DEFAULT '{}',
+        artifact_version     INTEGER NOT NULL DEFAULT 1,
+        parent_artifact_id   TEXT DEFAULT NULL,
+        derives_from         TEXT DEFAULT NULL,
+        created_by           TEXT NOT NULL DEFAULT '',
+        deleted_at           TIMESTAMP DEFAULT NULL,
+        lifecycle_status     TEXT NOT NULL DEFAULT 'active',
         created_at           TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at           TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )""",

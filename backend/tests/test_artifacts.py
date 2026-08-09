@@ -16,6 +16,7 @@ from artifacts import (
     ArtifactNotFoundError,
     ArtifactOrigin,
     ArtifactScope,
+    ArtifactLifecycle,
     calculate_checksum,
     delete_artifact,
     get_artifact,
@@ -83,6 +84,33 @@ class TestArtifactManager(unittest.IsolatedAsyncioTestCase):
         # Attempting to fetch Group 1's artifact under Group 2 should raise ArtifactNotFoundError
         with self.assertRaises(ArtifactNotFoundError):
             await get_artifact(art.artifact_id, group_id=2)
+
+    async def test_artifact_version_derivation_and_soft_delete(self):
+        parent = await register_artifact(
+            group_id=1,
+            display_name="source.md",
+            origin=ArtifactOrigin.WORKSPACE,
+            storage_locator="/workspace/source.md",
+            created_by="bot:1",
+        )
+        child = await register_artifact(
+            group_id=1,
+            display_name="report.md",
+            origin=ArtifactOrigin.WORKFLOW,
+            storage_locator="/workspace/report.md",
+            parent_artifact_id=parent.artifact_id,
+            derives_from=parent.artifact_id,
+            artifact_version=2,
+            created_by="bot:2",
+        )
+        self.assertEqual(child.artifact_version, 2)
+        self.assertEqual(child.parent_artifact_id, parent.artifact_id)
+        self.assertEqual(child.lifecycle_status, ArtifactLifecycle.ACTIVE)
+        self.assertTrue(await delete_artifact(child.artifact_id, 1))
+        with self.assertRaises(ArtifactNotFoundError):
+            await get_artifact(child.artifact_id, group_id=1)
+        remaining = await list_artifacts(group_id=1)
+        self.assertEqual([item.artifact_id for item in remaining], [parent.artifact_id])
 
     async def test_list_artifacts_filtering(self):
         # Register artifacts across different sessions and origins

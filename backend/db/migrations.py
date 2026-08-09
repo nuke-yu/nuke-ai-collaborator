@@ -1367,6 +1367,20 @@ async def migration_060(db):
     await db.commit()
 
 
+async def migration_061(db):
+    """Add version, derivation, creator, and soft-delete Artifact metadata."""
+    for statement in (
+        "ALTER TABLE group_artifacts ADD COLUMN artifact_version INTEGER NOT NULL DEFAULT 1",
+        "ALTER TABLE group_artifacts ADD COLUMN parent_artifact_id TEXT DEFAULT NULL",
+        "ALTER TABLE group_artifacts ADD COLUMN derives_from TEXT DEFAULT NULL",
+        "ALTER TABLE group_artifacts ADD COLUMN created_by TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE group_artifacts ADD COLUMN deleted_at TIMESTAMP DEFAULT NULL",
+        "ALTER TABLE group_artifacts ADD COLUMN lifecycle_status TEXT NOT NULL DEFAULT 'active'",
+    ):
+        await _safe_add_column(db, statement)
+    await db.commit()
+
+
 MIGRATIONS: list = [
     migration_001,
     migration_002,
@@ -1428,6 +1442,7 @@ MIGRATIONS: list = [
     migration_058,
     migration_059,
     migration_060,
+    migration_061,
 ]
 
 

@@ -34,6 +34,12 @@ class ArtifactScope(StrEnum):
     PRIVATE = "private"
 
 
+class ArtifactLifecycle(StrEnum):
+    ACTIVE = "active"
+    REVOKED = "revoked"
+    DELETED = "deleted"
+
+
 class ArtifactNotFoundError(ValueError):
     """Artifact with requested ID was not found or belongs to another group."""
 
@@ -57,6 +63,12 @@ class Artifact:
     workflow_run_id: str | None = None
     authorization_scope: str = ArtifactScope.GROUP.value
     metadata: dict[str, Any] = field(default_factory=dict)
+    artifact_version: int = 1
+    parent_artifact_id: str | None = None
+    derives_from: str | None = None
+    created_by: str = ""
+    deleted_at: str | None = None
+    lifecycle_status: str = ArtifactLifecycle.ACTIVE.value
     created_at: str | None = None
     updated_at: str | None = None
 
@@ -75,6 +87,12 @@ class Artifact:
             "size_bytes": self.size_bytes,
             "authorization_scope": self.authorization_scope,
             "metadata": self.metadata,
+            "artifact_version": self.artifact_version,
+            "parent_artifact_id": self.parent_artifact_id,
+            "derives_from": self.derives_from,
+            "created_by": self.created_by,
+            "deleted_at": self.deleted_at,
+            "lifecycle_status": self.lifecycle_status,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
@@ -104,6 +122,10 @@ async def register_artifact(
     authorization_scope: str | ArtifactScope = ArtifactScope.GROUP,
     metadata: Mapping[str, Any] | None = None,
     artifact_id: str | None = None,
+    artifact_version: int = 1,
+    parent_artifact_id: str | None = None,
+    derives_from: str | None = None,
+    created_by: str = "",
 ) -> Artifact:
     """Register a new Artifact in the group DB."""
     art_id = artifact_id or generate_artifact_id()
@@ -117,12 +139,14 @@ async def register_artifact(
             """INSERT INTO group_artifacts (
                 artifact_id, group_id, session_id, bot_id, workflow_run_id,
                 origin, mime_type, display_name, storage_locator, checksum_sha256,
-                size_bytes, authorization_scope, metadata_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                size_bytes, authorization_scope, metadata_json, artifact_version,
+                parent_artifact_id, derives_from, created_by
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 art_id, group_id, session_id, bot_id, workflow_run_id,
                 origin_val, mime_type, display_name, storage_locator, chksum,
-                size_bytes, scope_val, meta_json,
+                size_bytes, scope_val, meta_json, artifact_version,
+                parent_artifact_id, derives_from, created_by,
             ),
         )
         await conn.commit()
@@ -134,10 +158,10 @@ async def get_artifact(artifact_id: str, group_id: int | None = None) -> Artifac
     """Retrieve Artifact by ID with optional Group Isolation enforcement."""
     async with _db.connect() as conn:
         if group_id is not None:
-            query = "SELECT * FROM group_artifacts WHERE artifact_id = ? AND group_id = ?"
+            query = "SELECT * FROM group_artifacts WHERE artifact_id = ? AND group_id = ? AND lifecycle_status != 'deleted'"
             params = (artifact_id, group_id)
         else:
-            query = "SELECT * FROM group_artifacts WHERE artifact_id = ?"
+            query = "SELECT * FROM group_artifacts WHERE artifact_id = ? AND lifecycle_status != 'deleted'"
             params = (artifact_id,)
 
         async with conn.execute(query, params) as cursor:
@@ -171,6 +195,12 @@ async def get_artifact(artifact_id: str, group_id: int | None = None) -> Artifac
             size_bytes=int(data.get("size_bytes") or 0),
             authorization_scope=data.get("authorization_scope", "group"),
             metadata=metadata,
+            artifact_version=int(data.get("artifact_version") or 1),
+            parent_artifact_id=data.get("parent_artifact_id"),
+            derives_from=data.get("derives_from"),
+            created_by=data.get("created_by") or "",
+            deleted_at=data.get("deleted_at"),
+            lifecycle_status=data.get("lifecycle_status") or ArtifactLifecycle.ACTIVE.value,
             created_at=str(data.get("created_at") or ""),
             updated_at=str(data.get("updated_at") or ""),
         )
@@ -185,7 +215,7 @@ async def list_artifacts(
     offset: int = 0,
 ) -> list[Artifact]:
     """List Artifacts for a group with optional filtering."""
-    conditions = ["group_id = ?"]
+    conditions = ["group_id = ?", "lifecycle_status != 'deleted'"]
     params: list[Any] = [group_id]
 
     if origin:
@@ -229,6 +259,12 @@ async def list_artifacts(
                         size_bytes=int(data.get("size_bytes") or 0),
                         authorization_scope=data.get("authorization_scope", "group"),
                         metadata=metadata,
+                        artifact_version=int(data.get("artifact_version") or 1),
+                        parent_artifact_id=data.get("parent_artifact_id"),
+                        derives_from=data.get("derives_from"),
+                        created_by=data.get("created_by") or "",
+                        deleted_at=data.get("deleted_at"),
+                        lifecycle_status=data.get("lifecycle_status") or ArtifactLifecycle.ACTIVE.value,
                         created_at=str(data.get("created_at") or ""),
                         updated_at=str(data.get("updated_at") or ""),
                     )
@@ -238,10 +274,10 @@ async def list_artifacts(
 
 
 async def delete_artifact(artifact_id: str, group_id: int) -> bool:
-    """Delete Artifact record from DB."""
+    """Soft-delete the Artifact record; physical storage is not removed."""
     async with _db.connect() as conn:
         cursor = await conn.execute(
-            "DELETE FROM group_artifacts WHERE artifact_id = ? AND group_id = ?",
+            "UPDATE group_artifacts SET lifecycle_status = 'deleted', deleted_at = datetime('now'), updated_at = datetime('now') WHERE artifact_id = ? AND group_id = ? AND lifecycle_status != 'deleted'",
             (artifact_id, group_id),
         )
         await conn.commit()
