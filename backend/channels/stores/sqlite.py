@@ -7,6 +7,7 @@ module never opens or imports Group persistence.
 from __future__ import annotations
 
 import json
+import hashlib
 import time
 from enum import StrEnum
 from pathlib import Path
@@ -92,7 +93,7 @@ class ChannelStore:
     async def record_inbound(self, envelope: InboundEnvelope) -> bool:
         """Persist an inbound message once; return False for a duplicate event."""
         now = int(time.time() * 1000)
-        payload = json.dumps(envelope.to_dict(), ensure_ascii=False, sort_keys=True)
+        payload = _safe_json_text(envelope.to_dict())
         async with aiosqlite.connect(self.path) as db:
             cursor = await db.execute(
                 """INSERT OR IGNORE INTO channel_messages
@@ -121,7 +122,7 @@ class ChannelStore:
     async def enqueue_outbound(self, envelope: OutboundEnvelope) -> bool:
         """Persist one outbound delivery intent; duplicate keys are idempotent."""
         now = int(time.time() * 1000)
-        payload = json.dumps(_sanitize_json(dict(envelope.payload)), ensure_ascii=False, sort_keys=True)
+        payload = _safe_json_text(dict(envelope.payload))
         async with aiosqlite.connect(self.path) as db:
             cursor = await db.execute(
                 """INSERT OR IGNORE INTO channel_delivery_outbox
@@ -207,14 +208,14 @@ class ChannelStore:
                 """UPDATE channel_delivery_outbox
                    SET state=?, last_error=?, next_attempt_at=?, updated_at=?
                    WHERE idempotency_key=? AND state='sending'""",
-                (state, str(error)[:2000], next_attempt, now, idempotency_key),
+                (state, _sanitize_text(str(error), _MAX_ERROR_LENGTH), next_attempt, now, idempotency_key),
             )
             await db.commit()
             return cursor.rowcount == 1
 
     async def record_audit(self, idempotency_key: str, event_type: str, details: dict[str, Any]) -> None:
         now = int(time.time() * 1000)
-        safe_details = json.dumps(_sanitize_json(details), ensure_ascii=False, sort_keys=True)
+        safe_details = _safe_json_text(details)
         async with aiosqlite.connect(self.path) as db:
             await db.execute(
                 "INSERT INTO channel_audit_events (idempotency_key,event_type,details_json,created_at) VALUES(?,?,?,?)",
@@ -237,15 +238,40 @@ class ChannelStore:
 
 
 _MAX_STRING_LENGTH = 10_000
+_MAX_KEY_LENGTH = 256
+_MAX_ERROR_LENGTH = 2_000
+_MAX_DEPTH = 8
+_MAX_ELEMENTS = 1_000
+_MAX_JSON_BYTES = 256_000
 
 
-def _sanitize_json(value: Any) -> Any:
-    """Redact secrets and cap strings before Channel-owned persistence/audit."""
+def _sanitize_text(value: str, limit: int = _MAX_STRING_LENGTH) -> str:
+    """Redact the complete value before applying a storage length limit."""
+    safe = redact_secrets(value)[0]
+    return safe[:limit]
+
+
+def _sanitize_json(value: Any, *, depth: int = 0) -> Any:
+    """Redact and bound JSON before any Channel-owned persistence."""
+    if depth > _MAX_DEPTH:
+        return "[TRUNCATED_DEPTH]"
     if isinstance(value, str):
-        safe = redact_secrets(value[:_MAX_STRING_LENGTH])[0]
-        return safe[:_MAX_STRING_LENGTH]
+        return _sanitize_text(value)
     if isinstance(value, dict):
-        return {str(key): _sanitize_json(item) for key, item in value.items()}
+        items = list(value.items())[:_MAX_ELEMENTS]
+        return {
+            _sanitize_text(str(key), _MAX_KEY_LENGTH): _sanitize_json(item, depth=depth + 1)
+            for key, item in items
+        }
     if isinstance(value, (list, tuple)):
-        return [_sanitize_json(item) for item in value]
+        return [_sanitize_json(item, depth=depth + 1) for item in list(value)[:_MAX_ELEMENTS]]
     return value
+
+
+def _safe_json_text(value: Any) -> str:
+    safe = _sanitize_json(value)
+    encoded = json.dumps(safe, ensure_ascii=False, sort_keys=True)
+    if len(encoded.encode("utf-8")) <= _MAX_JSON_BYTES:
+        return encoded
+    digest = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+    return json.dumps({"_truncated": True, "sha256": digest}, ensure_ascii=False, sort_keys=True)

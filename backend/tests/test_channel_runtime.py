@@ -51,6 +51,30 @@ class TestChannelRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([item["event_type"] for item in audit], ["delivery.retrying", "delivery.sent"])
         self.assertNotIn("abcdefghijklmnopqrstuvwxyz123456", str(audit))
 
+    async def test_raw_pem_and_secret_keys_are_redacted_before_storage(self):
+        pem = "x" * 12_000 + "-----BEGIN RSA PRIVATE KEY-----\nsecret-material\n-----END RSA PRIVATE KEY-----"
+        from channels.core import ChannelConversation, ChannelIdentity, InboundEnvelope
+
+        inbound = InboundEnvelope(
+            identity=ChannelIdentity("slack", "tenant-a", "user-1"),
+            conversation=ChannelConversation("chat-raw"),
+            external_message_id="raw-1",
+            text="hello",
+            raw={"Authorization: Bearer abcdefghijklmnopqrstuvwxyz123456": pem},
+        )
+        self.assertTrue(await self.store.record_inbound(inbound))
+        async with __import__("aiosqlite").connect(self.store.path) as db:
+            cursor = await db.execute("SELECT payload_json FROM channel_messages WHERE message_key=?", (inbound.idempotency_key,))
+            raw = (await cursor.fetchone())[0]
+        self.assertNotIn("abcdefghijklmnopqrstuvwxyz123456", raw)
+        self.assertNotIn("PRIVATE KEY-----", raw)
+
+    async def test_last_error_is_redacted_before_storage(self):
+        dispatcher = ChannelDeliveryDispatcher(self.store, FailingConnector(9), max_attempts=1)
+        await dispatcher.run_once()
+        stored = await self.store.get_delivery("event-1")
+        self.assertNotIn("abcdefghijklmnopqrstuvwxyz123456", stored["last_error"])
+
     async def test_permanent_failure_enters_dead_letter_after_limit(self):
         dispatcher = ChannelDeliveryDispatcher(self.store, FailingConnector(9), max_attempts=2, base_delay_ms=0)
         await dispatcher.run_once()
