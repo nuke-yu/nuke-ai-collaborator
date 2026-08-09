@@ -114,12 +114,3 @@ async def revoke_personal_projection(projection_id: str, user=Depends(auth.get_c
     if not revoked:
         raise HTTPException(404, "Personal projection not found")
     return {"status": "ok", "revoked_projection_id": projection_id}
-
-
-@router.get("/api/personal/memory/usage")
-async def personal_memory_usage(group_id: int | None = None, record_id: str | None = None,
-                                limit: int = 100, user=Depends(auth.get_current_user)):
-    from ai.personal_vault import list_memory_usage
-    return {"items": await list_memory_usage(
-        int(user["uid"]), record_id=record_id, group_id=group_id, limit=limit,
-    )}

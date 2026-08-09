@@ -551,11 +551,14 @@ async def setup_session(runner) -> None:
             "max_tokens": runner.max_tokens,
         }
         from sessions.manifest import build_capability_manifest
+        executor_version = getattr(runner.executor.manifest, "version", "1")
+        if not isinstance(executor_version, str):
+            executor_version = "1"
         runner.capability_manifest, runner.manifest_hash = build_capability_manifest(
             provider=runner.provider,
             model=runner.model_name,
             executor_id=runner.executor.executor_id,
-            executor_version=getattr(runner.executor.manifest, "version", "1"),
+            executor_version=executor_version,
             system_prompt=runner.system_prompt,
             bot=runner.bot,
             tool_schemas=runner.tool_schemas,

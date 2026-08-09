@@ -112,10 +112,11 @@ class WSManager:
         return gone_id if gone_id and not still_online else None
 
     async def broadcast(self, group_id: int, message: dict):
-        if "event_id" not in message:
-            message = dict(message)
-            message["event_id"] = f"evt_{uuid4().hex}"
-        self.history.setdefault(group_id, deque(maxlen=500)).append(message)
+        delivery_message = message
+        history_message = dict(message)
+        if "event_id" not in history_message:
+            history_message["event_id"] = f"evt_{uuid4().hex}"
+        self.history.setdefault(group_id, deque(maxlen=500)).append(history_message)
         # Prevent re-entrant calls from same-coroutine recursion (Point 5 & DFT-047)
         dead = []
         async with self._lock:
@@ -126,7 +127,7 @@ class WSManager:
 
         async def _send_one(ws):
             try:
-                await asyncio.wait_for(ws.send_json(message), _SEND_TIMEOUT)
+                await asyncio.wait_for(ws.send_json(delivery_message), _SEND_TIMEOUT)
                 return None
             except Exception:
                 return ws

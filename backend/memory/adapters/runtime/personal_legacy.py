@@ -90,7 +90,7 @@ class LegacyPersonalKnowledgeAdapter:
     async def delete(self, scope: MemoryScope) -> bool:
         user_id = self._user_id(scope)
         from ai.personal_vault import delete_vault
-        return await delete_vault(user_id=user_id)
+        return await delete_vault(user_id)
 
     async def delete_record(self, scope: MemoryScope, record_id: str) -> bool:
         user_id = self._user_id(scope)
