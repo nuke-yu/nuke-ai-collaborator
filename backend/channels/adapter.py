@@ -23,6 +23,7 @@ class ChannelAdapter:
         secret: str,
         resolve_group: Callable[[str, str], Awaitable[tuple[int, int] | None]],
         register_attachment: Callable[[int, dict[str, Any]], Awaitable[str]] | None = None,
+        record_inbound: Callable[[InboundEnvelope], Awaitable[bool]] | None = None,
     ) -> None:
         if not channel.strip() or not secret:
             raise ValueError("channel and secret are required")
@@ -30,7 +31,7 @@ class ChannelAdapter:
         self.secret = secret.encode()
         self.resolve_group = resolve_group
         self.register_attachment = register_attachment
-        self._seen: set[tuple[str, str, str]] = set()
+        self.record_inbound = record_inbound
 
     def verify_signature(self, body: bytes, signature: str) -> bool:
         expected = hmac.new(self.secret, body, hashlib.sha256).hexdigest()
@@ -47,9 +48,6 @@ class ChannelAdapter:
         message_id = str(payload.get("message_id") or "").strip()
         if not all((tenant, external_group, external_user, message_id)):
             raise ValueError("tenant_id, group_id, user_id, and message_id are required")
-        key = (tenant, external_group, message_id)
-        if key in self._seen:
-            return None
         resolved = await self.resolve_group(tenant, external_group)
         if resolved is None:
             raise ChannelAuthError("external group is not authorized")
@@ -68,7 +66,8 @@ class ChannelAdapter:
             attachments=attachments,
             raw=payload,
         )
-        self._seen.add(key)
+        if self.record_inbound is not None and not await self.record_inbound(envelope):
+            return None
         return envelope
 
     async def register_attachments(self, envelope: InboundEnvelope) -> tuple[str, ...]:
