@@ -6,7 +6,7 @@ import uuid
 from typing import Protocol
 
 from channels.core import ChannelConversation, ChannelIdentity, DeliveryReceipt, OutboundEnvelope
-from channels.stores import ChannelStore
+from channels.stores import ChannelStore, DeliveryState
 
 
 class ChannelConnector(Protocol):
@@ -56,19 +56,28 @@ class ChannelDeliveryDispatcher:
             if receipt.status != "sent" or not receipt.external_message_id:
                 detail = receipt.error_message or receipt.error_code or f"connector returned status={receipt.status}"
                 raise ChannelDeliveryError(detail)
-            if not await self.store.mark_sent(key, receipt.external_message_id, lease_owner=self.owner_id):
+            if not await self.store.transition_delivery_with_audit(
+                key,
+                DeliveryState.SENT,
+                event_type="delivery.sent",
+                details={"attempt": item["attempts"]},
+                external_message_id=receipt.external_message_id,
+                lease_owner=self.owner_id,
+            ):
                 raise ChannelDeliveryError("delivery state changed before success could be recorded")
-            await self.store.record_audit(key, "delivery.sent", {"attempt": item["attempts"]})
         except Exception as exc:
             attempt = int(item["attempts"])
             retry_at = None
             if attempt < self.max_attempts:
                 current = now_ms if now_ms is not None else int(time.time() * 1000)
                 retry_at = current + self.base_delay_ms * (2 ** (attempt - 1))
-            await self.store.mark_failed(key, str(exc), retry_at_ms=retry_at, lease_owner=self.owner_id)
-            await self.store.record_audit(key, "delivery.retrying" if retry_at is not None else "delivery.dead_letter", {
-                "attempt": attempt,
-                "error": str(exc),
-                "retry_at_ms": retry_at,
-            })
+            await self.store.transition_delivery_with_audit(
+                key,
+                DeliveryState.RETRYING if retry_at is not None else DeliveryState.DEAD_LETTER,
+                event_type="delivery.retrying" if retry_at is not None else "delivery.dead_letter",
+                details={"attempt": attempt, "error": str(exc), "retry_at_ms": retry_at},
+                error=str(exc),
+                retry_at_ms=retry_at,
+                lease_owner=self.owner_id,
+            )
         return True

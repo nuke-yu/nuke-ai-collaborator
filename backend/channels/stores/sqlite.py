@@ -217,47 +217,81 @@ class ChannelStore:
         return await self.get_delivery(key)
 
     async def mark_sent(self, idempotency_key: str, external_message_id: str, *, lease_owner: str | None = None) -> bool:
-        now = int(time.time() * 1000)
-        async with aiosqlite.connect(self.path) as db:
-            query = """UPDATE channel_delivery_outbox
-                   SET state='sent', external_message_id=?, last_error=NULL, lease_owner=NULL, lease_expires_at=NULL, updated_at=?
-                   WHERE idempotency_key=? AND state='sending'"""
-            args: tuple[Any, ...] = (external_message_id, now, idempotency_key)
-            if lease_owner is not None:
-                query += " AND lease_owner=?"
-                args += (lease_owner,)
-            cursor = await db.execute(
-                query,
-                args,
-            )
-            await db.commit()
-            return cursor.rowcount == 1
+        return await self.transition_delivery_with_audit(
+            idempotency_key,
+            DeliveryState.SENT,
+            event_type="delivery.sent",
+            details={},
+            external_message_id=external_message_id,
+            lease_owner=lease_owner,
+        )
 
-    async def mark_failed(
+    async def transition_delivery_with_audit(
         self,
         idempotency_key: str,
-        error: str,
+        state: DeliveryState,
         *,
+        event_type: str,
+        details: dict[str, Any],
+        external_message_id: str | None = None,
+        error: str | None = None,
         retry_at_ms: int | None = None,
         lease_owner: str | None = None,
     ) -> bool:
+        """CAS a delivery state and append its audit event in one transaction."""
+        if state not in {DeliveryState.SENT, DeliveryState.RETRYING, DeliveryState.DEAD_LETTER}:
+            raise ValueError("unsupported delivery transition")
         now = int(time.time() * 1000)
-        state = DeliveryState.RETRYING.value if retry_at_ms is not None else DeliveryState.DEAD_LETTER.value
-        next_attempt = retry_at_ms if retry_at_ms is not None else now
         async with aiosqlite.connect(self.path) as db:
-            query = """UPDATE channel_delivery_outbox
-                   SET state=?, last_error=?, next_attempt_at=?, lease_owner=NULL, lease_expires_at=NULL, updated_at=?
-                   WHERE idempotency_key=? AND state='sending'"""
-            args: tuple[Any, ...] = (state, _sanitize_text(str(error), _MAX_ERROR_LENGTH), next_attempt, now, idempotency_key)
-            if lease_owner is not None:
-                query += " AND lease_owner=?"
-                args += (lease_owner,)
+            await db.execute("BEGIN IMMEDIATE")
+            async with db.execute(
+                "SELECT state,lease_owner FROM channel_delivery_outbox WHERE idempotency_key=?",
+                (idempotency_key,),
+            ) as cursor:
+                current = await cursor.fetchone()
+            if current is None or current[0] != DeliveryState.SENDING.value:
+                await db.rollback()
+                return False
+            if lease_owner is not None and current[1] != lease_owner:
+                await db.rollback()
+                return False
+            if state is DeliveryState.SENT:
+                if not external_message_id:
+                    await db.rollback()
+                    return False
+                next_attempt = now
+                last_error = None
+            else:
+                next_attempt = retry_at_ms if retry_at_ms is not None else now
+                last_error = _sanitize_text(str(error or "delivery failed"), _MAX_ERROR_LENGTH)
             cursor = await db.execute(
-                query,
-                args,
+                """UPDATE channel_delivery_outbox
+                   SET state=?, external_message_id=COALESCE(?, external_message_id), last_error=?,
+                       next_attempt_at=?, lease_owner=NULL, lease_expires_at=NULL, updated_at=?
+                   WHERE idempotency_key=? AND state='sending'""",
+                (state.value, external_message_id, last_error, next_attempt, now, idempotency_key),
+            )
+            if cursor.rowcount != 1:
+                await db.rollback()
+                return False
+            await db.execute(
+                "INSERT INTO channel_audit_events (idempotency_key,event_type,details_json,created_at) VALUES(?,?,?,?)",
+                (idempotency_key, str(event_type), _safe_json_text(details), now),
             )
             await db.commit()
-            return cursor.rowcount == 1
+            return True
+
+    async def mark_failed(self, idempotency_key: str, error: str, *, retry_at_ms: int | None = None, lease_owner: str | None = None) -> bool:
+        state = DeliveryState.RETRYING if retry_at_ms is not None else DeliveryState.DEAD_LETTER
+        return await self.transition_delivery_with_audit(
+            idempotency_key,
+            state,
+            event_type="delivery.retrying" if retry_at_ms is not None else "delivery.dead_letter",
+            details={"error": str(error), "retry_at_ms": retry_at_ms},
+            error=error,
+            retry_at_ms=retry_at_ms,
+            lease_owner=lease_owner,
+        )
 
     async def record_audit(self, idempotency_key: str, event_type: str, details: dict[str, Any]) -> None:
         now = int(time.time() * 1000)

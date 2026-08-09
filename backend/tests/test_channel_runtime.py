@@ -115,6 +115,16 @@ class TestChannelRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reclaimed["state"], DeliveryState.SENDING)
         self.assertEqual(reclaimed["lease_owner"], "worker-b")
 
+    async def test_wrong_lease_owner_cannot_transition_or_append_audit(self):
+        await self.store.claim_due_delivery(lease_owner="worker-a", lease_ms=1000)
+        changed = await self.store.transition_delivery_with_audit(
+            "event-1", DeliveryState.SENT, event_type="delivery.sent", details={},
+            external_message_id="remote", lease_owner="worker-b",
+        )
+        self.assertFalse(changed)
+        self.assertEqual((await self.store.get_delivery("event-1"))["state"], DeliveryState.SENDING)
+        self.assertEqual(await self.store.list_audit("event-1"), [])
+
 
 if __name__ == "__main__":
     unittest.main()
