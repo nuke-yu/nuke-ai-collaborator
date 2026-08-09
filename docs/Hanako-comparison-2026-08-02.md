@@ -1156,7 +1156,7 @@ OpenHanako 的主要优势是：
 | Event Policy / Payload Policy / Retention | CURRENT | 已形成分类、脱敏、Artifact 化、原子写入、Retention、OTel 和 Prometheus 闭环。 |
 | Model Usage Ledger | CURRENT | 已按 Provider 请求记录实际模型、Token、费用、失败和 retry 关系；Provider Descriptor 和基础治理已补齐。 |
 | WebSocket Event Contract | CURRENT / TRANSITION | 已有版本化 Envelope、event_id、Replay Cursor、Catch-up 和客户端去重；完整 Schema 生成和所有事件迁移仍可继续。 |
-| Channel Adapter | TRANSITION | C0–C8 基础模块和 Review 阻断修复已提交；C4/C6/C7 已完成本地 runtime wiring，C8 已完成 JSONL Server/Client 与最小环境边界；真实平台 E2E、OS/container 隔离和 deployable 验收仍未完成。 |
+| Channel Adapter | TRANSITION | C0–C8 基础模块和 Review 阻断修复已提交；C4/C6/C7 已完成本地 runtime wiring，C8 已完成 JSONL Server/Client、最小环境和当前范围 Docker/Compose 测试部署；真实平台 E2E 仍未完成，云平台级隔离属于后续阶段。 |
 | Store Registry | CURRENT / TRANSITION | 已有可执行 Store Descriptor/Registry，以及 owner、canonical/projection、migration、retention、deletion 和 backup 治理元数据；策略执行器仍待补齐。 |
 | Plugin Process Isolation | TRANSITION | 已完成单插件 JSONL IPC 隔离和 Manifest/资源/HIL/崩溃状态治理；尚未迁移全部高风险 Executor。 |
 | Electron / Onboarding / Theme | CURRENT | 相关实现已经进入提交历史，不再按“未提交能力”处理。 |
@@ -1218,9 +1218,9 @@ OpenHanako 的主要优势是：
 2. 统一模型废弃、替换、fallback、预算和 quota 语义。
 3. 将所有执行路径的 Provider 解析收敛到 Registry，并与 Capability Manifest、Model Usage Ledger 对接。
 
-#### Phase 6：Channel Adapter（本地 runtime wiring 已完成，真实渠道和 deployable 待完成）
+#### Phase 6：Channel Adapter（本地 runtime wiring 和当前范围测试部署已完成，真实渠道待完成）
 
-Channel 先作为独立模块运行，只有通过显式 Channel-Group Bridge 和 active Binding 后，才作为 Group Integration Member 与 Group 双向通信。当前 Workflow → Group transactional outbox → Supervisor Relay → Channel delivery outbox 已接通，控制面和本地进程 fault boundary 也已补齐。剩余阻断项是外部用户授权、附件 Artifact、真实平台限流/重放 E2E、OS/container 隔离、部署编排和 go/no-go 演练。
+Channel 先作为独立模块运行，只有通过显式 Channel-Group Bridge 和 active Binding 后，才作为 Group Integration Member 与 Group 双向通信。当前 Workflow → Group transactional outbox → Supervisor Relay → Channel delivery outbox 已接通，控制面、本地进程 fault boundary 和 Docker/Compose 测试部署也已具备。剩余阻断项是外部用户授权、附件 Artifact、真实平台限流/重放 E2E 和 go/no-go 演练；云平台级隔离与多租户编排后置。
 
 #### Phase 7：Plugin Process Isolation（IPC 治理已完成，全面迁移待完善）
 
@@ -1243,4 +1243,4 @@ Channel 先作为独立模块运行，只有通过显式 Channel-Group Bridge �
 
 ### 14.5 当前验证备注
 
-截至本轮复核，后端全量测试为 `2522 passed, 2 skipped, 56 warnings, 40 subtests passed`。全量回归在允许本地 Unix/TCP socket 的环境执行；沙箱环境会因禁止 bind 而产生非代码级 PermissionError。本轮之后，Channel 的 Group 事务 Outbox producer、Supervisor Relay 生命周期、Pause/Resume、死信 replay、SLO 指标、Process Server、最小子进程环境和 Secret Resolver 已补齐；当前剩余工作集中在真实渠道端到端接入、外部用户授权映射、附件 Artifact 化、部署隔离和 deployable 验收。
+截至本轮复核，后端全量测试为 `2522 passed, 2 skipped, 56 warnings, 40 subtests passed`。全量回归在允许本地 Unix/TCP socket 的环境执行；沙箱环境会因禁止 bind 而产生非代码级 PermissionError。本轮之后，Channel 的 Group 事务 Outbox producer、Supervisor Relay 生命周期、Pause/Resume、死信 replay、SLO 指标、Process Server、最小子进程环境、Secret Resolver 和当前范围 Docker/Compose 测试部署已具备；当前剩余工作集中在真实渠道端到端接入、外部用户授权映射和附件 Artifact 化。云平台隔离与多租户编排后置。

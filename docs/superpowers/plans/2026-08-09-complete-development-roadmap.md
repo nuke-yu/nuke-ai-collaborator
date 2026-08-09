@@ -24,11 +24,11 @@ C0–C8 的基础代码已按顺序提交，但经 Review 校准，不能把“�
 | C5 入站路由到配置 Bot | `ed65487` | 2 | Bridge 路由基础层已测，外部用户授权映射尚未接入 |
 | C6 Group 事件出站 Outbox | `75da38c`, `a4c4939`, `ea55c17`, `741efd5`, `594c8c7` | 4（本地运行时） | Workflow observation 已在 Group 事务内生成 outbox；Relay 已由 Supervisor 托管并有超时、错误隔离、SLO 指标；尚无真实平台 E2E |
 | C7 脱敏、审计、重试、死信 | `90cf644` + review fixes + `3995fcd`, `5c15f0b`, `d2bcac4` | 4（本地运行时） | Pause/resume、健康、死信 replay、审计和 Prometheus 已接入；尚无部署级告警/值班演练 |
-| C8 独立进程 Bridge 边界 | `0efd8e9`, `f633bf9`, `73b8ce9`, `50a5d60` | 4（模块级） | JSONL Server/Client、Supervisor 生命周期、超时关闭、最小环境和 Secret Resolver 已测；尚无 OS/container sandbox 与部署编排 |
+| C8 独立进程 Bridge 边界 | `0efd8e9`, `f633bf9`, `73b8ce9`, `50a5d60` | 5（当前范围） | JSONL Server/Client、Supervisor 生命周期、最小环境，以及现有 Docker/Compose 测试环境部署路径已具备；云平台级隔离不属于当前产品阻断项 |
 
 Review 修复 commits：`cf35651`（回执校验）、`ba9b2e4`（存储边界脱敏）、`c66bd83`（delivery lease）、`ecdd9fe`（状态/审计原子事务）、`057d380`（canonical event_id）、`f633bf9`（ProcessClient 故障恢复）、`a4c4939`（Group durable outbox relay）、`a87fbff`（持久化入站去重）、`458e53c`（协议版本和无碰撞 key）、`5bb0370`（raw bytes 验签/replay）、`45cd48c`（Binding/Member/Router 状态一致性）、`3475b40`（payload fail-closed/lease heartbeat）。
 
-当前已完成本地 runtime wiring，但仍禁止宣称真实平台生产完成；必须补齐平台授权、真实 Connector E2E、部署隔离和 go/no-go 演练。
+当前已完成本地 runtime wiring 和当前范围内的 Docker 测试环境部署。仍不能宣称真实平台生产完成，剩余重点是平台授权、真实 Connector E2E 和产品级 go/no-go 演练；云平台隔离作为未来阶段。
 
 ## 1. 总体架构原则
 
@@ -320,9 +320,9 @@ Group SQLite commit
 - 为每个 Channel/Binding 提供健康状态、最后成功投递时间和失败计数。
 - 外部平台重复事件、乱序事件和过期事件必须可处理。
 
-### C8：进程与部署隔离（Gate 4：模块级 failure-tested）
+### C8：进程与部署边界（Gate 5：当前范围可部署）
 
-已完成独立 JSONL `BridgeEnvelope` Process Server/Client、响应校验、Supervisor 生命周期、超时 kill fallback、最小环境和显式 Secret Resolver；模块依赖保持可分离。生产部署编排仍需采用：
+已完成独立 JSONL `BridgeEnvelope` Process Server/Client、响应校验、Supervisor 生命周期、超时 kill fallback、最小环境和显式 Secret Resolver；仓库已有 Dockerfile、Compose 配置和单容器部署路径。当前目标是测试环境/单组织部署，不要求 Channel Connector 独立容器化；未来云平台再增加 OS/container 级隔离和多租户编排。
 
 ```text
 Channel Process
