@@ -87,16 +87,28 @@ class SupervisorCollector:
             "nuke_channel_relay_timeouts_total",
             "Group relay timeouts isolated by the Supervisor.",
         )
+        relay_retries = CounterMetricFamily(
+            "nuke_channel_relay_retries_total",
+            "Group relay failures scheduled for another attempt.",
+        )
+        relay_dead_letters = CounterMetricFamily(
+            "nuke_channel_relay_dead_letters_total",
+            "Poison Group relay events moved to dead letter.",
+        )
         relay_up.add_metric([], float(bool(relay_stats.get("relay_up", False))))
         relay_cycles.add_metric([], float(relay_stats.get("cycles", 0)))
         relay_forwarded.add_metric([], float(relay_stats.get("forwarded", 0)))
         relay_errors.add_metric([], float(relay_stats.get("errors", 0)))
         relay_timeouts.add_metric([], float(relay_stats.get("timeouts", 0)))
+        relay_retries.add_metric([], float(relay_stats.get("relay_retries", 0)))
+        relay_dead_letters.add_metric([], float(relay_stats.get("relay_dead_letters", 0)))
         yield relay_up
         yield relay_cycles
         yield relay_forwarded
         yield relay_errors
         yield relay_timeouts
+        yield relay_retries
+        yield relay_dead_letters
 
         # ── process fleet ────────────────────────────────────────────────
         alive = [(label, proc) for label, proc in processes

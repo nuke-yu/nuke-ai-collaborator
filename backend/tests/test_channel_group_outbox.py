@@ -51,6 +51,38 @@ class TestChannelGroupOutbox(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await relay.relay_once(), GroupRelayResult.FORWARDED)
         self.assertEqual((await self.channel.get_delivery(self.envelope.idempotency_key))["idempotency_key"], self.envelope.idempotency_key)
 
+    async def test_poison_event_enters_dead_letter_after_bounded_attempts(self):
+        async with aiosqlite.connect(self.group_path) as db:
+            await db.execute("BEGIN")
+            await GroupChannelOutboxWriter.append(db, self.envelope)
+            await db.execute(
+                "UPDATE group_channel_event_outbox SET payload_json='not-json'"
+            )
+            await db.commit()
+        relay = GroupChannelOutboxRelay(
+            self.group_path,
+            self.channel,
+            owner_id="relay-poison",
+            max_attempts=3,
+            retry_delay_ms=0,
+        )
+        self.assertEqual(await relay.relay_once(now_ms=10**15), GroupRelayResult.RETRY_SCHEDULED)
+        self.assertEqual(await relay.relay_once(now_ms=10**15 + 1), GroupRelayResult.RETRY_SCHEDULED)
+        self.assertEqual(await relay.relay_once(now_ms=10**15 + 2), GroupRelayResult.DEAD_LETTERED)
+        self.assertEqual(await relay.relay_once(now_ms=10**15 + 3), GroupRelayResult.IDLE)
+        async with aiosqlite.connect(self.group_path) as db:
+            async with db.execute(
+                "SELECT state,attempts FROM group_channel_event_outbox"
+            ) as cursor:
+                self.assertEqual(await cursor.fetchone(), ("dead_letter", 3))
+            async with db.execute(
+                "SELECT event_type FROM group_channel_outbox_audit ORDER BY id"
+            ) as cursor:
+                self.assertEqual(
+                    [row[0] for row in await cursor.fetchall()],
+                    ["relay.retrying", "relay.retrying", "relay.dead_lettered"],
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

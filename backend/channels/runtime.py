@@ -67,6 +67,9 @@ class GroupChannelRelayService:
         self._stats = {
             "cycles": 0,
             "forwarded": 0,
+            "relay_retries": 0,
+            "relay_dead_letters": 0,
+            "relay_lease_lost": 0,
             "projected": 0,
             "projection_retries": 0,
             "projection_dead_letters": 0,
@@ -140,6 +143,12 @@ class GroupChannelRelayService:
                 continue
             if result is GroupRelayResult.FORWARDED:
                 forwarded += 1
+            elif result is GroupRelayResult.RETRY_SCHEDULED:
+                self._stats["relay_retries"] += 1
+            elif result is GroupRelayResult.DEAD_LETTERED:
+                self._stats["relay_dead_letters"] += 1
+            elif result is GroupRelayResult.LEASE_LOST:
+                self._stats["relay_lease_lost"] += 1
         self._stats["cycles"] += 1
         self._stats["forwarded"] += forwarded
         self._stats["last_cycle_at"] = int(time.time() * 1000)
