@@ -74,6 +74,11 @@ _DDL = (
         details_json TEXT NOT NULL,
         created_at INTEGER NOT NULL
     )""",
+    """CREATE TABLE IF NOT EXISTS channel_delivery_controls (
+        channel TEXT PRIMARY KEY,
+        paused INTEGER NOT NULL DEFAULT 0,
+        updated_at INTEGER NOT NULL
+    )""",
     "CREATE INDEX IF NOT EXISTS idx_channel_delivery_due ON channel_delivery_outbox(state, next_attempt_at)",
 )
 
@@ -175,6 +180,55 @@ class ChannelStore:
         item["payload"] = json.loads(item.pop("payload_json"))
         return item
 
+    async def set_channel_paused(self, channel: str, paused: bool) -> None:
+        channel = str(channel or "").strip().lower()
+        if not channel:
+            raise ValueError("channel is required")
+        async with aiosqlite.connect(self.path) as db:
+            await db.execute(
+                """INSERT INTO channel_delivery_controls(channel,paused,updated_at) VALUES(?,?,?)
+                   ON CONFLICT(channel) DO UPDATE SET paused=excluded.paused,updated_at=excluded.updated_at""",
+                (channel, int(paused), int(time.time() * 1000)),
+            )
+            await db.commit()
+
+    async def get_delivery_health(self) -> dict[str, Any]:
+        async with aiosqlite.connect(self.path) as db:
+            async with db.execute(
+                "SELECT channel,state,COUNT(*) FROM channel_delivery_outbox GROUP BY channel,state"
+            ) as cursor:
+                rows = await cursor.fetchall()
+            async with db.execute("SELECT channel FROM channel_delivery_controls WHERE paused=1 ORDER BY channel") as cursor:
+                paused = [row[0] for row in await cursor.fetchall()]
+            async with db.execute(
+                "SELECT MIN(created_at) FROM channel_delivery_outbox WHERE state IN ('pending','retrying')"
+            ) as cursor:
+                oldest = (await cursor.fetchone())[0]
+        counts: dict[str, dict[str, int]] = {}
+        for channel, state, count in rows:
+            counts.setdefault(channel, {})[state] = int(count)
+        return {"by_channel": counts, "paused_channels": paused, "oldest_pending_at": oldest}
+
+    async def replay_dead_letter(self, idempotency_key: str) -> bool:
+        now = int(time.time() * 1000)
+        async with aiosqlite.connect(self.path) as db:
+            await db.execute("BEGIN IMMEDIATE")
+            cursor = await db.execute(
+                """UPDATE channel_delivery_outbox
+                   SET state='retrying',next_attempt_at=?,last_error=NULL,updated_at=?
+                   WHERE idempotency_key=? AND state='dead_letter'""",
+                (now, now, idempotency_key),
+            )
+            if cursor.rowcount != 1:
+                await db.rollback()
+                return False
+            await db.execute(
+                "INSERT INTO channel_audit_events(idempotency_key,event_type,details_json,created_at) VALUES(?,?,?,?)",
+                (idempotency_key, "delivery.replayed", _safe_json_text({}), now),
+            )
+            await db.commit()
+            return True
+
     async def recover_expired_deliveries(self, *, now_ms: int | None = None) -> int:
         """Return crashed ``sending`` work to the retry queue."""
         now = now_ms if now_ms is not None else int(time.time() * 1000)
@@ -205,6 +259,10 @@ class ChannelStore:
             async with db.execute(
                 """SELECT idempotency_key FROM channel_delivery_outbox
                    WHERE state IN ('pending','retrying') AND next_attempt_at<=?
+                     AND NOT EXISTS (
+                       SELECT 1 FROM channel_delivery_controls c
+                       WHERE c.channel=channel_delivery_outbox.channel AND c.paused=1
+                     )
                    ORDER BY created_at ASC LIMIT 1""",
                 (now,),
             ) as cursor:

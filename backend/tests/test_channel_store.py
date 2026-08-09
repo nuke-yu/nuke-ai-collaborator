@@ -61,6 +61,25 @@ class TestChannelStore(unittest.IsolatedAsyncioTestCase):
         stored = await self.store.get_delivery("event-2")
         self.assertEqual(stored["state"], DeliveryState.DEAD_LETTER)
 
+    async def test_pause_health_and_dead_letter_replay_are_operator_safe(self):
+        outbound = OutboundEnvelope(
+            identity=ChannelIdentity("slack", "tenant-a"), conversation=ChannelConversation("chat-1"),
+            event_type="workflow.failed", payload={"summary": "failed"}, idempotency_key="event-3",
+        )
+        await self.store.enqueue_outbound(outbound)
+        await self.store.set_channel_paused("slack", True)
+        self.assertIsNone(await self.store.claim_due_delivery())
+        health = await self.store.get_delivery_health()
+        self.assertEqual(health["paused_channels"], ["slack"])
+        await self.store.set_channel_paused("slack", False)
+        await self.store.claim_due_delivery()
+        self.assertTrue(await self.store.mark_failed("event-3", "permanent"))
+        self.assertTrue(await self.store.replay_dead_letter("event-3"))
+        self.assertFalse(await self.store.replay_dead_letter("event-3"))
+        self.assertEqual((await self.store.get_delivery("event-3"))["state"], DeliveryState.RETRYING)
+        audit = await self.store.list_audit("event-3")
+        self.assertEqual(audit[-1]["event_type"], "delivery.replayed")
+
 
 if __name__ == "__main__":
     unittest.main()
