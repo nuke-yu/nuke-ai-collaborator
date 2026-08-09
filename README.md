@@ -151,6 +151,113 @@ Nuke AI Collaborator 采用 **微内核 + 进程分片 + 事件总线 (Event Bus
 
 ---
 
+## 🔎 代码核验版：完整能力与技术边界
+
+> 本节基于当前代码与测试入口重新梳理，补充上方产品视角说明。状态分为：**✅ 已交付**、**🟡 过渡中**、**🧭 规划中**。复核基线：2026-08-09。
+
+### 实际运行时拓扑补充
+
+上方架构图用于表达产品的核心进程关系；从代码所有权和数据边界看，实际运行时还包含以下结构：
+
+~~~text
+Web / Electron
+      │  REST + WebSocket
+      ▼
+FastAPI / Supervisor
+      ├── Central DB：用户、Group 元数据、成员、模板和配置
+      ├── Scheduler / Plugin Host / Channel Relay & Delivery
+      ├── Worker process × N
+      │     ├── Group 稳定分片（不是每个 Group 一个进程）
+      │     ├── tool_loop_v1 / Workflow / Session / Memory / Permission
+      │     ├── Group DB + Group Workspace
+      │     └── Shell → 每 Group 沙箱容器（生产容器模式）
+      └── MCP Collector process × 1
+            ├── MCP stdio / remote 连接的唯一所有者
+            ├── Schema、OAuth、并发控制和预授权调用
+            └── 结果脱敏后经 IPC 返回 Worker
+
+独立持久化边界
+      ├── workspaces/group_<id>/chat.db       Group 规范数据
+      ├── workspaces/group_<id>/...           Group 文件工作区
+      ├── workspaces/_personal/...            Personal Vault
+      └── workspaces/_channels/bridge.db       Channel Bridge
+~~~
+
+运行时遵循三个关键约束：
+
+1. **工具路由**：Builtin、Skill 和 Shell 始终经过 Worker 内的权限 Hook 与 Shell Guard；MCP 工具经 McpProxyProvider 转发给 Collector。
+2. **MCP 单进程原则**：真实 MCP Client 只能存在于 Collector，Worker 不直接持有 MCP 连接。
+3. **事务后副作用**：Workflow、Timeline 等状态先提交 SQLite，再广播事件、导出遥测或触发外部投影；跨进程指标通过结构化快照传递。
+
+### 完整能力矩阵
+
+| 能力维度 | 状态 | 当前代码能力 |
+|---|---:|---|
+| 产品定位 | ✅ | 以 Group 为长期协作单元，人类与多个角色 Bot 共享消息、任务、文件、记忆和执行上下文 |
+| Group 数据边界 | ✅ | 每个 Group 独立 SQLite DB 和文件工作区；个人记忆与 Channel Bridge 使用独立 Store |
+| 群聊与实时协作 | ✅ | WebSocket 流式回复、Thinking、工具进度、Presence、未读状态和断线补偿 |
+| 消息协作 | ✅ | 回复、编辑、撤回、Reaction、多消息置顶、草稿、搜索、公告、文件与图片 |
+| Recap 与建议 | ✅ | 群组回顾、个人未读摘要、下一步建议和自动回复 |
+| Bot 组织 | ✅ | 独立角色、提示词、模型、Skill、权限和记忆；提供 BA、Dev、QA 等角色模板 |
+| 子 Agent | ✅ | 同步/后台派生、深度限制、结果回传和权限衰减 |
+| BA → Dev → QA 工作流 | ✅ | 声明式阶段、交付物、人工 Gate、驳回返工和状态持久化 |
+| 多 Bot 讨论 | ✅ | 多轮发言、阶段切换和总结者归并 |
+| Coding Agent | ✅ | 自主编码循环、Git worktree、重试/中止、卡死检测、结果提升与 PR Gate |
+| Session 与恢复 | ✅ | Session WAL、父子关系、事件、Manifest、快照、取消和恢复；不确定副作用不会自动重放 |
+| Group 长期记忆 | ✅ | 事实、经历、总结、反思、关系、TTL、冲突和 supersede 治理 |
+| 混合检索 | ✅ | SQLite 规范记录 + Chroma 向量投影，结合语义、时效、重要度和任务上下文重排 |
+| Personal Vault | 🟡 | 个人记录、来源、导出、删除、重建、Group/Bot 投影、撤销和使用审计已具备；撤销影响治理仍在演进 |
+| 分层 Skill | ✅ | System、Group、Role/Bot、Learned、Personal/External 来源发现与加载 |
+| Skill 自学习 | ✅ | 从成功/失败轨迹提取案例与候选 Skill，Draft 经测试、批准或拒绝后生效 |
+| 工作区工具 | ✅ | 文件读写、原子批量编辑、锚点编辑、目录树和文件历史 |
+| 代码搜索与分析 | ✅ | ripgrep、Python/Jedi，以及可选的 JS/TS Language Server |
+| GitHub 交付 | ✅ | 仓库准入策略、worktree、提交和 PR；真实路径依赖 gh CLI 与 GitHub Token |
+| Jira 风格任务 | 🟡 | 已有本地 ticket 工具与记录，不等同于真实 Jira Cloud/Server Connector |
+| MCP | ✅ | Schema 同步、Worker 代理、HITL、OAuth、每 Server 并发锁与结果脱敏 |
+| 模型提供商 | ✅ | DeepSeek、OpenAI、Anthropic Claude、MiniMax、智谱、通义千问和 Ollama |
+| 模型治理 | 🟡 | Provider Capability、工具/视觉/Thinking 检查、成本预算和用量账本已存在；模型目录仍在统一 |
+| HITL 权限 | ✅ | allow / deny / ask、once/always 规则、稳定审计 ID 与参数哈希 |
+| Shell 防护 | ✅ | 正则规则 + shlex 词法分解，覆盖管道、编码解码和 eval 等常见逃逸方式 |
+| 子 Agent 权限衰减 | ✅ | bypass 不向下传播，高风险通配 allow 被移除，子 Agent 不能自行绕过审批 |
+| Secret Redaction | ✅ | 工具结果、记忆、事件 Payload 和遥测链路过滤 Token、Key、PEM 等敏感内容并限制长度 |
+| Group Shell 沙箱 | ✅ | 生产配置强制容器后端，仅挂载目标 Group 工作区并设置资源限制 |
+| 本地开发 Shell | ⚠️ | 默认 local 后端属于可信开发模式，不提供容器级 OS 隔离；生产启动会拒绝该配置 |
+| Artifact Registry | 🟡 | 稳定 ID、版本、校验和、来源、作用域、lineage、撤销和软删除已具备；物理文件回收仍未闭环 |
+| Unified Timeline | ✅ | 关联 Workflow、Session、Permission、Tool、Memory、Artifact 和模型用量 |
+| Execution Timeline | ✅ | 前端查看 Thinking、工具参数/结果、状态、错误和恢复动作 |
+| Capability Manifest | ✅ | 保存执行时能力快照与稳定哈希，不保存 Secret 或无界正文 |
+| Event Payload Policy | ✅ | 事件分类、脱敏、截断、大 Payload Artifact 化和保留策略 |
+| Retention | ✅ | 清理符合条件的执行数据，并保留不含原始 Payload 的清理回执 |
+| Store Registry | 🟡 | 已登记主要 Store 的所有权、迁移、保留和删除策略元数据；统一策略执行仍在补全 |
+| Cron Scheduler | ✅ | 持久化 5 段 Cron、启停、立即运行、misfire 合并和 Operator 控制 |
+| Channel Runtime | 🟡 | Binding、签名 Webhook、Outbox、重试、死信、暂停/恢复、审计和健康指标已接入 |
+| 真实外部渠道 | 🧭 | 飞书、企微、钉钉、Slack 等真实 Connector 尚未完成生产注册和端到端验收 |
+| 插件进程隔离 | 🟡 | 已有带 Manifest、资源限制和 JSONL IPC 的隔离试点，尚未覆盖所有高风险插件 |
+| 可观测性 | ✅ | 结构化日志、W3C Trace、OpenTelemetry、低基数 Prometheus 指标和 Worker 指标快照 |
+| 故障恢复 | ✅ | Supervisor 监控并重启 Worker/Collector，Session 区分可恢复操作和不确定副作用 |
+| 前端体验 | ✅ | React 19、Vite 8、Tailwind CSS 4、Zustand、中英文 UI、13 套主题和引导流程 |
+| 桌面端与部署 | ✅ | Electron、Docker 多阶段构建、GHCR amd64/arm64 镜像、健康检查和 Group 沙箱镜像 |
+
+### 当前能力边界
+
+以下能力已有基础代码，但当前不应描述为完整生产交付：
+
+- **外部 Channel**：运行时链路已接通，但真实平台 Connector、外部身份授权、附件 Artifact 化、平台限流和真实 E2E 尚未完成。
+- **插件隔离**：JSONL 子进程执行是试点能力，不代表全部插件已经隔离。
+- **Artifact 生命周期**：Registry、版本和 lineage 已存在，物理存储回收及完整 Workflow 交付闭环仍待补齐。
+- **Store Registry**：当前主要是治理元数据注册表，不是完整的统一迁移、备份和删除执行引擎。
+- **Personal Vault**：投影、撤销和审计已存在，更完整的撤销影响分析仍在建设。
+- **工作流编辑器**：后端 Orchestrator 已可插拔，但完整的可视化拖拽画布仍是路线图能力。
+- **图记忆**：当前支持关系与时间边，不等同于独立图数据库产品。
+
+### Windows / Python 3.12 内网安装说明
+
+Chroma 及其原生依赖必须使用与 Python 3.12（cp312）和 Windows 架构匹配的预编译 wheel，否则 pip 会回退到本地 C/C++ 编译。没有编译器的内网环境，应在一台可联网、Python 小版本和 CPU 架构一致的 Windows 机器上预下载完整 wheelhouse，再复制进内网离线安装；不要只复制单个 chroma-hnswlib 包。Docker 部署路径不需要在 Windows 宿主机编译这些 Python 扩展。
+
+更完整的成熟度依据见 [Hanako 能力对比与校准](docs/Hanako-comparison-2026-08-02.md)，实现细节见 [系统架构](docs/ARCHITECTURE.md) 与 [并发执行模型](docs/CONCURRENCY-EXECUTION-MODEL.md)。
+
+---
+
 ## ⚡ 快速开始 (Quick Start)
 
 ### 方式一：一键脚本启动（最快体验）
