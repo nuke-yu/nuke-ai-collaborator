@@ -53,7 +53,7 @@
 
 ### 当前测试基线（2026-08-09）
 
-后端全量测试为 `2465 passed, 2 skipped, 56 warnings, 40 subtests passed`。
+后端全量测试为 `2493 passed, 2 skipped, 57 warnings, 40 subtests passed`。
 健康检查测试已改为使用自有临时数据库，不再依赖前序测试留下的全局 `DB_PATH`。
 剩余 warning 主要来自第三方依赖和既有弃用 API，不影响本次测试通过结果。
 
@@ -72,7 +72,7 @@ Phase 4  Memory Provenance / Personal Vault Audit（影响审计已完成）
     ↓
 Phase 5  Provider Governance（基础治理已完成）
     ↓
-Phase 6  Channel Adapter（通用基础层已完成，真实渠道待选择）
+Phase 6  Channel Adapter（C0–C8 独立 Bridge 基础层已完成，真实渠道待选择）
     ↓
 Phase 7  Plugin Process Isolation（IPC 治理已完成，全面迁移待完善）
 ```

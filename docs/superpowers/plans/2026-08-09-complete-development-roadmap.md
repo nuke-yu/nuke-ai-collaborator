@@ -1,8 +1,26 @@
 # Nuke AI 完整开发路线与 Channel 独立集成计划
 
-> 基线：2026-08-09，后端全量测试 `2465 passed, 2 skipped`。
+> 基线：2026-08-09，后端全量测试 `2493 passed, 2 skipped`。
 >
 > 本文汇总当前已交付能力、未完成治理事项，以及 Channel 从独立模块演进为 Group 集成成员的完整开发路线。
+
+## 0. 本轮执行结果
+
+C0–C8 已按顺序完成，并且每个任务均独立提交、可单独检出：
+
+| 任务 | Commit | 当前状态 |
+|---|---|---|
+| C0 契约与边界 | `918dfcf` | 已完成 |
+| C1 Channel-owned 消息/投递状态 | `7cd4456` | 已完成 |
+| C2 通用签名 Webhook Connector | `a305b2e` | 已完成（真实平台 Connector 待选择） |
+| C3 Channel–Group Binding | `2cb2912` | 已完成 |
+| C4 Integration Member | `71d45cc` | 已完成 |
+| C5 入站路由到配置 Bot | `ed65487` | 已完成（当前是 Bridge 路由基础层） |
+| C6 Group 事件出站 Outbox | `75da38c` | 已完成 |
+| C7 脱敏、审计、重试、死信 | `90cf644` | 已完成 |
+| C8 独立进程 Bridge 边界 | `0efd8e9` | 已完成（部署编排待接入） |
+
+本轮 Channel 回归测试为 `30 passed`；全量后端测试为 `2493 passed, 2 skipped`。这里的“完成”指计划中的独立模块和边界基础设施已落地，不等同于某个真实企业平台的生产级端到端上线。
 
 ## 1. 总体架构原则
 
@@ -117,7 +135,7 @@ Workflow / Session / Artifact 完成
 
 ## 5. Channel 分阶段开发计划
 
-### C0：冻结 Channel 契约与边界
+### C0：冻结 Channel 契约与边界（已完成）
 
 定义稳定的 transport-neutral contracts：
 
@@ -138,7 +156,7 @@ Workflow / Session / Artifact 完成
 feat(channel): define standalone channel and bridge contracts
 ```
 
-### C1：独立 Channel Core
+### C1：独立 Channel Core（基础能力已完成）
 
 目录建议：
 
@@ -166,9 +184,9 @@ backend/channels/
 
 验收：Channel 单独启动时不会初始化 Group DB、Worker、Bot 或 MCP。
 
-### C2：Platform Connector
+### C2：Platform Connector（通用参考 Connector 已完成）
 
-先选一个平台完成：
+当前已完成平台无关的 Signed Webhook Connector：
 
 - webhook/event payload 解析；
 - 外部消息发送；
@@ -182,7 +200,7 @@ Connector 不允许直接调用 `dispatch_bots()`、Workflow Runner 或 Group DB
 
 验收：Connector 可以使用 fake transport 完成入站/出站契约测试。
 
-### C3：Channel-Group Binding
+### C3：Channel-Group Binding（已完成）
 
 新增独立 Binding 模型：
 
@@ -214,7 +232,7 @@ configured → pending_approval → active → suspended → revoked
 
 验收：未绑定、暂停和撤销状态均不能读取或发送 Group 内容。
 
-### C4：Integration Member
+### C4：Integration Member（已完成）
 
 Channel 在 Group 中以 Integration Member 展示，但不混入 Bot 调度语义。
 
@@ -231,7 +249,7 @@ Integration Member 负责：
 
 验收：Channel 可以被 Group 识别为成员，但不会出现在 Bot 执行列表、模型上下文或 Tool Registry 中。
 
-### C5：Inbound Channel → Group/Bot
+### C5：Inbound Channel → Group/Bot（Bridge 路由基础层已完成）
 
 入站流程：
 
@@ -245,19 +263,19 @@ Integration Member 负责：
  → Group message / Session / Workflow
 ```
 
-必须支持：
+当前已支持：
 
-- 外部用户到 Group Member 映射；
 - 默认 Bot；
 - mention 指定 Bot；
-- 未授权外部用户拒绝；
-- reply-to 关联原始任务；
-- 附件 Artifact 化；
-- Group 权限和 HIL 继承。
+- Binding/Group 范围校验；
+- reply-to、附件和外部身份进入 Bridge payload；
+- 未允许 Bot、多个 Bot mention 和 mention-required 的 fail-closed 拒绝。
+
+真实外部用户到 Group Member 的授权映射、附件 Artifact 化以及 Group 权限/HIL 运行时接入，属于平台端到端接入前的后续工作。
 
 验收：外部消息只触发绑定的 Group 和允许的 Bot，不能跨 Group。
 
-### C6：Group/Bot → Channel Outbound
+### C6：Group/Bot → Channel Outbound（已完成）
 
 出站订阅事件至少包括：
 
@@ -282,7 +300,7 @@ Group SQLite commit
 
 验收：外部平台失败不回滚 Group 任务；重试幂等；成功发送能关联外部消息 ID 和内部 Event/Session/Artifact。
 
-### C7：安全、审计和运维
+### C7：安全、审计和运维（基础闭环已完成）
 
 - Channel Secret 只能保存引用，不进 Group DB 或事件 Payload。
 - 外发前执行脱敏、长度限制和 Artifact 权限检查。
@@ -292,9 +310,9 @@ Group SQLite commit
 - 为每个 Channel/Binding 提供健康状态、最后成功投递时间和失败计数。
 - 外部平台重复事件、乱序事件和过期事件必须可处理。
 
-### C8：进程与部署隔离
+### C8：进程与部署隔离（协议边界已完成）
 
-第一版可以在主服务内运行，但模块依赖必须保持可分离；生产版建议：
+已完成独立 JSONL `BridgeEnvelope` 进程客户端和响应校验；模块依赖保持可分离。生产部署编排仍建议采用：
 
 ```text
 Channel Process
@@ -316,7 +334,7 @@ Channel 进程不能持有 MCP Client、Group SQLite Writer 或 Worker 内存对
 5. feat(channel): route inbound messages to configured bots
 6. feat(channel): deliver group events through channel outbox
 7. feat(channel): add channel audit, retry and dead-letter controls
-8. test(channel): add end-to-end connector-to-group verification
+8. feat(channel): add isolated process bridge boundary
 ```
 
 每个 Commit 必须：
@@ -327,8 +345,8 @@ Channel 进程不能持有 MCP Client、Group SQLite Writer 或 Worker 内存对
 - 不把平台 SDK 泄漏到 Group/Core 层；
 - 通过 `git diff --check`。
 
-## 7. 第一阶段建议
+## 7. 后续阶段建议
 
-正式开发 Channel 时，从 C0 开始，不要直接接飞书/Slack API。先冻结 Bridge Envelope、Binding 状态机、Integration Member 身份和 Outbox 语义，再选择一个平台 Connector。
+基础开发已完成。下一阶段应选择一个真实平台（飞书、Slack 或企业微信）做端到端接入，补齐外部用户授权映射、附件 Artifact、平台限流/重放防护、Supervisor 部署编排和真实平台回归测试；不要在未选定平台前虚构平台特性。
 
 这样后续即使替换平台，Group、Bot、Workflow 和 Artifact 的内部模型也不需要重写。

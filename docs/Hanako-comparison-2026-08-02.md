@@ -1156,7 +1156,7 @@ OpenHanako 的主要优势是：
 | Event Policy / Payload Policy / Retention | CURRENT | 已形成分类、脱敏、Artifact 化、原子写入、Retention、OTel 和 Prometheus 闭环。 |
 | Model Usage Ledger | CURRENT | 已按 Provider 请求记录实际模型、Token、费用、失败和 retry 关系；Provider Descriptor 和基础治理已补齐。 |
 | WebSocket Event Contract | CURRENT / TRANSITION | 已有版本化 Envelope、event_id、Replay Cursor、Catch-up 和客户端去重；完整 Schema 生成和所有事件迁移仍可继续。 |
-| Channel Adapter | TRANSITION | 已有通用签名 Webhook、租户/用户映射、幂等、mention、回复和附件接口；真实企业渠道尚未完成端到端接入。 |
+| Channel Adapter | TRANSITION | C0–C8 独立模块、Bridge、Binding、Integration Member、入站 Bot 路由、出站 Outbox、审计/重试/死信和进程边界已完成；真实企业渠道端到端接入、外部用户授权映射和附件 Artifact 化仍待选择平台后完成。 |
 | Store Registry | CURRENT / TRANSITION | 已有可执行 Store Descriptor/Registry，以及 owner、canonical/projection、migration、retention、deletion 和 backup 治理元数据；策略执行器仍待补齐。 |
 | Plugin Process Isolation | TRANSITION | 已完成单插件 JSONL IPC 隔离和 Manifest/资源/HIL/崩溃状态治理；尚未迁移全部高风险 Executor。 |
 | Electron / Onboarding / Theme | CURRENT | 相关实现已经进入提交历史，不再按“未提交能力”处理。 |
@@ -1218,9 +1218,9 @@ OpenHanako 的主要优势是：
 2. 统一模型废弃、替换、fallback、预算和 quota 语义。
 3. 将所有执行路径的 Provider 解析收敛到 Registry，并与 Capability Manifest、Model Usage Ledger 对接。
 
-#### Phase 6：Channel Adapter（通用基础层已完成，真实渠道待选择）
+#### Phase 6：Channel Adapter（独立 Bridge 基础层已完成，真实渠道待选择）
 
-Channel 先作为独立模块运行，只有通过显式 Channel-Group Bridge 和 active Binding 后，才作为 Group Integration Member 与 Group 双向通信。开发顺序为：独立契约、Channel-owned Store、平台 Connector、Binding、Integration Member、入站 Bot 路由、Group commit 后 Outbox 出站、审计/重试/dead-letter 和进程隔离。
+Channel 先作为独立模块运行，只有通过显式 Channel-Group Bridge 和 active Binding 后，才作为 Group Integration Member 与 Group 双向通信。独立契约、Channel-owned Store、通用签名 Webhook Connector、Binding、Integration Member、入站 Bot 路由、Group commit 后 Outbox 出站、审计/重试/dead-letter 和结构化进程边界已逐项提交完成；下一步是选定真实平台并补齐外部用户授权、附件 Artifact、限流/重放防护和 Supervisor 部署接入。
 
 #### Phase 7：Plugin Process Isolation（IPC 治理已完成，全面迁移待完善）
 
@@ -1243,4 +1243,4 @@ Channel 先作为独立模块运行，只有通过显式 Channel-Group Bridge �
 
 ### 14.5 当前验证备注
 
-截至本次复核，后端全量测试为 `2465 passed, 2 skipped, 56 warnings, 40 subtests passed`。健康检查测试已经隔离自己的临时数据库，解决了前序测试污染全局 `DB_PATH` 导致的顺序依赖。本轮之后，MCP Bridge/Proxy/Collector 的已知边界问题也有回归覆盖；当前剩余工作集中在真实渠道端到端接入、插件全面迁移、Store 策略执行和 Timeline 产品化加固，而不是基础任务未实现。
+截至本次复核，后端全量测试为 `2493 passed, 2 skipped, 57 warnings, 40 subtests passed`。健康检查测试已经隔离自己的临时数据库，解决了前序测试污染全局 `DB_PATH` 导致的顺序依赖。本轮之后，Channel C0–C8 独立 Bridge 基础层也已逐项提交；当前剩余工作集中在真实渠道端到端接入、外部用户授权映射、附件 Artifact 化、插件全面迁移、Store 策略执行和 Timeline 产品化加固，而不是 Channel 基础边界未实现。
