@@ -165,9 +165,9 @@ class ChannelBindingStore:
                 )
             await db.commit()
 
-    async def create(self, binding: ChannelBinding, *, allow_active: bool = False) -> ChannelBinding:
-        if binding.status is BindingStatus.ACTIVE and not allow_active:
-            raise ValueError("new channel binding must enter configured or pending_approval state")
+    async def create(self, binding: ChannelBinding) -> ChannelBinding:
+        if binding.status is not BindingStatus.CONFIGURED:
+            raise ValueError("new channel binding must enter configured state")
         now = int(time.time() * 1000)
         try:
             async with aiosqlite.connect(self.path) as db:

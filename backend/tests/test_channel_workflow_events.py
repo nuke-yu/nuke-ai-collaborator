@@ -17,8 +17,10 @@ class TestChannelWorkflowEvents(unittest.IsolatedAsyncioTestCase):
             await binding_store.create(ChannelBinding(
                 binding_id="binding-1", channel_instance_id="slack:prod",
                 external_tenant_id="tenant-a", external_conversation_id="chat-1",
-                group_id=7, default_bot_id=42, status=BindingStatus.ACTIVE,
-            ), allow_active=True)
+                group_id=7, default_bot_id=42,
+            ))
+            await binding_store.transition("binding-1", BindingStatus.PENDING_APPROVAL)
+            await binding_store.transition("binding-1", BindingStatus.ACTIVE)
             group_path = os.path.join(tmp.name, "group.db")
             async with aiosqlite.connect(group_path) as db:
                 await initialize_group_channel_outbox(db)
@@ -46,11 +48,14 @@ class TestChannelWorkflowEvents(unittest.IsolatedAsyncioTestCase):
             binding_store = ChannelBindingStore(os.path.join(tmp.name, "bridge.db"))
             await binding_store.initialize()
             for index, conversation in enumerate(("chat-1", "chat-2"), start=1):
+                binding_id = f"binding-{index}"
                 await binding_store.create(ChannelBinding(
-                    binding_id=f"binding-{index}", channel_instance_id="slack:prod",
+                    binding_id=binding_id, channel_instance_id="slack:prod",
                     external_tenant_id="tenant-a", external_conversation_id=conversation,
-                    group_id=7, default_bot_id=42, status=BindingStatus.ACTIVE,
-                ), allow_active=True)
+                    group_id=7, default_bot_id=42,
+                ))
+                await binding_store.transition(binding_id, BindingStatus.PENDING_APPROVAL)
+                await binding_store.transition(binding_id, BindingStatus.ACTIVE)
             group_path = os.path.join(tmp.name, "group.db")
             async with aiosqlite.connect(group_path) as db:
                 await initialize_group_channel_outbox(db)

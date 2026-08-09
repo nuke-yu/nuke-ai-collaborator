@@ -64,6 +64,8 @@ class TestChannelBinding(unittest.IsolatedAsyncioTestCase):
     async def test_create_cannot_bypass_approval_state_machine(self):
         with self.assertRaises(ValueError):
             await self.store.create(ChannelBinding(**{**self.binding.to_dict(), "status": BindingStatus.ACTIVE}))
+        with self.assertRaises(ValueError):
+            await self.store.create(ChannelBinding(**{**self.binding.to_dict(), "status": BindingStatus.PENDING_APPROVAL}))
 
     async def test_revoked_binding_is_terminal(self):
         await self.store.create(self.binding)
