@@ -64,6 +64,17 @@ class TestIntegrationMember(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(await self.members.set_status(93, IntegrationMemberStatus.SUSPENDED))
         self.assertEqual((await self.members.get(93)).status, IntegrationMemberStatus.SUSPENDED)
 
+    async def test_group_projection_lists_integration_members_without_bot_semantics(self):
+        member = IntegrationMember(
+            integration_member_id=95, binding_id="binding-1", group_id=7,
+            channel_instance_id="slack-prod", display_name="Slack 集成",
+        )
+        await self.members.create(member)
+        projected = await self.members.list_for_group(7)
+        self.assertEqual(len(projected), 1)
+        self.assertEqual(projected[0].to_member_dict()["type"], "integration")
+        self.assertFalse(projected[0].to_member_dict()["can_execute_tools"])
+
     async def test_revoked_binding_cannot_reactivate_member(self):
         member = IntegrationMember(
             integration_member_id=94, binding_id="binding-1", group_id=7,

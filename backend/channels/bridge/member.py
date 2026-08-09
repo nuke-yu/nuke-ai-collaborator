@@ -137,6 +137,18 @@ class IntegrationMemberStore:
                 row = await cursor.fetchone()
         return self._from_row(dict(row)) if row else None
 
+    async def list_for_group(self, group_id: int) -> list[IntegrationMember]:
+        if not Path(self.path).exists():
+            return []
+        async with aiosqlite.connect(self.path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                "SELECT * FROM channel_integration_members WHERE group_id=? ORDER BY integration_member_id",
+                (group_id,),
+            ) as cursor:
+                rows = await cursor.fetchall()
+        return [self._from_row(dict(row)) for row in rows]
+
     async def set_status(self, integration_member_id: int, status: IntegrationMemberStatus) -> bool:
         if not isinstance(status, IntegrationMemberStatus):
             status = IntegrationMemberStatus(str(status))

@@ -17,3 +17,8 @@ def central_db_path() -> str:
 def personal_db_path(user_id: int) -> str:
     """Personal knowledge is physically separate from every Group database."""
     return os.path.join(str(layout.personal_dir(user_id)), "knowledge.db")
+
+
+def channel_bridge_db_path() -> str:
+    """Channel-owned Bridge registry; never stored in a Group DB."""
+    return os.path.join(str(layout._root()), "_channels", "bridge.db")

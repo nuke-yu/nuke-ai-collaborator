@@ -20,6 +20,8 @@ from skills.role_catalog import list_role_catalog
 from skills.role_meta import read_role_meta
 from skills.metadata import parse_skill_meta_cached
 from skills import assignment, registry
+from channels.bridge import IntegrationMemberStore
+from runtime.dbpaths import channel_bridge_db_path
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -170,7 +172,17 @@ async def get_group_info(group_id: int):
         if not group:
             raise HTTPException(404, "Group not found")
         members = await get_members(db, group_id)
-    return {"group": group, "members": members}
+    integrations = await IntegrationMemberStore(channel_bridge_db_path()).list_for_group(group_id)
+    return {"group": group, "members": members + [member.to_member_dict() for member in integrations]}
+
+
+@router.get("/api/groups/{group_id}/integrations")
+async def get_group_integrations(group_id: int):
+    async with get_db() as db:
+        if not await get_group(db, group_id):
+            raise HTTPException(404, "Group not found")
+    members = await IntegrationMemberStore(channel_bridge_db_path()).list_for_group(group_id)
+    return {"group_id": group_id, "integrations": [member.to_member_dict() for member in members]}
 
 
 @router.delete("/api/groups/{group_id}", dependencies=[Depends(ensure_group_ready)])
