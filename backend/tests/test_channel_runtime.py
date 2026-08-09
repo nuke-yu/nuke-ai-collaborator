@@ -105,6 +105,16 @@ class TestChannelRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stored["state"], DeliveryState.DEAD_LETTER)
         self.assertIn("channel mismatch", stored["last_error"])
 
+    async def test_expired_sending_lease_is_reclaimed_after_worker_crash(self):
+        claimed = await self.store.claim_due_delivery(lease_owner="worker-a", lease_ms=10, now_ms=int(time.time() * 1000))
+        self.assertEqual(claimed["state"], DeliveryState.SENDING)
+        self.assertEqual(claimed["lease_owner"], "worker-a")
+        recovered = await self.store.recover_expired_deliveries(now_ms=int(time.time() * 1000) + 11)
+        self.assertEqual(recovered, 1)
+        reclaimed = await self.store.claim_due_delivery(lease_owner="worker-b", lease_ms=100, now_ms=int(time.time() * 1000) + 12)
+        self.assertEqual(reclaimed["state"], DeliveryState.SENDING)
+        self.assertEqual(reclaimed["lease_owner"], "worker-b")
+
 
 if __name__ == "__main__":
     unittest.main()

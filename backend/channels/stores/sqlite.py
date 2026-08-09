@@ -59,6 +59,8 @@ _DDL = (
         next_attempt_at INTEGER NOT NULL,
         external_message_id TEXT,
         last_error TEXT,
+        lease_owner TEXT,
+        lease_expires_at INTEGER,
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL
     )""",
@@ -88,6 +90,11 @@ class ChannelStore:
             await db.execute("PRAGMA foreign_keys=ON")
             for statement in _DDL:
                 await db.execute(statement)
+            columns = {row[1] for row in await (await db.execute("PRAGMA table_info(channel_delivery_outbox)")).fetchall()}
+            if "lease_owner" not in columns:
+                await db.execute("ALTER TABLE channel_delivery_outbox ADD COLUMN lease_owner TEXT")
+            if "lease_expires_at" not in columns:
+                await db.execute("ALTER TABLE channel_delivery_outbox ADD COLUMN lease_expires_at INTEGER")
             await db.commit()
 
     async def record_inbound(self, envelope: InboundEnvelope) -> bool:
@@ -162,9 +169,31 @@ class ChannelStore:
         item["payload"] = json.loads(item.pop("payload_json"))
         return item
 
-    async def claim_due_delivery(self, *, now_ms: int | None = None) -> dict[str, Any] | None:
-        """Atomically claim one due delivery for a future Connector worker."""
+    async def recover_expired_deliveries(self, *, now_ms: int | None = None) -> int:
+        """Return crashed ``sending`` work to the retry queue."""
         now = now_ms if now_ms is not None else int(time.time() * 1000)
+        async with aiosqlite.connect(self.path) as db:
+            cursor = await db.execute(
+                """UPDATE channel_delivery_outbox
+                   SET state='retrying', lease_owner=NULL, lease_expires_at=NULL, updated_at=?
+                   WHERE state='sending' AND lease_expires_at IS NOT NULL AND lease_expires_at<=?""",
+                (now, now),
+            )
+            await db.commit()
+            return cursor.rowcount
+
+    async def claim_due_delivery(
+        self,
+        *,
+        now_ms: int | None = None,
+        lease_owner: str = "channel-dispatcher",
+        lease_ms: int = 30_000,
+    ) -> dict[str, Any] | None:
+        """Atomically claim one due delivery and attach a crash-recovery lease."""
+        now = now_ms if now_ms is not None else int(time.time() * 1000)
+        if not lease_owner.strip() or lease_ms <= 0:
+            raise ValueError("lease_owner is required and lease_ms must be positive")
+        await self.recover_expired_deliveries(now_ms=now)
         async with aiosqlite.connect(self.path) as db:
             await db.execute("BEGIN IMMEDIATE")
             async with db.execute(
@@ -180,35 +209,52 @@ class ChannelStore:
             key = row[0]
             await db.execute(
                 """UPDATE channel_delivery_outbox
-                   SET state='sending', attempts=attempts+1, updated_at=?
+                   SET state='sending', attempts=attempts+1, lease_owner=?, lease_expires_at=?, updated_at=?
                    WHERE idempotency_key=? AND state IN ('pending','retrying')""",
-                (now, key),
+                (lease_owner, now + lease_ms, now, key),
             )
             await db.commit()
         return await self.get_delivery(key)
 
-    async def mark_sent(self, idempotency_key: str, external_message_id: str) -> bool:
+    async def mark_sent(self, idempotency_key: str, external_message_id: str, *, lease_owner: str | None = None) -> bool:
         now = int(time.time() * 1000)
         async with aiosqlite.connect(self.path) as db:
+            query = """UPDATE channel_delivery_outbox
+                   SET state='sent', external_message_id=?, last_error=NULL, lease_owner=NULL, lease_expires_at=NULL, updated_at=?
+                   WHERE idempotency_key=? AND state='sending'"""
+            args: tuple[Any, ...] = (external_message_id, now, idempotency_key)
+            if lease_owner is not None:
+                query += " AND lease_owner=?"
+                args += (lease_owner,)
             cursor = await db.execute(
-                """UPDATE channel_delivery_outbox
-                   SET state='sent', external_message_id=?, last_error=NULL, updated_at=?
-                   WHERE idempotency_key=? AND state='sending'""",
-                (external_message_id, now, idempotency_key),
+                query,
+                args,
             )
             await db.commit()
             return cursor.rowcount == 1
 
-    async def mark_failed(self, idempotency_key: str, error: str, *, retry_at_ms: int | None = None) -> bool:
+    async def mark_failed(
+        self,
+        idempotency_key: str,
+        error: str,
+        *,
+        retry_at_ms: int | None = None,
+        lease_owner: str | None = None,
+    ) -> bool:
         now = int(time.time() * 1000)
         state = DeliveryState.RETRYING.value if retry_at_ms is not None else DeliveryState.DEAD_LETTER.value
         next_attempt = retry_at_ms if retry_at_ms is not None else now
         async with aiosqlite.connect(self.path) as db:
+            query = """UPDATE channel_delivery_outbox
+                   SET state=?, last_error=?, next_attempt_at=?, lease_owner=NULL, lease_expires_at=NULL, updated_at=?
+                   WHERE idempotency_key=? AND state='sending'"""
+            args: tuple[Any, ...] = (state, _sanitize_text(str(error), _MAX_ERROR_LENGTH), next_attempt, now, idempotency_key)
+            if lease_owner is not None:
+                query += " AND lease_owner=?"
+                args += (lease_owner,)
             cursor = await db.execute(
-                """UPDATE channel_delivery_outbox
-                   SET state=?, last_error=?, next_attempt_at=?, updated_at=?
-                   WHERE idempotency_key=? AND state='sending'""",
-                (state, _sanitize_text(str(error), _MAX_ERROR_LENGTH), next_attempt, now, idempotency_key),
+                query,
+                args,
             )
             await db.commit()
             return cursor.rowcount == 1
