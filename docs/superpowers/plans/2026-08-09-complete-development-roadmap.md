@@ -1,6 +1,6 @@
 # Nuke AI 完整开发路线与 Channel 独立集成计划
 
-> 基线：2026-08-09，后端全量测试 `2522 passed, 2 skipped, 56 warnings, 40 subtests passed`（在允许本地 Unix/TCP socket 的环境执行）。
+> 基线：2026-08-09，后端全量测试 `2541 passed, 2 skipped, 57 warnings, 40 subtests passed`（在允许本地 Unix/TCP socket 的环境执行）。
 >
 > 本文汇总当前已交付能力、未完成治理事项，以及 Channel 从独立模块演进为 Group 集成成员的完整开发路线。
 
