@@ -170,6 +170,31 @@ class TestWechatIlinkConnector(unittest.IsolatedAsyncioTestCase):
             {"get_updates_buf": "after-poison"},
         )
 
+    async def test_unauthorized_conversation_does_not_block_account_cursor(self):
+        transport = _Transport([ConnectorHttpResponse(200, {
+            "ret": 0, "get_updates_buf": "after-unauthorized",
+            "msgs": [{
+                "from_user_id": "unbound-user", "context_token": "ctx",
+                "item_list": [{"type": 1, "text_item": {"text": "hello"}}],
+            }],
+        }, {})])
+
+        async def reject_inbound(instance_id, envelope):
+            return False
+
+        connector = WechatIlinkConnector(
+            channel_instance_id="wechat:personal", bot_id="wx-bot-1",
+            bot_token="bot-secret-token", store=self.store,
+            on_inbound=reject_inbound,
+            http=ConnectorHttpClient("wechat", transport, retry_delay=0),
+        )
+        result = await connector.poll_once(now=int(time.time()))
+        self.assertEqual((result.dispatched, result.ignored), (0, 1))
+        self.assertEqual(
+            await self.store.get_connector_state("wechat:personal", "sync_cursor"),
+            {"get_updates_buf": "after-unauthorized"},
+        )
+
     async def _seed_context(self, now=None):
         now = int(time.time()) if now is None else now
         transport = _Transport([ConnectorHttpResponse(200, {

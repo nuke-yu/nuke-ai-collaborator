@@ -287,6 +287,8 @@ class ChannelDeliveryService:
         if not raw_key:
             raise ValueError("channel is required")
         key = canonical_channel_instance_id(raw_key)
+        if key in self._connectors:
+            raise ValueError(f"channel connector is already registered: {key}")
         self._connectors[key] = connector
         self._dispatchers[key] = ChannelDeliveryDispatcher(
             self.store, connector, channel_instance_id=key, owner_id=f"channel-dispatcher:{key}"
@@ -305,11 +307,18 @@ class ChannelDeliveryService:
         self._stopping = True
         self._stats["delivery_up"] = False
         task, self._task = self._task, None
-        if task is None:
-            return
-        task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await task
+        if task is not None:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+        for connector in tuple(self._connectors.values()):
+            close = getattr(connector, "close", None)
+            if close is None:
+                continue
+            try:
+                await close()
+            except Exception:
+                log.exception("failed to close channel connector")
 
     def snapshot(self) -> dict[str, object]:
         return {

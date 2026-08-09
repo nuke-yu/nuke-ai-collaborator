@@ -20,9 +20,11 @@ attrs==26.1.0
 bcrypt==5.0.0
 build==1.5.0
 certifi==2026.6.17
+cffi==2.1.1
 charset-normalizer==3.4.7
 chromadb==1.5.9
 click==8.4.1
+cryptography==44.0.3
 durationpy==0.10
 fastapi==0.115.0
 filelock==3.29.4
@@ -69,6 +71,7 @@ propcache==0.5.2
 protobuf==6.33.6
 psutil==7.2.2
 pybase64==1.4.3
+pycparser==3.0
 pydantic==2.13.4
 pydantic-settings==2.14.2
 pydantic_core==2.46.4

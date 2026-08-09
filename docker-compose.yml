@@ -95,6 +95,17 @@ services:
       # DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       # OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       # ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # Native Channel connectors are configured with a secret-free JSON list.
+      # Descriptor fields name environment variables; they never contain values.
+      NUKE_CHANNEL_PLATFORMS_JSON: '${NUKE_CHANNEL_PLATFORMS_JSON:-[]}'
+      # Example descriptor (put on one line in .env):
+      # [{"type":"feishu","channel_instance_id":"feishu:prod","app_id_env":"FEISHU_APP_ID","app_secret_env":"FEISHU_APP_SECRET","verification_token_env":"FEISHU_VERIFY_TOKEN","encrypt_key_env":"FEISHU_ENCRYPT_KEY"},{"type":"wechat_ilink","channel_instance_id":"wechat:personal","bot_id_env":"WECHAT_ILINK_BOT_ID","bot_token_env":"WECHAT_ILINK_BOT_TOKEN"}]
+      FEISHU_APP_ID: ${FEISHU_APP_ID:-}
+      FEISHU_APP_SECRET: ${FEISHU_APP_SECRET:-}
+      FEISHU_VERIFY_TOKEN: ${FEISHU_VERIFY_TOKEN:-}
+      FEISHU_ENCRYPT_KEY: ${FEISHU_ENCRYPT_KEY:-}
+      WECHAT_ILINK_BOT_ID: ${WECHAT_ILINK_BOT_ID:-}
+      WECHAT_ILINK_BOT_TOKEN: ${WECHAT_ILINK_BOT_TOKEN:-}
     volumes:
       # No raw docker.sock mount — app talks to docker-proxy via DOCKER_HOST
       - /var/lib/nuke-ai-collaborator:/var/lib/nuke-ai-collaborator

@@ -111,40 +111,22 @@ async def lifespan(app: FastAPI):
     addr = ipc.make_addr("supervisor")
     num_workers = int(os.getenv("NUKE_WORKERS", "8"))
     from channels.runtime import ChannelDeliveryService, GroupChannelRelayService
-    from channels.bootstrap import configure_process_connectors
+    from channels.bootstrap import configure_platform_connectors, configure_process_connectors
     from channels.bridge import ChannelBindingStore, IntegrationMemberStore
     from channels.inbound_runtime import ChannelInboundService
     from channels import initialize_channel_schema
     from channels.stores import ChannelStore
     from runtime.dbpaths import channel_bridge_db_path, group_db_path
     await initialize_channel_schema(channel_bridge_db_path())
+    channel_store = ChannelStore(channel_bridge_db_path())
     channel_delivery = ChannelDeliveryService(
-        ChannelStore(channel_bridge_db_path()),
+        channel_store,
         poll_interval=float(os.getenv("NUKE_CHANNEL_DELIVERY_INTERVAL", "1.0")),
     )
-    configure_process_connectors(
-        channel_delivery,
-        os.getenv("NUKE_CHANNEL_CONNECTORS_JSON"),
-    )
-    active_bindings = await ChannelBindingStore(channel_bridge_db_path()).list_active()
-    channel_delivery.require_registered_instances(
-        binding.channel_instance_id for binding in active_bindings
-    )
-    channel_relay = GroupChannelRelayService(
-        ChannelStore(channel_bridge_db_path()),
-        _channel_group_ids,
-        group_db_path,
-        poll_interval=float(os.getenv("NUKE_CHANNEL_RELAY_INTERVAL", "1.0")),
-        relay_timeout=float(os.getenv("NUKE_CHANNEL_RELAY_TIMEOUT", "10.0")),
-    )
-    sup = sup_mod.Supervisor(
-        addr,
-        num_workers=num_workers,
-        on_unread=on_unread_delta,
-        channel_relay=channel_relay,
-        channel_delivery=channel_delivery,
-    )
+    sup = None
     async def dispatch_channel_inbound(route, member):
+        if sup is None:
+            raise RuntimeError("Supervisor is not ready for Channel ingress")
         payload = route.bridge_envelope.payload
         await sup.send_to_worker(route.group_id, ipc.protocol.envelope(
             ipc.protocol.USER_MESSAGE,
@@ -159,16 +141,51 @@ async def lifespan(app: FastAPI):
             channel_meta={
                 "binding_id": route.binding_id,
                 "channel": payload.get("channel"),
+                "external_tenant_id": payload.get("external_tenant_id"),
+                "external_conversation_id": payload.get("external_conversation_id"),
                 "external_message_id": payload.get("external_message_id"),
                 "external_user_id": payload.get("external_user_id"),
+                "reply_to_external_id": payload.get("reply_to_external_id"),
+                "attachments": payload.get("attachments") or [],
             },
         ))
-    app.state.channel_inbound = ChannelInboundService(
-        ChannelStore(channel_bridge_db_path()),
+    channel_inbound = ChannelInboundService(
+        channel_store,
         ChannelBindingStore(channel_bridge_db_path()),
         IntegrationMemberStore(channel_bridge_db_path()),
         dispatch_channel_inbound,
     )
+    configure_process_connectors(
+        channel_delivery,
+        os.getenv("NUKE_CHANNEL_CONNECTORS_JSON"),
+    )
+    channel_platform = configure_platform_connectors(
+        channel_delivery,
+        channel_store,
+        channel_inbound,
+        os.getenv("NUKE_CHANNEL_PLATFORMS_JSON"),
+    )
+    active_bindings = await ChannelBindingStore(channel_bridge_db_path()).list_active()
+    channel_delivery.require_registered_instances(
+        binding.channel_instance_id for binding in active_bindings
+    )
+    channel_relay = GroupChannelRelayService(
+        channel_store,
+        _channel_group_ids,
+        group_db_path,
+        poll_interval=float(os.getenv("NUKE_CHANNEL_RELAY_INTERVAL", "1.0")),
+        relay_timeout=float(os.getenv("NUKE_CHANNEL_RELAY_TIMEOUT", "10.0")),
+    )
+    sup = sup_mod.Supervisor(
+        addr,
+        num_workers=num_workers,
+        on_unread=on_unread_delta,
+        channel_relay=channel_relay,
+        channel_delivery=channel_delivery,
+        channel_platform=channel_platform,
+    )
+    app.state.channel_inbound = channel_inbound
+    app.state.channel_platform = channel_platform
     await sup.start()
     sup_mod.supervisor = sup
     

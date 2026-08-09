@@ -146,20 +146,23 @@ class ChannelStore:
                     )
             await db.commit()
 
-    async def record_inbound(self, envelope: InboundEnvelope) -> bool:
+    async def record_inbound(
+        self, envelope: InboundEnvelope, *, channel_instance_id: str | None = None
+    ) -> bool:
         """Persist an inbound message once; return False for a duplicate event."""
         now = int(time.time() * 1000)
         payload = _safe_json_text(envelope.to_dict())
         async with aiosqlite.connect(self.path) as db:
             cursor = await db.execute(
                 """INSERT OR IGNORE INTO channel_messages
-                   (message_key,channel,external_tenant_id,external_conversation_id,
+                   (message_key,channel,channel_instance_id,external_tenant_id,external_conversation_id,
                     external_user_id,external_message_id,direction,event_type,payload_json,
                     binding_id,group_id,created_at)
-                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     envelope.idempotency_key,
                     envelope.channel,
+                    canonical_channel_instance_id(channel_instance_id or envelope.channel),
                     envelope.external_tenant_id,
                     envelope.external_group_id,
                     envelope.external_user_id,

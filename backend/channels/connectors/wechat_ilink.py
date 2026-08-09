@@ -74,7 +74,7 @@ class WechatIlinkConnector:
         bot_id: str,
         bot_token: str,
         store: ChannelStore,
-        on_inbound: Callable[[str, InboundEnvelope], Awaitable[None]],
+        on_inbound: Callable[[str, InboundEnvelope], Awaitable[bool | None]],
         http: ConnectorHttpClient | None = None,
         base_url: str = DEFAULT_WECHAT_ILINK_BASE_URL,
         context_ttl_seconds: int = _CONTEXT_TTL_SECONDS,
@@ -140,8 +140,11 @@ class WechatIlinkConnector:
             if envelope is None:
                 ignored += 1
                 continue
-            await self.on_inbound(self.channel_instance_id, envelope)
-            dispatched += 1
+            accepted = await self.on_inbound(self.channel_instance_id, envelope)
+            if accepted is False:
+                ignored += 1
+            else:
+                dispatched += 1
         next_cursor = body.get("get_updates_buf")
         if next_cursor is not None:
             await self.store.set_connector_state(
@@ -150,6 +153,10 @@ class WechatIlinkConnector:
                 {"get_updates_buf": str(next_cursor)},
             )
         return WechatPollResult(len(messages), dispatched, ignored)
+
+    async def start(self) -> None:
+        """Load encrypted reply context before polling or delivery starts."""
+        await self._ensure_state_loaded()
 
     async def send(self, envelope: OutboundEnvelope) -> DeliveryReceipt:
         if envelope.identity.channel != "wechat":
@@ -411,6 +418,9 @@ class WechatIlinkLoginClient:
             user_id=str(body.get("ilink_user_id") or "") or None,
             base_url=str(body.get("baseurl") or "") or None,
         )
+
+    async def close(self) -> None:
+        await self.http.close()
 
 
 def _require_ilink_success(operation: str, value: Any) -> dict[str, Any]:

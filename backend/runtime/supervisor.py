@@ -70,6 +70,7 @@ class Supervisor:
         self._mcp_schemas: dict | None = None
         self._channel_relay = kwargs.get("channel_relay")
         self._channel_delivery = kwargs.get("channel_delivery")
+        self._channel_platform = kwargs.get("channel_platform")
 
     def _reassign_log_extra(
         self, *, group_id: int, new_worker_id: str, reassign_version: int, old_worker_id: str | None = None, event: str
@@ -233,6 +234,8 @@ class Supervisor:
         self._server = await ipc.serve(self.addr, self._on_worker_conn)
         if self._channel_relay is not None:
             await self._channel_relay.start()
+        if self._channel_platform is not None:
+            await self._channel_platform.start()
         if self._channel_delivery is not None:
             await self._channel_delivery.start()
         if self._num_workers > 0:
@@ -298,6 +301,8 @@ class Supervisor:
 
         if self._channel_relay is not None:
             await self._channel_relay.stop()
+        if self._channel_platform is not None:
+            await self._channel_platform.stop()
         if self._channel_delivery is not None:
             await self._channel_delivery.stop()
 
@@ -715,6 +720,8 @@ class Supervisor:
             stats["channel_relay"] = self._channel_relay.snapshot()
         if self._channel_delivery is not None:
             stats["channel_delivery"] = self._channel_delivery.snapshot()
+        if self._channel_platform is not None:
+            stats["channel_platform"] = self._channel_platform.snapshot()
         return stats
 
     async def reassign_group(self, group_id: int, new_worker_id: str) -> None:

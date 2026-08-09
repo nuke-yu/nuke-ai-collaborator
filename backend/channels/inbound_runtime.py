@@ -56,7 +56,9 @@ class ChannelInboundService:
             member_id=member.integration_member_id,
             binding_id=binding.binding_id,
         )
-        if not await self.channel_store.record_inbound(bound):
+        if not await self.channel_store.record_inbound(
+            bound, channel_instance_id=instance_id
+        ):
             return None
         route = InboundBotRouter(
             binding,

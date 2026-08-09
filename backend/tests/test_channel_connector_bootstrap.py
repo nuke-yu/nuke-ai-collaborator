@@ -3,8 +3,13 @@ import os
 import tempfile
 import unittest
 
-from channels.bootstrap import ChannelConnectorConfigError, configure_process_connectors
+from channels.bootstrap import (
+    ChannelConnectorConfigError,
+    configure_platform_connectors,
+    configure_process_connectors,
+)
 from channels.runtime import ChannelDeliveryService
+from channels.secrets import EnvironmentSecretResolver
 from channels.stores import ChannelStore
 
 
@@ -39,6 +44,78 @@ class TestChannelConnectorBootstrap(unittest.IsolatedAsyncioTestCase):
                     "argv": ["connector"],
                     "secret": "must-not-live-in-descriptor",
                 }]))
+
+    async def test_native_feishu_and_personal_wechat_are_registered_from_env_names(self):
+        with tempfile.TemporaryDirectory(prefix="channel-native-bootstrap-") as directory:
+            store = ChannelStore(os.path.join(directory, "channel.db"))
+            await store.initialize()
+            service = ChannelDeliveryService(store)
+            platforms = configure_platform_connectors(
+                service,
+                store,
+                object(),
+                json.dumps([
+                    {
+                        "type": "feishu",
+                        "channel_instance_id": "Feishu:Prod",
+                        "app_id_env": "FEISHU_APP_ID",
+                        "app_secret_env": "FEISHU_APP_SECRET",
+                        "verification_token_env": "FEISHU_VERIFY_TOKEN",
+                        "encrypt_key_env": "FEISHU_ENCRYPT_KEY",
+                    },
+                    {
+                        "type": "wechat_ilink",
+                        "channel_instance_id": "Wechat:Personal",
+                        "bot_id_env": "WECHAT_ILINK_BOT_ID",
+                        "bot_token_env": "WECHAT_ILINK_BOT_TOKEN",
+                    },
+                ]),
+                secret_resolver=EnvironmentSecretResolver({
+                    "FEISHU_APP_ID": "cli_app",
+                    "FEISHU_APP_SECRET": "app-secret",
+                    "FEISHU_VERIFY_TOKEN": "verify-token",
+                    "FEISHU_ENCRYPT_KEY": "encrypt-key",
+                    "WECHAT_ILINK_BOT_ID": "wx-bot",
+                    "WECHAT_ILINK_BOT_TOKEN": "wx-token",
+                }),
+            )
+            self.assertEqual(
+                service.snapshot()["registered_channels"],
+                ["feishu:prod", "wechat:personal"],
+            )
+            self.assertEqual(
+                sorted(platforms.snapshot()["instances"]),
+                ["feishu:prod", "wechat:personal"],
+            )
+            await service.stop()
+
+    async def test_native_config_rejects_inline_secrets_and_missing_environment(self):
+        with tempfile.TemporaryDirectory(prefix="channel-native-invalid-") as directory:
+            store = ChannelStore(os.path.join(directory, "channel.db"))
+            service = ChannelDeliveryService(store)
+            with self.assertRaises(ChannelConnectorConfigError):
+                configure_platform_connectors(
+                    service, store, object(),
+                    json.dumps([{
+                        "type": "wechat_ilink",
+                        "channel_instance_id": "wechat:personal",
+                        "bot_id_env": "WECHAT_ID",
+                        "bot_token_env": "WECHAT_TOKEN",
+                        "bot_token": "must-not-be-inline",
+                    }]),
+                    secret_resolver=EnvironmentSecretResolver({}),
+                )
+            with self.assertRaisesRegex(ChannelConnectorConfigError, "WECHAT_TOKEN"):
+                configure_platform_connectors(
+                    ChannelDeliveryService(store), store, object(),
+                    json.dumps([{
+                        "type": "wechat_ilink",
+                        "channel_instance_id": "wechat:personal",
+                        "bot_id_env": "WECHAT_ID",
+                        "bot_token_env": "WECHAT_TOKEN",
+                    }]),
+                    secret_resolver=EnvironmentSecretResolver({"WECHAT_ID": "bot-id"}),
+                )
 
 
 if __name__ == "__main__":

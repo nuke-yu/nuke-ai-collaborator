@@ -35,6 +35,13 @@ services:
       NUKE_WORKERS: 4
       # Local shell: no per-group sandbox. See warning above.
       NUKE_SHELL_EXEC_BACKEND: local
+      NUKE_CHANNEL_PLATFORMS_JSON: '${NUKE_CHANNEL_PLATFORMS_JSON:-[]}'
+      FEISHU_APP_ID: ${FEISHU_APP_ID:-}
+      FEISHU_APP_SECRET: ${FEISHU_APP_SECRET:-}
+      FEISHU_VERIFY_TOKEN: ${FEISHU_VERIFY_TOKEN:-}
+      FEISHU_ENCRYPT_KEY: ${FEISHU_ENCRYPT_KEY:-}
+      WECHAT_ILINK_BOT_ID: ${WECHAT_ILINK_BOT_ID:-}
+      WECHAT_ILINK_BOT_TOKEN: ${WECHAT_ILINK_BOT_TOKEN:-}
     volumes:
       # Automatically managed Docker named volume
       - nuke-data:/var/lib/nuke-ai-collaborator

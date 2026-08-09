@@ -75,6 +75,13 @@ services:
       AUTH_SECRET: ${AUTH_SECRET:?Set AUTH_SECRET (≥32 chars)}
       NUKE_GITHUB_ENABLED: "true"
       GITHUB_TOKEN: ${GITHUB_TOKEN:?Set GITHUB_TOKEN for repository and pull-request access}
+      NUKE_CHANNEL_PLATFORMS_JSON: '${NUKE_CHANNEL_PLATFORMS_JSON:-[]}'
+      FEISHU_APP_ID: ${FEISHU_APP_ID:-}
+      FEISHU_APP_SECRET: ${FEISHU_APP_SECRET:-}
+      FEISHU_VERIFY_TOKEN: ${FEISHU_VERIFY_TOKEN:-}
+      FEISHU_ENCRYPT_KEY: ${FEISHU_ENCRYPT_KEY:-}
+      WECHAT_ILINK_BOT_ID: ${WECHAT_ILINK_BOT_ID:-}
+      WECHAT_ILINK_BOT_TOKEN: ${WECHAT_ILINK_BOT_TOKEN:-}
     volumes:
       - /var/lib/nuke-ai-collaborator:/var/lib/nuke-ai-collaborator
     healthcheck:
