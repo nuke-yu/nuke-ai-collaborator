@@ -10,6 +10,8 @@ from typing import Any, Mapping
 
 import aiosqlite
 
+from channels.core import canonical_channel_instance_id
+
 
 class IntegrationMemberStatus(StrEnum):
     ACTIVE = "active"
@@ -35,6 +37,9 @@ class IntegrationMember:
         for field_name in ("binding_id", "channel_instance_id", "display_name"):
             if not str(getattr(self, field_name) or "").strip():
                 raise ValueError(f"{field_name} is required")
+        object.__setattr__(
+            self, "channel_instance_id", canonical_channel_instance_id(self.channel_instance_id)
+        )
         if not isinstance(self.status, IntegrationMemberStatus):
             object.__setattr__(self, "status", IntegrationMemberStatus(str(self.status)))
         caps = tuple(dict.fromkeys(str(cap).strip() for cap in self.capabilities if str(cap).strip()))
@@ -93,6 +98,20 @@ class IntegrationMemberStore:
                 )"""
             )
             await db.execute("CREATE INDEX IF NOT EXISTS idx_channel_members_group ON channel_integration_members(group_id, status)")
+            async with db.execute(
+                "SELECT integration_member_id,channel_instance_id FROM channel_integration_members"
+            ) as cursor:
+                rows = await cursor.fetchall()
+            updates = []
+            for member_id, instance_id in rows:
+                canonical = canonical_channel_instance_id(instance_id)
+                if canonical != instance_id:
+                    updates.append((canonical, member_id))
+            if updates:
+                await db.executemany(
+                    "UPDATE channel_integration_members SET channel_instance_id=? WHERE integration_member_id=?",
+                    updates,
+                )
             await db.commit()
 
     async def create(self, member: IntegrationMember) -> IntegrationMember:

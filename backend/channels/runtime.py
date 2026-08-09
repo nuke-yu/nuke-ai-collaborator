@@ -9,7 +9,13 @@ import uuid
 from pathlib import Path
 from typing import Awaitable, Callable, Protocol, Sequence
 
-from channels.core import ChannelConversation, ChannelIdentity, DeliveryReceipt, OutboundEnvelope
+from channels.core import (
+    ChannelConversation,
+    ChannelIdentity,
+    DeliveryReceipt,
+    OutboundEnvelope,
+    canonical_channel_instance_id,
+)
 from channels.stores import ChannelStore, DeliveryState
 from channels.bridge.group_outbox import GroupChannelOutboxRelay, GroupRelayResult
 from channels.bridge.binding import ChannelBindingStore
@@ -161,7 +167,7 @@ class ChannelDeliveryDispatcher:
         self.store = store
         self.connector = connector
         self.channel = channel.lower() if channel else None
-        self.channel_instance_id = channel_instance_id.lower() if channel_instance_id else None
+        self.channel_instance_id = canonical_channel_instance_id(channel_instance_id) if channel_instance_id else None
         self.max_attempts = max_attempts
         self.base_delay_ms = base_delay_ms
         if lease_ms <= 0:
@@ -250,9 +256,10 @@ class ChannelDeliveryService:
         self._stats: dict[str, object] = {"cycles": 0, "claimed": 0, "errors": 0, "last_error": None}
 
     def register(self, channel: str, connector: ChannelConnector) -> None:
-        key = str(channel or "").strip().lower()
-        if not key:
+        raw_key = str(channel or "").strip()
+        if not raw_key:
             raise ValueError("channel is required")
+        key = canonical_channel_instance_id(raw_key)
         self._connectors[key] = connector
         self._dispatchers[key] = ChannelDeliveryDispatcher(
             self.store, connector, channel_instance_id=key, owner_id=f"channel-dispatcher:{key}"
@@ -278,8 +285,11 @@ class ChannelDeliveryService:
         return {**self._stats, "registered_channels": sorted(self._connectors)}
 
     def require_registered_instances(self, instance_ids: Sequence[str]) -> None:
-        required = {str(value or "").strip().lower() for value in instance_ids}
-        required.discard("")
+        required = {
+            canonical_channel_instance_id(value)
+            for value in instance_ids
+            if str(value or "").strip()
+        }
         missing = sorted(required.difference(self._connectors))
         if missing:
             raise RuntimeError(f"active channel bindings have no connector: {', '.join(missing)}")

@@ -5,6 +5,7 @@ import json
 from collections.abc import Mapping
 from typing import Any
 
+from .core import canonical_channel_instance_id
 from .process import ChannelProcessClient, ChannelProcessManifest
 from .runtime import ChannelDeliveryService
 from .secrets import ChannelSecretResolver
@@ -44,10 +45,11 @@ def configure_process_connectors(
             raise ChannelConnectorConfigError(
                 f"unsupported channel connector config fields: {', '.join(sorted(map(str, unknown)))}"
             )
-        instance_id = str(descriptor.get("channel_instance_id") or "").strip().lower()
+        raw_instance_id = str(descriptor.get("channel_instance_id") or "").strip()
         argv = descriptor.get("argv")
-        if not instance_id or not isinstance(argv, list) or not argv:
+        if not raw_instance_id or not isinstance(argv, list) or not argv:
             raise ChannelConnectorConfigError("channel_instance_id and non-empty argv are required")
+        instance_id = canonical_channel_instance_id(raw_instance_id)
         if any(not isinstance(value, str) or not value.strip() for value in argv):
             raise ChannelConnectorConfigError("connector argv entries must be non-empty strings")
         if instance_id in registered:

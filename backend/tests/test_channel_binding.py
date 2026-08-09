@@ -3,6 +3,8 @@ import tempfile
 import asyncio
 import unittest
 
+import aiosqlite
+
 from channels.bridge import BindingConflictError, BindingStatus, ChannelBinding, ChannelBindingStore
 
 
@@ -32,6 +34,25 @@ class TestChannelBinding(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(active.status, BindingStatus.ACTIVE)
         self.assertEqual(active.config_version, 3)
         self.assertEqual(active.allowed_bot_ids, (42, 43))
+
+    async def test_channel_instance_id_is_canonicalized(self):
+        binding = ChannelBinding(**{
+            **self.binding.to_dict(),
+            "binding_id": "binding-case",
+            "channel_instance_id": " Slack:Prod ",
+            "external_conversation_id": "chat-case",
+        })
+        await self.store.create(binding)
+        async with aiosqlite.connect(self.store.path) as db:
+            await db.execute(
+                "UPDATE channel_bindings SET channel_instance_id='SLACK:PROD' WHERE binding_id='binding-case'"
+            )
+            await db.commit()
+        await self.store.initialize()
+        self.assertEqual(
+            (await self.store.get("binding-case")).channel_instance_id,
+            "slack:prod",
+        )
 
     async def test_invalid_transition_and_duplicate_conversation_are_rejected(self):
         await self.store.create(self.binding)

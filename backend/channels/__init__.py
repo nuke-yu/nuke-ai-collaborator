@@ -7,6 +7,7 @@ from .core import (
     ChannelConversation,
     ChannelIdentity,
     canonical_message_key,
+    canonical_channel_instance_id,
     delivery_projection_id,
     DeliveryReceipt,
     OutboundEnvelope,
@@ -20,7 +21,7 @@ from .schema import initialize_channel_schema
 __all__ = [
     "BRIDGE_PROTOCOL_VERSION", "CHANNEL_PROTOCOL_VERSION", "BridgeDirection",
     "BridgeEnvelope", "ChannelAdapter", "ChannelAuthError", "ChannelConversation",
-    "ChannelIdentity", "canonical_message_key", "delivery_projection_id", "DeliveryReceipt", "InboundEnvelope", "OutboundEnvelope",
+    "ChannelIdentity", "canonical_message_key", "canonical_channel_instance_id", "delivery_projection_id", "DeliveryReceipt", "InboundEnvelope", "OutboundEnvelope",
     "ChannelDeliveryDispatcher",
     "ChannelProcessClient", "ChannelProcessError", "ChannelProcessManifest",
     "ChannelProcessHandler", "ChannelProcessServer",

@@ -2,6 +2,8 @@ import os
 import tempfile
 import unittest
 
+import aiosqlite
+
 from channels.core import ChannelConversation, ChannelIdentity, InboundEnvelope, OutboundEnvelope
 from channels.stores import ChannelStore, DeliveryState, sanitize_text_for_storage
 
@@ -86,6 +88,37 @@ class TestChannelStore(unittest.IsolatedAsyncioTestCase):
         safe = sanitize_text_for_storage(value)
         self.assertNotIn("authorization: bearer", safe.lower())
         self.assertNotIn("a" * 40, safe)
+
+    async def test_instance_ids_are_canonical_and_legacy_unknown_rows_are_quarantined(self):
+        outbound = OutboundEnvelope(
+            identity=ChannelIdentity("slack", "tenant-a"),
+            conversation=ChannelConversation("chat-1"),
+            event_type="workflow.completed", payload={}, idempotency_key="case-event",
+            channel_instance_id=" Slack:Prod ",
+        )
+        await self.store.enqueue_outbound(outbound)
+        async with aiosqlite.connect(self.store.path) as db:
+            await db.execute(
+                "UPDATE channel_delivery_outbox SET channel_instance_id='' WHERE idempotency_key='case-event'"
+            )
+            await db.commit()
+        await self.store.initialize()
+        stored = await self.store.get_delivery("case-event")
+        self.assertEqual(stored["state"], DeliveryState.QUARANTINED)
+        self.assertEqual(
+            (await self.store.list_audit("case-event"))[-1]["event_type"],
+            "delivery.quarantined",
+        )
+
+        second = OutboundEnvelope(
+            identity=ChannelIdentity("slack", "tenant-a"),
+            conversation=ChannelConversation("chat-2"),
+            event_type="workflow.completed", payload={}, idempotency_key="case-event-2",
+            channel_instance_id="Slack:Prod",
+        )
+        await self.store.enqueue_outbound(second)
+        claimed = await self.store.claim_due_delivery(channel_instance_id="SLACK:PROD")
+        self.assertEqual(claimed["idempotency_key"], "case-event-2")
 
 
 if __name__ == "__main__":

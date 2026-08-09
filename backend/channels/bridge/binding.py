@@ -14,6 +14,8 @@ from typing import Any, Mapping
 
 import aiosqlite
 
+from channels.core import canonical_channel_instance_id
+
 
 class BindingStatus(StrEnum):
     CONFIGURED = "configured"
@@ -61,6 +63,9 @@ class ChannelBinding:
             if field_name != "created_by" and not value:
                 raise ValueError(f"{field_name} is required")
             object.__setattr__(self, field_name, value)
+        object.__setattr__(
+            self, "channel_instance_id", canonical_channel_instance_id(self.channel_instance_id)
+        )
         if self.group_id <= 0 or self.default_bot_id <= 0:
             raise ValueError("group_id and default_bot_id must be positive")
         allowed = tuple(dict.fromkeys(int(bot_id) for bot_id in self.allowed_bot_ids))
@@ -138,6 +143,26 @@ class ChannelBindingStore:
                 )"""
             )
             await db.execute("CREATE INDEX IF NOT EXISTS idx_channel_bindings_group ON channel_bindings(group_id, status)")
+            async with db.execute(
+                """SELECT binding_id,channel_instance_id,external_tenant_id,external_conversation_id
+                   FROM channel_bindings"""
+            ) as cursor:
+                rows = await cursor.fetchall()
+            scopes: dict[tuple[str, str, str], str] = {}
+            updates: list[tuple[str, str]] = []
+            for binding_id, instance_id, tenant_id, conversation_id in rows:
+                canonical = canonical_channel_instance_id(instance_id)
+                scope = (canonical, tenant_id, conversation_id)
+                if scope in scopes and scopes[scope] != binding_id:
+                    raise ValueError("canonical Channel binding migration would merge distinct bindings")
+                scopes[scope] = binding_id
+                if canonical != instance_id:
+                    updates.append((canonical, binding_id))
+            if updates:
+                await db.executemany(
+                    "UPDATE channel_bindings SET channel_instance_id=? WHERE binding_id=?",
+                    updates,
+                )
             await db.commit()
 
     async def create(self, binding: ChannelBinding, *, allow_active: bool = False) -> ChannelBinding:

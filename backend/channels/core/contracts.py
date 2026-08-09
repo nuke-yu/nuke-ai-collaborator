@@ -27,6 +27,11 @@ def delivery_projection_id(source_event_id: str, binding_id: str) -> str:
     return f"bridge-projection-v1:{digest}"
 
 
+def canonical_channel_instance_id(value: str) -> str:
+    """Canonical internal routing identity shared by contracts, stores and runtime."""
+    return _required(value, "channel_instance_id").lower()
+
+
 def canonical_message_key(channel: str, tenant: str, conversation: str, message_id: str) -> str:
     """Build an unambiguous key with length-prefixed components."""
     parts = (channel, tenant, conversation, message_id)
@@ -174,7 +179,7 @@ class OutboundEnvelope:
         if self.source_event_id is not None:
             object.__setattr__(self, "source_event_id", _required(self.source_event_id, "source_event_id"))
         if self.channel_instance_id is not None:
-            object.__setattr__(self, "channel_instance_id", _required(self.channel_instance_id, "channel_instance_id"))
+            object.__setattr__(self, "channel_instance_id", canonical_channel_instance_id(self.channel_instance_id))
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self) | {

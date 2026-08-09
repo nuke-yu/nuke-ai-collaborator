@@ -14,7 +14,7 @@ from typing import Any
 
 import aiosqlite
 
-from channels.core import InboundEnvelope, OutboundEnvelope
+from channels.core import InboundEnvelope, OutboundEnvelope, canonical_channel_instance_id
 from executors.redaction import redact_secrets
 
 
@@ -25,6 +25,7 @@ class DeliveryState(StrEnum):
     RETRYING = "retrying"
     FAILED = "failed"
     DEAD_LETTER = "dead_letter"
+    QUARANTINED = "quarantined"
 
 
 class ChannelPayloadTooLargeError(ValueError):
@@ -51,6 +52,7 @@ _DDL = (
     """CREATE TABLE IF NOT EXISTS channel_delivery_outbox (
         idempotency_key TEXT PRIMARY KEY,
         channel TEXT NOT NULL,
+        channel_instance_id TEXT NOT NULL DEFAULT '',
         external_tenant_id TEXT NOT NULL,
         external_conversation_id TEXT NOT NULL,
         event_type TEXT NOT NULL,
@@ -106,6 +108,32 @@ class ChannelStore:
                 await db.execute("ALTER TABLE channel_delivery_outbox ADD COLUMN lease_expires_at INTEGER")
             if "channel_instance_id" not in columns:
                 await db.execute("ALTER TABLE channel_delivery_outbox ADD COLUMN channel_instance_id TEXT NOT NULL DEFAULT ''")
+            async with db.execute(
+                "SELECT idempotency_key,channel_instance_id,state FROM channel_delivery_outbox"
+            ) as cursor:
+                rows = await cursor.fetchall()
+            now = int(time.time() * 1000)
+            for key, instance_id, state in rows:
+                if str(instance_id or "").strip():
+                    canonical = canonical_channel_instance_id(instance_id)
+                    if canonical != instance_id:
+                        await db.execute(
+                            "UPDATE channel_delivery_outbox SET channel_instance_id=?,updated_at=? WHERE idempotency_key=?",
+                            (canonical, now, key),
+                        )
+                elif state in {DeliveryState.PENDING, DeliveryState.RETRYING, DeliveryState.SENDING}:
+                    error = "migration quarantined delivery without channel_instance_id"
+                    await db.execute(
+                        """UPDATE channel_delivery_outbox
+                           SET state='quarantined',last_error=?,lease_owner=NULL,lease_expires_at=NULL,updated_at=?
+                           WHERE idempotency_key=?""",
+                        (error, now, key),
+                    )
+                    await db.execute(
+                        """INSERT INTO channel_audit_events
+                           (idempotency_key,event_type,details_json,created_at) VALUES(?,?,?,?)""",
+                        (key, "delivery.quarantined", _safe_json_text({"reason": error}), now),
+                    )
             await db.commit()
 
     async def record_inbound(self, envelope: InboundEnvelope) -> bool:
@@ -154,7 +182,7 @@ class ChannelStore:
                 (
                     envelope.idempotency_key,
                     envelope.identity.channel,
-                    envelope.channel_instance_id or envelope.identity.channel,
+                    canonical_channel_instance_id(envelope.channel_instance_id or envelope.identity.channel),
                     envelope.identity.external_tenant_id,
                     envelope.conversation.external_conversation_id,
                     envelope.event_type,
@@ -185,9 +213,10 @@ class ChannelStore:
         return item
 
     async def set_channel_paused(self, channel: str, paused: bool) -> None:
-        channel = str(channel or "").strip().lower()
-        if not channel:
+        raw_channel = str(channel or "").strip()
+        if not raw_channel:
             raise ValueError("channel is required")
+        channel = canonical_channel_instance_id(raw_channel)
         async with aiosqlite.connect(self.path) as db:
             await db.execute(
                 """INSERT INTO channel_delivery_controls(channel,paused,updated_at) VALUES(?,?,?)
@@ -289,7 +318,7 @@ class ChannelStore:
             params: tuple[Any, ...] = (now,)
             if channel_instance_id:
                 channel_clause = " AND channel_instance_id=?"
-                params += (channel_instance_id.lower(),)
+                params += (canonical_channel_instance_id(channel_instance_id),)
             elif channel:
                 channel_clause = " AND channel=?"
                 params += (channel.lower(),)

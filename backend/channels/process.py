@@ -9,7 +9,13 @@ from typing import Any
 
 from executors.redaction import redact_secrets
 
-from .core import BridgeDirection, BridgeEnvelope, DeliveryReceipt, OutboundEnvelope
+from .core import (
+    BridgeDirection,
+    BridgeEnvelope,
+    DeliveryReceipt,
+    OutboundEnvelope,
+    canonical_channel_instance_id,
+)
 from .secrets import ChannelSecretResolver, EnvironmentSecretResolver, validate_env_names
 
 
@@ -30,6 +36,9 @@ class ChannelProcessManifest:
             raise ValueError("channel_instance_id and version are required")
         if self.max_seconds <= 0 or self.max_frame_bytes <= 0:
             raise ValueError("process limits must be positive")
+        object.__setattr__(
+            self, "channel_instance_id", canonical_channel_instance_id(self.channel_instance_id)
+        )
         object.__setattr__(self, "env_keys", validate_env_names(self.env_keys))
 
 
