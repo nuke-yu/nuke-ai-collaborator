@@ -110,11 +110,15 @@ async def lifespan(app: FastAPI):
     # 4. Start Supervisor Engine + Workers
     addr = ipc.make_addr("supervisor")
     num_workers = int(os.getenv("NUKE_WORKERS", "8"))
-    from channels.runtime import GroupChannelRelayService
+    from channels.runtime import ChannelDeliveryService, GroupChannelRelayService
     from channels import initialize_channel_schema
     from channels.stores import ChannelStore
     from runtime.dbpaths import channel_bridge_db_path, group_db_path
     await initialize_channel_schema(channel_bridge_db_path())
+    channel_delivery = ChannelDeliveryService(
+        ChannelStore(channel_bridge_db_path()),
+        poll_interval=float(os.getenv("NUKE_CHANNEL_DELIVERY_INTERVAL", "1.0")),
+    )
     channel_relay = GroupChannelRelayService(
         ChannelStore(channel_bridge_db_path()),
         _channel_group_ids,
@@ -127,6 +131,7 @@ async def lifespan(app: FastAPI):
         num_workers=num_workers,
         on_unread=on_unread_delta,
         channel_relay=channel_relay,
+        channel_delivery=channel_delivery,
     )
     await sup.start()
     sup_mod.supervisor = sup

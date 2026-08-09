@@ -248,6 +248,7 @@ class ChannelStore:
         now_ms: int | None = None,
         lease_owner: str = "channel-dispatcher",
         lease_ms: int = 30_000,
+        channel: str | None = None,
     ) -> dict[str, Any] | None:
         """Atomically claim one due delivery and attach a crash-recovery lease."""
         now = now_ms if now_ms is not None else int(time.time() * 1000)
@@ -256,15 +257,17 @@ class ChannelStore:
         await self.recover_expired_deliveries(now_ms=now)
         async with aiosqlite.connect(self.path) as db:
             await db.execute("BEGIN IMMEDIATE")
+            channel_clause = " AND channel=?" if channel else ""
+            params: tuple[Any, ...] = (now, channel.lower()) if channel else (now,)
             async with db.execute(
-                """SELECT idempotency_key FROM channel_delivery_outbox
+                f"""SELECT idempotency_key FROM channel_delivery_outbox
                    WHERE state IN ('pending','retrying') AND next_attempt_at<=?
                      AND NOT EXISTS (
                        SELECT 1 FROM channel_delivery_controls c
                        WHERE c.channel=channel_delivery_outbox.channel AND c.paused=1
                      )
-                   ORDER BY created_at ASC LIMIT 1""",
-                (now,),
+                   {channel_clause} ORDER BY created_at ASC LIMIT 1""",
+                params,
             ) as cursor:
                 row = await cursor.fetchone()
             if row is None:

@@ -121,11 +121,12 @@ class GroupChannelRelayService:
 
 
 class ChannelDeliveryDispatcher:
-    def __init__(self, store: ChannelStore, connector: ChannelConnector, *, max_attempts: int = 3, base_delay_ms: int = 1_000, lease_ms: int = 30_000, owner_id: str | None = None):
+    def __init__(self, store: ChannelStore, connector: ChannelConnector, *, channel: str | None = None, max_attempts: int = 3, base_delay_ms: int = 1_000, lease_ms: int = 30_000, owner_id: str | None = None):
         if max_attempts <= 0 or base_delay_ms < 0:
             raise ValueError("max_attempts must be positive and base_delay_ms must not be negative")
         self.store = store
         self.connector = connector
+        self.channel = channel.lower() if channel else None
         self.max_attempts = max_attempts
         self.base_delay_ms = base_delay_ms
         if lease_ms <= 0:
@@ -134,7 +135,7 @@ class ChannelDeliveryDispatcher:
         self.owner_id = owner_id or f"channel-dispatcher:{uuid.uuid4()}"
 
     async def run_once(self, *, now_ms: int | None = None) -> bool:
-        item = await self.store.claim_due_delivery(now_ms=now_ms, lease_owner=self.owner_id, lease_ms=self.lease_ms)
+        item = await self.store.claim_due_delivery(now_ms=now_ms, lease_owner=self.owner_id, lease_ms=self.lease_ms, channel=self.channel)
         if item is None:
             return False
         key = item["idempotency_key"]
@@ -196,3 +197,73 @@ class ChannelDeliveryDispatcher:
             await asyncio.sleep(interval)
             if not await self.store.renew_delivery_lease(idempotency_key, self.owner_id, lease_ms=self.lease_ms):
                 return
+
+
+class ChannelDeliveryService:
+    """Supervisor-owned dispatcher lifecycle for registered connectors."""
+
+    def __init__(self, store: ChannelStore, *, poll_interval: float = 1.0):
+        if poll_interval <= 0:
+            raise ValueError("poll_interval must be positive")
+        self.store = store
+        self.poll_interval = poll_interval
+        self._connectors: dict[str, ChannelConnector] = {}
+        self._dispatchers: dict[str, ChannelDeliveryDispatcher] = {}
+        self._task: asyncio.Task | None = None
+        self._stopping = False
+        self._stats: dict[str, object] = {"cycles": 0, "claimed": 0, "errors": 0, "last_error": None}
+
+    def register(self, channel: str, connector: ChannelConnector) -> None:
+        key = str(channel or "").strip().lower()
+        if not key:
+            raise ValueError("channel is required")
+        self._connectors[key] = connector
+        self._dispatchers[key] = ChannelDeliveryDispatcher(
+            self.store, connector, channel=key, owner_id=f"channel-dispatcher:{key}"
+        )
+
+    async def start(self) -> None:
+        if self._task is not None and not self._task.done():
+            return
+        await self.store.initialize()
+        self._stopping = False
+        self._task = asyncio.create_task(self._run(), name="channel-delivery")
+
+    async def stop(self) -> None:
+        self._stopping = True
+        task, self._task = self._task, None
+        if task is None:
+            return
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+    def snapshot(self) -> dict[str, object]:
+        return {**self._stats, "registered_channels": sorted(self._connectors)}
+
+    async def run_once(self) -> int:
+        claimed = 0
+        for dispatcher in tuple(self._dispatchers.values()):
+            try:
+                claimed += int(await dispatcher.run_once())
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                self._stats["errors"] += 1
+                self._stats["last_error"] = type(exc).__name__
+                log.exception("channel delivery dispatcher failed")
+        self._stats["cycles"] += 1
+        self._stats["claimed"] += claimed
+        return claimed
+
+    async def _run(self) -> None:
+        while not self._stopping:
+            try:
+                await self.run_once()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                self._stats["errors"] += 1
+                self._stats["last_error"] = type(exc).__name__
+                log.exception("channel delivery service loop failed")
+            await asyncio.sleep(self.poll_interval)

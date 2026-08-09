@@ -69,6 +69,7 @@ class Supervisor:
         # worker connecting later (or after a ToolListChanged) gets the current set.
         self._mcp_schemas: dict | None = None
         self._channel_relay = kwargs.get("channel_relay")
+        self._channel_delivery = kwargs.get("channel_delivery")
 
     def _reassign_log_extra(
         self, *, group_id: int, new_worker_id: str, reassign_version: int, old_worker_id: str | None = None, event: str
@@ -232,6 +233,8 @@ class Supervisor:
         self._server = await ipc.serve(self.addr, self._on_worker_conn)
         if self._channel_relay is not None:
             await self._channel_relay.start()
+        if self._channel_delivery is not None:
+            await self._channel_delivery.start()
         if self._num_workers > 0:
             await self._spawn_workers(self._num_workers)
             # MCP is a cross-group capability → one collector process, not per worker.
@@ -295,6 +298,8 @@ class Supervisor:
 
         if self._channel_relay is not None:
             await self._channel_relay.stop()
+        if self._channel_delivery is not None:
+            await self._channel_delivery.stop()
 
         # 1. Cancel monitor/restart tasks first so they don't re-spawn
         for t in list(self._monitor_tasks):
@@ -708,6 +713,8 @@ class Supervisor:
         }
         if self._channel_relay is not None:
             stats["channel_relay"] = self._channel_relay.snapshot()
+        if self._channel_delivery is not None:
+            stats["channel_delivery"] = self._channel_delivery.snapshot()
         return stats
 
     async def reassign_group(self, group_id: int, new_worker_id: str) -> None:
