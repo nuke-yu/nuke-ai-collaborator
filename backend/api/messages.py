@@ -1,9 +1,11 @@
 import uuid
 import pathlib
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+import db
 from db import global_db, get_unread_counts as _get_unread_counts
 from workspace import layout
 from core import media
+from runtime.dbpaths import group_db_path
 
 UPLOAD_DIR = pathlib.Path(__file__).parent / "uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
@@ -37,7 +39,7 @@ async def upload_file(file: UploadFile = File(...), group_id: int = Form(...)):
     art_id = None
     try:
         from artifacts import register_artifact, ArtifactOrigin, calculate_checksum
-        with db.bind_db(db.group_db_path(group_id) if hasattr(db, "group_db_path") else None):
+        with db.bind_db(group_db_path(group_id)):
             checksum = calculate_checksum(contents)
             artifact = await register_artifact(
                 group_id=group_id,
@@ -65,5 +67,3 @@ async def get_unread_counts(member_id: int):
     # the supervisor can't see, so we read the central projection, not messages.
     async with global_db() as db:
         return await _get_unread_counts(db, member_id)
-
-

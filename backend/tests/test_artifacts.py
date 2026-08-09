@@ -2,10 +2,14 @@
 
 import unittest
 import asyncio
+import io
 import os
 import shutil
 import tempfile
 import db as _db
+from unittest.mock import AsyncMock, patch
+from starlette.datastructures import Headers
+from starlette.datastructures import UploadFile
 
 from artifacts import (
     Artifact,
@@ -18,6 +22,10 @@ from artifacts import (
     list_artifacts,
     register_artifact,
 )
+from db.schema_split import init_group_db
+from runtime.dbpaths import group_db_path
+from api.messages import upload_file
+from executors.plugins import workspace_tools as wt
 
 
 class TestArtifactManager(unittest.IsolatedAsyncioTestCase):
@@ -133,6 +141,67 @@ class TestArtifactManager(unittest.IsolatedAsyncioTestCase):
 
         with self.assertRaises(ArtifactNotFoundError):
             await get_artifact(art.artifact_id, group_id=1)
+
+
+class TestArtifactAutoRegistration(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.tmp_dir = tempfile.mkdtemp()
+        self.workspace_patcher = patch("skills.constants.WORKSPACE_ROOT", self.tmp_dir)
+        self.workspace_patcher.start()
+        self.group_id = 7
+        self.group_path = group_db_path(self.group_id)
+        os.makedirs(os.path.dirname(self.group_path), exist_ok=True)
+        await init_group_db(self.group_path)
+
+    async def asyncTearDown(self):
+        self.workspace_patcher.stop()
+        shutil.rmtree(self.tmp_dir, ignore_errors=True)
+
+    async def test_upload_registers_artifact_in_target_group_db(self):
+        contents = b"uploaded artifact\n"
+        upload = UploadFile(
+            file=io.BytesIO(contents),
+            filename="notes.txt",
+            headers=Headers({"content-type": "text/plain"}),
+        )
+
+        result = await upload_file(upload, group_id=self.group_id)
+
+        self.assertIsNotNone(result["artifact_id"])
+        with _db.bind_db(self.group_path):
+            artifact = await get_artifact(result["artifact_id"], group_id=self.group_id)
+        self.assertEqual(artifact.origin, ArtifactOrigin.UPLOAD.value)
+        self.assertEqual(artifact.display_name, "notes.txt")
+        self.assertEqual(artifact.mime_type, "text/plain")
+        self.assertEqual(artifact.size_bytes, len(contents))
+        self.assertEqual(artifact.checksum_sha256, calculate_checksum(contents))
+        self.assertEqual(artifact.storage_locator, result["url"])
+
+    async def test_write_file_registers_artifact_with_session_and_bot(self):
+        with _db.bind_db(self.group_path), patch.object(
+            wt._ws, "write_file", new=AsyncMock(return_value="已写入")
+        ):
+            result = await wt._handle_write_file(
+                "src/app.py",
+                "print('ok')\n",
+                context={
+                    "group_id": self.group_id,
+                    "bot_id": 42,
+                    "session_id": "session-artifact",
+                },
+            )
+            artifacts = await list_artifacts(
+                group_id=self.group_id,
+                origin=ArtifactOrigin.WORKSPACE.value,
+                session_id="session-artifact",
+                bot_id=42,
+            )
+
+        self.assertIn("已写入", result)
+        self.assertEqual(len(artifacts), 1)
+        self.assertEqual(artifacts[0].display_name, "app.py")
+        self.assertEqual(artifacts[0].storage_locator, "src/app.py")
+        self.assertEqual(artifacts[0].checksum_sha256, calculate_checksum(b"print('ok')\n"))
 
 
 if __name__ == "__main__":
