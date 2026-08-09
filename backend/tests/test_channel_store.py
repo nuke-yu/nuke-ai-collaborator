@@ -3,7 +3,7 @@ import tempfile
 import unittest
 
 from channels.core import ChannelConversation, ChannelIdentity, InboundEnvelope, OutboundEnvelope
-from channels.stores import ChannelStore, DeliveryState
+from channels.stores import ChannelStore, DeliveryState, sanitize_text_for_storage
 
 
 class TestChannelStore(unittest.IsolatedAsyncioTestCase):
@@ -79,6 +79,12 @@ class TestChannelStore(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.store.get_delivery("event-3"))["state"], DeliveryState.RETRYING)
         audit = await self.store.list_audit("event-3")
         self.assertEqual(audit[-1]["event_type"], "delivery.replayed")
+
+    async def test_oversized_lowercase_bearer_is_not_stored_raw(self):
+        value = "x" * 70_000 + " authorization: bearer " + "a" * 40
+        safe = sanitize_text_for_storage(value)
+        self.assertNotIn("authorization: bearer", safe.lower())
+        self.assertNotIn("a" * 40, safe)
 
 
 if __name__ == "__main__":

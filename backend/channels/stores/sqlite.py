@@ -403,18 +403,17 @@ _MAX_JSON_BYTES = 256_000
 
 
 def sanitize_text_for_storage(value: str, limit: int = _MAX_STRING_LENGTH) -> str:
-    """Redact before limiting, with bounded scanning for pathological long text."""
-    if len(value) <= 64_000:
-        return redact_secrets(value)[0][:limit]
-    markers = ("PRIVATE KEY", "Bearer ", "ghp_", "github_pat_", "sk-", "xox", "API_KEY", "TOKEN", "SECRET", "PASSWORD", "Authorization")
-    if not any(marker in value for marker in markers):
-        return value[:limit]
-    window = 32_000
-    overlap = 512
-    for start in range(0, len(value), window - overlap):
-        if redact_secrets(value[start:start + window])[1]:
-            return "[REDACTED]"
-    return value[:limit]
+    """Apply the canonical redactor before any truncation.
+
+    Oversized values are fail-closed when no complete secret pattern can be
+    established.  This deliberately avoids a second, incomplete marker list
+    that could disagree with ``redact_secrets`` or miss case-insensitive forms.
+    """
+    text = str(value)
+    if len(text) > 64_000:
+        return "[TRUNCATED]"
+    redacted, _count = redact_secrets(text)
+    return redacted[:limit]
 
 
 def _sanitize_json(value: Any, *, depth: int = 0) -> Any:
