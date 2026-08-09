@@ -1,419 +1,303 @@
-# Nuke AI Collaborator
+<div align="center">
 
-A web-based AI collaboration workspace featuring multi-group chat, AI Bot members, real-time WebSocket communication, and an interactive experience similar to Slack or WeChat groups.
+# 🚀 Nuke AI Collaborator
 
----
+### 给组织的「常驻 AI 研发协同团队」操作系统
+### *A Resident AI Engineering Team That Appreciates Over Time.*
 
-## 📊 Codebase Metrics
+<p align="center">
+  <a href="./README_EN.md"><b>English</b></a> |
+  <a href="./README.md"><b>简体中文</b></a>
+</p>
 
-Current Project Scale: **~38,500 LOC**
-Backend Test Coverage: **1.5:1 (Test-to-Code ratio)**
+[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg?logo=python&logoColor=white&style=flat-square)](https://www.python.org/)
+[![React 19](https://img.shields.io/badge/React-19.0-61DAFB.svg?logo=react&logoColor=black&style=flat-square)](https://react.dev/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688.svg?logo=fastapi&logoColor=white&style=flat-square)](https://fastapi.tiangolo.com/)
+[![Tailwind CSS v4](https://img.shields.io/badge/Tailwind_CSS-v4.0-38B2AC.svg?logo=tailwind-css&logoColor=white&style=flat-square)](https://tailwindcss.com/)
+[![MCP Native](https://img.shields.io/badge/MCP-Protocol_Native-8A2BE2.svg?style=flat-square)](https://modelcontextprotocol.io/)
+[![Test Ratio](https://img.shields.io/badge/Test_Ratio-1.5:1-success.svg?style=flat-square)](docs/ENGINEERING-METRICS.md)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](LICENSE)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](https://github.com/nuke-yu/nuke-ai-collaborator/pulls)
 
-For a detailed breakdown by layer and engineering health analysis, see [ENGINEERING-METRICS.md](docs/ENGINEERING-METRICS.md).
+<br/>
 
-## Tech Stack
+<img src="./Home%20page.png" width="100%" alt="Nuke AI Collaborator Home Page" />
 
-| Layer | Technology |
-|---|---|
-| Backend | Python · FastAPI · aiosqlite · SQLite · JWT |
-| Frontend | React 19 · Vite · Tailwind CSS v4 |
-| Real-time | WebSocket |
-| AI Integration | DeepSeek · OpenAI · Anthropic Claude · Ollama |
+<br/>
 
----
+> **💡 核心愿景**：**Nuke AI Collaborator** 是一个以**群组（Group）**为协作边界的开源 AI 研发协同平台。它将类似 Slack/飞书的群聊体验与多智能体执行流水线结合，让人类工程师与具有专业分工的 AI 员工（需求、开发、测试、项目管理等）同台协作，形成**「数据物理隔离、流程受控可审计、且越用越懂你」**的常驻数字工程团队。
 
-## Features
-
-### 💬 Messaging
-
-- **Markdown Rendering** — Support for headers, lists, tables, quotes, and inline code.
-- **Code Blocks** — Foldable/expandable blocks with syntax highlighting (Prism) and one-click copy.
-- **File & Image Upload** — Click to upload, drag-and-drop, or paste images directly.
-- **Image Preview** — In-chat thumbnail display with full-screen Lightbox (Esc to close).
-- **Message Replies** — Threaded replies with quoted content summaries.
-- **Message Editing** — In-place editing with "Edited" markers.
-- **Message Recall** — Soft deletion with "This message was recalled" markers.
-- **Pinned Messages** — Top-mounted Pin bar supporting multiple pins with real-time sync.
-- **Message Drafts** — Drafts automatically saved when switching groups and restored upon return.
-- **@ Mentions** — Auto-complete member selector, supporting `@all`.
-- **Message Search** — Keyword highlighting and jump-to-location functionality.
-- **Time Grouping** — Date separators (Today / Yesterday / Specific Date).
-- **Read Receipts** — Real-time indicators of which members have read a message.
-- **Reactions** — Quick Emoji bar + Full Emoji selector (6 categories).
-
-### 🤖 AI Bot
-
-- **Multi-Model Support** — DeepSeek / OpenAI / Anthropic Claude / Ollama (Local).
-- **Streaming Output** — Real-time typewriter effect.
-- **Custom Personas** — Each Bot can have independent System Prompts and role descriptions.
-- **Role Templates** — Built-in library to add common AI roles with one click.
-- **Context Memory** — Independent conversation history for each group, fully isolated.
-
-### 👥 Members
-
-- **Online Presence** — Real-time green dot indicators; connected is online, disconnected is offline (multi-tab safe).
-- **Auto-Reply** — Automatically trigger custom replies when @mentioned while offline.
-- **Member Management** — Add/remove members with real-time sync of group counts.
-
-### 🗂 Groups
-
-- **Multi-Group Layout** — Sidebar listing with support for expanding multiple member sub-lists.
-- **Group Announcements** — Top-mounted, collapsible announcement bar with real-time editing.
-- **Empty State Guidance** — New groups display member avatars and "Send a message to start" prompts.
-- **Unread Badges** — Visual indicators for unread message counts per group.
-- **Group Renaming** — Click the name of a group to rename it.
-
-### 🎨 Interface
-
-- **Dark / Light Themes** — One-click toggle with Tailwind CSS variable-level inversion and smooth transitions.
-- **Mobile Responsive** — Bottom Tab navigation (Groups / Chat) for mobile devices.
-- **Flicker-Free Switching** — Local message caching for instant group switching with silent background refresh.
-- **Infinite Scroll** — Smooth upward scrolling to load earlier history while maintaining position.
-- **Keyboard Shortcuts** — `⌘K` / `Ctrl+K` to open search.
-- **Typing Indicators** — Visual "thinking" animation when Bots are processing.
-
-### 🛡️ Security & Robustness
-
-- **End-to-End Authentication** — JWT-based protection for all endpoints, including secure registration/login and WebSocket handshake verification.
-- **Multi-Process Sharding** — Supervisor-Worker architecture for horizontal scaling and physical fault isolation.
-- **Auto-Reconnect Compensation** — Frontend automatically catches up on missing messages after WebSocket flickers, ensuring eventual consistency.
-- **Distributed Tracing** — Cross-process `trace_id` propagation with structured JSON logging for easy debugging.
-- **High-Performance Tunneling** — Low-latency IPC protocol based on UDS/Named Pipes (P99 < 0.2ms).
-- **Memory Management** — VFS path lock cleanup mechanism to prevent leaks during long-term operation.
-
-### 📁 File Support
-
-| Type | Formats |
-|---|---|
-| Images | JPEG · PNG · GIF · WebP · SVG |
-| Documents | PDF · Word (.doc / .docx) · Excel (.xls / .xlsx) |
-| Text | TXT · JSON |
-
-Maximum file size: **10 MB**. Images are displayed inline; other files show as download cards.
-
-### ⏰ Scheduler (Cron Jobs)
-
-- **Cron Scheduling** — Standard 5-segment cron expressions (`0 9 * * 1-5`), powered by APScheduler in the main event loop.
-- **Pluggable Decoupling** — Independent `scheduler/` module; can be removed by deleting just 3 lines in `main.py`.
-- **REST Management API** — CRUD operations + toggle + manual trigger (`POST /api/cron-jobs/{id}/run`).
-- **Persistence** — Rules stored in `cron_jobs` table; automatically restored on reboot.
+</div>
 
 ---
 
-## Getting Started
+## 🎬 演示视频 (Product Demos)
 
-### Quick Start (Recommended)
+### 📹 Demo 1: Nuke AI Collaborator 平台实操演示
+<div align="center">
+  <video src="https://github.com/nuke-yu/nuke-ai-collaborator/raw/main/vedio/Nuke-ai-collaborator.mp4" controls="controls" width="100%" poster="./Home%20page.png">
+    您的浏览器不支持视频播放，可直接下载 <a href="https://github.com/nuke-yu/nuke-ai-collaborator/raw/main/vedio/Nuke-ai-collaborator.mp4">Nuke-ai-collaborator.mp4</a> 观看。
+  </video>
+  <p><i>▶️ 平台基础协作与多角色 AI 员工协同实操演示</i></p>
+</div>
 
-**One-command setup:**
+<br/>
 
-- **macOS / Linux**: `./start.sh`
-- **Windows**: Double-click `start.bat` or run `.\\start.bat` in PowerShell
-
-> For detailed installation instructions, platform-specific setup, and troubleshooting, see [docs/INSTALLATION.md](docs/INSTALLATION.md).
+### 🐝 Demo 2: Nuke AI Swarm 多智能体集群协同
+<div align="center">
+  <video src="https://github.com/nuke-yu/nuke-ai-collaborator/raw/main/vedio/Nuke%20AI%20swarm.mov" controls="controls" width="100%" poster="./Home%20page.png">
+    您的浏览器不支持视频播放，可直接下载 <a href="https://github.com/nuke-yu/nuke-ai-collaborator/raw/main/vedio/Nuke%20AI%20swarm.mov">Nuke AI swarm.mov</a> 观看。
+  </video>
+  <p><i>▶️ 多智能体流水线并发编排与任务接力实战演示</i></p>
+</div>
 
 ---
 
-### Run with Docker
+## 🎯 核心价值：一支越用越值钱的数字团队
 
-Single container (backend + served frontend SPA); per-group execution sandboxes
-are separate containers the app spawns at runtime via the mounted docker socket.
+Nuke AI Collaborator 围绕**组织级协作**、**认知记忆沉淀**与**企业级安全治理**构建，让 AI 真正成为团队长期的核心生产力资产：
 
-**Fastest path — prebuilt images (no checkout/build):**
+```
+                    ┌──────────────────────────────────────────────┐
+                    │          👥 真实人类 (PM / Leader)           │
+                    └──────────────────────┬───────────────────────┘
+                                           │ @需求拆解 / @全员
+                                           ▼
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│ 💬 群组协作空间 (Group Private Domain · 数据与沙箱物理级隔离)                             │
+│                                                                                        │
+│   ┌────────────────┐      ┌────────────────┐      ┌────────────────┐                   │
+│   │ 📋 AI-BA 需求官 │ ───► │ 💻 AI-Dev 工程师 │ ───► │ 🧪 AI-QA 测试官 │                   │
+│   └───────┬────────┘      └───────┬────────┘      └───────┬────────┘                   │
+│           │                       │                       │                            │
+│           └───────────────────────┼───────────────────────┘                            │
+│                                   ▼                                                    │
+│               📌 共享任务看板 & 交付物 (BOARD.md / SPEC.md)                               │
+│                                   │                                                    │
+│           ┌───────────────────────┴───────────────────────┐                            │
+│           ▼                                               ▼                            │
+│ 🧠 工业级认知记忆引擎 (A-MEM)                  🛡️ 企业级安全纵深 (Security Mesh)          │
+│ ├─ Episodic 经历 ➔ Semantic 常识反思           ├─ 关键写操作 / Shell 人在环审批 (HITL)     │
+│ ├─ 三因子加权检索 (相关性+时效+重要度)         ├─ AST Token 级双层防命令逃逸              │
+│ └─ 溯源链 + 冲突消解，记忆不腐烂               └─ 密钥/Token/PEM 自动脱敏 (Redaction)      │
+└────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 1. 🧠 工业级认知记忆复利 (Cognitive Memory Compound)
+- **经历反思与概念升华**：跳脱出单纯的文本拼接，通过 **经历记忆 (Episodic) 抽取 ➔ 概念常识 (Semantic) 反思固化**，将日常讨论与交付沉淀为领域知识。
+- **三因子加权动态召回**：综合 **语义相关性 (Relevance) + 时效衰减 (Recency) + 决策重要度 (Importance)** 动态打分，并辅以冲突消解与遗忘策略，确保记忆持续清晰且不腐烂。
+- **可信溯源与脱敏写入**：每条沉淀的记忆包含清晰的 A-MEM 溯源出处，并在持久化前强制过滤密钥凭据。
+
+### 2. 👥 多角色协同与流水线接力 (Multi-Agent Relay & Workflows)
+- **专业角色团队化**：内置需求分析师 (BA)、全栈开发架构师 (Dev)、测试工程师 (QA)、项目经理 (PM) 等丰富角色模板，支持通过 `SOUL.md` 与 `AGENT.md` 自由定义 Bot 性格与推理边界。
+- **结构化任务推进**：支持线性接力（BA 输出 PRD ➔ Dev 编码 ➔ QA 测试验证）与复杂分支网状编排，任务状态持久化于共享看板 (`BOARD.md`)。
+- **执行过程全透明**：前端提供实时 **Thinking 思考折叠**、**ReAct 动作跟踪** 与 **执行时间线抽屉 (Execution Timeline)**，执行步骤清晰可见。
+
+### 3. 🛡️ 生产级安全纵深与人在环治理 (Enterprise HITL & Safety Mesh)
+- **人在环审批门 (Human-in-the-Loop)**：涉及文件修改、代码落地、Shell 执行等关键写操作时，自动在前端弹出审批卡片，必须经由人类确认方可执行。
+- **双层防逃逸 Shell 守卫**：一层正则强制阻断高危命令，二层基于 `shlex` 语法树分词深度防御，彻底拦截 Base64 变形与管道拼接绕过。
+- **敏感数据自动脱敏 (Output Redaction)**：所有输出实时过滤 JWT、AWS 密钥、GitHub Token、私钥 PEM 等敏感数据。
+- **子 Agent 权限衰减**：向下派生子任务时强制收紧权限，防止高危权限向下渗透扩散。
+
+### 4. 🏰 物理级多租户隔离与原生 MCP (Physical Isolation & Native MCP)
+- **真正的群物理隔离**：每个群拥有专属的独立 SQLite 数据库（`workspaces/group_X/chat.db`）与文件工作区，群组之间数据物理隔离，永不串群。
+- **原生 MCP (Model Context Protocol) 跨进程架构**：独占式 MCP Collector 维持 Stdio/SSE 连接，Worker 进程轻量代理调用，提供无限横向扩展的工具生态。
+- **零厂商绑定**：支持 OpenAI、Anthropic Claude、DeepSeek、本地 Ollama 等多种大模型混合配置，每个 Bot 均可按需指定最合适的模型。
+
+---
+
+## 💎 核心功能全景 (Features Overview)
+
+### 💬 丝滑的群聊与富文本交互
+- **现代前端架构**：基于 React 19 + Vite + Tailwind CSS v4 构建，极速响应，支持深色/浅色主题一键无缝切换。
+- **专业 Markdown 渲染**：支持列表、表格、任务项、公式及 Prism 代码块折叠与一键复制。
+- **富媒体与协同细节**：图片/文件拖拽上传、图片 Lightbox 全屏预览、多置顶 Pin 栏、消息撤回/编辑/草稿暂存、Emoji 表情互动与快捷键支持（`⌘K` / `Ctrl+K`）。
+- **实时成员状态**：支持成员在线状态实时感知（Presence）与离线自定义自动代答（Auto-Reply）。
+
+### 📚 四层自进化技能系统 (Self-Evolving Skills)
+- **分层技能体系**：系统内置技能 (`System`) + 群组共享技能 (`Group`) + 角色私有技能 (`Bot`) + 外部技能扩展 (`External`)。
+- **L4 受控自学习闭环**：Bot 可根据实际交互日志总结高频规律，自动生成技能草稿 (`Draft`)。经过人类 Code Review 确认批准后正式入库生效。
+
+### ⏰ 定时调度与自动化巡检 (Cron Scheduler)
+- **标准 Cron 调度**：内置基于 APScheduler 的定时任务引擎，支持 5 段式标准 Cron 表达式。
+- **自动化运营**：可设置每日 Standup 自动总结、代码质量定时巡检、服务器健康体检与周报汇总。
+
+---
+
+## 🏗️ 系统架构与进程拓扑 (Architecture Topology)
+
+Nuke AI Collaborator 采用 **微内核 + 进程分片 + 事件总线 (Event Bus)** 架构，保障高并发下的稳定与物理容灾隔离：
+
+```
+                              ┌────────────────────────────────────────┐
+                              │            Web Browsers (UI)           │
+                              └───────────────────┬────────────────────┘
+                                                  │ WebSocket / REST API
+                                                  ▼
+┌────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ 🛡️ Supervisor 主进程 (main.py)                                                                         │
+│ ├─ WebSocket 鉴权握手 (JWT) · 跨群组路由分发                                                          │
+│ ├─ 分布式链路追踪 (W3C trace_id) · 结构化 JSON 统一日志                                               │
+│ └─ Worker 与 MCP Collector 进程生命周期守护与健康探针                                                  │
+└───────────────────────┬────────────────────────────────────────────────┬───────────────────────────────┘
+                        │ IPC 通信 (UDS / Named Pipes, P99 < 0.2ms)       │ IPC
+                        ▼                                                ▼
+┌────────────────────────────────────────────────────────┐  ┌──────────────────────────────────────────┐
+│ ⚙️ Worker 分片进程 × N (AI 推理与工具执行)              │  │ 🔌 MCP Collector 独占进程 (外部工具集线器)│
+│ ├─ 负责各群组独立的 tool_loop_v1 状态机                │  │ ├─ 独占维护各 Stdio / SSE MCP 活跃连接    │
+│ ├─ 29 类类型化事件总线 (Event Bus)                     │  │ ├─ 统一管理外部工具鉴权与 Schema 同步     │
+│ ├─ 人在环 (HITL) 权限拦截与双层命令安全防护            │  │ └─ 执行预授权的 MCP 工具调用与结果回传    │
+│ └─ 私有工作区与群独立 SQLite 存储 (workspaces/group_X) │  └──────────────────────────────────────────┘
+└────────────────────────────────────────────────────────┘
+```
+
+---
+
+## ⚡ 快速开始 (Quick Start)
+
+### 方式一：一键脚本启动（最快体验）
+
+- **macOS / Linux**:
+  ```bash
+  git clone https://github.com/nuke-yu/nuke-ai-collaborator.git
+  cd nuke-ai-collaborator
+  chmod +x start.sh
+  ./start.sh
+  ```
+
+- **Windows (PowerShell / CMD)**:
+  ```powershell
+  git clone https://github.com/nuke-yu/nuke-ai-collaborator.git
+  cd nuke-ai-collaborator
+  .\start.bat
+  ```
+
+启动后在浏览器打开 **`http://localhost:5173`** 即可使用。
+
+---
+
+### 方式二：Docker 容器化部署
+
 ```bash
+# 1. 创建本地持久化数据目录
 sudo mkdir -p /var/lib/nuke-ai-collaborator/workspaces
 sudo chown -R "$(id -u):$(id -g)" /var/lib/nuke-ai-collaborator
-docker compose -f docker-compose.ghcr.yml up -d        # pulls amd64/arm64 from GHCR
-# open http://localhost:8000 → set model API keys via the 🔑 button
+
+# 2. 启动预构建镜像 (支持 amd64 / arm64)
+docker compose -f docker-compose.ghcr.yml up -d
+
+# 3. 访问 http://localhost:8000 即可使用 (通过界面右上角 🔑 按钮直接配置模型 API Key)
 ```
-Images are published to GHCR by the `Publish images` workflow on each `v*` tag.
-Build them yourself instead with the steps below.
-
-**Prerequisites (once):**
-```bash
-# 1. Build the per-group sandbox image (the app spawns it; compose does not)
-docker build -t nuke-sandbox:latest deploy/sandbox
-
-# 2. Create the host data dir (chat.db + workspaces persist here)
-sudo mkdir -p /var/lib/nuke-ai-collaborator/workspaces
-sudo chown -R "$(id -u):$(id -g)" /var/lib/nuke-ai-collaborator
-```
-
-**Production (code baked into the image):**
-```bash
-docker compose up -d --build
-docker compose logs -f app          # watch startup
-# open http://localhost:8000  → set model API keys via the 🔑 button
-```
-The default group + 3 bots (BA / Dev / QA) are seeded automatically on first boot.
-
-**Development (live source, no rebuild on each change):**
-```bash
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
-```
-`docker-compose.dev.yml` bind-mounts `./backend` and `./frontend/dist` over the
-image, so edits sync into the container without rebuilding. Per change:
-
-| Changed | Sync command | Rebuild? |
-|---------|--------------|----------|
-| Backend code | `docker compose restart` | No |
-| Frontend (fast, HMR) | `npm --prefix frontend run dev` → open `http://localhost:5173` (vite proxies to :8000) | No |
-| Frontend (in-container) | `npm --prefix frontend run build`, refresh `http://localhost:8000` | No |
-| `requirements.txt` / `package.json` | regenerate `backend/requirements.lock` (see [backend/CLAUDE.md](backend/CLAUDE.md)), then `up -d --build` | Yes |
-
-> Backend uses `restart`, not `uvicorn --reload`: the AI loop / tools / workflow
-> run in worker **subprocesses** the app spawns, which `--reload` would leave on
-> stale code. `restart` re-execs the whole supervisor → worker → collector tree.
-
-The dev file is **explicit** (not an auto-merged `override.yml`), so a plain
-`docker compose up -d` stays pure production and never bind-mounts host source.
 
 ---
 
-### Requirements
+### 方式三：手动分步安装
 
-| Requirement | Minimum | Recommended |
-|-------------|---------|-------------|
-| Python | 3.12+ | 3.13 (Docker image base) |
-| Node.js | 18+ | 20+ LTS |
-| RAM | 4GB | 8GB+ (for local AI models) |
+<details>
+<summary><b>点击展开手动配置说明 (Python 3.12+ & Node 18+)</b></summary>
 
-> Python 3.12+ is required (the codebase uses PEP 701 f-strings; 3.11 raises a
-> `SyntaxError` at import).
-
----
-
-### Manual Setup
-
-#### 1. Install Dependencies
-
-**Linux / macOS:**
+#### 1. 启动后端 (Backend)
 ```bash
 cd backend
 python3 -m venv venv
+
+# macOS / Linux:
 source venv/bin/activate
+# Windows:
+# venv\Scripts\activate
+
 pip install -r requirements.txt
+python3 -m uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
-**Windows (PowerShell / CMD):**
-```powershell
-cd backend
-py -m venv venv
-venv\Scripts\activate.bat
-pip install -r requirements.txt
-```
-
-> 💡 **Windows Note:** If you get `PermissionError` during installation, try running PowerShell as Administrator, or add `--user`:
-> ```powershell
-> pip install --user -r requirements.txt
-> ```
-
-#### 2. Start the Application
-
-**Backend:**
+#### 2. 启动前端 (Frontend)
 ```bash
-cd backend
-# Make sure venv is activated, then:
-python3 -m uvicorn main:app --host 0.0.0.0 --port 8000  # macOS/Linux
-# or
-python -m uvicorn main:app --host 0.0.0.0 --port 8000   # Windows
-```
-
-**Frontend (new terminal):**
-```bash
+# 新开终端窗口
 cd frontend
-npm install      # Only needed once or when dependencies change
+npm install
 npm run dev
 ```
 
-#### 3. First-time Setup
-
-When you first visit [http://localhost:5173](http://localhost:5173):
-
-1. **Register an account** - The central database (`backend/chat.db`) is created automatically on first start
-2. **Create your first group** - Click the "+" button in the sidebar
-3. **Add AI members** - Use the "Add Bot" feature to add assistants
-
-> ℹ️ The database is initialized automatically:
-> - **Central DB** (`chat.db`): Created on backend start with users, groups, members, templates tables
-> - **Group DBs** (`backend/workspaces/group_X/chat.db`): Created lazily when a group becomes active
+打开 `http://localhost:5173` 注册管理员账号并创建第一个项目协作群组。
+</details>
 
 ---
 
-### Quick Start Summary
+## 🎯 典型应用场景 (Use Cases)
 
-**Prerequisites:**
-- Python 3.11+ and Node.js 18+ installed
-- **Windows:** Visual C++ Build Tools installed (for native package compilation)
-
----
-
-**macOS / Linux (two terminals):**
-
-```bash
-# Terminal 1 - Backend
-./start.sh
-
-# Terminal 2 - Frontend  
-cd frontend
-npm install    # First time only
-npm run dev
 ```
-
-**Windows (two terminals/PowerShell):**
-
-```powershell
-# Terminal 1 - Backend
-.\start.bat
-
-# Terminal 2 - Frontend
-cd frontend
-npm install    # First time only
-npm run dev
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 💡 场景 1：端到端需求接力交付                                                │
+│ 人类 PM: "@BA 梳理微信扫码登录功能的 PRD 需求文档并同步到看板"               │
+│   ➔ AI-BA 编写规范需求并同步至 `BOARD.md`                                   │
+│   ➔ AI-Dev 认领任务并生成前后端代码方案                                     │
+│   ➔ 触发 HITL 确认卡片，人类确认批准写入本地工作区                          │
+│   ➔ AI-QA 自动编写单元测试并执行验证                                       │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ 💡 场景 2：基于 MCP 生态的智能运维与巡检                                     │
+│ 定时 Cron / 人类 @DevOps: "检查生产 Pod 状态与最近 1 小时错误日志"           │
+│   ➔ 经 MCP 桥接 Kubernetes / Postgres 工具执行查询与分析                     │
+│   ➔ 自动提取高频错误堆栈并输出修复方案                                      │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ 💡 场景 3：长期沉淀的团队领域智库                                            │
+│ 新成员入职: "@All 这个老项目的支付重试机制有什么历史设计背景？"              │
+│   ➔ AI 检索群组长期认知记忆 (A-MEM)，精准提取历次重构决策与注意事项         │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-**Access:** Open [http://localhost:5173](http://localhost:5173) to start using the app.
+## 🤝 参与共建与贡献 (Contributing)
 
----
+Nuke AI Collaborator 是一个充满活力的开源项目，我们欢迎广大开发者、产品设计师和 AI 探索者共同参与建设！
 
-### Troubleshooting
+### 🌈 欢迎贡献的方向：
 
-#### Backend won't start on Windows
+- 🎨 **前端 UI/UX**：设计更多主题配色、动效微交互、可视化多 Agent 工作流编排画布、移动端体验优化。
+- 🤖 **Bot 角色与技能生态**：贡献专业领域 Bot 角色模板（数据分析师、UI 设计师、安全审计员等）、编写实用 MCP 工具集与 Skill 插件。
+- 🧠 **认知记忆与算法**：记忆向量召回、时间衰减与冲突消解算法调优、图数据库/知识图谱结合探索。
+- 🔌 **企业生态集成**：飞书、钉钉、企业微信、Slack 双向 Webhook 桥接网关与企业 SSO 鉴权支持。
 
-1. **Check Python installation:**
-   ```powershell
-   python --version
-   # If not found, try:
-   py --version
+### 🛠️ 贡献流程：
+
+1. **Fork** 本仓库并 Clone 到本地。
+2. 创建特性分支：`git checkout -b feature/your-feature-name`
+3. 编码并验证测试：`pytest` & `npm test`
+4. 提交规范 Commit（无需添加 AI 签名信息）：
+   ```bash
+   git commit -m "feat(skills): add docker-management skill"
    ```
-
-2. **Install using Python Launcher:**
-   ```powershell
-   cd backend
-   py -m pip install -r requirements.txt
-   ```
-
-3. **Check port 8000 is available:**
-   ```powershell
-   netstat -ano | findstr :8000
-   # If something is using it, stop it:
-   tasklist | findstr <PID>
-   taskkill /PID <PID> /F
-   ```
-
-4. **If installation fails with "Visual C++" errors:**
-   - Download and install Visual C++ Build Tools:
-     https://visualstudio.microsoft.com/visual-cpp-build-tools/
-   - Select "Desktop development with C++" workload
-   - Required for packages like `chromadb`, `numpy`, `psutil`
-
-#### Frontend won't start
-
-1. **Check Node.js version:**
-   ```powershell
-   node --version
-   npm --version
-   ```
-
-2. **Clear node_modules and reinstall:**
-   ```powershell
-   cd frontend
-   Remove-Item -Recurse -Force node_modules
-   npm install
-   ```
-
-#### "WebSocket connection failed"
-
-- Make sure backend is running on port **8000**
-- Check Windows Firewall isn't blocking the connection
-- Try accessing `http://localhost:8000/api/health` to verify backend is up
+5. Push 到分支并提交 **Pull Request**！
 
 ---
 
-### Environment Variables (Optional)
+## 🗺️ 路线图 (Roadmap)
 
-Create a `.env` file in the `backend` directory:
-
-```env
-# API Keys (optional - configure via UI instead)
-OPENAI_API_KEY=sk-...
-ANTHROPIC_API_KEY=sk-ant-...
-DEEPSEEK_API_KEY=sk-...
-
-# Server Settings
-NUKE_WORKERS=4  # Number of worker processes (default: 4)
-```
+- [x] **v1.0 架构地基**：Supervisor-Worker 分片运行时、EventBus 解耦、物理隔离存储
+- [x] **v2.0 认知记忆与 MCP**：A-MEM 认知记忆链、原生 MCP 进程集线器、L4 受控自进化技能
+- [x] **v2.5 企业硬化**：HITL 人在环审批、双层 Shell 命令守卫、自动密钥脱敏、Chaos 故障自愈
+- [ ] **v3.0 协同进阶 (进行中)**：
+  - [ ] 可视化多 Agent 流水线拖拽编排编辑器
+  - [ ] 飞书 / 企微 / Slack 机器人网关双向打通
+  - [ ] 知识图谱增强记忆网络 (Graph Memory)
+  - [ ] 一键导出团队沉淀为独立 Agentic 技能包
 
 ---
 
-Open [http://localhost:5173](http://localhost:5173) and start collaborating!
+## 📄 开源许可证 (License)
+
+本项目采用 [MIT 许可证](LICENSE) 开源。
 
 ---
 
-## Architecture: Event Bus
+<div align="center">
 
-The backend utilizes an internal Event Bus to decouple business logic from the WebSocket transport layer, inspired by the PubSub architecture of [OpenCode](https://github.com/opencode-ai/opencode).
+**让每个团队，都拥有一支永不下班、越用越懂你的常驻 AI 研发团队。**
 
-### Layered Structure
+<br/>
 
-```
-Business Logic (Orchestrator / Permissions / Executors)
-       ↓  bus.publish(TypedEvent)  /  bus.broadcast(group_id, dict)
-EventBus (asyncio Queue, typed channel + wildcard channel)
-       ↓  Wildcard Subscription
-WS Adapter (The only part that knows about WSManager)
-       ↓  manager.broadcast(group_id, payload)
-WSManager (Connection registry, pure transport layer)
-       ↓  ws.send_json × N
-Browsers
-```
+🌟 **如果这个项目对你有帮助或启发，欢迎在 GitHub 上点亮一颗 Star！** 🌟
 
-### Event Types (29 Total)
+[提交 Issue 反馈](https://github.com/nuke-yu/nuke-ai-collaborator/issues) · [提交 Pull Request](https://github.com/nuke-yu/nuke-ai-collaborator/pulls) · [查看详细架构文档](docs/ARCHITECTURE.md)
 
-| Category | Events |
-|------|------|
-| Streaming | `stream_start` · `stream_chunk` · `stream_error` · `stream_end` · `stream_aborted` |
-| Messages | `message` · `read` |
-| Presence | `presence` · `workflow_update` |
-| Bot State | `typing` · `error` · `steer_queued` · `followup_start` · `steer_injected` · `rewake_injected` |
-| Tool Execution | `tool_call` · `tool_result` |
-| ReAct | `react_thought` · `react_action` · `react_observation` |
-| Compaction | `compaction` |
-| Skills | `skills_loaded` · `skill_fork_start` · `skill_fork_end` · `skill_draft_added` |
-| Permissions | `before_finalize_review` · `before_finalize_approved` · `before_finalize_rejected` · `permission_asked` |
-
----
-
-## Project Structure
-
-```
-nuke-ai-collaborator/
-├── backend/
-│   ├── main.py              # Entry point, WS Handshake, Central Router
-│   ├── core/
-│   │   ├── auth.py          # JWT Auth, Password Hashing
-│   │   ├── config.py        # Centralized Magic Numbers & Thresholds
-│   ├── runtime/             # V3 Sharding Runtime
-│   │   ├── supervisor.py    # Master Process (Routing/Fan-out)
-│   │   ├── worker.py        # Shard Process (AI Loop/Pumps)
-│   │   ├── lifecycle.py     # Lazy Hydration & Eviction Management
-│   │   ├── tracing.py       # Distributed Tracing & JSON Logging
-│   ├── bus/                 # Event Bus (Decoupling Layer)
-│   ├── db/                  # Multi-Domain Database (Central + Group Private)
-│   ├── executors/           # AI Executor Plugins (Tool Loop, ReAct)
-│   ├── permissions/         # Permission Engine
-│   ├── scheduler/           # APScheduler Plugin
-│   └── api/                 # REST Routers (Groups, Messages, Auth)
-└── frontend/
-    └── src/
-        ├── components/      # UI Components (ChatWindow, MessageList, etc.)
-        ├── hooks/           # React Hooks (useWebSocket, useNotifications)
-        └── api.js           # Auth-aware REST API Wrapper
-```
-
----
-
-## License
-
-MIT
+</div>
