@@ -5,6 +5,9 @@ import os
 import shutil
 import tempfile
 import db as _db
+from unittest.mock import patch
+from db.schema_split import init_group_db
+from runtime.dbpaths import group_db_path
 from sessions.store import append_event
 from observability.timeline_projector import (
     TimelineNode,
@@ -17,11 +20,11 @@ from observability.timeline_projector import (
 class TestTimelineProjector(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.tmp_dir = tempfile.mkdtemp()
-        self.db_path = os.path.join(self.tmp_dir, "test_timeline.db")
-        _db.DB_PATH = self.db_path
-        await _db.init_db()
+        self.workspace_patcher = patch("skills.constants.WORKSPACE_ROOT", self.tmp_dir)
+        self.workspace_patcher.start()
 
     async def asyncTearDown(self):
+        self.workspace_patcher.stop()
         shutil.rmtree(self.tmp_dir, ignore_errors=True)
 
     def test_project_event_to_node(self):
@@ -37,7 +40,7 @@ class TestTimelineProjector(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIsNotNone(node1)
         self.assertEqual(node1.type, "context_injected")
-        self.assertIn("4 memory facts", node1.detail)
+        self.assertIn("调取 4 条关联记忆", node1.detail)
         self.assertIn("code_review", node1.detail)
 
         # 2. Tool Execution
@@ -57,7 +60,7 @@ class TestTimelineProjector(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIsNotNone(node2)
         self.assertEqual(node2.type, "tool_execution")
-        self.assertEqual(node2.title, "Executed Tool: write_file")
+        self.assertEqual(node2.title, "执行工具: write_file")
         self.assertEqual(node2.duration_s, 0.45)
         self.assertEqual(node2.artifact_ids, ["art_123"])
 
@@ -79,17 +82,15 @@ class TestTimelineProjector(unittest.IsolatedAsyncioTestCase):
     async def test_project_session_timeline_flow(self):
         group_id = 1
         session_id = "sess_timeline_test"
+        group_path = group_db_path(group_id)
+        os.makedirs(os.path.dirname(group_path), exist_ok=True)
+        await init_group_db(group_path)
 
-        with _db.bind_db(self.db_path):
-            # Create group and member in DB
+        with _db.bind_db(group_path):
+            # Session ownership is group-local. Central group/member metadata is
+            # not needed by the projector, so keep this fixture on the split DB
+            # boundary used by production code.
             async with _db.connect() as conn:
-                await conn.execute(
-                    "INSERT INTO groups (id, name) VALUES (?, ?)", (group_id, "Test Group")
-                )
-                await conn.execute(
-                    "INSERT INTO members (id, group_id, name, type) VALUES (?, ?, ?, ?)",
-                    (2, group_id, "DevBot", "bot"),
-                )
                 await conn.execute(
                     "INSERT INTO agent_sessions (id, group_id, bot_id, status) VALUES (?, ?, ?, ?)",
                     (session_id, group_id, 2, "completed"),
