@@ -106,6 +106,14 @@ async def delete_personal_record(record_id: str, user=Depends(auth.get_current_u
         raise HTTPException(404, "Personal record not found")
     return {"status": "ok", "deleted_record_id": record_id}
 
+@router.get("/api/personal/memory/records/{record_id}/impact")
+async def personal_record_impact(record_id: str, user=Depends(auth.get_current_user)):
+    uid = int(user["uid"])
+    return await _personal_client(uid).get_record_impact(
+        MemoryScope.personal(user_id=uid, actor_id=f"user:{uid}", purpose="personal_record_impact"),
+        record_id,
+    )
+
 @router.delete("/api/personal/memory/projections/{projection_id}")
 async def revoke_personal_projection(projection_id: str, user=Depends(auth.get_current_user)):
     uid=int(user["uid"])

@@ -87,6 +87,11 @@ class LegacyPersonalKnowledgeAdapter:
         from ai.personal_vault import export_vault
         return await export_vault(user_id)
 
+    async def get_record_impact(self, scope: MemoryScope, record_id: str) -> Mapping[str, Any]:
+        user_id = self._user_id(scope)
+        from ai.personal_vault import get_record_impact
+        return await get_record_impact(user_id=user_id, record_id=record_id)
+
     async def delete(self, scope: MemoryScope) -> bool:
         user_id = self._user_id(scope)
         from ai.personal_vault import delete_vault

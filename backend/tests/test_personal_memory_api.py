@@ -15,6 +15,7 @@ from ai.personal_vault import (
     revoke_projection,
     projected_context,
     list_memory_usage,
+    get_record_impact,
 )
 
 
@@ -110,6 +111,12 @@ class TestPersonalMemoryAPI(unittest.IsolatedAsyncioTestCase):
         usage = await list_memory_usage(self.user_id, record_id=rec_id, group_id=10)
         self.assertEqual(usage[0]["projection_id"], projection_id)
         self.assertEqual(usage[0]["purpose"], "assistant_context")
+
+        impact = await get_record_impact(self.user_id, rec_id)
+        self.assertEqual(impact["affected_group_ids"], [10])
+        self.assertEqual(impact["affected_session_ids"], [])
+        self.assertEqual(len(impact["active_projections"]), 1)
+        self.assertEqual(len(impact["usage_events"]), 1)
 
 
 if __name__ == "__main__":

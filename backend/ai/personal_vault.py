@@ -298,11 +298,18 @@ async def export_vault(user_id: int) -> dict:
         async with db.execute("SELECT projection_id,record_id,group_id,bot_id,purpose,status,expires_at "
                               "FROM personal_projections ORDER BY created_at") as cur:
             projections = await cur.fetchall()
+        async with db.execute(
+            """SELECT usage_id,record_id,projection_id,group_id,bot_id,session_id,purpose,used_at
+               FROM personal_memory_usage_events ORDER BY used_at DESC LIMIT 500"""
+        ) as cur:
+            usage_events = await cur.fetchall()
     fields = ("record_id", "kind", "content", "speaker", "subject", "authority", "sensitivity", "status",
               "source_type", "source_id", "confidence", "explicit", "valid_from", "valid_to")
     pfields = ("projection_id", "record_id", "group_id", "bot_id", "purpose", "status", "expires_at")
+    ufields = ("usage_id", "record_id", "projection_id", "group_id", "bot_id", "session_id", "purpose", "used_at")
     return {"schema_version": 1, "user_id": user_id, "records": [dict(zip(fields, r)) for r in records],
-            "projections": [dict(zip(pfields, r)) for r in projections]}
+            "projections": [dict(zip(pfields, r)) for r in projections],
+            "usage_events": [dict(zip(ufields, r)) for r in usage_events]}
 
 
 async def delete_vault(user_id: int) -> bool:
@@ -397,3 +404,40 @@ async def list_memory_usage(user_id: int, *, record_id: str | None = None,
             rows = await cur.fetchall()
     fields = ("usage_id", "record_id", "projection_id", "group_id", "bot_id", "session_id", "purpose", "used_at")
     return [dict(zip(fields, row)) for row in rows]
+
+
+async def get_record_impact(user_id: int, record_id: str, *, limit: int = 500) -> dict:
+    """Return the groups, sessions, projections, and usage events affected by a record."""
+    async with connect(user_id) as db:
+        async with db.execute(
+            """SELECT projection_id,group_id,bot_id,purpose,status,expires_at
+               FROM personal_projections WHERE record_id=? ORDER BY created_at DESC""",
+            (record_id,),
+        ) as cur:
+            projection_rows = await cur.fetchall()
+        async with db.execute(
+            """SELECT usage_id,projection_id,group_id,bot_id,session_id,purpose,used_at
+               FROM personal_memory_usage_events WHERE user_id=? AND record_id=?
+               ORDER BY used_at DESC LIMIT ?""",
+            (user_id, record_id, max(1, min(int(limit), 500))),
+        ) as cur:
+            usage_rows = await cur.fetchall()
+
+    projections = [
+        {"projection_id": row[0], "group_id": row[1], "bot_id": row[2],
+         "purpose": row[3], "status": row[4], "expires_at": row[5]}
+        for row in projection_rows
+    ]
+    usage_events = [
+        {"usage_id": row[0], "projection_id": row[1], "group_id": row[2],
+         "bot_id": row[3], "session_id": row[4], "purpose": row[5], "used_at": row[6]}
+        for row in usage_rows
+    ]
+    return {
+        "record_id": record_id,
+        "active_projections": [p for p in projections if p["status"] == "active"],
+        "projections": projections,
+        "usage_events": usage_events,
+        "affected_group_ids": sorted({p["group_id"] for p in projections} | {e["group_id"] for e in usage_events}),
+        "affected_session_ids": sorted({e["session_id"] for e in usage_events if e["session_id"]}),
+    }

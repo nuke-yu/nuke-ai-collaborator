@@ -96,6 +96,11 @@ export async function deletePersonalRecord(recordId) {
   return res.json()
 }
 
+export async function fetchPersonalRecordImpact(recordId, { signal } = {}) {
+  const res = await authFetch(`/api/personal/memory/records/${recordId}/impact`, { signal })
+  return res.json()
+}
+
 export async function revokePersonalProjection(projectionId) {
   const res = await authFetch(`/api/personal/memory/projections/${projectionId}`, {
     method: 'DELETE',

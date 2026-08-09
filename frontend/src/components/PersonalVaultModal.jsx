@@ -4,6 +4,7 @@ import {
   createPersonalRecord,
   createPersonalProjection,
   deletePersonalRecord,
+  fetchPersonalRecordImpact,
   revokePersonalProjection,
 } from '../api'
 
@@ -12,6 +13,8 @@ export default function PersonalVaultModal({ groups = [], onClose }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [vaultData, setVaultData] = useState({ records: [], projections: [] })
+  const [impact, setImpact] = useState(null)
+  const [impactLoading, setImpactLoading] = useState(false)
 
   // Form states
   const [newKind, setNewKind] = useState('preference')
@@ -71,6 +74,17 @@ export default function PersonalVaultModal({ groups = [], onClose }) {
       await loadVault()
     } catch (err) {
       alert(err.message || '删除记录失败')
+    }
+  }
+
+  const handleViewImpact = async (recordId) => {
+    try {
+      setImpactLoading(true)
+      setImpact(await fetchPersonalRecordImpact(recordId))
+    } catch (err) {
+      alert(err.message || '加载记忆影响范围失败')
+    } finally {
+      setImpactLoading(false)
     }
   }
 
@@ -218,21 +232,36 @@ export default function PersonalVaultModal({ groups = [], onClose }) {
                           <span className="text-[10px] text-gray-500 font-mono">
                             置信度: {(r.confidence * 100).toFixed(0)}%
                           </span>
+                          <span className="text-[10px] text-sky-400 font-mono">
+                            使用: {(vaultData.usage_events || []).filter(e => e.record_id === r.record_id).length} 次
+                          </span>
                         </div>
                         <p className="text-xs text-gray-200">{r.content}</p>
                       </div>
 
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteRecord(r.record_id)}
-                        className="px-2.5 py-1 text-xs text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 rounded-lg transition-colors"
-                      >
-                        删除
-                      </button>
+                      <div className="flex shrink-0 gap-2">
+                        <button type="button" onClick={() => handleViewImpact(r.record_id)} className="px-2.5 py-1 text-xs text-sky-400 hover:text-sky-300 hover:bg-sky-500/10 rounded-lg transition-colors">
+                          {impactLoading ? '加载中…' : '影响审计'}
+                        </button>
+                        <button type="button" onClick={() => handleDeleteRecord(r.record_id)} className="px-2.5 py-1 text-xs text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 rounded-lg transition-colors">
+                          删除
+                        </button>
+                      </div>
                     </div>
                   ))
                 )}
               </div>
+
+              {impact && (
+                <div className="rounded-xl border border-sky-500/30 bg-sky-500/10 p-4 text-xs text-sky-100">
+                  <div className="flex items-center justify-between">
+                    <h3 className="font-semibold">记忆影响范围：{impact.record_id}</h3>
+                    <button type="button" onClick={() => setImpact(null)} className="text-sky-300 hover:text-white">✕</button>
+                  </div>
+                  <p className="mt-2 text-sky-200/80">影响 Group：{impact.affected_group_ids?.join(', ') || '无'}；已使用 Session：{impact.affected_session_ids?.length || 0} 个；使用记录：{impact.usage_events?.length || 0} 条。</p>
+                  <p className="mt-1 text-sky-200/70">删除或撤回该条记忆后，新的执行不会再注入；历史使用记录仍保留用于审计。</p>
+                </div>
+              )}
             </div>
           )}
 
