@@ -83,6 +83,7 @@ class ChannelProcessServer:
             reply_to_external_id=outbound_data.get("reply_to_external_id"),
             group_id=outbound_data.get("group_id"),
             session_id=outbound_data.get("session_id"),
+            source_event_id=outbound_data.get("source_event_id"),
             protocol_version=outbound_data.get("protocol_version", "channel.v1"),
         )
         receipt = await asyncio.wait_for(self.handler.send(envelope), timeout=self.manifest.max_seconds)

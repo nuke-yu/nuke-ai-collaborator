@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
-from channels.core import BridgeDirection, BridgeEnvelope, ChannelConversation, ChannelIdentity, OutboundEnvelope
+from channels.core import BridgeDirection, BridgeEnvelope, ChannelConversation, ChannelIdentity, OutboundEnvelope, delivery_projection_id
 
 from .binding import BindingStatus, ChannelBinding
 
@@ -51,7 +51,8 @@ class OutboundEventProjector:
             raise ValueError("payload must be an object")
         if event_id is None or not str(event_id).strip():
             raise ValueError("canonical event_id is required for outbound delivery")
-        key = str(event_id).strip()
+        source_event_id = str(event_id).strip()
+        key = delivery_projection_id(source_event_id, self.binding.binding_id)
         channel = self.binding.channel_instance_id.split(":", 1)[0]
         bridge = BridgeEnvelope(
             direction=BridgeDirection.OUTBOUND,
@@ -75,4 +76,5 @@ class OutboundEventProjector:
             reply_to_external_id=reply_to_external_id,
             group_id=self.binding.group_id,
             session_id=session_id,
+            source_event_id=source_event_id,
         )

@@ -31,7 +31,8 @@ class TestChannelOutbound(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(envelope.conversation.external_conversation_id, "chat-1")
         self.assertEqual(envelope.payload["event"], {"summary": "done"})
         self.assertEqual(envelope.payload["config_version"], 3)
-        self.assertEqual(envelope.idempotency_key, "event-1")
+        self.assertNotEqual(envelope.idempotency_key, "event-1")
+        self.assertEqual(envelope.source_event_id, "event-1")
 
     async def test_policy_filters_events_and_suspended_binding_fails_closed(self):
         projector = OutboundEventProjector(active_binding(outbound_policy={"events": ["task_stuck"]}))

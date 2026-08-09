@@ -6,6 +6,7 @@ Group-specific fields are optional until an explicit Bridge binding exists.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import asdict, dataclass, field
 from enum import StrEnum
@@ -16,6 +17,14 @@ CHANNEL_PROTOCOL_VERSION = "channel.v1"
 BRIDGE_PROTOCOL_VERSION = "channel-bridge.v1"
 _MAX_ID_LENGTH = 512
 _MAX_TEXT_LENGTH = 100_000
+
+
+def delivery_projection_id(source_event_id: str, binding_id: str) -> str:
+    """Return a stable per-binding delivery key for one source event."""
+    source = _required(source_event_id, "source_event_id")
+    binding = _required(binding_id, "binding_id")
+    digest = hashlib.sha256(f"{source}\x00{binding}".encode("utf-8")).hexdigest()
+    return f"bridge-projection-v1:{digest}"
 
 
 def canonical_message_key(channel: str, tenant: str, conversation: str, message_id: str) -> str:
@@ -148,6 +157,7 @@ class OutboundEnvelope:
     reply_to_external_id: str | None = None
     group_id: int | None = None
     session_id: str | None = None
+    source_event_id: str | None = None
     protocol_version: str = CHANNEL_PROTOCOL_VERSION
 
     def __post_init__(self) -> None:
@@ -160,6 +170,8 @@ class OutboundEnvelope:
             raise ValueError("group_id must be positive")
         if self.session_id is not None:
             object.__setattr__(self, "session_id", _required(self.session_id, "session_id"))
+        if self.source_event_id is not None:
+            object.__setattr__(self, "source_event_id", _required(self.source_event_id, "source_event_id"))
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self) | {

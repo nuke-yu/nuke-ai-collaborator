@@ -35,7 +35,7 @@ class TestChannelGroupOutbox(unittest.IsolatedAsyncioTestCase):
             await db.commit()
         relay = GroupChannelOutboxRelay(self.group_path, self.channel, owner_id="relay-1")
         self.assertTrue(await relay.relay_once())
-        self.assertEqual((await self.channel.get_delivery("event-1"))["state"], "pending")
+        self.assertEqual((await self.channel.get_delivery(self.envelope.idempotency_key))["state"], "pending")
         self.assertFalse(await relay.relay_once())
 
     async def test_relay_replay_after_channel_enqueue_is_idempotent(self):
@@ -46,10 +46,10 @@ class TestChannelGroupOutbox(unittest.IsolatedAsyncioTestCase):
         relay = GroupChannelOutboxRelay(self.group_path, self.channel, owner_id="relay-1")
         self.assertTrue(await relay.relay_once())
         async with aiosqlite.connect(self.group_path) as db:
-            await db.execute("UPDATE group_channel_event_outbox SET state='pending',lease_owner=NULL,lease_expires_at=NULL WHERE event_id='event-1'")
+            await db.execute("UPDATE group_channel_event_outbox SET state='pending',lease_owner=NULL,lease_expires_at=NULL WHERE source_event_id='event-1'")
             await db.commit()
         self.assertTrue(await relay.relay_once())
-        self.assertEqual((await self.channel.get_delivery("event-1"))["idempotency_key"], "event-1")
+        self.assertEqual((await self.channel.get_delivery(self.envelope.idempotency_key))["idempotency_key"], self.envelope.idempotency_key)
 
 
 if __name__ == "__main__":

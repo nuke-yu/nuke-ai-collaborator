@@ -24,6 +24,7 @@ class GroupChannelOutboxError(RuntimeError):
 
 _DDL = """CREATE TABLE IF NOT EXISTS group_channel_event_outbox (
     event_id TEXT PRIMARY KEY,
+    source_event_id TEXT NOT NULL,
     group_id INTEGER NOT NULL,
     event_type TEXT NOT NULL,
     payload_json TEXT NOT NULL,
@@ -40,6 +41,9 @@ _DDL = """CREATE TABLE IF NOT EXISTS group_channel_event_outbox (
 
 async def initialize_group_channel_outbox(db: aiosqlite.Connection) -> None:
     await db.execute(_DDL)
+    columns = {row[1] for row in await (await db.execute("PRAGMA table_info(group_channel_event_outbox)")).fetchall()}
+    if "source_event_id" not in columns:
+        await db.execute("ALTER TABLE group_channel_event_outbox ADD COLUMN source_event_id TEXT NOT NULL DEFAULT ''")
     await db.execute("CREATE INDEX IF NOT EXISTS idx_group_channel_outbox_due ON group_channel_event_outbox(state,next_attempt_at)")
 
 
@@ -58,9 +62,9 @@ class GroupChannelOutboxWriter:
         payload = _safe_json({"outbound": envelope.to_dict()})
         cursor = await db.execute(
             """INSERT OR IGNORE INTO group_channel_event_outbox
-               (event_id,group_id,event_type,payload_json,next_attempt_at,created_at,updated_at)
-               VALUES(?,?,?,?,?,?,?)""",
-            (envelope.idempotency_key, envelope.group_id, envelope.event_type, payload, now, now, now),
+               (event_id,source_event_id,group_id,event_type,payload_json,next_attempt_at,created_at,updated_at)
+               VALUES(?,?,?,?,?,?,?,?)""",
+            (envelope.idempotency_key, envelope.source_event_id or envelope.idempotency_key, envelope.group_id, envelope.event_type, payload, now, now, now),
         )
         return cursor.rowcount == 1
 
@@ -138,6 +142,7 @@ def _outbound_from_json(payload_json: str) -> OutboundEnvelope:
         reply_to_external_id=data.get("reply_to_external_id"),
         group_id=data.get("group_id"),
         session_id=data.get("session_id"),
+        source_event_id=data.get("source_event_id"),
     )
 
 
