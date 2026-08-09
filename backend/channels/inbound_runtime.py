@@ -61,6 +61,21 @@ class ChannelInboundService:
         route = InboundBotRouter(
             binding,
             integration_member_id=member.integration_member_id,
-        ).route(bound)
+        ).route(bound, bot_mentions=_bot_mentions(binding.inbound_policy))
         await self.dispatch(route, member)
         return route
+
+
+def _bot_mentions(policy) -> dict[str, int]:
+    configured = policy.get("bot_mentions") if isinstance(policy, dict) else None
+    if not isinstance(configured, dict):
+        return {}
+    mentions: dict[str, int] = {}
+    for key, value in configured.items():
+        try:
+            bot_id = int(value)
+        except (TypeError, ValueError):
+            continue
+        if str(key or "").strip() and bot_id > 0:
+            mentions[str(key)] = bot_id
+    return mentions
