@@ -112,9 +112,9 @@ class TestGroupTimeline(unittest.IsolatedAsyncioTestCase):
         await db.aclose_writer(self.db_path)
         self.tempdir.cleanup()
 
-    async def _timeline(self, **kwargs):
+    async def _timeline(self, group_id=7, **kwargs):
         with db.bind_db(self.db_path):
-            return await get_group_timeline(7, **kwargs)
+            return await get_group_timeline(group_id, **kwargs)
 
     async def test_merges_workflow_session_and_permission_newest_first(self):
         result = await self._timeline()
@@ -159,6 +159,22 @@ class TestGroupTimeline(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([item["event_type"] for item in permission["items"]], ["permission_requested"])
         workflow = await self._timeline(workflow_id="wf_7", session_id="session-7")
         self.assertEqual([item["source"] for item in workflow["items"]], ["workflow"])
+
+    async def test_group_filter_blocks_cross_group_session_and_workflow_ids(self):
+        # A caller selecting Group 8 must not be able to reach Group 7 rows by
+        # supplying a foreign session/workflow identifier. The SQL boundary
+        # must enforce group ownership, not merely rely on request parameters.
+        foreign = await self._timeline(
+            group_id=8,
+            session_id="session-7",
+            workflow_id="wf_7",
+            business_significant=None,
+        )
+        self.assertEqual(foreign["items"], [])
+
+        group_8 = await self._timeline(group_id=8)
+        self.assertEqual([item["event_type"] for item in group_8["items"]], ["permission_denied"])
+        self.assertTrue(all(item["context"]["group_id"] == 8 for item in group_8["items"]))
 
     async def test_invalid_cursor_and_source_are_rejected(self):
         with self.assertRaisesRegex(ValueError, "Invalid timeline cursor"):
