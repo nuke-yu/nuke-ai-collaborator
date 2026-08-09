@@ -12,6 +12,8 @@ from typing import Awaitable, Callable, Protocol, Sequence
 from channels.core import ChannelConversation, ChannelIdentity, DeliveryReceipt, OutboundEnvelope
 from channels.stores import ChannelStore, DeliveryState
 from channels.bridge.group_outbox import GroupChannelOutboxRelay, GroupRelayResult
+from channels.bridge.binding import ChannelBindingStore
+from channels.bridge.workflow_events import WorkflowChannelProjectionRelay, WorkflowProjectionResult
 
 
 log = logging.getLogger(__name__)
@@ -59,6 +61,9 @@ class GroupChannelRelayService:
         self._stats = {
             "cycles": 0,
             "forwarded": 0,
+            "projected": 0,
+            "projection_retries": 0,
+            "projection_dead_letters": 0,
             "errors": 0,
             "timeouts": 0,
             "last_cycle_at": None,
@@ -93,6 +98,12 @@ class GroupChannelRelayService:
         ids = sorted({int(group_id) for group_id in await self.group_ids() if int(group_id) > 0})
         forwarded = 0
         for group_id in ids:
+            projector = WorkflowChannelProjectionRelay(
+                self.group_db_path(group_id),
+                ChannelBindingStore(self.channel_store.path),
+                lease_ms=self.lease_ms,
+                owner_id=f"{self.owner_id}:projection:{group_id}",
+            )
             relay = GroupChannelOutboxRelay(
                 self.group_db_path(group_id),
                 self.channel_store,
@@ -100,6 +111,15 @@ class GroupChannelRelayService:
                 owner_id=f"{self.owner_id}:group:{group_id}",
             )
             try:
+                projection_result = await asyncio.wait_for(
+                    projector.run_once(group_id), timeout=self.relay_timeout
+                )
+                if projection_result is WorkflowProjectionResult.PROJECTED:
+                    self._stats["projected"] += 1
+                elif projection_result is WorkflowProjectionResult.RETRY_SCHEDULED:
+                    self._stats["projection_retries"] += 1
+                elif projection_result is WorkflowProjectionResult.DEAD_LETTERED:
+                    self._stats["projection_dead_letters"] += 1
                 result = await asyncio.wait_for(relay.relay_once(), timeout=self.relay_timeout)
             except asyncio.TimeoutError:
                 self._stats["timeouts"] += 1
