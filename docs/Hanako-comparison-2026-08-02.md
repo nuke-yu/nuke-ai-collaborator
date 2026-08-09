@@ -1141,7 +1141,7 @@ OpenHanako 的主要优势是：
 
 本节覆盖原始文档之后的代码变化，以 2026-08-09 的最新任务提交为基线。它是当前可执行路线的准据；前文第 8、9 节保留为 8.2 决策审计记录，不再作为当前排期直接使用。
 
-完整开发执行计划见：[2026-08-09-hanako-comparison-development-execution-plan.md](superpowers/plans/2026-08-09-hanako-comparison-development-execution-plan.md)。
+完整开发执行计划见：[2026-08-09-hanako-comparison-development-execution-plan.md](superpowers/plans/2026-08-09-hanako-comparison-development-execution-plan.md)；Channel 独立模块与 Bridge 专项计划见：[2026-08-09-complete-development-roadmap.md](superpowers/plans/2026-08-09-complete-development-roadmap.md)。
 
 ### 14.1 当前状态校准
 
@@ -1220,7 +1220,7 @@ OpenHanako 的主要优势是：
 
 #### Phase 6：Channel Adapter（通用基础层已完成，真实渠道待选择）
 
-只有在确定企业渠道战略后启动，先选择一个渠道完成端到端验证。必须先解决外部租户、外部用户到 Group/Member 的映射、消息幂等、mention、回复关联、附件 Artifact 化和权限继承。
+Channel 先作为独立模块运行，只有通过显式 Channel-Group Bridge 和 active Binding 后，才作为 Group Integration Member 与 Group 双向通信。开发顺序为：独立契约、Channel-owned Store、平台 Connector、Binding、Integration Member、入站 Bot 路由、Group commit 后 Outbox 出站、审计/重试/dead-letter 和进程隔离。
 
 #### Phase 7：Plugin Process Isolation（IPC 治理已完成，全面迁移待完善）
 

@@ -3,6 +3,8 @@
 > 基线：2026-08-09；任务状态以本文件所在提交及其父提交为准。
 >
 > 关联评审：[Hanako-comparison-2026-08-02.md](../../Hanako-comparison-2026-08-02.md)
+>
+> 总路线与 Channel 专项计划：[2026-08-09-complete-development-roadmap.md](2026-08-09-complete-development-roadmap.md)
 
 ## 1. 执行目标
 
@@ -351,7 +353,9 @@ feat(provider): add model capability and budget governance
 
 ## 10. Phase 6：Channel Adapter
 
-只有明确企业渠道战略后启动，先选择一个渠道完成端到端验证：飞书、Slack 或企业微信。
+Channel 必须保持独立模块，只有通过显式 Channel-Group Bridge 和 active Binding 后，才能作为 Group Integration Member 双向通信。完整 C0-C8 路线见：[Channel 专项计划](2026-08-09-complete-development-roadmap.md)。
+
+第一版先选择一个渠道完成端到端验证，必须先解决外部租户、外部用户到 Group/Member 的映射、消息幂等、mention、回复关联、附件 Artifact 化、权限继承和 Group commit 后的 Delivery Outbox。
 
 统一入口：
 
