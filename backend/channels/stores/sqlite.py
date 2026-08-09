@@ -15,6 +15,7 @@ from typing import Any
 import aiosqlite
 
 from channels.core import InboundEnvelope, OutboundEnvelope
+from executors.redaction import redact_secrets
 
 
 class DeliveryState(StrEnum):
@@ -59,6 +60,13 @@ _DDL = (
         last_error TEXT,
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL
+    )""",
+    """CREATE TABLE IF NOT EXISTS channel_audit_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        idempotency_key TEXT NOT NULL,
+        event_type TEXT NOT NULL,
+        details_json TEXT NOT NULL,
+        created_at INTEGER NOT NULL
     )""",
     "CREATE INDEX IF NOT EXISTS idx_channel_delivery_due ON channel_delivery_outbox(state, next_attempt_at)",
 )
@@ -113,7 +121,7 @@ class ChannelStore:
     async def enqueue_outbound(self, envelope: OutboundEnvelope) -> bool:
         """Persist one outbound delivery intent; duplicate keys are idempotent."""
         now = int(time.time() * 1000)
-        payload = json.dumps(dict(envelope.payload), ensure_ascii=False, sort_keys=True)
+        payload = json.dumps(_sanitize_json(dict(envelope.payload)), ensure_ascii=False, sort_keys=True)
         async with aiosqlite.connect(self.path) as db:
             cursor = await db.execute(
                 """INSERT OR IGNORE INTO channel_delivery_outbox
@@ -203,3 +211,41 @@ class ChannelStore:
             )
             await db.commit()
             return cursor.rowcount == 1
+
+    async def record_audit(self, idempotency_key: str, event_type: str, details: dict[str, Any]) -> None:
+        now = int(time.time() * 1000)
+        safe_details = json.dumps(_sanitize_json(details), ensure_ascii=False, sort_keys=True)
+        async with aiosqlite.connect(self.path) as db:
+            await db.execute(
+                "INSERT INTO channel_audit_events (idempotency_key,event_type,details_json,created_at) VALUES(?,?,?,?)",
+                (idempotency_key, str(event_type), safe_details, now),
+            )
+            await db.commit()
+
+    async def list_audit(self, idempotency_key: str) -> list[dict[str, Any]]:
+        async with aiosqlite.connect(self.path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                "SELECT event_type,details_json,created_at FROM channel_audit_events WHERE idempotency_key=? ORDER BY id",
+                (idempotency_key,),
+            ) as cursor:
+                rows = await cursor.fetchall()
+        return [
+            {"event_type": row["event_type"], "details": json.loads(row["details_json"]), "created_at": row["created_at"]}
+            for row in rows
+        ]
+
+
+_MAX_STRING_LENGTH = 10_000
+
+
+def _sanitize_json(value: Any) -> Any:
+    """Redact secrets and cap strings before Channel-owned persistence/audit."""
+    if isinstance(value, str):
+        safe = redact_secrets(value[:_MAX_STRING_LENGTH])[0]
+        return safe[:_MAX_STRING_LENGTH]
+    if isinstance(value, dict):
+        return {str(key): _sanitize_json(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_sanitize_json(item) for item in value]
+    return value
