@@ -68,6 +68,7 @@ class Supervisor:
         # Latest MCP tool-schema snapshot pushed by the collector; cached so a
         # worker connecting later (or after a ToolListChanged) gets the current set.
         self._mcp_schemas: dict | None = None
+        self._channel_relay = kwargs.get("channel_relay")
 
     def _reassign_log_extra(
         self, *, group_id: int, new_worker_id: str, reassign_version: int, old_worker_id: str | None = None, event: str
@@ -229,6 +230,8 @@ class Supervisor:
     async def start(self) -> None:
         tracing.setup_structured_logging(log_file="logs/supervisor.log")
         self._server = await ipc.serve(self.addr, self._on_worker_conn)
+        if self._channel_relay is not None:
+            await self._channel_relay.start()
         if self._num_workers > 0:
             await self._spawn_workers(self._num_workers)
             # MCP is a cross-group capability → one collector process, not per worker.
@@ -289,6 +292,9 @@ class Supervisor:
 
     async def stop(self) -> None:
         self._stopping = True
+
+        if self._channel_relay is not None:
+            await self._channel_relay.stop()
 
         # 1. Cancel monitor/restart tasks first so they don't re-spawn
         for t in list(self._monitor_tasks):
@@ -694,12 +700,15 @@ class Supervisor:
         self._routing_cache[group_id] = (wid, time.time() + 60.0)
         return wid
     def get_stats(self) -> dict:
-        return {
+        stats = {
             "workers": self._worker_stats,
             "active_workers": list(self._workers.keys()),
             "process_count": len(self._processes),
             "browsers_by_group": {g: len(s) for g, s in self._browsers.items()},
         }
+        if self._channel_relay is not None:
+            stats["channel_relay"] = self._channel_relay.snapshot()
+        return stats
 
     async def reassign_group(self, group_id: int, new_worker_id: str) -> None:
         """CELL-18: Safely transfer a group to a new worker with clean lease handoff."""

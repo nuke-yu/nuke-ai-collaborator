@@ -40,6 +40,13 @@ from api.artifacts import router as artifacts_router
 from executors import registry
 from api.admin_deps import require_operator, audit_control_plane
 
+
+async def _channel_group_ids() -> list[int]:
+    """Discover Group databases from the central registry for the Supervisor relay."""
+    async with db.global_db() as conn:
+        async with conn.execute("SELECT id FROM groups ORDER BY id") as cursor:
+            return [int(row[0]) for row in await cursor.fetchall()]
+
 async def _media_reaper_loop():
     """Purge old MCP screenshots + orphaned staging files every 6h. User uploads untouched."""
     from core import media
@@ -102,7 +109,22 @@ async def lifespan(app: FastAPI):
     # 4. Start Supervisor Engine + Workers
     addr = ipc.make_addr("supervisor")
     num_workers = int(os.getenv("NUKE_WORKERS", "8"))
-    sup = sup_mod.Supervisor(addr, num_workers=num_workers, on_unread=on_unread_delta)
+    from channels.runtime import GroupChannelRelayService
+    from channels.stores import ChannelStore
+    from runtime.dbpaths import channel_bridge_db_path, group_db_path
+    channel_relay = GroupChannelRelayService(
+        ChannelStore(channel_bridge_db_path()),
+        _channel_group_ids,
+        group_db_path,
+        poll_interval=float(os.getenv("NUKE_CHANNEL_RELAY_INTERVAL", "1.0")),
+        relay_timeout=float(os.getenv("NUKE_CHANNEL_RELAY_TIMEOUT", "10.0")),
+    )
+    sup = sup_mod.Supervisor(
+        addr,
+        num_workers=num_workers,
+        on_unread=on_unread_delta,
+        channel_relay=channel_relay,
+    )
     await sup.start()
     sup_mod.supervisor = sup
     
