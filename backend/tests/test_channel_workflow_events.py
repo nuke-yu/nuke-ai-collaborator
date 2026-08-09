@@ -18,7 +18,7 @@ class TestChannelWorkflowEvents(unittest.IsolatedAsyncioTestCase):
                 binding_id="binding-1", channel_instance_id="slack:prod",
                 external_tenant_id="tenant-a", external_conversation_id="chat-1",
                 group_id=7, default_bot_id=42, status=BindingStatus.ACTIVE,
-            ))
+            ), allow_active=True)
             group_path = os.path.join(tmp.name, "group.db")
             async with aiosqlite.connect(group_path) as db:
                 await initialize_group_channel_outbox(db)
@@ -50,7 +50,7 @@ class TestChannelWorkflowEvents(unittest.IsolatedAsyncioTestCase):
                     binding_id=f"binding-{index}", channel_instance_id="slack:prod",
                     external_tenant_id="tenant-a", external_conversation_id=conversation,
                     group_id=7, default_bot_id=42, status=BindingStatus.ACTIVE,
-                ))
+                ), allow_active=True)
             group_path = os.path.join(tmp.name, "group.db")
             async with aiosqlite.connect(group_path) as db:
                 await initialize_group_channel_outbox(db)

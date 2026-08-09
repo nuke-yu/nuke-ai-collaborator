@@ -140,7 +140,9 @@ class ChannelBindingStore:
             await db.execute("CREATE INDEX IF NOT EXISTS idx_channel_bindings_group ON channel_bindings(group_id, status)")
             await db.commit()
 
-    async def create(self, binding: ChannelBinding) -> ChannelBinding:
+    async def create(self, binding: ChannelBinding, *, allow_active: bool = False) -> ChannelBinding:
+        if binding.status is BindingStatus.ACTIVE and not allow_active:
+            raise ValueError("new channel binding must enter configured or pending_approval state")
         now = int(time.time() * 1000)
         try:
             async with aiosqlite.connect(self.path) as db:
