@@ -46,3 +46,20 @@ class TestChannelDeliveryService(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(service.snapshot()["registered_channels"], ["slack"])
         finally:
             tmp.cleanup()
+
+    async def test_start_fails_when_open_delivery_has_no_connector(self):
+        with tempfile.TemporaryDirectory(prefix="channel-delivery-orphan-") as directory:
+            store = ChannelStore(os.path.join(directory, "channel.db"))
+            await store.initialize()
+            await store.enqueue_outbound(OutboundEnvelope(
+                identity=ChannelIdentity("slack", "tenant"),
+                conversation=ChannelConversation("chat"),
+                event_type="task_stuck",
+                payload={},
+                idempotency_key="orphan-event",
+                channel_instance_id="slack:prod",
+            ))
+            service = ChannelDeliveryService(store)
+            with self.assertRaisesRegex(RuntimeError, "slack:prod"):
+                await service.start()
+            self.assertEqual((await store.get_delivery("orphan-event"))["state"], "pending")

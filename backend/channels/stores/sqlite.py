@@ -216,6 +216,17 @@ class ChannelStore:
         item["payload"] = json.loads(item.pop("payload_json"))
         return item
 
+    async def list_open_delivery_instances(self) -> tuple[str, ...]:
+        """Return canonical instances that currently require a live dispatcher."""
+        async with aiosqlite.connect(self.path) as db:
+            async with db.execute(
+                """SELECT DISTINCT channel_instance_id FROM channel_delivery_outbox
+                   WHERE state IN ('pending','retrying','sending')
+                     AND channel_instance_id<>'' ORDER BY channel_instance_id"""
+            ) as cursor:
+                rows = await cursor.fetchall()
+        return tuple(canonical_channel_instance_id(row[0]) for row in rows)
+
     async def set_channel_paused(self, channel: str, paused: bool) -> None:
         raw_channel = str(channel or "").strip()
         if not raw_channel:

@@ -296,6 +296,7 @@ class ChannelDeliveryService:
         if self._task is not None and not self._task.done():
             return
         await self.store.initialize()
+        self.require_registered_instances(await self.store.list_open_delivery_instances())
         self._stopping = False
         self._stats["delivery_up"] = True
         self._task = asyncio.create_task(self._run(), name="channel-delivery")
