@@ -12,6 +12,7 @@ from .core import (
 )
 from .runtime import ChannelDeliveryDispatcher
 from .process import ChannelProcessClient, ChannelProcessError, ChannelProcessManifest
+from .process_server import ChannelProcessHandler, ChannelProcessServer
 
 __all__ = [
     "BRIDGE_PROTOCOL_VERSION", "CHANNEL_PROTOCOL_VERSION", "BridgeDirection",
@@ -19,4 +20,5 @@ __all__ = [
     "ChannelIdentity", "canonical_message_key", "DeliveryReceipt", "InboundEnvelope", "OutboundEnvelope",
     "ChannelDeliveryDispatcher",
     "ChannelProcessClient", "ChannelProcessError", "ChannelProcessManifest",
+    "ChannelProcessHandler", "ChannelProcessServer",
 ]
