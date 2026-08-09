@@ -22,13 +22,13 @@ C0–C8 的基础代码已按顺序提交，但经 Review 校准，不能把“�
 | C3 Channel–Group Binding | `2cb2912`, `45cd48c` | 2 | Binding Store 和状态一致性已完成，正式配置/审批 API 尚未完成 |
 | C4 Integration Member | `71d45cc`, `8d03335` | 3（读取投影） | Group 成员查询已投影 Integration Member；创建/审批/权限闭环尚未完成 |
 | C5 入站路由到配置 Bot | `ed65487` | 2 | Bridge 路由基础层已测，外部用户授权映射尚未接入 |
-| C6 Group 事件出站 Outbox | `75da38c`, `a4c4939`, `ea55c17`, `741efd5`, `594c8c7` | 4（本地运行时） | Workflow observation 已在 Group 事务内生成 outbox；Relay 已由 Supervisor 托管并有超时、错误隔离、SLO 指标；尚无真实平台 E2E |
-| C7 脱敏、审计、重试、死信 | `90cf644` + review fixes + `3995fcd`, `5c15f0b`, `d2bcac4` | 4（本地运行时） | Pause/resume、健康、死信 replay、审计和 Prometheus 已接入；尚无部署级告警/值班演练 |
-| C8 独立进程 Bridge 边界 | `0efd8e9`, `f633bf9`, `73b8ce9`, `50a5d60` | 5（当前范围） | JSONL Server/Client、Supervisor 生命周期、最小环境，以及现有 Docker/Compose 测试环境部署路径已具备；云平台级隔离不属于当前产品阻断项 |
+| C6 Group 事件出站 Outbox | `75da38c`, `a4c4939`, `ea55c17`, `741efd5`, `594c8c7` | 3（runtime wired） | Group 事务 Outbox、Supervisor Relay 和 Channel delivery Dispatcher 生命周期已接通；真实 Connector registry/E2E 尚未接入，Bridge 故障采用 fail-open 投影策略 |
+| C7 脱敏、审计、重试、死信 | `90cf644` + review fixes + `3995fcd`, `5c15f0b`, `d2bcac4` | 3（runtime wired） | 脱敏、审计、lease、pause/resume、健康和死信 API 已接入并有失败测试；尚无真实平台回归、部署级告警和值班演练 |
+| C8 独立进程 Bridge 边界 | `0efd8e9`, `f633bf9`, `73b8ce9`, `50a5d60` | 3（runtime wired） | JSONL Server/Client、协议校验、Supervisor 生命周期和当前范围 Docker/Compose 路径已具备；尚未把 Process Server 和真实 Connector 作为可配置运行实例纳入部署 |
 
 Review 修复 commits：`cf35651`（回执校验）、`ba9b2e4`（存储边界脱敏）、`c66bd83`（delivery lease）、`ecdd9fe`（状态/审计原子事务）、`057d380`（canonical event_id）、`f633bf9`（ProcessClient 故障恢复）、`a4c4939`（Group durable outbox relay）、`a87fbff`（持久化入站去重）、`458e53c`（协议版本和无碰撞 key）、`5bb0370`（raw bytes 验签/replay）、`45cd48c`（Binding/Member/Router 状态一致性）、`3475b40`（payload fail-closed/lease heartbeat）。
 
-当前已完成本地 runtime wiring 和当前范围内的 Docker 测试环境部署。仍不能宣称真实平台生产完成，剩余重点是平台授权、真实 Connector E2E 和产品级 go/no-go 演练；云平台隔离作为未来阶段。
+当前已完成 Channel 核心模块、Group Outbox/Relay、Dispatcher 生命周期、控制面和 Docker 测试环境基础。仍不能宣称“渠道生产完成”：真实 Connector 尚未注册到部署配置，Process Server 尚未由生产生命周期实际拉起，外部平台授权、平台限流/重放 E2E 和 go/no-go 演练仍是发布前置条件。云平台隔离作为未来阶段。
 
 ## 1. 总体架构原则
 
@@ -283,7 +283,7 @@ Integration Member 负责：
 
 验收：外部消息只触发绑定的 Group 和允许的 Bot，不能跨 Group。
 
-### C6：Group/Bot → Channel Outbound（Gate 4：本地运行时 failure-tested）
+### C6：Group/Bot → Channel Outbound（Gate 3：runtime wired）
 
 出站订阅事件至少包括：
 
@@ -302,7 +302,7 @@ Group SQLite commit
  → Supervisor GroupChannelRelayService
  → channel_delivery_outbox
  → 异步 Dispatcher
- → Connector.send()
+ → 已注册 Connector.send()（当前仅有服务容器，尚未接入真实平台 Connector）
  → DeliveryReceipt
 ```
 
@@ -310,7 +310,7 @@ Group SQLite commit
 
 验收：外部平台失败不回滚 Group 任务；重试幂等；成功发送能关联外部消息 ID 和内部 Event/Session/Artifact。
 
-### C7：安全、审计和运维（Gate 4：本地运行时 failure-tested）
+### C7：安全、审计和运维（Gate 3：runtime wired）
 
 - Channel Secret 只能保存引用，不进 Group DB 或事件 Payload。
 - 外发前执行脱敏、长度限制和 Artifact 权限检查。
@@ -320,9 +320,9 @@ Group SQLite commit
 - 为每个 Channel/Binding 提供健康状态、最后成功投递时间和失败计数。
 - 外部平台重复事件、乱序事件和过期事件必须可处理。
 
-### C8：进程与部署边界（Gate 5：当前范围可部署）
+### C8：进程与部署边界（Gate 3：runtime wired）
 
-已完成独立 JSONL `BridgeEnvelope` Process Server/Client、响应校验、Supervisor 生命周期、超时 kill fallback、最小环境和显式 Secret Resolver；仓库已有 Dockerfile、Compose 配置和单容器部署路径。当前目标是测试环境/单组织部署，不要求 Channel Connector 独立容器化；未来云平台再增加 OS/container 级隔离和多租户编排。
+已完成独立 JSONL `BridgeEnvelope` Process Server/Client、响应校验、Supervisor 生命周期、超时 kill fallback、最小环境和显式 Secret Resolver；仓库已有 Dockerfile、Compose 配置和单容器测试部署路径。但当前生产入口尚未拉起 Process Server，也没有真实 Connector 的部署配置和 smoke E2E，因此尚不能称为 Gate 5。当前目标仍是测试环境/单组织部署，不要求 Channel Connector 独立容器化；未来云平台再增加 OS/container 级隔离和多租户编排。
 
 ```text
 Channel Process
@@ -357,6 +357,6 @@ Channel 进程不能持有 MCP Client、Group SQLite Writer 或 Worker 内存对
 
 ## 7. 后续阶段建议
 
-基础开发已完成。下一阶段应选择一个真实平台（飞书、Slack 或企业微信）做端到端接入，补齐外部用户授权映射、附件 Artifact、平台限流/重放防护、Supervisor 部署编排和真实平台回归测试；不要在未选定平台前虚构平台特性。
+基础模块开发已完成，但 Channel 尚未达到真实平台生产完成。下一阶段应选择一个真实平台（飞书、Slack 或企业微信）做端到端接入，补齐外部用户授权映射、附件 Artifact、平台限流/重放防护、Process Server/Connector 部署编排和真实平台回归测试；不要在未选定平台前虚构平台特性。
 
 这样后续即使替换平台，Group、Bot、Workflow 和 Artifact 的内部模型也不需要重写。
