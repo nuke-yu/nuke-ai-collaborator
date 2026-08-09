@@ -3,6 +3,7 @@
 from .manager import (
     Artifact,
     ArtifactAccessDeniedError,
+    ArtifactLifecycleError,
     ArtifactNotFoundError,
     ArtifactOrigin,
     ArtifactLifecycle,
@@ -12,12 +13,15 @@ from .manager import (
     generate_artifact_id,
     get_artifact,
     list_artifacts,
+    get_artifact_lineage,
     register_artifact,
+    revoke_artifact,
 )
 
 __all__ = [
     "Artifact",
     "ArtifactAccessDeniedError",
+    "ArtifactLifecycleError",
     "ArtifactNotFoundError",
     "ArtifactOrigin",
     "ArtifactLifecycle",
@@ -27,5 +31,7 @@ __all__ = [
     "generate_artifact_id",
     "get_artifact",
     "list_artifacts",
+    "get_artifact_lineage",
     "register_artifact",
+    "revoke_artifact",
 ]

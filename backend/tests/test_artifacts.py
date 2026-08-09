@@ -17,11 +17,14 @@ from artifacts import (
     ArtifactOrigin,
     ArtifactScope,
     ArtifactLifecycle,
+    ArtifactLifecycleError,
     calculate_checksum,
     delete_artifact,
+    get_artifact_lineage,
     get_artifact,
     list_artifacts,
     register_artifact,
+    revoke_artifact,
 )
 from db.schema_split import init_group_db
 from runtime.dbpaths import group_db_path
@@ -169,6 +172,54 @@ class TestArtifactManager(unittest.IsolatedAsyncioTestCase):
 
         with self.assertRaises(ArtifactNotFoundError):
             await get_artifact(art.artifact_id, group_id=1)
+
+    async def test_revoke_and_lineage_governance(self):
+        parent = await register_artifact(
+            group_id=1,
+            display_name="source.txt",
+            origin=ArtifactOrigin.WORKSPACE,
+            storage_locator="/workspace/source.txt",
+        )
+        child = await register_artifact(
+            group_id=1,
+            display_name="derived.txt",
+            origin=ArtifactOrigin.WORKFLOW,
+            storage_locator="/workspace/derived.txt",
+            parent_artifact_id=parent.artifact_id,
+            derives_from=parent.artifact_id,
+            artifact_version=2,
+        )
+        lineage = await get_artifact_lineage(child.artifact_id, group_id=1)
+        self.assertEqual([item["artifact_id"] for item in lineage["ancestors"]], [parent.artifact_id])
+        self.assertEqual(lineage["descendants"], [])
+        self.assertTrue(await revoke_artifact(parent.artifact_id, group_id=1))
+        revoked = await get_artifact(parent.artifact_id, group_id=1)
+        self.assertEqual(revoked.lifecycle_status, ArtifactLifecycle.REVOKED)
+
+    async def test_derivation_cannot_cross_group_or_self_reference(self):
+        parent = await register_artifact(
+            group_id=1,
+            display_name="source.txt",
+            origin=ArtifactOrigin.WORKSPACE,
+            storage_locator="/workspace/source.txt",
+        )
+        with self.assertRaises(ArtifactLifecycleError):
+            await register_artifact(
+                group_id=2,
+                display_name="cross-group.txt",
+                origin=ArtifactOrigin.WORKFLOW,
+                storage_locator="/workspace/cross-group.txt",
+                parent_artifact_id=parent.artifact_id,
+            )
+        with self.assertRaises(ArtifactLifecycleError):
+            await register_artifact(
+                group_id=1,
+                artifact_id="self-ref",
+                display_name="self.txt",
+                origin=ArtifactOrigin.WORKFLOW,
+                storage_locator="/workspace/self.txt",
+                parent_artifact_id="self-ref",
+            )
 
 
 class TestArtifactAutoRegistration(unittest.IsolatedAsyncioTestCase):

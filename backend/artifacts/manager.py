@@ -48,6 +48,10 @@ class ArtifactAccessDeniedError(PermissionError):
     """Access to requested artifact is denied under current authorization scope."""
 
 
+class ArtifactLifecycleError(ValueError):
+    """Artifact lifecycle or derivation transition is invalid."""
+
+
 @dataclass
 class Artifact:
     artifact_id: str
@@ -135,6 +139,24 @@ async def register_artifact(
     chksum = checksum_sha256 or ""
 
     async with _db.connect() as conn:
+        for relation_name, related_id in (
+            ("parent_artifact_id", parent_artifact_id),
+            ("derives_from", derives_from),
+        ):
+            if not related_id:
+                continue
+            if related_id == art_id:
+                raise ArtifactLifecycleError(f"{relation_name} cannot reference the artifact itself")
+            async with conn.execute(
+                "SELECT group_id FROM group_artifacts WHERE artifact_id = ?",
+                (related_id,),
+            ) as relation_cursor:
+                relation_row = await relation_cursor.fetchone()
+            if relation_row is None or int(relation_row[0]) != int(group_id):
+                raise ArtifactLifecycleError(
+                    f"{relation_name} must reference an artifact in the same group: {related_id}"
+                )
+
         await conn.execute(
             """INSERT INTO group_artifacts (
                 artifact_id, group_id, session_id, bot_id, workflow_run_id,
@@ -274,7 +296,7 @@ async def list_artifacts(
 
 
 async def delete_artifact(artifact_id: str, group_id: int) -> bool:
-    """Soft-delete the Artifact record; physical storage is not removed."""
+    """Soft-delete the Artifact record; physical storage is retained for audit."""
     async with _db.connect() as conn:
         cursor = await conn.execute(
             "UPDATE group_artifacts SET lifecycle_status = 'deleted', deleted_at = datetime('now'), updated_at = datetime('now') WHERE artifact_id = ? AND group_id = ? AND lifecycle_status != 'deleted'",
@@ -282,3 +304,68 @@ async def delete_artifact(artifact_id: str, group_id: int) -> bool:
         )
         await conn.commit()
         return cursor.rowcount > 0
+
+
+async def revoke_artifact(artifact_id: str, group_id: int) -> bool:
+    """Revoke an artifact without destroying its audit record or storage locator."""
+    async with _db.connect() as conn:
+        cursor = await conn.execute(
+            """UPDATE group_artifacts
+               SET lifecycle_status = 'revoked', updated_at = datetime('now')
+               WHERE artifact_id = ? AND group_id = ? AND lifecycle_status = 'active'""",
+            (artifact_id, group_id),
+        )
+        await conn.commit()
+        return cursor.rowcount > 0
+
+
+async def get_artifact_lineage(artifact_id: str, group_id: int) -> dict[str, list[dict[str, Any]] | str]:
+    """Return same-group ancestors and descendants for audit and workflow handoff."""
+    async with _db.connect() as conn:
+        async with conn.execute(
+            "SELECT artifact_id, parent_artifact_id, derives_from FROM group_artifacts WHERE artifact_id = ? AND group_id = ?",
+            (artifact_id, group_id),
+        ) as cursor:
+            current = await cursor.fetchone()
+        if current is None:
+            raise ArtifactNotFoundError(f"Artifact not found: {artifact_id} (group={group_id})")
+
+        ancestors: list[dict[str, Any]] = []
+        visited = {artifact_id}
+        parent_id = current[1] or current[2]
+        while parent_id and parent_id not in visited:
+            visited.add(parent_id)
+            async with conn.execute(
+                "SELECT * FROM group_artifacts WHERE artifact_id = ? AND group_id = ?",
+                (parent_id, group_id),
+            ) as parent_cursor:
+                parent_row = await parent_cursor.fetchone()
+                parent_keys = [column[0] for column in parent_cursor.description]
+            if parent_row is None:
+                break
+            parent_data = dict(zip(parent_keys, parent_row))
+            ancestors.append({
+                "artifact_id": parent_data["artifact_id"],
+                "artifact_version": int(parent_data.get("artifact_version") or 1),
+                "lifecycle_status": parent_data.get("lifecycle_status") or ArtifactLifecycle.ACTIVE.value,
+                "display_name": parent_data.get("display_name") or "",
+            })
+            parent_id = parent_data.get("parent_artifact_id") or parent_data.get("derives_from")
+
+        descendants: list[dict[str, Any]] = []
+        async with conn.execute(
+            """SELECT artifact_id, artifact_version, lifecycle_status, display_name
+               FROM group_artifacts
+               WHERE group_id = ? AND (parent_artifact_id = ? OR derives_from = ?)
+               ORDER BY artifact_version ASC, created_at ASC""",
+            (group_id, artifact_id, artifact_id),
+        ) as cursor:
+            async for row in cursor:
+                descendants.append({
+                    "artifact_id": row[0],
+                    "artifact_version": int(row[1] or 1),
+                    "lifecycle_status": row[2] or ArtifactLifecycle.ACTIVE.value,
+                    "display_name": row[3] or "",
+                })
+
+    return {"artifact_id": artifact_id, "ancestors": ancestors, "descendants": descendants}
