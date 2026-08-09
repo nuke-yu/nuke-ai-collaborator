@@ -257,6 +257,13 @@ class ChannelDeliveryService:
     def snapshot(self) -> dict[str, object]:
         return {**self._stats, "registered_channels": sorted(self._connectors)}
 
+    def require_registered_instances(self, instance_ids: Sequence[str]) -> None:
+        required = {str(value or "").strip().lower() for value in instance_ids}
+        required.discard("")
+        missing = sorted(required.difference(self._connectors))
+        if missing:
+            raise RuntimeError(f"active channel bindings have no connector: {', '.join(missing)}")
+
     async def run_once(self) -> int:
         claimed = 0
         for dispatcher in tuple(self._dispatchers.values()):

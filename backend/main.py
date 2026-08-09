@@ -111,6 +111,8 @@ async def lifespan(app: FastAPI):
     addr = ipc.make_addr("supervisor")
     num_workers = int(os.getenv("NUKE_WORKERS", "8"))
     from channels.runtime import ChannelDeliveryService, GroupChannelRelayService
+    from channels.bootstrap import configure_process_connectors
+    from channels.bridge import ChannelBindingStore
     from channels import initialize_channel_schema
     from channels.stores import ChannelStore
     from runtime.dbpaths import channel_bridge_db_path, group_db_path
@@ -118,6 +120,14 @@ async def lifespan(app: FastAPI):
     channel_delivery = ChannelDeliveryService(
         ChannelStore(channel_bridge_db_path()),
         poll_interval=float(os.getenv("NUKE_CHANNEL_DELIVERY_INTERVAL", "1.0")),
+    )
+    configure_process_connectors(
+        channel_delivery,
+        os.getenv("NUKE_CHANNEL_CONNECTORS_JSON"),
+    )
+    active_bindings = await ChannelBindingStore(channel_bridge_db_path()).list_active()
+    channel_delivery.require_registered_instances(
+        binding.channel_instance_id for binding in active_bindings
     )
     channel_relay = GroupChannelRelayService(
         ChannelStore(channel_bridge_db_path()),

@@ -186,6 +186,17 @@ class ChannelBindingStore:
                 rows = await cursor.fetchall()
         return [self._from_row(dict(row)) for row in rows]
 
+    async def list_active(self) -> list[ChannelBinding]:
+        if not Path(self.path).exists():
+            return []
+        async with aiosqlite.connect(self.path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                "SELECT * FROM channel_bindings WHERE status='active' ORDER BY binding_id"
+            ) as cursor:
+                rows = await cursor.fetchall()
+        return [self._from_row(dict(row)) for row in rows]
+
     async def transition(self, binding_id: str, target: BindingStatus) -> ChannelBinding:
         current = await self.get(binding_id)
         if current is None:
