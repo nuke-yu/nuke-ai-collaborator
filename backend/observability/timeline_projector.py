@@ -12,6 +12,31 @@ from typing import Any, Mapping
 
 import db as _db
 from observability.timeline import get_group_timeline
+from executors.redaction import redact_secrets
+
+
+_TIMELINE_TEXT_LIMIT = 4000
+
+
+def _safe_text(value: Any, limit: int = _TIMELINE_TEXT_LIMIT) -> str:
+    redacted, _ = redact_secrets(str(value or ""))
+    return redacted[:limit]
+
+
+def _safe_json(value: Any, limit: int = _TIMELINE_TEXT_LIMIT) -> Any:
+    if not isinstance(value, (dict, list, tuple)):
+        return _safe_text(value, limit)
+    try:
+        encoded = json.dumps(value, ensure_ascii=False, sort_keys=True)
+    except (TypeError, ValueError):
+        return _safe_text(value, limit)
+    if len(encoded) > limit:
+        return _safe_text(encoded, limit)
+    redacted = _safe_text(encoded, limit)
+    try:
+        return json.loads(redacted)
+    except json.JSONDecodeError:
+        return redacted
 
 
 @dataclass
@@ -70,7 +95,7 @@ def project_event_to_node(event: Mapping[str, Any], idx: int) -> TimelineNode | 
 
     # 1. AI Thought / Thinking Events
     if event_type in ("ai_thought", "thinking", "thought", "reasoning"):
-        thought_text = str(payload.get("thought") or payload.get("content") or payload.get("text") or "AI reasoning...")
+        thought_text = _safe_text(payload.get("thought") or payload.get("content") or payload.get("text") or "AI reasoning...")
         return TimelineNode(
             node_id=event_id,
             type="thinking",
@@ -149,8 +174,8 @@ def project_event_to_node(event: Mapping[str, Any], idx: int) -> TimelineNode | 
             artifact_ids=art_ids,
             metadata={
                 "tool_name": tool_name,
-                "arguments": arguments,
-                "result": str(result) if result else "",
+                "arguments": _safe_json(arguments),
+                "result": _safe_text(result),
                 "is_error": status == "failed",
             },
         )

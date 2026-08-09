@@ -107,6 +107,21 @@ class TestTimelineProjector(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(node_failed.metadata["result"], "2 failed")
         self.assertTrue(node_failed.metadata["is_error"])
 
+        node_secret = project_event_to_node(
+            {
+                "event_type": "tool_result",
+                "payload": {
+                    "tool_name": "run_shell",
+                    "result": "Authorization: Bearer " + "a" * 48 + "\n" + "x" * 5000,
+                },
+                "occurred_at": 1785689181,
+                "event_id": "evt_secret",
+            },
+            idx=5,
+        )
+        self.assertNotIn("a" * 48, node_secret.metadata["result"])
+        self.assertLessEqual(len(node_secret.metadata["result"]), 4000)
+
         # 5. Permission Approval
         node3 = project_event_to_node(
             {
