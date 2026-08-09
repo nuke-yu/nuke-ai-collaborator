@@ -9,8 +9,12 @@ core/workflow_store.py — 工作流编排状态的持久化（崩溃恢复用�
 不需要细粒度事件回放 + 幂等回滚。
 """
 import json
+import logging
 
 import db as _db
+
+
+log = logging.getLogger(__name__)
 
 
 async def _upsert_state(conn, group_id: int, orchestrator_id: str, state: dict) -> None:
@@ -63,12 +67,18 @@ async def commit_transition(
         envelopes = await insert_workflow_observations(
             conn, group_id, orchestrator_id, observations
         )
-        await append_workflow_channel_events(
-            conn,
-            group_id,
-            envelopes,
-            ChannelBindingStore(channel_bridge_db_path()),
-        )
+        try:
+            await append_workflow_channel_events(
+                conn,
+                group_id,
+                envelopes,
+                ChannelBindingStore(channel_bridge_db_path()),
+            )
+        except Exception:
+            # Channel is an external notification projection.  Its registry,
+            # disk and payload failures must not roll back the core workflow
+            # transition; the observation remains durable for later replay.
+            log.exception("workflow transition committed without Channel projection group=%s", group_id)
         await conn.commit()
     return envelopes
 
