@@ -51,6 +51,9 @@ async def commit_transition(
 ) -> list[dict]:
     """Atomically persist one state-machine transition and its observations."""
     from observability.workflow import insert_workflow_observations
+    from channels.bridge import append_workflow_channel_events
+    from channels.bridge.binding import ChannelBindingStore
+    from runtime.dbpaths import channel_bridge_db_path
 
     async with _db.write_connect() as conn:
         if clear:
@@ -59,6 +62,12 @@ async def commit_transition(
             await _upsert_state(conn, group_id, orchestrator_id, state)
         envelopes = await insert_workflow_observations(
             conn, group_id, orchestrator_id, observations
+        )
+        await append_workflow_channel_events(
+            conn,
+            group_id,
+            envelopes,
+            ChannelBindingStore(channel_bridge_db_path()),
         )
         await conn.commit()
     return envelopes
