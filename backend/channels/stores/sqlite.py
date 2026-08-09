@@ -83,6 +83,13 @@ _DDL = (
         paused INTEGER NOT NULL DEFAULT 0,
         updated_at INTEGER NOT NULL
     )""",
+    """CREATE TABLE IF NOT EXISTS channel_connector_state (
+        channel_instance_id TEXT NOT NULL,
+        state_key TEXT NOT NULL,
+        value_json TEXT NOT NULL,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY(channel_instance_id,state_key)
+    )""",
     "CREATE INDEX IF NOT EXISTS idx_channel_delivery_due ON channel_delivery_outbox(state, next_attempt_at)",
 )
 
@@ -226,6 +233,36 @@ class ChannelStore:
             ) as cursor:
                 rows = await cursor.fetchall()
         return tuple(canonical_channel_instance_id(row[0]) for row in rows)
+
+    async def get_connector_state(self, channel_instance_id: str, state_key: str) -> Any:
+        instance_id = canonical_channel_instance_id(channel_instance_id)
+        key = str(state_key or "").strip()
+        if not key:
+            raise ValueError("connector state_key is required")
+        async with aiosqlite.connect(self.path) as db:
+            async with db.execute(
+                """SELECT value_json FROM channel_connector_state
+                   WHERE channel_instance_id=? AND state_key=?""",
+                (instance_id, key),
+            ) as cursor:
+                row = await cursor.fetchone()
+        return json.loads(row[0]) if row else None
+
+    async def set_connector_state(self, channel_instance_id: str, state_key: str, value: Any) -> None:
+        instance_id = canonical_channel_instance_id(channel_instance_id)
+        key = str(state_key or "").strip()
+        if not key:
+            raise ValueError("connector state_key is required")
+        encoded = _safe_json_text(value)
+        async with aiosqlite.connect(self.path) as db:
+            await db.execute(
+                """INSERT INTO channel_connector_state
+                   (channel_instance_id,state_key,value_json,updated_at) VALUES(?,?,?,?)
+                   ON CONFLICT(channel_instance_id,state_key) DO UPDATE SET
+                     value_json=excluded.value_json,updated_at=excluded.updated_at""",
+                (instance_id, key, encoded, int(time.time() * 1000)),
+            )
+            await db.commit()
 
     async def set_channel_paused(self, channel: str, paused: bool) -> None:
         raw_channel = str(channel or "").strip()
