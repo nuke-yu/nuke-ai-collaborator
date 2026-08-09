@@ -1243,4 +1243,4 @@ OpenHanako 的主要优势是：
 
 ### 14.5 当前验证备注
 
-截至本次复核，后端全量测试为 `2455 passed, 2 skipped, 56 warnings, 40 subtests passed`。健康检查测试已经隔离自己的临时数据库，解决了前序测试污染全局 `DB_PATH` 导致的顺序依赖。本轮之后，MCP Bridge/Proxy/Collector 的已知边界问题也有回归覆盖；当前剩余工作集中在真实渠道端到端接入、插件全面迁移、Store 策略执行和 Timeline 产品化加固，而不是基础任务未实现。
+截至本次复核，后端全量测试为 `2465 passed, 2 skipped, 56 warnings, 40 subtests passed`。健康检查测试已经隔离自己的临时数据库，解决了前序测试污染全局 `DB_PATH` 导致的顺序依赖。本轮之后，MCP Bridge/Proxy/Collector 的已知边界问题也有回归覆盖；当前剩余工作集中在真实渠道端到端接入、插件全面迁移、Store 策略执行和 Timeline 产品化加固，而不是基础任务未实现。

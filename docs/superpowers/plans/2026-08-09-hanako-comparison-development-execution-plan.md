@@ -51,7 +51,7 @@
 
 ### 当前测试基线（2026-08-09）
 
-后端全量测试为 `2455 passed, 2 skipped, 56 warnings, 40 subtests passed`。
+后端全量测试为 `2465 passed, 2 skipped, 56 warnings, 40 subtests passed`。
 健康检查测试已改为使用自有临时数据库，不再依赖前序测试留下的全局 `DB_PATH`。
 剩余 warning 主要来自第三方依赖和既有弃用 API，不影响本次测试通过结果。
 
