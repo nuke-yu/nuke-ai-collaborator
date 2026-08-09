@@ -23,6 +23,9 @@ class ProviderDescriptor:
     supports_vision: bool
     supports_thinking: bool
     pricing_version: int
+    deprecated: bool = False
+    replacement_model: str | None = None
+    fallback_model: str | None = None
 
     def __post_init__(self) -> None:
         provider_id = self.provider_id.strip().lower()
@@ -35,6 +38,8 @@ class ProviderDescriptor:
             raise ValueError("max_output_tokens must be positive")
         if self.pricing_version <= 0:
             raise ValueError("pricing_version must be positive")
+        if self.deprecated and not self.replacement_model and not self.fallback_model:
+            raise ValueError("deprecated models must define a replacement or fallback")
         object.__setattr__(self, "provider_id", provider_id)
         object.__setattr__(self, "model_id", model_id)
 
@@ -93,6 +98,9 @@ class ProviderRegistry:
                 supports_vision=family.supports_vision,
                 supports_thinking=family.supports_thinking,
                 pricing_version=family.pricing_version,
+                deprecated=family.deprecated,
+                replacement_model=family.replacement_model,
+                fallback_model=family.fallback_model,
             )
 
         defaults = _PROVIDER_DEFAULTS.get(provider, {})
@@ -139,3 +147,38 @@ provider_registry = _build_default_registry()
 def resolve_provider_descriptor(provider_id: str, model_id: str) -> ProviderDescriptor:
     """Resolve an exact, family, or conservative provider/model descriptor."""
     return provider_registry.resolve(provider_id, model_id)
+
+
+class ProviderGovernanceError(ValueError):
+    """The selected model cannot satisfy an execution governance rule."""
+
+
+def enforce_provider_governance(
+    descriptor: ProviderDescriptor,
+    *,
+    require_tools: bool = False,
+    require_vision: bool = False,
+    require_thinking: bool = False,
+    estimated_cost_usd: float = 0.0,
+    budget_usd: float | None = None,
+) -> None:
+    """Validate capabilities and budget before a Worker starts inference."""
+    if descriptor.deprecated:
+        replacement = descriptor.replacement_model or descriptor.fallback_model or ""
+        raise ProviderGovernanceError(
+            f"model {descriptor.provider_id}/{descriptor.model_id} is deprecated; use {replacement}"
+        )
+    requirements = (
+        (require_tools, descriptor.supports_tools, "tool calling"),
+        (require_vision, descriptor.supports_vision, "vision"),
+        (require_thinking, descriptor.supports_thinking, "thinking"),
+    )
+    for required, supported, label in requirements:
+        if required and not supported:
+            raise ProviderGovernanceError(
+                f"model {descriptor.provider_id}/{descriptor.model_id} does not support {label}"
+            )
+    if budget_usd is not None and estimated_cost_usd > budget_usd:
+        raise ProviderGovernanceError(
+            f"estimated model cost {estimated_cost_usd:.6f} exceeds budget {budget_usd:.6f}"
+        )

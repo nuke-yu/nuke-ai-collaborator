@@ -1,6 +1,12 @@
 import unittest
 
-from ai.providers import ProviderDescriptor, ProviderRegistry, resolve_provider_descriptor
+from ai.providers import (
+    ProviderDescriptor,
+    ProviderGovernanceError,
+    ProviderRegistry,
+    enforce_provider_governance,
+    resolve_provider_descriptor,
+)
 
 
 class TestProviderDescriptor(unittest.TestCase):
@@ -33,6 +39,13 @@ class TestProviderDescriptor(unittest.TestCase):
     def test_descriptor_rejects_invalid_identity(self):
         with self.assertRaises(ValueError):
             ProviderDescriptor("", "model", None, 100, True, False, False, 1)
+
+    def test_governance_rejects_unsupported_capability_and_budget(self):
+        descriptor = resolve_provider_descriptor("openai", "gpt-4o-mini")
+        with self.assertRaises(ProviderGovernanceError):
+            enforce_provider_governance(descriptor, require_thinking=True)
+        with self.assertRaises(ProviderGovernanceError):
+            enforce_provider_governance(descriptor, estimated_cost_usd=1.1, budget_usd=1.0)
 
 
 if __name__ == "__main__":
