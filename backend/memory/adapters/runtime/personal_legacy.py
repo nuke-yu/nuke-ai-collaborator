@@ -73,6 +73,7 @@ class LegacyPersonalKnowledgeAdapter:
             bot_id=command.scope.bot_id,
             purpose=command.purpose,
             char_budget=command.char_budget,
+            session_id=command.scope.run_id or "",
         )
 
 

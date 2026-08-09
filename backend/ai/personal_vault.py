@@ -25,6 +25,13 @@ _DDL_STATEMENTS = (
      source_key TEXT PRIMARY KEY,user_id INTEGER NOT NULL,source_type TEXT NOT NULL,source_id TEXT NOT NULL,
      speaker TEXT NOT NULL DEFAULT '',subject TEXT NOT NULL DEFAULT '',context_kind TEXT NOT NULL DEFAULT '',
      observed_at INTEGER NOT NULL,content_hash TEXT NOT NULL,created_at INTEGER NOT NULL)""",
+    """CREATE TABLE IF NOT EXISTS personal_memory_usage_events (
+     usage_id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER NOT NULL,
+     record_id TEXT NOT NULL,projection_id TEXT NOT NULL,group_id INTEGER NOT NULL,
+     bot_id INTEGER,session_id TEXT NOT NULL DEFAULT '',purpose TEXT NOT NULL,
+     used_at INTEGER NOT NULL)""",
+    "CREATE INDEX IF NOT EXISTS idx_personal_memory_usage_record ON personal_memory_usage_events(user_id,record_id,used_at)",
+    "CREATE INDEX IF NOT EXISTS idx_personal_memory_usage_session ON personal_memory_usage_events(group_id,session_id,used_at)",
     """CREATE TABLE IF NOT EXISTS habit_evidence (
      id INTEGER PRIMARY KEY AUTOINCREMENT,record_id TEXT NOT NULL,source_key TEXT NOT NULL,
      context_kind TEXT NOT NULL,polarity TEXT NOT NULL,observed_at INTEGER NOT NULL,
@@ -193,24 +200,38 @@ async def project(*, user_id: int, record_id: str, group_id: int, bot_id: int | 
     return projection_id
 
 
-async def projected_context(*, user_id: int, group_id: int, bot_id: int | None, purpose: str, limit: int = 20) -> list[dict]:
+async def projected_context(*, user_id: int, group_id: int, bot_id: int | None,
+                            purpose: str, limit: int = 20,
+                            session_id: str = "") -> list[dict]:
     now = int(time.time() * 1000)
     async with connect(user_id) as db:
-        async with db.execute("""SELECT r.record_id,r.kind,r.content,r.authority,r.confidence,r.status,r.explicit
+        async with db.execute("""SELECT r.record_id,p.projection_id,r.kind,r.content,r.authority,r.confidence,r.status,r.explicit
           FROM personal_projections p JOIN personal_records r ON r.record_id=p.record_id
           WHERE r.user_id=? AND p.group_id=? AND (p.bot_id IS NULL OR p.bot_id=?) AND p.purpose=?
           AND p.status='active' AND r.status IN ('active','provisional') AND r.sensitivity != 'secret'
           AND (p.expires_at IS NULL OR p.expires_at>?) ORDER BY r.explicit DESC,r.confidence DESC LIMIT ?""",
           (user_id, group_id, bot_id, purpose, now, max(1, min(limit, 100)))) as cur:
             rows = await cur.fetchall()
+    async with connect(user_id) as db:
+        await db.executemany(
+            """INSERT INTO personal_memory_usage_events
+               (user_id,record_id,projection_id,group_id,bot_id,session_id,purpose,used_at)
+               VALUES(?,?,?,?,?,?,?,?)""",
+            [
+                (user_id, row[0], row[1], group_id, bot_id, session_id, purpose, now)
+                for row in rows
+            ],
+        )
+        await db.commit()
     return [{
         "record_id": r[0],
-        "kind": r[1],
-        "content": r[2],
-        "authority": r[3],
-        "confidence": r[4],
-        "status": r[5],
-        "explicit": bool(r[6]),
+        "projection_id": r[1],
+        "kind": r[2],
+        "content": r[3],
+        "authority": r[4],
+        "confidence": r[5],
+        "status": r[6],
+        "explicit": bool(r[7]),
     } for r in rows]
 
 
@@ -343,11 +364,36 @@ async def rebuild_vault(user_id:int) -> dict:
 
 
 async def format_projected_context(*,user_id:int,group_id:int,bot_id:int|None,
-                                   purpose:str="assistant_context",char_budget:int=3000)->str:
-    rows=await projected_context(user_id=user_id,group_id=group_id,bot_id=bot_id,purpose=purpose)
+                                   purpose:str="assistant_context",char_budget:int=3000,
+                                   session_id: str = "")->str:
+    rows=await projected_context(user_id=user_id,group_id=group_id,bot_id=bot_id,
+                                 purpose=purpose, session_id=session_id)
     chunks=[];used=0
     for row in rows:
         line=f"- [{row['kind']}/{row['authority']}] {row['content']}"
         if used+len(line)>char_budget:break
         chunks.append(line);used+=len(line)
     return "[Authorized personal context]\n"+"\n".join(chunks) if chunks else ""
+
+
+async def list_memory_usage(user_id: int, *, record_id: str | None = None,
+                            group_id: int | None = None, limit: int = 100) -> list[dict]:
+    """Return provenance for personal records used by projected contexts."""
+    where = ["user_id = ?"]
+    params: list[object] = [user_id]
+    if record_id:
+        where.append("record_id = ?")
+        params.append(record_id)
+    if group_id is not None:
+        where.append("group_id = ?")
+        params.append(group_id)
+    params.append(max(1, min(int(limit), 500)))
+    async with connect(user_id) as db:
+        async with db.execute(
+            f"SELECT usage_id,record_id,projection_id,group_id,bot_id,session_id,purpose,used_at "
+            f"FROM personal_memory_usage_events WHERE {' AND '.join(where)} ORDER BY used_at DESC LIMIT ?",
+            params,
+        ) as cur:
+            rows = await cur.fetchall()
+    fields = ("usage_id", "record_id", "projection_id", "group_id", "bot_id", "session_id", "purpose", "used_at")
+    return [dict(zip(fields, row)) for row in rows]

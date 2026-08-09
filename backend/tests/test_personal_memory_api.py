@@ -13,6 +13,8 @@ from ai.personal_vault import (
     export_vault,
     delete_record,
     revoke_projection,
+    projected_context,
+    list_memory_usage,
 )
 
 
@@ -89,6 +91,25 @@ class TestPersonalMemoryAPI(unittest.IsolatedAsyncioTestCase):
 
         vault_after = await export_vault(self.user_id)
         self.assertEqual(len(vault_after.get("projections", [])), 0)
+
+    async def test_projected_context_records_usage_provenance(self):
+        rec_id = await add_record(
+            user_id=self.user_id, kind="preference", content="dark mode",
+            source_type="manual", source_id="usage-test", speaker="user:99",
+            subject="99", authority="user_statement", sensitivity="private",
+            confidence=1.0, explicit=True,
+        )
+        projection_id = await project(
+            user_id=self.user_id, record_id=rec_id, group_id=10, bot_id=2,
+            purpose="assistant_context",
+        )
+        rows = await projected_context(
+            user_id=self.user_id, group_id=10, bot_id=2, purpose="assistant_context"
+        )
+        self.assertEqual(rows[0]["projection_id"], projection_id)
+        usage = await list_memory_usage(self.user_id, record_id=rec_id, group_id=10)
+        self.assertEqual(usage[0]["projection_id"], projection_id)
+        self.assertEqual(usage[0]["purpose"], "assistant_context")
 
 
 if __name__ == "__main__":
