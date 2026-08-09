@@ -36,6 +36,7 @@ from api.media import router as media_router
 from permissions.routes import router as permissions_router
 from api.skills import router as skills_router
 from api.personal_memory import router as personal_memory_router
+from api.channels import router as channels_router
 from api.artifacts import router as artifacts_router
 from executors import registry
 from api.admin_deps import require_operator, audit_control_plane
@@ -198,6 +199,7 @@ app.include_router(skills_router, dependencies=[Depends(auth.get_current_user)])
 app.include_router(config_router, dependencies=[Depends(auth.get_current_user)])
 app.include_router(artifacts_router, dependencies=[Depends(auth.get_current_user)])
 app.include_router(personal_memory_router)
+app.include_router(channels_router)
 app.include_router(scheduler.router)
 app.include_router(auth_router)
 
