@@ -46,3 +46,22 @@ async def require_group_member_ready(
     """Authorize first, then initialize the one private DB the route may read."""
     await ensure_group_db_ready(group_db_path(group_id))
     return user
+
+
+async def require_group_owner(
+    group_id: int,
+    user: dict = Depends(auth.get_current_user),
+) -> dict:
+    """Restrict integration configuration to the Group owner."""
+    async with global_db() as conn:
+        async with conn.execute(
+            "SELECT role FROM group_memberships WHERE user_id=? AND group_id=?",
+            (int(user["uid"]), group_id),
+        ) as cursor:
+            row = await cursor.fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Group not found")
+    if row[0] != "owner":
+        raise HTTPException(status_code=403, detail="Group owner privileges required")
+    await ensure_group_db_ready(group_db_path(group_id))
+    return user

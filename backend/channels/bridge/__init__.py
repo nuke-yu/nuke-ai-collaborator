@@ -12,6 +12,7 @@ from .workflow_events import (
     enqueue_workflow_channel_projections,
     initialize_workflow_channel_projections,
 )
+from .provisioning import ChannelIntegrationProvisioner, ChannelProvisioningConflict
 
 __all__ = [
     "BindingConflictError", "BindingStatus", "ChannelBinding", "ChannelBindingStore",
@@ -22,4 +23,5 @@ __all__ = [
     "WorkflowChannelProjectionRelay", "WorkflowProjectionResult",
     "append_workflow_channel_events", "enqueue_workflow_channel_projections",
     "initialize_workflow_channel_projections",
+    "ChannelIntegrationProvisioner", "ChannelProvisioningConflict",
 ]

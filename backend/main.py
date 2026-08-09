@@ -187,6 +187,7 @@ async def lifespan(app: FastAPI):
     )
     app.state.channel_inbound = channel_inbound
     app.state.channel_platform = channel_platform
+    app.state.channel_delivery = channel_delivery
     await sup.start()
     sup_mod.supervisor = sup
     

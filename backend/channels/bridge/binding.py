@@ -15,6 +15,7 @@ from typing import Any, Mapping
 import aiosqlite
 
 from channels.core import canonical_channel_instance_id
+from channels.stores import safe_json_for_storage
 
 
 class BindingStatus(StrEnum):
@@ -182,8 +183,8 @@ class ChannelBindingStore:
                         binding.binding_id, binding.channel_instance_id, binding.external_tenant_id,
                         binding.external_conversation_id, binding.group_id, binding.default_bot_id,
                         json.dumps(binding.allowed_bot_ids), int(binding.mention_required),
-                        json.dumps(binding.inbound_policy, ensure_ascii=False),
-                        json.dumps(binding.outbound_policy, ensure_ascii=False), binding.status,
+                        safe_json_for_storage(binding.inbound_policy),
+                        safe_json_for_storage(binding.outbound_policy), binding.status,
                         binding.config_version, binding.created_by, now, now,
                     ),
                 )
@@ -206,6 +207,18 @@ class ChannelBindingStore:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT * FROM channel_bindings WHERE group_id=? AND status='active' ORDER BY binding_id",
+                (group_id,),
+            ) as cursor:
+                rows = await cursor.fetchall()
+        return [self._from_row(dict(row)) for row in rows]
+
+    async def list_for_group(self, group_id: int) -> list[ChannelBinding]:
+        if not Path(self.path).exists():
+            return []
+        async with aiosqlite.connect(self.path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                "SELECT * FROM channel_bindings WHERE group_id=? ORDER BY binding_id",
                 (group_id,),
             ) as cursor:
                 rows = await cursor.fetchall()
@@ -262,6 +275,18 @@ class ChannelBindingStore:
                     await db.execute(
                         "UPDATE channel_integration_members SET status=?, updated_at=? WHERE binding_id=? AND status=?",
                         (member_status, now, binding_id, "active"),
+                    )
+            elif target is BindingStatus.ACTIVE and current.status is BindingStatus.SUSPENDED:
+                async with db.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name='channel_integration_members'"
+                ) as table_cursor:
+                    has_members = await table_cursor.fetchone()
+                if has_members:
+                    await db.execute(
+                        """UPDATE channel_integration_members
+                           SET status='active',updated_at=?
+                           WHERE binding_id=? AND status='suspended'""",
+                        (now, binding_id),
                     )
             await db.commit()
         return ChannelBinding(**{**updated.to_dict(), "config_version": updated.config_version + 1})

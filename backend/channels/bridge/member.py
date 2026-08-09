@@ -11,6 +11,7 @@ from typing import Any, Mapping
 import aiosqlite
 
 from channels.core import canonical_channel_instance_id
+from channels.stores import safe_json_for_storage
 
 
 class IntegrationMemberStatus(StrEnum):
@@ -138,7 +139,7 @@ class IntegrationMemberStore:
                         member.integration_member_id, member.binding_id, member.group_id,
                         member.channel_instance_id, member.display_name, member.avatar,
                         json.dumps(member.capabilities), member.status,
-                        json.dumps(member.metadata, ensure_ascii=False), now, now,
+                        safe_json_for_storage(member.metadata), now, now,
                     ),
                 )
                 await db.commit()

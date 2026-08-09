@@ -608,3 +608,8 @@ def _safe_json_text(value: Any) -> str:
     if len(encoded.encode("utf-8")) <= _MAX_JSON_BYTES:
         return encoded
     raise ChannelPayloadTooLargeError(f"channel payload exceeds {_MAX_JSON_BYTES} bytes")
+
+
+def safe_json_for_storage(value: Any) -> str:
+    """Public Channel storage boundary for Bridge-owned JSON columns."""
+    return _safe_json_text(value)
