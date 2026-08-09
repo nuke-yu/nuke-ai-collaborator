@@ -38,8 +38,9 @@ class ChannelAdapter:
             raise ValueError("replay_window_seconds must be positive")
         self.replay_window_seconds = replay_window_seconds
 
-    def verify_signature(self, body: bytes, signature: str) -> bool:
-        expected = hmac.new(self.secret, body, hashlib.sha256).hexdigest()
+    def verify_signature(self, body: bytes, signature: str, timestamp: str | int) -> bool:
+        signed = f"{int(str(timestamp))}.".encode("ascii") + body
+        expected = hmac.new(self.secret, signed, hashlib.sha256).hexdigest()
         supplied = signature.removeprefix("sha256=")
         return hmac.compare_digest(expected, supplied)
 
@@ -64,8 +65,6 @@ class ChannelAdapter:
             raw = raw_body
         if not isinstance(payload, Mapping):
             raise ValueError("webhook payload must be an object")
-        if not self.verify_signature(raw, signature):
-            raise ChannelAuthError("invalid channel signature")
         try:
             timestamp_value = int(str(timestamp))
         except (TypeError, ValueError) as exc:
@@ -73,6 +72,8 @@ class ChannelAdapter:
         current = int(time.time()) if now is None else int(now)
         if timestamp_value <= 0 or abs(current - timestamp_value) > self.replay_window_seconds:
             raise ChannelAuthError("webhook timestamp is outside replay window")
+        if not self.verify_signature(raw, signature, timestamp_value):
+            raise ChannelAuthError("invalid channel signature")
         tenant = str(payload.get("tenant_id") or "").strip()
         external_group = str(payload.get("group_id") or "").strip()
         external_user = str(payload.get("user_id") or "").strip()

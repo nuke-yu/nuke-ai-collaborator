@@ -15,9 +15,10 @@ class TestChannelAdapter(unittest.IsolatedAsyncioTestCase):
     def body(self, payload):
         return json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode()
 
-    def signature(self, payload):
+    def signature(self, payload, timestamp=None):
         body = self.body(payload)
-        return hmac.new(self.secret.encode(), body, hashlib.sha256).hexdigest()
+        timestamp = int(time.time()) if timestamp is None else timestamp
+        return hmac.new(self.secret.encode(), f"{timestamp}.".encode() + body, hashlib.sha256).hexdigest()
 
     async def test_normalizes_authorized_message_and_deduplicates(self):
         async def resolve(tenant, external_group):

@@ -40,6 +40,7 @@ class SignedWebhookConnector:
         send: Callable[[OutboundEnvelope], Awaitable[str]] | None = None,
         replay_guard: Callable[[str, int], Awaitable[bool]] | None = None,
         replay_window_seconds: int = 300,
+        allow_in_memory_replay_guard: bool = False,
     ) -> None:
         if not channel.strip() or not secret:
             raise ValueError("channel and secret are required")
@@ -49,15 +50,16 @@ class SignedWebhookConnector:
         if replay_window_seconds <= 0:
             raise ValueError("replay_window_seconds must be positive")
         self._replay_guard = replay_guard
+        self._allow_in_memory_replay_guard = allow_in_memory_replay_guard
         self._replay_window_seconds = replay_window_seconds
         self._replay_seen: dict[str, int] = {}
         self._replay_lock = asyncio.Lock()
 
-    def signature(self, body: bytes) -> str:
-        return hmac.new(self._secret, body, hashlib.sha256).hexdigest()
+    def signature(self, body: bytes, timestamp: str | int) -> str:
+        return hmac.new(self._secret, _signed_payload(timestamp, body), hashlib.sha256).hexdigest()
 
-    def verify_signature(self, body: bytes, supplied: str) -> bool:
-        expected = self.signature(body)
+    def verify_signature(self, body: bytes, supplied: str, timestamp: str | int) -> bool:
+        expected = self.signature(body, timestamp)
         return hmac.compare_digest(expected, str(supplied or "").removeprefix("sha256="))
 
     async def normalize(
@@ -81,21 +83,23 @@ class SignedWebhookConnector:
             body = raw_body
         if not isinstance(payload, Mapping):
             raise ConnectorError("webhook payload must be an object")
-        if not self.verify_signature(body, signature):
-            raise ConnectorAuthError("invalid webhook signature")
         timestamp_value = _parse_timestamp(timestamp)
+        if not self.verify_signature(body, signature, timestamp_value):
+            raise ConnectorAuthError("invalid webhook signature")
         current = int(time.time()) if now is None else int(now)
         if abs(current - timestamp_value) > self._replay_window_seconds:
             raise ConnectorAuthError("webhook timestamp is outside replay window")
         replay_key = f"{timestamp_value}:{hashlib.sha256(body).hexdigest()}"
         if self._replay_guard is not None:
             accepted = await self._replay_guard(replay_key, timestamp_value)
-        else:
+        elif self._allow_in_memory_replay_guard:
             async with self._replay_lock:
                 self._replay_seen = {key: value for key, value in self._replay_seen.items() if current - value <= self._replay_window_seconds}
                 accepted = replay_key not in self._replay_seen
                 if accepted:
                     self._replay_seen[replay_key] = current
+        else:
+            raise ConnectorAuthError("durable replay guard is required")
         if not accepted:
             raise ConnectorAuthError("webhook replay detected")
         tenant = str(payload.get("tenant_id") or "").strip()
@@ -144,3 +148,7 @@ def _parse_timestamp(value: str | int | None) -> int:
     if timestamp <= 0:
         raise ConnectorAuthError("webhook timestamp is invalid")
     return timestamp
+
+
+def _signed_payload(timestamp: str | int, body: bytes) -> bytes:
+    return f"{int(str(timestamp))}.".encode("ascii") + body
