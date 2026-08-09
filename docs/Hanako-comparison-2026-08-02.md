@@ -39,7 +39,9 @@ Nuke AI Collaborator 与 OpenHanako 并不是同一类产品的两种实现。
 - **TRANSITION**：已有部分实现，但仍处于迁移、双写或产品化过程中。
 - **TARGET**：设计文档或路线图中的目标，不视为当前已交付功能。
 
-当前工作树中的 Electron、Onboarding 和主题相关文件仍有未提交内容，因此本文不把它们视为 Collaborator 已稳定交付的桌面能力。
+本文原始对比日期为 2026-08-02。以下“当前实现”以 2026-08-09 的仓库 `HEAD=62e5c17` 为准；8.2 之后已经提交的 Electron、Onboarding、主题、Artifact、Personal Vault 和 Timeline 代码均纳入判断。
+
+本节后续路线在 2026-08-09 复核后重新校准。原文中的路线建议保留为决策背景，但凡与“14. 当前代码复核与路线校准”冲突，以该节为准。
 
 ## 3. 根本产品模型
 
@@ -252,9 +254,11 @@ Collaborator 已通过 `agent_sessions.config_json` 保存部分执行配置，�
 
 原则是：**冻结 Bot 的执行能力，不冻结 Group 的协作现实。**
 
-### 6.2 P0：统一 Artifact 模型
+### 6.2 P1：Artifact Registry 与生命周期治理
 
-Collaborator 当前存在多种资源路径：
+Collaborator 当前已经有 `group_artifacts` 和稳定 `artifact_id`，并且上传文件、Workspace `write_file` 已进入自动登记路径。当前需要解决的已不是“是否引入 Artifact ID”，而是统一现有资源登记和生命周期语义。
+
+仍需治理的资源路径包括：
 
 - 消息附件。
 - Workspace 文件。
@@ -263,7 +267,7 @@ Collaborator 当前存在多种资源路径：
 - Git Worktree 文件。
 - 将来的外部渠道附件。
 
-建议参考 Hanako 的 SessionFile/Media 抽象，建立稳定 Artifact ID：
+建议在现有 `backend/artifacts/manager.py` 基础上补齐：
 
 ```text
 Artifact
@@ -280,7 +284,7 @@ Artifact
 └── lifecycle
 ```
 
-价值包括：
+剩余价值包括：
 
 - 外部渠道文件可直接进入工具链。
 - Bot 报告可作为聊天交付卡片发送。
@@ -340,7 +344,7 @@ protocol/
 
 Bot 配置只保存稳定标识和策略，不让各执行路径自行判断 Provider 差异。
 
-### 6.5 P1：把 Session WAL 产品化为 Execution Timeline
+### 6.5 CURRENT：Execution Timeline 产品化与加固
 
 Collaborator 已有：
 
@@ -351,7 +355,7 @@ Collaborator 已有：
 - parent session
 - token usage
 
-这些目前主要服务后端恢复。可以进一步提供用户可理解的执行详情：
+这项能力已经从后端恢复设施进入产品路径。当前同时存在 Group 级统一业务时间线和单 Session 执行抽屉，可展示：
 
 ```text
 需求输入
@@ -365,13 +369,13 @@ Collaborator 已有：
   → 最终交付了哪些 Artifact
 ```
 
-Execution Timeline 可以同时承担：
+当前下一步不是重新建设 Timeline，而是继续加固：
 
-- 审计记录。
-- 失败定位。
-- Workflow 重试入口。
-- Experience 学习证据。
-- 用户信任界面。
+- 普通用户视图与管理员审计视图分层。
+- 失败节点与恢复/重试入口关联。
+- Tool 参数和输出的脱敏、长度和权限控制。
+- Timeline 与 Artifact、Memory、Skill、Permission 的稳定下钻。
+- 大量 Diagnostic 事件的查询性能和分页稳定性。
 
 不建议为普通群聊引入任意分支；优先为 Coding Task、Workflow Run 和长任务提供 checkpoint/fork。
 
@@ -444,7 +448,7 @@ workflow_state       recoverable runtime state
 deliverables         project artifacts
 ```
 
-### 6.8 P2：Personal Knowledge Vault 产品化
+### 6.8 P1：Personal Knowledge Vault 使用证据与治理
 
 Collaborator 已有 Personal Memory 后端接口与授权边界：
 
@@ -452,14 +456,14 @@ Collaborator 已有 Personal Memory 后端接口与授权边界：
 - `backend/ai/personal_vault.py`
 - `backend/memory/application/authorized_personal.py`
 
-但还缺少用户可感知的完整体验：
+当前已经有 Personal Vault 后端、授权边界和前端管理 UI。下一步缺少的是使用证据和撤回影响的完整体验：
 
 - 系统记住了什么。
 - 记忆来自哪里。
 - 哪些 Group/Bot 可以使用。
-- 何时被使用过。
-- 删除后影响什么。
-- 用户固定事实与模型推断如何区分。
+- 哪个 Bot 在什么 Session 使用过。
+- 删除或撤回后影响哪些执行。
+- 用户固定事实与模型推断如何区分并完成确认/纠正。
 
 应继续使用 Collaborator 自己的授权模型：
 
@@ -507,7 +511,9 @@ Collaborator 的外部 Executor/Orchestrator Python 会直接 import 到运行�
 
 会话产品化后，应继续按 Group、Chat、Workflow、Execution、Artifact、Memory 分领域管理状态，避免全部进入一个全局 Store。
 
-## 8. 推荐实施路线
+## 8. 推荐实施路线（原始版本）
+
+原始路线中的 Artifact ID、Execution Timeline API/UI、Personal Vault UI 和可观测性导出已在 8.2 之后进入代码。以下旧路线保留用于审计原始决策，最新可执行路线见第 14 节。
 
 ### 阶段一：提高可复现性和可信度
 
@@ -519,7 +525,7 @@ Collaborator 的外部 Executor/Orchestrator Python 会直接 import 到运行�
 
 ### 阶段二：统一协作资源
 
-1. 引入 Artifact ID。
+1. 完善现有 Artifact Registry，而不是重新引入 Artifact ID。
 2. 统一上传、Workspace 文件、工具输出和 Workflow Deliverable。
 3. Artifact 接入权限、审计和生命周期体系。
 4. 为外部渠道预留 `origin` 和 `external_locator`。
@@ -534,13 +540,13 @@ Collaborator 的外部 Executor/Orchestrator Python 会直接 import 到运行�
 
 ### 阶段四：个人连续性
 
-1. Personal Knowledge Vault UI。
+1. Personal Knowledge Vault 使用证据与撤回影响 UI。
 2. 展示记忆来源、置信度、授权和撤回。
 3. 跨 Group 使用必须经过 Scoped Projection。
 4. Scheduler 执行绑定 Bot Identity、Permission Snapshot 和审计记录。
 5. 将主动提醒通过 Web/飞书等 Channel 投递。
 
-## 9. 建议优先级
+## 9. 原始优先级（已过时，保留用于审计）
 
 | 优先级 | 项目 | 主要价值 | 主要风险 |
 |---|---|---|---|
@@ -1091,7 +1097,7 @@ dry-run、幂等重跑、Migration、Schema Split 和 Worker lease 调度。
 
 这些导出能力统一使用当前 Registry 规则，确保不破坏敏感数据脱敏与上下文安全边界。
 
-## 13. 当前结论
+## 13. 原始结论（保留）
 
 Collaborator 的长期护城河应当是：
 
@@ -1130,3 +1136,111 @@ OpenHanako 的主要优势是：
 - 分阶段交付范围。
 - 兼容迁移方案。
 - 可验收的成功指标。
+
+## 14. 当前代码复核与路线校准（2026-08-09）
+
+本节覆盖原始文档之后的代码变化，以仓库 `HEAD=62e5c17` 为基线。它是当前可执行路线的准据；前文第 8、9 节保留为 8.2 决策审计记录，不再作为当前排期直接使用。
+
+完整开发执行计划见：[2026-08-09-hanako-comparison-development-execution-plan.md](superpowers/plans/2026-08-09-hanako-comparison-development-execution-plan.md)。
+
+### 14.1 当前状态校准
+
+| 能力 | 当前状态 | 复核结论 |
+|---|---|---|
+| Group / Worker / MCP Collector 隔离 | CURRENT | 仍是 Collaborator 的核心架构优势。真实 MCP 连接只在 Collector，Worker 通过 Proxy/IPC 调用。 |
+| Workflow / Session WAL / Recovery | CURRENT | 已有 workflow state、session events、snapshot、parent session、recovery 和原子 Workflow transition。 |
+| Capability Manifest | TARGET | `agent_sessions` 目前主要保存 `config_json`、`executor_id` 和 snapshot，尚无完整能力版本/hash 快照。 |
+| Artifact Registry | TRANSITION | `group_artifacts`、稳定 `artifact_id`、上传和 `write_file` 自动登记已完成；Workflow 交付、版本/派生关系和物理生命周期仍需治理。 |
+| Unified Timeline | CURRENT | 已有 Group 级统一业务时间线和单 Session 执行抽屉；后续重点是权限、性能、恢复入口和用户/管理员视图分层。 |
+| Personal Vault | TRANSITION | 后端授权边界和前端管理 UI 已完成；记忆来源、使用 Session、撤回影响和使用审计仍不完整。 |
+| Event Policy / Payload Policy / Retention | CURRENT | 已形成分类、脱敏、Artifact 化、原子写入、Retention、OTel 和 Prometheus 闭环。 |
+| Model Usage Ledger | CURRENT | 已按 Provider 请求记录实际模型、Token、费用、失败和 retry 关系；统一 Provider Descriptor 仍缺失。 |
+| WebSocket Event Contract | TRANSITION | IPC 有版本号，REST Timeline 有 cursor；业务 WS 尚无统一 Schema、replay cursor 和完整 catch-up 契约。 |
+| Channel Adapter | TARGET | 当前 integrations 主要是 Git/GitHub/Jira 工具集成，不是外部聊天渠道归一化层。 |
+| Store Registry | TARGET | 当前存在多种 Store，但尚无统一 owner、canonical/projection、migration、retention 和 deletion 登记。 |
+| Plugin Process Isolation | TARGET | Python Executor/Orchestrator 仍与 Worker/runtime 共享进程边界。 |
+| Electron / Onboarding / Theme | CURRENT | 相关实现已经进入提交历史，不再按“未提交能力”处理。 |
+
+### 14.2 原始检查清单中需要降级或改名的项目
+
+1. **Artifact Model** 不再是“引入 Artifact ID”的 P0，应改为 **Artifact Lifecycle Governance**，优先级 P1。
+2. **Execution Timeline** 不再是待建设的 P1，而是 CURRENT；后续工作是 Timeline Hardening。
+3. **Personal Vault UI** 已完成，应改为 **Personal Memory Provenance and Usage Audit**，优先级 P1。
+4. **OTel / Prometheus / Retention / Unified Timeline API** 已完成，转入维护、性能和权限加固。
+5. **MCP Collector OAuth 并发问题** 已加入 per-server lock 和 inflight guard；原始“完全没有 per-server lock”的描述已过时。
+6. `/api/config/mcp` 当前使用 operator 权限、ETag 和审计；原始“任何登录用户可写”的描述已过时。
+
+### 14.3 当前推荐路线
+
+#### Phase 0：状态与契约校准
+
+1. 修正旧文档中的 CURRENT / TRANSITION / TARGET 标记。
+2. 修复 Timeline Projector 与旧测试之间的 DB 绑定和文案契约不一致。
+3. 建立 Session、Workflow、Artifact、Memory、Permission 的主键和关联清单。
+4. 为每项路线补充数据迁移、权限边界和验收标准。
+
+#### Phase 1：Execution Identity
+
+1. 建立最小 Provider/Model Descriptor。
+2. 为 `agent_sessions` 增加 Capability Manifest、canonical serialization 和 manifest hash。
+3. 固定 Provider/Model、Executor、Prompt、Trait、Skill、Tool Schema、Permission 和 Sandbox 版本。
+4. 明确 Group 最新消息、共享文件、最新 Bot 交付和当前有效事实继续动态读取。
+5. Session resume/retry 时比较 Manifest，并把 Manifest Hash 绑定 Model Usage Ledger。
+
+验收标准：同一 Session 的重试可检测能力差异；实际 Provider/Model 与 Ledger 一致；Manifest 不保存 Secret 或无界原文。
+
+#### Phase 2：Event Protocol 与 Timeline Hardening
+
+1. 给业务 WebSocket 增加统一 Envelope、protocol version、event_id、request_id、session_id 和 workflow_id。
+2. 增加 reconnect cursor、catch-up 和去重语义。
+3. 对未知事件显式告警，不再静默丢弃。
+4. 把现有 Timeline 接入恢复/重试入口，并区分普通用户视图和管理员审计视图。
+
+第一阶段只需要稳定 Envelope 和回放语义，不应一开始创建大量独立 Schema 文件；类型生成和完整事件 Schema 可随后补齐。
+
+#### Phase 3：Artifact Lifecycle
+
+1. 在现有 `backend/artifacts/manager.py` 基础上统一上传、Workspace、Workflow Deliverable 和工具输出。
+2. 增加 Artifact version、`derives_from`、引用和删除语义。
+3. 明确 `storage_locator` 的权限、路径守卫和物理文件清理规则。
+4. 将 Artifact 作为 Workflow 阶段输入输出，并为未来 Connector 附件预留 `external_locator`。
+
+#### Phase 4：Memory Provenance 与 Personal Vault Governance
+
+1. 展示记忆来源、置信度、授权范围和用户/模型判断来源。
+2. 记录哪个 Group/Bot/Session 使用过某条个人记忆。
+3. 展示删除或撤回 Projection 后的影响范围。
+4. 保持跨 Group 使用必须经过 Scoped Projection，禁止默认全局注入。
+
+#### Phase 5：Provider Governance
+
+1. 统一 Provider/Model 能力描述：tool calling、vision、thinking、context window、OAuth、pricing。
+2. 统一模型废弃、替换、fallback、预算和 quota 语义。
+3. 将所有执行路径的 Provider 解析收敛到 Registry，并与 Capability Manifest、Model Usage Ledger 对接。
+
+#### Phase 6：Channel Adapter
+
+只有在确定企业渠道战略后启动，先选择一个渠道完成端到端验证。必须先解决外部租户、外部用户到 Group/Member 的映射、消息幂等、mention、回复关联、附件 Artifact 化和权限继承。
+
+#### Phase 7：Plugin Process Isolation
+
+先选择一个高风险 Executor 或 Coding Agent 做独立进程试点，完成结构化 IPC、Capability Manifest、权限、资源额度、超时、取消和崩溃恢复后，再扩展到其他插件。
+
+### 14.4 当前优先级
+
+| 优先级 | 项目 | 当前动作 |
+|---|---|---|
+| P0 | Capability Manifest / Execution Identity | 新建基础设施 |
+| P0 | 最小 WS Event Envelope / Catch-up | 新建基础设施 |
+| P1 | Timeline Hardening | 修复测试、权限、恢复和性能 |
+| P1 | Artifact Lifecycle Governance | 完成版本、派生、删除和 Workflow 交接 |
+| P1 | Personal Memory Usage Audit | 补充来源、使用和撤回影响 |
+| P1 | 最小 Provider Registry | 为 Manifest、Ledger 和成本治理提供稳定身份 |
+| P1/P2 | Store Registry | 先做可执行元数据登记，不做大型服务 |
+| P1/P2 | Channel Adapter | 取决于企业渠道战略 |
+| P2 | Plugin Process Isolation | 先做单插件隔离试点 |
+| CURRENT | Observability 闭环 | 转入维护、性能和安全加固 |
+
+### 14.5 当前验证备注
+
+截至本次复核，相关定向测试结果为 `71 passed, 2 failed`。失败集中在旧的 `test_timeline_projector.py`：一个测试仍期待旧英文文案，另一个测试把数据写入临时 `DB_PATH`，而当前 Projector 按 `group_db_path(group_id)` 读取。该测试契约需要在后续 Timeline Hardening 中修正，当前不能将相关测试描述为完全绿色。
