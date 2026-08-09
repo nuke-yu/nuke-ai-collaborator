@@ -21,7 +21,7 @@
 
 <br/>
 
-<img src="./Home%20page.png" width="100%" alt="Nuke AI Collaborator Home Page" />
+<img src="home-page.png" width="100%" alt="Nuke AI Collaborator Home Page" />
 
 <br/>
 
@@ -39,7 +39,7 @@
       <b>📹 Demo 1: Platform Basics & Multi-Role Collaboration</b>
       <br/><br/>
       <a href="https://github.com/nuke-yu/nuke-ai-collaborator/blob/main/vedio/Nuke-ai-collaborator.mp4" target="_blank">
-        <img src="./Home%20page.png" width="100%" alt="Click to play Demo 1" style="border-radius: 8px; border: 1px solid #30363d;" />
+        <img src="home-page.png" width="100%" alt="Click to play Demo 1" style="border-radius: 8px; border: 1px solid #30363d;" />
         <br/><br/>
         <b>▶️ Click to Watch Demo 1 (5.2MB MP4)</b>
       </a>
@@ -50,7 +50,7 @@
       <b>🐝 Demo 2: Nuke AI Swarm Multi-Agent Swarm Orchestration</b>
       <br/><br/>
       <a href="https://github.com/nuke-yu/nuke-ai-collaborator/blob/main/vedio/Nuke-AI-swarm.mp4" target="_blank">
-        <img src="./Home%20page.png" width="100%" alt="Click to play Demo 2" style="border-radius: 8px; border: 1px solid #30363d;" />
+        <img src="home-page.png" width="100%" alt="Click to play Demo 2" style="border-radius: 8px; border: 1px solid #30363d;" />
         <br/><br/>
         <b>▶️ Click to Watch Demo 2 (7.8MB MP4)</b>
       </a>
