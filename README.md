@@ -33,23 +33,32 @@
 
 ## 🎬 演示视频 (Product Demos)
 
-### 📹 Demo 1: Nuke AI Collaborator 平台实操演示
-<div align="center">
-  <video src="https://github.com/nuke-yu/nuke-ai-collaborator/raw/main/vedio/Nuke-ai-collaborator.mp4" controls="controls" width="100%" poster="./Home%20page.png">
-    您的浏览器不支持视频播放，可直接下载 <a href="https://github.com/nuke-yu/nuke-ai-collaborator/raw/main/vedio/Nuke-ai-collaborator.mp4">Nuke-ai-collaborator.mp4</a> 观看。
-  </video>
-  <p><i>▶️ 平台基础协作与多角色 AI 员工协同实操演示</i></p>
-</div>
-
-<br/>
-
-### 🐝 Demo 2: Nuke AI Swarm 多智能体集群协同
-<div align="center">
-  <video src="https://github.com/nuke-yu/nuke-ai-collaborator/raw/main/vedio/Nuke%20AI%20swarm.mov" controls="controls" width="100%" poster="./Home%20page.png">
-    您的浏览器不支持视频播放，可直接下载 <a href="https://github.com/nuke-yu/nuke-ai-collaborator/raw/main/vedio/Nuke%20AI%20swarm.mov">Nuke AI swarm.mov</a> 观看。
-  </video>
-  <p><i>▶️ 多智能体流水线并发编排与任务接力实战演示</i></p>
-</div>
+<table align="center" width="100%">
+  <tr>
+    <td align="center" width="50%">
+      <b>📹 Demo 1: 平台基础协作与多角色协同</b>
+      <br/><br/>
+      <a href="https://github.com/nuke-yu/nuke-ai-collaborator/blob/main/vedio/Nuke-ai-collaborator.mp4" target="_blank">
+        <img src="./Home%20page.png" width="100%" alt="点击播放 Demo 1" style="border-radius: 8px; border: 1px solid #30363d;" />
+        <br/><br/>
+        <b>▶️ 点击在线播放 Demo 1 (MP4)</b>
+      </a>
+      <br/>
+      <sub>展示群组讨论、多角色 AI 员工接力与共享看板</sub>
+    </td>
+    <td align="center" width="50%">
+      <b>🐝 Demo 2: Nuke AI Swarm 多智能体集群演练</b>
+      <br/><br/>
+      <a href="https://github.com/nuke-yu/nuke-ai-collaborator/blob/main/vedio/Nuke%20AI%20swarm.mov" target="_blank">
+        <img src="./Home%20page.png" width="100%" alt="点击播放 Demo 2" style="border-radius: 8px; border: 1px solid #30363d;" />
+        <br/><br/>
+        <b>▶️ 点击在线播放 Demo 2 (Swarm)</b>
+      </a>
+      <br/>
+      <sub>展示多智能体并发流水线编排与任务接力实战</sub>
+    </td>
+  </tr>
+</table>
 
 ---
 

@@ -33,23 +33,32 @@
 
 ## 🎬 Product Demo Videos
 
-### 📹 Demo 1: Nuke AI Collaborator Platform Walkthrough
-<div align="center">
-  <video src="https://github.com/nuke-yu/nuke-ai-collaborator/raw/main/vedio/Nuke-ai-collaborator.mp4" controls="controls" width="100%" poster="./Home%20page.png">
-    Your browser does not support playing HTML5 video. You can download and watch <a href="https://github.com/nuke-yu/nuke-ai-collaborator/raw/main/vedio/Nuke-ai-collaborator.mp4">Nuke-ai-collaborator.mp4</a> directly.
-  </video>
-  <p><i>▶️ Live walkthrough of group collaboration and multi-role AI team workflows</i></p>
-</div>
-
-<br/>
-
-### 🐝 Demo 2: Nuke AI Swarm Multi-Agent Swarm Orchestration
-<div align="center">
-  <video src="https://github.com/nuke-yu/nuke-ai-collaborator/raw/main/vedio/Nuke%20AI%20swarm.mov" controls="controls" width="100%" poster="./Home%20page.png">
-    Your browser does not support playing HTML5 video. You can download and watch <a href="https://github.com/nuke-yu/nuke-ai-collaborator/raw/main/vedio/Nuke%20AI%20swarm.mov">Nuke AI swarm.mov</a> directly.
-  </video>
-  <p><i>▶️ Multi-agent concurrent pipeline orchestration and task relay in action</i></p>
-</div>
+<table align="center" width="100%">
+  <tr>
+    <td align="center" width="50%">
+      <b>📹 Demo 1: Platform Basics & Multi-Role Collaboration</b>
+      <br/><br/>
+      <a href="https://github.com/nuke-yu/nuke-ai-collaborator/blob/main/vedio/Nuke-ai-collaborator.mp4" target="_blank">
+        <img src="./Home%20page.png" width="100%" alt="Click to play Demo 1" style="border-radius: 8px; border: 1px solid #30363d;" />
+        <br/><br/>
+        <b>▶️ Click to Watch Demo 1 (MP4)</b>
+      </a>
+      <br/>
+      <sub>Live walkthrough of group discussions, AI agent handoffs, and shared task board</sub>
+    </td>
+    <td align="center" width="50%">
+      <b>🐝 Demo 2: Nuke AI Swarm Multi-Agent Swarm Orchestration</b>
+      <br/><br/>
+      <a href="https://github.com/nuke-yu/nuke-ai-collaborator/blob/main/vedio/Nuke%20AI%20swarm.mov" target="_blank">
+        <img src="./Home%20page.png" width="100%" alt="Click to play Demo 2" style="border-radius: 8px; border: 1px solid #30363d;" />
+        <br/><br/>
+        <b>▶️ Click to Watch Demo 2 (Swarm)</b>
+      </a>
+      <br/>
+      <sub>Multi-agent concurrent pipeline orchestration and task relay in action</sub>
+    </td>
+  </tr>
+</table>
 
 ---
 
