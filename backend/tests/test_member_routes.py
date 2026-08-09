@@ -130,5 +130,17 @@ class TestMemberRoutes(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(any("best-effort SQL failed" in line for line in logs.output))
 
+    async def test_integration_member_reads_require_group_membership(self):
+        async with database.get_db() as db:
+            await db.execute("CREATE TABLE IF NOT EXISTS group_memberships(user_id INTEGER, group_id INTEGER, role TEXT)")
+            await db.execute("INSERT INTO groups (id, name) VALUES (2, 'Other Group')")
+            await db.execute("INSERT INTO group_memberships(user_id, group_id, role) VALUES (1, 1, 'owner')")
+            await db.commit()
+        async with AsyncClient(app=app, base_url="http://test") as ac:
+            allowed = await ac.get("/api/groups/1/integrations")
+            denied = await ac.get("/api/groups/2/integrations")
+        self.assertEqual(allowed.status_code, 200)
+        self.assertEqual(denied.status_code, 404)
+
 if __name__ == "__main__":
     unittest.main()

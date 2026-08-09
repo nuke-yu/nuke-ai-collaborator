@@ -6,7 +6,7 @@ from datetime import datetime
 from urllib.parse import quote
 from fastapi import APIRouter, HTTPException, Depends
 
-from api.deps import ensure_group_ready
+from api.deps import ensure_group_ready, require_group_member_ready
 from core import auth
 from fastapi.responses import Response
 from db import (get_db, write_connect, global_db, get_group, get_members, get_all_messages, get_member_stats,
@@ -165,7 +165,7 @@ async def create_group(req: CreateGroupRequest, user=Depends(auth.get_current_us
     return {"id": group_id, "name": req.name}
 
 
-@router.get("/api/groups/{group_id}")
+@router.get("/api/groups/{group_id}", dependencies=[Depends(require_group_member_ready)])
 async def get_group_info(group_id: int):
     async with get_db() as db:
         group = await get_group(db, group_id)
@@ -176,7 +176,7 @@ async def get_group_info(group_id: int):
     return {"group": group, "members": members + [member.to_member_dict() for member in integrations]}
 
 
-@router.get("/api/groups/{group_id}/integrations")
+@router.get("/api/groups/{group_id}/integrations", dependencies=[Depends(require_group_member_ready)])
 async def get_group_integrations(group_id: int):
     async with get_db() as db:
         if not await get_group(db, group_id):
