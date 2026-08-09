@@ -40,7 +40,7 @@ class TestChannelProcessServer(unittest.IsolatedAsyncioTestCase):
         )
         bridge = {
             "direction": "outbound", "event_type": envelope.event_type,
-            "idempotency_key": envelope.idempotency_key, "payload": {"outbound": envelope.to_dict()},
+            "idempotency_key": envelope.idempotency_key, "payload": {"channel_instance_id": "slack:prod", "outbound": envelope.to_dict()},
             "protocol_version": "channel-bridge.v1",
         }
         reader = asyncio.StreamReader()
@@ -63,6 +63,26 @@ class TestChannelProcessServer(unittest.IsolatedAsyncioTestCase):
         response = json.loads(writer.data[0])
         self.assertEqual(response["request_id"], "req-2")
         self.assertIn("error", response)
+
+    async def test_server_rejects_mismatched_bridge_contract_fields(self):
+        server = ChannelProcessServer(ChannelProcessManifest("slack:prod"), _Handler())
+        reader = asyncio.StreamReader()
+        reader.feed_data((json.dumps({
+            "request_id": "req-3",
+            "manifest": {"channel_instance_id": "slack:prod", "version": "1"},
+            "bridge": {
+                "direction": "outbound", "event_type": "task_stuck", "idempotency_key": "bridge-key",
+                "payload": {"channel_instance_id": "slack:prod", "outbound": {
+                    "identity": {"channel": "slack", "external_tenant_id": "tenant"},
+                    "conversation": {"external_conversation_id": "chat", "conversation_type": "group"},
+                    "event_type": "task_stuck", "payload": {}, "idempotency_key": "outbound-key",
+                }}, "protocol_version": "channel-bridge.v1",
+            },
+        }) + "\n").encode())
+        reader.feed_eof()
+        writer = _Writer()
+        await server.serve(reader, writer)
+        self.assertIn("error", json.loads(writer.data[0]))
 
 
 if __name__ == "__main__":

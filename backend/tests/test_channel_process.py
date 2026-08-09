@@ -91,6 +91,24 @@ class TestChannelProcess(unittest.IsolatedAsyncioTestCase):
         start.assert_awaited_once()
         self.assertEqual(start.await_args.kwargs["limit"], 256_000)
 
+    async def test_cancellation_stops_child_process(self):
+        process = FakeProcess(b"")
+        async def wait_forever():
+            await asyncio.sleep(10)
+        process.stdout.readline = AsyncMock(side_effect=wait_forever)
+        client = ChannelProcessClient(["channel-worker"], ChannelProcessManifest("slack:prod"))
+        envelope = OutboundEnvelope(
+            identity=ChannelIdentity("slack", "tenant-a"), conversation=ChannelConversation("chat-1"),
+            event_type="task_stuck", payload={}, idempotency_key="event-cancel",
+        )
+        with patch("channels.process.asyncio.create_subprocess_exec", new=AsyncMock(return_value=process)):
+            task = asyncio.create_task(client.send(envelope))
+            await asyncio.sleep(0)
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+        self.assertEqual(process.terminate_calls, 1)
+
     async def test_close_kills_process_when_terminate_does_not_finish(self):
         process = FakeProcess(b"")
         process.wait = AsyncMock(side_effect=asyncio.TimeoutError)

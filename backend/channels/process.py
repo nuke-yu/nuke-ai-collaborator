@@ -87,6 +87,9 @@ class ChannelProcessClient:
             except ChannelProcessError:
                 await self._stop_process()
                 raise
+            except asyncio.CancelledError:
+                await self._stop_process()
+                raise
             except (asyncio.TimeoutError, BrokenPipeError, ConnectionError, OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
                 await self._stop_process()
                 raise ChannelProcessError("channel process response failed") from exc

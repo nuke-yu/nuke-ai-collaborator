@@ -71,6 +71,10 @@ class ChannelProcessServer:
         bridge = BridgeEnvelope(**bridge_data)
         if bridge.direction is not BridgeDirection.OUTBOUND:
             raise ChannelProcessError("channel process accepts outbound bridge envelopes only")
+        if bridge.idempotency_key != str((bridge.payload or {}).get("outbound", {}).get("idempotency_key") or ""):
+            raise ChannelProcessError("bridge and outbound idempotency keys do not match")
+        if bridge.payload.get("channel_instance_id") != self.manifest.channel_instance_id:
+            raise ChannelProcessError("bridge channel instance mismatch")
         outbound_data = bridge.payload.get("outbound")
         if not isinstance(outbound_data, dict):
             raise ChannelProcessError("bridge payload must contain outbound envelope")
@@ -86,6 +90,9 @@ class ChannelProcessServer:
             source_event_id=outbound_data.get("source_event_id"),
             protocol_version=outbound_data.get("protocol_version", "channel.v1"),
         )
+        expected_channel = self.manifest.channel_instance_id.split(":", 1)[0].lower()
+        if envelope.identity.channel != expected_channel:
+            raise ChannelProcessError("outbound channel does not match process manifest")
         receipt = await asyncio.wait_for(self.handler.send(envelope), timeout=self.manifest.max_seconds)
         if not isinstance(receipt, DeliveryReceipt):
             raise ChannelProcessError("handler returned invalid delivery receipt")
