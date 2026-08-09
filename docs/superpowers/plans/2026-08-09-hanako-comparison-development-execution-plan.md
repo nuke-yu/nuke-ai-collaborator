@@ -72,7 +72,7 @@ Phase 4  Memory Provenance / Personal Vault Audit（影响审计已完成）
     ↓
 Phase 5  Provider Governance（基础治理已完成）
     ↓
-Phase 6  Channel Adapter（C0–C8 基础模块已完成，当前 Gate 2–4，运行时 wiring 尚未完成）
+Phase 6  Channel Adapter（C0–C8 基础模块已完成；C4/C6/C7 已有本地 runtime wiring，C8 已有进程 fault boundary；真实平台和 deployable 隔离待完成）
     ↓
 Phase 7  Plugin Process Isolation（IPC 治理已完成，全面迁移待完善）
 ```

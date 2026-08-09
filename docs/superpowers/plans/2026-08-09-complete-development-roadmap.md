@@ -1,6 +1,6 @@
 # Nuke AI 完整开发路线与 Channel 独立集成计划
 
-> 基线：2026-08-09，后端全量测试 `2512 passed, 2 skipped, 56 warnings, 40 subtests passed`。
+> 基线：2026-08-09，后端全量测试 `2522 passed, 2 skipped, 56 warnings, 40 subtests passed`（在允许本地 Unix/TCP socket 的环境执行）。
 >
 > 本文汇总当前已交付能力、未完成治理事项，以及 Channel 从独立模块演进为 Group 集成成员的完整开发路线。
 
@@ -19,16 +19,16 @@ C0–C8 的基础代码已按顺序提交，但经 Review 校准，不能把“�
 | C0 契约与边界 | `918dfcf` | 2 | Contract merged + module tested |
 | C1 Channel-owned 消息/投递状态 | `7cd4456` | 2 | SQLite 状态和边界测试已完成，尚无生产 Worker 编排 |
 | C2 通用签名 Webhook Connector | `a305b2e` | 2 | 仅通用参考 Connector，缺少真实平台 replay/限流/附件闭环 |
-| C3 Channel–Group Binding | `2cb2912` | 2 | Binding Store 已有，Group 管理 API 尚未接入 |
-| C4 Integration Member | `71d45cc` | 2 | 模型/Store 已有，未接入 Group 成员运行时 |
+| C3 Channel–Group Binding | `2cb2912`, `45cd48c` | 2 | Binding Store 和状态一致性已完成，正式配置/审批 API 尚未完成 |
+| C4 Integration Member | `71d45cc`, `8d03335` | 3（读取投影） | Group 成员查询已投影 Integration Member；创建/审批/权限闭环尚未完成 |
 | C5 入站路由到配置 Bot | `ed65487` | 2 | Bridge 路由基础层已测，外部用户授权映射尚未接入 |
-| C6 Group 事件出站 Outbox | `75da38c`, `a4c4939` | 2 | Group transactional outbox + relay contract 已测，尚无生产事件 producer |
-| C7 脱敏、审计、重试、死信 | `90cf644` + review fixes | 4（模块级） | 失败回执、脱敏、lease/heartbeat、原子审计已 failure-tested，运维控制面未完成 |
-| C8 独立进程 Bridge 边界 | `0efd8e9` + `f633bf9` | 2 | JSONL fault boundary 已测，无 server/Supervisor/deployment sandbox |
+| C6 Group 事件出站 Outbox | `75da38c`, `a4c4939`, `ea55c17`, `741efd5`, `594c8c7` | 4（本地运行时） | Workflow observation 已在 Group 事务内生成 outbox；Relay 已由 Supervisor 托管并有超时、错误隔离、SLO 指标；尚无真实平台 E2E |
+| C7 脱敏、审计、重试、死信 | `90cf644` + review fixes + `3995fcd`, `5c15f0b`, `d2bcac4` | 4（本地运行时） | Pause/resume、健康、死信 replay、审计和 Prometheus 已接入；尚无部署级告警/值班演练 |
+| C8 独立进程 Bridge 边界 | `0efd8e9`, `f633bf9`, `73b8ce9`, `50a5d60` | 4（模块级） | JSONL Server/Client、Supervisor 生命周期、超时关闭、最小环境和 Secret Resolver 已测；尚无 OS/container sandbox 与部署编排 |
 
 Review 修复 commits：`cf35651`（回执校验）、`ba9b2e4`（存储边界脱敏）、`c66bd83`（delivery lease）、`ecdd9fe`（状态/审计原子事务）、`057d380`（canonical event_id）、`f633bf9`（ProcessClient 故障恢复）、`a4c4939`（Group durable outbox relay）、`a87fbff`（持久化入站去重）、`458e53c`（协议版本和无碰撞 key）、`5bb0370`（raw bytes 验签/replay）、`45cd48c`（Binding/Member/Router 状态一致性）、`3475b40`（payload fail-closed/lease heartbeat）。
 
-当前禁止直接进入真实平台生产接入，必须先完成 Gate 3 runtime wiring。
+当前已完成本地 runtime wiring，但仍禁止宣称真实平台生产完成；必须补齐平台授权、真实 Connector E2E、部署隔离和 go/no-go 演练。
 
 ## 1. 总体架构原则
 
@@ -283,7 +283,7 @@ Integration Member 负责：
 
 验收：外部消息只触发绑定的 Group 和允许的 Bot，不能跨 Group。
 
-### C6：Group/Bot → Channel Outbound（Gate 2：模块与 durable relay 已完成）
+### C6：Group/Bot → Channel Outbound（Gate 4：本地运行时 failure-tested）
 
 出站订阅事件至少包括：
 
@@ -298,6 +298,8 @@ Integration Member 负责：
 
 ```text
 Group SQLite commit
+ → group_channel_event_outbox（同一 Group 事务）
+ → Supervisor GroupChannelRelayService
  → channel_delivery_outbox
  → 异步 Dispatcher
  → Connector.send()
@@ -308,7 +310,7 @@ Group SQLite commit
 
 验收：外部平台失败不回滚 Group 任务；重试幂等；成功发送能关联外部消息 ID 和内部 Event/Session/Artifact。
 
-### C7：安全、审计和运维（Gate 4：模块级 failure-tested）
+### C7：安全、审计和运维（Gate 4：本地运行时 failure-tested）
 
 - Channel Secret 只能保存引用，不进 Group DB 或事件 Payload。
 - 外发前执行脱敏、长度限制和 Artifact 权限检查。
@@ -318,9 +320,9 @@ Group SQLite commit
 - 为每个 Channel/Binding 提供健康状态、最后成功投递时间和失败计数。
 - 外部平台重复事件、乱序事件和过期事件必须可处理。
 
-### C8：进程与部署隔离（Gate 2：JSONL fault boundary）
+### C8：进程与部署隔离（Gate 4：模块级 failure-tested）
 
-已完成独立 JSONL `BridgeEnvelope` 进程客户端和响应校验；模块依赖保持可分离。生产部署编排仍建议采用：
+已完成独立 JSONL `BridgeEnvelope` Process Server/Client、响应校验、Supervisor 生命周期、超时 kill fallback、最小环境和显式 Secret Resolver；模块依赖保持可分离。生产部署编排仍需采用：
 
 ```text
 Channel Process
