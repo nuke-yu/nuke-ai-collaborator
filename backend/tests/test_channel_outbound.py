@@ -54,6 +54,14 @@ class TestChannelOutbound(unittest.IsolatedAsyncioTestCase):
         finally:
             tmp.cleanup()
 
+    async def test_missing_event_id_fails_and_distinct_events_are_not_collapsed(self):
+        projector = OutboundEventProjector(active_binding())
+        with self.assertRaises(ValueError):
+            projector.project("task_stuck", {})
+        first = projector.project("task_stuck", {}, event_id="event-1")
+        second = projector.project("task_stuck", {}, event_id="event-2")
+        self.assertNotEqual(first.idempotency_key, second.idempotency_key)
+
 
 if __name__ == "__main__":
     unittest.main()

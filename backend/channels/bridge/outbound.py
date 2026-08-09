@@ -50,9 +50,9 @@ class OutboundEventProjector:
             raise OutboundPolicyError(f"event is not allowed by binding: {event_type}")
         if not isinstance(payload, Mapping):
             raise ValueError("payload must be an object")
-        key = str(event_id or f"{self.binding.binding_id}:{event_type}").strip()
-        if not key:
-            raise ValueError("event_id must not be empty")
+        if event_id is None or not str(event_id).strip():
+            raise ValueError("canonical event_id is required for outbound delivery")
+        key = str(event_id).strip()
         channel = self.binding.channel_instance_id.split(":", 1)[0]
         bridge = BridgeEnvelope(
             direction=BridgeDirection.OUTBOUND,
