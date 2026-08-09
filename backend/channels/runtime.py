@@ -106,6 +106,7 @@ class GroupChannelRelayService:
         """Relay at most one committed event per known Group."""
         ids = sorted({int(group_id) for group_id in await self.group_ids() if int(group_id) > 0})
         forwarded = 0
+        cycle_healthy = True
         for group_id in ids:
             projector = WorkflowChannelProjectionRelay(
                 self.group_db_path(group_id),
@@ -131,12 +132,14 @@ class GroupChannelRelayService:
                     self._stats["projection_dead_letters"] += 1
                 result = await asyncio.wait_for(relay.relay_once(), timeout=self.relay_timeout)
             except asyncio.TimeoutError:
+                cycle_healthy = False
                 self._stats["timeouts"] += 1
                 self._stats["last_error"] = f"relay timeout group={group_id}"
                 continue
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
+                cycle_healthy = False
                 self._stats["errors"] += 1
                 self._stats["last_error"] = f"group={group_id}: {type(exc).__name__}"
                 log.exception("group channel relay failed for group=%s", group_id)
@@ -152,7 +155,10 @@ class GroupChannelRelayService:
         self._stats["cycles"] += 1
         self._stats["forwarded"] += forwarded
         self._stats["last_cycle_at"] = int(time.time() * 1000)
-        self._stats["last_success_at"] = self._stats["last_cycle_at"]
+        self._stats["relay_up"] = cycle_healthy
+        if cycle_healthy:
+            self._stats["last_success_at"] = self._stats["last_cycle_at"]
+            self._stats["last_error"] = None
         return forwarded
 
     async def _run(self) -> None:
@@ -266,7 +272,15 @@ class ChannelDeliveryService:
         self._dispatchers: dict[str, ChannelDeliveryDispatcher] = {}
         self._task: asyncio.Task | None = None
         self._stopping = False
-        self._stats: dict[str, object] = {"cycles": 0, "claimed": 0, "errors": 0, "last_error": None}
+        self._stats: dict[str, object] = {
+            "cycles": 0,
+            "claimed": 0,
+            "errors": 0,
+            "last_error": None,
+            "last_cycle_at": None,
+            "last_success_at": None,
+            "delivery_up": False,
+        }
 
     def register(self, channel: str, connector: ChannelConnector) -> None:
         raw_key = str(channel or "").strip()
@@ -283,10 +297,12 @@ class ChannelDeliveryService:
             return
         await self.store.initialize()
         self._stopping = False
+        self._stats["delivery_up"] = True
         self._task = asyncio.create_task(self._run(), name="channel-delivery")
 
     async def stop(self) -> None:
         self._stopping = True
+        self._stats["delivery_up"] = False
         task, self._task = self._task, None
         if task is None:
             return
@@ -295,7 +311,11 @@ class ChannelDeliveryService:
             await task
 
     def snapshot(self) -> dict[str, object]:
-        return {**self._stats, "registered_channels": sorted(self._connectors)}
+        return {
+            **self._stats,
+            "running": self._task is not None and not self._task.done(),
+            "registered_channels": sorted(self._connectors),
+        }
 
     def require_registered_instances(self, instance_ids: Sequence[str]) -> None:
         required = {
@@ -309,17 +329,24 @@ class ChannelDeliveryService:
 
     async def run_once(self) -> int:
         claimed = 0
+        cycle_healthy = True
         for dispatcher in tuple(self._dispatchers.values()):
             try:
                 claimed += int(await dispatcher.run_once())
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
+                cycle_healthy = False
                 self._stats["errors"] += 1
                 self._stats["last_error"] = type(exc).__name__
                 log.exception("channel delivery dispatcher failed")
         self._stats["cycles"] += 1
         self._stats["claimed"] += claimed
+        self._stats["last_cycle_at"] = int(time.time() * 1000)
+        self._stats["delivery_up"] = cycle_healthy
+        if cycle_healthy:
+            self._stats["last_success_at"] = self._stats["last_cycle_at"]
+            self._stats["last_error"] = None
         return claimed
 
     async def _run(self) -> None:
@@ -331,5 +358,6 @@ class ChannelDeliveryService:
             except Exception as exc:
                 self._stats["errors"] += 1
                 self._stats["last_error"] = type(exc).__name__
+                self._stats["delivery_up"] = False
                 log.exception("channel delivery service loop failed")
             await asyncio.sleep(self.poll_interval)

@@ -32,7 +32,11 @@ class TestChannelDeliveryService(unittest.IsolatedAsyncioTestCase):
             service.register("slack", connector)
             await service.run_once()
             await service.start()
+            self.assertTrue(service.snapshot()["running"])
+            self.assertTrue(service.snapshot()["delivery_up"])
             await service.stop()
+            self.assertFalse(service.snapshot()["running"])
+            self.assertFalse(service.snapshot()["delivery_up"])
             self.assertEqual((await store.get_delivery("event-1"))["state"], "sent")
             self.assertEqual(connector.envelopes[0].source_event_id, "workflow-source-1")
             self.assertEqual(

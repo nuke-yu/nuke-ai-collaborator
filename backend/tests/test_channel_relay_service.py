@@ -1,4 +1,5 @@
 import os
+import asyncio
 import tempfile
 import unittest
 
@@ -50,6 +51,51 @@ class TestGroupChannelRelayService(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual((await cursor.fetchone())[0], "pending")
         finally:
             tmp.cleanup()
+
+    async def test_health_recovers_and_partial_failure_is_not_success(self):
+        with tempfile.TemporaryDirectory(prefix="channel-relay-health-") as directory:
+            calls = 0
+
+            async def groups():
+                nonlocal calls
+                calls += 1
+                if calls == 1:
+                    raise OSError("central db unavailable")
+                return []
+
+            service = GroupChannelRelayService(
+                ChannelStore(os.path.join(directory, "channel.db")),
+                groups,
+                lambda _group_id: os.path.join(directory, "group.db"),
+                poll_interval=0.01,
+            )
+            await service.start()
+            for _ in range(100):
+                snapshot = service.snapshot()
+                if snapshot["errors"] == 1 and snapshot["cycles"] >= 1:
+                    break
+                await asyncio.sleep(0.01)
+            recovered = service.snapshot()
+            self.assertTrue(recovered["relay_up"])
+            self.assertIsNotNone(recovered["last_success_at"])
+            self.assertIsNone(recovered["last_error"])
+            await service.stop()
+            snapshot = service.snapshot()
+            self.assertEqual(snapshot["errors"], 1)
+
+    async def test_group_error_does_not_advance_last_success(self):
+        with tempfile.TemporaryDirectory(prefix="channel-relay-partial-") as directory:
+            service = GroupChannelRelayService(
+                ChannelStore(os.path.join(directory, "channel.db")),
+                lambda: _groups(7),
+                lambda _group_id: os.path.join(directory, "missing", "group.db"),
+            )
+            await service.start()
+            await asyncio.sleep(0.02)
+            await service.stop()
+            snapshot = service.snapshot()
+            self.assertIsNone(snapshot["last_success_at"])
+            self.assertIsNotNone(snapshot["last_error"])
 
 
 async def _groups(group_id: int):
