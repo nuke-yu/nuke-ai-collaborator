@@ -11,7 +11,7 @@ from typing import Awaitable, Callable, Protocol, Sequence
 
 from channels.core import ChannelConversation, ChannelIdentity, DeliveryReceipt, OutboundEnvelope
 from channels.stores import ChannelStore, DeliveryState
-from channels.bridge.group_outbox import GroupChannelOutboxRelay
+from channels.bridge.group_outbox import GroupChannelOutboxRelay, GroupRelayResult
 
 
 log = logging.getLogger(__name__)
@@ -62,6 +62,8 @@ class GroupChannelRelayService:
             "errors": 0,
             "timeouts": 0,
             "last_cycle_at": None,
+            "last_success_at": None,
+            "relay_up": False,
             "last_error": None,
         }
 
@@ -70,10 +72,12 @@ class GroupChannelRelayService:
             return
         await self.channel_store.initialize()
         self._stopping = False
+        self._stats["relay_up"] = True
         self._task = asyncio.create_task(self._run(), name="group-channel-relay")
 
     async def stop(self) -> None:
         self._stopping = True
+        self._stats["relay_up"] = False
         task, self._task = self._task, None
         if task is None:
             return
@@ -96,7 +100,7 @@ class GroupChannelRelayService:
                 owner_id=f"{self.owner_id}:group:{group_id}",
             )
             try:
-                did_work = await asyncio.wait_for(relay.relay_once(), timeout=self.relay_timeout)
+                result = await asyncio.wait_for(relay.relay_once(), timeout=self.relay_timeout)
             except asyncio.TimeoutError:
                 self._stats["timeouts"] += 1
                 self._stats["last_error"] = f"relay timeout group={group_id}"
@@ -108,15 +112,25 @@ class GroupChannelRelayService:
                 self._stats["last_error"] = f"group={group_id}: {type(exc).__name__}"
                 log.exception("group channel relay failed for group=%s", group_id)
                 continue
-            forwarded += int(did_work)
+            if result is GroupRelayResult.FORWARDED:
+                forwarded += 1
         self._stats["cycles"] += 1
         self._stats["forwarded"] += forwarded
         self._stats["last_cycle_at"] = int(time.time() * 1000)
+        self._stats["last_success_at"] = self._stats["last_cycle_at"]
         return forwarded
 
     async def _run(self) -> None:
         while not self._stopping:
-            await self.run_once()
+            try:
+                await self.run_once()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                self._stats["errors"] += 1
+                self._stats["last_error"] = type(exc).__name__
+                self._stats["relay_up"] = False
+                log.exception("group channel relay loop failed")
             await asyncio.sleep(self.poll_interval)
 
 

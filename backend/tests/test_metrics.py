@@ -23,7 +23,7 @@ class _FakeProc:
 
 class _FakeRelay:
     def snapshot(self):
-        return {"cycles": 4, "forwarded": 7, "errors": 1, "timeouts": 2}
+        return {"cycles": 4, "forwarded": 7, "errors": 1, "timeouts": 2, "relay_up": True}
 
 
 class _FakeSupervisor:
@@ -55,6 +55,7 @@ class TestMetricsCollector(unittest.TestCase):
         sup._channel_relay = _FakeRelay()
         out = self._render(sup)
         self.assertIn("nuke_channel_relay_cycles_total 4.0", out)
+        self.assertIn("nuke_channel_relay_up 1.0", out)
         self.assertIn("nuke_channel_relay_forwarded_total 7.0", out)
         self.assertIn("nuke_channel_relay_timeouts_total 2.0", out)
 

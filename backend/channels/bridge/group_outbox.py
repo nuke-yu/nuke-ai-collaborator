@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import time
 import uuid
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,14 @@ from channels.stores import ChannelPayloadTooLargeError, ChannelStore, sanitize_
 
 class GroupChannelOutboxError(RuntimeError):
     pass
+
+
+class GroupRelayResult(StrEnum):
+    IDLE = "idle"
+    FORWARDED = "forwarded"
+    RETRY_SCHEDULED = "retry_scheduled"
+    DEAD_LETTERED = "dead_lettered"
+    LEASE_LOST = "lease_lost"
 
 
 _DDL = """CREATE TABLE IF NOT EXISTS group_channel_event_outbox (
@@ -80,12 +89,12 @@ class GroupChannelOutboxRelay:
         if lease_ms <= 0:
             raise ValueError("lease_ms must be positive")
 
-    async def relay_once(self, *, now_ms: int | None = None) -> bool:
+    async def relay_once(self, *, now_ms: int | None = None) -> GroupRelayResult:
         now = now_ms if now_ms is not None else int(time.time() * 1000)
         async with aiosqlite.connect(self.group_db_path) as db:
             await initialize_group_channel_outbox(db)
             await db.execute("BEGIN IMMEDIATE")
-            await db.execute(
+            cursor = await db.execute(
                 """UPDATE group_channel_event_outbox
                    SET state='retrying',lease_owner=NULL,lease_expires_at=NULL,updated_at=?
                    WHERE state='sending' AND lease_expires_at<=?""",
@@ -100,7 +109,7 @@ class GroupChannelOutboxRelay:
                 row = await cursor.fetchone()
             if row is None:
                 await db.rollback()
-                return False
+                return GroupRelayResult.IDLE
             event_id, payload_json, attempts = row
             await db.execute(
                 """UPDATE group_channel_event_outbox
@@ -113,21 +122,23 @@ class GroupChannelOutboxRelay:
             envelope = _outbound_from_json(payload_json)
             await self.channel_store.enqueue_outbound(envelope)
         except Exception as exc:
-            await self._finish(event_id, "retrying", str(exc), now + 1_000)
+            finished = await self._finish(event_id, "retrying", str(exc), now + 1_000)
+            return GroupRelayResult.RETRY_SCHEDULED if finished else GroupRelayResult.LEASE_LOST
         else:
-            await self._finish(event_id, "forwarded", None, now)
-        return True
+            finished = await self._finish(event_id, "forwarded", None, now)
+            return GroupRelayResult.FORWARDED if finished else GroupRelayResult.LEASE_LOST
 
-    async def _finish(self, event_id: str, state: str, error: str | None, next_attempt_at: int) -> None:
+    async def _finish(self, event_id: str, state: str, error: str | None, next_attempt_at: int) -> bool:
         now = int(time.time() * 1000)
         async with aiosqlite.connect(self.group_db_path) as db:
-            await db.execute(
+            cursor = await db.execute(
                 """UPDATE group_channel_event_outbox
                    SET state=?,last_error=?,next_attempt_at=?,lease_owner=NULL,lease_expires_at=NULL,updated_at=?
                    WHERE event_id=? AND state='sending' AND lease_owner=?""",
                 (state, _sanitize_text(error or "", 2_000) or None, next_attempt_at, now, event_id, self.owner_id),
             )
             await db.commit()
+            return cursor.rowcount == 1
 
 
 def _outbound_from_json(payload_json: str) -> OutboundEnvelope:

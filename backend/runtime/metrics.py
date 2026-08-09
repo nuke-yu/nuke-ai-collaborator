@@ -68,7 +68,10 @@ class SupervisorCollector:
         # ── Group → Channel relay SLO signals ───────────────────────────
         relay = getattr(sup, "_channel_relay", None)
         relay_stats = relay.snapshot() if relay is not None else {}
-        relay_cycles = GaugeMetricFamily(
+        relay_up = GaugeMetricFamily(
+            "nuke_channel_relay_up", "Group to Channel relay loop is healthy (1)."
+        )
+        relay_cycles = CounterMetricFamily(
             "nuke_channel_relay_cycles_total",
             "Relay polling cycles since Supervisor start.",
         )
@@ -84,10 +87,12 @@ class SupervisorCollector:
             "nuke_channel_relay_timeouts_total",
             "Group relay timeouts isolated by the Supervisor.",
         )
+        relay_up.add_metric([], float(bool(relay_stats.get("relay_up", False))))
         relay_cycles.add_metric([], float(relay_stats.get("cycles", 0)))
         relay_forwarded.add_metric([], float(relay_stats.get("forwarded", 0)))
         relay_errors.add_metric([], float(relay_stats.get("errors", 0)))
         relay_timeouts.add_metric([], float(relay_stats.get("timeouts", 0)))
+        yield relay_up
         yield relay_cycles
         yield relay_forwarded
         yield relay_errors
