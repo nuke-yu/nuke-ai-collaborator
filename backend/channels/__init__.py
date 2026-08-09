@@ -14,6 +14,7 @@ from .runtime import ChannelDeliveryDispatcher
 from .process import ChannelProcessClient, ChannelProcessError, ChannelProcessManifest
 from .process_server import ChannelProcessHandler, ChannelProcessServer
 from .secrets import ChannelSecretResolver, EnvironmentSecretResolver
+from .schema import initialize_channel_schema
 
 __all__ = [
     "BRIDGE_PROTOCOL_VERSION", "CHANNEL_PROTOCOL_VERSION", "BridgeDirection",
@@ -23,4 +24,5 @@ __all__ = [
     "ChannelProcessClient", "ChannelProcessError", "ChannelProcessManifest",
     "ChannelProcessHandler", "ChannelProcessServer",
     "ChannelSecretResolver", "EnvironmentSecretResolver",
+    "initialize_channel_schema",
 ]

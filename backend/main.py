@@ -111,8 +111,10 @@ async def lifespan(app: FastAPI):
     addr = ipc.make_addr("supervisor")
     num_workers = int(os.getenv("NUKE_WORKERS", "8"))
     from channels.runtime import GroupChannelRelayService
+    from channels import initialize_channel_schema
     from channels.stores import ChannelStore
     from runtime.dbpaths import channel_bridge_db_path, group_db_path
+    await initialize_channel_schema(channel_bridge_db_path())
     channel_relay = GroupChannelRelayService(
         ChannelStore(channel_bridge_db_path()),
         _channel_group_ids,
