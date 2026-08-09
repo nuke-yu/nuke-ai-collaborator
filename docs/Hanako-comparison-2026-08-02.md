@@ -1156,7 +1156,7 @@ OpenHanako 的主要优势是：
 | Event Policy / Payload Policy / Retention | CURRENT | 已形成分类、脱敏、Artifact 化、原子写入、Retention、OTel 和 Prometheus 闭环。 |
 | Model Usage Ledger | CURRENT | 已按 Provider 请求记录实际模型、Token、费用、失败和 retry 关系；Provider Descriptor 和基础治理已补齐。 |
 | WebSocket Event Contract | CURRENT / TRANSITION | 已有版本化 Envelope、event_id、Replay Cursor、Catch-up 和客户端去重；完整 Schema 生成和所有事件迁移仍可继续。 |
-| Channel Adapter | TRANSITION | C0–C8 基础模块和本轮 Review 阻断修复已提交；C4 为读取投影，C6/C7 为 runtime wiring，C8 为 JSONL Server/Client 与单容器测试部署基础。真实 Connector 注册、Process Server 部署生命周期、真实平台 E2E 和 go/no-go 演练仍未完成；云平台级隔离属于后续阶段。 |
+| Channel Adapter | TRANSITION | C0–C8 基础模块和两轮 Review 阻断修复已提交；C6/C7 已达到本地 failure-tested，包含持久化 projection 补偿、instance migration/quarantine、source lineage、双层 dead-letter 和可恢复健康指标；C8 已接入配置驱动的 ProcessClient 注册与 active Binding fail-fast。真实平台 Connector executable、平台 E2E 和 go/no-go 演练仍未完成。 |
 | Store Registry | CURRENT / TRANSITION | 已有可执行 Store Descriptor/Registry，以及 owner、canonical/projection、migration、retention、deletion 和 backup 治理元数据；策略执行器仍待补齐。 |
 | Plugin Process Isolation | TRANSITION | 已完成单插件 JSONL IPC 隔离和 Manifest/资源/HIL/崩溃状态治理；尚未迁移全部高风险 Executor。 |
 | Electron / Onboarding / Theme | CURRENT | 相关实现已经进入提交历史，不再按“未提交能力”处理。 |
@@ -1218,9 +1218,9 @@ OpenHanako 的主要优势是：
 2. 统一模型废弃、替换、fallback、预算和 quota 语义。
 3. 将所有执行路径的 Provider 解析收敛到 Registry，并与 Capability Manifest、Model Usage Ledger 对接。
 
-#### Phase 6：Channel Adapter（核心 runtime wiring 已完成，真实渠道与部署闭环待完成）
+#### Phase 6：Channel Adapter（核心链路已 failure-tested，真实平台 Connector 待完成）
 
-Channel 先作为独立模块运行，只有通过显式 Channel-Group Bridge 和 active Binding 后，才作为 Group Integration Member 与 Group 双向通信。当前 Workflow → Group transactional outbox → Supervisor Relay → Channel delivery outbox → Dispatcher 生命周期已接通，控制面和单容器测试部署基础已具备；但真实 Connector 尚未注册到部署配置，Process Server 尚未由生产生命周期拉起。剩余阻断项是外部用户授权、附件 Artifact、真实平台限流/重放 E2E、部署 smoke test 和 go/no-go 演练；云平台级隔离与多租户编排后置。
+Channel 先作为独立模块运行，只有通过显式 Channel-Group Bridge 和 active Binding 后，才作为 Group Integration Member 与 Group 双向通信。当前 Workflow → durable projection queue → Group transactional outbox → Supervisor Relay → Channel delivery outbox → Dispatcher → configured ProcessClient 已接通，并覆盖补偿重放、历史实例隔离、lineage、poison dead-letter 和健康恢复。active Binding 缺 Connector 配置会启动失败。剩余阻断项是选择并交付一个真实平台 Connector executable、外部用户授权、附件 Artifact、平台限流/重放 E2E、部署 smoke test 和 go/no-go 演练；云平台级隔离与多租户编排后置。
 
 #### Phase 7：Plugin Process Isolation（IPC 治理已完成，全面迁移待完善）
 
