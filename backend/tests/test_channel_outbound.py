@@ -40,20 +40,6 @@ class TestChannelOutbound(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(OutboundPolicyError):
             OutboundEventProjector(active_binding(status=BindingStatus.SUSPENDED))
 
-    async def test_projection_can_enqueue_in_channel_owned_outbox_idempotently(self):
-        tmp = tempfile.TemporaryDirectory(prefix="channel-outbound-")
-        try:
-            store = ChannelStore(os.path.join(tmp.name, "channel.db"))
-            await store.initialize()
-            projector = OutboundEventProjector(active_binding())
-            self.assertTrue(await projector.enqueue(store, "task_stuck", {"task": "T1"}, event_id="event-2"))
-            self.assertFalse(await projector.enqueue(store, "task_stuck", {"task": "T1"}, event_id="event-2"))
-            delivery = await store.get_delivery("event-2")
-            self.assertEqual(delivery["group_id"], 7)
-            self.assertEqual(delivery["payload"]["binding_id"], "binding-1")
-        finally:
-            tmp.cleanup()
-
     async def test_missing_event_id_fails_and_distinct_events_are_not_collapsed(self):
         projector = OutboundEventProjector(active_binding())
         with self.assertRaises(ValueError):

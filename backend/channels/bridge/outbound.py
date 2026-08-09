@@ -4,7 +4,6 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 from channels.core import BridgeDirection, BridgeEnvelope, ChannelConversation, ChannelIdentity, OutboundEnvelope
-from channels.stores import ChannelStore
 
 from .binding import BindingStatus, ChannelBinding
 
@@ -77,12 +76,3 @@ class OutboundEventProjector:
             group_id=self.binding.group_id,
             session_id=session_id,
         )
-
-    async def enqueue(
-        self,
-        store: ChannelStore,
-        event_type: str,
-        payload: Mapping[str, Any],
-        **kwargs: Any,
-    ) -> bool:
-        return await store.enqueue_outbound(self.project(event_type, payload, **kwargs))
