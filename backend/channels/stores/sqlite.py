@@ -7,7 +7,6 @@ module never opens or imports Group persistence.
 from __future__ import annotations
 
 import json
-import hashlib
 import time
 from enum import StrEnum
 from pathlib import Path
@@ -26,6 +25,10 @@ class DeliveryState(StrEnum):
     RETRYING = "retrying"
     FAILED = "failed"
     DEAD_LETTER = "dead_letter"
+
+
+class ChannelPayloadTooLargeError(ValueError):
+    """A payload cannot be safely persisted without changing its meaning."""
 
 
 _DDL = (
@@ -129,6 +132,9 @@ class ChannelStore:
     async def enqueue_outbound(self, envelope: OutboundEnvelope) -> bool:
         """Persist one outbound delivery intent; duplicate keys are idempotent."""
         now = int(time.time() * 1000)
+        raw_payload = json.dumps(dict(envelope.payload), ensure_ascii=False, sort_keys=True)
+        if len(raw_payload.encode("utf-8")) > _MAX_JSON_BYTES:
+            raise ChannelPayloadTooLargeError(f"channel payload exceeds {_MAX_JSON_BYTES} bytes")
         payload = _safe_json_text(dict(envelope.payload))
         async with aiosqlite.connect(self.path) as db:
             cursor = await db.execute(
@@ -226,6 +232,19 @@ class ChannelStore:
             lease_owner=lease_owner,
         )
 
+    async def renew_delivery_lease(self, idempotency_key: str, lease_owner: str, *, lease_ms: int = 30_000) -> bool:
+        if not lease_owner.strip() or lease_ms <= 0:
+            raise ValueError("lease_owner is required and lease_ms must be positive")
+        now = int(time.time() * 1000)
+        async with aiosqlite.connect(self.path) as db:
+            cursor = await db.execute(
+                """UPDATE channel_delivery_outbox SET lease_expires_at=?,updated_at=?
+                   WHERE idempotency_key=? AND state='sending' AND lease_owner=?""",
+                (now + lease_ms, now, idempotency_key, lease_owner),
+            )
+            await db.commit()
+            return cursor.rowcount == 1
+
     async def transition_delivery_with_audit(
         self,
         idempotency_key: str,
@@ -263,7 +282,7 @@ class ChannelStore:
                 last_error = None
             else:
                 next_attempt = retry_at_ms if retry_at_ms is not None else now
-                last_error = _sanitize_text(str(error or "delivery failed"), _MAX_ERROR_LENGTH)
+                last_error = sanitize_text_for_storage(str(error or "delivery failed"), _MAX_ERROR_LENGTH)
             cursor = await db.execute(
                 """UPDATE channel_delivery_outbox
                    SET state=?, external_message_id=COALESCE(?, external_message_id), last_error=?,
@@ -325,10 +344,19 @@ _MAX_ELEMENTS = 1_000
 _MAX_JSON_BYTES = 256_000
 
 
-def _sanitize_text(value: str, limit: int = _MAX_STRING_LENGTH) -> str:
-    """Redact the complete value before applying a storage length limit."""
-    safe = redact_secrets(value)[0]
-    return safe[:limit]
+def sanitize_text_for_storage(value: str, limit: int = _MAX_STRING_LENGTH) -> str:
+    """Redact before limiting, with bounded scanning for pathological long text."""
+    if len(value) <= 64_000:
+        return redact_secrets(value)[0][:limit]
+    markers = ("PRIVATE KEY", "Bearer ", "ghp_", "github_pat_", "sk-", "xox", "API_KEY", "TOKEN", "SECRET", "PASSWORD", "Authorization")
+    if not any(marker in value for marker in markers):
+        return value[:limit]
+    window = 32_000
+    overlap = 512
+    for start in range(0, len(value), window - overlap):
+        if redact_secrets(value[start:start + window])[1]:
+            return "[REDACTED]"
+    return value[:limit]
 
 
 def _sanitize_json(value: Any, *, depth: int = 0) -> Any:
@@ -336,11 +364,11 @@ def _sanitize_json(value: Any, *, depth: int = 0) -> Any:
     if depth > _MAX_DEPTH:
         return "[TRUNCATED_DEPTH]"
     if isinstance(value, str):
-        return _sanitize_text(value)
+        return sanitize_text_for_storage(value)
     if isinstance(value, dict):
         items = list(value.items())[:_MAX_ELEMENTS]
         return {
-            _sanitize_text(str(key), _MAX_KEY_LENGTH): _sanitize_json(item, depth=depth + 1)
+            sanitize_text_for_storage(str(key), _MAX_KEY_LENGTH): _sanitize_json(item, depth=depth + 1)
             for key, item in items
         }
     if isinstance(value, (list, tuple)):
@@ -353,5 +381,4 @@ def _safe_json_text(value: Any) -> str:
     encoded = json.dumps(safe, ensure_ascii=False, sort_keys=True)
     if len(encoded.encode("utf-8")) <= _MAX_JSON_BYTES:
         return encoded
-    digest = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
-    return json.dumps({"_truncated": True, "sha256": digest}, ensure_ascii=False, sort_keys=True)
+    raise ChannelPayloadTooLargeError(f"channel payload exceeds {_MAX_JSON_BYTES} bytes")

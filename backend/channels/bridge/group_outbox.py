@@ -15,8 +15,7 @@ from typing import Any
 import aiosqlite
 
 from channels.core import ChannelConversation, ChannelIdentity, OutboundEnvelope
-from channels.stores import ChannelStore
-from executors.redaction import redact_secrets
+from channels.stores import ChannelPayloadTooLargeError, ChannelStore, sanitize_text_for_storage
 
 
 class GroupChannelOutboxError(RuntimeError):
@@ -53,6 +52,9 @@ class GroupChannelOutboxWriter:
             raise GroupChannelOutboxError("Group Channel outbox append must run inside the Group transaction")
         await initialize_group_channel_outbox(db)
         now = int(time.time() * 1000)
+        raw_payload = json.dumps({"outbound": envelope.to_dict()}, ensure_ascii=False, sort_keys=True)
+        if len(raw_payload.encode("utf-8")) > 256_000:
+            raise ChannelPayloadTooLargeError("Group Channel outbox payload exceeds 256000 bytes")
         payload = _safe_json({"outbound": envelope.to_dict()})
         cursor = await db.execute(
             """INSERT OR IGNORE INTO group_channel_event_outbox
@@ -140,7 +142,7 @@ def _outbound_from_json(payload_json: str) -> OutboundEnvelope:
 
 
 def _sanitize_text(value: str, limit: int) -> str:
-    return redact_secrets(value)[0][:limit]
+    return sanitize_text_for_storage(value, limit)
 
 
 def _safe_json(value: Any) -> str:
@@ -155,4 +157,6 @@ def _safe_json(value: Any) -> str:
             return [clean(v, depth + 1) for v in list(item)[:1_000]]
         return item
     encoded = json.dumps(clean(value), ensure_ascii=False, sort_keys=True)
-    return encoded if len(encoded.encode()) <= 256_000 else json.dumps({"_truncated": True})
+    if len(encoded.encode()) > 256_000:
+        raise ChannelPayloadTooLargeError("Group Channel outbox payload exceeds 256000 bytes")
+    return encoded

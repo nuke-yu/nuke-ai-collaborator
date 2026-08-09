@@ -1,4 +1,5 @@
 import os
+import asyncio
 import tempfile
 import time
 import unittest
@@ -6,7 +7,7 @@ import unittest
 from channels.connectors import ConnectorError
 from channels.core import ChannelConversation, ChannelIdentity, DeliveryReceipt, OutboundEnvelope
 from channels.runtime import ChannelDeliveryDispatcher, ChannelDeliveryError
-from channels.stores import ChannelStore, DeliveryState
+from channels.stores import ChannelPayloadTooLargeError, ChannelStore, DeliveryState
 
 
 class FailingConnector:
@@ -124,6 +125,33 @@ class TestChannelRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(changed)
         self.assertEqual((await self.store.get_delivery("event-1"))["state"], DeliveryState.SENDING)
         self.assertEqual(await self.store.list_audit("event-1"), [])
+
+    async def test_long_send_renews_lease_and_blocks_second_worker_claim(self):
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        class SlowConnector:
+            async def send(self, envelope):
+                started.set()
+                await release.wait()
+                return DeliveryReceipt("slack", envelope.idempotency_key, "sent", external_message_id="remote")
+
+        first = ChannelDeliveryDispatcher(self.store, SlowConnector(), owner_id="worker-a", lease_ms=30)
+        second = ChannelDeliveryDispatcher(self.store, SlowConnector(), owner_id="worker-b", lease_ms=30)
+        task = asyncio.create_task(first.run_once())
+        await started.wait()
+        await asyncio.sleep(0.06)
+        self.assertFalse(await second.run_once())
+        release.set()
+        self.assertTrue(await task)
+
+    async def test_oversized_outbound_payload_is_rejected_not_replaced_with_digest(self):
+        with self.assertRaises(ChannelPayloadTooLargeError):
+            await self.store.enqueue_outbound(OutboundEnvelope(
+                identity=ChannelIdentity("slack", "tenant-a"),
+                conversation=ChannelConversation("chat-1"),
+                event_type="task_stuck", payload={"message": "x" * 300_000}, idempotency_key="large-event",
+            ))
 
 
 if __name__ == "__main__":

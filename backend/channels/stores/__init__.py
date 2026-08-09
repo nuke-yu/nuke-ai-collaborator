@@ -1,5 +1,5 @@
 """Channel-owned persistence implementations."""
 
-from .sqlite import ChannelStore, DeliveryState
+from .sqlite import ChannelPayloadTooLargeError, ChannelStore, DeliveryState, sanitize_text_for_storage
 
-__all__ = ["ChannelStore", "DeliveryState"]
+__all__ = ["ChannelPayloadTooLargeError", "ChannelStore", "DeliveryState", "sanitize_text_for_storage"]

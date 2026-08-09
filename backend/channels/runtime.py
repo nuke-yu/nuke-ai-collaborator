@@ -1,6 +1,8 @@
 """Channel-owned delivery worker for connector calls and delivery audit."""
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import time
 import uuid
 from typing import Protocol
@@ -45,6 +47,7 @@ class ChannelDeliveryDispatcher:
             group_id=item["group_id"],
             session_id=item["session_id"],
         )
+        heartbeat = asyncio.create_task(self._heartbeat(key))
         try:
             receipt = await self.connector.send(envelope)
             if not isinstance(receipt, DeliveryReceipt):
@@ -80,4 +83,15 @@ class ChannelDeliveryDispatcher:
                 retry_at_ms=retry_at,
                 lease_owner=self.owner_id,
             )
+        finally:
+            heartbeat.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await heartbeat
         return True
+
+    async def _heartbeat(self, idempotency_key: str) -> None:
+        interval = max(0.01, self.lease_ms / 3 / 1000)
+        while True:
+            await asyncio.sleep(interval)
+            if not await self.store.renew_delivery_lease(idempotency_key, self.owner_id, lease_ms=self.lease_ms):
+                return
