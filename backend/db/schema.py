@@ -122,6 +122,7 @@ async def init_db():
                 file_size   INTEGER DEFAULT NULL,
                 file_type   TEXT    DEFAULT NULL,
                 is_auto_reply INTEGER DEFAULT 0,
+                external_message_key TEXT DEFAULT NULL,
                 created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (group_id)  REFERENCES groups(id),
                 FOREIGN KEY (member_id) REFERENCES members(id)
@@ -260,5 +261,7 @@ async def init_db():
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_artifacts_session ON group_artifacts(session_id)")
         await conn.commit()
         await run_migrations(conn)
+        await conn.execute("""CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_external_key
+            ON messages(external_message_key) WHERE external_message_key IS NOT NULL""")
         await _seed_templates(conn)
         await conn.commit()

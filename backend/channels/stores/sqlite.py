@@ -46,6 +46,8 @@ _DDL = (
         payload_json TEXT NOT NULL,
         binding_id TEXT,
         group_id INTEGER,
+        dispatch_state TEXT NOT NULL DEFAULT 'pending',
+        dispatched_at INTEGER,
         created_at INTEGER NOT NULL,
         UNIQUE(channel, external_tenant_id, external_conversation_id, external_message_id, direction)
     )""",
@@ -118,6 +120,23 @@ class ChannelStore:
                 await db.execute("ALTER TABLE channel_delivery_outbox ADD COLUMN channel_instance_id TEXT NOT NULL DEFAULT ''")
             if "source_event_id" not in columns:
                 await db.execute("ALTER TABLE channel_delivery_outbox ADD COLUMN source_event_id TEXT")
+            message_columns = {
+                row[1] for row in await (
+                    await db.execute("PRAGMA table_info(channel_messages)")
+                ).fetchall()
+            }
+            if "dispatch_state" not in message_columns:
+                await db.execute(
+                    "ALTER TABLE channel_messages ADD COLUMN dispatch_state TEXT NOT NULL DEFAULT 'pending'"
+                )
+                # Rows from older releases were already considered consumed.
+                await db.execute(
+                    "UPDATE channel_messages SET dispatch_state='dispatched'"
+                )
+            if "dispatched_at" not in message_columns:
+                await db.execute(
+                    "ALTER TABLE channel_messages ADD COLUMN dispatched_at INTEGER"
+                )
             async with db.execute(
                 "SELECT idempotency_key,channel_instance_id,state FROM channel_delivery_outbox"
             ) as cursor:
@@ -174,6 +193,35 @@ class ChannelStore:
                     envelope.group_id,
                     now,
                 ),
+            )
+            await db.commit()
+            return cursor.rowcount == 1
+
+    async def prepare_inbound(
+        self, envelope: InboundEnvelope, *, channel_instance_id: str
+    ) -> bool:
+        """Persist/recover ingress; False means it was already dispatched."""
+        await self.record_inbound(
+            envelope, channel_instance_id=channel_instance_id
+        )
+        async with aiosqlite.connect(self.path) as db:
+            cursor = await db.execute(
+                "SELECT dispatch_state FROM channel_messages WHERE message_key=?",
+                (envelope.idempotency_key,),
+            )
+            row = await cursor.fetchone()
+        if row is None:
+            raise RuntimeError("inbound message disappeared after persistence")
+        return row[0] != "dispatched"
+
+    async def mark_inbound_dispatched(self, message_key: str) -> bool:
+        now = int(time.time() * 1000)
+        async with aiosqlite.connect(self.path) as db:
+            cursor = await db.execute(
+                """UPDATE channel_messages
+                   SET dispatch_state='dispatched',dispatched_at=?
+                   WHERE message_key=? AND dispatch_state='pending'""",
+                (now, message_key),
             )
             await db.commit()
             return cursor.rowcount == 1

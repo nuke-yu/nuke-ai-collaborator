@@ -1381,6 +1381,20 @@ async def migration_061(db):
     await db.commit()
 
 
+async def migration_062(db):
+    """Deduplicate replayed Channel ingress at the Group message boundary."""
+    await _safe_add_column(
+        db, "ALTER TABLE messages ADD COLUMN external_message_key TEXT DEFAULT NULL"
+    )
+    cursor = await db.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='messages'"
+    )
+    if await cursor.fetchone() is not None:
+        await db.execute("""CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_external_key
+            ON messages(external_message_key) WHERE external_message_key IS NOT NULL""")
+    await db.commit()
+
+
 MIGRATIONS: list = [
     migration_001,
     migration_002,
@@ -1443,6 +1457,7 @@ MIGRATIONS: list = [
     migration_059,
     migration_060,
     migration_061,
+    migration_062,
 ]
 
 

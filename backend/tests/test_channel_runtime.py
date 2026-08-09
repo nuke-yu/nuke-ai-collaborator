@@ -84,6 +84,26 @@ class TestChannelRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stored["state"], DeliveryState.DEAD_LETTER)
         self.assertEqual((await self.store.list_audit("event-1"))[-1]["event_type"], "delivery.dead_letter")
 
+    async def test_ambiguous_external_success_never_auto_retries(self):
+        class AmbiguousConnector:
+            async def send(self, envelope):
+                error = ConnectorError("send timed out after request body was written")
+                error.ambiguous = True
+                raise error
+
+        connector = AmbiguousConnector()
+        dispatcher = ChannelDeliveryDispatcher(
+            self.store, connector, max_attempts=5, base_delay_ms=0
+        )
+        await dispatcher.run_once()
+        stored = await self.store.get_delivery("event-1")
+        self.assertEqual(stored["state"], DeliveryState.DEAD_LETTER)
+        self.assertEqual(stored["attempts"], 1)
+        self.assertEqual(
+            (await self.store.list_audit("event-1"))[-1]["event_type"],
+            "delivery.ambiguous",
+        )
+
     async def test_failed_receipt_never_becomes_sent(self):
         class FailedReceiptConnector:
             async def send(self, envelope):

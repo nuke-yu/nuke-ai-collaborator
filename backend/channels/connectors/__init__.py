@@ -5,6 +5,7 @@ from .http import ConnectorHttpClient, ConnectorHttpError, ConnectorHttpResponse
 from .feishu import FeishuConnector, FeishuConnectorError, FeishuWebhookResult
 from .wechat_ilink import (
     WechatIlinkConnector,
+    WechatIlinkAmbiguousDelivery,
     WechatIlinkError,
     WechatIlinkLoginClient,
     WechatIlinkSessionExpired,
@@ -16,6 +17,6 @@ __all__ = [
     "ConnectorAuthError", "ConnectorError", "SignedWebhookConnector",
     "ConnectorHttpClient", "ConnectorHttpError", "ConnectorHttpResponse", "ConnectorHttpTransport",
     "FeishuConnector", "FeishuConnectorError", "FeishuWebhookResult",
-    "WechatIlinkConnector", "WechatIlinkError", "WechatIlinkLoginClient",
+    "WechatIlinkConnector", "WechatIlinkAmbiguousDelivery", "WechatIlinkError", "WechatIlinkLoginClient",
     "WechatIlinkSessionExpired", "WechatLoginStatus", "WechatPollResult",
 ]

@@ -47,6 +47,19 @@ async def dispatch_user_message(msg: dict) -> None:
     gid = msg["group_id"]
     sender_id = msg.get("member_id")
     content = (msg.get("content") or "").strip()
+    channel_meta = msg.get("channel_meta")
+    channel_attachments = (
+        channel_meta.get("attachments")
+        if isinstance(channel_meta, dict) and isinstance(channel_meta.get("attachments"), list)
+        else []
+    )
+    if not content and channel_attachments:
+        kinds = [
+            str(item.get("type") or "file")
+            for item in channel_attachments
+            if isinstance(item, dict)
+        ]
+        content = f"[收到外部渠道附件: {', '.join(kinds) or 'file'}]"
     from core import media
     file_url = media.canonicalize(msg.get("file_url"))  # persist stable ref, never a signed URL
     file_name = msg.get("file_name")
@@ -70,12 +83,16 @@ async def dispatch_user_message(msg: dict) -> None:
 
     # ── group domain (persist message + load recent) ──
     async with db.write_connect() as gdb:        # bound -> group's private DB
-        msg_id = await db.save_message(
+        msg_id, created = await db.save_message(
             gdb, gid, sender_id, content,
             msg.get("reply_to_id"), file_url, file_name, file_size, file_type,
-            meta=msg.get("channel_meta"),
+            meta=channel_meta,
             sender_snapshot=sender if sender.get("type") == "integration" else None,
+            external_message_key=msg.get("channel_message_key"),
+            return_created=True,
         )
+        if not created:
+            return
         recent = await db.get_messages(gdb, gid)
     saved = next((m for m in recent if m["id"] == msg_id), {})
     if msg.get("channel_target_bot_id"):

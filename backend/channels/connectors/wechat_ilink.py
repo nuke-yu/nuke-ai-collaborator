@@ -48,6 +48,12 @@ class WechatIlinkSessionExpired(WechatIlinkError):
     """The scanned personal WeChat bot session must be authorized again."""
 
 
+class WechatIlinkAmbiguousDelivery(WechatIlinkError):
+    """A multi-part send partially succeeded and must not auto-retry."""
+
+    ambiguous = True
+
+
 @dataclass(frozen=True, slots=True)
 class WechatPollResult:
     received: int
@@ -173,24 +179,31 @@ class WechatIlinkConnector:
         client_ids: list[str] = []
         for index, chunk in enumerate(chunks):
             client_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{envelope.idempotency_key}:{index}"))
-            response = await self.http.request_json(
-                "sendmessage", "POST", f"{self.base_url}/ilink/bot/sendmessage",
-                headers=self._headers(),
-                json_body={
-                    "msg": {
-                        "from_user_id": "",
-                        "to_user_id": chat_id,
-                        "client_id": client_id,
-                        "message_type": 2,
-                        "message_state": 2,
-                        "item_list": [{"type": _TEXT, "text_item": {"text": chunk}}],
-                        "context_token": context_token,
+            try:
+                response = await self.http.request_json(
+                    "sendmessage", "POST", f"{self.base_url}/ilink/bot/sendmessage",
+                    headers=self._headers(),
+                    json_body={
+                        "msg": {
+                            "from_user_id": "",
+                            "to_user_id": chat_id,
+                            "client_id": client_id,
+                            "message_type": 2,
+                            "message_state": 2,
+                            "item_list": [{"type": _TEXT, "text_item": {"text": chunk}}],
+                            "context_token": context_token,
+                        },
+                        "base_info": {"channel_version": "1.0.0"},
                     },
-                    "base_info": {"channel_version": "1.0.0"},
-                },
-                idempotent=False,
-            )
-            _require_ilink_success("sendmessage", response.body)
+                    idempotent=False,
+                )
+                _require_ilink_success("sendmessage", response.body)
+            except Exception as exc:
+                if client_ids:
+                    raise WechatIlinkAmbiguousDelivery(
+                        "WeChat message batch partially succeeded; operator review is required"
+                    ) from exc
+                raise
             client_ids.append(client_id)
         external_id = client_ids[0] if len(client_ids) == 1 else "ilink-batch:" + hashlib.sha256("\x00".join(client_ids).encode()).hexdigest()
         return DeliveryReceipt(

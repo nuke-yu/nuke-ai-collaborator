@@ -234,14 +234,22 @@ class ChannelDeliveryDispatcher:
         except Exception as exc:
             attempt = int(item["attempts"])
             retry_at = None
-            if attempt < self.max_attempts:
+            ambiguous = bool(getattr(exc, "ambiguous", False))
+            if attempt < self.max_attempts and not ambiguous:
                 current = now_ms if now_ms is not None else int(time.time() * 1000)
                 retry_at = current + self.base_delay_ms * (2 ** (attempt - 1))
             await self.store.transition_delivery_with_audit(
                 key,
                 DeliveryState.RETRYING if retry_at is not None else DeliveryState.DEAD_LETTER,
-                event_type="delivery.retrying" if retry_at is not None else "delivery.dead_letter",
-                details={"attempt": attempt, "error": str(exc), "retry_at_ms": retry_at},
+                event_type=(
+                    "delivery.retrying" if retry_at is not None
+                    else "delivery.ambiguous" if ambiguous
+                    else "delivery.dead_letter"
+                ),
+                details={
+                    "attempt": attempt, "error": str(exc),
+                    "retry_at_ms": retry_at, "ambiguous": ambiguous,
+                },
                 error=str(exc),
                 retry_at_ms=retry_at,
                 lease_owner=self.owner_id,

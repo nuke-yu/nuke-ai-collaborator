@@ -232,8 +232,11 @@ _GROUP_DDL = [
         sender_avatar TEXT DEFAULT NULL,
         sender_provider TEXT DEFAULT NULL,
         sender_model TEXT DEFAULT NULL,
-        meta TEXT DEFAULT NULL
+        meta TEXT DEFAULT NULL,
+        external_message_key TEXT DEFAULT NULL
     )""",
+    """CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_external_key
+       ON messages(external_message_key) WHERE external_message_key IS NOT NULL""",
     """CREATE TABLE IF NOT EXISTS role_summaries (
         id                 INTEGER PRIMARY KEY AUTOINCREMENT,
         group_id           INTEGER NOT NULL,

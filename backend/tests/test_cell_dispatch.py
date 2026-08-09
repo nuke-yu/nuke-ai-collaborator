@@ -105,10 +105,13 @@ class TestCellDispatch(unittest.IsolatedAsyncioTestCase):
              patch(m + "archive_run", new=AsyncMock()), \
              patch("executors.compact.maybe_compact_db_history", new=AsyncMock()):
             with db.bind_db(self.group):
-                await dispatch_user_message({
+                channel_message = {
                     "group_id": GID, "member_id": HUMAN_ID,
                     "content": "@Assistant hello", "trace_id": "tr",
-                })
+                    "channel_message_key": "channel.v1|dedup-cell-message",
+                }
+                await dispatch_user_message(channel_message)
+                await dispatch_user_message(channel_message)
             # bot run is fire-and-forget (bg.spawn_group); wait for it to land
             for _ in range(250):
                 if await self._bot_replies():

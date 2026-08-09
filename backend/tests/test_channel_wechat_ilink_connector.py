@@ -97,6 +97,20 @@ class TestWechatIlinkConnector(unittest.IsolatedAsyncioTestCase):
             transport.calls[1]["body"]["msg"]["client_id"],
         )
 
+    async def test_partial_long_message_failure_is_ambiguous(self):
+        from channels.connectors import WechatIlinkAmbiguousDelivery
+
+        await self._seed_context()
+        transport = _Transport([
+            ConnectorHttpResponse(200, {"ret": 0}, {}),
+            ConnectorHttpResponse(500, {}, {}),
+        ])
+        connector = self._connector(transport, [])
+        with self.assertRaises(WechatIlinkAmbiguousDelivery) as caught:
+            await connector.send(_outbound("partial-event", text="x" * 4_001))
+        self.assertTrue(caught.exception.ambiguous)
+        self.assertEqual(len(transport.calls), 2)
+
     async def test_expired_context_and_session_expiry_fail_closed(self):
         await self._seed_context(now=100)
         connector = self._connector(_Transport([]), [])

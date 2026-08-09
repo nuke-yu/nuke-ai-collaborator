@@ -122,7 +122,8 @@ async def save_message(db, group_id: int, member_id: int, content: str,
                        file_type: str = None, is_auto_reply: bool = False,
                        input_tokens: int = None, output_tokens: int = None,
                        cache_read_tokens: int = None, cache_creation_tokens: int = None,
-                       meta: dict = None, sender_snapshot: dict = None):
+                       meta: dict = None, sender_snapshot: dict = None,
+                       external_message_key: str = None, return_created: bool = False):
     if sender_snapshot:
         s_name = sender_snapshot.get("name")
         s_type = sender_snapshot.get("type")
@@ -132,19 +133,33 @@ async def save_message(db, group_id: int, member_id: int, content: str,
     else:
         s_name, s_type, s_avatar, s_prov, s_model = await _sender_snapshot(db, member_id)
     meta_json = json.dumps(meta, ensure_ascii=False) if meta else None
+    insert_verb = "INSERT OR IGNORE" if external_message_key else "INSERT"
     async with db.execute(
-        "INSERT INTO messages (group_id, member_id, content, reply_to_id, "
+        insert_verb + " INTO messages (group_id, member_id, content, reply_to_id, "
         "file_url, file_name, file_size, file_type, is_auto_reply, "
         "input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, "
-        "sender_name, sender_type, sender_avatar, sender_provider, sender_model, meta) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "sender_name, sender_type, sender_avatar, sender_provider, sender_model, meta, "
+        "external_message_key) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (group_id, member_id, content, reply_to_id,
          file_url, file_name, file_size, file_type, int(is_auto_reply),
          input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
-         s_name, s_type, s_avatar, s_prov, s_model, meta_json)
+         s_name, s_type, s_avatar, s_prov, s_model, meta_json,
+         external_message_key)
     ) as cur:
+        created = cur.rowcount == 1
+        message_id = cur.lastrowid if created else None
+        if not created and external_message_key:
+            existing = await db.execute(
+                "SELECT id FROM messages WHERE external_message_key=?",
+                (external_message_key,),
+            )
+            row = await existing.fetchone()
+            if row is None:
+                raise RuntimeError("message insert was ignored without a matching external key")
+            message_id = int(row[0])
         await db.commit()
-        return cur.lastrowid
+        return (message_id, created) if return_created else message_id
 
 
 async def update_member_setting(db, member_id: int, auto_reply: str | None):

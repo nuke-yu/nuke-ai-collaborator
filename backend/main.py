@@ -137,6 +137,7 @@ async def lifespan(app: FastAPI):
             trace_id=route.bridge_envelope.trace_id,
             content=payload.get("text") or "",
             channel_target_bot_id=route.target_bot_id,
+            channel_message_key=route.bridge_envelope.idempotency_key,
             channel_sender=member.to_member_dict(),
             channel_meta={
                 "binding_id": route.binding_id,

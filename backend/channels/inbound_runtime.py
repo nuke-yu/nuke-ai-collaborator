@@ -56,15 +56,17 @@ class ChannelInboundService:
             member_id=member.integration_member_id,
             binding_id=binding.binding_id,
         )
-        if not await self.channel_store.record_inbound(
-            bound, channel_instance_id=instance_id
-        ):
-            return None
         route = InboundBotRouter(
             binding,
             integration_member_id=member.integration_member_id,
         ).route(bound, bot_mentions=_bot_mentions(binding.inbound_policy))
+        if not await self.channel_store.prepare_inbound(
+            bound, channel_instance_id=instance_id
+        ):
+            return None
         await self.dispatch(route, member)
+        if not await self.channel_store.mark_inbound_dispatched(bound.idempotency_key):
+            raise RuntimeError("Channel inbound dispatch state changed unexpectedly")
         return route
 
 

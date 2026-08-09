@@ -53,6 +53,27 @@ class TestConnectorHttp(unittest.IsolatedAsyncioTestCase):
                 {"cursor": "b"},
             )
 
+    async def test_non_idempotent_transport_uncertainty_is_marked_ambiguous(self):
+        for response in (
+            TimeoutError("socket timed out after write"),
+            ConnectorHttpResponse(500, {"error": "unknown"}, {}),
+        ):
+            client = ConnectorHttpClient("feishu", _Transport([response]), retry_delay=0)
+            with self.assertRaises(ConnectorHttpError) as caught:
+                await client.request_json(
+                    "send", "POST", "https://example.test/send", idempotent=False
+                )
+            self.assertTrue(caught.exception.ambiguous)
+
+        client = ConnectorHttpClient(
+            "feishu", _Transport([ConnectorHttpResponse(429, {}, {})]), retry_delay=0
+        )
+        with self.assertRaises(ConnectorHttpError) as caught:
+            await client.request_json(
+                "send", "POST", "https://example.test/send", idempotent=False
+            )
+        self.assertFalse(caught.exception.ambiguous)
+
 
 if __name__ == "__main__":
     unittest.main()

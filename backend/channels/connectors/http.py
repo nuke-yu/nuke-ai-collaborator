@@ -51,12 +51,16 @@ class HttpxConnectorTransport:
 
 
 class ConnectorHttpError(RuntimeError):
-    def __init__(self, platform: str, stage: str, message: str, *, status: int | None = None, attempts: int = 1):
+    def __init__(
+        self, platform: str, stage: str, message: str, *,
+        status: int | None = None, attempts: int = 1, ambiguous: bool = False,
+    ):
         host = ""
         self.platform = platform
         self.stage = stage
         self.status = status
         self.attempts = attempts
+        self.ambiguous = bool(ambiguous)
         super().__init__(redact_secrets(f"[{platform}:{stage}] {message}")[0])
 
 
@@ -106,7 +110,7 @@ class ConnectorHttpClient:
                     continue
                 raise ConnectorHttpError(
                     self.platform, stage, f"network request failed: {type(exc).__name__}",
-                    attempts=attempt,
+                    attempts=attempt, ambiguous=not idempotent,
                 ) from exc
             if response.status in {429} or response.status >= 500:
                 if attempt < attempts:
@@ -116,6 +120,7 @@ class ConnectorHttpClient:
                 raise ConnectorHttpError(
                     self.platform, stage, f"HTTP {response.status}",
                     status=response.status, attempts=attempt,
+                    ambiguous=not idempotent and response.status >= 500,
                 )
             return response
         raise ConnectorHttpError(self.platform, stage, f"request failed: {last_error}")
