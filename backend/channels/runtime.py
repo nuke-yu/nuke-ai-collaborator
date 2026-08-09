@@ -3,12 +3,18 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import time
 import uuid
-from typing import Protocol
+from pathlib import Path
+from typing import Awaitable, Callable, Protocol, Sequence
 
 from channels.core import ChannelConversation, ChannelIdentity, DeliveryReceipt, OutboundEnvelope
 from channels.stores import ChannelStore, DeliveryState
+from channels.bridge.group_outbox import GroupChannelOutboxRelay
+
+
+log = logging.getLogger(__name__)
 
 
 class ChannelConnector(Protocol):
@@ -17,6 +23,101 @@ class ChannelConnector(Protocol):
 
 class ChannelDeliveryError(RuntimeError):
     """A connector response cannot be accepted as a successful delivery."""
+
+
+class GroupChannelRelayService:
+    """Supervisor-owned lifecycle for the Group-to-Channel durable relay.
+
+    The service only reads committed Group outboxes and writes Channel-owned
+    delivery intents.  It never executes a connector and has no MCP access.
+    Group discovery is injected so the service cannot accidentally open the
+    central database from a Worker or Collector process.
+    """
+
+    def __init__(
+        self,
+        channel_store: ChannelStore,
+        group_ids: Callable[[], Awaitable[Sequence[int]]],
+        group_db_path: Callable[[int], str | Path],
+        *,
+        poll_interval: float = 1.0,
+        relay_timeout: float = 10.0,
+        lease_ms: int = 30_000,
+        owner_id: str | None = None,
+    ) -> None:
+        if poll_interval <= 0 or relay_timeout <= 0 or lease_ms <= 0:
+            raise ValueError("poll_interval, relay_timeout and lease_ms must be positive")
+        self.channel_store = channel_store
+        self.group_ids = group_ids
+        self.group_db_path = group_db_path
+        self.poll_interval = poll_interval
+        self.relay_timeout = relay_timeout
+        self.lease_ms = lease_ms
+        self.owner_id = owner_id or f"supervisor-channel-relay:{uuid.uuid4()}"
+        self._task: asyncio.Task | None = None
+        self._stopping = False
+        self._stats = {
+            "cycles": 0,
+            "forwarded": 0,
+            "errors": 0,
+            "timeouts": 0,
+            "last_cycle_at": None,
+            "last_error": None,
+        }
+
+    async def start(self) -> None:
+        if self._task is not None and not self._task.done():
+            return
+        await self.channel_store.initialize()
+        self._stopping = False
+        self._task = asyncio.create_task(self._run(), name="group-channel-relay")
+
+    async def stop(self) -> None:
+        self._stopping = True
+        task, self._task = self._task, None
+        if task is None:
+            return
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+    def snapshot(self) -> dict[str, object]:
+        return dict(self._stats)
+
+    async def run_once(self) -> int:
+        """Relay at most one committed event per known Group."""
+        ids = sorted({int(group_id) for group_id in await self.group_ids() if int(group_id) > 0})
+        forwarded = 0
+        for group_id in ids:
+            relay = GroupChannelOutboxRelay(
+                self.group_db_path(group_id),
+                self.channel_store,
+                lease_ms=self.lease_ms,
+                owner_id=f"{self.owner_id}:group:{group_id}",
+            )
+            try:
+                did_work = await asyncio.wait_for(relay.relay_once(), timeout=self.relay_timeout)
+            except asyncio.TimeoutError:
+                self._stats["timeouts"] += 1
+                self._stats["last_error"] = f"relay timeout group={group_id}"
+                continue
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                self._stats["errors"] += 1
+                self._stats["last_error"] = f"group={group_id}: {type(exc).__name__}"
+                log.exception("group channel relay failed for group=%s", group_id)
+                continue
+            forwarded += int(did_work)
+        self._stats["cycles"] += 1
+        self._stats["forwarded"] += forwarded
+        self._stats["last_cycle_at"] = int(time.time() * 1000)
+        return forwarded
+
+    async def _run(self) -> None:
+        while not self._stopping:
+            await self.run_once()
+            await asyncio.sleep(self.poll_interval)
 
 
 class ChannelDeliveryDispatcher:
