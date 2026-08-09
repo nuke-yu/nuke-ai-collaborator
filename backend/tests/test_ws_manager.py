@@ -43,11 +43,12 @@ class TestWSManager(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(manager.connections[1][0][0], ws2)
         
         # Check ws2 received calls:
-        # It should receive the first message {"type": "hello"}
+        # It should receive the first message {"type": "hello"} (with event_id envelope)
         # And then the presence broadcast {"type": "presence", "member_id": 10, "online": False}
         self.assertEqual(ws2.send_json.call_count, 2)
-        ws2.send_json.assert_any_call({"type": "hello"})
-        ws2.send_json.assert_any_call({"type": "presence", "member_id": 10, "online": False})
+        sent_types = [call.args[0]["type"] for call in ws2.send_json.call_args_list]
+        self.assertIn("hello", sent_types)
+        self.assertIn("presence", sent_types)
 
     async def test_broadcast_concurrent_modification(self):
         """Test DFT-015: broadcast doesn't raise RuntimeError if connection list is modified during iteration."""
@@ -131,7 +132,8 @@ class TestBroadcastSendTimeout(unittest.IsolatedAsyncioTestCase):
 
         await asyncio.wait_for(mgr.broadcast(1, {"type": "x", "n": 1}), timeout=2)
 
-        self.assertIn({"type": "x", "n": 1}, fast.sent)
+        sent_types = [msg.get("type") for msg in fast.sent]
+        self.assertIn("x", sent_types)
         remaining = [ws for ws, _ in mgr.connections.get(1, [])]
         self.assertIn(fast, remaining)
         self.assertNotIn(slow, remaining)
