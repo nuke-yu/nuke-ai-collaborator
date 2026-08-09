@@ -8,10 +8,33 @@ from channels.core import (
     DeliveryReceipt,
     InboundEnvelope,
     OutboundEnvelope,
+    canonical_message_key,
 )
 
 
 class TestChannelContracts(unittest.TestCase):
+    def test_message_key_is_unambiguous_for_delimiter_containing_ids(self):
+        self.assertNotEqual(
+            canonical_message_key("a:b", "c", "d", "e"),
+            canonical_message_key("a", "b:c", "d", "e"),
+        )
+
+    def test_protocol_versions_are_validated(self):
+        with self.assertRaises(ValueError):
+            InboundEnvelope(
+                identity=ChannelIdentity("slack", "tenant"),
+                conversation=ChannelConversation("chat"),
+                external_message_id="message",
+                protocol_version="channel.v0",
+            )
+        with self.assertRaises(ValueError):
+            BridgeEnvelope(
+                direction=BridgeDirection.OUTBOUND,
+                event_type="event",
+                idempotency_key="event-1",
+                payload={},
+                protocol_version="channel-bridge.v0",
+            )
     def setUp(self):
         self.identity = ChannelIdentity("Feishu", "tenant-a", "user-1")
         self.conversation = ChannelConversation("chat-1")
@@ -25,7 +48,7 @@ class TestChannelContracts(unittest.TestCase):
         )
         self.assertEqual(envelope.channel, "feishu")
         self.assertIsNone(envelope.group_id)
-        self.assertEqual(envelope.idempotency_key, "feishu:tenant-a:chat-1:msg-1")
+        self.assertEqual(envelope.idempotency_key, "channel.v1|6:feishu8:tenant-a6:chat-15:msg-1")
         self.assertEqual(envelope.to_dict()["protocol_version"], "channel.v1")
 
     def test_bridge_requires_group_after_explicit_binding(self):

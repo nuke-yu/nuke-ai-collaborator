@@ -18,6 +18,12 @@ _MAX_ID_LENGTH = 512
 _MAX_TEXT_LENGTH = 100_000
 
 
+def canonical_message_key(channel: str, tenant: str, conversation: str, message_id: str) -> str:
+    """Build an unambiguous key with length-prefixed components."""
+    parts = (channel, tenant, conversation, message_id)
+    return CHANNEL_PROTOCOL_VERSION + "|" + "".join(f"{len(part)}:{part}" for part in parts)
+
+
 def _required(value: str, field_name: str) -> str:
     normalized = str(value or "").strip()
     if not normalized:
@@ -83,6 +89,8 @@ class InboundEnvelope:
     protocol_version: str = CHANNEL_PROTOCOL_VERSION
 
     def __post_init__(self) -> None:
+        if self.protocol_version != CHANNEL_PROTOCOL_VERSION:
+            raise ValueError(f"unsupported channel protocol version: {self.protocol_version}")
         object.__setattr__(self, "external_message_id", _required(self.external_message_id, "external_message_id"))
         if len(self.text) > _MAX_TEXT_LENGTH:
             raise ValueError(f"text exceeds {_MAX_TEXT_LENGTH} characters")
@@ -119,7 +127,7 @@ class InboundEnvelope:
 
     @property
     def idempotency_key(self) -> str:
-        return f"{self.channel}:{self.external_tenant_id}:{self.external_group_id}:{self.external_message_id}"
+        return canonical_message_key(self.channel, self.external_tenant_id, self.external_group_id, self.external_message_id)
 
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
@@ -143,6 +151,8 @@ class OutboundEnvelope:
     protocol_version: str = CHANNEL_PROTOCOL_VERSION
 
     def __post_init__(self) -> None:
+        if self.protocol_version != CHANNEL_PROTOCOL_VERSION:
+            raise ValueError(f"unsupported channel protocol version: {self.protocol_version}")
         object.__setattr__(self, "event_type", _required(self.event_type, "event_type"))
         object.__setattr__(self, "idempotency_key", _required(self.idempotency_key, "idempotency_key"))
         object.__setattr__(self, "payload", _jsonable(self.payload, "payload"))
@@ -173,6 +183,8 @@ class BridgeEnvelope:
     protocol_version: str = BRIDGE_PROTOCOL_VERSION
 
     def __post_init__(self) -> None:
+        if self.protocol_version != BRIDGE_PROTOCOL_VERSION:
+            raise ValueError(f"unsupported bridge protocol version: {self.protocol_version}")
         if not isinstance(self.direction, BridgeDirection):
             object.__setattr__(self, "direction", BridgeDirection(str(self.direction)))
         object.__setattr__(self, "event_type", _required(self.event_type, "event_type"))

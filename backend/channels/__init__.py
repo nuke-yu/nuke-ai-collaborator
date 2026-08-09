@@ -6,6 +6,7 @@ from .core import (
     BridgeEnvelope,
     ChannelConversation,
     ChannelIdentity,
+    canonical_message_key,
     DeliveryReceipt,
     OutboundEnvelope,
 )
@@ -15,7 +16,7 @@ from .process import ChannelProcessClient, ChannelProcessError, ChannelProcessMa
 __all__ = [
     "BRIDGE_PROTOCOL_VERSION", "CHANNEL_PROTOCOL_VERSION", "BridgeDirection",
     "BridgeEnvelope", "ChannelAdapter", "ChannelAuthError", "ChannelConversation",
-    "ChannelIdentity", "DeliveryReceipt", "InboundEnvelope", "OutboundEnvelope",
+    "ChannelIdentity", "canonical_message_key", "DeliveryReceipt", "InboundEnvelope", "OutboundEnvelope",
     "ChannelDeliveryDispatcher",
     "ChannelProcessClient", "ChannelProcessError", "ChannelProcessManifest",
 ]
