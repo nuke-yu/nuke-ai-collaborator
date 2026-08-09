@@ -33,32 +33,25 @@
 
 ## 🎬 Product Demo Videos
 
-<table align="center" width="100%">
-  <tr>
-    <td align="center" width="50%">
-      <b>📹 Demo 1: Platform Basics & Multi-Role Collaboration</b>
-      <br/><br/>
-      <a href="https://github.com/nuke-yu/nuke-ai-collaborator/blob/main/vedio/Nuke-ai-collaborator.mp4" target="_blank">
-        <img src="home-page.png" width="100%" alt="Click to play Demo 1" style="border-radius: 8px; border: 1px solid #30363d;" />
-        <br/><br/>
-        <b>▶️ Click to Watch Demo 1 (5.2MB MP4)</b>
-      </a>
-      <br/>
-      <sub>Live walkthrough of group discussions, AI agent handoffs, and shared task board</sub>
-    </td>
-    <td align="center" width="50%">
-      <b>🐝 Demo 2: Nuke AI Swarm Multi-Agent Swarm Orchestration</b>
-      <br/><br/>
-      <a href="https://github.com/nuke-yu/nuke-ai-collaborator/blob/main/vedio/Nuke-AI-swarm.mp4" target="_blank">
-        <img src="home-page.png" width="100%" alt="Click to play Demo 2" style="border-radius: 8px; border: 1px solid #30363d;" />
-        <br/><br/>
-        <b>▶️ Click to Watch Demo 2 (7.8MB MP4)</b>
-      </a>
-      <br/>
-      <sub>Multi-agent concurrent pipeline orchestration and task relay in action</sub>
-    </td>
-  </tr>
-</table>
+### 📹 Demo 1: Nuke AI Collaborator Platform Walkthrough
+
+<div align="center">
+  <video src="https://github.com/user-attachments/assets/4510ce20-7577-40e6-89b6-444c6cd17136" controls="controls" width="100%"></video>
+  <p><i>▶️ Live walkthrough of group collaboration, multi-role AI team workflows, and pipeline relays</i></p>
+</div>
+
+<br/>
+
+### 🐝 Demo 2: Nuke AI Swarm Multi-Agent Swarm Orchestration
+
+<div align="center">
+  <a href="https://github.com/nuke-yu/nuke-ai-collaborator/blob/main/vedio/Nuke-AI-swarm.mp4" target="_blank">
+    <img src="home-page.png" width="100%" alt="Click to play Demo 2" style="border-radius: 8px; border: 1px solid #30363d;" />
+    <br/><br/>
+    <b>▶️ Click to Watch Demo 2 (7.8MB MP4)</b>
+  </a>
+  <p><i>▶️ Multi-agent concurrent pipeline orchestration and task relay in action</i></p>
+</div>
 
 ---
 
