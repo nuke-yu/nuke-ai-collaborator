@@ -71,6 +71,7 @@ class TestChannelStore(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(await self.store.claim_due_delivery())
         health = await self.store.get_delivery_health()
         self.assertEqual(health["paused_channels"], ["slack"])
+        self.assertIn("by_instance", health)
         await self.store.set_channel_paused("slack", False)
         await self.store.claim_due_delivery()
         self.assertTrue(await self.store.mark_failed("event-3", "permanent"))

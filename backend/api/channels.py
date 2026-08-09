@@ -20,6 +20,10 @@ async def channel_health(request: Request, user=Depends(require_operator)):
     store = _store()
     await store.initialize()
     result = await store.get_delivery_health()
+    from runtime import supervisor as supervisor_module
+    supervisor = supervisor_module.supervisor
+    delivery = getattr(supervisor, "_channel_delivery", None) if supervisor else None
+    result["dispatcher"] = delivery.snapshot() if delivery is not None else {"up": False}
     audit_control_plane("channels.health", user, request)
     return result
 

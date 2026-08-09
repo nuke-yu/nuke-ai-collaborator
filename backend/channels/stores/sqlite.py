@@ -208,10 +208,33 @@ class ChannelStore:
                 "SELECT MIN(created_at) FROM channel_delivery_outbox WHERE state IN ('pending','retrying')"
             ) as cursor:
                 oldest = (await cursor.fetchone())[0]
+            async with db.execute(
+                """SELECT channel_instance_id,
+                          MAX(CASE WHEN state='sent' THEN updated_at END),
+                          SUM(CASE WHEN state='retrying' THEN 1 ELSE 0 END),
+                          SUM(CASE WHEN state='dead_letter' THEN 1 ELSE 0 END),
+                          MIN(CASE WHEN state='dead_letter' THEN created_at END)
+                   FROM channel_delivery_outbox GROUP BY channel_instance_id"""
+            ) as cursor:
+                instance_rows = await cursor.fetchall()
         counts: dict[str, dict[str, int]] = {}
         for channel, state, count in rows:
             counts.setdefault(channel, {})[state] = int(count)
-        return {"by_channel": counts, "paused_channels": paused, "oldest_pending_at": oldest}
+        by_instance = {
+            row[0] or "unknown": {
+                "last_success_at": row[1],
+                "retrying": int(row[2] or 0),
+                "dead_letter": int(row[3] or 0),
+                "oldest_dead_letter_at": row[4],
+            }
+            for row in instance_rows
+        }
+        return {
+            "by_channel": counts,
+            "by_instance": by_instance,
+            "paused_channels": paused,
+            "oldest_pending_at": oldest,
+        }
 
     async def replay_dead_letter(self, idempotency_key: str) -> bool:
         now = int(time.time() * 1000)
