@@ -35,6 +35,7 @@ _DDL = (
     """CREATE TABLE IF NOT EXISTS channel_messages (
         message_key TEXT PRIMARY KEY,
         channel TEXT NOT NULL,
+        channel_instance_id TEXT NOT NULL DEFAULT '',
         external_tenant_id TEXT NOT NULL,
         external_conversation_id TEXT NOT NULL,
         external_user_id TEXT,
@@ -103,6 +104,8 @@ class ChannelStore:
                 await db.execute("ALTER TABLE channel_delivery_outbox ADD COLUMN lease_owner TEXT")
             if "lease_expires_at" not in columns:
                 await db.execute("ALTER TABLE channel_delivery_outbox ADD COLUMN lease_expires_at INTEGER")
+            if "channel_instance_id" not in columns:
+                await db.execute("ALTER TABLE channel_delivery_outbox ADD COLUMN channel_instance_id TEXT NOT NULL DEFAULT ''")
             await db.commit()
 
     async def record_inbound(self, envelope: InboundEnvelope) -> bool:
@@ -144,13 +147,14 @@ class ChannelStore:
         async with aiosqlite.connect(self.path) as db:
             cursor = await db.execute(
                 """INSERT OR IGNORE INTO channel_delivery_outbox
-                   (idempotency_key,channel,external_tenant_id,external_conversation_id,
+                   (idempotency_key,channel,channel_instance_id,external_tenant_id,external_conversation_id,
                     event_type,payload_json,reply_to_external_id,group_id,session_id,
                     state,next_attempt_at,created_at,updated_at)
-                   VALUES(?,?,?,?,?,?,?,?,?,'pending',?,?,?)""",
+                   VALUES(?,?,?,?,?,?,?,?,?,?,'pending',?,?,?)""",
                 (
                     envelope.idempotency_key,
                     envelope.identity.channel,
+                    envelope.channel_instance_id or envelope.identity.channel,
                     envelope.identity.external_tenant_id,
                     envelope.conversation.external_conversation_id,
                     envelope.event_type,
@@ -249,6 +253,7 @@ class ChannelStore:
         lease_owner: str = "channel-dispatcher",
         lease_ms: int = 30_000,
         channel: str | None = None,
+        channel_instance_id: str | None = None,
     ) -> dict[str, Any] | None:
         """Atomically claim one due delivery and attach a crash-recovery lease."""
         now = now_ms if now_ms is not None else int(time.time() * 1000)
@@ -257,14 +262,20 @@ class ChannelStore:
         await self.recover_expired_deliveries(now_ms=now)
         async with aiosqlite.connect(self.path) as db:
             await db.execute("BEGIN IMMEDIATE")
-            channel_clause = " AND channel=?" if channel else ""
-            params: tuple[Any, ...] = (now, channel.lower()) if channel else (now,)
+            channel_clause = ""
+            params: tuple[Any, ...] = (now,)
+            if channel_instance_id:
+                channel_clause = " AND channel_instance_id=?"
+                params += (channel_instance_id.lower(),)
+            elif channel:
+                channel_clause = " AND channel=?"
+                params += (channel.lower(),)
             async with db.execute(
                 f"""SELECT idempotency_key FROM channel_delivery_outbox
                    WHERE state IN ('pending','retrying') AND next_attempt_at<=?
                      AND NOT EXISTS (
                        SELECT 1 FROM channel_delivery_controls c
-                       WHERE c.channel=channel_delivery_outbox.channel AND c.paused=1
+                       WHERE c.channel=COALESCE(NULLIF(channel_delivery_outbox.channel_instance_id,''), channel_delivery_outbox.channel) AND c.paused=1
                      )
                    {channel_clause} ORDER BY created_at ASC LIMIT 1""",
                 params,

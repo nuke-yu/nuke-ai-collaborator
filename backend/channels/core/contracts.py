@@ -158,6 +158,7 @@ class OutboundEnvelope:
     group_id: int | None = None
     session_id: str | None = None
     source_event_id: str | None = None
+    channel_instance_id: str | None = None
     protocol_version: str = CHANNEL_PROTOCOL_VERSION
 
     def __post_init__(self) -> None:
@@ -172,6 +173,8 @@ class OutboundEnvelope:
             object.__setattr__(self, "session_id", _required(self.session_id, "session_id"))
         if self.source_event_id is not None:
             object.__setattr__(self, "source_event_id", _required(self.source_event_id, "source_event_id"))
+        if self.channel_instance_id is not None:
+            object.__setattr__(self, "channel_instance_id", _required(self.channel_instance_id, "channel_instance_id"))
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self) | {

@@ -37,6 +37,7 @@ class TestChannelProcessServer(unittest.IsolatedAsyncioTestCase):
             identity=ChannelIdentity("slack", "tenant"),
             conversation=ChannelConversation("chat"),
             event_type="task_stuck", payload={"message": "hello"}, idempotency_key="event-1",
+            channel_instance_id="slack:prod",
         )
         bridge = {
             "direction": "outbound", "event_type": envelope.event_type,

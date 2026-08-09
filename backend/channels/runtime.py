@@ -135,12 +135,13 @@ class GroupChannelRelayService:
 
 
 class ChannelDeliveryDispatcher:
-    def __init__(self, store: ChannelStore, connector: ChannelConnector, *, channel: str | None = None, max_attempts: int = 3, base_delay_ms: int = 1_000, lease_ms: int = 30_000, owner_id: str | None = None):
+    def __init__(self, store: ChannelStore, connector: ChannelConnector, *, channel: str | None = None, channel_instance_id: str | None = None, max_attempts: int = 3, base_delay_ms: int = 1_000, lease_ms: int = 30_000, owner_id: str | None = None):
         if max_attempts <= 0 or base_delay_ms < 0:
             raise ValueError("max_attempts must be positive and base_delay_ms must not be negative")
         self.store = store
         self.connector = connector
         self.channel = channel.lower() if channel else None
+        self.channel_instance_id = channel_instance_id.lower() if channel_instance_id else None
         self.max_attempts = max_attempts
         self.base_delay_ms = base_delay_ms
         if lease_ms <= 0:
@@ -149,7 +150,7 @@ class ChannelDeliveryDispatcher:
         self.owner_id = owner_id or f"channel-dispatcher:{uuid.uuid4()}"
 
     async def run_once(self, *, now_ms: int | None = None) -> bool:
-        item = await self.store.claim_due_delivery(now_ms=now_ms, lease_owner=self.owner_id, lease_ms=self.lease_ms, channel=self.channel)
+        item = await self.store.claim_due_delivery(now_ms=now_ms, lease_owner=self.owner_id, lease_ms=self.lease_ms, channel=self.channel, channel_instance_id=self.channel_instance_id)
         if item is None:
             return False
         key = item["idempotency_key"]
@@ -162,6 +163,7 @@ class ChannelDeliveryDispatcher:
             reply_to_external_id=item["reply_to_external_id"],
             group_id=item["group_id"],
             session_id=item["session_id"],
+            channel_instance_id=item.get("channel_instance_id") or None,
         )
         heartbeat = asyncio.create_task(self._heartbeat(key))
         try:
@@ -233,7 +235,7 @@ class ChannelDeliveryService:
             raise ValueError("channel is required")
         self._connectors[key] = connector
         self._dispatchers[key] = ChannelDeliveryDispatcher(
-            self.store, connector, channel=key, owner_id=f"channel-dispatcher:{key}"
+            self.store, connector, channel_instance_id=key, owner_id=f"channel-dispatcher:{key}"
         )
 
     async def start(self) -> None:

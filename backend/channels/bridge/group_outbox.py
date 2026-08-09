@@ -154,6 +154,7 @@ def _outbound_from_json(payload_json: str) -> OutboundEnvelope:
         group_id=data.get("group_id"),
         session_id=data.get("session_id"),
         source_event_id=data.get("source_event_id"),
+        channel_instance_id=data.get("channel_instance_id"),
     )
 
 

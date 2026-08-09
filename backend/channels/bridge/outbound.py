@@ -77,4 +77,5 @@ class OutboundEventProjector:
             group_id=self.binding.group_id,
             session_id=session_id,
             source_event_id=source_event_id,
+            channel_instance_id=self.binding.channel_instance_id,
         )

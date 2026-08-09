@@ -88,11 +88,14 @@ class ChannelProcessServer:
             group_id=outbound_data.get("group_id"),
             session_id=outbound_data.get("session_id"),
             source_event_id=outbound_data.get("source_event_id"),
+            channel_instance_id=outbound_data.get("channel_instance_id"),
             protocol_version=outbound_data.get("protocol_version", "channel.v1"),
         )
         expected_channel = self.manifest.channel_instance_id.split(":", 1)[0].lower()
         if envelope.identity.channel != expected_channel:
             raise ChannelProcessError("outbound channel does not match process manifest")
+        if envelope.channel_instance_id != self.manifest.channel_instance_id:
+            raise ChannelProcessError("outbound channel instance does not match process manifest")
         receipt = await asyncio.wait_for(self.handler.send(envelope), timeout=self.manifest.max_seconds)
         if not isinstance(receipt, DeliveryReceipt):
             raise ChannelProcessError("handler returned invalid delivery receipt")

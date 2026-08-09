@@ -24,22 +24,22 @@ async def channel_health(request: Request, user=Depends(require_operator)):
     return result
 
 
-@router.post("/{channel}/pause")
-async def pause_channel(channel: str, request: Request, user=Depends(require_operator)):
+@router.post("/{channel_instance_id}/pause")
+async def pause_channel(channel_instance_id: str, request: Request, user=Depends(require_operator)):
     store = _store()
     await store.initialize()
-    await store.set_channel_paused(channel, True)
-    audit_control_plane("channels.pause", user, request, channel=channel)
-    return {"channel": channel.lower(), "paused": True}
+    await store.set_channel_paused(channel_instance_id, True)
+    audit_control_plane("channels.pause", user, request, channel_instance_id=channel_instance_id)
+    return {"channel_instance_id": channel_instance_id.lower(), "paused": True}
 
 
-@router.post("/{channel}/resume")
-async def resume_channel(channel: str, request: Request, user=Depends(require_operator)):
+@router.post("/{channel_instance_id}/resume")
+async def resume_channel(channel_instance_id: str, request: Request, user=Depends(require_operator)):
     store = _store()
     await store.initialize()
-    await store.set_channel_paused(channel, False)
-    audit_control_plane("channels.resume", user, request, channel=channel)
-    return {"channel": channel.lower(), "paused": False}
+    await store.set_channel_paused(channel_instance_id, False)
+    audit_control_plane("channels.resume", user, request, channel_instance_id=channel_instance_id)
+    return {"channel_instance_id": channel_instance_id.lower(), "paused": False}
 
 
 @router.post("/replay")
