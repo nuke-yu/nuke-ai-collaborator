@@ -13,6 +13,7 @@ from .core import (
 from .runtime import ChannelDeliveryDispatcher
 from .process import ChannelProcessClient, ChannelProcessError, ChannelProcessManifest
 from .process_server import ChannelProcessHandler, ChannelProcessServer
+from .secrets import ChannelSecretResolver, EnvironmentSecretResolver
 
 __all__ = [
     "BRIDGE_PROTOCOL_VERSION", "CHANNEL_PROTOCOL_VERSION", "BridgeDirection",
@@ -21,4 +22,5 @@ __all__ = [
     "ChannelDeliveryDispatcher",
     "ChannelProcessClient", "ChannelProcessError", "ChannelProcessManifest",
     "ChannelProcessHandler", "ChannelProcessServer",
+    "ChannelSecretResolver", "EnvironmentSecretResolver",
 ]

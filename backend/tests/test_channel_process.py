@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, patch
 
 from channels import ChannelProcessClient, ChannelProcessError, ChannelProcessManifest
 from channels.core import ChannelConversation, ChannelIdentity, DeliveryReceipt, OutboundEnvelope
+from channels.secrets import EnvironmentSecretResolver
 
 
 class FakeStream:
@@ -98,6 +99,25 @@ class TestChannelProcess(unittest.IsolatedAsyncioTestCase):
         await client.close()
         self.assertEqual(process.terminate_calls, 1)
         self.assertEqual(process.kill_calls, 1)
+
+    async def test_child_receives_minimal_explicit_environment(self):
+        response = {"request_id": "slack:prod:1", "receipt": {
+            "channel": "slack", "idempotency_key": "event-env", "status": "sent", "external_message_id": "remote-1"
+        }}
+        process = FakeProcess((json.dumps(response) + "\n").encode())
+        envelope = OutboundEnvelope(
+            identity=ChannelIdentity("slack", "tenant-a"), conversation=ChannelConversation("chat-1"),
+            event_type="task_stuck", payload={}, idempotency_key="event-env",
+        )
+        resolver = EnvironmentSecretResolver({"SLACK_TOKEN": "secret", "HOME": "/must-not-leak"})
+        with patch("channels.process.asyncio.create_subprocess_exec", new=AsyncMock(return_value=process)) as start:
+            await ChannelProcessClient(
+                ["channel-worker"], ChannelProcessManifest("slack:prod", env_keys=("SLACK_TOKEN",)),
+                secret_resolver=resolver,
+            ).send(envelope)
+        env = start.await_args.kwargs["env"]
+        self.assertEqual(env["SLACK_TOKEN"], "secret")
+        self.assertNotIn("HOME", env)
 
 
 if __name__ == "__main__":

@@ -3,12 +3,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from dataclasses import dataclass
 from typing import Any
 
 from executors.redaction import redact_secrets
 
 from .core import BridgeDirection, BridgeEnvelope, DeliveryReceipt, OutboundEnvelope
+from .secrets import ChannelSecretResolver, EnvironmentSecretResolver, validate_env_names
 
 
 class ChannelProcessError(RuntimeError):
@@ -21,18 +23,20 @@ class ChannelProcessManifest:
     version: str = "1"
     max_seconds: float = 30.0
     max_frame_bytes: int = 256_000
+    env_keys: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.channel_instance_id.strip() or not self.version.strip():
             raise ValueError("channel_instance_id and version are required")
         if self.max_seconds <= 0 or self.max_frame_bytes <= 0:
             raise ValueError("process limits must be positive")
+        object.__setattr__(self, "env_keys", validate_env_names(self.env_keys))
 
 
 class ChannelProcessClient:
     """Send only BridgeEnvelope frames to an isolated Channel process."""
 
-    def __init__(self, argv: list[str], manifest: ChannelProcessManifest):
+    def __init__(self, argv: list[str], manifest: ChannelProcessManifest, *, secret_resolver: ChannelSecretResolver | None = None):
         if not argv:
             raise ValueError("channel process argv is required")
         self.argv = tuple(argv)
@@ -40,6 +44,7 @@ class ChannelProcessClient:
         self._process: asyncio.subprocess.Process | None = None
         self._lock = asyncio.Lock()
         self._request_id = 0
+        self._secret_resolver = secret_resolver or EnvironmentSecretResolver()
 
     async def send(self, envelope: OutboundEnvelope) -> DeliveryReceipt:
         bridge = BridgeEnvelope(
@@ -88,12 +93,16 @@ class ChannelProcessClient:
 
     async def _start(self) -> None:
         if self._process is None or self._process.returncode is not None:
+            resolved = self._secret_resolver.resolve(self.manifest.channel_instance_id, self.manifest.env_keys)
+            env = {"PATH": os.environ.get("PATH", ""), "LANG": os.environ.get("LANG", "C"), "LC_ALL": os.environ.get("LC_ALL", "C"), "PYTHONUNBUFFERED": "1"}
+            env.update({str(key): str(value) for key, value in resolved.items() if key in self.manifest.env_keys})
             self._process = await asyncio.create_subprocess_exec(
                 *self.argv,
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,
                 limit=self.manifest.max_frame_bytes,
+                env=env,
             )
 
     async def _stop_process(self) -> None:
