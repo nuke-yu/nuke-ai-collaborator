@@ -1,6 +1,6 @@
 # Nuke AI / Hanako 对比后的开发执行计划
 
-> 基线：2026-08-09，仓库 `HEAD=62e5c17`
+> 基线：2026-08-09；任务状态以本文件所在提交及其父提交为准。
 >
 > 关联评审：[Hanako-comparison-2026-08-02.md](../../Hanako-comparison-2026-08-02.md)
 
@@ -20,7 +20,7 @@
 
 ## 2. 当前基线
 
-### 已完成
+### 已完成（代码已交付）
 
 - Group / Worker / MCP Collector 隔离。
 - Workflow State、Session WAL、Snapshot、Parent Session、Recovery。
@@ -30,45 +30,49 @@
 - Retention、OTel、Prometheus 导出闭环。
 - Personal Vault 后端、Scoped Projection 和基础管理 UI。
 - Electron、Onboarding、Theme 相关代码已进入提交历史。
+- Capability Manifest / Execution Identity：Provider/Model Descriptor、Manifest 持久化和 canonical hash。
+- 业务 WebSocket Envelope、Replay Cursor、Catch-up 和客户端事件去重。
+- Timeline 执行详情、Group SQL 隔离和敏感输出脱敏。
+- Artifact 生命周期元数据：版本、派生关系、软删除和生命周期状态。
+- Personal Memory 使用来源与 Session 审计记录。
+- Provider Registry、能力校验、废弃/替换和预算治理。
+- 通用签名 Webhook Channel Adapter 基础层。
+- 单插件 JSONL IPC 隔离试点，包含超时、取消、输出上限和脱敏。
+- Store Registry 可执行元数据注册表。
 
-### 仍缺失
+### 仍缺失（后续治理或生产接入）
 
-- Capability Manifest / Execution Identity。
-- 业务 WebSocket 的统一 Envelope、Replay Cursor 和 Catch-up 契约。
-- Artifact 生命周期、版本和派生关系。
-- Personal Memory 使用证据和撤回影响审计。
-- 统一 Provider / Model Descriptor。
-- 外部 Channel Adapter。
-- Store Registry。
-- 插件进程隔离。
+- 真实飞书、Slack 或企业微信渠道的端到端接入。
+- Plugin IPC 试点向全部高风险 Executor 的迁移，以及正式崩溃恢复闭环。
+- Store Registry 的 migration、owner、retention、deletion 和灾备治理。
+- Personal Memory 撤回后的影响展示和产品化操作界面。
+- Timeline 恢复/重试入口、性能优化和用户/管理员视图分层。
+- 已知 MCP 边界问题：事件循环 API、无命名空间工具的 HIL 校验、Collector per-server 并发锁。
 
-### 当前测试基线
+### 当前测试基线（2026-08-09）
 
-相关定向测试当前为 `71 passed, 2 failed`。失败集中在旧的 `test_timeline_projector.py`：
-
-1. 测试仍期待旧英文节点文案；
-2. 测试写入临时 `DB_PATH`，而当前 Projector 按 `group_db_path(group_id)` 读取。
-
-在 Phase 0 完成前，不将相关测试状态视为完全绿色。
+后端全量测试为 `2455 passed, 2 skipped, 56 warnings, 40 subtests passed`。
+健康检查测试已改为使用自有临时数据库，不再依赖前序测试留下的全局 `DB_PATH`。
+剩余 warning 主要来自第三方依赖和既有弃用 API，不影响本次测试通过结果。
 
 ## 3. 阶段路线
 
 ```text
-Phase 0  基线修复
+Phase 0  基线修复（已完成）
     ↓
-Phase 1  Provider Identity + Capability Manifest
+Phase 1  Provider Identity + Capability Manifest（已完成基础交付）
     ↓
-Phase 2  WebSocket Event Contract + Timeline Hardening
+Phase 2  WebSocket Event Contract + Timeline Hardening（协议与安全基础已完成）
     ↓
-Phase 3  Artifact Lifecycle
+Phase 3  Artifact Lifecycle（元数据基础已完成，治理待完善）
     ↓
-Phase 4  Memory Provenance / Personal Vault Audit
+Phase 4  Memory Provenance / Personal Vault Audit（基础审计已完成）
     ↓
-Phase 5  Provider Governance
+Phase 5  Provider Governance（基础治理已完成）
     ↓
-Phase 6  Channel Adapter
+Phase 6  Channel Adapter（通用基础层已完成，真实渠道待选择）
     ↓
-Phase 7  Plugin Process Isolation
+Phase 7  Plugin Process Isolation（单插件试点已完成）
 ```
 
 ## 4. Phase 0：稳定当前基线
@@ -443,6 +447,7 @@ feat(plugins): isolate one executor behind process IPC
 9. feat(provider): add model capability and budget governance
 10. feat(channel): add first external channel adapter
 11. feat(plugins): isolate one executor behind process IPC
+12. feat(store): add executable store registry
 ```
 
 后端每完成一个功能点，只运行直接相关测试：

@@ -1139,7 +1139,7 @@ OpenHanako 的主要优势是：
 
 ## 14. 当前代码复核与路线校准（2026-08-09）
 
-本节覆盖原始文档之后的代码变化，以仓库 `HEAD=62e5c17` 为基线。它是当前可执行路线的准据；前文第 8、9 节保留为 8.2 决策审计记录，不再作为当前排期直接使用。
+本节覆盖原始文档之后的代码变化，以 2026-08-09 的最新任务提交为基线。它是当前可执行路线的准据；前文第 8、9 节保留为 8.2 决策审计记录，不再作为当前排期直接使用。
 
 完整开发执行计划见：[2026-08-09-hanako-comparison-development-execution-plan.md](superpowers/plans/2026-08-09-hanako-comparison-development-execution-plan.md)。
 
@@ -1149,16 +1149,16 @@ OpenHanako 的主要优势是：
 |---|---|---|
 | Group / Worker / MCP Collector 隔离 | CURRENT | 仍是 Collaborator 的核心架构优势。真实 MCP 连接只在 Collector，Worker 通过 Proxy/IPC 调用。 |
 | Workflow / Session WAL / Recovery | CURRENT | 已有 workflow state、session events、snapshot、parent session、recovery 和原子 Workflow transition。 |
-| Capability Manifest | TARGET | `agent_sessions` 目前主要保存 `config_json`、`executor_id` 和 snapshot，尚无完整能力版本/hash 快照。 |
-| Artifact Registry | TRANSITION | `group_artifacts`、稳定 `artifact_id`、上传和 `write_file` 自动登记已完成；Workflow 交付、版本/派生关系和物理生命周期仍需治理。 |
+| Capability Manifest | CURRENT / TRANSITION | `agent_sessions` 已保存版本化 Capability Manifest 及 canonical hash；后续仍需与所有执行入口和 Model Usage Ledger 完全收敛。 |
+| Artifact Registry | TRANSITION | `group_artifacts`、稳定 `artifact_id`、上传和 `write_file` 自动登记，以及版本/派生/软删除元数据已完成；Workflow 交付和物理生命周期治理仍需完善。 |
 | Unified Timeline | CURRENT | 已有 Group 级统一业务时间线和单 Session 执行抽屉；后续重点是权限、性能、恢复入口和用户/管理员视图分层。 |
-| Personal Vault | TRANSITION | 后端授权边界和前端管理 UI 已完成；记忆来源、使用 Session、撤回影响和使用审计仍不完整。 |
+| Personal Vault | TRANSITION | 后端授权边界、前端管理 UI、记忆来源和使用 Session 审计已完成；撤回影响展示和产品化治理仍不完整。 |
 | Event Policy / Payload Policy / Retention | CURRENT | 已形成分类、脱敏、Artifact 化、原子写入、Retention、OTel 和 Prometheus 闭环。 |
-| Model Usage Ledger | CURRENT | 已按 Provider 请求记录实际模型、Token、费用、失败和 retry 关系；统一 Provider Descriptor 仍缺失。 |
-| WebSocket Event Contract | TRANSITION | IPC 有版本号，REST Timeline 有 cursor；业务 WS 尚无统一 Schema、replay cursor 和完整 catch-up 契约。 |
-| Channel Adapter | TARGET | 当前 integrations 主要是 Git/GitHub/Jira 工具集成，不是外部聊天渠道归一化层。 |
-| Store Registry | TARGET | 当前存在多种 Store，但尚无统一 owner、canonical/projection、migration、retention 和 deletion 登记。 |
-| Plugin Process Isolation | TARGET | Python Executor/Orchestrator 仍与 Worker/runtime 共享进程边界。 |
+| Model Usage Ledger | CURRENT | 已按 Provider 请求记录实际模型、Token、费用、失败和 retry 关系；Provider Descriptor 和基础治理已补齐。 |
+| WebSocket Event Contract | CURRENT / TRANSITION | 已有版本化 Envelope、event_id、Replay Cursor、Catch-up 和客户端去重；完整 Schema 生成和所有事件迁移仍可继续。 |
+| Channel Adapter | TRANSITION | 已有通用签名 Webhook、租户/用户映射、幂等、mention、回复和附件接口；真实企业渠道尚未完成端到端接入。 |
+| Store Registry | TRANSITION | 已有可执行 Store Descriptor/Registry 和默认 Store 登记；owner、migration、retention、deletion 和灾备治理仍待补齐。 |
+| Plugin Process Isolation | TRANSITION | 已完成单插件 JSONL IPC 隔离试点，含超时、取消、输出上限和脱敏；尚未迁移全部高风险 Executor。 |
 | Electron / Onboarding / Theme | CURRENT | 相关实现已经进入提交历史，不再按“未提交能力”处理。 |
 
 ### 14.2 原始检查清单中需要降级或改名的项目
@@ -1167,19 +1167,19 @@ OpenHanako 的主要优势是：
 2. **Execution Timeline** 不再是待建设的 P1，而是 CURRENT；后续工作是 Timeline Hardening。
 3. **Personal Vault UI** 已完成，应改为 **Personal Memory Provenance and Usage Audit**，优先级 P1。
 4. **OTel / Prometheus / Retention / Unified Timeline API** 已完成，转入维护、性能和权限加固。
-5. **MCP Collector OAuth 并发问题** 已加入 per-server lock 和 inflight guard；原始“完全没有 per-server lock”的描述已过时。
+5. **MCP Collector OAuth 并发问题** 仍需补充 per-server lock；原始“完全没有 per-server lock”的描述仍是当前已知问题。
 6. `/api/config/mcp` 当前使用 operator 权限、ETag 和审计；原始“任何登录用户可写”的描述已过时。
 
 ### 14.3 当前推荐路线
 
-#### Phase 0：状态与契约校准
+#### Phase 0：状态与契约校准（已完成）
 
 1. 修正旧文档中的 CURRENT / TRANSITION / TARGET 标记。
 2. 修复 Timeline Projector 与旧测试之间的 DB 绑定和文案契约不一致。
 3. 建立 Session、Workflow、Artifact、Memory、Permission 的主键和关联清单。
 4. 为每项路线补充数据迁移、权限边界和验收标准。
 
-#### Phase 1：Execution Identity
+#### Phase 1：Execution Identity（基础交付已完成）
 
 1. 建立最小 Provider/Model Descriptor。
 2. 为 `agent_sessions` 增加 Capability Manifest、canonical serialization 和 manifest hash。
@@ -1189,7 +1189,7 @@ OpenHanako 的主要优势是：
 
 验收标准：同一 Session 的重试可检测能力差异；实际 Provider/Model 与 Ledger 一致；Manifest 不保存 Secret 或无界原文。
 
-#### Phase 2：Event Protocol 与 Timeline Hardening
+#### Phase 2：Event Protocol 与 Timeline Hardening（协议与安全基础已完成）
 
 1. 给业务 WebSocket 增加统一 Envelope、protocol version、event_id、request_id、session_id 和 workflow_id。
 2. 增加 reconnect cursor、catch-up 和去重语义。
@@ -1198,31 +1198,31 @@ OpenHanako 的主要优势是：
 
 第一阶段只需要稳定 Envelope 和回放语义，不应一开始创建大量独立 Schema 文件；类型生成和完整事件 Schema 可随后补齐。
 
-#### Phase 3：Artifact Lifecycle
+#### Phase 3：Artifact Lifecycle（基础元数据已完成）
 
 1. 在现有 `backend/artifacts/manager.py` 基础上统一上传、Workspace、Workflow Deliverable 和工具输出。
 2. 增加 Artifact version、`derives_from`、引用和删除语义。
 3. 明确 `storage_locator` 的权限、路径守卫和物理文件清理规则。
 4. 将 Artifact 作为 Workflow 阶段输入输出，并为未来 Connector 附件预留 `external_locator`。
 
-#### Phase 4：Memory Provenance 与 Personal Vault Governance
+#### Phase 4：Memory Provenance 与 Personal Vault Governance（基础审计已完成）
 
 1. 展示记忆来源、置信度、授权范围和用户/模型判断来源。
 2. 记录哪个 Group/Bot/Session 使用过某条个人记忆。
 3. 展示删除或撤回 Projection 后的影响范围。
 4. 保持跨 Group 使用必须经过 Scoped Projection，禁止默认全局注入。
 
-#### Phase 5：Provider Governance
+#### Phase 5：Provider Governance（基础治理已完成）
 
 1. 统一 Provider/Model 能力描述：tool calling、vision、thinking、context window、OAuth、pricing。
 2. 统一模型废弃、替换、fallback、预算和 quota 语义。
 3. 将所有执行路径的 Provider 解析收敛到 Registry，并与 Capability Manifest、Model Usage Ledger 对接。
 
-#### Phase 6：Channel Adapter
+#### Phase 6：Channel Adapter（通用基础层已完成，真实渠道待选择）
 
 只有在确定企业渠道战略后启动，先选择一个渠道完成端到端验证。必须先解决外部租户、外部用户到 Group/Member 的映射、消息幂等、mention、回复关联、附件 Artifact 化和权限继承。
 
-#### Phase 7：Plugin Process Isolation
+#### Phase 7：Plugin Process Isolation（单插件试点已完成）
 
 先选择一个高风险 Executor 或 Coding Agent 做独立进程试点，完成结构化 IPC、Capability Manifest、权限、资源额度、超时、取消和崩溃恢复后，再扩展到其他插件。
 
@@ -1243,4 +1243,4 @@ OpenHanako 的主要优势是：
 
 ### 14.5 当前验证备注
 
-截至本次复核，相关定向测试结果为 `71 passed, 2 failed`。失败集中在旧的 `test_timeline_projector.py`：一个测试仍期待旧英文文案，另一个测试把数据写入临时 `DB_PATH`，而当前 Projector 按 `group_db_path(group_id)` 读取。该测试契约需要在后续 Timeline Hardening 中修正，当前不能将相关测试描述为完全绿色。
+截至本次复核，后端全量测试为 `2455 passed, 2 skipped, 56 warnings, 40 subtests passed`。健康检查测试已经隔离自己的临时数据库，解决了前序测试污染全局 `DB_PATH` 导致的顺序依赖。当前剩余工作集中在真实渠道端到端接入、插件全面迁移、Store 治理和 Timeline 产品化加固，而不是基础任务未实现。
