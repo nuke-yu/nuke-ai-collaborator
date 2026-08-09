@@ -51,6 +51,7 @@ _DDL = (
     )""",
     """CREATE TABLE IF NOT EXISTS channel_delivery_outbox (
         idempotency_key TEXT PRIMARY KEY,
+        source_event_id TEXT,
         channel TEXT NOT NULL,
         channel_instance_id TEXT NOT NULL DEFAULT '',
         external_tenant_id TEXT NOT NULL,
@@ -108,6 +109,8 @@ class ChannelStore:
                 await db.execute("ALTER TABLE channel_delivery_outbox ADD COLUMN lease_expires_at INTEGER")
             if "channel_instance_id" not in columns:
                 await db.execute("ALTER TABLE channel_delivery_outbox ADD COLUMN channel_instance_id TEXT NOT NULL DEFAULT ''")
+            if "source_event_id" not in columns:
+                await db.execute("ALTER TABLE channel_delivery_outbox ADD COLUMN source_event_id TEXT")
             async with db.execute(
                 "SELECT idempotency_key,channel_instance_id,state FROM channel_delivery_outbox"
             ) as cursor:
@@ -175,12 +178,13 @@ class ChannelStore:
         async with aiosqlite.connect(self.path) as db:
             cursor = await db.execute(
                 """INSERT OR IGNORE INTO channel_delivery_outbox
-                   (idempotency_key,channel,channel_instance_id,external_tenant_id,external_conversation_id,
+                   (idempotency_key,source_event_id,channel,channel_instance_id,external_tenant_id,external_conversation_id,
                     event_type,payload_json,reply_to_external_id,group_id,session_id,
                     state,next_attempt_at,created_at,updated_at)
-                   VALUES(?,?,?,?,?,?,?,?,?,?,'pending',?,?,?)""",
+                   VALUES(?,?,?,?,?,?,?,?,?,?,?,'pending',?,?,?)""",
                 (
                     envelope.idempotency_key,
+                    envelope.source_event_id,
                     envelope.identity.channel,
                     canonical_channel_instance_id(envelope.channel_instance_id or envelope.identity.channel),
                     envelope.identity.external_tenant_id,

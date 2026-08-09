@@ -189,6 +189,7 @@ class ChannelDeliveryDispatcher:
             reply_to_external_id=item["reply_to_external_id"],
             group_id=item["group_id"],
             session_id=item["session_id"],
+            source_event_id=item.get("source_event_id") or None,
             channel_instance_id=item.get("channel_instance_id") or None,
         )
         heartbeat = asyncio.create_task(self._heartbeat(key))
@@ -207,7 +208,10 @@ class ChannelDeliveryDispatcher:
                 key,
                 DeliveryState.SENT,
                 event_type="delivery.sent",
-                details={"attempt": item["attempts"]},
+                details={
+                    "attempt": item["attempts"],
+                    "source_event_id": envelope.source_event_id,
+                },
                 external_message_id=receipt.external_message_id,
                 lease_owner=self.owner_id,
             ):

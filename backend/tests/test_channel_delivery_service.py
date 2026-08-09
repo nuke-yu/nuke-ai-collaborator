@@ -8,7 +8,11 @@ from channels.stores import ChannelStore
 
 
 class _Connector:
+    def __init__(self):
+        self.envelopes = []
+
     async def send(self, envelope):
+        self.envelopes.append(envelope)
         return DeliveryReceipt(envelope.identity.channel, envelope.idempotency_key, "sent", "remote")
 
 
@@ -21,13 +25,20 @@ class TestChannelDeliveryService(unittest.IsolatedAsyncioTestCase):
             await store.enqueue_outbound(OutboundEnvelope(
                 identity=ChannelIdentity("slack", "tenant"), conversation=ChannelConversation("chat"),
                 event_type="task_stuck", payload={}, idempotency_key="event-1",
+                source_event_id="workflow-source-1",
             ))
             service = ChannelDeliveryService(store, poll_interval=0.01)
-            service.register("slack", _Connector())
+            connector = _Connector()
+            service.register("slack", connector)
             await service.run_once()
             await service.start()
             await service.stop()
             self.assertEqual((await store.get_delivery("event-1"))["state"], "sent")
+            self.assertEqual(connector.envelopes[0].source_event_id, "workflow-source-1")
+            self.assertEqual(
+                (await store.list_audit("event-1"))[-1]["details"]["source_event_id"],
+                "workflow-source-1",
+            )
             self.assertEqual(service.snapshot()["registered_channels"], ["slack"])
         finally:
             tmp.cleanup()
