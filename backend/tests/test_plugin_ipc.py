@@ -63,6 +63,30 @@ class TestPluginIPC(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(PluginProcessError):
                 await client.call("run")
 
+    async def test_manifest_limits_and_hil_are_enforced(self):
+        manifest = PluginManifest(
+            "governed", "2", PluginCapability(
+                max_input_bytes=8,
+                allowed_methods=("read", "write"),
+                write_methods=("write",),
+            )
+        )
+        client = PluginProcessClient([sys.executable, "plugin_worker.py"], manifest)
+        with self.assertRaisesRegex(PluginProcessError, "human approval"):
+            await client.call("write")
+        with self.assertRaisesRegex(PluginProcessError, "input limit"):
+            await client.call("read", {"too_large": True})
+        with self.assertRaisesRegex(PluginProcessError, "not allowed"):
+            await client.call("unknown")
+
+    async def test_manifest_hash_and_status_are_exposed(self):
+        manifest = PluginManifest("status", "1")
+        client = PluginProcessClient([sys.executable, "plugin_worker.py"], manifest)
+        status = client.status()
+        self.assertEqual(status["plugin_id"], "status")
+        self.assertEqual(status["manifest_hash"], manifest.canonical_hash)
+        self.assertEqual(status["state"], "stopped")
+
 
 if __name__ == "__main__":
     unittest.main()
