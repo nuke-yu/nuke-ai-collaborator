@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import time
 from typing import Any, Awaitable, Callable, Mapping
 
 from channels.core import ChannelConversation, ChannelIdentity, InboundEnvelope
@@ -24,6 +25,7 @@ class ChannelAdapter:
         resolve_group: Callable[[str, str], Awaitable[tuple[int, int] | None]],
         register_attachment: Callable[[int, dict[str, Any]], Awaitable[str]] | None = None,
         record_inbound: Callable[[InboundEnvelope], Awaitable[bool]] | None = None,
+        replay_window_seconds: int = 300,
     ) -> None:
         if not channel.strip() or not secret:
             raise ValueError("channel and secret are required")
@@ -32,16 +34,45 @@ class ChannelAdapter:
         self.resolve_group = resolve_group
         self.register_attachment = register_attachment
         self.record_inbound = record_inbound
+        if replay_window_seconds <= 0:
+            raise ValueError("replay_window_seconds must be positive")
+        self.replay_window_seconds = replay_window_seconds
 
     def verify_signature(self, body: bytes, signature: str) -> bool:
         expected = hmac.new(self.secret, body, hashlib.sha256).hexdigest()
         supplied = signature.removeprefix("sha256=")
         return hmac.compare_digest(expected, supplied)
 
-    async def normalize(self, payload: Mapping[str, Any], *, signature: str = "") -> InboundEnvelope | None:
-        raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode()
+    async def normalize(
+        self,
+        payload: Mapping[str, Any] | bytes,
+        *,
+        signature: str = "",
+        raw_body: bytes | None = None,
+        timestamp: str | int | None = None,
+        now: int | None = None,
+    ) -> InboundEnvelope | None:
+        if isinstance(payload, bytes):
+            raw = payload
+            try:
+                payload = json.loads(raw.decode())
+            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise ValueError("webhook body must be valid JSON") from exc
+        else:
+            if raw_body is None:
+                raise ChannelAuthError("raw_body is required for signature verification")
+            raw = raw_body
+        if not isinstance(payload, Mapping):
+            raise ValueError("webhook payload must be an object")
         if not self.verify_signature(raw, signature):
             raise ChannelAuthError("invalid channel signature")
+        try:
+            timestamp_value = int(str(timestamp))
+        except (TypeError, ValueError) as exc:
+            raise ChannelAuthError("webhook timestamp is required") from exc
+        current = int(time.time()) if now is None else int(now)
+        if timestamp_value <= 0 or abs(current - timestamp_value) > self.replay_window_seconds:
+            raise ChannelAuthError("webhook timestamp is outside replay window")
         tenant = str(payload.get("tenant_id") or "").strip()
         external_group = str(payload.get("group_id") or "").strip()
         external_user = str(payload.get("user_id") or "").strip()
