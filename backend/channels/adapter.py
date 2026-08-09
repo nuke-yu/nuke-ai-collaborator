@@ -4,28 +4,13 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
-from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Mapping
+
+from channels.core import ChannelConversation, ChannelIdentity, InboundEnvelope
 
 
 class ChannelAuthError(PermissionError):
     pass
-
-
-@dataclass(frozen=True, slots=True)
-class InboundEnvelope:
-    channel: str
-    external_tenant_id: str
-    external_user_id: str
-    external_group_id: str
-    external_message_id: str
-    text: str
-    group_id: int
-    member_id: int
-    mentions: tuple[str, ...] = ()
-    reply_to_external_id: str | None = None
-    attachments: tuple[dict[str, Any], ...] = ()
-    raw: Mapping[str, Any] = field(default_factory=dict, repr=False, compare=False)
 
 
 class ChannelAdapter:
@@ -72,10 +57,8 @@ class ChannelAdapter:
         mentions = tuple(str(item).strip() for item in (payload.get("mentions") or ()) if str(item).strip())
         attachments = tuple(item for item in (payload.get("attachments") or ()) if isinstance(item, dict))
         envelope = InboundEnvelope(
-            channel=self.channel,
-            external_tenant_id=tenant,
-            external_user_id=external_user,
-            external_group_id=external_group,
+            identity=ChannelIdentity(self.channel, tenant, external_user),
+            conversation=ChannelConversation(external_group),
             external_message_id=message_id,
             text=str(payload.get("text") or ""),
             group_id=int(group_id),
