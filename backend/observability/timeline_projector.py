@@ -73,6 +73,8 @@ class ExecutionTimelineProjection:
     status: str
     total_duration_s: float
     nodes: list[TimelineNode] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    recovery_actions: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -82,6 +84,8 @@ class ExecutionTimelineProjection:
             "status": self.status,
             "total_duration_s": round(self.total_duration_s, 3),
             "nodes": [node.to_dict() for node in self.nodes],
+            "warnings": self.warnings,
+            "recovery_actions": self.recovery_actions,
         }
 
 
@@ -261,6 +265,7 @@ async def project_session_timeline(
 
     nodes: list[TimelineNode] = []
     total_duration = 0.0
+    warnings: list[str] = []
 
     for idx, item in enumerate(chronological_items):
         node = project_event_to_node(item, idx)
@@ -268,6 +273,14 @@ async def project_session_timeline(
             nodes.append(node)
             if node.duration_s:
                 total_duration += node.duration_s
+        else:
+            event_type = str(item.get("event_type") or "").strip()
+            if event_type:
+                warnings.append(f"事件未生成时间线节点：{event_type}")
+
+    recovery_actions: list[str] = []
+    if status == "awaiting_recovery":
+        recovery_actions = ["resume", "cancel_recovery"]
 
     return ExecutionTimelineProjection(
         session_id=session_id,
@@ -276,4 +289,6 @@ async def project_session_timeline(
         status=status,
         total_duration_s=total_duration,
         nodes=nodes,
+        warnings=list(dict.fromkeys(warnings)),
+        recovery_actions=recovery_actions,
     )

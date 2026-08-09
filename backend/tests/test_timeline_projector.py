@@ -188,10 +188,26 @@ class TestTimelineProjector(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(projection.group_id, group_id)
             self.assertEqual(projection.status, "completed")
             self.assertEqual(len(projection.nodes), 3)
+            self.assertEqual(projection.recovery_actions, [])
+            self.assertEqual(projection.warnings, [])
 
             node_types = [n.type for n in projection.nodes]
             self.assertEqual(node_types, ["context_injected", "tool_execution", "deliverable_produced"])
             self.assertAlmostEqual(projection.total_duration_s, 0.82, places=2)
+
+    def test_projection_serializes_recovery_actions_and_warnings(self):
+        projection = ExecutionTimelineProjection(
+            session_id="s1",
+            group_id=1,
+            bot_id=2,
+            status="awaiting_recovery",
+            total_duration_s=0,
+            warnings=["事件未生成时间线节点：future_event"],
+            recovery_actions=["resume", "cancel_recovery"],
+        )
+        payload = projection.to_dict()
+        self.assertEqual(payload["warnings"], ["事件未生成时间线节点：future_event"])
+        self.assertEqual(payload["recovery_actions"], ["resume", "cancel_recovery"])
 
 
 if __name__ == "__main__":

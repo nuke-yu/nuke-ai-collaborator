@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { fetchSessionTimeline } from '../api'
+import { cancelSessionRecovery, fetchSessionTimeline, resumeSession } from '../api'
 
 const NODE_ICONS = {
   thinking: '💡',
@@ -25,6 +25,7 @@ export default function ExecutionTimelineDrawer({ sessionId, groupId, onClose })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [timeline, setTimeline] = useState(null)
+  const [actionLoading, setActionLoading] = useState(false)
 
   useEffect(() => {
     if (!sessionId || !groupId) return
@@ -50,6 +51,24 @@ export default function ExecutionTimelineDrawer({ sessionId, groupId, onClose })
       active = false
     }
   }, [sessionId, groupId])
+
+  const runRecoveryAction = async (action) => {
+    setActionLoading(true)
+    setError(null)
+    try {
+      if (action === 'resume') {
+        await resumeSession(sessionId, groupId)
+      } else {
+        await cancelSessionRecovery(sessionId, groupId)
+      }
+      const refreshed = await fetchSessionTimeline(sessionId, groupId)
+      setTimeline(refreshed)
+    } catch (err) {
+      setError(err.message || '恢复操作失败')
+    } finally {
+      setActionLoading(false)
+    }
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-black/50 backdrop-blur-xs transition-opacity animate-fade-in">
@@ -77,7 +96,7 @@ export default function ExecutionTimelineDrawer({ sessionId, groupId, onClose })
           <div className="flex items-center justify-between px-5 py-2.5 bg-gray-950/60 border-b border-gray-800 text-xs">
             <div className="flex items-center gap-2">
               <span className="text-gray-400">运行状态:</span>
-              <span className="px-2 py-0.5 rounded-full font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+              <span className={`px-2 py-0.5 rounded-full font-medium border ${timeline.status === 'failed' ? 'bg-rose-500/10 text-rose-400 border-rose-500/20' : timeline.status === 'awaiting_recovery' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'}`}>
                 {timeline.status}
               </span>
             </div>
@@ -87,6 +106,18 @@ export default function ExecutionTimelineDrawer({ sessionId, groupId, onClose })
                 ⚡ {timeline.total_duration_s}s
               </span>
             </div>
+          </div>
+        )}
+
+        {timeline?.recovery_actions?.length > 0 && (
+          <div className="flex items-center justify-end gap-2 border-b border-gray-800 bg-amber-950/20 px-5 py-2.5">
+            <span className="mr-auto text-xs text-amber-300">该执行等待恢复处理</span>
+            <button type="button" disabled={actionLoading} onClick={() => runRecoveryAction('cancel_recovery')} className="rounded-md border border-gray-700 px-2.5 py-1 text-xs text-gray-400 hover:border-gray-500 hover:text-gray-200 disabled:opacity-50">
+              取消恢复
+            </button>
+            <button type="button" disabled={actionLoading} onClick={() => runRecoveryAction('resume')} className="rounded-md border border-indigo-500/40 bg-indigo-500/15 px-2.5 py-1 text-xs text-indigo-300 hover:bg-indigo-500/25 disabled:opacity-50">
+              {actionLoading ? '处理中…' : '恢复执行'}
+            </button>
           </div>
         )}
 
@@ -109,6 +140,15 @@ export default function ExecutionTimelineDrawer({ sessionId, groupId, onClose })
           {timeline && timeline.nodes.length === 0 && (
             <div className="text-center py-12 text-gray-500 text-xs">
               暂无已投影的执行节点
+            </div>
+          )}
+
+          {timeline?.warnings?.length > 0 && (
+            <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-200">
+              <p className="font-semibold">时间线存在未投影事件</p>
+              <ul className="mt-1 list-disc space-y-0.5 pl-4 text-amber-300/80">
+                {timeline.warnings.map(warning => <li key={warning}>{warning}</li>)}
+              </ul>
             </div>
           )}
 
