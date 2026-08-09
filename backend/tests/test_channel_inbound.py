@@ -78,6 +78,14 @@ class TestChannelInboundRouting(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(InboundRouteError):
             self.router.route(ambiguous, bot_mentions={"dev": 42, "qa": 43})
 
+    async def test_router_refreshes_binding_state_before_each_route(self):
+        current = [self.binding]
+        router = InboundBotRouter(self.binding, integration_member_id=91, binding_provider=lambda: current[0])
+        self.assertEqual(router.route(self.envelope).target_bot_id, 42)
+        current[0] = self.binding.transitioned(BindingStatus.SUSPENDED)
+        with self.assertRaises(InboundRouteError):
+            router.route(self.envelope)
+
 
 if __name__ == "__main__":
     unittest.main()

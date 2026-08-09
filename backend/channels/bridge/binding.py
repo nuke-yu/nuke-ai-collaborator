@@ -23,6 +23,10 @@ class BindingStatus(StrEnum):
     REVOKED = "revoked"
 
 
+class BindingConflictError(RuntimeError):
+    """Another writer changed the binding after it was read."""
+
+
 _TRANSITIONS: dict[BindingStatus, frozenset[BindingStatus]] = {
     BindingStatus.CONFIGURED: frozenset({BindingStatus.PENDING_APPROVAL, BindingStatus.REVOKED}),
     BindingStatus.PENDING_APPROVAL: frozenset({BindingStatus.ACTIVE, BindingStatus.REVOKED}),
@@ -175,10 +179,22 @@ class ChannelBindingStore:
         updated = current.transitioned(target)
         now = int(time.time() * 1000)
         async with aiosqlite.connect(self.path) as db:
-            await db.execute(
+            cursor = await db.execute(
                 "UPDATE channel_bindings SET status=?, config_version=?, updated_at=? WHERE binding_id=? AND status=?",
                 (updated.status, updated.config_version + 1, now, binding_id, current.status),
             )
+            if cursor.rowcount != 1:
+                await db.rollback()
+                raise BindingConflictError(f"binding changed concurrently: {binding_id}")
+            if target in {BindingStatus.SUSPENDED, BindingStatus.REVOKED}:
+                async with db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='channel_integration_members'") as table_cursor:
+                    has_members = await table_cursor.fetchone()
+                if has_members:
+                    member_status = "suspended" if target is BindingStatus.SUSPENDED else "revoked"
+                    await db.execute(
+                        "UPDATE channel_integration_members SET status=?, updated_at=? WHERE binding_id=? AND status=?",
+                        (member_status, now, binding_id, "active"),
+                    )
             await db.commit()
         return ChannelBinding(**{**updated.to_dict(), "config_version": updated.config_version + 1})
 

@@ -142,6 +142,16 @@ class IntegrationMemberStore:
             status = IntegrationMemberStatus(str(status))
         now = int(time.time() * 1000)
         async with aiosqlite.connect(self.path) as db:
+            if status is IntegrationMemberStatus.ACTIVE:
+                async with db.execute(
+                    """SELECT b.status FROM channel_integration_members m
+                       JOIN channel_bindings b ON b.binding_id=m.binding_id
+                       WHERE m.integration_member_id=?""",
+                    (integration_member_id,),
+                ) as binding_cursor:
+                    binding = await binding_cursor.fetchone()
+                if binding is None or binding[0] != "active":
+                    raise ValueError("integration member requires an active binding")
             cursor = await db.execute(
                 "UPDATE channel_integration_members SET status=?, updated_at=? WHERE integration_member_id=?",
                 (status, now, integration_member_id),

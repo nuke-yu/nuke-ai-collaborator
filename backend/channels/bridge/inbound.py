@@ -28,22 +28,32 @@ class InboundRoute:
 class InboundBotRouter:
     """Resolve a normalized message into one allowed Bot without dispatching it."""
 
-    def __init__(self, binding: ChannelBinding, *, integration_member_id: int):
+    def __init__(self, binding: ChannelBinding, *, integration_member_id: int, binding_provider: Callable[[], ChannelBinding] | None = None):
         if binding.status is not BindingStatus.ACTIVE:
             raise InboundRouteError("only active channel bindings can route messages")
         if integration_member_id <= 0:
             raise ValueError("integration_member_id must be positive")
         self.binding = binding
+        self.binding_provider = binding_provider
         self.integration_member_id = integration_member_id
 
+    def _current_binding(self) -> ChannelBinding:
+        binding = self.binding_provider() if self.binding_provider is not None else self.binding
+        if binding.status is not BindingStatus.ACTIVE:
+            raise InboundRouteError("channel binding is no longer active")
+        if binding.binding_id != self.binding.binding_id:
+            raise InboundRouteError("binding identity changed while router was active")
+        return binding
+
     def route(self, envelope: InboundEnvelope, *, bot_mentions: Mapping[str, int] | None = None) -> InboundRoute:
-        if envelope.channel != self.binding.channel_instance_id.split(":", 1)[0]:
+        binding = self._current_binding()
+        if envelope.channel != binding.channel_instance_id.split(":", 1)[0]:
             raise InboundRouteError("message channel does not match binding")
-        if envelope.external_tenant_id != self.binding.external_tenant_id:
+        if envelope.external_tenant_id != binding.external_tenant_id:
             raise InboundRouteError("message tenant does not match binding")
-        if envelope.external_group_id != self.binding.external_conversation_id:
+        if envelope.external_group_id != binding.external_conversation_id:
             raise InboundRouteError("message conversation does not match binding")
-        if envelope.group_id is not None and envelope.group_id != self.binding.group_id:
+        if envelope.group_id is not None and envelope.group_id != binding.group_id:
             raise InboundRouteError("message Group does not match binding")
 
         normalized_mentions = {
@@ -54,10 +64,10 @@ class InboundBotRouter:
         mentioned_ids = list(dict.fromkeys(mentioned_ids))
         if len(mentioned_ids) > 1:
             raise InboundRouteError("message mentions more than one Bot")
-        if self.binding.mention_required and not mentioned_ids:
+        if binding.mention_required and not mentioned_ids:
             raise InboundRouteError("a Bot mention is required for this Channel binding")
-        target_bot_id = mentioned_ids[0] if mentioned_ids else self.binding.default_bot_id
-        if target_bot_id not in self.binding.allowed_bot_ids:
+        target_bot_id = mentioned_ids[0] if mentioned_ids else binding.default_bot_id
+        if target_bot_id not in binding.allowed_bot_ids:
             raise InboundRouteError("target Bot is not allowed by the Channel binding")
 
         bridge = BridgeEnvelope(
@@ -76,11 +86,11 @@ class InboundBotRouter:
                 "reply_to_external_id": envelope.reply_to_external_id,
                 "target_bot_id": target_bot_id,
             },
-            binding_id=self.binding.binding_id,
-            group_id=self.binding.group_id,
+            binding_id=binding.binding_id,
+            group_id=binding.group_id,
             integration_member_id=self.integration_member_id,
         )
-        return InboundRoute(self.binding.binding_id, self.binding.group_id, target_bot_id, bridge)
+        return InboundRoute(binding.binding_id, binding.group_id, target_bot_id, bridge)
 
     async def dispatch(
         self,

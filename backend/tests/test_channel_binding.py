@@ -1,8 +1,9 @@
 import os
 import tempfile
+import asyncio
 import unittest
 
-from channels.bridge import BindingStatus, ChannelBinding, ChannelBindingStore
+from channels.bridge import BindingConflictError, BindingStatus, ChannelBinding, ChannelBindingStore
 
 
 class TestChannelBinding(unittest.IsolatedAsyncioTestCase):
@@ -45,6 +46,16 @@ class TestChannelBinding(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(revoked.status, BindingStatus.REVOKED)
         with self.assertRaises(ValueError):
             await self.store.transition("binding-1", BindingStatus.ACTIVE)
+
+    async def test_concurrent_transition_cannot_report_two_successes(self):
+        await self.store.create(self.binding)
+        results = await asyncio.gather(
+            self.store.transition("binding-1", BindingStatus.PENDING_APPROVAL),
+            self.store.transition("binding-1", BindingStatus.PENDING_APPROVAL),
+            return_exceptions=True,
+        )
+        self.assertEqual(sum(not isinstance(result, Exception) for result in results), 1)
+        self.assertTrue(any(isinstance(result, (BindingConflictError, ValueError)) for result in results))
 
 
 if __name__ == "__main__":

@@ -64,6 +64,17 @@ class TestIntegrationMember(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(await self.members.set_status(93, IntegrationMemberStatus.SUSPENDED))
         self.assertEqual((await self.members.get(93)).status, IntegrationMemberStatus.SUSPENDED)
 
+    async def test_revoked_binding_cannot_reactivate_member(self):
+        member = IntegrationMember(
+            integration_member_id=94, binding_id="binding-1", group_id=7,
+            channel_instance_id="slack-prod", display_name="Slack 集成",
+        )
+        await self.members.create(member)
+        await self.bindings.transition("binding-1", BindingStatus.REVOKED)
+        self.assertEqual((await self.members.get(94)).status, IntegrationMemberStatus.REVOKED)
+        with self.assertRaises(ValueError):
+            await self.members.set_status(94, IntegrationMemberStatus.ACTIVE)
+
 
 if __name__ == "__main__":
     unittest.main()
