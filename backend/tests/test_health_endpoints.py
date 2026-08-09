@@ -1,8 +1,11 @@
 import time
+import tempfile
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 
+import db
+from db import writer as db_writer
 from main import app
 from runtime import supervisor as sup_mod
 
@@ -10,10 +13,20 @@ from runtime import supervisor as sup_mod
 class TestHealthEndpoints(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self._orig_supervisor = sup_mod.supervisor
+        self._orig_db_path = db.DB_PATH
+        self._orig_writer_db_path = db_writer.DB_PATH
+        self._db_tmpdir = tempfile.TemporaryDirectory(prefix="nuke-health-")
+        self._health_db_path = f"{self._db_tmpdir.name}/health.db"
+        db.DB_PATH = self._health_db_path
+        db_writer.DB_PATH = self._health_db_path
         sup_mod.supervisor = None
 
     async def asyncTearDown(self):
         sup_mod.supervisor = self._orig_supervisor
+        await db_writer.aclose_writer(self._health_db_path)
+        db.DB_PATH = self._orig_db_path
+        db_writer.DB_PATH = self._orig_writer_db_path
+        self._db_tmpdir.cleanup()
 
     async def test_liveness_success(self):
         # We need a working DB connection for the liveness DB write.
