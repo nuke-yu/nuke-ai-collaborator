@@ -21,6 +21,11 @@ class _FakeProc:
         self.returncode = returncode
 
 
+class _FakeRelay:
+    def snapshot(self):
+        return {"cycles": 4, "forwarded": 7, "errors": 1, "timeouts": 2}
+
+
 class _FakeSupervisor:
     """Mimics the Supervisor attributes the collector reads."""
     def __init__(self):
@@ -31,6 +36,7 @@ class _FakeSupervisor:
         self._worker_stats = {}                  # worker_id -> payload
         self._worker_stats_ts = {}               # worker_id -> float epoch
         self._browsers = {}                      # group_id -> set
+        self._channel_relay = None
 
 
 class TestMetricsCollector(unittest.TestCase):
@@ -43,6 +49,14 @@ class TestMetricsCollector(unittest.TestCase):
         sup = _FakeSupervisor()
         out = self._render(sup)
         self.assertIn("nuke_supervisor_up 1.0", out)
+
+    def test_channel_relay_slo_signals_are_exposed(self):
+        sup = _FakeSupervisor()
+        sup._channel_relay = _FakeRelay()
+        out = self._render(sup)
+        self.assertIn("nuke_channel_relay_cycles_total 4.0", out)
+        self.assertIn("nuke_channel_relay_forwarded_total 7.0", out)
+        self.assertIn("nuke_channel_relay_timeouts_total 2.0", out)
 
     def test_process_count_and_per_label_up(self):
         sup = _FakeSupervisor()

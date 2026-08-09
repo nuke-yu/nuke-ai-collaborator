@@ -65,6 +65,34 @@ class SupervisorCollector:
         up.add_metric([], 1.0)
         yield up
 
+        # ── Group → Channel relay SLO signals ───────────────────────────
+        relay = getattr(sup, "_channel_relay", None)
+        relay_stats = relay.snapshot() if relay is not None else {}
+        relay_cycles = GaugeMetricFamily(
+            "nuke_channel_relay_cycles_total",
+            "Relay polling cycles since Supervisor start.",
+        )
+        relay_forwarded = CounterMetricFamily(
+            "nuke_channel_relay_forwarded_total",
+            "Committed Group events forwarded into the Channel outbox.",
+        )
+        relay_errors = CounterMetricFamily(
+            "nuke_channel_relay_errors_total",
+            "Group relay errors isolated by the Supervisor.",
+        )
+        relay_timeouts = CounterMetricFamily(
+            "nuke_channel_relay_timeouts_total",
+            "Group relay timeouts isolated by the Supervisor.",
+        )
+        relay_cycles.add_metric([], float(relay_stats.get("cycles", 0)))
+        relay_forwarded.add_metric([], float(relay_stats.get("forwarded", 0)))
+        relay_errors.add_metric([], float(relay_stats.get("errors", 0)))
+        relay_timeouts.add_metric([], float(relay_stats.get("timeouts", 0)))
+        yield relay_cycles
+        yield relay_forwarded
+        yield relay_errors
+        yield relay_timeouts
+
         # ── process fleet ────────────────────────────────────────────────
         alive = [(label, proc) for label, proc in processes
                  if getattr(proc, "returncode", None) is None]
