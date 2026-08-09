@@ -22,6 +22,8 @@ export function useWebSocket(groupId, memberId, onMessage, onReconnect, token, o
   const reconnectingRef = useRef(false)
   const identityRef = useRef(null)
   const connectRef = useRef(null)
+  const cursorRef = useRef(null)
+  const seenEventIdsRef = useRef(new Set())
 
   const onMessageRef = useRef(onMessage)
   const onReconnectRef = useRef(onReconnect)
@@ -42,7 +44,10 @@ export function useWebSocket(groupId, memberId, onMessage, onReconnect, token, o
     }
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const host = window.location.host || 'localhost:8000'
-    const url = protocol + '//' + host + '/ws/' + groupId + '/' + memberId
+    const cursorQuery = cursorRef.current
+      ? `?cursor=${encodeURIComponent(cursorRef.current)}`
+      : ''
+    const url = protocol + '//' + host + '/ws/' + groupId + '/' + memberId + cursorQuery
     const socket = new WebSocket(url, token ? [`nuke.jwt.${token}`] : undefined)
 
     socket.onopen = () => {
@@ -64,6 +69,16 @@ export function useWebSocket(groupId, memberId, onMessage, onReconnect, token, o
     socket.onmessage = (e) => {
       if (ws.current !== socket) return
       const data = JSON.parse(e.data)
+      if (data.event_id) {
+        if (seenEventIdsRef.current.has(data.event_id)) return
+        seenEventIdsRef.current.add(data.event_id)
+        cursorRef.current = data.event_id
+        // Bound client-side deduplication memory for long-lived tabs.
+        if (seenEventIdsRef.current.size > 1000) {
+          const oldest = seenEventIdsRef.current.values().next().value
+          seenEventIdsRef.current.delete(oldest)
+        }
+      }
       if (data.type === 'auth_error') {
         onAuthErrorRef.current?.(data.message)
         socket.onclose = null // prevent retry

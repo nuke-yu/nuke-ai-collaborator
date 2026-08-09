@@ -1,5 +1,7 @@
 import asyncio
 import logging
+from collections import deque
+from uuid import uuid4
 from core import config
 from fastapi import WebSocket
 from typing import Dict, List
@@ -16,6 +18,7 @@ log = logging.getLogger(__name__)
 class WSManager:
     def __init__(self):
         self.connections: Dict[int, List[tuple]] = {}
+        self.history: dict[int, deque] = {}
         # Point 5: Concurrency Defense (DFT-047)
         self._lock = asyncio.Lock()
 
@@ -34,7 +37,7 @@ class WSManager:
 
     async def connect(
         self, websocket: WebSocket, group_id: int, member_id: int,
-        *, subprotocol: str | None = None,
+        *, subprotocol: str | None = None, cursor: str | None = None,
     ):
         if subprotocol:
             await websocket.accept(subprotocol=subprotocol)
@@ -44,6 +47,24 @@ class WSManager:
             if group_id not in self.connections:
                 self.connections[group_id] = []
             self.connections[group_id].append((websocket, member_id))
+            replay = self._replay_after(group_id, cursor)
+        for event in replay:
+            try:
+                await websocket.send_json(event)
+            except Exception:
+                await self.disconnect(websocket, group_id)
+                break
+
+    def _replay_after(self, group_id: int, cursor: str | None) -> list[dict]:
+        events = list(self.history.get(group_id, ()))
+        if not cursor:
+            return []
+        for index, event in enumerate(events):
+            if event.get("event_id") == cursor:
+                return events[index + 1:]
+        # Unknown/expired cursor is a safe no-op; the client will refresh its
+        # normal group snapshot after connecting.
+        return []
 
     async def disconnect(self, websocket: WebSocket, group_id: int):
         """Remove connection. Returns member_id if they fully went offline, else None."""
@@ -91,6 +112,10 @@ class WSManager:
         return gone_id if gone_id and not still_online else None
 
     async def broadcast(self, group_id: int, message: dict):
+        if "event_id" not in message:
+            message = dict(message)
+            message["event_id"] = f"evt_{uuid4().hex}"
+        self.history.setdefault(group_id, deque(maxlen=500)).append(message)
         # Prevent re-entrant calls from same-coroutine recursion (Point 5 & DFT-047)
         dead = []
         async with self._lock:

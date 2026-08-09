@@ -370,9 +370,12 @@ async def _authenticate_websocket(
 
 async def _initialize_websocket_session(
     websocket: WebSocket, group_id: int, member_id: int,
-    *, subprotocol: str | None = None,
+    *, subprotocol: str | None = None, cursor: str | None = None,
 ):
-    await manager.connect(websocket, group_id, member_id, subprotocol=subprotocol)
+    await manager.connect(
+        websocket, group_id, member_id,
+        subprotocol=subprotocol, cursor=cursor,
+    )
     
     # 1. Reuse the group's single fan-out proxy (register it only for the first
     #    connection). One proxy per *connection* would fan every worker event out
@@ -491,7 +494,10 @@ async def _handle_websocket_disconnect(websocket: WebSocket, group_id: int):
 
 
 @app.websocket("/ws/{group_id:int}/{member_id:int}")
-async def websocket_endpoint(websocket: WebSocket, group_id: int, member_id: int, token: str = None):
+async def websocket_endpoint(
+    websocket: WebSocket, group_id: int, member_id: int,
+    token: str = None, cursor: str = None,
+):
     protocol_token, subprotocol = _websocket_protocol_auth(websocket)
     # Query token is a temporary compatibility fallback for older clients.
     auth_token = protocol_token or token
@@ -503,6 +509,7 @@ async def websocket_endpoint(websocket: WebSocket, group_id: int, member_id: int
 
     await _initialize_websocket_session(
         websocket, group_id, member_id, subprotocol=subprotocol,
+        cursor=cursor,
     )
     
     try:
