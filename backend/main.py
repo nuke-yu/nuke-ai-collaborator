@@ -112,7 +112,8 @@ async def lifespan(app: FastAPI):
     num_workers = int(os.getenv("NUKE_WORKERS", "8"))
     from channels.runtime import ChannelDeliveryService, GroupChannelRelayService
     from channels.bootstrap import configure_process_connectors
-    from channels.bridge import ChannelBindingStore
+    from channels.bridge import ChannelBindingStore, IntegrationMemberStore
+    from channels.inbound_runtime import ChannelInboundService
     from channels import initialize_channel_schema
     from channels.stores import ChannelStore
     from runtime.dbpaths import channel_bridge_db_path, group_db_path
@@ -142,6 +143,31 @@ async def lifespan(app: FastAPI):
         on_unread=on_unread_delta,
         channel_relay=channel_relay,
         channel_delivery=channel_delivery,
+    )
+    async def dispatch_channel_inbound(route, member):
+        payload = route.bridge_envelope.payload
+        await sup.send_to_worker(route.group_id, ipc.protocol.envelope(
+            ipc.protocol.USER_MESSAGE,
+            group_id=route.group_id,
+            member_id=member.integration_member_id,
+            user_id=0,
+            online_ids=[],
+            trace_id=route.bridge_envelope.trace_id,
+            content=payload.get("text") or "",
+            channel_target_bot_id=route.target_bot_id,
+            channel_sender=member.to_member_dict(),
+            channel_meta={
+                "binding_id": route.binding_id,
+                "channel": payload.get("channel"),
+                "external_message_id": payload.get("external_message_id"),
+                "external_user_id": payload.get("external_user_id"),
+            },
+        ))
+    app.state.channel_inbound = ChannelInboundService(
+        ChannelStore(channel_bridge_db_path()),
+        ChannelBindingStore(channel_bridge_db_path()),
+        IntegrationMemberStore(channel_bridge_db_path()),
+        dispatch_channel_inbound,
     )
     await sup.start()
     sup_mod.supervisor = sup

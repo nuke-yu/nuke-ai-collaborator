@@ -58,11 +58,14 @@ async def dispatch_user_message(msg: dict) -> None:
 
     # ── central domain (sender / members / group) ──
     async with db.global_db() as cdb:
-        sender = await db.get_member(cdb, sender_id)
+        channel_sender = msg.get("channel_sender")
+        sender = dict(channel_sender) if isinstance(channel_sender, dict) else await db.get_member(cdb, sender_id)
         if not sender:
             return
         all_members = await db.get_members(cdb, gid)
         group_info = await db.get_group(cdb, gid) or {}
+    if sender.get("type") == "integration":
+        all_members = [*all_members, sender]
     all_bots = [m for m in all_members if m["type"] == "bot"]
 
     # ── group domain (persist message + load recent) ──
@@ -70,9 +73,13 @@ async def dispatch_user_message(msg: dict) -> None:
         msg_id = await db.save_message(
             gdb, gid, sender_id, content,
             msg.get("reply_to_id"), file_url, file_name, file_size, file_type,
+            meta=msg.get("channel_meta"),
+            sender_snapshot=sender if sender.get("type") == "integration" else None,
         )
         recent = await db.get_messages(gdb, gid)
-        saved = next((m for m in recent if m["id"] == msg_id), {})
+    saved = next((m for m in recent if m["id"] == msg_id), {})
+    if msg.get("channel_target_bot_id"):
+        saved["target_bot_id"] = int(msg["channel_target_bot_id"])
 
     # echo the user's own message back out (Supervisor fans it to the group)
     media.presign_message(saved)  # canonical in DB → signed URL on the wire

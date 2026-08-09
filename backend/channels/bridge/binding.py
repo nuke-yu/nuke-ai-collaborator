@@ -222,6 +222,24 @@ class ChannelBindingStore:
                 rows = await cursor.fetchall()
         return [self._from_row(dict(row)) for row in rows]
 
+    async def resolve_active(
+        self,
+        channel_instance_id: str,
+        external_tenant_id: str,
+        external_conversation_id: str,
+    ) -> ChannelBinding | None:
+        instance_id = canonical_channel_instance_id(channel_instance_id)
+        async with aiosqlite.connect(self.path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                """SELECT * FROM channel_bindings
+                   WHERE channel_instance_id=? AND external_tenant_id=?
+                     AND external_conversation_id=? AND status='active'""",
+                (instance_id, external_tenant_id, external_conversation_id),
+            ) as cursor:
+                row = await cursor.fetchone()
+        return self._from_row(dict(row)) if row else None
+
     async def transition(self, binding_id: str, target: BindingStatus) -> ChannelBinding:
         current = await self.get(binding_id)
         if current is None:

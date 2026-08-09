@@ -538,7 +538,8 @@ class DeclarativeOrchestrator(Orchestrator):
         #    natural follow-up with no @ and no keyword still continues the
         #    conversation with the bot that last spoke (instead of going unanswered).
         from core.role_router import should_bot_respond
-        explicit = [b for b in all_bots if f"@{b['name']}" in content]
+        explicit_target_id = int(message.get("target_bot_id") or 0)
+        explicit = [b for b in all_bots if b["id"] == explicit_target_id] if explicit_target_id else [b for b in all_bots if f"@{b['name']}" in content]
         if "@all" in content.lower():
             explicit = all_bots
 

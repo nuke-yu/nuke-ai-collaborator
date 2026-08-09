@@ -156,6 +156,17 @@ class IntegrationMemberStore:
                 row = await cursor.fetchone()
         return self._from_row(dict(row)) if row else None
 
+    async def get_for_binding(self, binding_id: str) -> IntegrationMember | None:
+        async with aiosqlite.connect(self.path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                """SELECT * FROM channel_integration_members
+                   WHERE binding_id=? AND status='active'""",
+                (str(binding_id or "").strip(),),
+            ) as cursor:
+                row = await cursor.fetchone()
+        return self._from_row(dict(row)) if row else None
+
     async def list_for_group(self, group_id: int) -> list[IntegrationMember]:
         if not Path(self.path).exists():
             return []

@@ -122,8 +122,15 @@ async def save_message(db, group_id: int, member_id: int, content: str,
                        file_type: str = None, is_auto_reply: bool = False,
                        input_tokens: int = None, output_tokens: int = None,
                        cache_read_tokens: int = None, cache_creation_tokens: int = None,
-                       meta: dict = None):
-    s_name, s_type, s_avatar, s_prov, s_model = await _sender_snapshot(db, member_id)
+                       meta: dict = None, sender_snapshot: dict = None):
+    if sender_snapshot:
+        s_name = sender_snapshot.get("name")
+        s_type = sender_snapshot.get("type")
+        s_avatar = sender_snapshot.get("avatar_color")
+        s_prov = sender_snapshot.get("model_provider")
+        s_model = sender_snapshot.get("model_name")
+    else:
+        s_name, s_type, s_avatar, s_prov, s_model = await _sender_snapshot(db, member_id)
     meta_json = json.dumps(meta, ensure_ascii=False) if meta else None
     async with db.execute(
         "INSERT INTO messages (group_id, member_id, content, reply_to_id, "
