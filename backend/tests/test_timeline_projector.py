@@ -49,9 +49,11 @@ class TestTimelineProjector(unittest.IsolatedAsyncioTestCase):
                 "event_type": "tool_execution",
                 "payload": {
                     "tool_name": "write_file",
-                    "duration_s": 0.45,
+                    "duration_ms": 450,
                     "summary": "Modified Login.jsx",
                     "artifact_ids": ["art_123"],
+                    "arguments": {"path": "src/Login.jsx", "content": "..."},
+                    "stdout": "[written] src/Login.jsx",
                 },
                 "occurred_at": 1785689100,
                 "event_id": "evt_2",
@@ -63,8 +65,49 @@ class TestTimelineProjector(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(node2.title, "执行工具: write_file")
         self.assertEqual(node2.duration_s, 0.45)
         self.assertEqual(node2.artifact_ids, ["art_123"])
+        self.assertEqual(node2.metadata["arguments"]["path"], "src/Login.jsx")
+        self.assertEqual(node2.metadata["result"], "[written] src/Login.jsx")
+        self.assertFalse(node2.metadata["is_error"])
 
-        # 3. Permission Approval
+        # 3. Thinking event
+        node_thinking = project_event_to_node(
+            {
+                "event_type": "thinking",
+                "payload": {"content": "先检查现有路由，再修改登录组件。"},
+                "occurred_at": 1785689150,
+                "event_id": "evt_thinking",
+            },
+            idx=3,
+        )
+        self.assertIsNotNone(node_thinking)
+        self.assertEqual(node_thinking.type, "thinking")
+        self.assertEqual(node_thinking.detail, "先检查现有路由，再修改登录组件。")
+
+        # 4. Failed tool execution keeps output, duration, and error status
+        node_failed = project_event_to_node(
+            {
+                "event_type": "tool_result",
+                "payload": {
+                    "tool": "run_shell",
+                    "duration_ms": 1200,
+                    "args": {"command": "pytest -q"},
+                    "output": "2 failed",
+                    "is_error": True,
+                    "artifact_ids": "art_failure_log",
+                },
+                "occurred_at": 1785689180,
+                "event_id": "evt_failed",
+            },
+            idx=4,
+        )
+        self.assertIsNotNone(node_failed)
+        self.assertEqual(node_failed.status, "failed")
+        self.assertEqual(node_failed.duration_s, 1.2)
+        self.assertEqual(node_failed.artifact_ids, ["art_failure_log"])
+        self.assertEqual(node_failed.metadata["result"], "2 failed")
+        self.assertTrue(node_failed.metadata["is_error"])
+
+        # 5. Permission Approval
         node3 = project_event_to_node(
             {
                 "event_type": "permission_approved",
