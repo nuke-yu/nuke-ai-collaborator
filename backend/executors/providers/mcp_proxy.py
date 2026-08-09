@@ -51,18 +51,23 @@ class McpProxyProvider(ToolProvider):
             return bool(s["needs_approval"])
         return True
 
+    @staticmethod
+    def _permission_tool_name(name: str) -> str:
+        server, sep, tool = name.partition("__")
+        return f"mcp::{server}::{tool}" if sep else f"mcp::{name}"
+
     async def _check_permission(self, name: str, arguments: dict, context: dict) -> str | None:
         """Worker-side HIL for MCP tools (collector runs them pre-authorized).
 
         Mirrors the old in-provider _check_hil: tools the owning server flags for
         approval go through the permissions pipeline; missing ruleset fails closed."""
-        server, sep, tool = name.partition("__")
+        server, sep, _tool = name.partition("__")
         # Fail-safe: an un-namespaced name (no '__') can't be classified — require
         # approval rather than silently skipping HIL. (Collector always prefixes,
         # so this is defensive.)
         if sep and not self._needs_approval(name):
             return None  # no approval required for this tool
-        perm_name = f"mcp::{server}::{tool}" if sep else f"mcp::{name}"
+        perm_name = self._permission_tool_name(name)
         import permissions
         ruleset = context.get("ruleset")
         if ruleset is None:

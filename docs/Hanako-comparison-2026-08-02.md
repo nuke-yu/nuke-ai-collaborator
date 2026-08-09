@@ -1157,8 +1157,8 @@ OpenHanako 的主要优势是：
 | Model Usage Ledger | CURRENT | 已按 Provider 请求记录实际模型、Token、费用、失败和 retry 关系；Provider Descriptor 和基础治理已补齐。 |
 | WebSocket Event Contract | CURRENT / TRANSITION | 已有版本化 Envelope、event_id、Replay Cursor、Catch-up 和客户端去重；完整 Schema 生成和所有事件迁移仍可继续。 |
 | Channel Adapter | TRANSITION | 已有通用签名 Webhook、租户/用户映射、幂等、mention、回复和附件接口；真实企业渠道尚未完成端到端接入。 |
-| Store Registry | TRANSITION | 已有可执行 Store Descriptor/Registry 和默认 Store 登记；owner、migration、retention、deletion 和灾备治理仍待补齐。 |
-| Plugin Process Isolation | TRANSITION | 已完成单插件 JSONL IPC 隔离试点，含超时、取消、输出上限和脱敏；尚未迁移全部高风险 Executor。 |
+| Store Registry | CURRENT / TRANSITION | 已有可执行 Store Descriptor/Registry，以及 owner、canonical/projection、migration、retention、deletion 和 backup 治理元数据；策略执行器仍待补齐。 |
+| Plugin Process Isolation | TRANSITION | 已完成单插件 JSONL IPC 隔离和 Manifest/资源/HIL/崩溃状态治理；尚未迁移全部高风险 Executor。 |
 | Electron / Onboarding / Theme | CURRENT | 相关实现已经进入提交历史，不再按“未提交能力”处理。 |
 
 ### 14.2 原始检查清单中需要降级或改名的项目
@@ -1167,7 +1167,7 @@ OpenHanako 的主要优势是：
 2. **Execution Timeline** 不再是待建设的 P1，而是 CURRENT；后续工作是 Timeline Hardening。
 3. **Personal Vault UI** 已完成，应改为 **Personal Memory Provenance and Usage Audit**，优先级 P1。
 4. **OTel / Prometheus / Retention / Unified Timeline API** 已完成，转入维护、性能和权限加固。
-5. **MCP Collector OAuth 并发问题** 仍需补充 per-server lock；原始“完全没有 per-server lock”的描述仍是当前已知问题。
+5. **MCP Collector OAuth 并发问题** 已有 per-server lock、取消路径清理和并发回归覆盖；原始“完全没有 per-server lock”的描述已过时。
 6. `/api/config/mcp` 当前使用 operator 权限、ETag 和审计；原始“任何登录用户可写”的描述已过时。
 
 ### 14.3 当前推荐路线
@@ -1189,7 +1189,7 @@ OpenHanako 的主要优势是：
 
 验收标准：同一 Session 的重试可检测能力差异；实际 Provider/Model 与 Ledger 一致；Manifest 不保存 Secret 或无界原文。
 
-#### Phase 2：Event Protocol 与 Timeline Hardening（协议与安全基础已完成）
+#### Phase 2：Event Protocol 与 Timeline Hardening（基础交付已完成，产品化加固待完善）
 
 1. 给业务 WebSocket 增加统一 Envelope、protocol version、event_id、request_id、session_id 和 workflow_id。
 2. 增加 reconnect cursor、catch-up 和去重语义。
@@ -1198,14 +1198,14 @@ OpenHanako 的主要优势是：
 
 第一阶段只需要稳定 Envelope 和回放语义，不应一开始创建大量独立 Schema 文件；类型生成和完整事件 Schema 可随后补齐。
 
-#### Phase 3：Artifact Lifecycle（基础元数据已完成）
+#### Phase 3：Artifact Lifecycle（生命周期治理已完成，Workflow/物理清理待完善）
 
 1. 在现有 `backend/artifacts/manager.py` 基础上统一上传、Workspace、Workflow Deliverable 和工具输出。
 2. 增加 Artifact version、`derives_from`、引用和删除语义。
 3. 明确 `storage_locator` 的权限、路径守卫和物理文件清理规则。
 4. 将 Artifact 作为 Workflow 阶段输入输出，并为未来 Connector 附件预留 `external_locator`。
 
-#### Phase 4：Memory Provenance 与 Personal Vault Governance（基础审计已完成）
+#### Phase 4：Memory Provenance 与 Personal Vault Governance（影响审计已完成）
 
 1. 展示记忆来源、置信度、授权范围和用户/模型判断来源。
 2. 记录哪个 Group/Bot/Session 使用过某条个人记忆。
@@ -1222,7 +1222,7 @@ OpenHanako 的主要优势是：
 
 只有在确定企业渠道战略后启动，先选择一个渠道完成端到端验证。必须先解决外部租户、外部用户到 Group/Member 的映射、消息幂等、mention、回复关联、附件 Artifact 化和权限继承。
 
-#### Phase 7：Plugin Process Isolation（单插件试点已完成）
+#### Phase 7：Plugin Process Isolation（IPC 治理已完成，全面迁移待完善）
 
 先选择一个高风险 Executor 或 Coding Agent 做独立进程试点，完成结构化 IPC、Capability Manifest、权限、资源额度、超时、取消和崩溃恢复后，再扩展到其他插件。
 
@@ -1232,15 +1232,15 @@ OpenHanako 的主要优势是：
 |---|---|---|
 | P0 | Capability Manifest / Execution Identity | 新建基础设施 |
 | P0 | 最小 WS Event Envelope / Catch-up | 新建基础设施 |
-| P1 | Timeline Hardening | 修复测试、权限、恢复和性能 |
-| P1 | Artifact Lifecycle Governance | 完成版本、派生、删除和 Workflow 交接 |
-| P1 | Personal Memory Usage Audit | 补充来源、使用和撤回影响 |
+| P1 | Timeline Hardening | 完成恢复/重试、用户/管理员视图和性能加固 |
+| P1 | Artifact Lifecycle Governance | 接入 Workflow 交付和物理文件清理执行器 |
+| P1 | Personal Memory Usage Audit | 维护影响审计和撤回后的产品操作 |
 | P1 | 最小 Provider Registry | 为 Manifest、Ledger 和成本治理提供稳定身份 |
-| P1/P2 | Store Registry | 先做可执行元数据登记，不做大型服务 |
+| P1/P2 | Store Registry | 已完成可执行治理元数据；后续接入 migration/retention 执行 |
 | P1/P2 | Channel Adapter | 取决于企业渠道战略 |
-| P2 | Plugin Process Isolation | 先做单插件隔离试点 |
+| P2 | Plugin Process Isolation | 已完成 IPC 治理试点；后续迁移全部高风险 Executor |
 | CURRENT | Observability 闭环 | 转入维护、性能和安全加固 |
 
 ### 14.5 当前验证备注
 
-截至本次复核，后端全量测试为 `2455 passed, 2 skipped, 56 warnings, 40 subtests passed`。健康检查测试已经隔离自己的临时数据库，解决了前序测试污染全局 `DB_PATH` 导致的顺序依赖。当前剩余工作集中在真实渠道端到端接入、插件全面迁移、Store 治理和 Timeline 产品化加固，而不是基础任务未实现。
+截至本次复核，后端全量测试为 `2455 passed, 2 skipped, 56 warnings, 40 subtests passed`。健康检查测试已经隔离自己的临时数据库，解决了前序测试污染全局 `DB_PATH` 导致的顺序依赖。本轮之后，MCP Bridge/Proxy/Collector 的已知边界问题也有回归覆盖；当前剩余工作集中在真实渠道端到端接入、插件全面迁移、Store 策略执行和 Timeline 产品化加固，而不是基础任务未实现。

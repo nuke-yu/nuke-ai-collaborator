@@ -47,7 +47,7 @@
 - Store Registry 的 migration、owner、retention、deletion 和灾备治理。
 - Personal Memory 撤回后的影响展示和产品化操作界面。
 - Timeline 恢复/重试入口、性能优化和用户/管理员视图分层。
-- 已知 MCP 边界问题：事件循环 API、无命名空间工具的 HIL 校验、Collector per-server 并发锁。
+- Artifact Workflow 交付接入和物理存储清理执行器。
 
 ### 当前测试基线（2026-08-09）
 
@@ -62,17 +62,17 @@ Phase 0  基线修复（已完成）
     ↓
 Phase 1  Provider Identity + Capability Manifest（已完成基础交付）
     ↓
-Phase 2  WebSocket Event Contract + Timeline Hardening（协议与安全基础已完成）
+Phase 2  WebSocket Event Contract + Timeline Hardening（基础交付已完成，产品化加固待完善）
     ↓
-Phase 3  Artifact Lifecycle（元数据基础已完成，治理待完善）
+Phase 3  Artifact Lifecycle（生命周期治理已完成，Workflow/物理清理待完善）
     ↓
-Phase 4  Memory Provenance / Personal Vault Audit（基础审计已完成）
+Phase 4  Memory Provenance / Personal Vault Audit（影响审计已完成）
     ↓
 Phase 5  Provider Governance（基础治理已完成）
     ↓
 Phase 6  Channel Adapter（通用基础层已完成，真实渠道待选择）
     ↓
-Phase 7  Plugin Process Isolation（单插件试点已完成）
+Phase 7  Plugin Process Isolation（IPC 治理已完成，全面迁移待完善）
 ```
 
 ## 4. Phase 0：稳定当前基线
@@ -470,11 +470,11 @@ git diff --check
 |---|---|---|
 | P0 | Capability Manifest / Execution Identity | 新建基础设施 |
 | P0 | 最小 WS Event Envelope / Catch-up | 新建基础设施 |
-| P1 | Timeline Hardening | 修复测试、权限、恢复和性能 |
-| P1 | Artifact Lifecycle Governance | 完成版本、派生、删除和 Workflow 交接 |
-| P1 | Personal Memory Usage Audit | 补充来源、使用和撤回影响 |
+| P1 | Timeline Hardening | 完成恢复/重试、用户/管理员视图和性能加固 |
+| P1 | Artifact Lifecycle Governance | 接入 Workflow 交付和物理文件清理执行器 |
+| P1 | Personal Memory Usage Audit | 维护影响审计和撤回后的产品操作 |
 | P1 | 最小 Provider Registry | 为 Manifest、Ledger 和成本治理提供稳定身份 |
-| P1/P2 | Store Registry | 先做可执行元数据登记，不做大型服务 |
+| P1/P2 | Store Registry | 已完成可执行治理元数据；后续接入 migration/retention 执行 |
 | P1/P2 | Channel Adapter | 取决于企业渠道战略 |
-| P2 | Plugin Process Isolation | 先做单插件隔离试点 |
+| P2 | Plugin Process Isolation | 已完成 IPC 治理试点；后续迁移全部高风险 Executor |
 | CURRENT | Observability 闭环 | 转入维护、性能和安全加固 |

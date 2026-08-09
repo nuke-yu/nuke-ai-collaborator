@@ -34,6 +34,26 @@ class _FakeMcpProvider:
 
 class TestMCPCollectorRoundTrip(unittest.IsolatedAsyncioTestCase):
 
+    async def test_auth_lock_is_cleaned_when_handler_is_cancelled(self):
+        coll = MCPCollector("dummy")
+        provider = MagicMock(url="https://mcp.example", oauth_cfg={})
+        coll._find_provider = MagicMock(return_value=provider)
+        coll._build_auth_provider = AsyncMock(return_value=object())
+        coll._flows.begin = MagicMock(return_value=asyncio.Future())
+        coll._writer = object()
+        with patch("runtime.mcp_collector.ipc.send_msg", new=AsyncMock()):
+            task = asyncio.create_task(coll._handle_auth_start({
+                "request_id": "cancelled", "origin_worker_id": "w0", "server": "gh", "group_id": 1,
+            }))
+            for _ in range(100):
+                if "gh" in coll._auth_locks:
+                    break
+                await asyncio.sleep(0)
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+        self.assertNotIn("gh", coll._auth_locks)
+
     async def test_hello_schema_push_and_call_roundtrip(self):
         addr = ipc.make_addr(f"coll_{os.getpid()}")
         got = {"hello": None, "schemas": None, "result": None}

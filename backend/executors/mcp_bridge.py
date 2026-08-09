@@ -78,6 +78,10 @@ class MCPBridge:
 
     async def request(self, name: str, arguments: dict, *, group_id, trace_id,
                       timeout: int = _DEFAULT_TIMEOUT) -> tuple[str, bool]:
+        if not isinstance(name, str) or not name.strip():
+            return "[MCP错误] 工具名不能为空", True
+        if timeout <= 0:
+            return "[MCP错误] timeout 必须为正数", True
         if self._send is None:
             return "[MCP错误] collector 总线未就绪", True
         self._seq += 1
@@ -107,6 +111,10 @@ class MCPBridge:
                            timeout: int = 60) -> tuple[str, bool]:
         """Start OAuth for a server; the collector replies (via MCP_RESULT) with
         the authorization URL to surface to the user."""
+        if not isinstance(server, str) or not server.strip():
+            return "[MCP认证错误] server 不能为空", True
+        if timeout <= 0:
+            return "[MCP认证错误] timeout 必须为正数", True
         if self._send_auth is None:
             return "[MCP认证错误] collector 总线未就绪", True
         self._seq += 1

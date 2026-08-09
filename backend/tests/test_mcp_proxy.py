@@ -42,6 +42,18 @@ class TestMCPBridge(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(is_error)
         self.assertIn("未就绪", result)
 
+    async def test_request_and_authenticate_validate_boundary_inputs(self):
+        b = MCPBridge()
+        result, is_error = await b.request("", {}, group_id=1, trace_id="t")
+        self.assertTrue(is_error)
+        self.assertIn("工具名不能为空", result)
+        result, is_error = await b.request("x__y", {}, group_id=1, trace_id="t", timeout=0)
+        self.assertTrue(is_error)
+        self.assertIn("timeout", result)
+        result, is_error = await b.authenticate("", group_id=1, trace_id="t")
+        self.assertTrue(is_error)
+        self.assertIn("server 不能为空", result)
+
     async def test_request_timeout(self):
         b = MCPBridge()
         async def send(*a): pass
@@ -168,6 +180,11 @@ class TestMcpProxyProvider(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(names, {"fs__read_file", "fs__write_file"})
         self.assertTrue(p.can_handle("fs__read_file"))
         self.assertFalse(p.can_handle("read_file"))
+
+    def test_permission_name_is_safe_for_namespaced_and_plain_tools(self):
+        p = McpProxyProvider()
+        self.assertEqual(p._permission_tool_name("fs__read_file"), "mcp::fs::read_file")
+        self.assertEqual(p._permission_tool_name("untrusted_tool"), "mcp::untrusted_tool")
 
     async def test_read_tool_no_hil_forwards(self):
         p = McpProxyProvider()
