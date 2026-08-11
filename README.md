@@ -151,6 +151,53 @@ Nuke AI Collaborator 采用 **微内核 + 进程分片 + 事件总线 (Event Bus
 
 ---
 
+## 🧠 Memory：一套会随协作持续增值的团队记忆系统
+
+Nuke Memory 不是把全部聊天原文直接塞进向量数据库，而是围绕 **Group 隔离、选择性提炼、证据验证、时序演化和安全投影** 建立长期记忆闭环。每个 Group 拥有独立的知识与执行历史；每个 Bot 保留与角色相关的私有经验；个人知识只存放在 Personal Vault，并通过显式 Projection 按用途投影到指定 Group 或 Bot。
+
+```text
+Conversation / Tool Execution
+          │
+          ▼
+Selective Observation ──► Fact / Summary / Reflection
+          │
+          ▼
+Run ──► Case ──► Outcome Verification ──► Experience ──► Skill Candidate
+                     │                         │                 │
+                     └── 失败与纠正证据 ───────┘                 ▼
+                                                    Reuse Feedback / Evolution
+
+Personal Vault ── explicit Projection ──► Group / Bot Context
+```
+
+### 开源 Memory 设计参考
+
+Nuke 没有把下列项目作为第二套运行时直接嵌入，而是研究其核心机制，再结合 Group-first 架构、SQLite 规范存储、Chroma 向量投影、Worker durable pipeline、HITL 和数据脱敏边界进行原生实现。
+
+| 参考项目 | Nuke 重点吸收的设计与算法 | 在 Nuke 中的落点 |
+|---|---|---|
+| **Mem0** | 原子事实提取；`ADD / UPDATE / DELETE / NOOP` 记忆变更决策；幂等写入和历史保留 | 对话事实、冲突消解、supersede 历史与选择性记忆提炼 |
+| **EverOS** | `Run → Case → Experience → Skill` 分层；Case 提取、质量门控、聚类与 Skill Induction | 执行轨迹结构化、纠错经验蒸馏、经验聚合和声明式 Skill 候选 |
+| **AutoGen Task-Centric Memory** | 从失败中提炼 Insight；将纠正后的结果与原失败关联；验证 Insight 后再保存 | 失败—纠正—验证证据链，只让经过真实结果验证的经验进入长期记忆 |
+| **Graphiti** | 时序知识、关系边、冲突事实失效；实体关系和 Sparse/Dense/Graph 混合检索思想 | `valid_from / valid_to`、关系与来源记录、旧事实 supersede，以及混合召回演进方向 |
+| **Voyager** | Critic、成功门控、成功轨迹技能化、Skill Library 和真实复用反馈 | 结果验证、Skill Candidate、`Trial → Active → Stable / Suspended` 生命周期 |
+| **LangGraph** | Stateful workflow、Checkpoint lineage、幂等恢复和 durable execution | Memory Learning 后台任务、稳定 Job 身份、lease、失败恢复与可重放边界 |
+| **Letta / MemGPT** | Core Memory 与 Archival Memory 分层；上下文窗口预算；长期知识按需召回 | 当前上下文与长期存储分离、受预算约束的 Experience/Personal Knowledge 注入 |
+| **OpenMemory** | Personal Memory ACL、显式共享、访问审计以及导出/删除生命周期 | 独立 Personal Vault、Group/Bot Projection、fail-closed ACL、使用审计与可撤销投影 |
+
+### Nuke Memory 的关键约束
+
+- **Group 物理隔离**：Group 事实、Bot 经验和学习任务始终绑定 Group DB，不允许跨 Group 自动共享。
+- **数据库为唯一权威**：SQLite 保存规范记录、证据和状态；Chroma 与 Workspace 文件属于可重建投影。
+- **验证后学习**：普通模型自评不足以形成经验；必须结合工具结果、测试或任务验收信号建立 Outcome Evidence。
+- **历史不被静默覆盖**：冲突知识通过失效时间、supersede 关系和来源链保留演化历史。
+- **个人知识显式投影**：Personal Vault 默认私有，只有经过 ACL 检查的记录才能按 Group、Bot 和用途进入上下文。
+- **安全先于沉淀**：写入存储、模型上下文或链路追踪前执行 Secret Redaction，并限制内容长度。
+
+更完整的设计与实现边界见 [Memory System Design](docs/decisions/MEMORY-SYSTEM-DESIGN.md)、[Memory 算法升级基线](docs/decisions/memory-%E7%AE%97%E6%B3%95%E5%8D%87%E7%BA%A7.md) 和 [Agent 自学习研究笔记](docs/agent-self-learning-research-notes.md)。
+
+---
+
 ## 🔎 代码核验版：完整能力与技术边界
 
 > 本节基于当前代码与测试入口重新梳理，补充上方产品视角说明。状态分为：**✅ 已交付**、**🟡 过渡中**、**🧭 规划中**。复核基线：2026-08-09。
