@@ -8,6 +8,7 @@ Ported from Graphiti (Zep AI / Apache-2.0) Temporal Knowledge Graph:
 from __future__ import annotations
 
 import time
+import re
 from dataclasses import dataclass
 from typing import Sequence
 
@@ -37,10 +38,32 @@ class GraphitiTemporalEngine:
     def __init__(self) -> None:
         self._nodes: dict[str, TemporalEntityNode] = {}
         self._edges: list[TemporalEdge] = []
+        self._aliases: dict[str, str] = {}
+
+    @staticmethod
+    def normalize_entity_name(name: str) -> str:
+        """Normalize an entity key while keeping display text untouched."""
+        value = re.sub(r"\s+", " ", (name or "").strip().lower())
+        value = value.strip(".,:;!?()[]{}<>\"'")
+        return value
+
+    def register_alias(self, alias: str, canonical_name: str) -> TemporalEntityNode:
+        """Register an explicit alias and return the canonical entity node."""
+        canonical = self.normalize_entity_name(canonical_name)
+        alias_key = self.normalize_entity_name(alias)
+        if not canonical or not alias_key:
+            raise ValueError("entity alias and canonical name are required")
+        node = self.get_or_create_node(canonical_name)
+        self._aliases[alias_key] = node.node_id
+        return node
 
     def get_or_create_node(self, name: str, entity_type: str = "concept") -> TemporalEntityNode:
         """Retrieve or register temporal entity node."""
-        node_id = f"node:{entity_type}:{name.lower().strip()}"
+        normalized = self.normalize_entity_name(name)
+        alias_node_id = self._aliases.get(normalized)
+        if alias_node_id is not None:
+            return self._nodes[alias_node_id]
+        node_id = f"node:{entity_type}:{normalized}"
         if node_id not in self._nodes:
             self._nodes[node_id] = TemporalEntityNode(
                 node_id=node_id,

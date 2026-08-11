@@ -47,6 +47,14 @@ class TestGraphitiTemporalEngine(unittest.TestCase):
         self.assertEqual(len(active_t1), 1)
         self.assertEqual(active_t1[0].edge_id, e2.edge_id)
 
+    def test_entity_aliases_resolve_to_one_node(self) -> None:
+        canonical = self.engine.register_alias("  SF  ", "San Francisco")
+        edge = self.engine.add_edge(
+            "User", "lives_in", "SF", "User lives in SF", valid_at=1000.0
+        )
+        self.assertEqual(edge.target_node_id, canonical.node_id)
+        self.assertEqual(self.engine.normalize_entity_name(" San   Francisco! "), "san francisco")
+
 
 class TestGraphitiTemporalAlgorithmAdapter(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
