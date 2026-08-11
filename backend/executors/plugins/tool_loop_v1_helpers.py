@@ -101,7 +101,14 @@ def _apply_memory_context_budget(
         recall_budget = min(recall_tokens, max(256, input_budget // 3))
         memory_budget = max(256, input_budget - recall_budget)
         bounded_memory = engine.truncate_text_to_tokens(memory, memory_budget, tokenizer)
-        bounded_recall = engine.truncate_text_to_tokens(recall_text, recall_budget, tokenizer)
+        recall_records = [
+            {"content": value, "importance": 1.0 - (index * 0.001)}
+            for index, value in enumerate(learned_contexts)
+            if value
+        ]
+        paged = engine.page_memory(recall_records, recall_budget, tokenizer)
+        paged_recall = "\n\n".join(str(item["content"]) for item in paged)
+        bounded_recall = engine.truncate_text_to_tokens(paged_recall, recall_budget, tokenizer)
         bounded_contexts = [bounded_recall] if bounded_recall else []
         logger.warning(
             "memory context budget applied provider=%s model=%s memory_tokens=%d recall_tokens=%d budget=%d",
