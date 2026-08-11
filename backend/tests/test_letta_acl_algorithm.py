@@ -65,6 +65,12 @@ class TestLettaOpenMemoryEngine(unittest.TestCase):
 
         self.assertTrue(budget.is_budget_exceeded)
 
+    def test_truncate_text_to_tokens_is_bounded_and_marked(self) -> None:
+        value = "重要记忆 " + ("context " * 200)
+        bounded = self.engine.truncate_text_to_tokens(value, 20)
+        self.assertIn("context truncated by memory budget", bounded)
+        self.assertLessEqual(self.engine.estimate_tokens(bounded), 25)
+
     def test_check_acl_access_grants_personal_owner(self) -> None:
         scope = MemoryScope.personal(user_id=10, group_id=1, actor_id="user:10")
         principal = Principal.user(user_id=10, group_ids=[1])

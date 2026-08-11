@@ -66,6 +66,56 @@ def _attach_untrusted_learning_data(user_content: Any, contexts: list[str]) -> A
     return prefix + str(user_content)
 
 
+def _apply_memory_context_budget(
+    runner: Any,
+    memory: str,
+    learned_contexts: list[str],
+) -> tuple[str, list[str]]:
+    """Apply the Letta-style input budget before memory enters the prompt.
+
+    Provider descriptors with an unknown context window are left unchanged.
+    For known windows, reserve output tokens and a small control margin, then
+    trim learned evidence before core memory.  This keeps the system prompt
+    useful while ensuring untrusted historical context cannot consume the
+    entire model window.
+    """
+    try:
+        from ai.providers import resolve_provider_descriptor
+        from memory.adapters.algorithms.letta_acl_engine import LettaOpenMemoryEngine
+
+        descriptor = resolve_provider_descriptor(runner.provider, runner.model_name)
+        if descriptor.context_window is None:
+            return memory, learned_contexts
+        engine = LettaOpenMemoryEngine()
+        input_budget = max(1024, descriptor.context_window - int(runner.max_tokens) - 1024)
+        recall_text = "\n\n".join(value for value in learned_contexts if value)
+        memory_tokens = engine.estimate_tokens(memory)
+        recall_tokens = engine.estimate_tokens(recall_text)
+        if memory_tokens + recall_tokens <= input_budget:
+            return memory, learned_contexts
+
+        # Keep at least a small evidence slice, then give the remaining budget
+        # to the core memory context.  This is intentionally deterministic so
+        # retries produce the same prompt and manifest.
+        recall_budget = min(recall_tokens, max(256, input_budget // 3))
+        memory_budget = max(256, input_budget - recall_budget)
+        bounded_memory = engine.truncate_text_to_tokens(memory, memory_budget)
+        bounded_recall = engine.truncate_text_to_tokens(recall_text, recall_budget)
+        bounded_contexts = [bounded_recall] if bounded_recall else []
+        logger.warning(
+            "memory context budget applied provider=%s model=%s memory_tokens=%d recall_tokens=%d budget=%d",
+            runner.provider,
+            runner.model_name,
+            memory_tokens,
+            recall_tokens,
+            input_budget,
+        )
+        return bounded_memory, bounded_contexts
+    except (AttributeError, TypeError, ValueError):
+        logger.warning("memory context budget unavailable; preserving original context", exc_info=True)
+        return memory, learned_contexts
+
+
 def _tool_evidence_links(memory_refs: list[str], dispatch_context: dict) -> list[dict]:
     """Build explicit causal links after arguments have passed provenance validation."""
     from sessions.evidence import evidence_kind
@@ -464,6 +514,10 @@ async def setup_session(runner) -> None:
         )
         if personal_context:
             memory = f"{memory}\n\n{personal_context}" if memory else personal_context
+
+    memory, learned_contexts = _apply_memory_context_budget(
+        runner, memory, learned_contexts
+    )
 
     if skill_discovery:
         runner.system_prompt_base, runner.skills_xml, runner.skills_snapshot, runner.always_skills = await prompt_builder.compile_system_prompt(

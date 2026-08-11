@@ -44,6 +44,31 @@ class LettaOpenMemoryEngine:
         ascii_chars = len(text) - cjk_chars
         return cjk_chars + (ascii_chars // 4)
 
+    @classmethod
+    def truncate_text_to_tokens(cls, text: str, max_tokens: int) -> str:
+        """Bound untrusted context before it enters a model prompt.
+
+        The project deliberately avoids a provider-specific tokenizer in this
+        low-level adapter.  Use the same conservative estimator as
+        ``calculate_context_budget`` and preserve the beginning of the value,
+        which contains the memory envelope and provenance markers.
+        """
+        if not text or max_tokens <= 0:
+            return ""
+        if cls.estimate_tokens(text) <= max_tokens:
+            return text
+        marker = "\n[context truncated by memory budget]"
+        body_tokens = max(1, max_tokens - cls.estimate_tokens(marker))
+        # CJK is estimated at one token/character; other text at four
+        # characters/token.  The multiplier is intentionally conservative.
+        cjk = sum("\u4e00" <= char <= "\u9fff" for char in text)
+        ascii_chars = max(0, len(text) - cjk)
+        estimated_chars = min(
+            len(text),
+            max(1, min(ascii_chars, body_tokens * 4) + min(cjk, body_tokens)),
+        )
+        return text[:estimated_chars].rstrip() + marker
+
     def calculate_context_budget(
         self,
         max_tokens: int,
