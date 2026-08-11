@@ -16,7 +16,7 @@ class HybridRerankAlgorithmAdapter:
         source="RRF (Cormack et al.) / MMR (Carbonell & Goldstein)",
         version="v1.0",
         license="Apache-2.0",
-        capabilities=("rrf_fusion", "mmr_diversification", "cross_encoder_rerank"),
+        capabilities=("rrf_fusion", "mmr_diversification"),
     )
 
     def __init__(self, engine: HybridRerankEngine | None = None) -> None:

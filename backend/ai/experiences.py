@@ -466,6 +466,9 @@ async def recall_experiences(*, query: str, run_id: str, group_id: int | None,
 
     q = _terms(query)
     ranked = []
+    keyword_hits = []
+    vector_hits = []
+    cluster_hits = []
     for record_id, content, confidence, semantic_cluster_key in rows:
         terms = _terms(content)
         lexical = len(q & terms) / max(1, len(q | terms)) if terms and q else 0.0
@@ -482,12 +485,47 @@ async def recall_experiences(*, query: str, run_id: str, group_id: int | None,
 
         # Minimum score threshold to prevent irrelevance
         if score >= 0.08 or (lexical >= 0.15 or vector_score >= 0.3):
-            ranked.append((score, record_id, content))
+            item = {
+                "id": str(record_id),
+                "record_id": str(record_id),
+                "content": str(content),
+                "confidence": float(confidence),
+                "score": score,
+                "lexical_score": lexical,
+                "vector_score": vector_score,
+                "cluster_match": cluster_match,
+            }
+            ranked.append(item)
+            if lexical > 0.0:
+                keyword_hits.append(item)
+            if vector_score > 0.0:
+                vector_hits.append(item)
+            if cluster_match:
+                cluster_hits.append(item)
 
-    ranked.sort(reverse=True)
+    # Production recall uses the RRF/MMR implementation rather than the
+    # previous single linear score. Keep the score threshold above as a
+    # bounded-recall guard, then fuse independent ranking signals and remove
+    # near-duplicate memories before applying the context budget.
+    if ranked:
+        from memory.adapters.algorithms import HybridRerankEngine
+
+        keyword_hits.sort(key=lambda item: item["lexical_score"], reverse=True)
+        vector_hits.sort(key=lambda item: item["vector_score"], reverse=True)
+        cluster_hits.sort(key=lambda item: item["updated_at"] if "updated_at" in item else 0, reverse=True)
+        reranker = HybridRerankEngine()
+        ranked = reranker.rerank(
+            keyword_hits,
+            vector_hits + cluster_hits,
+            query=query,
+            top_k=max(limit, 1),
+        )
+
     selected = []
     used = 0
-    for _, record_id, content in ranked[:limit]:
+    for item in ranked[:limit]:
+        record_id = str(item["record_id"])
+        content = str(item["content"])
         snippet = content[:1200]
         if used + len(snippet) > char_budget:
             break
