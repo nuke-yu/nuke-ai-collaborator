@@ -97,10 +97,14 @@ async def compile_candidate(record_id: str, group_id: int) -> str | None:
     source_case_ids = tuple(json.loads(row[5] or "[]"))
     everos_cluster_id = ""
     everos_cluster_size = 0
+    everos_skill_md = ""
+    everos_qualification_score = 0.0
+    everos_tools_sequence: tuple[str, ...] = ()
     if source_case_ids:
         from memory.adapters.algorithms import VoyagerCriticEngine
         from memory.adapters.algorithms.everos_case_engine import ExtractedCase
         from memory.adapters.algorithms.everos_clustering_engine import EverOSClusteringEngine
+        from memory.adapters.algorithms.everos_skill_engine import EverOSSkillEngine
 
         critic = VoyagerCriticEngine()
         clustering_cases = []
@@ -187,6 +191,15 @@ async def compile_candidate(record_id: str, group_id: int) -> str | None:
             selected_cluster = max(clusters, key=lambda cluster: len(cluster.cases))
             everos_cluster_id = selected_cluster.cluster_id
             everos_cluster_size = len(selected_cluster.cases)
+            # Existing Nuke qualification gates remain authoritative.  The
+            # EverOS engine supplies the richer induction artifact and score.
+            induced = EverOSSkillEngine(
+                min_cases=2, min_success_rate=0.8, min_qualification_score=0.7
+            ).compile_skill_candidate(selected_cluster)
+            if induced is not None:
+                everos_skill_md = induced.skill_md_content
+                everos_qualification_score = induced.qualification_score
+                everos_tools_sequence = induced.tools_sequence
 
     declaration = {
         "risk_level":"S0", "trigger":experience.get("task_pattern", ""),
@@ -197,6 +210,11 @@ async def compile_candidate(record_id: str, group_id: int) -> str | None:
             "everos_cluster_id": everos_cluster_id,
             "everos_cluster_size": everos_cluster_size,
             "source_case_ids": list(source_case_ids),
+        },
+        "everos_induction": {
+            "skill_md": everos_skill_md,
+            "qualification_score": everos_qualification_score,
+            "tools_sequence": list(everos_tools_sequence),
         },
     }
     validate_declaration(declaration)
