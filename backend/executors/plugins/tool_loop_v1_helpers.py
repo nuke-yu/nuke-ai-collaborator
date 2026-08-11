@@ -221,6 +221,53 @@ async def _inject_failure_insight(runner: Any, tool_name: str, result: str) -> N
         logger.warning("failure insight injection unavailable", exc_info=True)
 
 
+async def _maybe_autogen_retry(
+    runner: Any,
+    tool_name: str,
+    arguments: dict,
+    dispatch_context: dict,
+    result: str,
+    is_error: bool,
+) -> tuple[str, bool]:
+    """Run an explicitly opted-in, side-effect-safe AutoGen retry policy.
+
+    The default is disabled. A caller must provide ``runner.autogen_retry_policy``
+    with an allowlisted tool set; this prevents automatic retries of writes or
+    arbitrary tools while still closing the failure→validate loop for reads.
+    """
+    policy = getattr(runner, "autogen_retry_policy", None)
+    if not is_error or not isinstance(policy, dict):
+        return result, is_error
+    allowed_tools = set(policy.get("tools") or ())
+    if tool_name not in allowed_tools:
+        return result, is_error
+    try:
+        from executors.tool_dispatch import dispatch_tool
+        from memory.adapters.algorithms import AutoGenFailureEngine, FailureCategory
+
+        categories = policy.get("retryable_categories")
+        if categories is None:
+            categories = (FailureCategory.PATH_NOT_FOUND.value, FailureCategory.INVALID_ARGUMENT.value)
+        max_retries = max(0, min(int(policy.get("max_retries", 1)), 2))
+
+        async def attempt(_task, _insights):
+            retry_result, retry_error = await dispatch_tool(tool_name, arguments, dispatch_context)
+            return {"result": retry_result, "is_error": retry_error}
+
+        async def validate(response):
+            return not bool(response.get("is_error"))
+
+        outcome = await AutoGenFailureEngine().run_with_retry(
+            f"retry tool {tool_name}", attempt, validate,
+            max_retries=max_retries, retryable_categories=categories,
+        )
+        if outcome.succeeded and isinstance(outcome.response, dict):
+            return str(outcome.response.get("result", "")), False
+    except Exception:
+        logger.warning("autogen retry unavailable for %s", tool_name, exc_info=True)
+    return result, is_error
+
+
 def _context_evidence_links(memory_refs, always_skills: list[dict]) -> list[dict]:
     """Describe availability separately from later causal citation/adoption."""
     from sessions.evidence import evidence_kind
@@ -1229,6 +1276,10 @@ async def execute_parallel_tools(runner, calls, iteration=None) -> None:
     for call, dispatch_context, (tool_result, is_error) in zip(
         calls, dispatch_contexts, raw_results
     ):
+        tool_result, is_error = await _maybe_autogen_retry(
+            runner, call["name"], call["arguments"], dispatch_context,
+            tool_result, is_error,
+        )
         memory_refs = list(
             dispatch_context.get("_validated_memory_refs", ())
         )
@@ -1313,6 +1364,10 @@ async def execute_serial_tools(runner, calls, iteration=None) -> None:
         }
         tool_result, is_error = await dispatch_tool(
             call["name"], call["arguments"], dispatch_context
+        )
+        tool_result, is_error = await _maybe_autogen_retry(
+            runner, call["name"], call["arguments"], dispatch_context,
+            tool_result, is_error,
         )
         memory_refs = list(
             dispatch_context.get("_validated_memory_refs", ())
