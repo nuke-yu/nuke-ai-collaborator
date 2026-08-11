@@ -38,6 +38,14 @@ _DDL_STATEMENTS = (
      bot_id INTEGER,action TEXT NOT NULL,allowed INTEGER NOT NULL,
      reason TEXT NOT NULL,created_at INTEGER NOT NULL)""",
     "CREATE INDEX IF NOT EXISTS idx_personal_acl_audit_user_time ON personal_acl_audit_events(user_id,created_at)",
+    """CREATE TABLE IF NOT EXISTS personal_access_controls (
+     rule_id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER NOT NULL,
+     subject_type TEXT NOT NULL,subject_id TEXT NOT NULL,
+     object_type TEXT NOT NULL,object_id TEXT NOT NULL,
+     effect TEXT NOT NULL CHECK(effect IN ('allow','deny')),
+     created_at INTEGER NOT NULL,
+     UNIQUE(user_id,subject_type,subject_id,object_type,object_id))""",
+    "CREATE INDEX IF NOT EXISTS idx_personal_acl_object ON personal_access_controls(user_id,object_type,object_id)",
     """CREATE TABLE IF NOT EXISTS habit_evidence (
      id INTEGER PRIMARY KEY AUTOINCREMENT,record_id TEXT NOT NULL,source_key TEXT NOT NULL,
      context_kind TEXT NOT NULL,polarity TEXT NOT NULL,observed_at INTEGER NOT NULL,
@@ -159,6 +167,72 @@ async def record_acl_audit_event(
             ),
         )
         await db.commit()
+
+
+async def set_access_control_rule(
+    *,
+    user_id: int,
+    subject_type: str,
+    subject_id: str,
+    object_type: str,
+    object_id: str,
+    effect: str,
+) -> int:
+    """Create/update an OpenMemory-style subject/object/effect rule."""
+    if effect not in {"allow", "deny"}:
+        raise ValueError("effect must be allow or deny")
+    values = tuple(
+        value.strip()
+        for value in (subject_type, subject_id, object_type, object_id)
+    )
+    if not all(values):
+        raise ValueError("subject and object fields are required")
+    async with connect(user_id) as db:
+        await db.execute(
+            """INSERT INTO personal_access_controls
+               (user_id,subject_type,subject_id,object_type,object_id,effect,created_at)
+               VALUES (?,?,?,?,?,?,?)
+               ON CONFLICT(user_id,subject_type,subject_id,object_type,object_id)
+               DO UPDATE SET effect=excluded.effect,created_at=excluded.created_at""",
+            (user_id, *values, effect, int(time.time() * 1000)),
+        )
+        await db.commit()
+        async with db.execute(
+            """SELECT rule_id FROM personal_access_controls
+               WHERE user_id=? AND subject_type=? AND subject_id=?
+                 AND object_type=? AND object_id=?""",
+            (user_id, *values),
+        ) as cur:
+            row = await cur.fetchone()
+    return int(row[0])
+
+
+async def evaluate_access_control_rule(
+    *,
+    user_id: int,
+    subject_type: str,
+    subject_id: str,
+    object_type: str,
+    object_id: str,
+) -> bool | None:
+    """Return explicit ABAC decision, or None when no rule matches."""
+    async with connect(user_id) as db:
+        async with db.execute(
+            """SELECT effect FROM personal_access_controls
+               WHERE user_id=? AND subject_type=? AND subject_id=?
+                 AND object_type=? AND object_id=?""",
+            (
+                user_id,
+                subject_type.strip(),
+                subject_id.strip(),
+                object_type.strip(),
+                object_id.strip(),
+            ),
+        ) as cur:
+            row = await cur.fetchone()
+    if not row:
+        return None
+    return str(row[0]) == "allow"
 
 
 async def add_record(*,user_id:int,kind:str,content:str,source_type:str,source_id:str="",

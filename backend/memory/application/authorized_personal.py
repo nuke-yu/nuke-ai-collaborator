@@ -93,6 +93,35 @@ class AuthorizedPersonalKnowledgeService:
         check = await self._acl.check_acl(
             scope, principal=self._principal, action=action
         )
+        # OpenMemory-style explicit rules can only tighten the platform ACL.
+        # An allow rule never grants access that the Nuke scope matrix denied.
+        if check.allowed and self._principal.user_id is not None:
+            try:
+                from ai.personal_vault import evaluate_access_control_rule
+
+                explicit = await evaluate_access_control_rule(
+                    user_id=self._principal.user_id,
+                    subject_type="user",
+                    subject_id=str(self._principal.user_id),
+                    object_type=scope.kind.value,
+                    object_id=(
+                        str(scope.bot_id)
+                        if scope.bot_id is not None
+                        else str(scope.group_id or self._principal.user_id)
+                    ),
+                )
+                if explicit is False:
+                    from dataclasses import replace
+
+                    check = replace(
+                        check,
+                        allowed=False,
+                        reason="Access denied: explicit OpenMemory ABAC deny rule.",
+                    )
+            except Exception:
+                # A missing/legacy ACL table must not broaden access; the
+                # default Nuke ACL result remains authoritative.
+                pass
         if self._principal.user_id is not None:
             try:
                 from ai.personal_vault import record_acl_audit_event

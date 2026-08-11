@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import sys
 import unittest
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -51,6 +51,19 @@ class TestAuthorizedPersonalKnowledgeService(unittest.IsolatedAsyncioTestCase):
                 CreatePersonalRecord(scope=self.scope, kind="preference", content="concise")
             )
 
+        self.delegate.create_record.assert_not_awaited()
+
+    @patch(
+        "ai.personal_vault.evaluate_access_control_rule",
+        new_callable=AsyncMock,
+        return_value=False,
+    )
+    async def test_explicit_abac_deny_tightens_default_acl(self, evaluate_rule) -> None:
+        with self.assertRaisesRegex(MemoryAuthorizationError, "ABAC deny"):
+            await self.service.create_record(
+                CreatePersonalRecord(scope=self.scope, kind="preference", content="concise")
+            )
+        evaluate_rule.assert_awaited_once()
         self.delegate.create_record.assert_not_awaited()
 
     async def test_scope_cannot_impersonate_another_actor(self) -> None:
