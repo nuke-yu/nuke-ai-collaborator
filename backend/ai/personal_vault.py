@@ -215,24 +215,36 @@ async def evaluate_access_control_rule(
     object_type: str,
     object_id: str,
 ) -> bool | None:
-    """Return explicit ABAC decision, or None when no rule matches."""
+    """Return explicit ABAC decision, or None when no rule matches.
+
+    Exact subject/object rules outrank wildcard rules. If multiple matching
+    rules have the same specificity, deny wins so a broad deny cannot be
+    weakened by another allow rule.
+    """
+    subject_type = subject_type.strip()
+    subject_id = subject_id.strip()
+    object_type = object_type.strip()
+    object_id = object_id.strip()
     async with connect(user_id) as db:
         async with db.execute(
-            """SELECT effect FROM personal_access_controls
-               WHERE user_id=? AND subject_type=? AND subject_id=?
-                 AND object_type=? AND object_id=?""",
-            (
-                user_id,
-                subject_type.strip(),
-                subject_id.strip(),
-                object_type.strip(),
-                object_id.strip(),
-            ),
+            """SELECT subject_type,subject_id,object_type,object_id,effect
+               FROM personal_access_controls
+               WHERE user_id=?
+                 AND subject_type IN (?, '*')
+                 AND subject_id IN (?, '*')
+                 AND object_type IN (?, '*')
+                 AND object_id IN (?, '*')""",
+            (user_id, subject_type, subject_id, object_type, object_id),
         ) as cur:
-            row = await cur.fetchone()
-    if not row:
+            rows = await cur.fetchall()
+    if not rows:
         return None
-    return str(row[0]) == "allow"
+    def specificity(row) -> int:
+        return sum(value != "*" for value in row[:4])
+
+    highest = max(specificity(row) for row in rows)
+    top = [row for row in rows if specificity(row) == highest]
+    return not any(str(row[4]) == "deny" for row in top)
 
 
 async def add_record(*,user_id:int,kind:str,content:str,source_type:str,source_id:str="",
