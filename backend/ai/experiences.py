@@ -516,9 +516,10 @@ async def recall_experiences(*, query: str, run_id: str, group_id: int | None,
         reranker = HybridRerankEngine()
         ranked = reranker.rerank(
             keyword_hits,
-            vector_hits + cluster_hits,
+            vector_hits,
             query=query,
             top_k=max(limit, 1),
+            cluster_hits=cluster_hits,
         )
 
     selected = []

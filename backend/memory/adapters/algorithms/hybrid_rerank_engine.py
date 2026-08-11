@@ -112,8 +112,12 @@ class HybridRerankEngine:
         vector_hits: Sequence[Mapping[str, Any]],
         query: str,
         top_k: int = 5,
+        cluster_hits: Sequence[Mapping[str, Any]] = (),
     ) -> list[dict[str, Any]]:
         """Execute complete RRF Fusion + MMR Diversification pipeline."""
-        fused = self.rrf_fusion([keyword_hits, vector_hits])
+        rank_lists = [keyword_hits, vector_hits]
+        if cluster_hits:
+            rank_lists.append(cluster_hits)
+        fused = self.rrf_fusion(rank_lists)
         diversified = self.mmr_diversify(fused, query, top_k=top_k)
         return diversified
