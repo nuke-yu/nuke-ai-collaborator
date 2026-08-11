@@ -440,6 +440,7 @@ async def recall_experiences(*, query: str, run_id: str, group_id: int | None,
     async with await _memory_db("memory_records", group_id, write=False) as db:
         candidate_ids = list(vector_candidate_ids[:32]) if isinstance(vector_candidate_ids, list) else list(vector_candidate_ids)
         rows = []
+        graph_candidate_ids: set[str] = set()
         if candidate_ids:
             placeholders = ",".join("?" for _ in candidate_ids)
             async with db.execute(
@@ -464,11 +465,48 @@ async def recall_experiences(*, query: str, run_id: str, group_id: int | None,
                     rows.append(row)
                     fetched_ids.add(str(row[0]))
 
+    # Graphiti-style bounded graph expansion: use active relation neighbors of
+    # already recalled candidates as a fourth, independent ranking signal.
+    if fetched_ids:
+        try:
+            from ai.memory import _memory_db
+            placeholders = ",".join("?" for _ in fetched_ids)
+            async with await _memory_db("memory_relations", group_id, write=False) as rel_db:
+                async with rel_db.execute(
+                    """SELECT from_record_id,to_record_id FROM memory_relations
+                       WHERE group_id=? AND status='active'
+                         AND (from_record_id IN (""" + placeholders + ") OR to_record_id IN (" + placeholders + "))",
+                    (group_id, *sorted(fetched_ids), *sorted(fetched_ids)),
+                ) as rel_cur:
+                    for left, right in await rel_cur.fetchall():
+                        left, right = str(left), str(right)
+                        if left in fetched_ids:
+                            graph_candidate_ids.add(right)
+                        if right in fetched_ids:
+                            graph_candidate_ids.add(left)
+            graph_candidate_ids.difference_update(fetched_ids)
+            if graph_candidate_ids:
+                async with await _memory_db("memory_records", group_id, write=False) as graph_db:
+                    graph_placeholders = ",".join("?" for _ in graph_candidate_ids)
+                    async with graph_db.execute(
+                        """SELECT record_id,content,confidence,semantic_cluster_key
+                           FROM memory_records WHERE group_id=? AND bot_id=?
+                             AND kind='experience' AND status='active'
+                             AND record_id IN (""" + graph_placeholders + ")",
+                        (group_id, bot_id, *sorted(graph_candidate_ids)),
+                    ) as graph_cur:
+                        rows.extend(await graph_cur.fetchall())
+        except Exception:
+            # Graph retrieval is an optional recall lane; lexical/vector
+            # recall must remain available when the relation index is absent.
+            pass
+
     q = _terms(query)
     ranked = []
     keyword_hits = []
     vector_hits = []
     cluster_hits = []
+    graph_hits = []
     for record_id, content, confidence, semantic_cluster_key in rows:
         terms = _terms(content)
         lexical = len(q & terms) / max(1, len(q | terms)) if terms and q else 0.0
@@ -502,6 +540,8 @@ async def recall_experiences(*, query: str, run_id: str, group_id: int | None,
                 vector_hits.append(item)
             if cluster_match:
                 cluster_hits.append(item)
+            if str(record_id) in graph_candidate_ids:
+                graph_hits.append(item)
 
     # Production recall uses the RRF/MMR implementation rather than the
     # previous single linear score. Keep the score threshold above as a
@@ -520,6 +560,7 @@ async def recall_experiences(*, query: str, run_id: str, group_id: int | None,
             query=query,
             top_k=max(limit, 1),
             cluster_hits=cluster_hits,
+            graph_hits=graph_hits,
         )
 
     selected = []

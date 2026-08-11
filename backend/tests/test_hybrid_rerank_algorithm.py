@@ -48,6 +48,16 @@ class TestHybridRerankEngine(unittest.TestCase):
         results = self.engine.rerank(kw, vec, query="database connection", top_k=2)
         self.assertEqual(len(results), 2)
 
+    def test_rerank_accepts_graph_rank_lane(self) -> None:
+        results = self.engine.rerank(
+            [{"id": "a", "content": "alpha"}],
+            [],
+            query="alpha",
+            top_k=2,
+            graph_hits=[{"id": "b", "content": "related alpha"}],
+        )
+        self.assertEqual({item["id"] for item in results}, {"a", "b"})
+
 
 class TestHybridRerankAlgorithmAdapter(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
