@@ -1115,6 +1115,12 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
                 declaration = json.loads((await cur.fetchone())[0])
         self.assertEqual(row,("trial","S0")); self.assertEqual(declaration["allowed_tools"],[])
         self.assertFalse(declaration["execution_plan"]["requires_hil"])
+        async with database.connect(TEST_DB_PATH) as db:
+            async with db.execute(
+                "SELECT source_type FROM everos_source_documents WHERE record_id=?",
+                (record_id,),
+            ) as cur:
+                self.assertEqual((await cur.fetchone())[0], "experience_case_snapshot")
         with self.assertRaises(ValueError):
             validate_declaration({"risk_level":"S1","trigger":"x","procedure":["x"],"allowed_tools":["run_shell"]})
         with self.assertRaisesRegex(ValueError, "executable code"):

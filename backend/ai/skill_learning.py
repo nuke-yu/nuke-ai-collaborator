@@ -239,6 +239,28 @@ async def compile_candidate(record_id: str, group_id: int) -> str | None:
     canonical = json.dumps(declaration,ensure_ascii=False,sort_keys=True,separators=(",",":"))
     digest = hashlib.sha256(canonical.encode()).hexdigest(); now = int(time.time()*1000)
     async with await _memory_db("skills", group_id, write=True) as db:
+        await db.execute(
+            """CREATE TABLE IF NOT EXISTS everos_source_documents (
+                source_id TEXT PRIMARY KEY, group_id INTEGER NOT NULL,
+                record_id TEXT NOT NULL, source_type TEXT NOT NULL,
+                content_json TEXT NOT NULL, created_at INTEGER NOT NULL
+            )"""
+        )
+        await db.execute(
+            """CREATE INDEX IF NOT EXISTS idx_everos_source_documents_group
+               ON everos_source_documents(group_id,record_id,created_at)"""
+        )
+        source_document_id = "everos-source:" + hashlib.sha256(
+            f"{group_id}:{record_id}:{row[5]}".encode()
+        ).hexdigest()[:24]
+        await db.execute(
+            """INSERT OR REPLACE INTO everos_source_documents
+               (source_id,group_id,record_id,source_type,content_json,created_at)
+               VALUES (?,?,?,?,?,?)""",
+            (source_document_id, group_id, record_id, "experience_case_snapshot",
+             json.dumps({"experience": experience, "source_case_ids": list(source_case_ids)},
+                        ensure_ascii=False, sort_keys=True), now),
+        )
         await db.execute("""INSERT INTO skills
           (skill_id,group_id,bot_id,name,maturity,risk_level,current_version,created_at,updated_at)
           VALUES (?,?,?,?, 'trial','S0',1,?,?) ON CONFLICT(skill_id) DO UPDATE SET updated_at=excluded.updated_at""",
