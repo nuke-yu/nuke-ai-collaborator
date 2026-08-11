@@ -213,6 +213,7 @@ Nuke 对应代码：
 - Voyager：Skill declaration 拒绝 code/python/shell 等执行字段及 subprocess/eval/curl 等隐式执行指令。
 - Graphiti：增加可选 LLM entity candidate extractor；解析失败回退确定性抽取，仍不直接创建关系。
 - OpenMemory：增加无内容 ACL 审计查询接口，支持分页上限并保持用户隔离。
+- OpenMemory：`CreatePersonalProjection` / `FormatProjectedContext` 支持 `app_id`，projection 与读取均对 inactive/unregistered app fail-closed。
 
 这份文档的核心原则是：可以说“吸收了某算法的设计思想或局部机制”，但只有在存在生产 composition root 接线和端到端调用证据时，才可以说“该算法已在线”。
 
