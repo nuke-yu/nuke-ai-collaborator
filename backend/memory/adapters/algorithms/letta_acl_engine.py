@@ -127,6 +127,41 @@ class LettaOpenMemoryEngine:
             is_budget_exceeded=exceeded,
         )
 
+    @classmethod
+    def page_memory(
+        cls,
+        records: Sequence[Mapping[str, Any]],
+        max_tokens: int,
+        tokenizer: Callable[[str], Any] | Any | None = None,
+    ) -> list[dict[str, Any]]:
+        """Page archival records into working memory by importance density.
+
+        Records are sorted by explicit importance (then recency) and admitted
+        until the token budget is exhausted. The method never mutates input or
+        performs I/O, making it safe for active memory-function callers.
+        """
+        if max_tokens <= 0:
+            return []
+        ranked = sorted(
+            (dict(record) for record in records if record.get("content")),
+            key=lambda item: (
+                float(item.get("importance", item.get("confidence", 0.0)) or 0.0),
+                float(item.get("updated_at", item.get("created_at", 0)) or 0),
+            ),
+            reverse=True,
+        )
+        selected: list[dict[str, Any]] = []
+        used = 0
+        for record in ranked:
+            cost = cls.estimate_tokens(str(record["content"]), tokenizer)
+            if cost <= 0:
+                continue
+            if used + cost > max_tokens:
+                continue
+            selected.append(record)
+            used += cost
+        return selected
+
     def check_acl_access(
         self,
         scope: MemoryScope,

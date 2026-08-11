@@ -83,6 +83,15 @@ class TestLettaOpenMemoryEngine(unittest.TestCase):
         )
         self.assertEqual(bounded, "one\n[context truncated by memory budget]")
 
+    def test_page_memory_selects_high_value_records_within_budget(self) -> None:
+        records = [
+            {"content": "low", "importance": 0.1},
+            {"content": "high", "importance": 0.9},
+            {"content": "medium", "importance": 0.5},
+        ]
+        selected = self.engine.page_memory(records, 2, lambda text: [text])
+        self.assertEqual([record["content"] for record in selected], ["high", "medium"])
+
     def test_check_acl_access_grants_personal_owner(self) -> None:
         scope = MemoryScope.personal(user_id=10, group_id=1, actor_id="user:10")
         principal = Principal.user(user_id=10, group_ids=[1])
