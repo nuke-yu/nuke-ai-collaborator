@@ -190,6 +190,14 @@ Nuke 对应代码：
 
 仍需继续增强的部分主要是：完整实体抽取/解析模型、跨多跳图的混合向量检索、真实 provider tokenizer、OpenMemory subject/object/effect ORM 规则管理，以及按策略选择性自动 retry。
 
+### 2026-08-12 继续实现与验证
+
+- AutoGen：Tool Loop 失败结果经过 `redact_secrets()` 后生成一次去重的 corrective insight，作为历史证据注入下一轮模型上下文；不会把工具错误当成新的用户指令。
+- LangGraph：新增 `memory_checkpoint_pending_writes` 表，以及 `put_pending_write()`、`list_pending_writes()`、`acknowledge_pending_writes()`、`fork_checkpoint()`。
+- RRF/MMR：Experience Recall 的 keyword、vector、semantic-cluster 三路结果分别参与 RRF，再由 MMR 去重。
+- Mem0：补充 NOOP 回归测试，确认整批事实均为 NOOP 时 canonical 和 Chroma 均不写入。
+- 验证：本轮 memory 算法与接线回归测试 93 项通过；Tool Loop 失败洞察新增测试 2 项，LangGraph pending write/fork 新增测试 2 项。
+
 这份文档的核心原则是：可以说“吸收了某算法的设计思想或局部机制”，但只有在存在生产 composition root 接线和端到端调用证据时，才可以说“该算法已在线”。
 
 ---
