@@ -127,7 +127,7 @@ Nuke 对应代码：
 - `backend/ai/experiences.py:491-495`：字符预算截断。
 - `backend/ai/personal_vault.py:373`：Personal Vault 上下文预算。
 
-当前边界：Nuke 已实现分层注入、工具 schema 后的最终预算裁剪和超限输出 token clamp。预算仍是启发式 token 估算，没有完整复刻 MemGPT/Letta 的主动 memory function、paging/eviction、provider 原生 tokenizer 和 Archival Memory runtime。
+当前边界：Nuke 已实现分层注入、工具 schema 后的最终预算裁剪、超限输出 token clamp，以及可选 provider tokenizer。仍没有完整复刻 MemGPT/Letta 的主动 memory function、paging/eviction 和独立 Archival Memory runtime。
 
 ## 9. OpenMemory：个人记忆隔离、ACL 和访问审计
 
@@ -144,7 +144,7 @@ Nuke 对应代码：
 - `backend/memory/application/authorized_personal.py:88`：授权个人记忆边界。
 - `backend/ai/personal_vault.py:386`：访问/使用记录。
 
-当前边界：Nuke 已吸收 Personal Vault、隔离、导出/删除/重建、显式 ABAC deny 和无内容审计。规则持久化仍是 Nuke 的本地 ACL 矩阵，不是 OpenMemory 完整的 subject/object/effect ORM 模型。
+当前边界：Nuke 已吸收 Personal Vault、隔离、导出/删除/重建、持久化 subject/object/effect 规则、通配匹配、显式 ABAC deny 和无内容审计。仍未复刻 OpenMemory 的 App active 状态机及完整 ORM/HTTP 层。
 
 ## 10. 补充论文：Reflexion 与 Generative Agents
 
@@ -188,7 +188,7 @@ Nuke 对应代码：
 - LangGraph：durable pipeline job 保存 checkpoint、parent、state hash/state JSON，并支持 pending writes、acknowledge、fork、prune；
 - OpenMemory：个人 ACL 的允许/拒绝决策均进入无内容审计表。
 
-仍需继续增强的部分主要是：完整实体抽取/解析模型、跨多跳图的混合向量检索、真实 provider tokenizer、OpenMemory subject/object/effect ORM 规则管理，以及按策略选择性自动 retry。
+仍需继续增强的部分主要是：LLM 级实体抽取/解析、跨多跳图的混合向量检索、MemGPT 主动 memory function/paging、OpenMemory App 状态机，以及按策略选择性自动 retry。
 
 ### 2026-08-12 继续实现与验证
 
