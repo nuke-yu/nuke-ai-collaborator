@@ -11,6 +11,7 @@ from ai.personal_vault import (
     evaluate_access_control_rule,
     is_personal_app_active,
     list_acl_audit_events,
+    list_personal_apps,
     project,
     register_personal_app,
     set_personal_app_status,
@@ -140,6 +141,9 @@ class PersonalGovernanceTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(await set_personal_app_status(user_id=self.user_id, app_id="chat", active=False))
         self.assertFalse(await is_personal_app_active(user_id=self.user_id, app_id="chat"))
         self.assertFalse(await set_personal_app_status(user_id=self.user_id, app_id="missing", active=True))
+        apps = await list_personal_apps(user_id=self.user_id)
+        self.assertEqual(apps[0]["app_id"], "chat")
+        self.assertEqual(await list_personal_apps(user_id=self.user_id, include_inactive=False), [])
 
     async def test_inactive_app_cannot_project_or_read(self) -> None:
         record_id = await add_record(

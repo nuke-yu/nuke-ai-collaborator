@@ -269,6 +269,23 @@ async def is_personal_app_active(*, user_id: int, app_id: str) -> bool:
     return bool(row and row[0] == "active")
 
 
+async def list_personal_apps(*, user_id: int, include_inactive: bool = True) -> list[dict[str, object]]:
+    """List only the authenticated user's registered apps."""
+    where = "" if include_inactive else " AND status='active'"
+    async with connect(user_id) as db:
+        async with db.execute(
+            "SELECT app_id,name,status,created_at,updated_at FROM personal_apps "
+            "WHERE user_id=?" + where + " ORDER BY app_id",
+            (user_id,),
+        ) as cur:
+            rows = await cur.fetchall()
+    return [
+        {"app_id": str(row[0]), "name": str(row[1]), "status": str(row[2]),
+         "created_at": int(row[3]), "updated_at": int(row[4])}
+        for row in rows
+    ]
+
+
 async def evaluate_access_control_rule(
     *,
     user_id: int,
