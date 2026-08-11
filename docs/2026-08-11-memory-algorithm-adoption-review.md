@@ -22,7 +22,7 @@
 - `backend/memory/adapters/algorithms/mem0_fact_engine.py:33`：对应的决策 Prompt。
 - `backend/memory/adapters/algorithms/mem0_fact_engine.py:88`：事实冲突协调。
 
-当前边界：Engine 已实现，但生产 `observe()` 进入 durable observation pipeline，而不是直接调用该 Engine（`backend/memory/adapters/runtime/legacy.py:63-79`）。准确表述是：Nuke 已吸收 Mem0 的事实级增量更新思想和四动作决策模型，生产观察链路尚未直接接线。
+当前状态：生产 durable observation pipeline 的 fact stage 会进入 `add_to_chroma()`；该函数通过 `ConflictResolver.resolve_batch()` 调用 Mem0 冲突决策，并把 ADD/UPDATE/DELETE/NOOP 和原始 fact index 写入 canonical metadata（`backend/ai/memory.py:306-445,558-730`）。因此 Mem0 已在线于事实冲突与双写路径；`legacy.py` 仍只是 durable pipeline 的入口，不应被误读为算法未接线。
 
 ## 2. EverOS：Run → Case → Experience → Skill
 
@@ -38,7 +38,7 @@ Nuke 对应代码：
 - `backend/ai/experiences.py:59`：有纠正证据且验证成功时才蒸馏 Experience。
 - `backend/ai/pipeline.py:251`：评估 Case 并触发蒸馏。
 
-当前边界：Nuke 的 Case → Experience → Skill 主链路已在线；EverOS 风格的独立 OME、聚类、反思调度和 Markdown 源事实体系没有完整复刻。独立 `everos_*_engine` 主要是算法模块和测试，不等于完整生产接入。
+当前边界：Nuke 的 Case → Experience → Skill 主链路已在线，`compile_candidate()` 会执行 Case 聚类、蒸馏资格门控并保存 cluster provenance 与 induction artifact。没有完整复刻 EverOS 的 OME/Markdown 源事实体系和独立反思调度；当前实现是 Nuke 原生 durable pipeline 吸收其分层思想。
 
 ## 3. AutoGen Task-Centric Memory：失败 → Insight → 复用
 
@@ -57,7 +57,7 @@ Nuke 对应代码：
 - `backend/ai/experiences.py:59-80`：仅对完成且验证成功、存在纠正信号的 Case 蒸馏。
 - `backend/memory/adapters/algorithms/autogen_failure_engine.py:57`：失败分类和纠正建议。
 
-当前边界：Nuke 已吸收“失败分析—纠正建议—验证后记忆化”的思想，但独立 Failure Engine 尚未形成完整的自动 `Retry → Validate → Store` 闭环。
+当前状态：失败工具调用会在 Tool Loop 中经脱敏、去重后注入 AutoGen 风格 corrective insight；失败 Case 仍要求真实纠正证据且验证成功才可蒸馏 Experience。`AutoGenFailureEngine.run_with_retry()` 也提供可复用的 `Retry → Validate → Store` 前置闭环，但 Nuke 不会对所有工具失败无条件自动重试。
 
 ## 4. Graphiti / Zep：时序知识图谱与事实失效
 
@@ -72,7 +72,7 @@ Nuke 对应代码：
 - `backend/memory/adapters/algorithms/graphiti_temporal_engine.py:34,55,86,107`：轻量时序节点/关系和冲突边失效。
 - `backend/memory/application/bot_facts.py:146,205`：事实 supersede 与 `valid_to`。
 
-当前边界：已吸收时序失效和历史保留；尚未完整实现实体抽取、实体解析、图遍历、社区发现和 Graphiti Hybrid Graph Search。
+当前边界：已实现实体 alias 规范化、时序失效、历史保留和带 `as_of`/`max_hops` 的有界图遍历。尚未实现 Graphiti 同等规模的 LLM 实体抽取、社区发现和完整 hybrid graph search。
 
 ## 5. RRF / MMR：多路召回融合与去冗余
 
@@ -80,13 +80,13 @@ Graphiti/Zep 论文在 PDF p.5 §3.1 讨论召回与重排，并在 PDF p.11 引
 
 Nuke 实现：`backend/memory/adapters/algorithms/hybrid_rerank_engine.py:16,23,49,109`。
 
-当前线上 Experience Recall 仍使用线性加权：
+当前线上 Experience Recall 已使用 RRF/MMR；线性分数只用于候选阈值过滤：
 
 ```text
 0.45 × lexical + 0.35 × vector + 0.20 × cluster
 ```
 
-位置：`backend/ai/experiences.py:467-481`。因此，RRF/MMR Engine 已存在，但尚未接入生产召回。若文档声称已具备 cross-encoder rerank，也需要修正：当前实现没有真正加载 cross-encoder 模型。
+位置：`backend/ai/experiences.py:467-530`。关键词、向量、cluster 三路排名进入 `HybridRerankEngine`，再执行 RRF 与 MMR。当前没有加载 cross-encoder 模型，不能宣称拥有 cross-encoder rerank。
 
 ## 6. Voyager：成功轨迹 → Skill 与 Critic 门控
 
@@ -100,7 +100,7 @@ Nuke 对应代码：
 - `backend/ai/skill_learning.py:81,165-219`：候选生成、试用和晋升。
 - `backend/ai/usage_tracking.py:89-180`：成功/失败复用反馈和暂停逻辑。
 
-当前边界：Nuke 已吸收成功门控、Skill 生命周期和复用反馈；没有 Voyager 式可执行代码 Skill Library、Automatic Curriculum，也没有将独立 Critic Adapter 完整接入生产。
+当前边界：Nuke 已吸收成功门控、Skill 生命周期、真实复用反馈，并在 Skill 编译前执行 Critic gate。Skill 仍是声明式经验策略，不是 Voyager 式可执行代码 Skill Library；Automatic Curriculum 也未复刻。
 
 ## 7. LangGraph Checkpoint：可恢复状态与 Durable Execution
 
@@ -113,7 +113,7 @@ Nuke 对应代码：
 
 Nuke 对应代码：`backend/memory/adapters/runtime/learning_legacy.py:186-207`（durable job、lease、幂等和失败恢复）。
 
-当前边界：`backend/memory/adapters/algorithms/langgraph_dag_engine.py:28` 主要生成内存中的 DAG dataclass/hash，并不是 LangGraph SQLite Saver。Nuke 尚未完整实现 LangGraph 的 pending writes、resume、fork、prune 检查点模型。
+当前状态：Nuke 的 durable pipeline 已持久化 checkpoint、parent、state hash/state JSON，并提供 latest、prune、thread delete；新增 `memory_checkpoint_pending_writes`、pending write acknowledge 和 checkpoint fork API。它仍不是 LangGraph 官方 SQLite Saver，resume 由 Nuke 的 lease/job worker 负责。
 
 ## 8. Letta / MemGPT：分层记忆与上下文预算
 
@@ -127,7 +127,7 @@ Nuke 对应代码：
 - `backend/ai/experiences.py:491-495`：字符预算截断。
 - `backend/ai/personal_vault.py:373`：Personal Vault 上下文预算。
 
-当前边界：Nuke 已吸收核心/长期记忆分层和按需注入思想，但主要使用启发式字符预算，没有完整实现 MemGPT/Letta 的主动 memory function、paging/eviction、真实 tokenizer 预算和 Archival Memory 运行时。
+当前边界：Nuke 已实现分层注入、工具 schema 后的最终预算裁剪和超限输出 token clamp。预算仍是启发式 token 估算，没有完整复刻 MemGPT/Letta 的主动 memory function、paging/eviction、provider 原生 tokenizer 和 Archival Memory runtime。
 
 ## 9. OpenMemory：个人记忆隔离、ACL 和访问审计
 
@@ -144,7 +144,7 @@ Nuke 对应代码：
 - `backend/memory/application/authorized_personal.py:88`：授权个人记忆边界。
 - `backend/ai/personal_vault.py:386`：访问/使用记录。
 
-当前边界：Nuke 已吸收 Personal Vault、隔离、访问控制、导出/删除/重建和审计思想；但当前 ACL 是 Nuke 本地规则矩阵，并非 OpenMemory 完整的 subject/object/effect 数据模型与日志体系。
+当前边界：Nuke 已吸收 Personal Vault、隔离、导出/删除/重建、显式 ABAC deny 和无内容审计。规则持久化仍是 Nuke 的本地 ACL 矩阵，不是 OpenMemory 完整的 subject/object/effect ORM 模型。
 
 ## 10. 补充论文：Reflexion 与 Generative Agents
 
@@ -164,13 +164,13 @@ Nuke 对应代码：
 
 | 算法 | 已吸收的主要能力 | 当前未完成部分 |
 |---|---|---|
-| Mem0 | 原子事实、ADD/UPDATE/DELETE/NOOP | 生产 observe 未直接调用 Engine |
-| EverOS | Case → Experience → Skill 主链路 | OME、聚类、反思调度未完整接入 |
-| AutoGen | 失败分析、纠正证据、Insight 门控 | 完整 Retry → Validate → Store 闭环 |
-| Graphiti/Zep | 时序事实、关系失效、历史保留 | 实体图谱和完整 Hybrid Search |
-| RRF/MMR | 独立融合/去冗余算法 | 线上仍是线性加权召回 |
-| Voyager | 成功门控、Skill 生命周期、复用反馈 | 可执行代码 Skill 和 Curriculum |
-| LangGraph | Durable job、lease、幂等、恢复思想 | 原生 Checkpoint/pending writes/fork/prune |
+| Mem0 | 事实级 ADD/UPDATE/DELETE/NOOP 决策、canonical 双写 | 原始 Mem0 LLM extractor/prompt 不是唯一事实抽取器 |
+| EverOS | Case → Experience → Skill、cluster provenance、induction artifact | OME/Markdown 源事实和独立反思调度 |
+| AutoGen | 失败分析、工具循环 corrective insight、验证门控 | 不对所有失败自动重试，需显式 retry policy |
+| Graphiti/Zep | 时序事实、alias、关系失效、有界图遍历 | LLM 实体抽取、社区发现、完整 Hybrid Search |
+| RRF/MMR | 关键词/向量/cluster 三路融合与去冗余 | 没有 cross-encoder |
+| Voyager | Critic 成功门控、Skill 生命周期、复用反馈 | 可执行代码 Skill 和 Curriculum |
+| LangGraph | Durable job、lease、checkpoint、pending writes、fork/prune | 不是官方 Saver，resume 由 Nuke worker 恢复 |
 | Letta/MemGPT | 分层记忆、按需注入、上下文预算 | 主动 paging、function memory、真实 tokenizer |
 | OpenMemory | Personal Vault、ACL、隔离、审计 | 完整 ABAC 数据模型和访问日志 |
 
@@ -178,17 +178,17 @@ Nuke 对应代码：
 
 本次代码落地后，以下边界已经从“独立 Adapter”进入生产或持久化链路：
 
-- RRF/MMR：已接入 Experience Recall；
+- RRF/MMR：关键词、向量、cluster 三路已接入 Experience Recall；
 - Letta/MemGPT：记忆注入前和工具 Schema 确定后均执行上下文预算；
 - Mem0：canonical fact metadata 保存 `mem0_action`；
-- AutoGen：失败 Insight 持久化，并提供异步 retry→validate 闭环；
+- AutoGen：失败 Insight 已接入 Tool Loop，失败 Case 持久化，并提供异步 retry→validate 闭环；
 - EverOS：Case cluster provenance 和 Skill induction artifact 写入 Skill declaration；
 - Voyager：Skill 编译前执行 Critic gate；
 - Graphiti：时间点关系查询、有限深度关系遍历、实体 alias 规范化；
-- LangGraph：durable pipeline job 保存 checkpoint、parent、state hash 和 state JSON；
+- LangGraph：durable pipeline job 保存 checkpoint、parent、state hash/state JSON，并支持 pending writes、acknowledge、fork、prune；
 - OpenMemory：个人 ACL 的允许/拒绝决策均进入无内容审计表。
 
-仍需继续增强的部分主要是：完整实体抽取/解析模型、跨多跳图的混合向量检索、真实 provider tokenizer、OpenMemory subject/object/effect 持久化规则管理，以及将 AutoGen retry loop 接到具体 Agent 执行器。
+仍需继续增强的部分主要是：完整实体抽取/解析模型、跨多跳图的混合向量检索、真实 provider tokenizer、OpenMemory subject/object/effect ORM 规则管理，以及按策略选择性自动 retry。
 
 这份文档的核心原则是：可以说“吸收了某算法的设计思想或局部机制”，但只有在存在生产 composition root 接线和端到端调用证据时，才可以说“该算法已在线”。
 
@@ -601,7 +601,7 @@ AutoGen Task-Centric Memory 想得到的是：
 
 源码位置：`_prompter.py:100-154`、`_prompter.py:228-252`、`memory_controller.py:135-189`、`memory_controller.py:191-230`。
 
-Nuke 中的对应物不是“保存所有错误”，而是 `correction_evidence_json`、错误列表、尝试记录和验证结果。只有验证成功后才蒸馏 Experience。因此 Nuke 当前实现了“错误必须有纠正证据”，但还没有完全复制 AutoGen 的自动失败重试循环。
+Nuke 中的对应物不是“保存所有错误”，而是 `correction_evidence_json`、错误列表、尝试记录和验证结果；Tool Loop 还会把脱敏后的失败洞察注入下一轮。只有验证成功后才蒸馏 Experience。Nuke 提供 retry helper，但是否自动重试由执行策略决定。
 
 ### 11.4 Graphiti：重点不是“有一张图”，而是“旧关系什么时候失效”
 
@@ -700,7 +700,7 @@ checkpoint_id
 父 checkpoint
 节点状态
 channel versions
-尚未合并的 pending writes
+pending writes（已合并到 Nuke 的 durable checkpoint 表）
 ```
 
 例如工具调用成功但进程在写最终结果前崩溃：
@@ -753,7 +753,7 @@ OpenMemory 的访问流程可以具体写成：
 
 源码位置：`utils/permissions.py:8-53`。权限数据模型在 `models.py:132-188`，包括 subject/object/effect、状态历史和访问日志。
 
-Nuke 的 `AuthorizedPersonalKnowledgeService` 在应用边界做 fail-closed 检查（`backend/memory/application/authorized_personal.py:88`），ACL Adapter 在 composition root 装配（`backend/memory/bootstrap.py:121-125`）。区别是 Nuke 当前规则主要存在本地 ACL 矩阵中，尚未完全使用 OpenMemory 的 ABAC 表结构。
+Nuke 的 `AuthorizedPersonalKnowledgeService` 在应用边界做 fail-closed 检查（`backend/memory/application/authorized_personal.py:88`），ACL Adapter 在 composition root 装配（`backend/memory/bootstrap.py:121-125`）。区别是 Nuke 当前规则主要存在本地 ACL 矩阵中，而不是 OpenMemory 的完整 ABAC ORM 表结构。
 
 ## 13. 阅读这些算法时最容易混淆的三件事
 
