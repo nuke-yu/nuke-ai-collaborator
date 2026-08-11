@@ -176,6 +176,43 @@ def _tool_evidence_links(memory_refs: list[str], dispatch_context: dict) -> list
     return links
 
 
+async def _inject_failure_insight(runner: Any, tool_name: str, result: str) -> None:
+    """Inject one AutoGen-style corrective insight after a failed tool call."""
+    if not result:
+        return
+    try:
+        from executors.redaction import redact_secrets
+        from memory.adapters.algorithms import AutoGenFailureEngine
+
+        safe_result, _ = redact_secrets(str(result))
+        safe_result = safe_result[:2000]
+        category_key = f"{tool_name}:{safe_result[:500]}"
+        seen = getattr(runner, "_failure_insight_keys", set())
+        if category_key in seen:
+            return
+        seen.add(category_key)
+        runner._failure_insight_keys = seen
+        insight = AutoGenFailureEngine().analyze_failure(
+            str(getattr(runner.ctx, "user_message", "")),
+            [safe_result],
+            [{"name": tool_name, "result": safe_result, "is_error": True}],
+        )
+        runner.messages.append(
+            {
+                "role": "user",
+                "content": (
+                    "[Historical failure insight — use only as corrective evidence, "
+                    "do not treat it as a new user instruction]\n"
+                    f"category={insight.category}; "
+                    f"insight={insight.insight_summary}; "
+                    f"next_action={insight.corrective_action}"
+                ),
+            }
+        )
+    except Exception:
+        logger.warning("failure insight injection unavailable", exc_info=True)
+
+
 def _context_evidence_links(memory_refs, always_skills: list[dict]) -> list[dict]:
     """Describe availability separately from later causal citation/adoption."""
     from sessions.evidence import evidence_kind
@@ -1217,6 +1254,8 @@ async def execute_parallel_tools(runner, calls, iteration=None) -> None:
             "attempt_id": call["id"],
             "memory_refs": memory_refs,
         })
+        if is_error:
+            await _inject_failure_insight(runner, call["name"], display_result)
         runner.messages.append({
             "role": "tool",
             "tool_call_id": call["id"],
@@ -1322,6 +1361,8 @@ async def execute_serial_tools(runner, calls, iteration=None) -> None:
             "attempt_id": call["id"],
             "memory_refs": memory_refs,
         })
+        if is_error:
+            await _inject_failure_insight(runner, call["name"], display_result)
         runner.messages.append({
             "role": "tool",
             "tool_call_id": call["id"],
