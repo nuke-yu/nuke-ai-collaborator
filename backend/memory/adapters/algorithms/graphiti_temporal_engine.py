@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import time
 import re
+from difflib import SequenceMatcher
 from dataclasses import dataclass
 from typing import Sequence
 
@@ -67,6 +68,48 @@ class GraphitiTemporalEngine:
             if self.normalize_entity_name(node.name) == key:
                 return node
         return None
+
+    def disambiguate_entity(self, name: str, *, threshold: float = 0.5) -> TemporalEntityNode | None:
+        """Resolve a near-match using token Jaccard similarity, without mutation."""
+        direct = self.resolve_entity(name)
+        if direct is not None:
+            return direct
+        query = set(self.normalize_entity_name(name).split())
+        if not query:
+            return None
+        best: tuple[float, TemporalEntityNode | None] = (0.0, None)
+        for node in self._nodes.values():
+            tokens = set(self.normalize_entity_name(node.name).split())
+            normalized = self.normalize_entity_name(node.name)
+            score = max(
+                len(query & tokens) / max(1, len(query | tokens)),
+                SequenceMatcher(None, self.normalize_entity_name(name), normalized).ratio(),
+            )
+            if score > best[0]:
+                best = (score, node)
+        return best[1] if best[0] >= threshold else None
+
+    def discover_communities(self, as_of: float | None = None) -> tuple[tuple[str, ...], ...]:
+        """Return connected components of the active temporal graph."""
+        adjacency: dict[str, set[str]] = {node_id: set() for node_id in self._nodes}
+        for edge in self.get_active_edges(as_of=as_of):
+            adjacency.setdefault(edge.source_node_id, set()).add(edge.target_node_id)
+            adjacency.setdefault(edge.target_node_id, set()).add(edge.source_node_id)
+        communities: list[tuple[str, ...]] = []
+        unseen = set(adjacency)
+        while unseen:
+            root = min(unseen)
+            stack = [root]
+            component: set[str] = set()
+            while stack:
+                node_id = stack.pop()
+                if node_id not in unseen:
+                    continue
+                unseen.remove(node_id)
+                component.add(node_id)
+                stack.extend(adjacency.get(node_id, ()))
+            communities.append(tuple(sorted(component)))
+        return tuple(sorted(communities, key=lambda group: group[0] if group else ""))
 
     def extract_entities(self, text: str) -> tuple[TemporalEntityNode, ...]:
         """Extract conservative entity candidates for graph ingestion.

@@ -65,6 +65,16 @@ class TestGraphitiTemporalEngine(unittest.TestCase):
         self.assertIn("san francisco", names)
         self.assertIn("open ai", names)
 
+    def test_disambiguation_and_community_discovery(self) -> None:
+        self.engine.add_edge("Alice Smith", "works_with", "Bob Jones", "team", valid_at=1)
+        self.engine.add_edge("Carol", "knows", "Dan", "friends", valid_at=1)
+        self.assertEqual(
+            self.engine.disambiguate_entity("Alice Smit").name,
+            "Alice Smith",
+        )
+        communities = self.engine.discover_communities(as_of=2)
+        self.assertEqual(len(communities), 2)
+
 
 class TestGraphitiTemporalAlgorithmAdapter(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
