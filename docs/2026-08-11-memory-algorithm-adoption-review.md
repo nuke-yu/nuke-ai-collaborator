@@ -212,6 +212,7 @@ Nuke 对应代码：
 - Graphiti：增加近似实体消歧和 active temporal graph connected-component 社区发现。
 - Voyager：Skill declaration 拒绝 code/python/shell 等执行字段及 subprocess/eval/curl 等隐式执行指令。
 - Voyager：新增 `SkillExecutionPlan`，只生成可审计的步骤、工具白名单、验证步骤和 HIL 标记；计划本身不执行代码。
+- Skill 编译链路会将该 plan 持久化到 `execution_plan`，执行器可据此做二次授权与验证。
 - Graphiti：增加可选 LLM entity candidate extractor；解析失败回退确定性抽取，仍不直接创建关系。
 - OpenMemory：增加无内容 ACL 审计查询接口，支持分页上限并保持用户隔离。
 - OpenMemory：`CreatePersonalProjection` / `FormatProjectedContext` 支持 `app_id`，projection 与读取均对 inactive/unregistered app fail-closed。
