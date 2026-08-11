@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import sys
 import time
+import asyncio
 import unittest
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -74,6 +75,15 @@ class TestGraphitiTemporalEngine(unittest.TestCase):
         )
         communities = self.engine.discover_communities(as_of=2)
         self.assertEqual(len(communities), 2)
+
+    def test_llm_entity_candidates_fallback_and_parse(self) -> None:
+        async def ai_call(_system, _messages):
+            return {"content": '["Nuke", "SQLite"]'}
+
+        entities = asyncio.run(
+            self.engine.extract_entities_with_llm("database note", ai_call)
+        )
+        self.assertEqual({node.name for node in entities}, {"Nuke", "SQLite"})
 
 
 class TestGraphitiTemporalAlgorithmAdapter(unittest.IsolatedAsyncioTestCase):

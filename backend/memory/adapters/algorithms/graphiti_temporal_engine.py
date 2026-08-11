@@ -11,7 +11,7 @@ import time
 import re
 from difflib import SequenceMatcher
 from dataclasses import dataclass
-from typing import Sequence
+from typing import Any, Awaitable, Callable, Sequence
 
 
 @dataclass(frozen=True, slots=True)
@@ -133,6 +133,37 @@ class GraphitiTemporalEngine:
             seen.add(key)
             nodes.append(self.get_or_create_node(candidate))
         return tuple(nodes)
+
+    async def extract_entities_with_llm(
+        self,
+        text: str,
+        ai_call_fn: Callable[..., Awaitable[Any]],
+    ) -> tuple[TemporalEntityNode, ...]:
+        """Ask an LLM for entity candidates, falling back deterministically.
+
+        The response is parsed as a JSON list of strings and bounded before
+        node creation. This method never creates edges or asserts relations.
+        """
+        prompt = (
+            "Extract only concrete entity names from the text. Return JSON "
+            "array of strings, no explanations. Text: " + str(text or "")[:4000]
+        )
+        try:
+            response = await ai_call_fn(
+                "You are a conservative entity candidate extractor.",
+                [{"role": "user", "content": prompt}],
+            )
+            raw = response.get("content", "") if isinstance(response, dict) else str(response)
+            match = re.search(r"\[[^\]]*\]", raw, re.DOTALL)
+            import json
+            values = json.loads(match.group(0)) if match else []
+            if isinstance(values, list):
+                candidates = [str(value)[:120] for value in values if str(value).strip()][:32]
+                if candidates:
+                    return tuple(self.get_or_create_node(value) for value in dict.fromkeys(candidates))
+        except Exception:
+            pass
+        return self.extract_entities(text)
 
     def get_or_create_node(self, name: str, entity_type: str = "concept") -> TemporalEntityNode:
         """Retrieve or register temporal entity node."""
