@@ -204,6 +204,10 @@ Nuke 对应代码：
 - OpenMemory：`personal_access_controls` 支持 subject/object 通配符；精确规则优先，同等 specificity 下显式 deny 优先，并保留无内容审计。
 - Graphiti：增加确定性的实体候选抽取和 alias/entity 解析。候选只用于后续关系验证，不会未经证据直接写入知识图谱。
 - Voyager：增加无副作用的依赖拓扑 Curriculum 排序；检测到循环依赖时 fail-closed。
+- OpenMemory：增加用户隔离的 App 注册、active/inactive 生命周期查询。
+- Graphiti：关系邻居已作为第四路进入 Experience Recall 的 RRF/MMR。
+- Letta/MemGPT：增加按 importance/recency 分页 archival records 的纯函数选择器。
+- AutoGen：retry helper 支持按 FailureCategory 配置可重试范围，避免权限类错误自动重试。
 
 这份文档的核心原则是：可以说“吸收了某算法的设计思想或局部机制”，但只有在存在生产 composition root 接线和端到端调用证据时，才可以说“该算法已在线”。
 
