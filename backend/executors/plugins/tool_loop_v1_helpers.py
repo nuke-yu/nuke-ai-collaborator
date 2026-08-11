@@ -116,6 +116,47 @@ def _apply_memory_context_budget(
         return memory, learned_contexts
 
 
+def _enforce_final_context_budget(runner: Any) -> None:
+    """Account for the final tool schemas before making the model call."""
+    try:
+        from ai.providers import resolve_provider_descriptor
+        from memory.adapters.algorithms.letta_acl_engine import LettaOpenMemoryEngine
+
+        descriptor = resolve_provider_descriptor(runner.provider, runner.model_name)
+        if descriptor.context_window is None:
+            return
+        engine = LettaOpenMemoryEngine()
+        working_memory = "\n".join(
+            str(message.get("content") or "")
+            for message in getattr(runner, "messages", ())
+            if isinstance(message, dict)
+        )
+        allocation = engine.calculate_context_budget(
+            max_tokens=descriptor.context_window,
+            system_prompt=str(getattr(runner, "system_prompt", "")),
+            working_memory=working_memory,
+            recall_memory="",
+            tool_schemas=getattr(runner, "tool_schemas", ()) or (),
+            reserve_generation_tokens=max(256, int(runner.max_tokens)),
+        )
+        if allocation.is_budget_exceeded:
+            previous = int(runner.max_tokens)
+            runner.max_tokens = max(
+                256,
+                min(previous, allocation.available_for_generation),
+            )
+            logger.warning(
+                "final model context budget exceeded provider=%s model=%s "
+                "available_generation=%d previous_generation=%d",
+                runner.provider,
+                runner.model_name,
+                allocation.available_for_generation,
+                previous,
+            )
+    except (AttributeError, TypeError, ValueError):
+        logger.warning("final model context budget unavailable", exc_info=True)
+
+
 def _tool_evidence_links(memory_refs: list[str], dispatch_context: dict) -> list[dict]:
     """Build explicit causal links after arguments have passed provenance validation."""
     from sessions.evidence import evidence_kind
@@ -593,6 +634,7 @@ async def setup_session(runner) -> None:
     runner.tool_schemas = add_tool_ref_parameter(
         runner.tool_schemas, runner.injected_memory_refs
     )
+    _enforce_final_context_budget(runner)
 
     if _resuming:
         await runner.ctx.interaction.update_session_status(runner.session_id, "running")
