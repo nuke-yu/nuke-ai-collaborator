@@ -55,6 +55,16 @@ class TestGraphitiTemporalEngine(unittest.TestCase):
         self.assertEqual(edge.target_node_id, canonical.node_id)
         self.assertEqual(self.engine.normalize_entity_name(" San   Francisco! "), "san francisco")
 
+    def test_entity_resolution_and_conservative_extraction(self) -> None:
+        canonical = self.engine.register_alias("SF", "San Francisco")
+        self.assertEqual(self.engine.resolve_entity(" sf ").node_id, canonical.node_id)
+        entities = self.engine.extract_entities(
+            'User moved to "San Francisco" while working with Open AI'
+        )
+        names = {self.engine.normalize_entity_name(node.name) for node in entities}
+        self.assertIn("san francisco", names)
+        self.assertIn("open ai", names)
+
 
 class TestGraphitiTemporalAlgorithmAdapter(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:

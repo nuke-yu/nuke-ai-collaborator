@@ -57,6 +57,40 @@ class GraphitiTemporalEngine:
         self._aliases[alias_key] = node.node_id
         return node
 
+    def resolve_entity(self, name: str) -> TemporalEntityNode | None:
+        """Resolve a normalized name or registered alias without creating data."""
+        key = self.normalize_entity_name(name)
+        node_id = self._aliases.get(key)
+        if node_id:
+            return self._nodes.get(node_id)
+        for node in self._nodes.values():
+            if self.normalize_entity_name(node.name) == key:
+                return node
+        return None
+
+    def extract_entities(self, text: str) -> tuple[TemporalEntityNode, ...]:
+        """Extract conservative entity candidates for graph ingestion.
+
+        This is intentionally deterministic and fail-soft: quoted spans,
+        capitalized multi-word names, and CJK runs become candidates. It is a
+        candidate generator, not an LLM assertion, so callers still need
+        relation/evidence validation before persisting edges.
+        """
+        value = str(text or "")
+        candidates: list[str] = []
+        candidates.extend(re.findall(r"[\"']([^\"']{2,80})[\"']", value))
+        candidates.extend(re.findall(r"\b[A-Z][A-Za-z0-9]*(?:\s+[A-Z][A-Za-z0-9]*)+\b", value))
+        candidates.extend(re.findall(r"[\u4e00-\u9fff]{2,12}", value))
+        seen: set[str] = set()
+        nodes: list[TemporalEntityNode] = []
+        for candidate in candidates:
+            key = self.normalize_entity_name(candidate)
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            nodes.append(self.get_or_create_node(candidate))
+        return tuple(nodes)
+
     def get_or_create_node(self, name: str, entity_type: str = "concept") -> TemporalEntityNode:
         """Retrieve or register temporal entity node."""
         normalized = self.normalize_entity_name(name)
