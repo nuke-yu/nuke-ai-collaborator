@@ -217,6 +217,7 @@ Nuke 对应代码：
 - OpenMemory：增加无内容 ACL 审计查询接口，支持分页上限并保持用户隔离。
 - OpenMemory：`CreatePersonalProjection` / `FormatProjectedContext` 支持 `app_id`，projection 与读取均对 inactive/unregistered app fail-closed。
 - OpenMemory：增加用户隔离的 App 列表查询，可筛选 active 状态供管理与审计界面使用。
+- OpenMemory：新增 `/api/personal/memory/apps` 注册、列表、状态管理和 `/api/personal/memory/audit` 审计查询接口。
 - Graphiti Adapter：正式暴露 entity candidate extraction、entity disambiguation、community discovery 能力。
 
 这份文档的核心原则是：可以说“吸收了某算法的设计思想或局部机制”，但只有在存在生产 composition root 接线和端到端调用证据时，才可以说“该算法已在线”。
