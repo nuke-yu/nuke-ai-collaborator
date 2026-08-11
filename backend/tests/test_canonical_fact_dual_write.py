@@ -242,6 +242,41 @@ class BotFactObservationServiceTest(unittest.IsolatedAsyncioTestCase):
 
 
 class LegacyFactDualWriteTest(unittest.IsolatedAsyncioTestCase):
+    async def test_mem0_noop_skips_canonical_and_chroma_writes(self) -> None:
+        mirror = AsyncMock()
+        write = unittest.mock.MagicMock()
+        resolution = memory.ConflictResolution(
+            [], {}, {0: "NOOP"}, {0}
+        )
+        with (
+            patch.object(
+                memory.FactExtractor,
+                "extract",
+                new=AsyncMock(return_value=[("API is v2", 0.8)]),
+            ),
+            patch.object(
+                memory.ConflictResolver,
+                "resolve_batch",
+                new=AsyncMock(return_value=resolution),
+            ),
+            patch(
+                "memory.bootstrap.build_bot_fact_observation_client",
+                return_value=mirror,
+            ),
+            patch.object(memory.ChromaStore, "write_fact_sync", write),
+            patch("random.random", return_value=1.0),
+        ):
+            await memory.add_to_chroma(
+                message_id=42,
+                content="The API is v2",
+                role="developer",
+                bot_id=3,
+                group_id=7,
+            )
+
+        mirror.ingest.assert_not_awaited()
+        write.assert_not_called()
+
     async def test_add_to_chroma_reuses_extraction_for_canonical_write(self) -> None:
         mirror = AsyncMock()
         with (
