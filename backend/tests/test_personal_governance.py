@@ -9,7 +9,10 @@ from ai.personal_vault import (
     add_record,
     delete_vault,
     evaluate_access_control_rule,
+    is_personal_app_active,
     project,
+    register_personal_app,
+    set_personal_app_status,
     set_access_control_rule,
 )
 from memory.adapters.runtime import legacy_memory_database
@@ -128,6 +131,14 @@ class PersonalGovernanceTest(unittest.IsolatedAsyncioTestCase):
                 object_id="7",
             )
         )
+
+    async def test_personal_app_lifecycle_is_user_isolated(self) -> None:
+        await register_personal_app(user_id=self.user_id, app_id="chat", name="Chat")
+        self.assertTrue(await is_personal_app_active(user_id=self.user_id, app_id="chat"))
+        self.assertFalse(await is_personal_app_active(user_id=998, app_id="chat"))
+        self.assertTrue(await set_personal_app_status(user_id=self.user_id, app_id="chat", active=False))
+        self.assertFalse(await is_personal_app_active(user_id=self.user_id, app_id="chat"))
+        self.assertFalse(await set_personal_app_status(user_id=self.user_id, app_id="missing", active=True))
 
 
 if __name__ == "__main__":

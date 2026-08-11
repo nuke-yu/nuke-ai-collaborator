@@ -46,6 +46,13 @@ _DDL_STATEMENTS = (
      created_at INTEGER NOT NULL,
      UNIQUE(user_id,subject_type,subject_id,object_type,object_id))""",
     "CREATE INDEX IF NOT EXISTS idx_personal_acl_object ON personal_access_controls(user_id,object_type,object_id)",
+    """CREATE TABLE IF NOT EXISTS personal_apps (
+     app_id TEXT NOT NULL,user_id INTEGER NOT NULL,name TEXT NOT NULL,
+     status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','inactive')),
+     created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL,
+     PRIMARY KEY(user_id,app_id)
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_personal_apps_user_status ON personal_apps(user_id,status)",
     """CREATE TABLE IF NOT EXISTS habit_evidence (
      id INTEGER PRIMARY KEY AUTOINCREMENT,record_id TEXT NOT NULL,source_key TEXT NOT NULL,
      context_kind TEXT NOT NULL,polarity TEXT NOT NULL,observed_at INTEGER NOT NULL,
@@ -205,6 +212,43 @@ async def set_access_control_rule(
         ) as cur:
             row = await cur.fetchone()
     return int(row[0])
+
+
+async def register_personal_app(*, user_id: int, app_id: str, name: str) -> None:
+    """Create or reactivate an OpenMemory-style app registration."""
+    app_id, name = app_id.strip(), name.strip()
+    if not app_id or not name:
+        raise ValueError("app_id and name are required")
+    now = int(time.time() * 1000)
+    async with connect(user_id) as db:
+        await db.execute(
+            """INSERT INTO personal_apps(app_id,user_id,name,status,created_at,updated_at)
+               VALUES(?,?,?,'active',?,?)
+               ON CONFLICT(user_id,app_id) DO UPDATE SET name=excluded.name,status='active',updated_at=excluded.updated_at""",
+            (app_id, user_id, name, now, now),
+        )
+        await db.commit()
+
+
+async def set_personal_app_status(*, user_id: int, app_id: str, active: bool) -> bool:
+    """Activate/deactivate an app; deactivated apps cannot project memory."""
+    async with connect(user_id) as db:
+        cur = await db.execute(
+            "UPDATE personal_apps SET status=?,updated_at=? WHERE user_id=? AND app_id=?",
+            ("active" if active else "inactive", int(time.time() * 1000), user_id, app_id.strip()),
+        )
+        await db.commit()
+    return cur.rowcount == 1
+
+
+async def is_personal_app_active(*, user_id: int, app_id: str) -> bool:
+    async with connect(user_id) as db:
+        async with db.execute(
+            "SELECT status FROM personal_apps WHERE user_id=? AND app_id=?",
+            (user_id, app_id.strip()),
+        ) as cur:
+            row = await cur.fetchone()
+    return bool(row and row[0] == "active")
 
 
 async def evaluate_access_control_rule(
