@@ -100,7 +100,7 @@ Nuke 对应代码：
 - `backend/ai/skill_learning.py:81,165-219`：候选生成、试用和晋升。
 - `backend/ai/usage_tracking.py:89-180`：成功/失败复用反馈和暂停逻辑。
 
-当前边界：Nuke 已吸收成功门控、Skill 生命周期、真实复用反馈，并在 Skill 编译前执行 Critic gate。Skill 仍是声明式经验策略，不是 Voyager 式可执行代码 Skill Library；Automatic Curriculum 也未复刻。
+当前边界：Nuke 已吸收成功门控、Skill 生命周期、真实复用反馈，并在 Skill 编译前执行 Critic gate；`VoyagerCriticEngine.build_curriculum()` 还提供依赖拓扑与难度排序。Skill 仍是声明式经验策略，不是 Voyager 式可执行代码 Skill Library。
 
 ## 7. LangGraph Checkpoint：可恢复状态与 Durable Execution
 
@@ -169,7 +169,7 @@ Nuke 对应代码：
 | AutoGen | 失败分析、工具循环 corrective insight、验证门控 | 不对所有失败自动重试，需显式 retry policy |
 | Graphiti/Zep | 时序事实、alias、关系失效、有界图遍历 | LLM 实体抽取、社区发现、完整 Hybrid Search |
 | RRF/MMR | 关键词/向量/cluster 三路融合与去冗余 | 没有 cross-encoder |
-| Voyager | Critic 成功门控、Skill 生命周期、复用反馈 | 可执行代码 Skill 和 Curriculum |
+| Voyager | Critic 成功门控、Skill 生命周期、复用反馈、依赖式 Curriculum 排序 | 可执行代码 Skill Library |
 | LangGraph | Durable job、lease、checkpoint、pending writes、fork/prune | 不是官方 Saver，resume 由 Nuke worker 恢复 |
 | Letta/MemGPT | 分层记忆、按需注入、上下文预算 | 主动 paging、function memory、真实 tokenizer |
 | OpenMemory | Personal Vault、ACL、隔离、审计 | 完整 ABAC 数据模型和访问日志 |
@@ -203,6 +203,7 @@ Nuke 对应代码：
 - Letta/MemGPT：预算引擎接受 provider tokenizer 或 `encode()` 对象；可用时按真实 token 数计算并二分截断，失败自动回退保守估算。
 - OpenMemory：`personal_access_controls` 支持 subject/object 通配符；精确规则优先，同等 specificity 下显式 deny 优先，并保留无内容审计。
 - Graphiti：增加确定性的实体候选抽取和 alias/entity 解析。候选只用于后续关系验证，不会未经证据直接写入知识图谱。
+- Voyager：增加无副作用的依赖拓扑 Curriculum 排序；检测到循环依赖时 fail-closed。
 
 这份文档的核心原则是：可以说“吸收了某算法的设计思想或局部机制”，但只有在存在生产 composition root 接线和端到端调用证据时，才可以说“该算法已在线”。
 
