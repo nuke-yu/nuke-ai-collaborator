@@ -294,10 +294,12 @@ class ConflictResolution(list[str]):
         conflict_ids: list[str],
         replacement_indexes: dict[str, int],
         action_by_index: dict[int, str] | None = None,
+        noop_indexes: set[int] | None = None,
     ) -> None:
         super().__init__(conflict_ids)
         self.replacement_indexes = replacement_indexes
         self.action_by_index = dict(action_by_index or {})
+        self.noop_indexes = set(noop_indexes or set())
 
 
 # ── 4. ConflictResolver ── 批量语义冲突消解 (优化 LLM 调用扇出)
@@ -362,6 +364,7 @@ class ConflictResolver:
         mem0_actions: dict[int, str] = {}
         mem0_conflicts: set[str] = set()
         mem0_replacements: dict[str, int] = {}
+        mem0_noops: set[int] = set()
         candidate_records = [
             {"record_id": str(item_id), "content": str(document)}
             for item_id, document in candidates.items()
@@ -369,6 +372,8 @@ class ConflictResolver:
         for fact_index, fact in enumerate(facts):
             action = mem0_engine.reconcile_fact(candidate_records, fact)
             mem0_actions[fact_index] = str(action.action_type)
+            if action.action_type.value == "NOOP":
+                mem0_noops.add(fact_index)
             if action.action_type.value in {"UPDATE", "DELETE"} and action.target_record_id:
                 target_id = str(action.target_record_id)
                 if target_id in candidates:
@@ -418,6 +423,7 @@ class ConflictResolver:
                         **mem0_replacements,
                     },
                     mem0_actions,
+                    mem0_noops,
                 )
         except Exception:
             log.exception("ConflictResolver: failed to resolve conflicts via batch LLM")
@@ -565,6 +571,11 @@ async def add_to_chroma(message_id: int, content: str, role: str, bot_id: int, g
     del_ids = list(conflicts)
     replacement_indexes = getattr(conflicts, "replacement_indexes", {})
     mem0_actions = getattr(conflicts, "action_by_index", {})
+    noop_indexes = getattr(conflicts, "noop_indexes", set())
+    fact_indexes = [index for index in range(len(facts)) if index not in noop_indexes]
+    effective_facts = [facts[index] for index in fact_indexes]
+    if not effective_facts:
+        return
     conflict_replacements = tuple(
         (
             old_projection_id,
@@ -579,7 +590,7 @@ async def add_to_chroma(message_id: int, content: str, role: str, bot_id: int, g
     # schema 暂不可用时阻断现有 Chroma 写路径。
     canonical_record_ids = await _mirror_facts_to_canonical(
         message_id=message_id,
-        facts=facts,
+        facts=effective_facts,
         role=role,
         bot_id=bot_id,
         group_id=group_id,
@@ -590,6 +601,7 @@ async def add_to_chroma(message_id: int, content: str, role: str, bot_id: int, g
         legacy_conflict_ids=del_ids,
         legacy_conflict_replacements=conflict_replacements,
         mem0_actions=mem0_actions,
+        fact_indexes=fact_indexes,
         strict=strict,
     )
     if canonical_record_ids and group_id is not None:
@@ -612,7 +624,7 @@ async def add_to_chroma(message_id: int, content: str, role: str, bot_id: int, g
     loop = asyncio.get_running_loop()
 
     # 4. 写入全部新事实并保存重要性评分与访问频次统计
-    for idx, (fact, score) in enumerate(facts):
+    for idx, (fact, score) in zip(fact_indexes, effective_facts):
         metadata = {
             "bot_id": bot_id,
             "role": role or "",
@@ -661,6 +673,7 @@ async def _mirror_facts_to_canonical(
     legacy_conflict_ids: list[str],
     legacy_conflict_replacements: tuple[tuple[str, str], ...],
     mem0_actions: Mapping[int, str] | None = None,
+    fact_indexes: list[int] | None = None,
     strict: bool = False,
 ) -> tuple[str, ...] | None:
     if group_id is None:
@@ -682,22 +695,23 @@ async def _mirror_facts_to_canonical(
             ExtractedFactObservation(
                 content=redact_secrets(fact)[0],
                 importance=score,
-                projection_id=f"fact_{bot_id}_{group_id}_{message_id}_{index}",
+                projection_id=f"fact_{bot_id}_{group_id}_{message_id}_{original_index}",
                 # ConflictResolver has already established the old→new
                 # relationship.  Preserve that decision in canonical
                 # metadata using Mem0's action vocabulary instead of losing
                 # whether this was a new fact or a replacement.
                 algorithm_action=str(
                     (mem0_actions or {}).get(
-                        index,
+                        original_index,
                         "UPDATE"
-                        if f"fact_{bot_id}_{group_id}_{message_id}_{index}"
+                        if f"fact_{bot_id}_{group_id}_{message_id}_{original_index}"
                         in updated_projection_ids
                         else "ADD",
                     )
                 ),
             )
             for index, (fact, score) in enumerate(facts)
+            for original_index in ((fact_indexes or list(range(len(facts))))[index],)
         )
         return await build_bot_fact_observation_client().ingest(
             IngestBotFactObservations(
