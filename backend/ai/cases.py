@@ -159,6 +159,24 @@ async def assemble_case(*, run_id: str, group_id: int | None, bot_id: int | None
             }
             for index in verdict.correction.corrective_signal_indices
         ]
+    elif errors:
+        # Persist a structured failure insight even when this run did not yet
+        # recover.  The insight is evidence for a future retry, not proof of
+        # success; evaluate_outcome still requires a verified completion and
+        # correction signal before Experience distillation is allowed.
+        from memory.adapters.algorithms import AutoGenFailureEngine
+
+        failure_insight = AutoGenFailureEngine().analyze_failure(
+            task, errors, tool_records
+        )
+        correction = {
+            "source": "autogen_task_centric_failure_insight",
+            "category": str(failure_insight.category),
+            "insight_summary": failure_insight.insight_summary,
+            "corrective_action": failure_insight.corrective_action,
+            "relevancy_score": failure_insight.relevancy_score,
+            "corrective_actions": [],
+        }
     signals = [verdict.status.value]
     signals.extend(
         f"{signal.adapter}:{'success' if signal.success else 'failure'}"

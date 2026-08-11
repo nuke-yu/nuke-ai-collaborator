@@ -517,6 +517,17 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
             ],
         )
         self.assertIsNone(await distill_case(error_only, 7))
+        async with database.connect(TEST_DB_PATH) as db:
+            async with db.execute(
+                "SELECT correction_evidence_json FROM agent_cases WHERE case_id=?",
+                (error_only,),
+            ) as cur:
+                failure_evidence = json.loads((await cur.fetchone())[0])
+        self.assertEqual(
+            failure_evidence["source"],
+            "autogen_task_centric_failure_insight",
+        )
+        self.assertEqual(failure_evidence["category"], "execution_error")
         corrected = await assemble_case(
             run_id="fixed", group_id=7, bot_id=3, task="fix tests", outcome="completed",
             tool_records=_corrected_trace("failed then fixed"),
