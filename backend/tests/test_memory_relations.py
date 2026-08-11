@@ -143,6 +143,26 @@ class CanonicalRelationServiceTest(unittest.IsolatedAsyncioTestCase):
             (),
         )
 
+    async def test_relation_recall_traverses_bounded_graph(self) -> None:
+        await self._insert_record("fact:third", 7)
+        await self.service.create(CreateMemoryRelation(
+            scope=MemoryScope.group(group_id=7, actor_id="system:graph"),
+            from_record_id="fact:new", to_record_id="fact:old",
+            relation_type=MemoryRelationType.DERIVED_FROM,
+            source_type="graph", source_id="edge:1", effective_from=100,
+        ))
+        await self.service.create(CreateMemoryRelation(
+            scope=MemoryScope.group(group_id=7, actor_id="system:graph"),
+            from_record_id="fact:old", to_record_id="fact:third",
+            relation_type=MemoryRelationType.DERIVED_FROM,
+            source_type="graph", source_id="edge:2", effective_from=100,
+        ))
+        relations = await self.service.recall(RecallMemoryRelations(
+            scope=MemoryScope.group(group_id=7, actor_id="system:graph"),
+            record_id="fact:new", max_hops=2,
+        ))
+        self.assertEqual(len(relations), 2)
+
     async def test_cross_group_endpoint_fails_closed(self) -> None:
         await self._insert_record("fact:other-group", 8)
 

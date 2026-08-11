@@ -91,35 +91,68 @@ class CanonicalRelationService:
         relation_types = tuple(
             MemoryRelationType(value).value for value in query.relation_types
         )
-        params: list[object] = [group_id, query.record_id, query.record_id]
         type_filter = ""
+        type_params: list[object] = []
+        if relation_types:
+            placeholders = ",".join("?" for _ in relation_types)
+            type_filter = f" AND relation_type IN ({placeholders})"
+            type_params.extend(relation_types)
         temporal_filter = ""
+        temporal_params: list[object] = []
         if query.as_of is not None:
             temporal_filter = (
                 " AND effective_from<=?"
                 " AND (valid_to IS NULL OR valid_to>?)"
             )
-            params.extend((query.as_of, query.as_of))
-        if relation_types:
-            placeholders = ",".join("?" for _ in relation_types)
-            type_filter = f" AND relation_type IN ({placeholders})"
-            params.extend(relation_types)
+            temporal_params.extend((query.as_of, query.as_of))
+
+        # Bounded breadth-first traversal.  Each hop is queried independently
+        # so the SQL remains parameter-safe and a group can never leak into a
+        # neighboring graph.  Relation IDs deduplicate cycles.
+        frontier = {query.record_id}
+        seen_nodes = {query.record_id}
+        seen_relations: set[str] = set()
+        rows = []
         async with await self._database.connect(
             "memory_relations", group_id, write=False
         ) as db:
-            async with db.execute(
-                """SELECT relation_id,group_id,from_record_id,to_record_id,
-                    relation_type,source_type,source_id,evidence_json,
-                    created_by,effective_from,valid_to,status
-                FROM memory_relations
-                WHERE group_id=? AND status='active'
-                  AND (from_record_id=? OR to_record_id=?)"""
-                + temporal_filter
-                + type_filter
-                + " ORDER BY effective_from,relation_id",
-                tuple(params),
-            ) as cursor:
-                rows = await cursor.fetchall()
+            for _ in range(query.max_hops):
+                if not frontier:
+                    break
+                placeholders = ",".join("?" for _ in frontier)
+                params: list[object] = [group_id, *sorted(frontier), *sorted(frontier)]
+                params.extend(temporal_params)
+                params.extend(type_params)
+                async with db.execute(
+                    """SELECT relation_id,group_id,from_record_id,to_record_id,
+                        relation_type,source_type,source_id,evidence_json,
+                        created_by,effective_from,valid_to,status
+                    FROM memory_relations
+                    WHERE group_id=? AND status='active'
+                      AND (from_record_id IN ("""
+                    + placeholders
+                    + ") OR to_record_id IN ("
+                    + placeholders
+                    + "))"
+                    + temporal_filter
+                    + type_filter
+                    + " ORDER BY effective_from,relation_id",
+                    tuple(params),
+                ) as cursor:
+                    hop_rows = await cursor.fetchall()
+                next_frontier: set[str] = set()
+                for row in hop_rows:
+                    relation_id = str(row[0])
+                    if relation_id in seen_relations:
+                        continue
+                    seen_relations.add(relation_id)
+                    rows.append(row)
+                    left, right = str(row[2]), str(row[3])
+                    neighbor = right if left in frontier else left
+                    if neighbor not in seen_nodes:
+                        seen_nodes.add(neighbor)
+                        next_frontier.add(neighbor)
+                frontier = next_frontier
         return tuple(
             MemoryRelation(
                 relation_id=str(row[0]),

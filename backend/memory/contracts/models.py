@@ -149,12 +149,15 @@ class RecallMemoryRelations:
     record_id: str
     relation_types: tuple[MemoryRelationType, ...] = ()
     as_of: int | None = None
+    max_hops: int = 1
 
     def __post_init__(self) -> None:
         if not self.record_id.strip():
             raise ValueError("record_id is required")
         if self.as_of is not None and self.as_of < 0:
             raise ValueError("as_of cannot be negative")
+        if self.max_hops < 1 or self.max_hops > 5:
+            raise ValueError("max_hops must be between 1 and 5")
 
 
 @dataclass(frozen=True, slots=True)
