@@ -1116,6 +1116,10 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(row,("trial","S0")); self.assertEqual(declaration["allowed_tools"],[])
         with self.assertRaises(ValueError):
             validate_declaration({"risk_level":"S1","trigger":"x","procedure":["x"],"allowed_tools":["run_shell"]})
+        with self.assertRaisesRegex(ValueError, "executable code"):
+            validate_declaration({"risk_level":"S1","trigger":"x","procedure":["x"],"code":"print('unsafe')"})
+        with self.assertRaisesRegex(ValueError, "executable instructions"):
+            validate_declaration({"risk_level":"S1","trigger":"x","procedure":["subprocess.run(cmd)"],"allowed_tools":[]})
 
     async def test_skill_projection_job_rebuilds_draft_and_active_files(self):
         case1 = await assemble_case(

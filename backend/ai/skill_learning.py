@@ -22,6 +22,13 @@ def validate_declaration(value: dict) -> None:
         raise ValueError("S0 skills cannot call tools")
     if any(not _SAFE_TOOL.match(t) or t in _BANNED for t in tools):
         raise ValueError("unsafe or executable tool in learned skill")
+    executable_fields = {"code", "python", "shell", "shell_command", "executable"}
+    if executable_fields.intersection(value):
+        raise ValueError("executable code fields are forbidden in learned skills")
+    procedure_values = value.get("procedure") if isinstance(value.get("procedure"), list) else [value.get("procedure")]
+    procedure_text = " ".join(str(item) for item in procedure_values).lower()
+    if any(marker in procedure_text for marker in ("os.system(", "subprocess.", "eval(", "exec(", "curl |", "bash -c")):
+        raise ValueError("executable instructions are forbidden in learned skills")
     encoded = json.dumps(value, ensure_ascii=False).lower()
     if "bypasspermissions" in encoded or "bypass_permissions" in encoded:
         raise ValueError("permission bypass is forbidden")
