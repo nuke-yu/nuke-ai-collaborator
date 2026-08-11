@@ -39,6 +39,7 @@ class LegacyPersonalKnowledgeAdapter:
             bot_id=command.target_bot_id,
             purpose=command.purpose,
             expires_at=command.expires_at,
+            app_id=command.app_id,
         )
 
     async def ingest(self, command: IngestPersonalKnowledge) -> str:
@@ -74,6 +75,7 @@ class LegacyPersonalKnowledgeAdapter:
             purpose=command.purpose,
             char_budget=command.char_budget,
             session_id=command.scope.run_id or "",
+            app_id=command.app_id,
         )
 
 

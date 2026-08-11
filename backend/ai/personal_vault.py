@@ -357,7 +357,10 @@ def _get_vault_lock(user_id: int) -> asyncio.Lock:
 
 
 async def project(*, user_id: int, record_id: str, group_id: int, bot_id: int | None, purpose: str,
-                  expires_at: int | None = None, allow_restricted: bool = False) -> str:
+                  expires_at: int | None = None, allow_restricted: bool = False,
+                  app_id: str | None = None) -> str:
+    if app_id is not None and not await is_personal_app_active(user_id=user_id, app_id=app_id):
+        raise ValueError("personal app is inactive or not registered")
     async with connect(user_id) as db:
         async with db.execute(
             "SELECT sensitivity, status, explicit FROM personal_records WHERE record_id=? AND user_id=?",
@@ -388,7 +391,9 @@ async def project(*, user_id: int, record_id: str, group_id: int, bot_id: int | 
 
 async def projected_context(*, user_id: int, group_id: int, bot_id: int | None,
                             purpose: str, limit: int = 20,
-                            session_id: str = "") -> list[dict]:
+                            session_id: str = "", app_id: str | None = None) -> list[dict]:
+    if app_id is not None and not await is_personal_app_active(user_id=user_id, app_id=app_id):
+        return []
     now = int(time.time() * 1000)
     async with connect(user_id) as db:
         async with db.execute("""SELECT r.record_id,p.projection_id,r.kind,r.content,r.authority,r.confidence,r.status,r.explicit
@@ -558,9 +563,9 @@ async def rebuild_vault(user_id:int) -> dict:
 
 async def format_projected_context(*,user_id:int,group_id:int,bot_id:int|None,
                                    purpose:str="assistant_context",char_budget:int=3000,
-                                   session_id: str = "")->str:
+                                   session_id: str = "", app_id: str | None = None)->str:
     rows=await projected_context(user_id=user_id,group_id=group_id,bot_id=bot_id,
-                                 purpose=purpose, session_id=session_id)
+                                 purpose=purpose, session_id=session_id, app_id=app_id)
     chunks=[];used=0
     for row in rows:
         line=f"- [{row['kind']}/{row['authority']}] {row['content']}"

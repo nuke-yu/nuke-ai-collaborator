@@ -141,6 +141,24 @@ class PersonalGovernanceTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(await is_personal_app_active(user_id=self.user_id, app_id="chat"))
         self.assertFalse(await set_personal_app_status(user_id=self.user_id, app_id="missing", active=True))
 
+    async def test_inactive_app_cannot_project_or_read(self) -> None:
+        record_id = await add_record(
+            user_id=self.user_id, kind="preference", content="dark mode",
+            source_type="manual", authority="user_statement", explicit=True,
+        )
+        await register_personal_app(user_id=self.user_id, app_id="chat", name="Chat")
+        projection_id = await project(
+            user_id=self.user_id, record_id=record_id, group_id=7, bot_id=3,
+            purpose="assistant_context", app_id="chat",
+        )
+        self.assertTrue(projection_id.startswith("projection:"))
+        await set_personal_app_status(user_id=self.user_id, app_id="chat", active=False)
+        with self.assertRaisesRegex(ValueError, "inactive"):
+            await project(
+                user_id=self.user_id, record_id=record_id, group_id=7, bot_id=3,
+                purpose="assistant_context", app_id="chat",
+            )
+
     async def test_acl_audit_listing_contains_no_memory_content(self) -> None:
         from ai.personal_vault import record_acl_audit_event
 

@@ -41,6 +41,7 @@ class CreatePersonalProjection:
     target_bot_id: int | None = None
     purpose: str = "assistant_context"
     expires_at: int | None = None
+    app_id: str | None = None
 
     def __post_init__(self) -> None:
         if not self.record_id.strip():
@@ -53,6 +54,8 @@ class CreatePersonalProjection:
             or isinstance(self.target_bot_id, bool) or self.target_bot_id <= 0
         ):
             raise ValueError("target_bot_id must be positive")
+        if self.app_id is not None and not self.app_id.strip():
+            raise ValueError("app_id cannot be empty")
 
 
 @dataclass(frozen=True, slots=True)
@@ -440,6 +443,11 @@ class FormatProjectedContext:
     scope: MemoryScope
     purpose: str = "assistant_context"
     char_budget: int = 3000
+    app_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.app_id is not None and not self.app_id.strip():
+            raise ValueError("app_id cannot be empty")
 
 
 @dataclass(frozen=True, slots=True)
