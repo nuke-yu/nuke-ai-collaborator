@@ -162,6 +162,51 @@ class LettaOpenMemoryEngine:
             used += cost
         return selected
 
+    @classmethod
+    def memory_read(
+        cls,
+        records: Sequence[Mapping[str, Any]],
+        query: str,
+        *,
+        limit: int = 5,
+        tokenizer: Callable[[str], Any] | Any | None = None,
+    ) -> list[dict[str, Any]]:
+        """Letta-style explicit archival read without granting tool access.
+
+        Retrieval is lexical and deterministic; callers can replace it with a
+        vector provider while retaining the same bounded result contract.
+        """
+        query_terms = {term.lower() for term in str(query or "").split() if term}
+        ranked = []
+        for record in records:
+            item = dict(record)
+            content_terms = {term.lower() for term in str(item.get("content", "")).split()}
+            overlap = len(query_terms & content_terms)
+            if overlap:
+                item["_memory_score"] = overlap / max(1, len(query_terms))
+                ranked.append(item)
+        ranked.sort(key=lambda item: (float(item["_memory_score"]), float(item.get("importance", 0) or 0)), reverse=True)
+        return cls.page_memory(ranked[: max(1, limit * 2)], max_tokens=10**9, tokenizer=tokenizer)[: max(0, limit)]
+
+    @staticmethod
+    def memory_write(
+        working_memory: Sequence[Mapping[str, Any]],
+        content: str,
+        *,
+        max_items: int = 20,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Append a bounded working-memory entry with exact-content deduplication."""
+        value = str(content or "").strip()
+        if not value:
+            return [dict(item) for item in working_memory]
+        result = [dict(item) for item in working_memory if str(item.get("content", "")).strip() != value]
+        entry = {"content": value}
+        if metadata:
+            entry.update(dict(metadata))
+        result.append(entry)
+        return result[-max(1, max_items):]
+
     def check_acl_access(
         self,
         scope: MemoryScope,

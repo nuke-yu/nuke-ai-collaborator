@@ -92,6 +92,17 @@ class TestLettaOpenMemoryEngine(unittest.TestCase):
         selected = self.engine.page_memory(records, 2, lambda text: [text])
         self.assertEqual([record["content"] for record in selected], ["high", "medium"])
 
+    def test_memory_read_and_write_are_bounded_and_deduplicated(self) -> None:
+        records = [
+            {"content": "python deployment guide", "importance": 0.8},
+            {"content": "react styling guide", "importance": 0.9},
+        ]
+        read = self.engine.memory_read(records, "python deployment", limit=1)
+        self.assertEqual(read[0]["content"], "python deployment guide")
+        written = self.engine.memory_write(records, "python deployment guide", max_items=2)
+        self.assertEqual(len(written), 2)
+        self.assertEqual(written[-1]["content"], "python deployment guide")
+
     def test_check_acl_access_grants_personal_owner(self) -> None:
         scope = MemoryScope.personal(user_id=10, group_id=1, actor_id="user:10")
         principal = Principal.user(user_id=10, group_ids=[1])
