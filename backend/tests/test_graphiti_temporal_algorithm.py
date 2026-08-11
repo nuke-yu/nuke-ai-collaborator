@@ -116,6 +116,10 @@ class TestGraphitiTemporalAlgorithmAdapter(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(candidates[0].name, "Nuke")
         self.assertEqual(len(await self.adapter.discover_communities(as_of=2)), 2)
 
+    async def test_adapter_exposes_hybrid_search(self) -> None:
+        await self.adapter.add_temporal_fact("A", "knows", "B", "deployment", valid_at=1)
+        self.assertEqual(len(await self.adapter.hybrid_search("deployment", as_of=2)), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

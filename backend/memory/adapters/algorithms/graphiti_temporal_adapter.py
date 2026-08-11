@@ -49,3 +49,6 @@ class GraphitiTemporalAlgorithmAdapter:
 
     async def discover_communities(self, as_of: float | None = None):
         return self._engine.discover_communities(as_of=as_of)
+
+    async def hybrid_search(self, query: str, *, top_k: int = 10, as_of: float | None = None):
+        return self._engine.hybrid_search(query, top_k=top_k, as_of=as_of)
