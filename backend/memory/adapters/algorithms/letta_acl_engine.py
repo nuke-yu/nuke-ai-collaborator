@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 from memory.domain import MemoryScope, Principal, ScopeKind
 
@@ -36,16 +36,32 @@ class LettaOpenMemoryEngine:
     """Audit-grade Letta Context Budgeting & OpenMemory ACL Security Engine."""
 
     @staticmethod
-    def estimate_tokens(text: str) -> int:
+    def estimate_tokens(
+        text: str, tokenizer: Callable[[str], Any] | Any | None = None
+    ) -> int:
         """Estimate token count for string content (1 token ~ 4 chars for EN / 1 char for CJK)."""
         if not text:
             return 0
+        if tokenizer is not None:
+            try:
+                encoded = tokenizer.encode(text) if hasattr(tokenizer, "encode") else tokenizer(text)
+                if hasattr(encoded, "ids"):
+                    return len(encoded.ids)
+                if isinstance(encoded, Mapping) and "input_ids" in encoded:
+                    return len(encoded["input_ids"])
+                return len(encoded)
+            except Exception:
+                # Tokenizer failures must not break the model loop; retain the
+                # deterministic conservative fallback below.
+                pass
         cjk_chars = len([c for c in text if '\u4e00' <= c <= '\u9fff'])
         ascii_chars = len(text) - cjk_chars
         return cjk_chars + (ascii_chars // 4)
 
     @classmethod
-    def truncate_text_to_tokens(cls, text: str, max_tokens: int) -> str:
+    def truncate_text_to_tokens(
+        cls, text: str, max_tokens: int, tokenizer: Callable[[str], Any] | Any | None = None
+    ) -> str:
         """Bound untrusted context before it enters a model prompt.
 
         The project deliberately avoids a provider-specific tokenizer in this
@@ -55,10 +71,20 @@ class LettaOpenMemoryEngine:
         """
         if not text or max_tokens <= 0:
             return ""
-        if cls.estimate_tokens(text) <= max_tokens:
+        if cls.estimate_tokens(text, tokenizer) <= max_tokens:
             return text
         marker = "\n[context truncated by memory budget]"
-        body_tokens = max(1, max_tokens - cls.estimate_tokens(marker))
+        body_tokens = max(1, max_tokens - cls.estimate_tokens(marker, tokenizer))
+        if tokenizer is not None:
+            # Binary search the largest prefix accepted by the real tokenizer.
+            low, high = 0, len(text)
+            while low < high:
+                mid = (low + high + 1) // 2
+                if cls.estimate_tokens(text[:mid], tokenizer) <= body_tokens:
+                    low = mid
+                else:
+                    high = mid - 1
+            return text[:low].rstrip() + marker
         # CJK is estimated at one token/character; other text at four
         # characters/token.  The multiplier is intentionally conservative.
         cjk = sum("\u4e00" <= char <= "\u9fff" for char in text)
@@ -77,14 +103,15 @@ class LettaOpenMemoryEngine:
         recall_memory: str,
         tool_schemas: Sequence[Mapping[str, Any]] = (),
         reserve_generation_tokens: int = 2048,
+        tokenizer: Callable[[str], Any] | Any | None = None,
     ) -> ContextBudgetAllocation:
         """Calculate token allocation budget according to Letta / MemGPT context specification."""
-        sys_tokens = self.estimate_tokens(system_prompt)
-        work_tokens = self.estimate_tokens(working_memory)
-        rec_tokens = self.estimate_tokens(recall_memory)
+        sys_tokens = self.estimate_tokens(system_prompt, tokenizer)
+        work_tokens = self.estimate_tokens(working_memory, tokenizer)
+        rec_tokens = self.estimate_tokens(recall_memory, tokenizer)
 
         schema_json = json.dumps(list(tool_schemas), default=str) if tool_schemas else ""
-        schema_tokens = self.estimate_tokens(schema_json)
+        schema_tokens = self.estimate_tokens(schema_json, tokenizer)
 
         consumed = sys_tokens + work_tokens + rec_tokens + schema_tokens
         available = max(0, max_tokens - consumed)

@@ -87,10 +87,11 @@ def _apply_memory_context_budget(
         if descriptor.context_window is None:
             return memory, learned_contexts
         engine = LettaOpenMemoryEngine()
+        tokenizer = getattr(runner, "tokenizer", None)
         input_budget = max(1024, descriptor.context_window - int(runner.max_tokens) - 1024)
         recall_text = "\n\n".join(value for value in learned_contexts if value)
-        memory_tokens = engine.estimate_tokens(memory)
-        recall_tokens = engine.estimate_tokens(recall_text)
+        memory_tokens = engine.estimate_tokens(memory, tokenizer)
+        recall_tokens = engine.estimate_tokens(recall_text, tokenizer)
         if memory_tokens + recall_tokens <= input_budget:
             return memory, learned_contexts
 
@@ -99,8 +100,8 @@ def _apply_memory_context_budget(
         # retries produce the same prompt and manifest.
         recall_budget = min(recall_tokens, max(256, input_budget // 3))
         memory_budget = max(256, input_budget - recall_budget)
-        bounded_memory = engine.truncate_text_to_tokens(memory, memory_budget)
-        bounded_recall = engine.truncate_text_to_tokens(recall_text, recall_budget)
+        bounded_memory = engine.truncate_text_to_tokens(memory, memory_budget, tokenizer)
+        bounded_recall = engine.truncate_text_to_tokens(recall_text, recall_budget, tokenizer)
         bounded_contexts = [bounded_recall] if bounded_recall else []
         logger.warning(
             "memory context budget applied provider=%s model=%s memory_tokens=%d recall_tokens=%d budget=%d",

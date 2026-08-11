@@ -71,6 +71,18 @@ class TestLettaOpenMemoryEngine(unittest.TestCase):
         self.assertIn("context truncated by memory budget", bounded)
         self.assertLessEqual(self.engine.estimate_tokens(bounded), 25)
 
+    def test_real_tokenizer_can_be_injected(self) -> None:
+        class Tokenizer:
+            def encode(self, text):
+                return list(text.split())
+
+        tokenizer = Tokenizer()
+        self.assertEqual(self.engine.estimate_tokens("one two", tokenizer), 2)
+        bounded = self.engine.truncate_text_to_tokens(
+            "one two three four", 2, tokenizer
+        )
+        self.assertEqual(bounded, "one\n[context truncated by memory budget]")
+
     def test_check_acl_access_grants_personal_owner(self) -> None:
         scope = MemoryScope.personal(user_id=10, group_id=1, actor_id="user:10")
         principal = Principal.user(user_id=10, group_ids=[1])
