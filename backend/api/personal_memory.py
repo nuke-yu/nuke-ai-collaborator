@@ -6,12 +6,49 @@ from memory.contracts import (CreatePersonalProjection, CreatePersonalRecord,
                               IngestPersonalKnowledge, MemoryAuthorizationError,
                               ObservePersonalHabit)
 from memory.domain import MemoryScope, Principal
+from ai.personal_vault import (
+    list_acl_audit_events, list_personal_apps, register_personal_app,
+    set_personal_app_status,
+)
 
 router=APIRouter()
 
 
 def _personal_client(uid: int, group_ids=()):
     return build_personal_knowledge_client(Principal.user(uid, group_ids))
+
+
+@router.get("/api/personal/memory/apps")
+async def list_personal_memory_apps(include_inactive: bool = True, user=Depends(auth.get_current_user)):
+    return {"apps": await list_personal_apps(user_id=int(user["uid"]), include_inactive=include_inactive)}
+
+
+@router.post("/api/personal/memory/apps")
+async def register_personal_memory_app(body: dict, user=Depends(auth.get_current_user)):
+    try:
+        await register_personal_app(
+            user_id=int(user["uid"]), app_id=str(body["app_id"]), name=str(body["name"])
+        )
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(400, str(exc))
+    return {"app_id": str(body["app_id"]), "status": "active"}
+
+
+@router.post("/api/personal/memory/apps/{app_id}/status")
+async def set_personal_memory_app_status(app_id: str, body: dict, user=Depends(auth.get_current_user)):
+    if "active" not in body:
+        raise HTTPException(400, "active is required")
+    changed = await set_personal_app_status(
+        user_id=int(user["uid"]), app_id=app_id, active=bool(body["active"])
+    )
+    if not changed:
+        raise HTTPException(404, "Personal app not found")
+    return {"app_id": app_id, "status": "active" if body["active"] else "inactive"}
+
+
+@router.get("/api/personal/memory/audit")
+async def list_personal_memory_audit(limit: int = 100, user=Depends(auth.get_current_user)):
+    return {"events": await list_acl_audit_events(user_id=int(user["uid"]), limit=limit)}
 
 @router.get("/api/personal/memory")
 async def export_personal_memory(user=Depends(auth.get_current_user)):
