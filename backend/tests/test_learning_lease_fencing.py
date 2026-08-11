@@ -83,6 +83,39 @@ class TestLearningLeaseFencing(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("attempt>=?", sql)
         self.assertEqual(params[0], "failed")
 
+    async def test_pending_write_is_deterministic_and_upserted(self) -> None:
+        mock_db = AsyncMock()
+        mock_db_ctx = AsyncMock()
+        mock_db_ctx.__aenter__.return_value = mock_db
+
+        with patch("ai.memory._memory_db", return_value=mock_db_ctx):
+            first = await self.adapter.put_pending_write(
+                self.scope, "chk:1", "task:1", "messages", {"ok": True}
+            )
+            second = await self.adapter.put_pending_write(
+                self.scope, "chk:1", "task:1", "messages", {"ok": False}
+            )
+
+        self.assertEqual(first, second)
+        self.assertIn("ON CONFLICT(group_id,checkpoint_id,task_id,channel)",
+                      mock_db.execute.call_args_list[-1].args[0])
+        self.assertEqual(mock_db.commit.await_count, 2)
+
+    async def test_acknowledge_pending_writes_is_scoped_to_thread_checkpoint(self) -> None:
+        cursor = MagicMock(rowcount=2)
+        mock_db = AsyncMock()
+        mock_db.execute = AsyncMock(return_value=cursor)
+        mock_db_ctx = AsyncMock()
+        mock_db_ctx.__aenter__.return_value = mock_db
+
+        with patch("ai.memory._memory_db", return_value=mock_db_ctx):
+            count = await self.adapter.acknowledge_pending_writes(self.scope, "chk:1")
+
+        self.assertEqual(count, 2)
+        sql, params = mock_db.execute.call_args_list[-1].args
+        self.assertIn("DELETE FROM memory_checkpoint_pending_writes", sql)
+        self.assertEqual(params, (1, "chk:1"))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -398,7 +398,124 @@ class LegacyPipelineJobAdapter:
                 (group_id, thread_id),
             )
             await db.commit()
-            return int(cur.rowcount)
+        return int(cur.rowcount)
+
+    async def put_pending_write(
+        self,
+        scope: MemoryScope,
+        checkpoint_id: str,
+        task_id: str,
+        channel: str,
+        value: Any,
+    ) -> str:
+        """Persist a channel write that happened before a checkpoint commit.
+
+        LangGraph uses pending writes to make tool/task side effects recoverable
+        when a worker dies between the task and the next checkpoint.
+        """
+        if not checkpoint_id or not task_id or not channel:
+            raise ValueError("checkpoint_id, task_id and channel are required")
+        group_id = self._group_id(scope)
+        import hashlib
+        import json
+
+        write_id = "pwrite:" + hashlib.sha256(
+            f"{group_id}:{checkpoint_id}:{task_id}:{channel}".encode()
+        ).hexdigest()[:24]
+        now = int(time.time() * 1000)
+        async with await self._db(group_id, write=True) as db:
+            await self._ensure_checkpoint_table(db)
+            await db.execute(
+                """INSERT INTO memory_checkpoint_pending_writes
+                   (write_id,group_id,checkpoint_id,task_id,channel,value_json,created_at)
+                   VALUES (?,?,?,?,?,?,?)
+                   ON CONFLICT(group_id,checkpoint_id,task_id,channel)
+                   DO UPDATE SET value_json=excluded.value_json,created_at=excluded.created_at""",
+                (write_id, group_id, checkpoint_id, task_id, channel,
+                 json.dumps(value, ensure_ascii=False, sort_keys=True, default=str), now),
+            )
+            await db.commit()
+        return write_id
+
+    async def list_pending_writes(
+        self, scope: MemoryScope, checkpoint_id: str
+    ) -> list[dict[str, Any]]:
+        """Return pending writes in deterministic creation order for recovery."""
+        group_id = self._group_id(scope)
+        import json
+
+        async with await self._db(group_id, write=False) as db:
+            await self._ensure_checkpoint_table(db)
+            async with db.execute(
+                """SELECT write_id,task_id,channel,value_json,created_at
+                   FROM memory_checkpoint_pending_writes
+                   WHERE group_id=? AND checkpoint_id=? ORDER BY created_at,write_id""",
+                (group_id, checkpoint_id),
+            ) as cur:
+                rows = await cur.fetchall()
+        return [
+            {"write_id": str(row[0]), "task_id": str(row[1]), "channel": str(row[2]),
+             "value": json.loads(row[3] or "null"), "created_at": int(row[4])}
+            for row in rows
+        ]
+
+    async def acknowledge_pending_writes(
+        self, scope: MemoryScope, checkpoint_id: str, task_id: str | None = None
+    ) -> int:
+        """Remove recovered writes after they have been incorporated in a checkpoint."""
+        group_id = self._group_id(scope)
+        async with await self._db(group_id, write=True) as db:
+            await self._ensure_checkpoint_table(db)
+            if task_id:
+                cur = await db.execute(
+                    "DELETE FROM memory_checkpoint_pending_writes WHERE group_id=? AND checkpoint_id=? AND task_id=?",
+                    (group_id, checkpoint_id, task_id),
+                )
+            else:
+                cur = await db.execute(
+                    "DELETE FROM memory_checkpoint_pending_writes WHERE group_id=? AND checkpoint_id=?",
+                    (group_id, checkpoint_id),
+                )
+            await db.commit()
+        return int(cur.rowcount)
+
+    async def fork_checkpoint(
+        self,
+        scope: MemoryScope,
+        checkpoint_id: str,
+        new_thread_id: str,
+        step_name: str = "fork",
+    ) -> dict[str, Any] | None:
+        """Create a new branch whose parent is an existing checkpoint."""
+        group_id = self._group_id(scope)
+        import json
+        async with await self._db(group_id, write=True) as db:
+            await self._ensure_checkpoint_table(db)
+            async with db.execute(
+                "SELECT state_json FROM memory_checkpoints WHERE group_id=? AND checkpoint_id=?",
+                (group_id, checkpoint_id),
+            ) as cur:
+                row = await cur.fetchone()
+            if not row:
+                return None
+            from memory.adapters.algorithms import LangGraphDAGEngine
+            checkpoint = LangGraphDAGEngine().create_checkpoint(
+                thread_id=new_thread_id, step_name=step_name,
+                state=json.loads(row[0] or "{}"), parent_id=checkpoint_id,
+            )
+            await db.execute(
+                """INSERT OR IGNORE INTO memory_checkpoints
+                   (checkpoint_id,group_id,thread_id,parent_checkpoint_id,step_name,state_hash,state_json,created_at)
+                   VALUES (?,?,?,?,?,?,?,?)""",
+                (checkpoint.checkpoint_id, group_id, checkpoint.thread_id,
+                 checkpoint.parent_checkpoint_id, checkpoint.step_name,
+                 checkpoint.state_hash, json.dumps(checkpoint.state_payload, ensure_ascii=False, sort_keys=True),
+                 int(checkpoint.created_at * 1000)),
+            )
+            await db.commit()
+        return {"checkpoint_id": checkpoint.checkpoint_id, "thread_id": new_thread_id,
+                "parent_checkpoint_id": checkpoint_id, "step_name": step_name,
+                "state_hash": checkpoint.state_hash, "state": checkpoint.state_payload}
 
     async def _db(self, group_id: int, *, write: bool):
         from ai.memory import _memory_db
@@ -419,6 +536,19 @@ class LegacyPipelineJobAdapter:
         await db.execute(
             """CREATE INDEX IF NOT EXISTS idx_memory_checkpoints_thread
                ON memory_checkpoints(group_id,thread_id,created_at)"""
+        )
+        await db.execute(
+            """CREATE TABLE IF NOT EXISTS memory_checkpoint_pending_writes (
+                write_id TEXT PRIMARY KEY, group_id INTEGER NOT NULL,
+                checkpoint_id TEXT NOT NULL, task_id TEXT NOT NULL,
+                channel TEXT NOT NULL, value_json TEXT NOT NULL DEFAULT '{}',
+                created_at INTEGER NOT NULL,
+                UNIQUE(group_id,checkpoint_id,task_id,channel)
+            )"""
+        )
+        await db.execute(
+            """CREATE INDEX IF NOT EXISTS idx_memory_checkpoint_pending_writes
+               ON memory_checkpoint_pending_writes(group_id,checkpoint_id,created_at)"""
         )
 
     async def stats(self, scope: MemoryScope) -> dict[str, int]:

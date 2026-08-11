@@ -116,6 +116,14 @@ MEMORY_V1_DDL = (
         state_json TEXT NOT NULL DEFAULT '{}', created_at INTEGER NOT NULL
     )""",
     "CREATE INDEX IF NOT EXISTS idx_memory_checkpoints_thread ON memory_checkpoints(group_id,thread_id,created_at)",
+    """CREATE TABLE IF NOT EXISTS memory_checkpoint_pending_writes (
+        write_id TEXT PRIMARY KEY, group_id INTEGER NOT NULL,
+        checkpoint_id TEXT NOT NULL, task_id TEXT NOT NULL,
+        channel TEXT NOT NULL, value_json TEXT NOT NULL DEFAULT '{}',
+        created_at INTEGER NOT NULL,
+        UNIQUE(group_id,checkpoint_id,task_id,channel)
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_memory_checkpoint_pending_writes ON memory_checkpoint_pending_writes(group_id,checkpoint_id,created_at)",
     """CREATE TABLE IF NOT EXISTS memory_projection_rollout (
         group_id INTEGER PRIMARY KEY,
         consecutive_passes INTEGER NOT NULL DEFAULT 0,
