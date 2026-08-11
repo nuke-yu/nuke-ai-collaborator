@@ -91,6 +91,25 @@ class TestAutoGenFailureEngine(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.attempts, 2)
         self.assertEqual(calls, 2)
 
+    async def test_run_with_retry_honors_retryable_categories(self) -> None:
+        calls = 0
+
+        async def attempt(_task, _insights):
+            nonlocal calls
+            calls += 1
+            return "Permission denied: protected path"
+
+        result = await self.engine.run_with_retry(
+            "write protected file",
+            attempt,
+            lambda _response: _always_false(),
+            max_retries=3,
+            retryable_categories={FailureCategory.PATH_NOT_FOUND},
+        )
+        self.assertFalse(result.succeeded)
+        self.assertEqual(calls, 1)
+        self.assertEqual(result.insights[0].category, FailureCategory.PERMISSION_DENIED)
+
 
 async def _always_false() -> bool:
     return False

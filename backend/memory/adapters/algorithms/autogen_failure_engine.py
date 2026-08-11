@@ -219,6 +219,7 @@ class AutoGenFailureEngine:
         *,
         max_retries: int = 2,
         ai_call_fn: Any = None,
+        retryable_categories: Sequence[FailureCategory | str] | None = None,
     ) -> RetryResult:
         """Execute AutoGen's failure→insight→retry→validate loop.
 
@@ -229,6 +230,11 @@ class AutoGenFailureEngine:
         """
         if max_retries < 0:
             raise ValueError("max_retries must be non-negative")
+        allowed_categories = (
+            None
+            if retryable_categories is None
+            else {FailureCategory(value) for value in retryable_categories}
+        )
         insights: list[FailureInsight] = []
         response: Any = None
         for attempt in range(max_retries + 1):
@@ -244,4 +250,6 @@ class AutoGenFailureEngine:
                 ai_call_fn=ai_call_fn,
             )
             insights.append(insight)
+            if allowed_categories is not None and insight.category not in allowed_categories:
+                break
         return RetryResult(False, max_retries + 1, response, tuple(insights))
