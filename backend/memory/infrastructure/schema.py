@@ -109,6 +109,13 @@ MEMORY_V1_DDL = (
         created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, completed_at INTEGER
     )""",
     "CREATE INDEX IF NOT EXISTS idx_memory_projection_outbox_ready ON memory_projection_outbox(group_id,status,next_attempt_at,updated_at)",
+    """CREATE TABLE IF NOT EXISTS memory_checkpoints (
+        checkpoint_id TEXT PRIMARY KEY, group_id INTEGER NOT NULL,
+        thread_id TEXT NOT NULL, parent_checkpoint_id TEXT,
+        step_name TEXT NOT NULL, state_hash TEXT NOT NULL,
+        state_json TEXT NOT NULL DEFAULT '{}', created_at INTEGER NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_memory_checkpoints_thread ON memory_checkpoints(group_id,thread_id,created_at)",
     """CREATE TABLE IF NOT EXISTS memory_projection_rollout (
         group_id INTEGER PRIMARY KEY,
         consecutive_passes INTEGER NOT NULL DEFAULT 0,

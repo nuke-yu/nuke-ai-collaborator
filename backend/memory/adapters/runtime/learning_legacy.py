@@ -281,6 +281,87 @@ class LegacyPipelineJobAdapter:
             await db.commit()
             return cur.rowcount == 1
 
+    async def checkpoint(
+        self,
+        scope: MemoryScope,
+        thread_id: str,
+        step_name: str,
+        state: dict[str, Any],
+        parent_checkpoint_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Persist a LangGraph-compatible checkpoint for a durable job."""
+        group_id = self._group_id(scope)
+        from memory.adapters.algorithms import LangGraphDAGEngine
+
+        checkpoint = LangGraphDAGEngine().create_checkpoint(
+            thread_id=thread_id,
+            step_name=step_name,
+            state=state,
+            parent_id=parent_checkpoint_id,
+        )
+        import json
+
+        async with await self._db(group_id, write=True) as db:
+            await db.execute(
+                """INSERT OR IGNORE INTO memory_checkpoints
+                   (checkpoint_id,group_id,thread_id,parent_checkpoint_id,
+                    step_name,state_hash,state_json,created_at)
+                   VALUES (?,?,?,?,?,?,?,?)""",
+                (
+                    checkpoint.checkpoint_id,
+                    group_id,
+                    checkpoint.thread_id,
+                    checkpoint.parent_checkpoint_id,
+                    checkpoint.step_name,
+                    checkpoint.state_hash,
+                    json.dumps(checkpoint.state_payload, ensure_ascii=False, sort_keys=True),
+                    int(checkpoint.created_at * 1000),
+                ),
+            )
+            await db.commit()
+        return {
+            "checkpoint_id": checkpoint.checkpoint_id,
+            "thread_id": checkpoint.thread_id,
+            "parent_checkpoint_id": checkpoint.parent_checkpoint_id,
+            "step_name": checkpoint.step_name,
+            "state_hash": checkpoint.state_hash,
+            "state": checkpoint.state_payload,
+        }
+
+    async def latest_checkpoint(
+        self, scope: MemoryScope, thread_id: str
+    ) -> dict[str, Any] | None:
+        """Load the newest persisted checkpoint for a group/thread."""
+        group_id = self._group_id(scope)
+        import json
+
+        async with await self._db(group_id, write=False) as db:
+            async with db.execute(
+                """SELECT checkpoint_id,parent_checkpoint_id,step_name,
+                          state_hash,state_json,created_at
+                   FROM memory_checkpoints
+                   WHERE group_id=? AND thread_id=?
+                   ORDER BY created_at DESC,checkpoint_id DESC LIMIT 1""",
+                (group_id, thread_id),
+            ) as cur:
+                row = await cur.fetchone()
+        if not row:
+            return None
+        return {
+            "checkpoint_id": str(row[0]),
+            "thread_id": thread_id,
+            "parent_checkpoint_id": row[1],
+            "step_name": str(row[2]),
+            "state_hash": str(row[3]),
+            "state": json.loads(row[4] or "{}"),
+            "created_at": int(row[5]),
+        }
+
+    async def _db(self, group_id: int, *, write: bool):
+        from ai.memory import _memory_db
+
+        return await _memory_db("memory_checkpoints", group_id, write=write)
+
     async def stats(self, scope: MemoryScope) -> dict[str, int]:
         group_id = self._group_id(scope)
         now = int(time.time() * 1000)

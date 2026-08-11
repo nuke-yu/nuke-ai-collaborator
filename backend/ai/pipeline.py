@@ -330,6 +330,28 @@ async def dispatch_group(group_id: int, *, limit: int = 10, lease_seconds: int =
         if not lease_token:
             continue
         try:
+            checkpoint_scope = MemoryScope.group(
+                group_id=group_id, actor_id="pipeline_checkpoint"
+            )
+            previous = await _pipeline_repo.latest_checkpoint(
+                checkpoint_scope, thread_id=job_id
+            )
+            claimed_checkpoint = await _pipeline_repo.checkpoint(
+                checkpoint_scope,
+                thread_id=job_id,
+                step_name="claimed",
+                state={
+                    "job_id": job_id,
+                    "job_type": str(job["job_type"]),
+                    "input_id": str(job["input_id"]),
+                    "input_version": str(job["input_version"]),
+                    "attempt": int(job["attempt"]) + 1,
+                    "status": "running",
+                },
+                parent_checkpoint_id=(
+                    previous.get("checkpoint_id") if previous else None
+                ),
+            )
             handler = _HANDLERS.get(str(job["job_type"]))
             if handler is None:
                 raise ValueError(f"unsupported pipeline job type: {job['job_type']}")
@@ -344,6 +366,21 @@ async def dispatch_group(group_id: int, *, limit: int = 10, lease_seconds: int =
             )
             if not completed:
                 raise LostLeaseError(f"Worker lost lease for job {job_id}")
+            await _pipeline_repo.checkpoint(
+                checkpoint_scope,
+                thread_id=job_id,
+                step_name="completed",
+                state={
+                    "job_id": job_id,
+                    "job_type": str(job["job_type"]),
+                    "input_id": str(job["input_id"]),
+                    "status": "completed",
+                    "output": output,
+                },
+                parent_checkpoint_id=(
+                    claimed_checkpoint.get("checkpoint_id")
+                ),
+            )
             processed += 1
         except Exception as exc:
             failed += 1
