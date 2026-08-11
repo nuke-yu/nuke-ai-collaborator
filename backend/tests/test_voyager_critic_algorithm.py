@@ -50,6 +50,21 @@ class TestVoyagerCriticEngine(unittest.IsolatedAsyncioTestCase):
                 {"id": "b", "depends_on": ["a"]},
             ])
 
+    def test_compile_execution_plan_is_auditable_and_non_executing(self) -> None:
+        plan = self.engine.compile_execution_plan({
+            "risk_level": "S1", "trigger": "deploy", "procedure": ["run tests"],
+            "allowed_tools": ["run_tests"], "verification": ["tests_pass"],
+        })
+        self.assertEqual(plan.allowed_tools, ("run_tests",))
+        self.assertTrue(plan.requires_hil)
+
+    def test_compile_execution_plan_rejects_tools_for_s0(self) -> None:
+        with self.assertRaisesRegex(ValueError, "S0"):
+            self.engine.compile_execution_plan({
+                "risk_level": "S0", "trigger": "x", "procedure": ["x"],
+                "allowed_tools": ["run_tests"], "verification": ["ok"],
+            })
+
     async def test_evaluate_success_with_llm_parses_json_critique(self) -> None:
         mock_ai_call = AsyncMock(return_value={
             "content": '{"passed": true, "score": 0.98, "critique": "All verification assertions satisfied"}'

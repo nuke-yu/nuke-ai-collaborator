@@ -22,7 +22,7 @@ from .letta_acl_engine import (ACLPermissionCheck, ContextBudgetAllocation,
 from .mem0_adapter import Mem0FactAlgorithmAdapter
 from .mem0_fact_engine import FactAction, FactActionType, Mem0FactEngine
 from .voyager_critic_adapter import VoyagerCriticAlgorithmAdapter
-from .voyager_critic_engine import CriticResult, VoyagerCriticEngine
+from .voyager_critic_engine import CriticResult, SkillExecutionPlan, VoyagerCriticEngine
 
 __all__ = [
     "FactAction",
@@ -45,6 +45,7 @@ __all__ = [
     "EverOSSkillEngine",
     "EverOSSkillAlgorithmAdapter",
     "CriticResult",
+    "SkillExecutionPlan",
     "VoyagerCriticEngine",
     "VoyagerCriticAlgorithmAdapter",
     "HybridRerankEngine",
@@ -61,4 +62,3 @@ __all__ = [
     "GraphitiTemporalEngine",
     "GraphitiTemporalAlgorithmAdapter",
 ]
-

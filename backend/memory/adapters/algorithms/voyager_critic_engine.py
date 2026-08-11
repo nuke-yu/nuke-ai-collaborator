@@ -20,6 +20,15 @@ class CriticResult:
     verification_mode: str = "deterministic_rules"
 
 
+@dataclass(frozen=True, slots=True)
+class SkillExecutionPlan:
+    trigger: str
+    steps: tuple[str, ...]
+    allowed_tools: tuple[str, ...]
+    verification: tuple[str, ...]
+    requires_hil: bool
+
+
 VOYAGER_CRITIC_SYSTEM_PROMPT = """You are a Voyager Environmental Critic Agent.
 Analyze the agent's task description, tool execution history, and environment outputs.
 Evaluate whether the task was genuinely completed successfully without unresolved error states.
@@ -119,6 +128,32 @@ class VoyagerCriticEngine:
         if len(ordered) != len(items):
             raise ValueError("curriculum dependencies contain a cycle")
         return ordered
+
+    @staticmethod
+    def compile_execution_plan(declaration: Mapping[str, Any]) -> SkillExecutionPlan:
+        """Compile a declarative skill into an auditable, non-executing plan."""
+        risk = str(declaration.get("risk_level", ""))
+        if risk not in {"S0", "S1"}:
+            raise ValueError("only S0/S1 skills can produce execution plans")
+        trigger = str(declaration.get("trigger", "")).strip()
+        procedure = declaration.get("procedure") or ()
+        verification = declaration.get("verification") or ()
+        tools = tuple(str(tool) for tool in (declaration.get("allowed_tools") or ()))
+        if not trigger or not isinstance(procedure, (list, tuple)) or not procedure:
+            raise ValueError("execution plan requires trigger and procedure")
+        if not isinstance(verification, (list, tuple)) or not verification:
+            raise ValueError("execution plan requires verification steps")
+        if any(not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,79}", tool) for tool in tools):
+            raise ValueError("execution plan contains invalid tool name")
+        if risk == "S0" and tools:
+            raise ValueError("S0 execution plans cannot call tools")
+        return SkillExecutionPlan(
+            trigger=trigger,
+            steps=tuple(str(step) for step in procedure),
+            allowed_tools=tools,
+            verification=tuple(str(step) for step in verification),
+            requires_hil=bool(tools),
+        )
 
     async def evaluate_success_with_llm(
         self,
