@@ -174,6 +174,22 @@ Nuke 对应代码：
 | Letta/MemGPT | 分层记忆、按需注入、上下文预算 | 主动 paging、function memory、真实 tokenizer |
 | OpenMemory | Personal Vault、ACL、隔离、审计 | 完整 ABAC 数据模型和访问日志 |
 
+### 2026-08-11 实现进展补充
+
+本次代码落地后，以下边界已经从“独立 Adapter”进入生产或持久化链路：
+
+- RRF/MMR：已接入 Experience Recall；
+- Letta/MemGPT：记忆注入前和工具 Schema 确定后均执行上下文预算；
+- Mem0：canonical fact metadata 保存 `mem0_action`；
+- AutoGen：失败 Insight 持久化，并提供异步 retry→validate 闭环；
+- EverOS：Case cluster provenance 和 Skill induction artifact 写入 Skill declaration；
+- Voyager：Skill 编译前执行 Critic gate；
+- Graphiti：时间点关系查询、有限深度关系遍历、实体 alias 规范化；
+- LangGraph：durable pipeline job 保存 checkpoint、parent、state hash 和 state JSON；
+- OpenMemory：个人 ACL 的允许/拒绝决策均进入无内容审计表。
+
+仍需继续增强的部分主要是：完整实体抽取/解析模型、跨多跳图的混合向量检索、真实 provider tokenizer、OpenMemory subject/object/effect 持久化规则管理，以及将 AutoGen retry loop 接到具体 Agent 执行器。
+
 这份文档的核心原则是：可以说“吸收了某算法的设计思想或局部机制”，但只有在存在生产 composition root 接线和端到端调用证据时，才可以说“该算法已在线”。
 
 ---
