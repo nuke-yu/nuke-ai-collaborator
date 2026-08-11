@@ -287,6 +287,39 @@ async def compile_candidate(record_id: str, group_id: int) -> str | None:
     return skill_id
 
 
+async def list_everos_source_documents(
+    *, group_id: int, record_id: str | None = None, limit: int = 100
+) -> list[dict[str, object]]:
+    """Read durable EverOS source snapshots for rebuild and audit workflows."""
+    from ai.memory import _memory_db
+    async with await _memory_db("skills", group_id, write=False) as db:
+        await db.execute(
+            """CREATE TABLE IF NOT EXISTS everos_source_documents (
+                source_id TEXT PRIMARY KEY, group_id INTEGER NOT NULL,
+                record_id TEXT NOT NULL, source_type TEXT NOT NULL,
+                content_json TEXT NOT NULL, created_at INTEGER NOT NULL
+            )"""
+        )
+        query = (
+            "SELECT source_id,record_id,source_type,content_json,created_at "
+            "FROM everos_source_documents WHERE group_id=?"
+        )
+        params: list[object] = [group_id]
+        if record_id is not None:
+            query += " AND record_id=?"
+            params.append(record_id)
+        query += " ORDER BY created_at DESC,source_id DESC LIMIT ?"
+        params.append(max(1, min(limit, 1000)))
+        async with db.execute(query, tuple(params)) as cur:
+            rows = await cur.fetchall()
+    return [
+        {"source_id": str(row[0]), "record_id": str(row[1]),
+         "source_type": str(row[2]), "content_json": str(row[3]),
+         "created_at": int(row[4])}
+        for row in rows
+    ]
+
+
 async def list_skill_candidates(
     *, group_id: int, bot_id: int
 ) -> list[dict]:

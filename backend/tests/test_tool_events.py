@@ -1121,6 +1121,10 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
                 (record_id,),
             ) as cur:
                 self.assertEqual((await cur.fetchone())[0], "experience_case_snapshot")
+        from ai.skill_learning import list_everos_source_documents
+        sources = await list_everos_source_documents(group_id=7, record_id=record_id)
+        self.assertEqual(len(sources), 1)
+        self.assertEqual(sources[0]["source_type"], "experience_case_snapshot")
         with self.assertRaises(ValueError):
             validate_declaration({"risk_level":"S1","trigger":"x","procedure":["x"],"allowed_tools":["run_shell"]})
         with self.assertRaisesRegex(ValueError, "executable code"):
