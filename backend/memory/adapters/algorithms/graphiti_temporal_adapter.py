@@ -17,7 +17,8 @@ class GraphitiTemporalAlgorithmAdapter:
         source="Graphiti (Zep AI / Apache-2.0)",
         version="v0.3",
         license="Apache-2.0",
-        capabilities=("temporal_graph", "bitemporal_invalidation", "invalid_at_timestamp"),
+        capabilities=("temporal_graph", "bitemporal_invalidation", "invalid_at_timestamp",
+                      "entity_candidate_extraction", "entity_disambiguation", "community_discovery"),
     )
 
     def __init__(self, engine: GraphitiTemporalEngine | None = None) -> None:
@@ -37,3 +38,14 @@ class GraphitiTemporalAlgorithmAdapter:
     async def get_active_facts(self, as_of: float | None = None) -> Sequence[TemporalEdge]:
         """Retrieve active temporal facts as of point in time."""
         return self._engine.get_active_edges(as_of=as_of)
+
+    async def extract_entity_candidates(self, text: str, ai_call_fn: Any = None):
+        if ai_call_fn is None:
+            return self._engine.extract_entities(text)
+        return await self._engine.extract_entities_with_llm(text, ai_call_fn)
+
+    async def disambiguate_entity(self, name: str):
+        return self._engine.disambiguate_entity(name)
+
+    async def discover_communities(self, as_of: float | None = None):
+        return self._engine.discover_communities(as_of=as_of)

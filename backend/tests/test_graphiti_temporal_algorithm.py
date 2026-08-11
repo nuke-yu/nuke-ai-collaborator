@@ -102,6 +102,12 @@ class TestGraphitiTemporalAlgorithmAdapter(unittest.IsolatedAsyncioTestCase):
         active = await self.adapter.get_active_facts()
         self.assertEqual(len(active), 1)
 
+    async def test_adapter_exposes_entity_and_community_capabilities(self) -> None:
+        await self.adapter.add_temporal_fact("A", "knows", "B", "A knows B", valid_at=1)
+        candidates = await self.adapter.extract_entity_candidates('"Nuke"')
+        self.assertEqual(candidates[0].name, "Nuke")
+        self.assertEqual(len(await self.adapter.discover_communities(as_of=2)), 2)
+
 
 if __name__ == "__main__":
     unittest.main()
