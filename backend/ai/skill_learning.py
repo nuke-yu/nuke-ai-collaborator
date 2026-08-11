@@ -88,6 +88,55 @@ async def compile_candidate(record_id: str, group_id: int) -> str | None:
     if not row or row[3] < 0.7 or row[4] < 2:
         return None
     experience = json.loads(row[1])
+
+    # Voyager-style environmental critic gate.  Experience verification is a
+    # necessary signal, but Skill compilation must also inspect the persisted
+    # attempts that produced it.  This prevents a stale or malformed
+    # Experience row from becoming a reusable Skill without a final clean
+    # execution state.
+    source_case_ids = tuple(json.loads(row[5] or "[]"))
+    if source_case_ids:
+        from memory.adapters.algorithms import VoyagerCriticEngine
+
+        critic = VoyagerCriticEngine()
+        async with await _memory_db("agent_cases", group_id, write=False) as cases_db:
+            for source_case_id in source_case_ids:
+                async with cases_db.execute(
+                    """SELECT task,outcome,errors FROM agent_cases
+                       WHERE case_id=? AND group_id=?""",
+                    (str(source_case_id), group_id),
+                ) as case_cur:
+                    case_row = await case_cur.fetchone()
+                if not case_row:
+                    return None
+                async with cases_db.execute(
+                    """SELECT action_tool,observation_status,observation_summary
+                       FROM agent_case_attempts
+                       WHERE case_id=? AND group_id=? ORDER BY ordinal""",
+                    (str(source_case_id), group_id),
+                ) as attempt_cur:
+                    attempt_rows = await attempt_cur.fetchall()
+                tool_records = [
+                    {
+                        "name": str(attempt[0] or ""),
+                        "is_error": str(attempt[1] or "") == "error",
+                        "result": str(attempt[2] or ""),
+                    }
+                    for attempt in attempt_rows
+                ]
+                try:
+                    errors = tuple(json.loads(case_row[2] or "[]"))
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    errors = ()
+                critic_result = critic.evaluate_success(
+                    str(case_row[0] or ""),
+                    str(case_row[1] or ""),
+                    tool_records,
+                    errors,
+                )
+                if not critic_result.passed:
+                    return None
+
     declaration = {
         "risk_level":"S0", "trigger":experience.get("task_pattern", ""),
         "procedure":["Review the prior failure mode before planning", "Apply the verified corrective lesson"],
