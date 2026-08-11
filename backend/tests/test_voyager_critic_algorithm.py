@@ -35,6 +35,21 @@ class TestVoyagerCriticEngine(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.passed)
         self.assertEqual(result.score, 0.85)
 
+    def test_build_curriculum_orders_dependencies_and_difficulty(self) -> None:
+        ordered = self.engine.build_curriculum([
+            {"id": "deploy", "depends_on": ["test"], "difficulty": 3},
+            {"id": "test", "depends_on": ["build"], "difficulty": 2},
+            {"id": "build", "difficulty": 1},
+        ])
+        self.assertEqual([item["id"] for item in ordered], ["build", "test", "deploy"])
+
+    def test_build_curriculum_rejects_cycles(self) -> None:
+        with self.assertRaisesRegex(ValueError, "cycle"):
+            self.engine.build_curriculum([
+                {"id": "a", "depends_on": ["b"]},
+                {"id": "b", "depends_on": ["a"]},
+            ])
+
     async def test_evaluate_success_with_llm_parses_json_critique(self) -> None:
         mock_ai_call = AsyncMock(return_value={
             "content": '{"passed": true, "score": 0.98, "critique": "All verification assertions satisfied"}'

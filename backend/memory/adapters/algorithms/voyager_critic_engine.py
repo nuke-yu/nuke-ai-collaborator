@@ -81,6 +81,45 @@ class VoyagerCriticEngine:
             verification_mode="deterministic_rules",
         )
 
+    @staticmethod
+    def build_curriculum(tasks: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+        """Order candidate tasks by prerequisites without executing anything.
+
+        Voyager's automatic curriculum chooses the next achievable task from
+        a growing skill library. This deterministic variant topologically
+        sorts declared ``depends_on`` task IDs, then prefers lower difficulty.
+        Cycles are rejected so a malformed curriculum cannot silently loop.
+        """
+        items = {str(item.get("id") or item.get("task")): dict(item) for item in tasks}
+        items.pop("", None)
+        indegree = {key: 0 for key in items}
+        edges: dict[str, set[str]] = {key: set() for key in items}
+        for key, item in items.items():
+            deps = item.get("depends_on") or item.get("dependencies") or ()
+            for dependency in deps:
+                dep = str(dependency)
+                if dep not in items:
+                    continue
+                if key not in edges[dep]:
+                    edges[dep].add(key)
+                    indegree[key] += 1
+        ready = sorted(
+            (key for key, degree in indegree.items() if degree == 0),
+            key=lambda key: (float(items[key].get("difficulty", 0) or 0), key),
+        )
+        ordered: list[dict[str, Any]] = []
+        while ready:
+            key = ready.pop(0)
+            ordered.append(items[key])
+            for child in sorted(edges[key]):
+                indegree[child] -= 1
+                if indegree[child] == 0:
+                    ready.append(child)
+            ready.sort(key=lambda value: (float(items[value].get("difficulty", 0) or 0), value))
+        if len(ordered) != len(items):
+            raise ValueError("curriculum dependencies contain a cycle")
+        return ordered
+
     async def evaluate_success_with_llm(
         self,
         task: str,
