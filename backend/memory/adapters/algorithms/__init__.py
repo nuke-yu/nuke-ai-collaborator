@@ -2,7 +2,7 @@
 
 from .autogen_adapter import AutoGenFailureAlgorithmAdapter
 from .autogen_failure_engine import (AutoGenFailureEngine, FailureCategory,
-                                      FailureInsight)
+                                      FailureInsight, RetryResult)
 from .everos_adapter import EverOSCaseAlgorithmAdapter
 from .everos_case_engine import CaseEvaluation, EverOSCaseEngine, ExtractedCase
 from .everos_clustering_adapter import EverOSClusteringAlgorithmAdapter
@@ -35,6 +35,7 @@ __all__ = [
     "EverOSCaseAlgorithmAdapter",
     "FailureCategory",
     "FailureInsight",
+    "RetryResult",
     "AutoGenFailureEngine",
     "AutoGenFailureAlgorithmAdapter",
     "CaseCluster",
@@ -60,5 +61,4 @@ __all__ = [
     "GraphitiTemporalEngine",
     "GraphitiTemporalAlgorithmAdapter",
 ]
-
 

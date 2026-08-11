@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any, Mapping, Sequence
+from typing import Any, Awaitable, Callable, Mapping, Sequence
 
 
 class FailureCategory(StrEnum):
@@ -29,6 +29,14 @@ class FailureInsight:
     insight_summary: str
     corrective_action: str
     relevancy_score: float = 0.9
+
+
+@dataclass(frozen=True, slots=True)
+class RetryResult:
+    succeeded: bool
+    attempts: int
+    response: Any
+    insights: tuple[FailureInsight, ...]
 
 
 AUTOGEN_FAILURE_SYSTEM_PROMPT = """You are an AutoGen Task-Centric Failure Reflection Agent.
@@ -203,3 +211,37 @@ class AutoGenFailureEngine:
 
         return self.analyze_failure(task, errors, tool_records)
 
+    async def run_with_retry(
+        self,
+        task: str,
+        attempt_fn: Callable[[str, tuple[FailureInsight, ...]], Awaitable[Any]],
+        validate_fn: Callable[[Any], Awaitable[bool]],
+        *,
+        max_retries: int = 2,
+        ai_call_fn: Any = None,
+    ) -> RetryResult:
+        """Execute AutoGen's failure→insight→retry→validate loop.
+
+        ``attempt_fn`` receives the original task and accumulated insights;
+        it owns tool execution. ``validate_fn`` is the authoritative success
+        gate. No response is stored as a lesson until validation succeeds or
+        the retry budget is exhausted.
+        """
+        if max_retries < 0:
+            raise ValueError("max_retries must be non-negative")
+        insights: list[FailureInsight] = []
+        response: Any = None
+        for attempt in range(max_retries + 1):
+            response = await attempt_fn(task, tuple(insights))
+            if await validate_fn(response):
+                return RetryResult(True, attempt + 1, response, tuple(insights))
+            if attempt >= max_retries:
+                break
+            errors = [str(response)[:2000]]
+            insight = await self.analyze_failure_with_llm(
+                task,
+                errors,
+                ai_call_fn=ai_call_fn,
+            )
+            insights.append(insight)
+        return RetryResult(False, max_retries + 1, response, tuple(insights))

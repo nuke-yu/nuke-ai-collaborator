@@ -58,6 +58,43 @@ class TestAutoGenFailureEngine(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(insight.insight_summary, "Missing config file")
         self.assertEqual(insight.relevancy_score, 0.98)
 
+    async def test_run_with_retry_injects_insight_until_validation_succeeds(self) -> None:
+        attempts = []
+
+        async def attempt(task, insights):
+            attempts.append((task, insights))
+            return "fixed" if insights else "FileNotFoundError: missing.py"
+
+        async def validate(response):
+            return response == "fixed"
+
+        result = await self.engine.run_with_retry(
+            "read config", attempt, validate, max_retries=2
+        )
+        self.assertTrue(result.succeeded)
+        self.assertEqual(result.attempts, 2)
+        self.assertEqual(len(result.insights), 1)
+        self.assertEqual(len(attempts[1][1]), 1)
+
+    async def test_run_with_retry_respects_retry_budget(self) -> None:
+        calls = 0
+
+        async def attempt(_task, _insights):
+            nonlocal calls
+            calls += 1
+            return "still failing"
+
+        result = await self.engine.run_with_retry(
+            "task", attempt, lambda _response: _always_false(), max_retries=1
+        )
+        self.assertFalse(result.succeeded)
+        self.assertEqual(result.attempts, 2)
+        self.assertEqual(calls, 2)
+
+
+async def _always_false() -> bool:
+    return False
+
 
 class TestAutoGenFailureAlgorithmAdapter(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
