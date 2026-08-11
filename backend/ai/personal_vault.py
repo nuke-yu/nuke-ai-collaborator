@@ -32,6 +32,12 @@ _DDL_STATEMENTS = (
      used_at INTEGER NOT NULL)""",
     "CREATE INDEX IF NOT EXISTS idx_personal_memory_usage_record ON personal_memory_usage_events(user_id,record_id,used_at)",
     "CREATE INDEX IF NOT EXISTS idx_personal_memory_usage_session ON personal_memory_usage_events(group_id,session_id,used_at)",
+    """CREATE TABLE IF NOT EXISTS personal_acl_audit_events (
+     audit_id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER NOT NULL,
+     actor_id TEXT NOT NULL,scope_kind TEXT NOT NULL,group_id INTEGER,
+     bot_id INTEGER,action TEXT NOT NULL,allowed INTEGER NOT NULL,
+     reason TEXT NOT NULL,created_at INTEGER NOT NULL)""",
+    "CREATE INDEX IF NOT EXISTS idx_personal_acl_audit_user_time ON personal_acl_audit_events(user_id,created_at)",
     """CREATE TABLE IF NOT EXISTS habit_evidence (
      id INTEGER PRIMARY KEY AUTOINCREMENT,record_id TEXT NOT NULL,source_key TEXT NOT NULL,
      context_kind TEXT NOT NULL,polarity TEXT NOT NULL,observed_at INTEGER NOT NULL,
@@ -121,6 +127,38 @@ async def connect(user_id: int):
             yield db
         finally:
             await db.close()
+
+
+async def record_acl_audit_event(
+    *,
+    user_id: int,
+    actor_id: str,
+    scope_kind: str,
+    group_id: int | None,
+    bot_id: int | None,
+    action: str,
+    allowed: bool,
+    reason: str,
+) -> None:
+    """Persist an authorization decision without storing memory content."""
+    async with connect(user_id) as db:
+        await db.execute(
+            """INSERT INTO personal_acl_audit_events
+               (user_id,actor_id,scope_kind,group_id,bot_id,action,allowed,reason,created_at)
+               VALUES (?,?,?,?,?,?,?,?,?)""",
+            (
+                user_id,
+                actor_id,
+                scope_kind,
+                group_id,
+                bot_id,
+                action,
+                int(allowed),
+                reason[:1000],
+                int(time.time() * 1000),
+            ),
+        )
+        await db.commit()
 
 
 async def add_record(*,user_id:int,kind:str,content:str,source_type:str,source_id:str="",

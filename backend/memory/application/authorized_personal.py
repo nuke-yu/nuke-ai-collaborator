@@ -93,5 +93,24 @@ class AuthorizedPersonalKnowledgeService:
         check = await self._acl.check_acl(
             scope, principal=self._principal, action=action
         )
+        if self._principal.user_id is not None:
+            try:
+                from ai.personal_vault import record_acl_audit_event
+
+                await record_acl_audit_event(
+                    user_id=self._principal.user_id,
+                    actor_id=self._principal.actor_id,
+                    scope_kind=scope.kind.value,
+                    group_id=scope.group_id,
+                    bot_id=scope.bot_id,
+                    action=action,
+                    allowed=check.allowed,
+                    reason=check.reason or "",
+                )
+            except Exception:
+                # Audit failure must never turn an already-authorized memory
+                # operation into a data-path failure; the ACL decision itself
+                # remains fail-closed below.
+                pass
         if not check.allowed:
             raise MemoryAuthorizationError(check.reason or "memory access denied")
