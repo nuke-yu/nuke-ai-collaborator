@@ -219,10 +219,12 @@ Nuke 对应代码：
 - OpenMemory：增加用户隔离的 App 列表查询，可筛选 active 状态供管理与审计界面使用。
 - OpenMemory：新增 `/api/personal/memory/apps` 注册、列表、状态管理和 `/api/personal/memory/audit` 审计查询接口。
 - EverOS：Skill 编译时持久化 Experience/Case source snapshot，支持后续索引重建和蒸馏恢复。
+- EverOS：新增 source document listing 入口，供审计、重建和再次蒸馏使用。
 - EverOS：reflection 已作为 `observe_turn_reflection` durable pipeline stage，与 fact/summary/tool compression 同步入队、独立 lease 执行，并由 reflection watermark 保证幂等覆盖范围。
 - Letta/MemGPT：Tool Loop 上下文超限时先对 learned contexts 执行 paging，再进行 tokenizer/估算器截断。
 - AutoGen：Tool Loop 支持显式 opt-in retry policy；只有 allowlisted 工具和可重试 FailureCategory 才会重试，默认关闭以避免副作用重复执行。
 - Graphiti Adapter：正式暴露 entity candidate extraction、entity disambiguation、community discovery 能力。
+- Graphiti：增加统一 lexical/vector/active-graph RRF hybrid search，并通过 Adapter 暴露。
 
 这份文档的核心原则是：可以说“吸收了某算法的设计思想或局部机制”，但只有在存在生产 composition root 接线和端到端调用证据时，才可以说“该算法已在线”。
 
