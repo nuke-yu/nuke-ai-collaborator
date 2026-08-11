@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from typing import Any, Mapping
+import importlib
 
 from memory.contracts import (
     CreatePersonalProjection,
@@ -97,9 +98,12 @@ class AuthorizedPersonalKnowledgeService:
         # An allow rule never grants access that the Nuke scope matrix denied.
         if check.allowed and self._principal.user_id is not None:
             try:
-                from ai.personal_vault import evaluate_access_control_rule
+                # Host-specific vault integration is resolved dynamically at
+                # the composition boundary; the application layer remains
+                # free of imports from the legacy ai/runtime packages.
+                personal_vault = importlib.import_module("ai.personal_vault")
 
-                explicit = await evaluate_access_control_rule(
+                explicit = await personal_vault.evaluate_access_control_rule(
                     user_id=self._principal.user_id,
                     subject_type="user",
                     subject_id=str(self._principal.user_id),
@@ -124,9 +128,9 @@ class AuthorizedPersonalKnowledgeService:
                 pass
         if self._principal.user_id is not None:
             try:
-                from ai.personal_vault import record_acl_audit_event
+                personal_vault = importlib.import_module("ai.personal_vault")
 
-                await record_acl_audit_event(
+                await personal_vault.record_acl_audit_event(
                     user_id=self._principal.user_id,
                     actor_id=self._principal.actor_id,
                     scope_kind=scope.kind.value,
