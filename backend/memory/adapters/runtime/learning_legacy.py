@@ -359,6 +359,47 @@ class LegacyPipelineJobAdapter:
             "created_at": int(row[5]),
         }
 
+    async def prune_checkpoints(
+        self, scope: MemoryScope, thread_id: str, *, keep: int = 20
+    ) -> int:
+        """Delete old checkpoints while retaining the newest lineage tail."""
+        if keep < 1:
+            raise ValueError("keep must be positive")
+        group_id = self._group_id(scope)
+        async with await self._db(group_id, write=True) as db:
+            await self._ensure_checkpoint_table(db)
+            async with db.execute(
+                """SELECT checkpoint_id FROM memory_checkpoints
+                   WHERE group_id=? AND thread_id=?
+                   ORDER BY created_at DESC,checkpoint_id DESC""",
+                (group_id, thread_id),
+            ) as cur:
+                checkpoint_ids = [str(row[0]) for row in await cur.fetchall()]
+            stale_ids = checkpoint_ids[keep:]
+            if stale_ids:
+                placeholders = ",".join("?" for _ in stale_ids)
+                await db.execute(
+                    f"DELETE FROM memory_checkpoints WHERE group_id=? "
+                    f"AND checkpoint_id IN ({placeholders})",
+                    (group_id, *stale_ids),
+                )
+            await db.commit()
+        return len(stale_ids)
+
+    async def delete_checkpoint_thread(
+        self, scope: MemoryScope, thread_id: str
+    ) -> int:
+        """Delete all checkpoints belonging to one durable execution thread."""
+        group_id = self._group_id(scope)
+        async with await self._db(group_id, write=True) as db:
+            await self._ensure_checkpoint_table(db)
+            cur = await db.execute(
+                "DELETE FROM memory_checkpoints WHERE group_id=? AND thread_id=?",
+                (group_id, thread_id),
+            )
+            await db.commit()
+            return int(cur.rowcount)
+
     async def _db(self, group_id: int, *, write: bool):
         from ai.memory import _memory_db
 
