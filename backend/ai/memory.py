@@ -5,6 +5,7 @@ import math
 import time
 import re
 from functools import partial
+from typing import Mapping
 import chromadb
 from db import get_db
 from ai import embeddings
@@ -292,9 +293,11 @@ class ConflictResolution(list[str]):
         self,
         conflict_ids: list[str],
         replacement_indexes: dict[str, int],
+        action_by_index: dict[int, str] | None = None,
     ) -> None:
         super().__init__(conflict_ids)
         self.replacement_indexes = replacement_indexes
+        self.action_by_index = dict(action_by_index or {})
 
 
 # ── 4. ConflictResolver ── 批量语义冲突消解 (优化 LLM 调用扇出)
@@ -349,6 +352,29 @@ class ConflictResolver:
         if not candidates:
             return []
 
+        # Mem0 action decision runs against the same bounded candidate set
+        # used by the legacy batch resolver.  The LLM batch result below still
+        # performs the final conservative conflict-ID validation; the action
+        # map is persisted as provenance for every extracted fact.
+        from memory.adapters.algorithms import Mem0FactEngine
+
+        mem0_engine = Mem0FactEngine()
+        mem0_actions: dict[int, str] = {}
+        mem0_conflicts: set[str] = set()
+        mem0_replacements: dict[str, int] = {}
+        candidate_records = [
+            {"record_id": str(item_id), "content": str(document)}
+            for item_id, document in candidates.items()
+        ]
+        for fact_index, fact in enumerate(facts):
+            action = mem0_engine.reconcile_fact(candidate_records, fact)
+            mem0_actions[fact_index] = str(action.action_type)
+            if action.action_type.value in {"UPDATE", "DELETE"} and action.target_record_id:
+                target_id = str(action.target_record_id)
+                if target_id in candidates:
+                    mem0_conflicts.add(target_id)
+                    mem0_replacements[target_id] = fact_index
+
         # 2. 将所有新事实与召回的冲突候选合并，打包执行 1 次 LLM 进行批量判断（大幅缩减 LLM 调用成本）
         new_facts_text = "\n".join(f"- {fact}" for fact in facts)
         existing_memories_text = "\n".join(f"- [ID: {item_id}] {doc}" for item_id, doc in candidates.items())
@@ -380,13 +406,18 @@ class ConflictResolver:
                     for item_id in ids_to_delete
                     if str(item_id) in candidates
                 ]
+                merged_conflicts = list(dict.fromkeys(conflict_ids + list(mem0_conflicts)))
                 return ConflictResolution(
-                    conflict_ids,
+                    merged_conflicts,
                     {
-                        item_id: nearest_replacements[item_id][1]
-                        for item_id in conflict_ids
-                        if item_id in nearest_replacements
+                        **{
+                            item_id: nearest_replacements[item_id][1]
+                            for item_id in conflict_ids
+                            if item_id in nearest_replacements
+                        },
+                        **mem0_replacements,
                     },
+                    mem0_actions,
                 )
         except Exception:
             log.exception("ConflictResolver: failed to resolve conflicts via batch LLM")
@@ -533,6 +564,7 @@ async def add_to_chroma(message_id: int, content: str, role: str, bot_id: int, g
     )
     del_ids = list(conflicts)
     replacement_indexes = getattr(conflicts, "replacement_indexes", {})
+    mem0_actions = getattr(conflicts, "action_by_index", {})
     conflict_replacements = tuple(
         (
             old_projection_id,
@@ -557,6 +589,7 @@ async def add_to_chroma(message_id: int, content: str, role: str, bot_id: int, g
         timestamp=timestamp,
         legacy_conflict_ids=del_ids,
         legacy_conflict_replacements=conflict_replacements,
+        mem0_actions=mem0_actions,
         strict=strict,
     )
     if canonical_record_ids and group_id is not None:
@@ -588,6 +621,7 @@ async def add_to_chroma(message_id: int, content: str, role: str, bot_id: int, g
             "mem_type": "fact",        # 区分情景/原子事实 vs 反思洞察 (P1 巩固层)
             "scored_by_model": f"{provider}/{model}",  # 打分模型来源，供将来换模型时按刻度归一化重标
             "thread_id": thread_id or "",  # 当前讨论 topic，供反思按话题分区（自由聊天为 ""；Chroma 不接受 None）
+            "mem0_action": str(mem0_actions.get(idx, "ADD")),
         }
         if group_id is not None:
             metadata["group_id"] = group_id
@@ -626,6 +660,7 @@ async def _mirror_facts_to_canonical(
     timestamp: float | None,
     legacy_conflict_ids: list[str],
     legacy_conflict_replacements: tuple[tuple[str, str], ...],
+    mem0_actions: Mapping[int, str] | None = None,
     strict: bool = False,
 ) -> tuple[str, ...] | None:
     if group_id is None:
@@ -652,11 +687,14 @@ async def _mirror_facts_to_canonical(
                 # relationship.  Preserve that decision in canonical
                 # metadata using Mem0's action vocabulary instead of losing
                 # whether this was a new fact or a replacement.
-                algorithm_action=(
-                    "UPDATE"
-                    if f"fact_{bot_id}_{group_id}_{message_id}_{index}"
-                    in updated_projection_ids
-                    else "ADD"
+                algorithm_action=str(
+                    (mem0_actions or {}).get(
+                        index,
+                        "UPDATE"
+                        if f"fact_{bot_id}_{group_id}_{message_id}_{index}"
+                        in updated_projection_ids
+                        else "ADD",
+                    )
                 ),
             )
             for index, (fact, score) in enumerate(facts)
