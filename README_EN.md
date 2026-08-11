@@ -151,6 +151,54 @@ Nuke AI Collaborator utilizes a **Microkernel + Process Sharding + Event Bus** t
 
 ---
 
+## 🧠 Memory: A Team Memory System That Compounds Over Time
+
+Nuke Memory is not a raw transcript dump into a vector database. It is built around **Group isolation, selective distillation, evidence-based validation, temporal evolution, and secure projection**. Each Group owns an isolated knowledge and execution history; each Bot retains role-specific experience; personal knowledge stays in the Personal Vault and is projected into a selected Group or Bot only for an explicit purpose.
+
+```text
+Conversation / Tool Execution
+          │
+          ▼
+Selective Observation ──► Fact / Summary / Reflection
+          │
+          ▼
+Run ──► Case ──► Outcome Verification ──► Experience ──► Skill Candidate
+                     │                         │                 │
+                     └── Failure & correction evidence ──────────┘
+                                                               ▼
+                                                    Reuse Feedback / Evolution
+
+Personal Vault ── explicit Projection ──► Group / Bot Context
+```
+
+### Open-Source Memory Design References
+
+Nuke does not embed these projects as a second runtime. It studies their core mechanisms and implements them natively within the Group-first architecture, SQLite canonical storage, Chroma vector projections, Worker durable pipeline, HITL controls, and redaction boundaries.
+
+| Reference project | Design and algorithms absorbed by Nuke | Nuke implementation focus |
+|---|---|---|
+| **Mem0** | Atomic fact extraction; `ADD / UPDATE / DELETE / NOOP` memory operations; idempotent writes and history retention | Conversational facts, conflict resolution, supersede history, and selective memory distillation |
+| **EverOS** | `Run → Case → Experience → Skill` hierarchy; Case extraction, quality gates, clustering, and Skill Induction | Structured execution traces, corrective-experience distillation, aggregation, and declarative Skill candidates |
+| **AutoGen Task-Centric Memory** | Failure Insight extraction; linking correction outcomes to the original failure; persisting an Insight only after validation | Failure → correction → verification evidence chain for durable learning |
+| **Graphiti** | Temporal knowledge, relation edges, conflicting-fact invalidation, and Sparse/Dense/Graph hybrid retrieval concepts | `valid_from / valid_to`, source-aware relations, superseded history, and an evolving hybrid-recall path |
+| **Voyager** | Critic, success gating, skill extraction from successful trajectories, Skill Library, and reuse feedback | Outcome verification, Skill Candidates, and `Trial → Active → Stable / Suspended` lifecycle |
+| **LangGraph** | Stateful workflows, checkpoint lineage, idempotent recovery, and durable execution | Memory Learning background jobs, stable Job identity, leases, failure recovery, and replay boundaries |
+| **Letta / MemGPT** | Core Memory versus Archival Memory; context-window budgeting; on-demand retrieval of long-term knowledge | Separation of current context and long-term storage, with budgeted Experience/Personal Knowledge injection |
+| **OpenMemory** | Personal Memory ACL, explicit sharing, access auditing, and export/delete lifecycle | Isolated Personal Vault, Group/Bot Projection, fail-closed ACL, usage auditing, and revocable projections |
+
+### Nuke Memory Invariants
+
+- **Physical Group isolation**: Group facts, Bot experiences, and learning jobs remain bound to the Group database; no automatic cross-Group sharing.
+- **SQLite is canonical**: SQLite stores records, evidence, and state; Chroma and Workspace files are rebuildable projections.
+- **Learning follows verification**: Model self-evaluation alone is insufficient; tool results, tests, or task acceptance signals must establish Outcome Evidence.
+- **History is never silently overwritten**: Conflicting knowledge retains temporal validity, supersede relations, and provenance.
+- **Personal knowledge is explicitly projected**: Personal Vault records enter Group/Bot context only after ACL checks for the target, actor, and purpose.
+- **Security precedes persistence**: Secret Redaction and bounded-length handling run before data enters storage, model context, or tracing.
+
+See [Memory System Design](docs/decisions/MEMORY-SYSTEM-DESIGN.md), [Memory Algorithm Upgrade Baseline](docs/decisions/memory-%E7%AE%97%E6%B3%95%E5%8D%87%E7%BA%A7.md), and [Agent Self-Learning Research Notes](docs/agent-self-learning-research-notes.md) for the detailed design and implementation boundaries.
+
+---
+
 ## ⚡ Quick Start
 
 ### Option 1: One-Click Startup Script (Recommended)
