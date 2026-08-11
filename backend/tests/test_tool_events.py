@@ -1114,6 +1114,7 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
             async with db.execute("SELECT declaration_json FROM skill_versions WHERE skill_id=?",(skill_id,)) as cur:
                 declaration = json.loads((await cur.fetchone())[0])
         self.assertEqual(row,("trial","S0")); self.assertEqual(declaration["allowed_tools"],[])
+        self.assertFalse(declaration["execution_plan"]["requires_hil"])
         with self.assertRaises(ValueError):
             validate_declaration({"risk_level":"S1","trigger":"x","procedure":["x"],"allowed_tools":["run_shell"]})
         with self.assertRaisesRegex(ValueError, "executable code"):

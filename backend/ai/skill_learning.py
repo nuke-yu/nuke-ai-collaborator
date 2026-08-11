@@ -224,6 +224,15 @@ async def compile_candidate(record_id: str, group_id: int) -> str | None:
             "tools_sequence": list(everos_tools_sequence),
         },
     }
+    from memory.adapters.algorithms import VoyagerCriticEngine
+    execution_plan = VoyagerCriticEngine.compile_execution_plan(declaration)
+    declaration["execution_plan"] = {
+        "trigger": execution_plan.trigger,
+        "steps": list(execution_plan.steps),
+        "allowed_tools": list(execution_plan.allowed_tools),
+        "verification": list(execution_plan.verification),
+        "requires_hil": execution_plan.requires_hil,
+    }
     validate_declaration(declaration)
     skill_id = "skill:" + hashlib.sha256(f"{group_id}:{row[0]}:{row[2]}".encode()).hexdigest()[:24]
     name = f"learned-{row[2]}"
