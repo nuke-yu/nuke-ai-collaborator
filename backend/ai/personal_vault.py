@@ -176,6 +176,24 @@ async def record_acl_audit_event(
         await db.commit()
 
 
+async def list_acl_audit_events(*, user_id: int, limit: int = 100) -> list[dict[str, object]]:
+    """Read authorization audit metadata without exposing personal content."""
+    async with connect(user_id) as db:
+        async with db.execute(
+            """SELECT audit_id,actor_id,scope_kind,group_id,bot_id,action,allowed,reason,created_at
+               FROM personal_acl_audit_events WHERE user_id=?
+               ORDER BY created_at DESC,audit_id DESC LIMIT ?""",
+            (user_id, max(1, min(limit, 1000))),
+        ) as cur:
+            rows = await cur.fetchall()
+    return [
+        {"audit_id": int(row[0]), "actor_id": str(row[1]), "scope_kind": str(row[2]),
+         "group_id": row[3], "bot_id": row[4], "action": str(row[5]),
+         "allowed": bool(row[6]), "reason": str(row[7]), "created_at": int(row[8])}
+        for row in rows
+    ]
+
+
 async def set_access_control_rule(
     *,
     user_id: int,

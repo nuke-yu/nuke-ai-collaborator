@@ -10,6 +10,7 @@ from ai.personal_vault import (
     delete_vault,
     evaluate_access_control_rule,
     is_personal_app_active,
+    list_acl_audit_events,
     project,
     register_personal_app,
     set_personal_app_status,
@@ -139,6 +140,18 @@ class PersonalGovernanceTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(await set_personal_app_status(user_id=self.user_id, app_id="chat", active=False))
         self.assertFalse(await is_personal_app_active(user_id=self.user_id, app_id="chat"))
         self.assertFalse(await set_personal_app_status(user_id=self.user_id, app_id="missing", active=True))
+
+    async def test_acl_audit_listing_contains_no_memory_content(self) -> None:
+        from ai.personal_vault import record_acl_audit_event
+
+        await record_acl_audit_event(
+            user_id=self.user_id, actor_id="user:999", scope_kind="personal",
+            group_id=None, bot_id=None, action="read", allowed=False,
+            reason="denied by policy",
+        )
+        events = await list_acl_audit_events(user_id=self.user_id)
+        self.assertEqual(events[0]["action"], "read")
+        self.assertNotIn("content", events[0])
 
 
 if __name__ == "__main__":
