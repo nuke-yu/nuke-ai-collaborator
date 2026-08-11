@@ -95,20 +95,67 @@ async def compile_candidate(record_id: str, group_id: int) -> str | None:
     # Experience row from becoming a reusable Skill without a final clean
     # execution state.
     source_case_ids = tuple(json.loads(row[5] or "[]"))
+    everos_cluster_id = ""
+    everos_cluster_size = 0
     if source_case_ids:
         from memory.adapters.algorithms import VoyagerCriticEngine
+        from memory.adapters.algorithms.everos_case_engine import ExtractedCase
+        from memory.adapters.algorithms.everos_clustering_engine import EverOSClusteringEngine
 
         critic = VoyagerCriticEngine()
+        clustering_cases = []
         async with await _memory_db("agent_cases", group_id, write=False) as cases_db:
             for source_case_id in source_case_ids:
                 async with cases_db.execute(
-                    """SELECT task,outcome,errors FROM agent_cases
+                    """SELECT task,outcome,errors,tools_used,files_touched,
+                              outcome_confidence,verification_signals,summary,
+                              correction_evidence_json,created_at FROM agent_cases
                        WHERE case_id=? AND group_id=?""",
                     (str(source_case_id), group_id),
                 ) as case_cur:
                     case_row = await case_cur.fetchone()
                 if not case_row:
                     return None
+                try:
+                    case_errors = tuple(json.loads(case_row[2] or "[]"))
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    case_errors = ()
+                try:
+                    case_tools = tuple(json.loads(case_row[3] or "[]"))
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    case_tools = ()
+                try:
+                    case_files = tuple(json.loads(case_row[4] or "[]"))
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    case_files = ()
+                try:
+                    verification_signals = tuple(json.loads(case_row[6] or "[]"))
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    verification_signals = ()
+                try:
+                    correction_evidence = json.loads(case_row[8] or "{}")
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    correction_evidence = {}
+                clustering_cases.append(
+                    (
+                        ExtractedCase(
+                            case_id=str(source_case_id),
+                            task=str(case_row[0] or ""),
+                            task_signature=str(row[2] or ""),
+                            tools_used=case_tools,
+                            files_touched=case_files,
+                            errors=case_errors,
+                            outcome=str(case_row[1] or ""),
+                            outcome_confidence=float(case_row[5] or 0.0),
+                            verification_signals=verification_signals,
+                            information_gain="high",
+                            should_distill=True,
+                            summary=str(case_row[7] or ""),
+                            correction_evidence=correction_evidence,
+                        ),
+                        float(case_row[9] or 0) / 1000.0,
+                    )
+                )
                 async with cases_db.execute(
                     """SELECT action_tool,observation_status,observation_summary
                        FROM agent_case_attempts
@@ -124,24 +171,33 @@ async def compile_candidate(record_id: str, group_id: int) -> str | None:
                     }
                     for attempt in attempt_rows
                 ]
-                try:
-                    errors = tuple(json.loads(case_row[2] or "[]"))
-                except (TypeError, ValueError, json.JSONDecodeError):
-                    errors = ()
                 critic_result = critic.evaluate_success(
                     str(case_row[0] or ""),
                     str(case_row[1] or ""),
                     tool_records,
-                    errors,
+                    case_errors,
                 )
                 if not critic_result.passed:
                     return None
+
+        if clustering_cases:
+            clusters = EverOSClusteringEngine().cluster_cases(clustering_cases)
+            if not clusters:
+                return None
+            selected_cluster = max(clusters, key=lambda cluster: len(cluster.cases))
+            everos_cluster_id = selected_cluster.cluster_id
+            everos_cluster_size = len(selected_cluster.cases)
 
     declaration = {
         "risk_level":"S0", "trigger":experience.get("task_pattern", ""),
         "procedure":["Review the prior failure mode before planning", "Apply the verified corrective lesson"],
         "verification":[experience.get("verification", "run_terminal_completed")],
         "limitations":experience.get("limitations", ""), "allowed_tools":[],
+        "provenance": {
+            "everos_cluster_id": everos_cluster_id,
+            "everos_cluster_size": everos_cluster_size,
+            "source_case_ids": list(source_case_ids),
+        },
     }
     validate_declaration(declaration)
     skill_id = "skill:" + hashlib.sha256(f"{group_id}:{row[0]}:{row[2]}".encode()).hexdigest()[:24]

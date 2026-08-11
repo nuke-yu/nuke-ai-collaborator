@@ -302,6 +302,7 @@ class LegacyPipelineJobAdapter:
         import json
 
         async with await self._db(group_id, write=True) as db:
+            await self._ensure_checkpoint_table(db)
             await db.execute(
                 """INSERT OR IGNORE INTO memory_checkpoints
                    (checkpoint_id,group_id,thread_id,parent_checkpoint_id,
@@ -336,6 +337,7 @@ class LegacyPipelineJobAdapter:
         import json
 
         async with await self._db(group_id, write=False) as db:
+            await self._ensure_checkpoint_table(db)
             async with db.execute(
                 """SELECT checkpoint_id,parent_checkpoint_id,step_name,
                           state_hash,state_json,created_at
@@ -361,6 +363,22 @@ class LegacyPipelineJobAdapter:
         from ai.memory import _memory_db
 
         return await _memory_db("memory_checkpoints", group_id, write=write)
+
+    @staticmethod
+    async def _ensure_checkpoint_table(db) -> None:
+        """Lazy-create the table for legacy group DBs during rollout."""
+        await db.execute(
+            """CREATE TABLE IF NOT EXISTS memory_checkpoints (
+                checkpoint_id TEXT PRIMARY KEY, group_id INTEGER NOT NULL,
+                thread_id TEXT NOT NULL, parent_checkpoint_id TEXT,
+                step_name TEXT NOT NULL, state_hash TEXT NOT NULL,
+                state_json TEXT NOT NULL DEFAULT '{}', created_at INTEGER NOT NULL
+            )"""
+        )
+        await db.execute(
+            """CREATE INDEX IF NOT EXISTS idx_memory_checkpoints_thread
+               ON memory_checkpoints(group_id,thread_id,created_at)"""
+        )
 
     async def stats(self, scope: MemoryScope) -> dict[str, int]:
         group_id = self._group_id(scope)
