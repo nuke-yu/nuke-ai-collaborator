@@ -111,6 +111,32 @@ class GraphitiTemporalEngine:
             communities.append(tuple(sorted(component)))
         return tuple(sorted(communities, key=lambda group: group[0] if group else ""))
 
+    def hybrid_search(
+        self,
+        query: str,
+        *,
+        lexical_edges: Sequence[TemporalEdge] = (),
+        vector_edges: Sequence[TemporalEdge] = (),
+        top_k: int = 10,
+        as_of: float | None = None,
+    ) -> tuple[TemporalEdge, ...]:
+        """Fuse lexical, vector and graph-active edge lanes with RRF ranks."""
+        active = {edge.edge_id: edge for edge in self.get_active_edges(as_of=as_of)}
+        query_terms = set(re.findall(r"\w+", str(query or "").lower()))
+        lexical = list(lexical_edges) or [
+            edge for edge in active.values()
+            if query_terms & set(re.findall(r"\w+", edge.fact_statement.lower()))
+        ]
+        vector = list(vector_edges)
+        graph = list(active.values())
+        scores: dict[str, float] = {}
+        for lane in (lexical, vector, graph):
+            for rank, edge in enumerate(lane, 1):
+                if edge.edge_id in active:
+                    scores[edge.edge_id] = scores.get(edge.edge_id, 0.0) + 1.0 / (60 + rank)
+        ordered = sorted(scores, key=lambda edge_id: scores[edge_id], reverse=True)
+        return tuple(active[edge_id] for edge_id in ordered[: max(1, top_k)])
+
     def extract_entities(self, text: str) -> tuple[TemporalEntityNode, ...]:
         """Extract conservative entity candidates for graph ingestion.
 

@@ -76,6 +76,14 @@ class TestGraphitiTemporalEngine(unittest.TestCase):
         communities = self.engine.discover_communities(as_of=2)
         self.assertEqual(len(communities), 2)
 
+    def test_hybrid_search_fuses_active_graph_and_rank_lanes(self) -> None:
+        first = self.engine.add_edge("A", "knows", "B", "deployment path", valid_at=1)
+        second = self.engine.add_edge("B", "uses", "C", "database path", valid_at=1)
+        results = self.engine.hybrid_search(
+            "deployment", lexical_edges=[first], vector_edges=[second], top_k=2, as_of=2
+        )
+        self.assertEqual({edge.edge_id for edge in results}, {first.edge_id, second.edge_id})
+
     def test_llm_entity_candidates_fallback_and_parse(self) -> None:
         async def ai_call(_system, _messages):
             return {"content": '["Nuke", "SQLite"]'}
