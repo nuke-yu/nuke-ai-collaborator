@@ -640,11 +640,24 @@ async def _mirror_facts_to_canonical(
         from memory.domain import MemoryScope
 
         observed_at = None if timestamp is None else max(0, int(timestamp * 1000))
+        updated_projection_ids = {
+            replacement_id for _, replacement_id in legacy_conflict_replacements
+        }
         observations = tuple(
             ExtractedFactObservation(
                 content=redact_secrets(fact)[0],
                 importance=score,
                 projection_id=f"fact_{bot_id}_{group_id}_{message_id}_{index}",
+                # ConflictResolver has already established the old→new
+                # relationship.  Preserve that decision in canonical
+                # metadata using Mem0's action vocabulary instead of losing
+                # whether this was a new fact or a replacement.
+                algorithm_action=(
+                    "UPDATE"
+                    if f"fact_{bot_id}_{group_id}_{message_id}_{index}"
+                    in updated_projection_ids
+                    else "ADD"
+                ),
             )
             for index, (fact, score) in enumerate(facts)
         )

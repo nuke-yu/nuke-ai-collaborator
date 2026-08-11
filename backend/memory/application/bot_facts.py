@@ -85,6 +85,7 @@ class BotFactObservationService:
                     "role": command.role,
                     "thread_id": command.thread_id,
                     "projection_state": "legacy_direct_write_with_durable_outbox",
+                    "mem0_action": fact.algorithm_action,
                 }
                 cursor = await db.execute(
                     """INSERT OR IGNORE INTO memory_records

@@ -175,6 +175,7 @@ class ExtractedFactObservation:
     content: str
     importance: float
     projection_id: str
+    algorithm_action: str = "ADD"
 
     def __post_init__(self) -> None:
         if not self.content.strip():
@@ -183,6 +184,8 @@ class ExtractedFactObservation:
             raise ValueError("fact importance must be between 0 and 1")
         if not self.projection_id.strip():
             raise ValueError("projection_id is required")
+        if self.algorithm_action not in {"ADD", "UPDATE", "DELETE", "NOOP"}:
+            raise ValueError("algorithm_action must be ADD, UPDATE, DELETE, or NOOP")
 
 
 @dataclass(frozen=True, slots=True)

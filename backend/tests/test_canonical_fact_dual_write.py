@@ -53,6 +53,7 @@ def _command(*, actor_id: str = "bot:3") -> IngestBotFactObservations:
                 content="The release branch is main",
                 importance=0.7,
                 projection_id="fact_3_7_42_1",
+                algorithm_action="UPDATE",
             ),
         ),
         role="developer",
@@ -94,6 +95,7 @@ class BotFactObservationServiceTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(record_ids), 2)
         self.assertEqual({row[0] for row in rows}, set(record_ids))
+        actions = set()
         for row in rows:
             self.assertEqual(
                 row[1:9],
@@ -106,7 +108,9 @@ class BotFactObservationServiceTest(unittest.IsolatedAsyncioTestCase):
                 '"projection_state": "legacy_direct_write_with_durable_outbox"',
                 row[12],
             )
+            actions.add(__import__("json").loads(row[12])["mem0_action"])
             self.assertEqual(row[13], 123_000)
+        self.assertEqual(actions, {"ADD", "UPDATE"})
         async with db.connect(self.path) as connection:
             async with connection.execute(
                 """SELECT projection_type,status,COUNT(*)
