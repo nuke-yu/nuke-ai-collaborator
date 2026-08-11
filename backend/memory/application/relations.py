@@ -93,6 +93,13 @@ class CanonicalRelationService:
         )
         params: list[object] = [group_id, query.record_id, query.record_id]
         type_filter = ""
+        temporal_filter = ""
+        if query.as_of is not None:
+            temporal_filter = (
+                " AND effective_from<=?"
+                " AND (valid_to IS NULL OR valid_to>?)"
+            )
+            params.extend((query.as_of, query.as_of))
         if relation_types:
             placeholders = ",".join("?" for _ in relation_types)
             type_filter = f" AND relation_type IN ({placeholders})"
@@ -107,6 +114,7 @@ class CanonicalRelationService:
                 FROM memory_relations
                 WHERE group_id=? AND status='active'
                   AND (from_record_id=? OR to_record_id=?)"""
+                + temporal_filter
                 + type_filter
                 + " ORDER BY effective_from,relation_id",
                 tuple(params),

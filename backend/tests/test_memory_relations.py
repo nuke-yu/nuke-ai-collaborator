@@ -113,6 +113,36 @@ class CanonicalRelationServiceTest(unittest.IsolatedAsyncioTestCase):
             [MemoryRelationType.CONTRADICTS],
         )
 
+    async def test_relation_recall_reconstructs_point_in_time_state(self) -> None:
+        await self.service.create(CreateMemoryRelation(
+            scope=MemoryScope.group(group_id=7, actor_id="system:timeline"),
+            from_record_id="fact:new",
+            to_record_id="fact:old",
+            relation_type=MemoryRelationType.SUPERSEDES,
+            source_type="timeline",
+            source_id="timeline:1",
+            effective_from=100,
+        ))
+        async with db.connect(self.path) as connection:
+            await connection.execute(
+                "UPDATE memory_relations SET valid_to=200"
+            )
+            await connection.commit()
+
+        scope = MemoryScope.group(group_id=7, actor_id="system:timeline")
+        self.assertEqual(
+            len(await self.service.recall(RecallMemoryRelations(
+                scope=scope, record_id="fact:new", as_of=150
+            ))),
+            1,
+        )
+        self.assertEqual(
+            await self.service.recall(RecallMemoryRelations(
+                scope=scope, record_id="fact:new", as_of=250
+            )),
+            (),
+        )
+
     async def test_cross_group_endpoint_fails_closed(self) -> None:
         await self._insert_record("fact:other-group", 8)
 
