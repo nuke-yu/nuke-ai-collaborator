@@ -62,4 +62,17 @@ Artifact、Store Registry、Memory evaluation、MCP proxy/collector 和 Promethe
 - Emergency context pruning 改为按完整 assistant tool-call + tool-result 组删除，避免产生孤立 `role=tool` 消息。
 - Graphiti hybrid search 的 RRF `k` 改为构造参数，默认仍为 60，可按召回分布校准。
 
+## 2026-08-12 P0/P1/P2 反馈复核结果
+
+- 测试依赖补齐 `pytest-asyncio`；此前 9 个 async 用例未执行的问题属实。
+- AutoGen 自动重试现在强制经过 `classify_tool_effect`，仅 `READ` 工具可重试；allowlist 不再构成安全证明。
+- 失败洞察在全部 `role=tool` 结果之后追加，保持 tool-call 协议的原子顺序。
+- Checkpoint 持久化和 pending write 均先脱敏并限长；prune/delete 在同一事务清理关联 pending writes。DAG 校验重新计算 state hash，并校验 parent 存在且同 thread。
+- EverOS source snapshot 先脱敏、限长后落库；Personal projection API 要求 `app_id`，状态检查与 INSERT 在同一连接事务内完成，避免 TOCTOU。
+- Relation candidate 的 composition root 已注入 group membership authorizer；无授权 actor 不得写入关系。
+- Voyager sandbox 根据工具名称重新计算 HIL，验证失败支持显式 rollback；未知 curriculum dependency fail-closed。
+- Graphiti 仅对显式声明的 functional relation 失效旧边，`member_of` 等多值关系保留并存事实；Personal Vault 重复 lock 定义已清理。
+
+有两项反馈不作为代码缺陷处理：`run_skill` 当前是受 ToolRouter 权限钩子保护的技能内容加载器，并非 `SkillExecutionPlan` 的 callable 执行器，因此不能把 Voyager sandbox 强行包裹在该路径；历史 commit 是否逐个 bisect-safe 需要重写提交历史，本轮不改写既有历史，只保证当前修复提交及测试可独立验证。文档中不再宣称上述两项已接入或历史提交可独立测试。
+
 契约测试 `test_memory_module_contracts.py` 现已通过；报告中提到的两项分层违例在当前代码中已关闭。Personal app 当前真实状态值是 `active/inactive`，不是 `disabled/archived`，后者不应写入能力说明。
