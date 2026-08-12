@@ -819,3 +819,19 @@ EverOS、AutoGen、Voyager 的价值主要在第二层，而不是简单的向�
 - OpenMemory 解决“谁可以读取哪一类记忆”。
 
 Nuke 的完整 Memory 能力，实际上是这些层叠加后的结果，而不是某一个项目的单一实现。
+
+## 14. 2026-08-12 完成项复核
+
+本轮已补齐并逐项测试：
+
+- **AutoGen**：失败→纠正→验证成功后才写入 Experience；工具循环可通过显式策略启用，默认保持关闭。
+- **EverOS**：Skill 候选同时生成 JSON snapshot 与可审阅 Markdown source，保留 Case 证据、验证条件和执行计划。
+- **Letta**：新增按 group 隔离的 durable memory blocks，支持重要性排序、访问时间更新和显式 eviction；工具循环在上下文截断前分页注入。
+- **Voyager**：Skill execution plan 经过风险/HIL/工具白名单校验后，只能调用注册 callable，禁止 shell/eval/exec 字符串执行，并支持验证器门控。
+- **Graphiti**：LLM relation candidate 经过 JSON、类型、证据和 scope 校验后才进入事务；保留 temporal validity 与 superseded history。
+- **OpenMemory**：personal app 生命周期、审计和 fail-closed projection 已接入；ACL 增加 action 维度（read/write/delete 等），规则按 subject/object/action specificity 计算，deny 优先。
+- **Mem0**：新增完整 extraction→reconcile 编排；LLM 返回空/异常时回退 deterministic extractor，避免 provider 故障丢失 durable fact。
+- **RRF/MMR**：支持分数校准和可选 reranker，reranker 失败时 fail-soft 回退基础融合。
+- **LangGraph**：提供 `put/get_tuple/put_writes/pending_writes/delete_thread` saver-compatible 接口，映射到 durable checkpoint/pending-write 语义。
+
+仍需单独评估的不是“是否存在代码”，而是生产数据规模下的指标校准：Graphiti 的实体解析质量、Letta 的真实 tokenizer 预算、Voyager Skill 的长期复用收益，以及 Mem0 LLM 抽取的成本/延迟。这些属于上线观测与模型评估，不应伪装成已经完成的算法能力。
