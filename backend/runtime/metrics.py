@@ -194,6 +194,24 @@ class SupervisorCollector:
         writer_busy_timeout = GaugeMetricFamily(
             "nuke_sqlite_writer_busy_timeout_seconds",
             "Configured native SQLite busy timeout.", labels=["worker_id"])
+        memory_graph_accuracy = GaugeMetricFamily(
+            "nuke_memory_graph_resolution_accuracy",
+            "Graph entity resolution accuracy from labeled evaluation samples.", labels=["worker_id"])
+        memory_retrieval_recall = GaugeMetricFamily(
+            "nuke_memory_retrieval_recall",
+            "Memory retrieval recall from labeled evaluation samples.", labels=["worker_id"])
+        memory_skill_reuse = GaugeMetricFamily(
+            "nuke_memory_skill_reuse_success_rate",
+            "Verified learned-skill reuse success rate.", labels=["worker_id"])
+        memory_latency = GaugeMetricFamily(
+            "nuke_memory_operation_latency_ms_avg",
+            "Average measured Memory operation latency in milliseconds.", labels=["worker_id"])
+        memory_cost = CounterMetricFamily(
+            "nuke_memory_operation_cost_total",
+            "Accumulated Memory operation cost estimate.", labels=["worker_id"])
+        memory_tokenizer_error = GaugeMetricFamily(
+            "nuke_memory_tokenizer_abs_error_avg",
+            "Average absolute error of heuristic token estimate versus provider tokenizer.", labels=["worker_id"])
         now = time.time()
         for wid, payload in worker_stats.items():
             bg_tasks.add_metric([wid], float(_dig(payload, "bg", "active")))
@@ -210,6 +228,13 @@ class SupervisorCollector:
             writer_busy_timeout.add_metric(
                 [wid], float(_dig(payload, "sqlite_writer", "busy_timeout_ms")) / 1000.0
             )
+            evaluation = payload.get("memory_evaluation") or {}
+            memory_graph_accuracy.add_metric([wid], float(evaluation.get("graph_resolution_accuracy", 0.0)))
+            memory_retrieval_recall.add_metric([wid], float(evaluation.get("retrieval_recall", 0.0)))
+            memory_skill_reuse.add_metric([wid], float(evaluation.get("skill_reuse_success_rate", 0.0)))
+            memory_latency.add_metric([wid], float(evaluation.get("operation_latency_ms_avg", 0.0)))
+            memory_cost.add_metric([wid], float(evaluation.get("operation_cost_total", 0.0)))
+            memory_tokenizer_error.add_metric([wid], float(evaluation.get("tokenizer_abs_error_avg", 0.0)))
             ts = worker_stats_ts.get(wid)
             if ts is not None:
                 age.add_metric([wid], max(0.0, now - ts))
@@ -226,6 +251,12 @@ class SupervisorCollector:
         yield writer_wait_max
         yield writer_tx_max
         yield writer_busy_timeout
+        yield memory_graph_accuracy
+        yield memory_retrieval_recall
+        yield memory_skill_reuse
+        yield memory_latency
+        yield memory_cost
+        yield memory_tokenizer_error
 
         # ── canonical memory ↔ Chroma shadow audit ──────────────────────
         audit_fields = (

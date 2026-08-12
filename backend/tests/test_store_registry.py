@@ -32,6 +32,22 @@ class TestStoreRegistry(unittest.TestCase):
         with self.assertRaises(StoreGovernanceError):
             StoreDescriptor("invalid", "test", "group", "eventual", migration_id="m1", canonical=False)
 
+    def test_operation_requires_bound_executor_and_returns_governed_plan(self):
+        registry = StoreRegistry()
+        registry.register(StoreDescriptor("demo", "test", "group", "strong", migration_id="demo_v1"))
+        with self.assertRaises(StoreGovernanceError):
+            import asyncio
+            asyncio.run(registry.execute("demo", "backup"))
+        registry.bind_executor("demo", backup=lambda destination: {"destination": destination})
+        import asyncio
+        result = asyncio.run(registry.execute("demo", "backup", destination="/tmp/demo.bak"))
+        self.assertEqual(result["migration_id"], "demo_v1")
+        self.assertEqual(result["result"]["destination"], "/tmp/demo.bak")
+
+    def test_audit_hold_blocks_delete_plan(self):
+        with self.assertRaises(StoreGovernanceError):
+            store_registry.operation_plan("model_usage", "delete")
+
 
 if __name__ == "__main__":
     unittest.main()

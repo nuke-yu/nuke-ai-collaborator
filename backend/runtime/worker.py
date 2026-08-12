@@ -112,6 +112,7 @@ class Worker:
         while True:
             try:
                 snapshot = get_prometheus_metrics().get_metrics_snapshot()
+                from memory.evaluation import export_memory_evaluation
                 stats = {
                     "bg": bg.stats(),
                     "permissions": permissions.pending_stats(),
@@ -119,6 +120,7 @@ class Worker:
                     "sqlite_writer": db.writer_stats(),
                     "worker_id": self.worker_id,
                     "obs_metrics_snapshot": snapshot,
+                    "memory_evaluation": export_memory_evaluation(),
                 }
                 await ipc.send_msg(self._writer, ipc.protocol.envelope(
                     ipc.protocol.STATS_REPORT, group_id=0, payload=stats

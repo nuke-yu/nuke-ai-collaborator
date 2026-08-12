@@ -48,8 +48,17 @@ class LettaOpenMemoryEngine:
                 if hasattr(encoded, "ids"):
                     return len(encoded.ids)
                 if isinstance(encoded, Mapping) and "input_ids" in encoded:
-                    return len(encoded["input_ids"])
-                return len(encoded)
+                    count = len(encoded["input_ids"])
+                else:
+                    count = len(encoded)
+                try:
+                    from memory.evaluation import memory_evaluation
+                    cjk = sum("\u4e00" <= char <= "\u9fff" for char in text)
+                    heuristic = cjk + ((len(text) - cjk) // 4)
+                    memory_evaluation.record_tokenizer_calibration(heuristic, count)
+                except Exception:
+                    pass
+                return count
             except Exception:
                 # Tokenizer failures must not break the model loop; retain the
                 # deterministic conservative fallback below.

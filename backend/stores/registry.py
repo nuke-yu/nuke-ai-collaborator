@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import inspect
+from typing import Any, Awaitable, Callable
 
 
 class StoreGovernanceError(ValueError):
@@ -55,6 +57,7 @@ class StoreDescriptor:
 class StoreRegistry:
     def __init__(self) -> None:
         self._stores: dict[str, StoreDescriptor] = {}
+        self._executors: dict[str, dict[str, Callable[..., Any]]] = {}
 
     def register(self, descriptor: StoreDescriptor) -> None:
         existing = self._stores.get(descriptor.store_id)
@@ -78,6 +81,35 @@ class StoreRegistry:
     def governance_report(self) -> list[dict[str, str | bool | None]]:
         """Return a stable audit view suitable for startup checks and admin tooling."""
         return [store.to_dict() for store in sorted(self._stores.values(), key=lambda item: item.store_id)]
+
+    def bind_executor(self, store_id: str, *, migrate: Callable[..., Any] | None = None,
+                      backup: Callable[..., Any] | None = None,
+                      delete: Callable[..., Any] | None = None) -> None:
+        """Bind host-specific side effects behind the registry contract."""
+        self.get(store_id)
+        callbacks = {k: v for k, v in {"migrate": migrate, "backup": backup, "delete": delete}.items() if v}
+        self._executors[store_id] = callbacks
+
+    def operation_plan(self, store_id: str, operation: str) -> dict[str, Any]:
+        descriptor = self.get(store_id)
+        if operation not in {"migrate", "backup", "delete"}:
+            raise StoreGovernanceError(f"unsupported store operation: {operation}")
+        if operation == "delete" and descriptor.canonical and descriptor.deletion_policy == "audit_hold":
+            raise StoreGovernanceError(f"store is under audit hold: {store_id}")
+        return {"store_id": store_id, "operation": operation, "migration_id": descriptor.migration_id,
+                "version": descriptor.version, "canonical": descriptor.canonical,
+                "projection_of": descriptor.projection_of}
+
+    async def execute(self, store_id: str, operation: str, **kwargs: Any) -> dict[str, Any]:
+        """Execute a governed operation only through an explicitly bound handler."""
+        plan = self.operation_plan(store_id, operation)
+        handler = self._executors.get(store_id, {}).get(operation)
+        if handler is None:
+            raise StoreGovernanceError(f"no executor bound for {store_id}:{operation}")
+        result = handler(**kwargs)
+        if inspect.isawaitable(result):
+            result = await result
+        return {**plan, "result": result}
 
 
 store_registry = StoreRegistry()

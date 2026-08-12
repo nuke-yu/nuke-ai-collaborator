@@ -25,6 +25,7 @@ from artifacts import (
     list_artifacts,
     register_artifact,
     revoke_artifact,
+    purge_deleted_artifacts,
 )
 from db.schema_split import init_group_db
 from runtime.dbpaths import group_db_path
@@ -172,6 +173,33 @@ class TestArtifactManager(unittest.IsolatedAsyncioTestCase):
 
         with self.assertRaises(ArtifactNotFoundError):
             await get_artifact(art.artifact_id, group_id=1)
+
+    async def test_purge_deleted_artifact_removes_group_local_file_and_tombstone(self):
+        with patch("skills.constants.WORKSPACE_ROOT", self.tmp_dir):
+            path = os.path.join(self.tmp_dir, "group_1", "shared", "old.txt")
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write("old")
+            art = await register_artifact(
+                group_id=1, display_name="old.txt", origin=ArtifactOrigin.WORKSPACE,
+                storage_locator=path,
+            )
+            self.assertTrue(await delete_artifact(art.artifact_id, 1))
+            result = await purge_deleted_artifacts(1, older_than_seconds=0)
+            self.assertEqual(result["purged"], [art.artifact_id])
+            self.assertFalse(os.path.exists(path))
+            with self.assertRaises(ArtifactNotFoundError):
+                await get_artifact(art.artifact_id, group_id=1)
+
+    async def test_purge_skips_external_locator(self):
+        art = await register_artifact(
+            group_id=1, display_name="remote", origin=ArtifactOrigin.CONNECTOR,
+            storage_locator="https://example.invalid/object",
+        )
+        await delete_artifact(art.artifact_id, 1)
+        result = await purge_deleted_artifacts(1, older_than_seconds=0)
+        self.assertEqual(result["purged"], [])
+        self.assertEqual(result["skipped"][0]["reason"], "external_or_unsafe_locator")
 
     async def test_revoke_and_lineage_governance(self):
         parent = await register_artifact(

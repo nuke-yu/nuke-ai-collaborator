@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import uuid
+from pathlib import Path
 from dataclasses import asdict, dataclass, field
 from enum import StrEnum
 from typing import Any, Mapping
@@ -304,6 +305,64 @@ async def delete_artifact(artifact_id: str, group_id: int) -> bool:
         )
         await conn.commit()
         return cursor.rowcount > 0
+
+
+def _safe_artifact_path(group_id: int, locator: str) -> Path | None:
+    """Resolve a locator only when it is inside the owning Group workspace."""
+    if not locator or locator.startswith(("http://", "https://", "s3://")):
+        return None
+    from workspace import layout
+    root = layout.group_dir(group_id).resolve()
+    try:
+        candidate = Path(locator).expanduser().resolve(strict=False)
+        candidate.relative_to(root)
+    except (OSError, ValueError):
+        return None
+    if candidate == root or candidate.is_dir():
+        return None
+    return candidate
+
+
+async def purge_deleted_artifacts(
+    group_id: int, *, older_than_seconds: int = 86400, dry_run: bool = False
+) -> dict[str, Any]:
+    """Physically remove expired deleted artifacts, then remove DB tombstones.
+
+    Only Group-local files are eligible. External locators remain auditable and
+    are reported as skipped; a DB row is never removed before physical cleanup.
+    """
+    if older_than_seconds < 0:
+        raise ValueError("older_than_seconds must be non-negative")
+    async with _db.connect() as conn:
+        async with conn.execute(
+            """SELECT artifact_id,storage_locator FROM group_artifacts
+               WHERE group_id=? AND lifecycle_status='deleted'
+                 AND deleted_at <= datetime('now', ?)""",
+            (group_id, f"-{int(older_than_seconds)} seconds"),
+        ) as cur:
+            rows = await cur.fetchall()
+        purged: list[str] = []
+        skipped: list[dict[str, str]] = []
+        for artifact_id, locator in rows:
+            path = _safe_artifact_path(group_id, str(locator or ""))
+            if path is None:
+                skipped.append({"artifact_id": str(artifact_id), "reason": "external_or_unsafe_locator"})
+                continue
+            if not dry_run and path.exists():
+                try:
+                    path.unlink()
+                except OSError as exc:
+                    skipped.append({"artifact_id": str(artifact_id), "reason": f"unlink_failed:{exc}"})
+                    continue
+            if not dry_run:
+                await conn.execute(
+                    "DELETE FROM group_artifacts WHERE artifact_id=? AND group_id=? AND lifecycle_status='deleted'",
+                    (artifact_id, group_id),
+                )
+            purged.append(str(artifact_id))
+        if not dry_run:
+            await conn.commit()
+    return {"group_id": group_id, "purged": purged, "skipped": skipped, "dry_run": dry_run}
 
 
 async def revoke_artifact(artifact_id: str, group_id: int) -> bool:
