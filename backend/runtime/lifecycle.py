@@ -430,6 +430,7 @@ class LifecycleManager:
     ) -> None:
         """Apply Event Policy retention only to Groups leased by this Worker."""
         from observability.retention import enforce_group_retention
+        from artifacts import purge_deleted_artifacts
 
         if group_ids is None:
             async with self._lock:
@@ -440,6 +441,16 @@ class LifecycleManager:
             try:
                 with db.bind_db(group_db_path(group_id)):
                     result = await enforce_group_retention(group_id)
+                    try:
+                        result["artifact_purge"] = await purge_deleted_artifacts(
+                            group_id, older_than_seconds=86400
+                        )
+                    except Exception:
+                        # Older/partially migrated Group DBs still receive
+                        # observability retention; artifact cleanup retries on
+                        # the next maintenance cycle after schema migration.
+                        log.exception("lifecycle: artifact purge deferred for group %d", group_id)
+                        result["artifact_purge"] = {"group_id": group_id, "deferred": True}
                 result["last_enforced_at"] = time.time()
                 self._observability_retention_stats[group_id] = result
             except asyncio.CancelledError:
