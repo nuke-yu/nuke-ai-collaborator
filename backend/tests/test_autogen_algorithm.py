@@ -110,9 +110,45 @@ class TestAutoGenFailureEngine(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(calls, 1)
         self.assertEqual(result.insights[0].category, FailureCategory.PERMISSION_DENIED)
 
+    async def test_run_with_retry_stores_only_after_validation(self) -> None:
+        stored = []
+
+        async def store(response, insights):
+            stored.append((response, insights))
+
+        async def validate_false(response):
+            return response is True
+
+        async def validate_true(response):
+            return response is True
+
+        result = await self.engine.run_with_retry(
+            "task", lambda _task, _insights: _always_false(),
+            validate_false,
+            max_retries=0,
+            store_fn=store,
+        )
+        self.assertFalse(result.succeeded)
+        self.assertFalse(result.stored)
+        self.assertEqual(stored, [])
+
+        result = await self.engine.run_with_retry(
+            "task", lambda _task, _insights: _always_true(),
+            validate_true,
+            max_retries=0,
+            store_fn=store,
+        )
+        self.assertTrue(result.succeeded)
+        self.assertTrue(result.stored)
+        self.assertEqual(len(stored), 1)
+
 
 async def _always_false() -> bool:
     return False
+
+
+async def _always_true() -> bool:
+    return True
 
 
 class TestAutoGenFailureAlgorithmAdapter(unittest.IsolatedAsyncioTestCase):

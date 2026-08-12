@@ -37,6 +37,7 @@ class RetryResult:
     attempts: int
     response: Any
     insights: tuple[FailureInsight, ...]
+    stored: bool = False
 
 
 AUTOGEN_FAILURE_SYSTEM_PROMPT = """You are an AutoGen Task-Centric Failure Reflection Agent.
@@ -220,6 +221,7 @@ class AutoGenFailureEngine:
         max_retries: int = 2,
         ai_call_fn: Any = None,
         retryable_categories: Sequence[FailureCategory | str] | None = None,
+        store_fn: Callable[[Any, tuple[FailureInsight, ...]], Awaitable[Any]] | None = None,
     ) -> RetryResult:
         """Execute AutoGen's failure→insight→retry→validate loop.
 
@@ -240,7 +242,11 @@ class AutoGenFailureEngine:
         for attempt in range(max_retries + 1):
             response = await attempt_fn(task, tuple(insights))
             if await validate_fn(response):
-                return RetryResult(True, attempt + 1, response, tuple(insights))
+                stored = False
+                if store_fn is not None:
+                    await store_fn(response, tuple(insights))
+                    stored = True
+                return RetryResult(True, attempt + 1, response, tuple(insights), stored)
             if attempt >= max_retries:
                 break
             errors = [str(response)[:2000]]
