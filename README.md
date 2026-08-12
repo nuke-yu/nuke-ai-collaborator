@@ -195,6 +195,7 @@ Nuke 没有把下列项目作为第二套运行时直接嵌入，而是研究其
 - **安全先于沉淀**：写入存储、模型上下文或链路追踪前执行 Secret Redaction，并限制内容长度。
 
 更完整的设计与实现边界见 [Memory System Design](docs/decisions/MEMORY-SYSTEM-DESIGN.md)、[Memory 算法升级基线](docs/decisions/memory-%E7%AE%97%E6%B3%95%E5%8D%87%E7%BA%A7.md) 和 [Agent 自学习研究笔记](docs/agent-self-learning-research-notes.md)。
+本轮渠道重放、WeChat 分片、Graphiti BFS 和最终上下文预算的架构复核见 [治理缺口闭环记录](docs/2026-08-12-governance-gap-closure.md)。
 
 ---
 

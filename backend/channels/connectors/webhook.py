@@ -36,6 +36,7 @@ class SignedWebhookConnector:
         self,
         *,
         channel: str,
+        channel_instance_id: str | None = None,
         secret: str,
         send: Callable[[OutboundEnvelope], Awaitable[str]] | None = None,
         replay_guard: Callable[[str, int], Awaitable[bool]] | None = None,
@@ -45,6 +46,9 @@ class SignedWebhookConnector:
         if not channel.strip() or not secret:
             raise ValueError("channel and secret are required")
         self.channel = channel.strip().lower()
+        self.channel_instance_id = str(channel_instance_id or self.channel).strip().lower()
+        if not self.channel_instance_id:
+            raise ValueError("channel_instance_id is required")
         self._secret = secret.encode()
         self._send = send
         if replay_window_seconds <= 0:
@@ -98,7 +102,7 @@ class SignedWebhookConnector:
         # Prefer the platform event identity over a timestamp/body hash. This
         # makes the durable guard resilient to clock skew and permits a 24h
         # uniqueness window in ChannelStore.
-        replay_key = f"{self.channel}:{tenant}:{message_id}"
+        replay_key = f"{self.channel_instance_id}:{tenant}:{message_id}"
         if self._replay_guard is not None:
             accepted = await self._replay_guard(replay_key, timestamp_value)
         elif self._allow_in_memory_replay_guard:
