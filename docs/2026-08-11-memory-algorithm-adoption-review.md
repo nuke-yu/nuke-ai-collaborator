@@ -160,19 +160,19 @@ Nuke 对应代码：
 
 论文的召回分数结合 recency、importance、relevance，并支持周期性 reflection。Nuke 当前 `lexical + vector + cluster + confidence` 的召回与其思想相近，但不是同一实现；Nuke 也没有实现 Generative Agents 的完整 reflection tree。
 
-## 最终状态摘要
+## 最终状态摘要（2026-08-12 复核）
 
 | 算法 | 已吸收的主要能力 | 当前未完成部分 |
 |---|---|---|
-| Mem0 | 事实级 ADD/UPDATE/DELETE/NOOP 决策、canonical 双写 | 原始 Mem0 LLM extractor/prompt 不是唯一事实抽取器 |
-| EverOS | Case → Experience → Skill、cluster provenance、induction artifact | OME/Markdown 源事实和独立反思调度 |
-| AutoGen | 失败分析、工具循环 corrective insight、验证门控 | 不对所有失败自动重试，需显式 retry policy |
-| Graphiti/Zep | 时序事实、alias、关系失效、有界图遍历 | LLM 实体抽取、社区发现、完整 Hybrid Search |
-| RRF/MMR | 关键词/向量/cluster 三路融合与去冗余 | 没有 cross-encoder |
-| Voyager | Critic 成功门控、Skill 生命周期、复用反馈、依赖式 Curriculum 排序 | 可执行代码 Skill Library |
-| LangGraph | Durable job、lease、checkpoint、pending writes、fork/prune | 不是官方 Saver，resume 由 Nuke worker 恢复 |
-| Letta/MemGPT | 分层记忆、按需注入、上下文预算 | 主动 paging、function memory、真实 tokenizer |
-| OpenMemory | Personal Vault、ACL、隔离、审计 | 完整 ABAC 数据模型和访问日志 |
+| Mem0 | ✅ ADD/UPDATE/DELETE/NOOP、LLM 编排、canonical 双写、deterministic fallback | 生产成本与模型质量仍需观测 |
+| EverOS | ✅ Case → Experience → Skill、cluster provenance、JSON/Markdown source truth | 独立反思调度仍需持续评估 |
+| AutoGen | ✅ 失败分析、纠正、验证门控、可选 Retry→Validate→Store | 默认不对所有失败自动重试（安全策略） |
+| Graphiti/Zep | ✅ 时序事实、alias、关系失效、LLM relation candidate、有限图检索 | 实体解析质量和规模化图检索仍需评估 |
+| RRF/MMR | ✅ 关键词/向量/cluster 融合、MMR、分数校准、reranker fail-soft | cross-encoder 未作为强依赖 |
+| Voyager | ✅ Critic、Skill 生命周期、复用反馈、Curriculum、注册工具安全沙箱 | 长期 Skill 收益需线上指标验证 |
+| LangGraph | ✅ durable checkpoint、pending writes、fork/prune、Saver-compatible API | 非官方 SQLite Saver 实现 |
+| Letta/MemGPT | ✅ 分层记忆、paging、durable blocks、eviction、上下文预算 | 真实 tokenizer 与主动 function memory 仍需评估 |
+| OpenMemory | ✅ Personal Vault、App 生命周期、action-scoped ABAC、隔离、审计 | 与第三方 ORM 的兼容性需持续验证 |
 
 ### 2026-08-11 实现进展补充
 
