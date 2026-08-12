@@ -96,7 +96,30 @@ def build_bot_reflection_client() -> BotReflectionService:
 
 
 def build_memory_relation_client() -> CanonicalRelationService:
-    return CanonicalRelationService(legacy_memory_database)
+    async def authorize_relation(scope) -> bool:
+        actor = scope.actor_id
+        if actor.startswith(("system:", "service:")):
+            return True
+        from db import global_db
+        try:
+            actor_id = int(actor.split(":", 1)[1])
+        except (IndexError, ValueError):
+            return False
+        async with global_db() as db:
+            if actor.startswith("user:"):
+                async with db.execute(
+                    "SELECT 1 FROM group_memberships WHERE user_id=? AND group_id=?",
+                    (actor_id, scope.group_id),
+                ) as cur:
+                    return await cur.fetchone() is not None
+            if actor.startswith("bot:"):
+                async with db.execute(
+                    "SELECT 1 FROM members WHERE id=? AND group_id=? AND type='bot'",
+                    (actor_id, scope.group_id),
+                ) as cur:
+                    return await cur.fetchone() is not None
+        return False
+    return CanonicalRelationService(legacy_memory_database, authorize_relation)
 
 
 def build_bot_memory_projection_auditor() -> BotMemoryProjectionAuditService:

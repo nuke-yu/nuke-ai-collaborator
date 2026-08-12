@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import time
 import uuid
+import json
 from typing import Any
 
 import aiosqlite
@@ -15,6 +16,18 @@ from memory.contracts import (ApproveSkillCandidate, AssembleCase,
                               RecallSkills, ResolveLearningRefs,
                               SkillCandidate, VerifyUsage)
 from memory.domain import MemoryScope, ScopeKind
+
+
+def _safe_payload(value: Any, *, limit: int = 100_000) -> dict[str, Any]:
+    """Serialize, redact, and bound persisted learning payloads."""
+    from executors.redaction import redact_secrets
+    raw = json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)[:limit]
+    safe, _ = redact_secrets(raw)
+    try:
+        parsed = json.loads(safe)
+    except json.JSONDecodeError:
+        return {"_truncated": safe[:limit]}
+    return parsed if isinstance(parsed, dict) else {"value": parsed}
 
 
 class LegacyLearningAdapter:
@@ -293,14 +306,13 @@ class LegacyPipelineJobAdapter:
         group_id = self._group_id(scope)
         from memory.adapters.algorithms import LangGraphDAGEngine
 
+        safe_state = _safe_payload(state)
         checkpoint = LangGraphDAGEngine().create_checkpoint(
             thread_id=thread_id,
             step_name=step_name,
-            state=state,
+            state=safe_state,
             parent_id=parent_checkpoint_id,
         )
-        import json
-
         async with await self._db(group_id, write=True) as db:
             await self._ensure_checkpoint_table(db)
             await db.execute(
@@ -315,7 +327,7 @@ class LegacyPipelineJobAdapter:
                     checkpoint.parent_checkpoint_id,
                     checkpoint.step_name,
                     checkpoint.state_hash,
-                    json.dumps(checkpoint.state_payload, ensure_ascii=False, sort_keys=True),
+                    json.dumps(checkpoint.state_payload, ensure_ascii=False, sort_keys=True, default=str),
                     int(checkpoint.created_at * 1000),
                 ),
             )
@@ -383,6 +395,11 @@ class LegacyPipelineJobAdapter:
                     f"AND checkpoint_id IN ({placeholders})",
                     (group_id, *stale_ids),
                 )
+                await db.execute(
+                    f"DELETE FROM memory_checkpoint_pending_writes WHERE group_id=? "
+                    f"AND checkpoint_id IN ({placeholders})",
+                    (group_id, *stale_ids),
+                )
             await db.commit()
         return len(stale_ids)
 
@@ -396,6 +413,11 @@ class LegacyPipelineJobAdapter:
             cur = await db.execute(
                 "DELETE FROM memory_checkpoints WHERE group_id=? AND thread_id=?",
                 (group_id, thread_id),
+            )
+            await db.execute(
+                "DELETE FROM memory_checkpoint_pending_writes WHERE group_id=? "
+                "AND checkpoint_id NOT IN (SELECT checkpoint_id FROM memory_checkpoints)",
+                (group_id,),
             )
             await db.commit()
         return int(cur.rowcount)
@@ -417,7 +439,6 @@ class LegacyPipelineJobAdapter:
             raise ValueError("checkpoint_id, task_id and channel are required")
         group_id = self._group_id(scope)
         import hashlib
-        import json
 
         write_id = "pwrite:" + hashlib.sha256(
             f"{group_id}:{checkpoint_id}:{task_id}:{channel}".encode()
@@ -432,7 +453,7 @@ class LegacyPipelineJobAdapter:
                    ON CONFLICT(group_id,checkpoint_id,task_id,channel)
                    DO UPDATE SET value_json=excluded.value_json,created_at=excluded.created_at""",
                 (write_id, group_id, checkpoint_id, task_id, channel,
-                 json.dumps(value, ensure_ascii=False, sort_keys=True, default=str), now),
+                 json.dumps(_safe_payload(value), ensure_ascii=False, sort_keys=True, default=str), now),
             )
             await db.commit()
         return write_id

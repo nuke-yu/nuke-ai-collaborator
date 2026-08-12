@@ -50,6 +50,10 @@ class TestVoyagerCriticEngine(unittest.IsolatedAsyncioTestCase):
                 {"id": "b", "depends_on": ["a"]},
             ])
 
+    def test_build_curriculum_rejects_unknown_dependencies(self) -> None:
+        with self.assertRaisesRegex(ValueError, "unknown curriculum dependency"):
+            self.engine.build_curriculum([{"id": "deploy", "depends_on": ["missing"]}])
+
     def test_compile_execution_plan_is_auditable_and_non_executing(self) -> None:
         plan = self.engine.compile_execution_plan({
             "risk_level": "S1", "trigger": "deploy", "procedure": ["run tests"],

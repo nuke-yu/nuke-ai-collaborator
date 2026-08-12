@@ -116,19 +116,6 @@ async def _ensure_schema(db: aiosqlite.Connection) -> None:
             raise RuntimeError("personal vault foreign key check failed")
 
 
-import weakref
-
-
-_vault_locks: weakref.WeakValueDictionary[int, asyncio.Lock] = weakref.WeakValueDictionary()
-
-def _get_vault_lock(user_id: int) -> asyncio.Lock:
-    lock = _vault_locks.get(user_id)
-    if lock is None:
-        lock = asyncio.Lock()
-        _vault_locks[user_id] = lock
-    return lock
-
-
 @asynccontextmanager
 async def connect(user_id: int):
     lock = _get_vault_lock(user_id)
@@ -388,9 +375,15 @@ def _get_vault_lock(user_id: int) -> asyncio.Lock:
 async def project(*, user_id: int, record_id: str, group_id: int, bot_id: int | None, purpose: str,
                   expires_at: int | None = None, allow_restricted: bool = False,
                   app_id: str | None = None) -> str:
-    if app_id is not None and not await is_personal_app_active(user_id=user_id, app_id=app_id):
-        raise ValueError("personal app is inactive or not registered")
     async with connect(user_id) as db:
+        if app_id is not None:
+            async with db.execute(
+                "SELECT status FROM personal_apps WHERE user_id=? AND app_id=?",
+                (user_id, app_id),
+            ) as cur:
+                app_row = await cur.fetchone()
+            if not app_row or str(app_row[0]) != "active":
+                raise ValueError("personal app is inactive or not registered")
         async with db.execute(
             "SELECT sensitivity, status, explicit FROM personal_records WHERE record_id=? AND user_id=?",
             (record_id, user_id),

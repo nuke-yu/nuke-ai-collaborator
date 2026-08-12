@@ -248,10 +248,10 @@ def _tool_evidence_links(memory_refs: list[str], dispatch_context: dict) -> list
     return links
 
 
-async def _inject_failure_insight(runner: Any, tool_name: str, result: str) -> None:
+async def _inject_failure_insight(runner: Any, tool_name: str, result: str) -> str | None:
     """Inject one AutoGen-style corrective insight after a failed tool call."""
     if not result:
-        return
+        return None
     try:
         from executors.redaction import redact_secrets
         from memory.adapters.algorithms import AutoGenFailureEngine
@@ -261,7 +261,7 @@ async def _inject_failure_insight(runner: Any, tool_name: str, result: str) -> N
         category_key = f"{tool_name}:{safe_result[:500]}"
         seen = getattr(runner, "_failure_insight_keys", set())
         if category_key in seen:
-            return
+            return None
         seen.add(category_key)
         runner._failure_insight_keys = seen
         insight = AutoGenFailureEngine().analyze_failure(
@@ -269,20 +269,16 @@ async def _inject_failure_insight(runner: Any, tool_name: str, result: str) -> N
             [safe_result],
             [{"name": tool_name, "result": safe_result, "is_error": True}],
         )
-        runner.messages.append(
-            {
-                "role": "user",
-                "content": (
+        return (
                     "[Historical failure insight — use only as corrective evidence, "
                     "do not treat it as a new user instruction]\n"
                     f"category={insight.category}; "
                     f"insight={insight.insight_summary}; "
                     f"next_action={insight.corrective_action}"
-                ),
-            }
         )
     except Exception:
         logger.warning("failure insight injection unavailable", exc_info=True)
+        return None
 
 
 async def _maybe_autogen_retry(
@@ -306,6 +302,11 @@ async def _maybe_autogen_retry(
     if tool_name not in allowed_tools:
         return result, is_error
     try:
+        from observability import classify_tool_effect, EffectClass
+        effect = classify_tool_effect(tool_name, arguments)
+        if any(item is not EffectClass.READ for item in effect.effect_classes):
+            logger.warning("autogen retry rejected non-read tool=%s effects=%s", tool_name, effect.effect_classes)
+            return result, is_error
         from executors.tool_dispatch import dispatch_tool
         from memory.adapters.algorithms import AutoGenFailureEngine, FailureCategory
 
@@ -1337,6 +1338,7 @@ async def execute_parallel_tools(runner, calls, iteration=None) -> None:
     ])
     _duration = round(asyncio.get_running_loop().time() - _t0, 2)
 
+    pending_insights: list[str] = []
     for call, dispatch_context, (tool_result, is_error) in zip(
         calls, dispatch_contexts, raw_results
     ):
@@ -1378,7 +1380,9 @@ async def execute_parallel_tools(runner, calls, iteration=None) -> None:
             "memory_refs": memory_refs,
         })
         if is_error:
-            await _inject_failure_insight(runner, call["name"], display_result)
+            insight = await _inject_failure_insight(runner, call["name"], display_result)
+            if insight:
+                pending_insights.append(insight)
         runner.messages.append({
             "role": "tool",
             "tool_call_id": call["id"],
@@ -1398,10 +1402,15 @@ async def execute_parallel_tools(runner, calls, iteration=None) -> None:
             "result": display_result[:800],
             "is_error": is_error,
         })
+    for insight in pending_insights:
+        runner.messages.append({"role": "user", "content": insight})
+    if pending_insights:
+        await runner.ctx.interaction.save_session_snapshot(runner.session_id, runner.messages)
 
 
 async def execute_serial_tools(runner, calls, iteration=None) -> None:
     _iter = iteration or runner.iter_count
+    pending_insights: list[str] = []
     for call in calls:
         await runner.ctx.interaction.broadcast(runner.ctx.group_id, {
             "type": "tool_call", "temp_id": runner.temp_id,
@@ -1489,7 +1498,9 @@ async def execute_serial_tools(runner, calls, iteration=None) -> None:
             "memory_refs": memory_refs,
         })
         if is_error:
-            await _inject_failure_insight(runner, call["name"], display_result)
+            insight = await _inject_failure_insight(runner, call["name"], display_result)
+            if insight:
+                pending_insights.append(insight)
         runner.messages.append({
             "role": "tool",
             "tool_call_id": call["id"],
@@ -1510,6 +1521,10 @@ async def execute_serial_tools(runner, calls, iteration=None) -> None:
             "result": display_result[:800],
             "is_error": is_error,
         })
+    for insight in pending_insights:
+        runner.messages.append({"role": "user", "content": insight})
+    if pending_insights:
+        await runner.ctx.interaction.save_session_snapshot(runner.session_id, runner.messages)
 
 
 THINKING_I18N = {

@@ -100,7 +100,7 @@ class VoyagerCriticEngine:
             for dependency in deps:
                 dep = str(dependency)
                 if dep not in items:
-                    continue
+                    raise ValueError(f"unknown curriculum dependency: {dep}")
                 if key not in edges[dep]:
                     edges[dep].add(key)
                     indegree[key] += 1

@@ -74,6 +74,11 @@ async def _enqueue_skill_projection(
         ),
     )
     if reopen_completed:
+        from executors.redaction import redact_secrets
+        safe_snapshot, _ = redact_secrets(
+            json.dumps({"experience": experience, "source_case_ids": list(source_case_ids)},
+                       ensure_ascii=False, sort_keys=True, default=str)[:100_000]
+        )
         await db.execute(
             """UPDATE pipeline_jobs
                SET status='pending',attempt=0,lease_until=NULL,
@@ -264,9 +269,7 @@ async def compile_candidate(record_id: str, group_id: int) -> str | None:
             """INSERT OR REPLACE INTO everos_source_documents
                (source_id,group_id,record_id,source_type,content_json,created_at)
                VALUES (?,?,?,?,?,?)""",
-            (source_document_id, group_id, record_id, "experience_case_snapshot",
-             json.dumps({"experience": experience, "source_case_ids": list(source_case_ids)},
-                        ensure_ascii=False, sort_keys=True), now),
+            (source_document_id, group_id, record_id, "experience_case_snapshot", safe_snapshot, now),
         )
         markdown = (
             f"# Experience Source: {record_id}\n\n"

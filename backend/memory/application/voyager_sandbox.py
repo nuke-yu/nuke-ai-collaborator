@@ -26,6 +26,16 @@ class SkillSandbox:
             raise ValueError("only safe named callables may be registered")
         self._tools[name] = tool
 
+    @staticmethod
+    def _requires_hil(plan: SkillExecutionPlan) -> bool:
+        # The plan flag is only an input hint.  Any tool outside the explicit
+        # read-only vocabulary is treated as side-effecting and fail-closed.
+        safe_prefixes = ("read", "list", "search", "get", "inspect", "stat")
+        return plan.requires_hil or any(
+            not str(name).lower().split(":", 1)[-1].startswith(safe_prefixes)
+            for name in plan.allowed_tools
+        )
+
     async def execute(
         self,
         plan: SkillExecutionPlan,
@@ -35,7 +45,7 @@ class SkillSandbox:
         verify_fn: Callable[[tuple[Any, ...], tuple[str, ...]], Awaitable[bool] | bool] | None = None,
         rollback_fn: Callable[[tuple[Any, ...]], Awaitable[None] | None] | None = None,
     ) -> SkillRunResult:
-        if plan.requires_hil and not hil_approved:
+        if self._requires_hil(plan) and not hil_approved:
             raise PermissionError("skill execution requires human approval")
         outputs: list[Any] = []
         arguments = arguments or {}

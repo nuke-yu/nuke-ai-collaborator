@@ -37,6 +37,15 @@ class TestLangGraphDAGEngine(unittest.TestCase):
 
         self.assertFalse(self.engine.verify_checkpoint_chain([chk1, chk2]))
 
+    def test_verify_checkpoint_chain_rejects_tampered_state_and_cross_thread_parent(self) -> None:
+        parent = self.engine.create_checkpoint("thread-a", "one", {"x": 1})
+        child = self.engine.create_checkpoint("thread-a", "two", {"x": 2}, parent.checkpoint_id)
+        tampered = child.__class__(child.checkpoint_id, child.thread_id, child.parent_checkpoint_id,
+                                   child.step_name, child.state_hash, {"x": 99}, child.created_at)
+        self.assertFalse(self.engine.verify_checkpoint_chain([parent, tampered]))
+        other = self.engine.create_checkpoint("thread-b", "two", {"x": 2}, parent.checkpoint_id)
+        self.assertFalse(self.engine.verify_checkpoint_chain([parent, other]))
+
 
 class TestLangGraphDAGAlgorithmAdapter(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:

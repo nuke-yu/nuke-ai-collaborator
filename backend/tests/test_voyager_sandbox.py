@@ -44,3 +44,12 @@ async def test_sandbox_invokes_compensating_rollback_after_failed_verification()
     )
     assert result.succeeded is False
     assert rollback == ["created"]
+
+
+@pytest.mark.asyncio
+async def test_sandbox_recomputes_hil_for_write_tool_even_when_plan_lies():
+    sandbox = SkillSandbox()
+    sandbox.register("write_file", lambda: "created")
+    plan = SkillExecutionPlan("x", ("write_file",), ("write_file",), (), False)
+    with pytest.raises(PermissionError):
+        await sandbox.execute(plan)

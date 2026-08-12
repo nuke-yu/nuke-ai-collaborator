@@ -1,4 +1,5 @@
 # Test runner dependencies; production images install requirements.lock only.
 pytest==9.0.3
 pytest-timeout==2.4.0
+pytest-asyncio==1.2.0
 pyright==1.1.411

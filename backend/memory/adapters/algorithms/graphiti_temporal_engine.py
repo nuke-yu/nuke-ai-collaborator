@@ -43,6 +43,7 @@ class GraphitiTemporalEngine:
         self._edges: list[TemporalEdge] = []
         self._aliases: dict[str, str] = {}
         self.rrf_k = rrf_k
+        self._functional_relations = frozenset({"has_status", "primary_role", "current_location", "lives_in"})
 
     @staticmethod
     def normalize_entity_name(name: str) -> str:
@@ -224,11 +225,12 @@ class GraphitiTemporalEngine:
         tgt_node = self.get_or_create_node(target_name)
 
         # Invalidate prior active edges with same source and relation
-        self.invalidate_conflicting_edges(
-            source_node_id=src_node.node_id,
-            relation=relation,
-            invalid_at=now,
-        )
+        if relation in self._functional_relations:
+            self.invalidate_conflicting_edges(
+                source_node_id=src_node.node_id,
+                relation=relation,
+                invalid_at=now,
+            )
 
         edge_id = f"edge:{src_node.node_id}:{relation}:{tgt_node.node_id}:{int(now)}"
         edge = TemporalEdge(

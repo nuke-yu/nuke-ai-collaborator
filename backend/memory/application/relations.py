@@ -21,11 +21,15 @@ from memory.ports import MemoryDatabasePort
 class CanonicalRelationService:
     """Persist auditable links without turning relations into a retrieval graph."""
 
-    def __init__(self, database: MemoryDatabasePort) -> None:
+    def __init__(self, database: MemoryDatabasePort,
+                 authorizer: Callable[[Any], Awaitable[bool]] | None = None) -> None:
         self._database = database
+        self._authorizer = authorizer
 
     async def create(self, command: CreateMemoryRelation) -> str:
         group_id = _require_group_scope(command.scope.kind, command.scope.group_id)
+        if self._authorizer is not None and not await self._authorizer(command.scope):
+            raise MemoryAuthorizationError("actor is not authorized to write memory relations")
         relation_type = MemoryRelationType(command.relation_type)
         from_record_id = command.from_record_id.strip()
         to_record_id = command.to_record_id.strip()

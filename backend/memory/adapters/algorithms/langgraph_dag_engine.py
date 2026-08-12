@@ -61,10 +61,18 @@ class LangGraphDAGEngine:
             return True
 
         seen_ids: set[str] = set()
-        for idx, chk in enumerate(checkpoints):
+        seen: dict[str, DAGStateCheckpoint] = {}
+        for chk in checkpoints:
+            expected_hash = hashlib.sha256(
+                json.dumps(chk.state_payload, sort_keys=True, default=str).encode()
+            ).hexdigest()[:16]
+            if chk.state_hash != expected_hash or chk.checkpoint_id in seen_ids:
+                return False
             seen_ids.add(chk.checkpoint_id)
-            if idx > 0:
-                parent_id = chk.parent_checkpoint_id
-                if parent_id and parent_id not in seen_ids:
+            parent_id = chk.parent_checkpoint_id
+            if parent_id:
+                parent = seen.get(parent_id)
+                if parent is None or parent.thread_id != chk.thread_id:
                     return False
+            seen[chk.checkpoint_id] = chk
         return True

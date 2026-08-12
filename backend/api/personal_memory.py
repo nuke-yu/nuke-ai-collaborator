@@ -88,7 +88,8 @@ async def create_personal_projection(body:dict,user=Depends(auth.get_current_use
           scope=MemoryScope.personal(user_id=uid,actor_id=f"user:{uid}",group_id=gid,
                                      purpose="personal_projection_create"),
           record_id=body["record_id"],target_group_id=gid,target_bot_id=bot_id,
-          purpose=body.get("purpose","assistant_context"),expires_at=body.get("expires_at")))
+          purpose=body.get("purpose","assistant_context"),expires_at=body.get("expires_at"),
+          app_id=body["app_id"]))
     except MemoryAuthorizationError as exc:raise HTTPException(403,str(exc))
     except (KeyError,ValueError) as exc:raise HTTPException(400,str(exc))
     return {"projection_id":projection_id}

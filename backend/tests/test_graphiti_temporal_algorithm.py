@@ -48,6 +48,12 @@ class TestGraphitiTemporalEngine(unittest.TestCase):
         self.assertEqual(len(active_t1), 1)
         self.assertEqual(active_t1[0].edge_id, e2.edge_id)
 
+    def test_nonfunctional_relation_keeps_multiple_active_targets(self) -> None:
+        first = self.engine.add_edge("A", "member_of", "Team1", "membership", valid_at=1)
+        second = self.engine.add_edge("A", "member_of", "Team2", "membership", valid_at=2)
+        self.assertIsNone(first.invalid_at)
+        self.assertIsNone(second.invalid_at)
+
     def test_entity_aliases_resolve_to_one_node(self) -> None:
         canonical = self.engine.register_alias("  SF  ", "San Francisco")
         edge = self.engine.add_edge(
