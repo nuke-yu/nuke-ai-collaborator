@@ -269,13 +269,13 @@ FastAPI / Supervisor
 | Secret Redaction | ✅ | 工具结果、记忆、事件 Payload 和遥测链路过滤 Token、Key、PEM 等敏感内容并限制长度 |
 | Group Shell 沙箱 | ✅ | 生产配置强制容器后端，仅挂载目标 Group 工作区并设置资源限制 |
 | 本地开发 Shell | ⚠️ | 默认 local 后端属于可信开发模式，不提供容器级 OS 隔离；生产启动会拒绝该配置 |
-| Artifact Registry | 🟡 | 稳定 ID、版本、校验和、来源、作用域、lineage、撤销和软删除已具备；物理文件回收仍未闭环 |
+| Artifact Registry | ✅ | 稳定 ID、版本、校验和、来源、作用域、lineage、撤销、软删除、Group-local 物理回收与 retention 调度已具备 |
 | Unified Timeline | ✅ | 关联 Workflow、Session、Permission、Tool、Memory、Artifact 和模型用量 |
 | Execution Timeline | ✅ | 前端查看 Thinking、工具参数/结果、状态、错误和恢复动作 |
 | Capability Manifest | ✅ | 保存执行时能力快照与稳定哈希，不保存 Secret 或无界正文 |
 | Event Payload Policy | ✅ | 事件分类、脱敏、截断、大 Payload Artifact 化和保留策略 |
 | Retention | ✅ | 清理符合条件的执行数据，并保留不含原始 Payload 的清理回执 |
-| Store Registry | 🟡 | 已登记主要 Store 的所有权、迁移、保留和删除策略元数据；统一策略执行仍在补全 |
+| Store Registry | ✅ | 已登记主要 Store 的所有权、迁移、保留和删除策略，并提供受治理的 migrate/backup/delete 执行绑定 |
 | Cron Scheduler | ✅ | 持久化 5 段 Cron、启停、立即运行、misfire 合并和 Operator 控制 |
 | Channel Runtime | 🟡 | Binding、签名 Webhook、Outbox、重试、死信、暂停/恢复、审计和健康指标已接入 |
 | 真实外部渠道 | 🧭 | 飞书、企微、钉钉、Slack 等真实 Connector 尚未完成生产注册和端到端验收 |
@@ -291,17 +291,17 @@ FastAPI / Supervisor
 
 - **外部 Channel**：运行时链路已接通，但真实平台 Connector、外部身份授权、附件 Artifact 化、平台限流和真实 E2E 尚未完成。
 - **插件隔离**：JSONL 子进程执行是试点能力，不代表全部插件已经隔离。
-- **Artifact 生命周期**：Registry、版本和 lineage 已存在，物理存储回收及完整 Workflow 交付闭环仍待补齐。
-- **Store Registry**：当前主要是治理元数据注册表，不是完整的统一迁移、备份和删除执行引擎。
+- **Artifact 生命周期**：Registry、版本、lineage、tombstone 和 Group-local 物理回收已闭环；远程 locator 仍需由其所属外部系统负责回收。
+- **Store Registry**：统一执行通过显式绑定的 host-specific executor 完成；未绑定的操作会 fail-closed，不会假装执行成功。
 - **Personal Vault**：投影、撤销和审计已存在，更完整的撤销影响分析仍在建设。
 - **工作流编辑器**：后端 Orchestrator 已可插拔，但完整的可视化拖拽画布仍是路线图能力。
-- **图记忆**：当前支持关系与时间边，不等同于独立图数据库产品。
+- **图记忆**：当前支持关系、时间边、实体候选和混合检索；质量指标需要持续输入标注样本，不等同于独立图数据库产品。
 
 ### Windows / Python 3.12 内网安装说明
 
 Chroma 及其原生依赖必须使用与 Python 3.12（cp312）和 Windows 架构匹配的预编译 wheel，否则 pip 会回退到本地 C/C++ 编译。没有编译器的内网环境，应在一台可联网、Python 小版本和 CPU 架构一致的 Windows 机器上预下载完整 wheelhouse，再复制进内网离线安装；不要只复制单个 chroma-hnswlib 包。Docker 部署路径不需要在 Windows 宿主机编译这些 Python 扩展。
 
-更完整的成熟度依据见 [Hanako 能力对比与校准](docs/Hanako-comparison-2026-08-02.md)，实现细节见 [系统架构](docs/ARCHITECTURE.md) 与 [并发执行模型](docs/CONCURRENCY-EXECUTION-MODEL.md)。
+更完整的成熟度依据见 [Hanako 能力对比与校准](docs/Hanako-comparison-2026-08-02.md)，实现细节见 [系统架构](docs/ARCHITECTURE.md)、[并发执行模型](docs/CONCURRENCY-EXECUTION-MODEL.md) 和 [治理缺口闭环记录](docs/2026-08-12-governance-gap-closure.md)。
 
 ---
 
