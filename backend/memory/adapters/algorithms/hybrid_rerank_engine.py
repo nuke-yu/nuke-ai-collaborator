@@ -46,6 +46,21 @@ class HybridRerankEngine:
 
         return results
 
+    @staticmethod
+    def calibrate_scores(
+        candidates: Sequence[Mapping[str, Any]], field: str = "score"
+    ) -> list[dict[str, Any]]:
+        """Normalize a lane's arbitrary scores to [0,1] before ranking."""
+        values = [float(item.get(field) or 0.0) for item in candidates]
+        if not values:
+            return []
+        low, high = min(values), max(values)
+        span = high - low
+        return [
+            {**dict(item), f"{field}_calibrated": 1.0 if span == 0 else (float(item.get(field) or 0.0) - low) / span}
+            for item in candidates
+        ]
+
     def mmr_diversify(
         self,
         candidates: Sequence[Mapping[str, Any]],
@@ -114,6 +129,7 @@ class HybridRerankEngine:
         top_k: int = 5,
         cluster_hits: Sequence[Mapping[str, Any]] = (),
         graph_hits: Sequence[Mapping[str, Any]] = (),
+        reranker: Any = None,
     ) -> list[dict[str, Any]]:
         """Execute complete RRF Fusion + MMR Diversification pipeline."""
         rank_lists = [keyword_hits, vector_hits]
@@ -122,5 +138,13 @@ class HybridRerankEngine:
         if graph_hits:
             rank_lists.append(graph_hits)
         fused = self.rrf_fusion(rank_lists)
+        if reranker is not None:
+            try:
+                reranked = reranker(query, fused)
+                if reranked:
+                    fused = [dict(item) for item in reranked]
+            except Exception:
+                # Optional model rerankers are never allowed to break recall.
+                pass
         diversified = self.mmr_diversify(fused, query, top_k=top_k)
         return diversified

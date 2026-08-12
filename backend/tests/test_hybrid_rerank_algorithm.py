@@ -58,6 +58,15 @@ class TestHybridRerankEngine(unittest.TestCase):
         )
         self.assertEqual({item["id"] for item in results}, {"a", "b"})
 
+    def test_calibration_and_optional_reranker_are_fail_soft(self) -> None:
+        calibrated = self.engine.calibrate_scores([{"id": "a", "score": 10}, {"id": "b", "score": 20}])
+        self.assertEqual(calibrated[0]["score_calibrated"], 0.0)
+        results = self.engine.rerank(
+            [{"id": "a", "content": "alpha"}], [], query="alpha",
+            reranker=lambda _query, items: list(reversed(items)),
+        )
+        self.assertEqual(results[0]["id"], "a")
+
 
 class TestHybridRerankAlgorithmAdapter(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
