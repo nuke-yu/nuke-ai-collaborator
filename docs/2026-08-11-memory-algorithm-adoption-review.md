@@ -222,6 +222,7 @@ Nuke 对应代码：
 - EverOS：新增 source document listing 入口，供审计、重建和再次蒸馏使用。
 - EverOS：reflection 已作为 `observe_turn_reflection` durable pipeline stage，与 fact/summary/tool compression 同步入队、独立 lease 执行，并由 reflection watermark 保证幂等覆盖范围。
 - Letta/MemGPT：Tool Loop 上下文超限时先对 learned contexts 执行 paging，再进行 tokenizer/估算器截断。
+- Letta/MemGPT：新增 group-isolated durable memory blocks runtime，支持 write/read、last_accessed 跟踪和 importance-based eviction。
 - AutoGen：Tool Loop 支持显式 opt-in retry policy；只有 allowlisted 工具和可重试 FailureCategory 才会重试，默认关闭以避免副作用重复执行。
 - Graphiti Adapter：正式暴露 entity candidate extraction、entity disambiguation、community discovery 能力。
 - Graphiti：增加统一 lexical/vector/active-graph RRF hybrid search，并通过 Adapter 暴露。
