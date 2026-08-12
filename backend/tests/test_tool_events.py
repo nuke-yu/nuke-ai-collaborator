@@ -1125,6 +1125,9 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
         sources = await list_everos_source_documents(group_id=7, record_id=record_id)
         self.assertEqual(len(sources), 1)
         self.assertEqual(sources[0]["source_type"], "experience_case_snapshot")
+        from ai.skill_learning import get_everos_source_markdown
+        markdown = await get_everos_source_markdown(group_id=7, record_id=record_id)
+        self.assertIn("# Experience Source", markdown)
         with self.assertRaises(ValueError):
             validate_declaration({"risk_level":"S1","trigger":"x","procedure":["x"],"allowed_tools":["run_shell"]})
         with self.assertRaisesRegex(ValueError, "executable code"):

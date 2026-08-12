@@ -250,6 +250,13 @@ async def compile_candidate(record_id: str, group_id: int) -> str | None:
             """CREATE INDEX IF NOT EXISTS idx_everos_source_documents_group
                ON everos_source_documents(group_id,record_id,created_at)"""
         )
+        await db.execute(
+            """CREATE TABLE IF NOT EXISTS everos_source_markdown (
+                source_id TEXT PRIMARY KEY, group_id INTEGER NOT NULL,
+                record_id TEXT NOT NULL, markdown TEXT NOT NULL,
+                created_at INTEGER NOT NULL
+            )"""
+        )
         source_document_id = "everos-source:" + hashlib.sha256(
             f"{group_id}:{record_id}:{row[5]}".encode()
         ).hexdigest()[:24]
@@ -260,6 +267,17 @@ async def compile_candidate(record_id: str, group_id: int) -> str | None:
             (source_document_id, group_id, record_id, "experience_case_snapshot",
              json.dumps({"experience": experience, "source_case_ids": list(source_case_ids)},
                         ensure_ascii=False, sort_keys=True), now),
+        )
+        markdown = (
+            f"# Experience Source: {record_id}\n\n"
+            f"## Task Pattern\n{experience.get('task_pattern', '')}\n\n"
+            f"## Verification\n{experience.get('verification', '')}\n\n"
+            f"## Source Cases\n" + "\n".join(f"- {case_id}" for case_id in source_case_ids)
+        )
+        await db.execute(
+            """INSERT OR REPLACE INTO everos_source_markdown
+               (source_id,group_id,record_id,markdown,created_at) VALUES (?,?,?,?,?)""",
+            (source_document_id, group_id, record_id, markdown, now),
         )
         await db.execute("""INSERT INTO skills
           (skill_id,group_id,bot_id,name,maturity,risk_level,current_version,created_at,updated_at)
@@ -318,6 +336,25 @@ async def list_everos_source_documents(
          "created_at": int(row[4])}
         for row in rows
     ]
+
+
+async def get_everos_source_markdown(*, group_id: int, record_id: str) -> str | None:
+    """Return the rebuildable Markdown source projection for an Experience."""
+    from ai.memory import _memory_db
+    async with await _memory_db("skills", group_id, write=False) as db:
+        await db.execute(
+            """CREATE TABLE IF NOT EXISTS everos_source_markdown (
+                source_id TEXT PRIMARY KEY, group_id INTEGER NOT NULL,
+                record_id TEXT NOT NULL, markdown TEXT NOT NULL,
+                created_at INTEGER NOT NULL
+            )"""
+        )
+        async with db.execute(
+            "SELECT markdown FROM everos_source_markdown WHERE group_id=? AND record_id=? ORDER BY created_at DESC LIMIT 1",
+            (group_id, record_id),
+        ) as cur:
+            row = await cur.fetchone()
+    return None if not row else str(row[0])
 
 
 async def list_skill_candidates(
