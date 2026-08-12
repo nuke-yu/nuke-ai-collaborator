@@ -95,6 +95,16 @@ class MemoryACLPort(MemoryAlgorithmPort, Protocol):
 
 
 @runtime_checkable
+class PersonalVaultPolicyPort(Protocol):
+    async def evaluate_rule(self, *, user_id: int, subject_type: str, subject_id: str,
+                            object_type: str, object_id: str, action: str) -> bool | None: ...
+
+    async def record_audit(self, *, user_id: int, actor_id: str, scope_kind: str,
+                           group_id: int | None, bot_id: int | None, action: str,
+                           allowed: bool, reason: str) -> None: ...
+
+
+@runtime_checkable
 class CaseClusteringPort(MemoryAlgorithmPort, Protocol):
     async def cluster(self, cases_with_timestamps: Sequence[tuple[Any, float]]) -> Any: ...
 

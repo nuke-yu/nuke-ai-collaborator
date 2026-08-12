@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from typing import Any, Mapping
-import importlib
 
 from memory.contracts import (
     CreatePersonalProjection,
@@ -13,7 +12,7 @@ from memory.contracts import (
     ObservePersonalHabit,
 )
 from memory.domain import MemoryScope, Principal
-from memory.ports import MemoryACLPort, PersonalKnowledgePort
+from memory.ports import MemoryACLPort, PersonalKnowledgePort, PersonalVaultPolicyPort
 
 
 class AuthorizedPersonalKnowledgeService:
@@ -24,10 +23,12 @@ class AuthorizedPersonalKnowledgeService:
         delegate: PersonalKnowledgePort,
         acl: MemoryACLPort,
         principal: Principal,
+        vault_policy: PersonalVaultPolicyPort | None = None,
     ) -> None:
         self._delegate = delegate
         self._acl = acl
         self._principal = principal
+        self._vault_policy = vault_policy
 
     async def create_record(self, command: CreatePersonalRecord) -> str:
         await self._authorize(command.scope, "write")
@@ -96,14 +97,9 @@ class AuthorizedPersonalKnowledgeService:
         )
         # OpenMemory-style explicit rules can only tighten the platform ACL.
         # An allow rule never grants access that the Nuke scope matrix denied.
-        if check.allowed and self._principal.user_id is not None:
+        if check.allowed and self._principal.user_id is not None and self._vault_policy is not None:
             try:
-                # Host-specific vault integration is resolved dynamically at
-                # the composition boundary; the application layer remains
-                # free of imports from the legacy ai/runtime packages.
-                personal_vault = importlib.import_module("ai.personal_vault")
-
-                explicit = await personal_vault.evaluate_access_control_rule(
+                explicit = await self._vault_policy.evaluate_rule(
                     user_id=self._principal.user_id,
                     subject_type="user",
                     subject_id=str(self._principal.user_id),
@@ -127,11 +123,9 @@ class AuthorizedPersonalKnowledgeService:
                 # A missing/legacy ACL table must not broaden access; the
                 # default Nuke ACL result remains authoritative.
                 pass
-        if self._principal.user_id is not None:
+        if self._principal.user_id is not None and self._vault_policy is not None:
             try:
-                personal_vault = importlib.import_module("ai.personal_vault")
-
-                await personal_vault.record_acl_audit_event(
+                await self._vault_policy.record_audit(
                     user_id=self._principal.user_id,
                     actor_id=self._principal.actor_id,
                     scope_kind=scope.kind.value,

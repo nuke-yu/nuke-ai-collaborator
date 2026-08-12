@@ -9,6 +9,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from memory.adapters.algorithms import ACLPermissionCheck
 from memory.application import AuthorizedPersonalKnowledgeService
+from memory.adapters.runtime import LegacyPersonalVaultPolicyAdapter
 from memory.contracts import (
     CreatePersonalProjection,
     CreatePersonalRecord,
@@ -25,7 +26,7 @@ class TestAuthorizedPersonalKnowledgeService(unittest.IsolatedAsyncioTestCase):
         self.acl.check_acl.return_value = ACLPermissionCheck(True, "allowed")
         self.principal = Principal.user(10, [7])
         self.service = AuthorizedPersonalKnowledgeService(
-            self.delegate, self.acl, self.principal
+            self.delegate, self.acl, self.principal, LegacyPersonalVaultPolicyAdapter()
         )
         self.scope = MemoryScope.personal(
             user_id=10, actor_id="user:10", purpose="test"

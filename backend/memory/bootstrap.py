@@ -13,6 +13,7 @@ from memory.adapters.runtime import (
     LegacyBotMemoryProjectionReader,
     LegacyLearningAdapter,
     LegacyPersonalKnowledgeAdapter,
+    LegacyPersonalVaultPolicyAdapter,
     legacy_memory_database,
     redact_projection_content,
     redact_projection_error,
@@ -46,7 +47,8 @@ def build_memory_client(bot: dict | None = None) -> LegacyConversationMemoryAdap
 def build_personal_knowledge_client(principal: Principal) -> AuthorizedPersonalKnowledgeService:
     """Build the fail-closed personal-memory application boundary."""
     return AuthorizedPersonalKnowledgeService(
-        LegacyPersonalKnowledgeAdapter(), build_memory_acl(), principal
+        LegacyPersonalKnowledgeAdapter(), build_memory_acl(), principal,
+        vault_policy=LegacyPersonalVaultPolicyAdapter(),
     )
 
 
