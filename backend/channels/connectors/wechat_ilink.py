@@ -53,6 +53,11 @@ class WechatIlinkAmbiguousDelivery(WechatIlinkError):
 
     ambiguous = True
 
+    def __init__(self, message: str, *, completed_chunks: tuple[int, ...] = (), total_chunks: int = 0):
+        super().__init__(message)
+        self.completed_chunks = completed_chunks
+        self.total_chunks = total_chunks
+
 
 @dataclass(frozen=True, slots=True)
 class WechatPollResult:
@@ -201,7 +206,9 @@ class WechatIlinkConnector:
             except Exception as exc:
                 if client_ids:
                     raise WechatIlinkAmbiguousDelivery(
-                        "WeChat message batch partially succeeded; operator review is required"
+                        "WeChat message batch partially succeeded; operator review is required",
+                        completed_chunks=tuple(range(len(client_ids))),
+                        total_chunks=len(chunks),
                     ) from exc
                 raise
             client_ids.append(client_id)

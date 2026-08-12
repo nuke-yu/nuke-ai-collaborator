@@ -92,6 +92,12 @@ _DDL = (
         updated_at INTEGER NOT NULL,
         PRIMARY KEY(channel_instance_id,state_key)
     )""",
+    """CREATE TABLE IF NOT EXISTS channel_webhook_replay (
+        replay_key TEXT PRIMARY KEY,
+        observed_at INTEGER NOT NULL,
+        expires_at INTEGER NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_channel_webhook_replay_expiry ON channel_webhook_replay(expires_at)",
     "CREATE INDEX IF NOT EXISTS idx_channel_delivery_due ON channel_delivery_outbox(state, next_attempt_at)",
 )
 
@@ -314,6 +320,23 @@ class ChannelStore:
                 (instance_id, key, encoded, int(time.time() * 1000)),
             )
             await db.commit()
+
+    async def claim_webhook_replay(
+        self, replay_key: str, observed_at: int, *, ttl_seconds: int = 86_400
+    ) -> bool:
+        """Claim a webhook event identity for a durable 24h replay window."""
+        key = str(replay_key or "").strip()
+        if not key or ttl_seconds <= 0:
+            raise ValueError("replay_key and positive ttl_seconds are required")
+        now = int(observed_at)
+        async with aiosqlite.connect(self.path) as db:
+            await db.execute("DELETE FROM channel_webhook_replay WHERE expires_at<=?", (now,))
+            cursor = await db.execute(
+                "INSERT OR IGNORE INTO channel_webhook_replay(replay_key,observed_at,expires_at) VALUES(?,?,?)",
+                (key, now, now + int(ttl_seconds)),
+            )
+            await db.commit()
+            return cursor.rowcount == 1
 
     async def set_channel_paused(self, channel: str, paused: bool) -> None:
         raw_channel = str(channel or "").strip()

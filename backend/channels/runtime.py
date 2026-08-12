@@ -249,6 +249,8 @@ class ChannelDeliveryDispatcher:
                 details={
                     "attempt": attempt, "error": str(exc),
                     "retry_at_ms": retry_at, "ambiguous": ambiguous,
+                    "completed_chunks": list(getattr(exc, "completed_chunks", ())),
+                    "total_chunks": int(getattr(exc, "total_chunks", 0) or 0),
                 },
                 error=str(exc),
                 retry_at_ms=retry_at,

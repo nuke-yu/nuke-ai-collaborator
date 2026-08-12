@@ -83,6 +83,11 @@ class TestChannelStore(unittest.IsolatedAsyncioTestCase):
         audit = await self.store.list_audit("event-3")
         self.assertEqual(audit[-1]["event_type"], "delivery.replayed")
 
+    async def test_webhook_replay_claim_has_durable_ttl(self):
+        self.assertTrue(await self.store.claim_webhook_replay("wechat:tenant:event-1", 100))
+        self.assertFalse(await self.store.claim_webhook_replay("wechat:tenant:event-1", 101))
+        self.assertTrue(await self.store.claim_webhook_replay("wechat:tenant:event-1", 100 + 86400))
+
     async def test_oversized_lowercase_bearer_is_not_stored_raw(self):
         value = "x" * 70_000 + " authorization: bearer " + "a" * 40
         safe = sanitize_text_for_storage(value)

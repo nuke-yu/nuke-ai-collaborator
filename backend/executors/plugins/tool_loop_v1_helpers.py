@@ -134,6 +134,7 @@ def _enforce_final_context_budget(runner: Any) -> None:
         if descriptor.context_window is None:
             return
         engine = LettaOpenMemoryEngine()
+        tokenizer = getattr(runner, "tokenizer", None)
         working_memory = "\n".join(
             str(message.get("content") or "")
             for message in getattr(runner, "messages", ())
@@ -147,6 +148,47 @@ def _enforce_final_context_budget(runner: Any) -> None:
             tool_schemas=getattr(runner, "tool_schemas", ()) or (),
             reserve_generation_tokens=max(256, int(runner.max_tokens)),
         )
+        if allocation.available_for_generation <= 256:
+            # Emergency synchronous compaction: this path runs immediately
+            # before the provider call and cannot await an LLM summarizer.
+            # Preserve the newest tool-call group and discard oldest history
+            # until a real completion budget exists.
+            messages = list(getattr(runner, "messages", ()) or ())
+            while len(messages) > 1 and allocation.available_for_generation <= 256:
+                remove_at = 0
+                while remove_at < len(messages) - 1 and messages[remove_at].get("role") == "tool":
+                    remove_at += 1
+                messages.pop(remove_at)
+                runner.messages = messages
+                working_memory = "\n".join(
+                    str(message.get("content") or "")
+                    for message in messages if isinstance(message, dict)
+                )
+                allocation = engine.calculate_context_budget(
+                    max_tokens=descriptor.context_window,
+                    system_prompt=str(getattr(runner, "system_prompt", "")),
+                    working_memory=working_memory,
+                    recall_memory="",
+                    tool_schemas=getattr(runner, "tool_schemas", ()) or (),
+                    reserve_generation_tokens=256,
+                )
+            if allocation.available_for_generation <= 0:
+                # History may already be minimal; bound the two other mutable
+                # prompt contributors before refusing to call a provider.
+                runner.tool_schemas = list(getattr(runner, "tool_schemas", ()) or ())[:32]
+                runner.system_prompt = engine.truncate_text_to_tokens(
+                    str(getattr(runner, "system_prompt", "")),
+                    max(512, int(descriptor.context_window * 0.45)),
+                    tokenizer,
+                )
+                allocation = engine.calculate_context_budget(
+                    max_tokens=descriptor.context_window,
+                    system_prompt=runner.system_prompt,
+                    working_memory=working_memory,
+                    recall_memory="",
+                    tool_schemas=runner.tool_schemas,
+                    reserve_generation_tokens=256,
+                )
         if allocation.is_budget_exceeded:
             previous = int(runner.max_tokens)
             runner.max_tokens = max(

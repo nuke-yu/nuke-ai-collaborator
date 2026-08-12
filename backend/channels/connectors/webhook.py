@@ -89,7 +89,16 @@ class SignedWebhookConnector:
         current = int(time.time()) if now is None else int(now)
         if abs(current - timestamp_value) > self._replay_window_seconds:
             raise ConnectorAuthError("webhook timestamp is outside replay window")
-        replay_key = f"{timestamp_value}:{hashlib.sha256(body).hexdigest()}"
+        tenant = str(payload.get("tenant_id") or "").strip()
+        conversation = str(payload.get("group_id") or payload.get("conversation_id") or "").strip()
+        user = str(payload.get("user_id") or "").strip()
+        message_id = str(payload.get("message_id") or "").strip()
+        if not all((tenant, conversation, user, message_id)):
+            raise ConnectorError("tenant_id, conversation_id, user_id, and message_id are required")
+        # Prefer the platform event identity over a timestamp/body hash. This
+        # makes the durable guard resilient to clock skew and permits a 24h
+        # uniqueness window in ChannelStore.
+        replay_key = f"{self.channel}:{tenant}:{message_id}"
         if self._replay_guard is not None:
             accepted = await self._replay_guard(replay_key, timestamp_value)
         elif self._allow_in_memory_replay_guard:
@@ -102,12 +111,6 @@ class SignedWebhookConnector:
             raise ConnectorAuthError("durable replay guard is required")
         if not accepted:
             raise ConnectorAuthError("webhook replay detected")
-        tenant = str(payload.get("tenant_id") or "").strip()
-        conversation = str(payload.get("group_id") or payload.get("conversation_id") or "").strip()
-        user = str(payload.get("user_id") or "").strip()
-        message_id = str(payload.get("message_id") or "").strip()
-        if not all((tenant, conversation, user, message_id)):
-            raise ConnectorError("tenant_id, conversation_id, user_id, and message_id are required")
         mentions = tuple(str(item).strip() for item in (payload.get("mentions") or ()) if str(item).strip())
         attachments = tuple(item for item in (payload.get("attachments") or ()) if isinstance(item, Mapping))
         return InboundEnvelope(

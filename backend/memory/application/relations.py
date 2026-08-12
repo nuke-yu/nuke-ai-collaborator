@@ -177,27 +177,34 @@ class CanonicalRelationService:
             for _ in range(query.max_hops):
                 if not frontier:
                     break
-                placeholders = ",".join("?" for _ in frontier)
-                params: list[object] = [group_id, *sorted(frontier), *sorted(frontier)]
-                params.extend(temporal_params)
-                params.extend(type_params)
-                async with db.execute(
-                    """SELECT relation_id,group_id,from_record_id,to_record_id,
-                        relation_type,source_type,source_id,evidence_json,
-                        created_by,effective_from,valid_to,status
-                    FROM memory_relations
-                    WHERE group_id=? AND status='active'
-                      AND (from_record_id IN ("""
-                    + placeholders
-                    + ") OR to_record_id IN ("
-                    + placeholders
-                    + "))"
-                    + temporal_filter
-                    + type_filter
-                    + " ORDER BY effective_from,relation_id",
-                    tuple(params),
-                ) as cursor:
-                    hop_rows = await cursor.fetchall()
+                hop_rows = []
+                # SQLite defaults to 999 bind variables. Keep each frontier
+                # batch bounded (including temporal/type filters) while still
+                # traversing the complete high-fanout graph.
+                frontier_values = sorted(frontier)
+                for offset in range(0, len(frontier_values), 50):
+                    batch = frontier_values[offset:offset + 50]
+                    placeholders = ",".join("?" for _ in batch)
+                    params: list[object] = [group_id, *batch, *batch]
+                    params.extend(temporal_params)
+                    params.extend(type_params)
+                    async with db.execute(
+                        """SELECT relation_id,group_id,from_record_id,to_record_id,
+                            relation_type,source_type,source_id,evidence_json,
+                            created_by,effective_from,valid_to,status
+                        FROM memory_relations
+                        WHERE group_id=? AND status='active'
+                          AND (from_record_id IN ("""
+                        + placeholders
+                        + ") OR to_record_id IN ("
+                        + placeholders
+                        + "))"
+                        + temporal_filter
+                        + type_filter
+                        + " ORDER BY effective_from,relation_id",
+                        tuple(params),
+                    ) as cursor:
+                        hop_rows.extend(await cursor.fetchall())
                 next_frontier: set[str] = set()
                 for row in hop_rows:
                     relation_id = str(row[0])

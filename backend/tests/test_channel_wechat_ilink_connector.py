@@ -109,6 +109,8 @@ class TestWechatIlinkConnector(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(WechatIlinkAmbiguousDelivery) as caught:
             await connector.send(_outbound("partial-event", text="x" * 4_001))
         self.assertTrue(caught.exception.ambiguous)
+        self.assertEqual(caught.exception.completed_chunks, (0,))
+        self.assertEqual(caught.exception.total_chunks, 2)
         self.assertEqual(len(transport.calls), 2)
 
     async def test_expired_context_and_session_expiry_fail_closed(self):
