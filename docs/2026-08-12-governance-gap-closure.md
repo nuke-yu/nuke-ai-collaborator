@@ -51,3 +51,14 @@ Artifact、Store Registry、Memory evaluation、MCP proxy/collector 和 Promethe
 - **Webhook 重放**：风险成立。Webhook replay key 已从“时间戳+body hash”改为 `channel:tenant:event_id`，`ChannelStore.claim_webhook_replay()` 提供 24 小时 durable uniqueness；时间窗口仍用于拒绝过期签名，二者形成双层防线。
 - **Graphiti BFS 参数膨胀**：风险成立。关系 recall 按每批最多 50 个 frontier 节点分批执行，避免 SQLite bind-variable 上限，同时保留完整遍历结果。
 - **上下文超限**：风险成立。最终模型调用前增加同步 emergency compaction：先丢弃最早历史，再限制工具 Schema 和 system prompt；只有重新计算预算后才设置 generation tokens，避免明知窗口已满仍以 256 token 盲调 Provider。
+
+## 2026-08-12 第二轮分层审查修复
+
+- `SkillExecutionPlan` 已迁移到 `memory.contracts`，Voyager adapter 负责生成，application sandbox 只消费契约。
+- Letta runtime 改为通过注入的 `MemoryDatabasePort` 访问 Group DB，不再引用 `ai.memory`；默认实现由 composition root 提供。
+- Personal Memory API 不再直接导入 `ai.personal_vault`，App/ACL 操作统一经 `memory.bootstrap` facade。
+- Voyager 验证失败时支持显式 `rollback_fn` 补偿副作用；沙箱不会假设任意 Python callable 可以自动回滚。
+- Emergency context pruning 改为按完整 assistant tool-call + tool-result 组删除，避免产生孤立 `role=tool` 消息。
+- Graphiti hybrid search 的 RRF `k` 改为构造参数，默认仍为 60，可按召回分布校准。
+
+契约测试 `test_memory_module_contracts.py` 现已通过；报告中提到的两项分层违例在当前代码中已关闭。Personal app 当前真实状态值是 `active/inactive`，不是 `disabled/archived`，后者不应写入能力说明。
