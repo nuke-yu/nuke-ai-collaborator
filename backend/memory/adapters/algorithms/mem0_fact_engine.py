@@ -85,6 +85,25 @@ class Mem0FactEngine:
 
         return candidates
 
+    async def extract_and_reconcile(
+        self,
+        text: str,
+        existing_records: Sequence[Mapping[str, Any]] = (),
+        *,
+        ai_call_fn: Any = None,
+    ) -> list[FactAction]:
+        """Run Mem0's complete extraction→decision pipeline.
+
+        The LLM path is preferred when supplied; malformed/failed responses
+        fall back to the deterministic extractor so observation never loses a
+        fact solely because a provider returned invalid JSON.
+        """
+        if ai_call_fn is not None:
+            actions = await self.reconcile_with_llm(text, existing_records, ai_call_fn=ai_call_fn)
+            if actions:
+                return actions
+        return [self.reconcile_fact(existing_records, fact) for fact in self.extract_candidate_facts(text)]
+
     def reconcile_fact(
         self, existing_records: Sequence[Mapping[str, Any]], new_fact: str
     ) -> FactAction:
@@ -293,4 +312,3 @@ class Mem0FactEngine:
         # Fallback to rule-based extraction
         candidates = self.extract_candidate_facts(user_message)
         return [self.reconcile_fact(existing_records, c) for c in candidates]
-

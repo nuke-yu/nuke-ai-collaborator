@@ -283,7 +283,10 @@ class FactExtractor:
             return extracted
         except Exception:
             log.exception("FactExtractor: failed to extract facts")
-            return []
+            # Mem0's deterministic extractor is the fail-soft production
+            # fallback: a provider outage must not discard durable facts.
+            from memory.adapters.algorithms import Mem0FactEngine
+            return [(fact, 0.5) for fact in Mem0FactEngine().extract_candidate_facts(content)]
 
 
 class ConflictResolution(list[str]):

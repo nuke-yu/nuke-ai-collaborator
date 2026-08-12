@@ -60,6 +60,13 @@ class TestMem0FactEngine(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(actions[0].action_type, FactActionType.ADD)
         self.assertEqual(actions[0].content, "User speaks French")
 
+    async def test_extract_and_reconcile_falls_back_on_empty_llm_response(self) -> None:
+        mock_ai_call = AsyncMock(return_value={"content": "not-json"})
+        actions = await self.engine.extract_and_reconcile(
+            "User prefers dark mode.", [], ai_call_fn=mock_ai_call
+        )
+        self.assertEqual([a.action_type for a in actions], [FactActionType.ADD])
+
 
 class TestMem0FactAlgorithmAdapter(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
