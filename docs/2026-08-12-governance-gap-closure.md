@@ -57,6 +57,7 @@ Artifact、Store Registry、Memory evaluation、MCP proxy/collector 和 Promethe
 - `SkillExecutionPlan` 已迁移到 `memory.contracts`，Voyager adapter 负责生成，application sandbox 只消费契约。
 - Letta runtime 改为通过注入的 `MemoryDatabasePort` 访问 Group DB，不再引用 `ai.memory`；默认实现由 composition root 提供。
 - Personal Memory API 不再直接导入 `ai.personal_vault`，App/ACL 操作统一经 `memory.bootstrap` facade。
+- `AuthorizedPersonalKnowledgeService` 的 ABAC 查询和审计也已抽象为 `PersonalVaultPolicyPort`；Legacy Vault 只存在于 runtime adapter。
 - Voyager 验证失败时支持显式 `rollback_fn` 补偿副作用；沙箱不会假设任意 Python callable 可以自动回滚。
 - Emergency context pruning 改为按完整 assistant tool-call + tool-result 组删除，避免产生孤立 `role=tool` 消息。
 - Graphiti hybrid search 的 RRF `k` 改为构造参数，默认仍为 60，可按召回分布校准。
