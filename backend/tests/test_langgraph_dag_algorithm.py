@@ -51,6 +51,13 @@ class TestLangGraphDAGAlgorithmAdapter(unittest.IsolatedAsyncioTestCase):
         chk = await self.adapter.checkpoint("th:2", "distill", {"status": "ok"})
         self.assertTrue(chk.checkpoint_id.startswith("chk:th:2:distill:"))
 
+    async def test_saver_compat_put_get_writes_and_delete(self) -> None:
+        chk = await self.adapter.put("th:3", "step", {"value": 1})
+        await self.adapter.put_writes(chk.checkpoint_id, "task:1", {"channel": "ok"})
+        self.assertEqual((await self.adapter.get_tuple("th:3")).checkpoint_id, chk.checkpoint_id)
+        self.assertEqual((await self.adapter.pending_writes(chk.checkpoint_id))[0]["channel"], "channel")
+        self.assertEqual(await self.adapter.delete_thread("th:3"), 1)
+
 
 if __name__ == "__main__":
     unittest.main()
