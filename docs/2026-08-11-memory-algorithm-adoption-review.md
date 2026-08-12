@@ -225,6 +225,7 @@ Nuke 对应代码：
 - AutoGen：Tool Loop 支持显式 opt-in retry policy；只有 allowlisted 工具和可重试 FailureCategory 才会重试，默认关闭以避免副作用重复执行。
 - Graphiti Adapter：正式暴露 entity candidate extraction、entity disambiguation、community discovery 能力。
 - Graphiti：增加统一 lexical/vector/active-graph RRF hybrid search，并通过 Adapter 暴露。
+- Graphiti：新增 LLM relation candidate 入口；只有已知 relation type、有效 evidence 和 canonical endpoint 才会进入事务持久化。
 
 这份文档的核心原则是：可以说“吸收了某算法的设计思想或局部机制”，但只有在存在生产 composition root 接线和端到端调用证据时，才可以说“该算法已在线”。
 
