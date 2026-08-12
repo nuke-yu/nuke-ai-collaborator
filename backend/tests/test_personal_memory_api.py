@@ -17,6 +17,7 @@ from ai.personal_vault import (
     list_memory_usage,
     get_record_impact,
 )
+from api import personal_memory as personal_api
 
 
 class TestPersonalMemoryAPI(unittest.IsolatedAsyncioTestCase):
@@ -117,6 +118,19 @@ class TestPersonalMemoryAPI(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(impact["affected_session_ids"], [])
         self.assertEqual(len(impact["active_projections"]), 1)
         self.assertEqual(len(impact["usage_events"]), 1)
+
+    async def test_app_management_endpoint_functions_are_user_scoped(self):
+        await personal_api.register_personal_memory_app(
+            {"app_id": "chat", "name": "Chat"}, {"uid": self.user_id}
+        )
+        listed = await personal_api.list_personal_memory_apps(user={"uid": self.user_id})
+        self.assertEqual(listed["apps"][0]["app_id"], "chat")
+        changed = await personal_api.set_personal_memory_app_status(
+            "chat", {"active": False}, {"uid": self.user_id}
+        )
+        self.assertEqual(changed["status"], "inactive")
+        audit = await personal_api.list_personal_memory_audit(user={"uid": self.user_id})
+        self.assertIn("events", audit)
 
 
 if __name__ == "__main__":
