@@ -4,6 +4,8 @@ from __future__ import annotations
 import hashlib
 import json
 import time
+import re
+from typing import Any, Awaitable, Callable, Mapping
 
 from memory.contracts import (
     CreateMemoryRelation,
@@ -83,6 +85,62 @@ class CanonicalRelationService:
             )
             await db.commit()
         return relation_id
+
+    async def create_from_candidates(
+        self,
+        *,
+        scope,
+        text: str,
+        source_id: str,
+        ai_call_fn: Callable[..., Awaitable[Any]],
+    ) -> tuple[str, ...]:
+        """Extract relation candidates, then persist only validated endpoints.
+
+        The LLM response is bounded JSON evidence. Every candidate must point
+        at existing record IDs and a known ``MemoryRelationType`` before the
+        normal authorization/transaction path is used.
+        """
+        prompt = (
+            "Extract relation candidates as JSON array with keys "
+            "from_record_id,to_record_id,relation_type,evidence. "
+            "Never invent record IDs. Text: " + str(text or "")[:4000]
+        )
+        try:
+            response = await ai_call_fn(
+                "You are a conservative memory relation extractor.",
+                [{"role": "user", "content": prompt}],
+            )
+            raw = response.get("content", "") if isinstance(response, dict) else str(response)
+            match = re.search(r"\[[^\]]*\]", raw, re.DOTALL)
+            candidates = json.loads(match.group(0)) if match else []
+        except Exception:
+            return ()
+        if not isinstance(candidates, list):
+            return ()
+        created: list[str] = []
+        for candidate in candidates[:32]:
+            if not isinstance(candidate, Mapping):
+                continue
+            try:
+                relation_type = MemoryRelationType(str(candidate["relation_type"]))
+                evidence = candidate.get("evidence")
+                if not isinstance(evidence, Mapping):
+                    evidence = {}
+                relation_id = await self.create(
+                    CreateMemoryRelation(
+                        scope=scope,
+                        from_record_id=str(candidate["from_record_id"]),
+                        to_record_id=str(candidate["to_record_id"]),
+                        relation_type=relation_type,
+                        source_type="llm_relation_candidate",
+                        source_id=source_id,
+                        evidence={**dict(evidence), "text_excerpt": str(text or "")[:500]},
+                    )
+                )
+                created.append(relation_id)
+            except (KeyError, TypeError, ValueError, MemoryOperationError):
+                continue
+        return tuple(created)
 
     async def recall(
         self, query: RecallMemoryRelations
