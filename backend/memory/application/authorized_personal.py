@@ -113,6 +113,7 @@ class AuthorizedPersonalKnowledgeService:
                         if scope.bot_id is not None
                         else str(scope.group_id or self._principal.user_id)
                     ),
+                    action=action,
                 )
                 if explicit is False:
                     from dataclasses import replace

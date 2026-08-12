@@ -143,6 +143,20 @@ class PersonalGovernanceTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(await set_personal_app_status(user_id=self.user_id, app_id="missing", active=True))
         apps = await list_personal_apps(user_id=self.user_id)
         self.assertEqual(apps[0]["app_id"], "chat")
+
+    async def test_abac_action_specific_rules_do_not_leak_between_actions(self) -> None:
+        await set_access_control_rule(
+            user_id=self.user_id, subject_type="user", subject_id="42",
+            object_type="group", object_id="8", action="write", effect="deny",
+        )
+        self.assertFalse(await evaluate_access_control_rule(
+            user_id=self.user_id, subject_type="user", subject_id="42",
+            object_type="group", object_id="8", action="write",
+        ))
+        self.assertIsNone(await evaluate_access_control_rule(
+            user_id=self.user_id, subject_type="user", subject_id="42",
+            object_type="group", object_id="8", action="read",
+        ))
         self.assertEqual(await list_personal_apps(user_id=self.user_id, include_inactive=False), [])
 
     async def test_inactive_app_cannot_project_or_read(self) -> None:

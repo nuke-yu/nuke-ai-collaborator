@@ -46,6 +46,13 @@ _DDL_STATEMENTS = (
      created_at INTEGER NOT NULL,
      UNIQUE(user_id,subject_type,subject_id,object_type,object_id))""",
     "CREATE INDEX IF NOT EXISTS idx_personal_acl_object ON personal_access_controls(user_id,object_type,object_id)",
+    """CREATE TABLE IF NOT EXISTS personal_access_control_actions (
+     rule_id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER NOT NULL,
+     subject_type TEXT NOT NULL,subject_id TEXT NOT NULL,
+     object_type TEXT NOT NULL,object_id TEXT NOT NULL,action TEXT NOT NULL,
+     effect TEXT NOT NULL CHECK(effect IN ('allow','deny')),created_at INTEGER NOT NULL,
+     UNIQUE(user_id,subject_type,subject_id,object_type,object_id,action))""",
+    "CREATE INDEX IF NOT EXISTS idx_personal_acl_action_object ON personal_access_control_actions(user_id,object_type,object_id,action)",
     """CREATE TABLE IF NOT EXISTS personal_apps (
      app_id TEXT NOT NULL,user_id INTEGER NOT NULL,name TEXT NOT NULL,
      status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','inactive')),
@@ -202,31 +209,33 @@ async def set_access_control_rule(
     object_type: str,
     object_id: str,
     effect: str,
+    action: str = "*",
 ) -> int:
-    """Create/update an OpenMemory-style subject/object/effect rule."""
+    """Create/update an OpenMemory-style subject/object/action/effect rule."""
     if effect not in {"allow", "deny"}:
         raise ValueError("effect must be allow or deny")
     values = tuple(
         value.strip()
         for value in (subject_type, subject_id, object_type, object_id)
     )
-    if not all(values):
+    action = action.strip()
+    if not all(values) or not action:
         raise ValueError("subject and object fields are required")
     async with connect(user_id) as db:
         await db.execute(
-            """INSERT INTO personal_access_controls
-               (user_id,subject_type,subject_id,object_type,object_id,effect,created_at)
-               VALUES (?,?,?,?,?,?,?)
-               ON CONFLICT(user_id,subject_type,subject_id,object_type,object_id)
+            """INSERT INTO personal_access_control_actions
+               (user_id,subject_type,subject_id,object_type,object_id,action,effect,created_at)
+               VALUES (?,?,?,?,?,?,?,?)
+               ON CONFLICT(user_id,subject_type,subject_id,object_type,object_id,action)
                DO UPDATE SET effect=excluded.effect,created_at=excluded.created_at""",
-            (user_id, *values, effect, int(time.time() * 1000)),
+            (user_id, *values, action, effect, int(time.time() * 1000)),
         )
         await db.commit()
         async with db.execute(
-            """SELECT rule_id FROM personal_access_controls
+            """SELECT rule_id FROM personal_access_control_actions
                WHERE user_id=? AND subject_type=? AND subject_id=?
-                 AND object_type=? AND object_id=?""",
-            (user_id, *values),
+                 AND object_type=? AND object_id=? AND action=?""",
+            (user_id, *values, action),
         ) as cur:
             row = await cur.fetchone()
     return int(row[0])
@@ -293,6 +302,7 @@ async def evaluate_access_control_rule(
     subject_id: str,
     object_type: str,
     object_id: str,
+    action: str = "read",
 ) -> bool | None:
     """Return explicit ABAC decision, or None when no rule matches.
 
@@ -304,26 +314,28 @@ async def evaluate_access_control_rule(
     subject_id = subject_id.strip()
     object_type = object_type.strip()
     object_id = object_id.strip()
+    action = action.strip()
     async with connect(user_id) as db:
         async with db.execute(
-            """SELECT subject_type,subject_id,object_type,object_id,effect
-               FROM personal_access_controls
+            """SELECT subject_type,subject_id,object_type,object_id,action,effect
+               FROM personal_access_control_actions
                WHERE user_id=?
                  AND subject_type IN (?, '*')
                  AND subject_id IN (?, '*')
                  AND object_type IN (?, '*')
-                 AND object_id IN (?, '*')""",
-            (user_id, subject_type, subject_id, object_type, object_id),
+                 AND object_id IN (?, '*')
+                 AND action IN (?, '*')""",
+            (user_id, subject_type, subject_id, object_type, object_id, action),
         ) as cur:
             rows = await cur.fetchall()
     if not rows:
         return None
     def specificity(row) -> int:
-        return sum(value != "*" for value in row[:4])
+        return sum(value != "*" for value in row[:5])
 
     highest = max(specificity(row) for row in rows)
     top = [row for row in rows if specificity(row) == highest]
-    return not any(str(row[4]) == "deny" for row in top)
+    return not any(str(row[5]) == "deny" for row in top)
 
 
 async def add_record(*,user_id:int,kind:str,content:str,source_type:str,source_id:str="",
