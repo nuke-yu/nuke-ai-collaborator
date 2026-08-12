@@ -226,6 +226,8 @@ Nuke 对应代码：
 - Graphiti Adapter：正式暴露 entity candidate extraction、entity disambiguation、community discovery 能力。
 - Graphiti：增加统一 lexical/vector/active-graph RRF hybrid search，并通过 Adapter 暴露。
 - Graphiti：新增 LLM relation candidate 入口；只有已知 relation type、有效 evidence 和 canonical endpoint 才会进入事务持久化。
+- RRF/MMR：增加 lane score calibration 与可选 fail-soft reranker callback。
+- LangGraph：增加 `put/get_tuple/put_writes/pending_writes/delete_thread` Saver-compatible adapter API。
 
 这份文档的核心原则是：可以说“吸收了某算法的设计思想或局部机制”，但只有在存在生产 composition root 接线和端到端调用证据时，才可以说“该算法已在线”。
 
