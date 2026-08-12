@@ -17,11 +17,7 @@ from executors.plugins.rd_tools import RD_TOOLS, register_rd_tools
 from executors.plugins.memory_search_tool import MEMORY_TOOLS
 import executors.compact as compact
 from ai.client import call_ai_once, call_ai_stream_messages, AIError, AIContextOverflowError
-from memory.bootstrap import (
-    build_learning_client,
-    build_memory_client,
-    build_personal_knowledge_client,
-)
+from memory.canonical import build_conversation_memory_client, build_personal_knowledge_client, build_learning_client
 from memory.domain import Principal
 import workspace as _ws
 from core.orchestration.ai_service import AIService
@@ -111,7 +107,7 @@ class ToolLoopRunner:
         self.bf_config = (self.bot.get("executor_config") or {}).get("before_finalize")
         self.model_name = self.bot.get("model_name", "deepseek-chat")
         self.provider = self.bot.get("model_provider", "deepseek")
-        self.memory = build_memory_client(self.bot)
+        self.memory = build_conversation_memory_client()
         self.learning = build_learning_client()
         personal_user_id = getattr(ctx, "personal_user_id", None)
         self.personal = (

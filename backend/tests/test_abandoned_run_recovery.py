@@ -6,7 +6,9 @@ import unittest
 
 import db
 from ai.execution_runs import finish_run, recover_abandoned_runs, start_run
-from memory.adapters.runtime import legacy_memory_database
+from memory.infrastructure import SQLiteMemoryDatabase
+
+_memory_database = SQLiteMemoryDatabase()
 from memory.infrastructure.schema import MemorySchemaManager
 from memory.ports import MemoryDatabasePort
 
@@ -24,7 +26,7 @@ class AbandonedRunRecoveryTest(unittest.IsolatedAsyncioTestCase):
         self.path = tempfile.mktemp(suffix="_abandoned_runs.db")
         self.original_path = db.DB_PATH
         db.DB_PATH = self.path
-        legacy_memory_database.clear_cache()
+        _memory_database.clear_cache()
         await db.init_db()
         self.database = _PathDatabase(self.path)
         await MemorySchemaManager(self.database).ensure_group(7)
@@ -32,7 +34,7 @@ class AbandonedRunRecoveryTest(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self) -> None:
         await db.aclose_writer(self.path)
         db.DB_PATH = self.original_path
-        legacy_memory_database.clear_cache()
+        _memory_database.clear_cache()
         for suffix in ("", "-wal", "-shm"):
             try:
                 os.unlink(self.path + suffix)

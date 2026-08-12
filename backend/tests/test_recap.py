@@ -715,7 +715,6 @@ class TestRecapHydrationAndOperationalError(unittest.IsolatedAsyncioTestCase):
     async def test_operational_error_propagation(self):
         import sqlite3
         from core.recap.generator import generate_personal_recap, ack_personal_recap
-        from ai.memory import maybe_summarize
 
         # 1. generate_personal_recap raises when there is a schema error
         with patch("core.recap.generator.get_db") as mock_get_db:
@@ -733,15 +732,6 @@ class TestRecapHydrationAndOperationalError(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(sqlite3.OperationalError):
                 await ack_personal_recap(1, 2, covered_through_id=100)
 
-        # 3. maybe_summarize raises when there is a schema error
-        with patch("ai.memory._memory_db") as mock_memory_db:
-            mock_conn = MagicMock()
-            mock_conn.execute.side_effect = sqlite3.OperationalError("no such column: thread_id")
-            async_cm = AsyncMock()
-            async_cm.__aenter__.return_value = mock_conn
-            mock_memory_db.return_value = async_cm
-            with self.assertRaises(sqlite3.OperationalError):
-                await maybe_summarize(1, 2, "role", [3])
 
 
 if __name__ == "__main__":

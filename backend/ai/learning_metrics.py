@@ -3,6 +3,10 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 
+from memory.infrastructure import SQLiteMemoryDatabase
+
+_database = SQLiteMemoryDatabase()
+
 
 @dataclass(frozen=True, slots=True)
 class LearningShadowMetrics:
@@ -26,9 +30,7 @@ async def collect_learning_shadow_metrics(
 ) -> LearningShadowMetrics:
     if group_id is None:
         return LearningShadowMetrics()
-    from ai.memory import _memory_db
-
-    async with await _memory_db("experience_usage", group_id, write=False) as db:
+    async with await _database.connect("experience_usage", group_id, write=False) as db:
         experience = await _usage_counts(db, "experience_usage")
         skill = await _usage_counts(db, "skill_usage")
         async with db.execute(

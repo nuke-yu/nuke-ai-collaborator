@@ -22,11 +22,7 @@ from memory.adapters.algorithms import (
     Mem0FactAlgorithmAdapter,
     VoyagerCriticAlgorithmAdapter,
 )
-from memory.adapters.runtime import (
-    LegacyExperienceProjectionDelivery,
-    LegacyExperienceProjectionReconciler,
-    legacy_memory_database,
-)
+from memory.infrastructure import SQLiteMemoryDatabase
 from memory.ports.infrastructure import (
     CaseClusteringPort,
     CaseExtractionPort,
@@ -37,8 +33,6 @@ from memory.ports.infrastructure import (
     MemoryACLPort,
     MemoryAlgorithmPort,
     MemoryDatabasePort,
-    ProjectionDeliveryPort,
-    ProjectionReconcilerPort,
     RerankPort,
     SkillExtractionPort,
     SuccessCriticPort,
@@ -101,13 +95,7 @@ class TestProtocolConformance(unittest.TestCase):
         self.assertTrue(isinstance(LettaACLAlgorithmAdapter(), MemoryACLPort))
         self.assertTrue(isinstance(LettaACLAlgorithmAdapter(), ContextBudgetPort))
         self.assertTrue(isinstance(GraphitiTemporalAlgorithmAdapter(), TemporalGraphPort))
-        self.assertTrue(isinstance(legacy_memory_database, MemoryDatabasePort))
-        self.assertTrue(
-            isinstance(LegacyExperienceProjectionDelivery(), ProjectionDeliveryPort)
-        )
-        self.assertTrue(
-            isinstance(LegacyExperienceProjectionReconciler(), ProjectionReconcilerPort)
-        )
+        self.assertTrue(isinstance(SQLiteMemoryDatabase(), MemoryDatabasePort))
 
     def test_strict_signature_and_async_conformance(self) -> None:
         pairs = [

@@ -15,7 +15,7 @@ from memory.contracts import (
     RecallGroupFacts,
 )
 from memory.domain import MemoryScope
-from memory.adapters.runtime import legacy_memory_database
+from memory.infrastructure import SQLiteMemoryDatabase
 
 TEST_DB_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -27,16 +27,15 @@ class GroupFactServiceTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.original = database.DB_PATH
         database.DB_PATH = TEST_DB_PATH
-        legacy_memory_database.clear_cache()
+        database_adapter = SQLiteMemoryDatabase()
         if os.path.exists(TEST_DB_PATH):
             os.remove(TEST_DB_PATH)
         await database.init_db()
-        self.service = GroupFactService(legacy_memory_database)
+        self.service = GroupFactService(database_adapter)
 
     async def asyncTearDown(self) -> None:
         await database.aclose_writer(TEST_DB_PATH)
         database.DB_PATH = self.original
-        legacy_memory_database.clear_cache()
         if os.path.exists(TEST_DB_PATH):
             os.remove(TEST_DB_PATH)
 

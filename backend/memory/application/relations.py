@@ -16,6 +16,7 @@ from memory.contracts import (
 )
 from memory.domain import MemoryRelationType, ScopeKind
 from memory.ports import MemoryDatabasePort
+from memory.infrastructure import safe_memory_mapping, safe_memory_text
 
 
 class CanonicalRelationService:
@@ -48,9 +49,7 @@ class CanonicalRelationService:
         if effective_from is None:
             effective_from = now
         try:
-            evidence_json = json.dumps(
-                dict(command.evidence), ensure_ascii=False, sort_keys=True
-            )
+            evidence_json = safe_memory_mapping(command.evidence)
         except (TypeError, ValueError) as exc:
             raise ValueError("relation evidence must be JSON serializable") from exc
 
@@ -138,7 +137,10 @@ class CanonicalRelationService:
                         relation_type=relation_type,
                         source_type="llm_relation_candidate",
                         source_id=source_id,
-                        evidence={**dict(evidence), "text_excerpt": str(text or "")[:500]},
+                        evidence={
+                            **dict(evidence),
+                            "text_excerpt": safe_memory_text(text, limit=500),
+                        },
                     )
                 )
                 created.append(relation_id)

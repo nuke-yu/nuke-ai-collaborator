@@ -571,10 +571,24 @@ async def init_group_db(path: str | None = None) -> None:
             try:
                 await conn.execute(ddl)
             except Exception as e:
-                if "CREATE INDEX" in ddl.upper():
+                if "INDEX" in ddl.upper():
                     log.warning("init_group_db: index creation deferred (column might be missing before migrations): %s", e)
                 else:
                     raise
+        # Existing pre-split group databases may already have a messages table
+        # without columns introduced after the split.  They are stamped at the
+        # current domain version, so normalize this compatibility column before
+        # the first request can use the group database.
+        async with conn.execute("PRAGMA table_info(messages)") as columns:
+            message_columns = {str(row[1]) for row in await columns.fetchall()}
+        if "external_message_key" not in message_columns:
+            await conn.execute(
+                "ALTER TABLE messages ADD COLUMN external_message_key TEXT DEFAULT NULL"
+            )
+        await conn.execute(
+            """CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_external_key
+               ON messages(external_message_key) WHERE external_message_key IS NOT NULL"""
+        )
         await conn.commit()
         # FTS5 index — best-effort so a build without FTS5 still yields a usable
         # group DB (search_events degrades to LIKE).

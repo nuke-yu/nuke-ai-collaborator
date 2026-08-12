@@ -1,5 +1,6 @@
 import unittest
 import asyncio
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from executors.base import ExecutionContext, InteractionAdapter
 from executors.plugins.tool_loop_v1 import ToolLoopV1
@@ -64,12 +65,10 @@ class TestDecoupledExecutor(unittest.IsolatedAsyncioTestCase):
         # Path to mock: core.orchestration.ai_service uses call_ai_once and call_ai_stream_messages
         with patch("core.orchestration.ai_service.call_ai_once", new=AsyncMock(return_value={"type": "text", "content": "hello", "usage": {}})), \
              patch("core.orchestration.ai_service.call_ai_stream_messages", side_effect=mock_stream), \
+             patch("memory.application.conversation.CanonicalConversationMemoryService.recall", new=AsyncMock(return_value=SimpleNamespace(rendered_context=""))), \
              patch(m + "load_context_files", new=AsyncMock(return_value=[])), \
-             patch("ai.memory.get_memory_context", new=AsyncMock(return_value="")), \
              patch(m + "list_skills_all", return_value=[]), \
              patch(m + "get_db", new=MagicMock()), \
-             patch("ai.memory.add_to_chroma", new=AsyncMock()), \
-             patch("ai.memory.maybe_summarize", new=AsyncMock()), \
              patch(m + "append_log", new=AsyncMock()), \
              patch(m + "archive_run", new=AsyncMock()), \
              patch("executors.compact.apply_tool_result_microcompact", side_effect=lambda x: x):

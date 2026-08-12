@@ -1,6 +1,7 @@
 """Tests for user abort: CancelledError → stream_aborted broadcast in tool_loop_v1."""
 import asyncio
 import unittest
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch, MagicMock
 from executors.base import ExecutionContext, InteractionAdapter
 
@@ -70,7 +71,7 @@ class TestAbortSignal(unittest.IsolatedAsyncioTestCase):
             raise asyncio.CancelledError
 
         with patch("permissions.load_rules", new=AsyncMock(return_value=[])), \
-             patch("ai.memory.get_memory_context", new=AsyncMock(return_value="")), \
+             patch("memory.application.conversation.CanonicalConversationMemoryService.recall", new=AsyncMock(return_value=SimpleNamespace(rendered_context=""))), \
              patch(f"{_mod}.load_context_files", new=AsyncMock(return_value=[])), \
              patch(f"{_mod}.format_context_blocks", return_value=""), \
              patch(f"{_mod}.list_skills_all", new=AsyncMock(return_value=[])), \

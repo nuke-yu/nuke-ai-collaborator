@@ -43,7 +43,7 @@ class GraphitiTemporalEngine:
         self._edges: list[TemporalEdge] = []
         self._aliases: dict[str, str] = {}
         self.rrf_k = rrf_k
-        self._functional_relations = frozenset({"has_status", "primary_role", "current_location", "lives_in"})
+        self._functional_relations = frozenset({"has_status", "primary_role", "current_location", "lives_in", "preference"})
 
     @staticmethod
     def normalize_entity_name(name: str) -> str:

@@ -7,16 +7,21 @@
 不调用任何模型：args/result 只做 redact + 截断，files/command 从入参直接抠。这是
 "发生了什么"的可召回底座；提炼成持久记忆是上层（bot 自驱 observe / 可选 L4）的事。
 
-DB 路由复用 ai.memory._memory_db：tool_events 是 GROUP 表，分库模式自动落群私有库，
+DB 路由复用 canonical Memory SQLite router：tool_events 是 GROUP 表，分库模式自动落群私有库，
 单库 / 测试模式落默认库——与 role_summaries / reflection_state 行为完全一致。
 """
 from __future__ import annotations
 
 import json
+import hashlib
 import logging
 import time
 
+from memory.infrastructure import SQLiteMemoryDatabase
+
 log = logging.getLogger(__name__)
+
+_database = SQLiteMemoryDatabase()
 
 # 事件 summary 的字段上限（字符）。事件日志只要"够认出是什么"，不需要全文——全文留在
 # 主 loop 的 tool message 里。head/tail 各留一截，中间塞省略标记，避免一个巨型 Read
@@ -107,7 +112,6 @@ async def record_event(
     if group_id is None or not tool:
         return
     try:
-        from ai.memory import _memory_db
         row = (
             int(time.time() * 1000),
             group_id,
@@ -124,7 +128,7 @@ async def record_event(
             attempt_id or "",
             json.dumps(list(memory_refs), ensure_ascii=False),
         )
-        async with await _memory_db("tool_events", group_id, write=True) as db:
+        async with await _database.connect("tool_events", group_id, write=True) as db:
             await db.execute(
                 "INSERT INTO tool_events "
                 "(ts, group_id, bot_id, thread_id, tool, args_summary, result_summary, "
@@ -139,14 +143,14 @@ async def record_event(
         import sys
         e = sys.exc_info()[1]
         if e is not None and is_missing_schema_error(e):
-            # 缺表/缺列是迁移缺口，响亮上抛而非当成"没记成"咽下（对齐 ai.memory 约定）。
+            # 缺表/缺列是迁移缺口，响亮上抛而非当成"没记成"咽下。
             raise
         log.debug("record_event swallowed (group_id=%s, tool=%s)", group_id, tool, exc_info=True)
 
 
 # ───────────────────────── L3 三层检索（读路径，零模型） ─────────────────────────
 # search → 只返回 index（id/tool/files/cmd，便宜）；timeline → anchor 周围时间线；
-# fetch → 仅对筛过的 id 取全文（贵）。读路径同样复用 _memory_db 解析到同一群库。
+# fetch → 仅对筛过的 id 取全文（贵）。读路径同样复用 canonical router 解析到同一群库。
 
 # 拼成一段可搜文本，让一次 LIKE 覆盖 tool/入参/结果/命令/文件。
 _SEARCHABLE = ("tool || ' ' || args_summary || ' ' || result_summary || ' ' "
@@ -237,8 +241,7 @@ async def search_events(group_id: int, query: str = "", limit: int = 20,
         return []
     limit = max(1, min(int(limit or 20), 100))
     query = (query or "").strip()
-    from ai.memory import _memory_db
-    async with await _memory_db("tool_events", group_id, write=False) as db:
+    async with await _database.connect("tool_events", group_id, write=False) as db:
         if not query:
             return await _search_recency(db, group_id, limit, tool)
         try:
@@ -254,8 +257,7 @@ async def timeline_events(group_id: int, anchor: int, before: int = 3,
         return []
     before = max(0, min(int(before or 0), 20))
     after = max(0, min(int(after or 0), 20))
-    from ai.memory import _memory_db
-    async with await _memory_db("tool_events", group_id, write=False) as db:
+    async with await _database.connect("tool_events", group_id, write=False) as db:
         async with db.execute(
             f"SELECT {_INDEX_COLS} FROM tool_events "
             "WHERE group_id=? AND id < ? ORDER BY id DESC LIMIT ?",
@@ -277,8 +279,7 @@ async def fetch_events(group_id: int, ids: list[int]) -> list[dict]:
         return []
     ids = [int(i) for i in ids][:50]
     ph = ",".join("?" * len(ids))
-    from ai.memory import _memory_db
-    async with await _memory_db("tool_events", group_id, write=False) as db:
+    async with await _database.connect("tool_events", group_id, write=False) as db:
         async with db.execute(
             f"SELECT {_FULL_COLS} FROM tool_events "
             f"WHERE group_id=? AND id IN ({ph}) ORDER BY id ASC",
@@ -288,7 +289,7 @@ async def fetch_events(group_id: int, ids: list[int]) -> list[dict]:
 
 
 # ───────────────────── L4 批量压缩（1 次模型调用/触发，无 observer） ─────────────────────
-# turn 后由 ChromaMemoryProvider.observe 触发（与 maybe_summarize/maybe_reflect 同列），
+# turn 后由 canonical observation dispatcher 触发，
 # 纯条数门控：某 bot 在某群累计 compressed=0 的事件达到阈值，就用一次 call_ai 把这批总结成
 # 1-3 条持久结论，写进 Chroma（mem_type=tool_episode，供 recall / session-init 语义注入），
 # 再把这批标记 compressed=1。不引入常驻 observer，成本上限 = 1 次模型调用/触发。
@@ -346,14 +347,11 @@ async def maybe_compress_tool_events(group_id: int, bot_id: int, role: str = "",
     """L4：条数门控压缩。未达阈值即早退（不调模型）。fail-soft，schema 缺口上抛。"""
     if group_id is None or bot_id is None:
         return
-    import asyncio
-    from functools import partial
     from core import config
     threshold = config.TOOL_EVENT_COMPRESS_THRESHOLD
     max_batch = config.TOOL_EVENT_COMPRESS_MAX_BATCH
     try:
-        from ai.memory import _memory_db, ChromaStore
-        async with await _memory_db("tool_events", group_id, write=False) as db:
+        async with await _database.connect("tool_events", group_id, write=False) as db:
             async with db.execute(
                 "SELECT id, ts, tool, args_summary, result_summary, is_error, "
                 "files_touched, command FROM tool_events "
@@ -374,31 +372,37 @@ async def maybe_compress_tool_events(group_id: int, bot_id: int, role: str = "",
         text = (res.get("content") if isinstance(res, dict) and res.get("type") == "text" else "") or ""
         insights = _parse_insights(text, config.TOOL_EVENT_COMPRESS_MAX_INSIGHTS)
 
-        if insights:
-            loop = asyncio.get_running_loop()
-            max_ts = max(r[1] for r in rows) / 1000.0  # ms → s，对齐 time.time() 基准
-            for idx, (insight, score) in enumerate(insights):
-                ts = max_ts + (idx + 1) * 0.001
-                metadata = {
-                    "bot_id": bot_id,
-                    "role": role or "",
-                    "timestamp": ts,
-                    "importance": score,
-                    "mem_type": "tool_episode",      # 区别于 fact / reflection
-                    "thread_id": thread_id or "",
-                    "scored_by_model": f"{provider}/{model}",
-                }
-                if group_id is not None:
-                    metadata["group_id"] = group_id
-                fid = f"toolsum_{bot_id}_{group_id}_{int(ts * 1000)}_{idx}"
-                await loop.run_in_executor(
-                    None, partial(ChromaStore.write_fact_sync, fid, insight, metadata)
-                )
-
-        # 无论是否有洞察都推进 compressed（NO_INSIGHT 也推进，避免下一轮重复压同一批）。
+        # Write tool episodes into canonical records in the same transaction as
+        # the source-event watermark. Chroma is populated later by the outbox.
         ids = [r[0] for r in rows]
         ph = ",".join("?" * len(ids))
-        async with await _memory_db("tool_events", group_id, write=True) as db:
+        max_ts = max(r[1] for r in rows)
+        async with await _database.connect("memory_records", group_id, write=True) as db:
+            for idx, (insight, score) in enumerate(insights):
+                record_id = "tool-episode:" + hashlib.sha256(
+                    f"{group_id}:{bot_id}:{max_ts}:{idx}".encode()
+                ).hexdigest()[:24]
+                metadata = {
+                    "schema_version": "canonical-tool-episode-v1",
+                    "thread_id": thread_id or "",
+                    "source_type": "tool_events",
+                    "source_event_ids": [int(r[0]) for r in rows],
+                    "scored_by_model": f"{provider}/{model}",
+                }
+                await db.execute(
+                    """INSERT INTO memory_records
+                       (record_id,kind,group_id,bot_id,status,content,confidence,importance,
+                        source_ids,metadata_json,algorithm_version,owner_type,authority,
+                        sensitivity,evidence_json,created_by,effective_from,created_at,updated_at)
+                       VALUES (?, 'tool_episode', ?, ?, 'active', ?, ?, ?, ?, ?,
+                               'canonical-tool-compression-v1','bot','bot_observation','group','{}',?,?,?,?)
+                       ON CONFLICT(record_id) DO UPDATE SET content=excluded.content,
+                         metadata_json=excluded.metadata_json,updated_at=excluded.updated_at""",
+                    (record_id, group_id, bot_id, insight, score, score,
+                     json.dumps([str(r[0]) for r in rows]),
+                     json.dumps(metadata, ensure_ascii=False, sort_keys=True),
+                     bot_id, max_ts, int(time.time() * 1000), int(time.time() * 1000)),
+                )
             await db.execute(
                 f"UPDATE tool_events SET compressed=1 WHERE id IN ({ph})", ids
             )
@@ -424,9 +428,8 @@ async def _prune_compressed(group_id: int) -> None:
     """删除 compressed=1 且超过保留天数的原始事件行。"""
     import time as _time
     from core import config
-    from ai.memory import _memory_db
     cutoff_ms = int((_time.time() - config.TOOL_EVENT_RETENTION_DAYS * 86400) * 1000)
-    async with await _memory_db("tool_events", group_id, write=True) as db:
+    async with await _database.connect("tool_events", group_id, write=True) as db:
         await db.execute(
             "DELETE FROM tool_events WHERE group_id=? AND compressed=1 AND ts < ?",
             (group_id, cutoff_ms),

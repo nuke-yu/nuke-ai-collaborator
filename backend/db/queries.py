@@ -204,10 +204,10 @@ async def clear_bot_context(db, member_id: int, group_id: int):
 
     # 删除是物理清理，恒用默认 Memory adapter（不受 bot 的
     # memory=off 策略影响），但必须通过独立模块契约携带显式 scope。
-    from memory.bootstrap import build_memory_client
+    from memory.canonical import build_conversation_memory_client
     from memory.contracts import ForgetMemory
     from memory.domain import MemoryScope
-    await build_memory_client().forget(ForgetMemory(
+    await build_conversation_memory_client().forget(ForgetMemory(
         scope=MemoryScope.bot(
             group_id=group_id,
             bot_id=member_id,

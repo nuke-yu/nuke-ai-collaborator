@@ -62,8 +62,8 @@ class ProjectionOutboxTest(unittest.IsolatedAsyncioTestCase):
     async def test_projection_failure_keeps_committed_retryable_intent(self) -> None:
         case_id = await self._corrected_case()
         with patch(
-            "ai.experiences._index_vector",
-            new=AsyncMock(side_effect=RuntimeError("chroma unavailable")),
+            "memory.adapters.projections.chroma_client.ChromaProjectionClient.write_sync",
+            side_effect=RuntimeError("chroma unavailable"),
         ):
             record_id = await distill_case(case_id, 7)
 
@@ -84,11 +84,13 @@ class ProjectionOutboxTest(unittest.IsolatedAsyncioTestCase):
                 "UPDATE memory_projection_outbox SET next_attempt_at=0"
             )
             await db.commit()
-        with patch("ai.experiences._index_vector", new=AsyncMock()) as index_vector:
+        with patch(
+            "memory.adapters.projections.chroma_client.ChromaProjectionClient.write_sync"
+        ) as index_vector:
             result = await drain_projection_outbox(7)
 
         self.assertEqual((result.claimed, result.completed, result.failed), (1, 1, 0))
-        index_vector.assert_awaited_once()
+        index_vector.assert_called_once()
         async with database.connect(TEST_DB_PATH) as db:
             async with db.execute(
                 "SELECT status,completed_at FROM memory_projection_outbox"
@@ -99,7 +101,9 @@ class ProjectionOutboxTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_hydration_reconciliation_replays_canonical_projection(self) -> None:
         case_id = await self._corrected_case("reconcile")
-        with patch("ai.experiences._index_vector", new=AsyncMock()):
+        with patch(
+            "memory.adapters.projections.chroma_client.ChromaProjectionClient.write_sync"
+        ):
             await distill_case(case_id, 7)
 
         self.assertEqual(await reconcile_experience_projections(7), 1)
@@ -109,10 +113,12 @@ class ProjectionOutboxTest(unittest.IsolatedAsyncioTestCase):
             ) as cur:
                 self.assertEqual((await cur.fetchone())[0], "pending")
 
-        with patch("ai.experiences._index_vector", new=AsyncMock()) as index_vector:
+        with patch(
+            "memory.adapters.projections.chroma_client.ChromaProjectionClient.write_sync"
+        ) as index_vector:
             result = await drain_projection_outbox(7)
         self.assertEqual(result.completed, 1)
-        index_vector.assert_awaited_once()
+        index_vector.assert_called_once()
 
     async def test_superseded_inflight_delivery_cannot_ack_latest_version(self) -> None:
         started = asyncio.Event()
@@ -135,8 +141,7 @@ class ProjectionOutboxTest(unittest.IsolatedAsyncioTestCase):
             await db.commit()
 
         with patch(
-            "memory.adapters.runtime.projection_legacy."
-            "LegacyExperienceProjectionDelivery.deliver",
+            "memory.adapters.projections.chroma.ChromaBotMemoryProjectionDelivery.deliver",
             side_effect=delayed_delivery,
         ):
             first_drain = asyncio.create_task(drain_projection_outbox(7))

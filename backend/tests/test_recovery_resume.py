@@ -103,15 +103,12 @@ class TestResumeRunClosesSession(unittest.IsolatedAsyncioTestCase):
         
         with patch("core.orchestration.ai_service.call_ai_stream_messages", side_effect=fake_stream), \
              patch("core.orchestration.ai_service.call_ai_once", side_effect=fake_call_ai_once), \
-             patch("ai.memory.get_memory_context", new=AsyncMock(return_value="")), \
              patch(m + "list_skills_all", new=AsyncMock(return_value=[])), \
              patch(m + "load_context_files", new=AsyncMock(return_value=[])), \
              patch(m + "format_context_blocks", return_value=""), \
              patch(m + "load_always_skills", new=AsyncMock(return_value=[])), \
              patch("executors.plugins.tool_loop_v1.tool_executor.get_schemas",
                    return_value=[{"function": {"name": "write_file"}}]), \
-             patch("ai.memory.add_to_chroma", new=AsyncMock()), \
-             patch("ai.memory.maybe_summarize", new=AsyncMock()), \
              patch(m + "append_log", new=AsyncMock()), \
              patch(m + "archive_run", new=AsyncMock()), \
              patch("executors.compact.maybe_compact_db_history", new=AsyncMock()), \

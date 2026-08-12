@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from core import auth
 from db import global_db
-from memory.bootstrap import (
+from memory.canonical import (
     build_personal_knowledge_client, list_acl_audit_events, list_personal_apps,
     register_personal_app, set_personal_app_status,
 )
@@ -89,7 +89,7 @@ async def create_personal_projection(body:dict,user=Depends(auth.get_current_use
                                      purpose="personal_projection_create"),
           record_id=body["record_id"],target_group_id=gid,target_bot_id=bot_id,
           purpose=body.get("purpose","assistant_context"),expires_at=body.get("expires_at"),
-          app_id=body["app_id"]))
+              app_id=str(body.get("app_id") or "assistant_context")))
     except MemoryAuthorizationError as exc:raise HTTPException(403,str(exc))
     except (KeyError,ValueError) as exc:raise HTTPException(400,str(exc))
     return {"projection_id":projection_id}

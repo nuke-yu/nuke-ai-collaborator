@@ -161,7 +161,7 @@ class TestMemoryArchitecture(unittest.TestCase):
         self.assertNotIn("ai.experiences", imports)
         self.assertNotIn("ai.skill_learning", imports)
         self.assertNotIn("ai.personal_vault", imports)
-        self.assertIn("memory.bootstrap", imports)
+        self.assertIn("memory.canonical", imports)
         self.assertIn("memory.contracts", imports)
 
     def test_bot_context_deletion_uses_memory_module_contract(self):
@@ -175,7 +175,7 @@ class TestMemoryArchitecture(unittest.TestCase):
             elif isinstance(node, ast.Import):
                 imports.extend(alias.name for alias in node.names)
         self.assertNotIn("ai.memory_provider", imports)
-        self.assertIn("memory.bootstrap", imports)
+        self.assertIn("memory.canonical", imports)
         self.assertIn("memory.contracts", imports)
 
     def test_personal_api_has_no_direct_vault_dependency(self):
@@ -185,7 +185,7 @@ class TestMemoryArchitecture(unittest.TestCase):
         modules = [node.module for node in ast.walk(tree)
                    if isinstance(node, ast.ImportFrom) and node.module]
         self.assertNotIn("ai.personal_vault", modules)
-        self.assertIn("memory.bootstrap", modules)
+        self.assertIn("memory.canonical", modules)
 
 
 if __name__ == "__main__":

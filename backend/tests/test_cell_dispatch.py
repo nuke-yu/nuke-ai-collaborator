@@ -93,14 +93,11 @@ class TestCellDispatch(unittest.IsolatedAsyncioTestCase):
         m = "executors.plugins.tool_loop_v1."
         with patch("core.orchestration.ai_service.call_ai_once", new=call_once), \
              patch("core.orchestration.ai_service.call_ai_stream_messages", side_effect=mock_stream), \
-             patch("ai.memory.get_memory_context", new=AsyncMock(return_value="")), \
              patch(m + "list_skills_all", new=AsyncMock(return_value=[])), \
              patch(m + "load_always_skills", new=AsyncMock(return_value=[])), \
              patch(m + "load_context_files", new=AsyncMock(return_value=[])), \
              patch(m + "format_context_blocks", return_value=""), \
              patch(m + "filter_skills_by_context", side_effect=lambda s, _: s), \
-             patch("ai.memory.add_to_chroma", new=AsyncMock()), \
-             patch("ai.memory.maybe_summarize", new=AsyncMock()), \
              patch(m + "append_log", new=AsyncMock()), \
              patch(m + "archive_run", new=AsyncMock()), \
              patch("executors.compact.maybe_compact_db_history", new=AsyncMock()):

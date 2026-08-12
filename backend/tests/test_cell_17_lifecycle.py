@@ -124,19 +124,21 @@ class TestCell17Lifecycle(unittest.IsolatedAsyncioTestCase):
             "backlog": 0, "retry": 0, "dead": 0, "expired_lease": 0
         }
 
+        dispatcher = MagicMock()
+        dispatcher.dispatch_group = AsyncMock(return_value=dispatch_result)
+        learning = MagicMock()
+        learning.job_stats = AsyncMock(return_value=pipeline_stats)
         with patch(
-            "ai.pipeline.dispatch_group",
-            new_callable=AsyncMock,
-            return_value=dispatch_result,
-        ) as dispatch, patch(
-            "ai.pipeline.job_stats",
-            new_callable=AsyncMock,
-            return_value=pipeline_stats,
-        ) as stats:
+            "memory.canonical.build_pipeline_dispatcher",
+            return_value=dispatcher,
+        ), patch(
+            "memory.canonical.build_learning_client",
+            return_value=learning,
+        ):
             await lm._dispatch_learning_jobs()
 
-        dispatch.assert_awaited_once_with(7)
-        stats.assert_awaited_once_with(7)
+        dispatcher.dispatch_group.assert_awaited_once_with(7)
+        learning.job_stats.assert_awaited_once_with(7)
         snapshot = lm.stats()["learning_pipeline"]["7"]
         self.assertEqual(snapshot["completed"], 1)
         self.assertEqual(snapshot["backlog"], 0)
@@ -145,14 +147,14 @@ class TestCell17Lifecycle(unittest.IsolatedAsyncioTestCase):
     async def test_observation_gap_repair_is_scoped_to_worker_owned_groups(self):
         lm = LifecycleManager()
         lm._active_groups[7] = time.time()
+        learning = MagicMock()
+        learning.repair_observation_gaps = AsyncMock(return_value=2)
         with patch(
-            "ai.pipeline.enqueue_missing_turn_observations",
-            new_callable=AsyncMock,
-            return_value=2,
-        ) as repair:
+            "memory.canonical.build_learning_client", return_value=learning
+        ):
             await lm._repair_turn_observation_gaps()
 
-        repair.assert_awaited_once_with(7)
+        learning.repair_observation_gaps.assert_awaited_once_with(7)
         self.assertEqual(
             lm.stats()["learning_pipeline"]["7"]["observation_jobs_repaired"], 2
         )
@@ -160,14 +162,14 @@ class TestCell17Lifecycle(unittest.IsolatedAsyncioTestCase):
     async def test_skill_projection_repair_is_scoped_to_owned_groups(self):
         lm = LifecycleManager()
         lm._active_groups[7] = time.time()
+        learning = MagicMock()
+        learning.repair_skill_projection_gaps = AsyncMock(return_value=2)
         with patch(
-            "ai.skill_learning.enqueue_missing_skill_projections",
-            new_callable=AsyncMock,
-            return_value=2,
-        ) as repair:
+            "memory.canonical.build_learning_client", return_value=learning
+        ):
             await lm._repair_skill_projection_gaps()
 
-        repair.assert_awaited_once_with(7)
+        learning.repair_skill_projection_gaps.assert_awaited_once_with(7)
         self.assertEqual(
             lm.stats()["learning_pipeline"]["7"][
                 "skill_projection_jobs_repaired"

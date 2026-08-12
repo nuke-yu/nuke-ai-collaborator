@@ -17,7 +17,9 @@ from ai.personal_vault import (
     set_personal_app_status,
     set_access_control_rule,
 )
-from memory.adapters.runtime import legacy_memory_database
+from memory.infrastructure import SQLiteMemoryDatabase
+
+_memory_database = SQLiteMemoryDatabase()
 
 
 class PersonalGovernanceTest(unittest.IsolatedAsyncioTestCase):
@@ -25,11 +27,11 @@ class PersonalGovernanceTest(unittest.IsolatedAsyncioTestCase):
         self.user_id = 999
         self.tmp_dir = tempfile.mkdtemp()
         self.original_personal_path = db.DB_PATH
-        legacy_memory_database.clear_cache()
+        _memory_database.clear_cache()
 
     async def asyncTearDown(self) -> None:
         await delete_vault(self.user_id)
-        legacy_memory_database.clear_cache()
+        _memory_database.clear_cache()
 
     async def test_secret_sensitivity_projection_rejected(self) -> None:
         record_id = await add_record(

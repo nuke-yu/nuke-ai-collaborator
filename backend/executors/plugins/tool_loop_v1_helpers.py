@@ -632,7 +632,9 @@ async def setup_session(runner) -> None:
         group_port = getattr(runner, "group_knowledge", None)
         if group_port is None:
             from memory.bootstrap import build_group_knowledge_client
-            group_port = build_group_knowledge_client()
+            group_port = build_group_knowledge_client(
+                Principal.bot(runner.bot["id"], runner.ctx.group_id)
+            )
         group_result = await group_port.recall_facts(RecallGroupFacts(
             scope=memory_scope,
             query=runner.ctx.user_message,
@@ -648,7 +650,7 @@ async def setup_session(runner) -> None:
         )
     learning_port = getattr(runner, "learning", None)
     if learning_port is None:
-        from memory.bootstrap import build_learning_client
+        from memory.canonical import build_learning_client
         learning_port = build_learning_client()
     try:
         experience_context, runner.retrieved_experience_ids = await learning_port.recall_experiences(
@@ -703,7 +705,7 @@ async def setup_session(runner) -> None:
         )
         personal_port = getattr(runner, "personal", None)
         if personal_port is None:
-            from memory.bootstrap import build_personal_knowledge_client
+            from memory.canonical import build_personal_knowledge_client
             personal_port = build_personal_knowledge_client(
                 Principal.user(runner.ctx.personal_user_id, [runner.ctx.group_id])
             )
@@ -1209,7 +1211,7 @@ async def cleanup_and_finalize(runner) -> ExecutionResult:
         )
         learning_port = getattr(runner, "learning", None)
         if learning_port is None:
-            from memory.bootstrap import build_learning_client
+            from memory.canonical import build_learning_client
             learning_port = build_learning_client()
         case_id = await learning_port.assemble_case(AssembleCase(
             scope=bot_scope,

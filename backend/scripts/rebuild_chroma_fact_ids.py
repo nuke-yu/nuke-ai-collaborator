@@ -17,22 +17,22 @@ import asyncio
 import os
 
 import db
-from ai.memory import (
-    ChromaStore,
-    _parse_created_at,
-    add_to_chroma,
-    migrate_legacy_chroma_fact_ids,
-)
+from ai.client import call_ai_once
+from memory.adapters.projections.chroma_client import _get_collection
+from memory.adapters.projections.maintenance import migrate_legacy_fact_ids
+from memory.adapters.projections import ChromaBotMemoryProjectionDelivery
+from memory.application import BotFactObservationService, CanonicalBotFactObserver, CanonicalObservationEvent
+from memory.infrastructure import ProjectionOutbox, SQLiteMemoryDatabase
 from db import bind_db
 from runtime.dbpaths import group_db_path
 
 
 def _read_collection_sync() -> dict:
-    return ChromaStore.get_collection().get(include=["metadatas"])
+    return _get_collection().get(include=["metadatas"])
 
 
 def _delete_vectors_sync(ids: list[str]) -> None:
-    collection = ChromaStore.get_collection()
+    collection = _get_collection()
     for offset in range(0, len(ids), 500):
         collection.delete(ids=ids[offset:offset + 500])
 
@@ -125,18 +125,26 @@ async def rebuild_group_facts(*, group_ids: set[int] | None, dry_run: bool) -> d
             if not content or len(content.strip()) < 15:
                 continue
             role, default_provider, default_model = bots[int(bot_id)]
-            await add_to_chroma(
-                int(message_id), content, role, int(bot_id), group_id,
-                sender_provider or default_provider,
-                sender_model or default_model,
-                timestamp=_parse_created_at(created_at),
+            database = SQLiteMemoryDatabase()
+            outbox = ProjectionOutbox(database, ChromaBotMemoryProjectionDelivery())
+            observer = CanonicalBotFactObserver(
+                database,
+                BotFactObservationService(database, outbox),
+                call_ai_once,
             )
+            await observer.observe(CanonicalObservationEvent(
+                bot_id=int(bot_id), group_id=group_id, role=role,
+                bot_name=role, message_id=int(message_id), text=content,
+                provider=sender_provider or default_provider,
+                model=sender_model or default_model,
+            ))
+            await outbox.drain(group_id, limit=100)
             stats["processed"] += 1
     return stats
 
 
 async def _run(args) -> int:
-    renamed = await migrate_legacy_chroma_fact_ids(dry_run=args.dry_run)
+    renamed = await migrate_legacy_fact_ids(dry_run=args.dry_run)
     print(f"legacy ID migration: {renamed}")
     if args.rebuild:
         rebuilt = await rebuild_group_facts(

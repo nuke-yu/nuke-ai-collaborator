@@ -22,7 +22,7 @@ already have a scored_by_model are skipped, so re-running is safe.
 import argparse
 import asyncio
 
-from ai.memory import backfill_chroma_scored_by_model
+from memory.adapters.projections.maintenance import backfill_scored_by_model
 
 
 def main(argv=None) -> int:
@@ -36,7 +36,7 @@ def main(argv=None) -> int:
     )
     args = parser.parse_args(argv)
 
-    stats = asyncio.run(backfill_chroma_scored_by_model(dry_run=args.dry_run, label=args.label))
+    stats = asyncio.run(backfill_scored_by_model(dry_run=args.dry_run, label=args.label))
 
     mode = "DRY-RUN" if args.dry_run else "APPLIED"
     print(f"[{mode}] Chroma scored_by_model backfill (label={args.label!r})")

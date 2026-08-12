@@ -7,8 +7,8 @@ from pathlib import Path
 from core import auth
 from core.auth import verify_token
 from db import ensure_group_db_ready, get_db, get_member, global_db
-from memory.bootstrap import build_learning_client
-from memory.contracts import ApproveSkillCandidate, ListSkillCandidates
+from memory.canonical import build_learning_client
+from memory.contracts import ListSkillCandidates
 from memory.domain import MemoryScope
 from runtime.dbpaths import group_db_path
 from workspace import layout
@@ -174,12 +174,13 @@ async def approve_memory_skill_candidate(
     if not reason:
         raise HTTPException(400, "approval reason is required")
     try:
-        approved = await build_learning_client().approve_skill_candidate(
-            ApproveSkillCandidate(
-                scope=scope,
-                skill_id=skill_id,
-                reason=reason,
-            )
+        approved = await build_learning_client().promote_skill(
+            skill_id=skill_id,
+            group_id=int(scope.group_id),
+            target_maturity="active",
+            bot_id=member_id,
+            actor_id=f"user:{scope.user_id}",
+            reason=reason,
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc

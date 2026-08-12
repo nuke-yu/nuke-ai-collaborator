@@ -9,7 +9,6 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from memory.adapters.algorithms import ACLPermissionCheck
 from memory.application import AuthorizedPersonalKnowledgeService
-from memory.adapters.runtime import LegacyPersonalVaultPolicyAdapter
 from memory.contracts import (
     CreatePersonalProjection,
     CreatePersonalRecord,
@@ -24,9 +23,10 @@ class TestAuthorizedPersonalKnowledgeService(unittest.IsolatedAsyncioTestCase):
         self.delegate = AsyncMock()
         self.acl = AsyncMock()
         self.acl.check_acl.return_value = ACLPermissionCheck(True, "allowed")
+        self.policy = AsyncMock()
         self.principal = Principal.user(10, [7])
         self.service = AuthorizedPersonalKnowledgeService(
-            self.delegate, self.acl, self.principal, LegacyPersonalVaultPolicyAdapter()
+            self.delegate, self.acl, self.principal, self.policy
         )
         self.scope = MemoryScope.personal(
             user_id=10, actor_id="user:10", purpose="test"
@@ -54,17 +54,13 @@ class TestAuthorizedPersonalKnowledgeService(unittest.IsolatedAsyncioTestCase):
 
         self.delegate.create_record.assert_not_awaited()
 
-    @patch(
-        "ai.personal_vault.evaluate_access_control_rule",
-        new_callable=AsyncMock,
-        return_value=False,
-    )
-    async def test_explicit_abac_deny_tightens_default_acl(self, evaluate_rule) -> None:
+    async def test_explicit_abac_deny_tightens_default_acl(self) -> None:
+        self.policy.evaluate_rule.return_value = False
         with self.assertRaisesRegex(MemoryAuthorizationError, "ABAC deny"):
             await self.service.create_record(
                 CreatePersonalRecord(scope=self.scope, kind="preference", content="concise")
             )
-        evaluate_rule.assert_awaited_once()
+        self.policy.evaluate_rule.assert_awaited_once()
         self.delegate.create_record.assert_not_awaited()
 
     async def test_scope_cannot_impersonate_another_actor(self) -> None:

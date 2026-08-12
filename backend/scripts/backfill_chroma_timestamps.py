@@ -18,7 +18,7 @@ import argparse
 import asyncio
 import sys
 
-from ai.memory import backfill_chroma_timestamps
+from memory.adapters.projections.maintenance import backfill_timestamps
 
 
 def main(argv=None) -> int:
@@ -26,7 +26,7 @@ def main(argv=None) -> int:
     parser.add_argument("--dry-run", action="store_true", help="report what would change, write nothing")
     args = parser.parse_args(argv)
 
-    stats = asyncio.run(backfill_chroma_timestamps(dry_run=args.dry_run))
+    stats = asyncio.run(backfill_timestamps(dry_run=args.dry_run))
 
     mode = "DRY-RUN" if args.dry_run else "APPLIED"
     print(f"[{mode}] Chroma timestamp backfill")

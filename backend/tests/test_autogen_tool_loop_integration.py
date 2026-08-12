@@ -12,19 +12,20 @@ async def test_failed_tool_injects_redacted_autogen_insight_once():
         messages=[],
     )
 
-    await _inject_failure_insight(
+    first = await _inject_failure_insight(
         runner,
         "read_file",
         "FileNotFoundError: Authorization: Bearer secret-token",
     )
-    await _inject_failure_insight(
+    duplicate = await _inject_failure_insight(
         runner,
         "read_file",
         "FileNotFoundError: Authorization: Bearer secret-token",
     )
 
-    assert len(runner.messages) == 1
-    content = runner.messages[0]["content"]
+    assert first is not None
+    assert duplicate is None
+    content = first
     assert "path_not_found" in content
     assert "secret-token" not in content
     assert "[Historical failure insight" in content

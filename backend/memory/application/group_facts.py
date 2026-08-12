@@ -21,6 +21,7 @@ from memory.domain import (
     admit_group_fact,
 )
 from memory.ports import MemoryDatabasePort
+from memory.infrastructure import safe_memory_mapping, safe_memory_text
 
 _CONFIDENCE = {
     FactAuthority.USER_EXPLICIT: 0.95,
@@ -105,7 +106,7 @@ class GroupFactService:
                     record_id,
                     scope.group_id,
                     admission.status,
-                    command.statement.strip()[:4000],
+                    safe_memory_text(command.statement),
                     _CONFIDENCE[admission.authority],
                     0.8 if admission.can_activate else 0.4,
                     json.dumps([command.source_id]),
@@ -114,7 +115,7 @@ class GroupFactService:
                     admission.authority.value,
                     subject_key,
                     sensitivity.value,
-                    json.dumps(evidence, ensure_ascii=False),
+                    safe_memory_mapping(evidence),
                     scope.actor_id,
                     now,
                     now,
@@ -294,4 +295,3 @@ def _build_fts_query(raw_query: str) -> str:
 
 def _normalize_subject_safe(value: str) -> str:
     return re.sub(r"[^a-z0-9_.:/-]+", "-", value.strip().lower()).strip("-")
-

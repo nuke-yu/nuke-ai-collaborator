@@ -8,6 +8,7 @@ import time
 from memory.contracts import IngestBotFactObservations, MemoryAuthorizationError
 from memory.domain import MemoryRelationType, ScopeKind
 from memory.ports import MemoryDatabasePort, ProjectionOutboxPort
+from memory.infrastructure import safe_memory_mapping, safe_memory_text
 
 from .relations import memory_relation_id
 from .vector_projection import (
@@ -101,11 +102,11 @@ class BotFactObservationService:
                         record_id,
                         scope.group_id,
                         scope.bot_id,
-                        fact.content.strip()[:4000],
+                        safe_memory_text(fact.content),
                         fact.importance,
                         json.dumps([command.source_id]),
                         json.dumps(metadata, ensure_ascii=False, sort_keys=True),
-                        json.dumps(evidence, ensure_ascii=False, sort_keys=True),
+                        safe_memory_mapping(evidence),
                         scope.actor_id,
                         effective_from,
                         now,
@@ -138,7 +139,7 @@ class BotFactObservationService:
                     record_id=record_id,
                     group_id=scope.group_id,
                     projection_id=fact.projection_id,
-                    content=fact.content.strip()[:4000],
+                    content=safe_memory_text(fact.content),
                     metadata=projection_metadata,
                     delete_ids=conflict_ids,
                     now_ms=now,

@@ -5,6 +5,8 @@ import hashlib
 import time
 from typing import Any
 
+from memory.infrastructure import SQLiteMemoryDatabase
+
 _database = None
 
 
@@ -17,8 +19,7 @@ def configure_database(database) -> None:
 def _get_database():
     global _database
     if _database is None:
-        from memory.bootstrap import legacy_memory_database
-        _database = legacy_memory_database
+        _database = SQLiteMemoryDatabase()
     return _database
 
 

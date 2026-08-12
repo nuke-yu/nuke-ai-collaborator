@@ -148,7 +148,10 @@ class LifecycleManager:
         self, group_ids: tuple[int, ...] | None = None
     ) -> None:
         """Consume durable learning jobs only for Groups leased by this Worker."""
-        from ai.pipeline import dispatch_group, job_stats
+        from memory.canonical import build_learning_client, build_pipeline_dispatcher
+
+        canonical_learning = build_learning_client()
+        canonical_dispatcher = build_pipeline_dispatcher()
 
         if group_ids is None:
             async with self._lock:
@@ -157,8 +160,11 @@ class LifecycleManager:
             targets = group_ids
         for group_id in targets:
             try:
-                result = await dispatch_group(group_id)
-                snapshot = await job_stats(group_id)
+                # All production handlers are owned by the canonical dispatcher.
+                canonical_result = await canonical_dispatcher.dispatch_group(group_id)
+                result = canonical_result
+                # Stats belong to the canonical Memory boundary as well.
+                snapshot = await canonical_learning.job_stats(group_id)
                 snapshot.update(result)
                 snapshot["last_dispatched_at"] = time.time()
                 self._learning_pipeline_stats[group_id] = snapshot
@@ -174,16 +180,17 @@ class LifecycleManager:
         self, group_ids: tuple[int, ...] | None = None
     ) -> None:
         """Backfill turns committed just before a Worker/process crash."""
-        from ai.pipeline import enqueue_missing_turn_observations
+        from memory.canonical import build_learning_client
 
         if group_ids is None:
             async with self._lock:
                 targets = tuple(self._active_groups)
         else:
             targets = group_ids
+        learning = build_learning_client()
         for group_id in targets:
             try:
-                repaired = await enqueue_missing_turn_observations(group_id)
+                repaired = await learning.repair_observation_gaps(group_id)
                 if repaired:
                     snapshot = self._learning_pipeline_stats.setdefault(
                         group_id, {}
@@ -203,16 +210,17 @@ class LifecycleManager:
         self, group_ids: tuple[int, ...] | None = None
     ) -> None:
         """Requeue deleted or stale derived Skill workspace projections."""
-        from ai.skill_learning import enqueue_missing_skill_projections
+        from memory.canonical import build_learning_client
 
         if group_ids is None:
             async with self._lock:
                 targets = tuple(self._active_groups)
         else:
             targets = group_ids
+        learning = build_learning_client()
         for group_id in targets:
             try:
-                repaired = await enqueue_missing_skill_projections(group_id)
+                repaired = await learning.repair_skill_projection_gaps(group_id)
                 if repaired:
                     snapshot = self._learning_pipeline_stats.setdefault(
                         group_id, {}

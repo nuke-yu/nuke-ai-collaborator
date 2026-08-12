@@ -8,6 +8,7 @@ import time
 from memory.contracts import IngestBotReflections, MemoryAuthorizationError
 from memory.domain import ScopeKind
 from memory.ports import MemoryDatabasePort, ProjectionOutboxPort
+from memory.infrastructure import safe_memory_mapping, safe_memory_text
 
 from .vector_projection import enqueue_bot_memory_projection
 
@@ -90,11 +91,11 @@ class BotReflectionService:
                         record_id,
                         scope.group_id,
                         scope.bot_id,
-                        reflection.content.strip()[:4000],
+                        safe_memory_text(reflection.content),
                         reflection.importance,
                         json.dumps(sources),
                         json.dumps(metadata, ensure_ascii=False, sort_keys=True),
-                        json.dumps(evidence, ensure_ascii=False, sort_keys=True),
+                        safe_memory_mapping(evidence),
                         scope.actor_id,
                         reflection.observed_at,
                         now,
@@ -128,7 +129,7 @@ class BotReflectionService:
                     record_id=record_id,
                     group_id=scope.group_id,
                     projection_id=reflection.projection_id,
-                    content=reflection.content.strip()[:4000],
+                    content=safe_memory_text(reflection.content),
                     metadata=projection_metadata,
                     delete_ids=conflict_ids,
                     now_ms=now,

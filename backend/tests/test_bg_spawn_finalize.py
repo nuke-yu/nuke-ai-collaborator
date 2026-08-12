@@ -11,6 +11,7 @@ scheduled through it, while durable memory capture is awaited before return.
 import os
 import sys
 import unittest
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -70,15 +71,15 @@ class TestBgSpawnFinalize(unittest.IsolatedAsyncioTestCase):
 
         m = "executors.plugins.tool_loop_v1."
         with patch("core.bg.spawn", new=fake_spawn), \
+             patch("memory.application.conversation.CanonicalConversationMemoryService.recall", new=AsyncMock(return_value=SimpleNamespace(rendered_context=""))), \
              patch(
-                 "memory.adapters.runtime.legacy.LegacyConversationMemoryAdapter.observe",
+                 "memory.application.conversation.CanonicalConversationMemoryService.observe",
                  new_callable=AsyncMock,
              ) as observe, \
              patch("core.orchestration.ai_service.call_ai_stream_messages", side_effect=mock_stream), \
              patch("core.orchestration.ai_service.call_ai_once",
                    new=AsyncMock(return_value={"type": "text", "content": "done", "usage": {}})), \
              patch(m + "load_context_files", new=AsyncMock(return_value=[])), \
-             patch("ai.memory.get_memory_context", new=AsyncMock(return_value="")), \
              patch(m + "list_skills_all", new=AsyncMock(return_value=[])), \
              patch(m + "load_always_skills", new=AsyncMock(return_value=[])), \
              patch(
@@ -86,8 +87,6 @@ class TestBgSpawnFinalize(unittest.IsolatedAsyncioTestCase):
                  new=AsyncMock(return_value=[]),
              ), \
              patch(m + "get_db", new=MagicMock()), \
-             patch("ai.memory.add_to_chroma", new=AsyncMock()), \
-             patch("ai.memory.maybe_summarize", new=AsyncMock()), \
              patch(m + "append_log", new=AsyncMock()), \
              patch(m + "archive_run", new=AsyncMock()), \
              patch("executors.compact.maybe_compact_db_history", new=AsyncMock()), \

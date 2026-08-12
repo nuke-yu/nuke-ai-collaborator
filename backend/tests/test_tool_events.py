@@ -12,7 +12,7 @@ import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import ANY, AsyncMock, patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -569,17 +569,22 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
             tool_records=_corrected_trace("latest failure"),
         )
 
-        with patch("ai.experiences._index_vector", new=AsyncMock()) as index_vector:
-            record_id = await distill_case(first, 7)
-            await distill_case(second, 7)
+        record_id = await distill_case(first, 7)
+        await distill_case(second, 7)
 
         async with database.connect(TEST_DB_PATH) as db:
             async with db.execute(
                 "SELECT content,confidence FROM memory_records WHERE record_id=?", (record_id,)
             ) as cur:
                 canonical_content, confidence = await cur.fetchone()
-        projected_content = index_vector.await_args_list[-1].args[1]
-        projected_confidence = index_vector.await_args_list[-1].args[4]
+            async with db.execute(
+                "SELECT payload_json FROM memory_projection_outbox "
+                "WHERE event_id=?",
+                (f"experience-vector:{record_id}",),
+            ) as cur:
+                projection = json.loads((await cur.fetchone())[0])
+        projected_content = projection["content"]
+        projected_confidence = projection["confidence"]
         self.assertEqual(projected_content, canonical_content)
         self.assertEqual(projected_confidence, confidence)
         self.assertIn("latest failure", canonical_content)
@@ -715,7 +720,7 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
         from executors.plugins.tool_loop_v1_helpers import (
             _finalize_causal_memory_usage,
         )
-        from memory.adapters.runtime import LegacyLearningAdapter
+        from memory.application import CanonicalLearningService
 
         case_id = await assemble_case(
             run_id="causal-source",
@@ -764,7 +769,7 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
             scope=MemoryScope.bot(
                 group_id=7, bot_id=3, actor_id="bot:3"
             ),
-            learning_port=LegacyLearningAdapter(),
+            learning_port=CanonicalLearningService(),
         )
 
         async with database.connect(TEST_DB_PATH) as db:
@@ -965,37 +970,41 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
         parent = await dispatch_group(7)
         self.assertEqual(parent["completed"], 1)
 
-        with patch("ai.memory.add_to_chroma", new_callable=AsyncMock) as fact, \
-             patch("ai.memory.maybe_summarize", new_callable=AsyncMock) as summary, \
-             patch("ai.memory.maybe_reflect", new_callable=AsyncMock) as reflection, \
-             patch(
-                 "ai.tool_events.maybe_compress_tool_events",
-                 new_callable=AsyncMock,
-             ) as compression:
+        with patch(
+            "memory.application.observation.CanonicalBotFactObserver.observe",
+            new_callable=AsyncMock,
+            return_value=(),
+        ) as fact, patch(
+            "memory.application.observation.CanonicalSummaryObserver.observe",
+            new_callable=AsyncMock,
+            return_value={"stage": "summary", "skipped": False},
+        ) as summary, patch(
+            "memory.application.observation.CanonicalReflectionObserver.observe",
+            new_callable=AsyncMock,
+        ) as reflection, patch(
+            "memory.application.observation.CanonicalToolCompressionObserver.observe",
+            new_callable=AsyncMock,
+            return_value={"stage": "tool_compression", "skipped": True},
+        ) as compression:
             reflection.side_effect = RuntimeError("temporary model failure")
             first_children = await dispatch_group(7)
             reflection.side_effect = None
+            reflection.return_value = {"stage": "reflection", "skipped": False}
             retry = await dispatch_group(7)
 
         self.assertEqual(
             first_children, {"claimed": 4, "completed": 3, "failed": 1}
         )
         self.assertEqual(retry, {"claimed": 1, "completed": 1, "failed": 0})
-        fact.assert_awaited_once_with(
-            42, "Use React 19", "developer", 3, 7,
-            "claude", "opus", "disc:7:architecture", strict=True,
-        )
-        summary.assert_awaited_once_with(
-            7, 3, "developer", [3], "disc:7:architecture", strict=True
-        )
-        reflection.assert_awaited_with(
-            7, 3, "developer", "claude", "opus", strict=True
-        )
+        fact.assert_awaited_once()
+        self.assertEqual(fact.await_args.args[0].message_id, 42)
+        self.assertEqual(fact.await_args.args[0].group_id, 7)
+        summary.assert_awaited_once()
+        self.assertEqual(summary.await_args.args[0].thread_id, "disc:7:architecture")
+        reflection.assert_awaited_with(ANY)
         self.assertEqual(reflection.await_count, 2)
-        compression.assert_awaited_once_with(
-            7, 3, "developer", "disc:7:architecture", "claude", "opus",
-            strict=True,
-        )
+        compression.assert_awaited_once()
+        self.assertEqual(compression.await_args.args[0].bot_id, 3)
         async with database.connect(TEST_DB_PATH) as db:
             async with db.execute(
                 """SELECT job_type,status FROM pipeline_jobs
@@ -1448,20 +1457,26 @@ class CompressionTest(unittest.IsolatedAsyncioTestCase):
         mock_ai.assert_not_called()
         self.assertEqual(await self._compressed_count(), 0)
 
-    async def test_compresses_and_writes_chroma(self):
+    async def test_compresses_into_canonical_tool_episode_records(self):
         from ai import tool_events as te
         await self._seed(5)
         ai_ret = {"type": "text", "content": "- 改过 f0.py 等多个文件|0.9\n- 全部成功无报错|0.6"}
         with patch("core.config.TOOL_EVENT_COMPRESS_THRESHOLD", 5), \
-             patch("ai.client.call_ai_once", new=AsyncMock(return_value=ai_ret)) as mock_ai, \
-             patch("ai.memory.ChromaStore.write_fact_sync") as mock_write:
+             patch("ai.client.call_ai_once", new=AsyncMock(return_value=ai_ret)) as mock_ai:
             await te.maybe_compress_tool_events(1, 1, role="dev")
         mock_ai.assert_awaited_once()
-        self.assertEqual(mock_write.call_count, 2)  # two insights
-        # the written memory carries tool_episode type + group scope
-        _, _, meta = mock_write.call_args_list[0].args
-        self.assertEqual(meta["mem_type"], "tool_episode")
-        self.assertEqual(meta["group_id"], 1)
+        async with database.connect(TEST_DB_PATH) as db:
+            async with db.execute(
+                "SELECT kind,group_id,bot_id,content,metadata_json "
+                "FROM memory_records WHERE group_id=? AND kind='tool_episode' "
+                "ORDER BY record_id",
+                (1,),
+            ) as cur:
+                records = await cur.fetchall()
+        self.assertEqual(len(records), 2)
+        self.assertEqual({row[0] for row in records}, {"tool_episode"})
+        self.assertEqual({row[1] for row in records}, {1})
+        self.assertEqual({row[2] for row in records}, {1})
         self.assertEqual(await self._compressed_count(), 5)
 
     async def test_no_insight_still_advances(self):
@@ -1470,7 +1485,7 @@ class CompressionTest(unittest.IsolatedAsyncioTestCase):
         with patch("core.config.TOOL_EVENT_COMPRESS_THRESHOLD", 5), \
              patch("ai.client.call_ai_once",
                    new=AsyncMock(return_value={"type": "text", "content": "NO_INSIGHT"})), \
-             patch("ai.memory.ChromaStore.write_fact_sync") as mock_write:
+             patch("memory.adapters.projections.chroma_client.ChromaProjectionClient.write_sync") as mock_write:
             await te.maybe_compress_tool_events(1, 1)
         mock_write.assert_not_called()
         self.assertEqual(await self._compressed_count(), 5)  # advanced anyway

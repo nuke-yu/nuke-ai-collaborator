@@ -5,6 +5,11 @@ import json
 import time
 from typing import Mapping, Sequence
 
+from memory.infrastructure import SQLiteMemoryDatabase
+
+
+_database = SQLiteMemoryDatabase()
+
 
 def classify_failure(tool: str, result: str) -> str:
     text = (result or "").lower()
@@ -30,9 +35,8 @@ async def record(*, run_id: str, group_id: int | None, bot_id: int | None,
                  corrective_plan: str) -> None:
     if group_id is None:
         return
-    from ai.memory import _memory_db
     decision_id = "decision:" + hashlib.sha256(f"{run_id}:{step_id}:reflexion".encode()).hexdigest()[:24]
-    async with await _memory_db("run_decisions", group_id, write=True) as db:
+    async with await _database.connect("run_decisions", group_id, write=True) as db:
         await db.execute("""INSERT INTO run_decisions
           (decision_id,run_id,group_id,bot_id,step_id,decision_type,failure_class,
            observation,corrective_plan,created_at) VALUES (?,?,?,?,?,'reflexion',?,?,?,?)
@@ -52,13 +56,12 @@ async def record_memory_injection(
     """Persist the exact allowlist injected into one Run, without claiming adoption."""
     if group_id is None or not memory_refs:
         return None
-    from ai.memory import _memory_db
 
     step_id = f"{run_id}:context"
     decision_id = "decision:" + hashlib.sha256(
         f"{run_id}:{step_id}:memory_injection".encode()
     ).hexdigest()[:24]
-    async with await _memory_db("run_decisions", group_id, write=True) as db:
+    async with await _database.connect("run_decisions", group_id, write=True) as db:
         await db.execute(
             """INSERT INTO run_decisions
                (decision_id,run_id,group_id,bot_id,step_id,decision_type,
@@ -91,7 +94,6 @@ async def record_memory_adoption(
     """Persist the tool attempts proving that injected Memory was adopted."""
     if group_id is None or not evidence_by_ref:
         return None
-    from ai.memory import _memory_db
 
     memory_refs = tuple(sorted(evidence_by_ref))
     step_id = f"{run_id}:memory-adoption"
@@ -102,7 +104,7 @@ async def record_memory_adoption(
         memory_ref: list(dict.fromkeys(str(value) for value in evidence_ids))
         for memory_ref, evidence_ids in sorted(evidence_by_ref.items())
     }
-    async with await _memory_db("run_decisions", group_id, write=True) as db:
+    async with await _database.connect("run_decisions", group_id, write=True) as db:
         await db.execute(
             """INSERT INTO run_decisions
                (decision_id,run_id,group_id,bot_id,step_id,decision_type,

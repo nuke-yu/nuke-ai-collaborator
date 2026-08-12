@@ -10,6 +10,7 @@ elsewhere) while the suite stayed green because every test injected a mock. This
 test deliberately leaves interaction=None to lock the fallback in place.
 """
 import unittest
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from executors.base import ExecutionContext, InteractionAdapter
@@ -74,14 +75,12 @@ class TestInteractionFallback(unittest.IsolatedAsyncioTestCase):
         m = "executors.plugins.tool_loop_v1."
         with patch("core.orchestration.interaction.StandardInteraction", return_value=fake), \
              patch("core.orchestration.ai_service.call_ai_stream_messages", side_effect=mock_stream), \
+             patch("memory.application.conversation.CanonicalConversationMemoryService.recall", new=AsyncMock(return_value=SimpleNamespace(rendered_context=""))), \
              patch("core.orchestration.ai_service.call_ai_once",
                    new=AsyncMock(return_value={"type": "text", "content": "hello", "usage": {}})), \
              patch(m + "load_context_files", new=AsyncMock(return_value=[])), \
-             patch("ai.memory.get_memory_context", new=AsyncMock(return_value="")), \
              patch(m + "list_skills_all", return_value=[]), \
              patch(m + "get_db", new=MagicMock()), \
-             patch("ai.memory.add_to_chroma", new=AsyncMock()), \
-             patch("ai.memory.maybe_summarize", new=AsyncMock()), \
              patch(m + "append_log", new=AsyncMock()), \
              patch(m + "archive_run", new=AsyncMock()), \
              patch("executors.compact.apply_tool_result_microcompact", side_effect=lambda x: x):
