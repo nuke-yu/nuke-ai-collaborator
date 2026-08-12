@@ -11,6 +11,16 @@ _SAFE_TOOL = re.compile(r"^[a-zA-Z][a-zA-Z0-9_]{0,79}$")
 _BANNED = {"run_shell", "bash", "shell", "eval", "exec"}
 
 
+def _bounded_snapshot(value, depth: int = 0):
+    if depth >= 8:
+        return "[nested payload truncated]"
+    if isinstance(value, dict):
+        return {str(k): _bounded_snapshot(v, depth + 1) for k, v in list(value.items())[:512]}
+    if isinstance(value, (list, tuple)):
+        return [_bounded_snapshot(v, depth + 1) for v in list(value)[:512]]
+    return value if isinstance(value, (str, int, float, bool)) or value is None else str(value)
+
+
 def validate_declaration(value: dict) -> None:
     risk = value.get("risk_level")
     if risk not in {"S0", "S1"}:
@@ -76,7 +86,7 @@ async def _enqueue_skill_projection(
     if reopen_completed:
         from executors.redaction import redact_secrets
         safe_snapshot, _ = redact_secrets(
-            json.dumps({"experience": experience, "source_case_ids": list(source_case_ids)},
+            json.dumps(_bounded_snapshot({"experience": experience, "source_case_ids": list(source_case_ids)}),
                        ensure_ascii=False, sort_keys=True, default=str)[:100_000]
         )
         await db.execute(

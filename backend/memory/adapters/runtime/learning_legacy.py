@@ -18,10 +18,23 @@ from memory.contracts import (ApproveSkillCandidate, AssembleCase,
 from memory.domain import MemoryScope, ScopeKind
 
 
+def _bound_payload(value: Any, depth: int = 0, max_depth: int = 8) -> Any:
+    if depth >= max_depth:
+        return "[nested payload truncated]"
+    if isinstance(value, dict):
+        return {str(key): _bound_payload(item, depth + 1, max_depth)
+                for key, item in list(value.items())[:512]}
+    if isinstance(value, (list, tuple)):
+        return [_bound_payload(item, depth + 1, max_depth) for item in list(value)[:512]]
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return str(value)
+
+
 def _safe_payload(value: Any, *, limit: int = 100_000) -> dict[str, Any]:
     """Serialize, redact, and bound persisted learning payloads."""
     from executors.redaction import redact_secrets
-    raw = json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)[:limit]
+    raw = json.dumps(_bound_payload(value), ensure_ascii=False, sort_keys=True, default=str)[:limit]
     safe, _ = redact_secrets(raw)
     try:
         parsed = json.loads(safe)
