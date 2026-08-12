@@ -10,6 +10,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
+from memory.contracts import SkillExecutionPlan
 
 
 @dataclass(frozen=True, slots=True)
@@ -18,15 +19,6 @@ class CriticResult:
     score: float
     critique: str
     verification_mode: str = "deterministic_rules"
-
-
-@dataclass(frozen=True, slots=True)
-class SkillExecutionPlan:
-    trigger: str
-    steps: tuple[str, ...]
-    allowed_tools: tuple[str, ...]
-    verification: tuple[str, ...]
-    requires_hil: bool
 
 
 VOYAGER_CRITIC_SYSTEM_PROMPT = """You are a Voyager Environmental Critic Agent.

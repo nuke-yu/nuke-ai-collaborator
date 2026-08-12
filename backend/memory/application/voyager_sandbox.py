@@ -5,7 +5,7 @@ import inspect
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Mapping
 
-from memory.adapters.algorithms import SkillExecutionPlan
+from memory.contracts import SkillExecutionPlan
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,6 +33,7 @@ class SkillSandbox:
         *,
         hil_approved: bool = False,
         verify_fn: Callable[[tuple[Any, ...], tuple[str, ...]], Awaitable[bool] | bool] | None = None,
+        rollback_fn: Callable[[tuple[Any, ...]], Awaitable[None] | None] | None = None,
     ) -> SkillRunResult:
         if plan.requires_hil and not hil_approved:
             raise PermissionError("skill execution requires human approval")
@@ -51,5 +52,9 @@ class SkillSandbox:
             if inspect.isawaitable(verified):
                 verified = await verified
             if not verified:
+                if rollback_fn is not None:
+                    rollback_result = rollback_fn(tuple(outputs))
+                    if inspect.isawaitable(rollback_result):
+                        await rollback_result
                 return SkillRunResult(False, tuple(outputs), plan.verification)
         return SkillRunResult(True, tuple(outputs), plan.verification)

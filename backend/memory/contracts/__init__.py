@@ -41,6 +41,7 @@ from .models import (
     RecallSkills,
     ResolveLearningRefs,
     SkillCandidate,
+    SkillExecutionPlan,
     SynthesizedReflection,
     VerifyUsage,
 )
@@ -86,6 +87,7 @@ __all__ = [
     "RecallSkills",
     "ResolveLearningRefs",
     "SkillCandidate",
+    "SkillExecutionPlan",
     "SynthesizedReflection",
     "VerifyUsage",
 ]

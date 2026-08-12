@@ -14,6 +14,16 @@ class MemoryOperationError(RuntimeError):
     """A public, transport-safe failure raised by a Memory use case."""
 
 
+@dataclass(frozen=True, slots=True)
+class SkillExecutionPlan:
+    """Validated, transport-neutral plan consumed by the Skill use case."""
+    trigger: str
+    steps: tuple[str, ...]
+    allowed_tools: tuple[str, ...]
+    verification: tuple[str, ...]
+    requires_hil: bool
+
+
 class MemoryAuthorizationError(MemoryOperationError):
     """Raised when a principal cannot perform a Memory use case."""
 

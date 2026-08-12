@@ -50,6 +50,27 @@ def build_personal_knowledge_client(principal: Principal) -> AuthorizedPersonalK
     )
 
 
+async def list_personal_apps(*, user_id: int, include_inactive: bool = True):
+    """Composition-root facade for the host Personal Vault app registry."""
+    from ai.personal_vault import list_personal_apps as _list
+    return await _list(user_id=user_id, include_inactive=include_inactive)
+
+
+async def register_personal_app(*, user_id: int, app_id: str, name: str) -> None:
+    from ai.personal_vault import register_personal_app as _register
+    await _register(user_id=user_id, app_id=app_id, name=name)
+
+
+async def set_personal_app_status(*, user_id: int, app_id: str, active: bool) -> bool:
+    from ai.personal_vault import set_personal_app_status as _set_status
+    return await _set_status(user_id=user_id, app_id=app_id, active=active)
+
+
+async def list_acl_audit_events(*, user_id: int, limit: int = 100):
+    from ai.personal_vault import list_acl_audit_events as _list_audit
+    return await _list_audit(user_id=user_id, limit=limit)
+
+
 def build_learning_client() -> LegacyLearningAdapter:
     return LegacyLearningAdapter()
 

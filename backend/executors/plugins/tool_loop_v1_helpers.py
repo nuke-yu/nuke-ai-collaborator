@@ -124,6 +124,31 @@ def _apply_memory_context_budget(
         return memory, learned_contexts
 
 
+def _drop_oldest_message_group(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Remove one complete conversational/tool turn, never an orphan tool result."""
+    if not messages:
+        return messages
+    first = messages[0]
+    tool_calls = first.get("tool_calls") if isinstance(first, dict) else None
+    if isinstance(tool_calls, list):
+        call_ids = {
+            str(call.get("id")) for call in tool_calls
+            if isinstance(call, dict) and call.get("id")
+        }
+        end = 1
+        while end < len(messages):
+            item = messages[end]
+            if item.get("role") == "tool" and str(item.get("tool_call_id")) in call_ids:
+                end += 1
+                continue
+            break
+        return messages[end:]
+    if first.get("role") == "tool":
+        # A malformed/orphan tool result is safest removed as a single item.
+        return messages[1:]
+    return messages[1:]
+
+
 def _enforce_final_context_budget(runner: Any) -> None:
     """Account for the final tool schemas before making the model call."""
     try:
@@ -155,10 +180,7 @@ def _enforce_final_context_budget(runner: Any) -> None:
             # until a real completion budget exists.
             messages = list(getattr(runner, "messages", ()) or ())
             while len(messages) > 1 and allocation.available_for_generation <= 256:
-                remove_at = 0
-                while remove_at < len(messages) - 1 and messages[remove_at].get("role") == "tool":
-                    remove_at += 1
-                messages.pop(remove_at)
+                messages = _drop_oldest_message_group(messages)
                 runner.messages = messages
                 working_memory = "\n".join(
                     str(message.get("content") or "")

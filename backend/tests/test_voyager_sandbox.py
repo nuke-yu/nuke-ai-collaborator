@@ -2,6 +2,7 @@ import pytest
 
 from memory.adapters.algorithms import VoyagerCriticEngine
 from memory.application.voyager_sandbox import SkillSandbox
+from memory.contracts import SkillExecutionPlan
 
 
 @pytest.mark.asyncio
@@ -29,3 +30,17 @@ async def test_sandbox_requires_hil_for_tool_plan():
     sandbox.register("safe_tool", lambda: "ok")
     with pytest.raises(PermissionError):
         await sandbox.execute(plan)
+
+
+@pytest.mark.asyncio
+async def test_sandbox_invokes_compensating_rollback_after_failed_verification():
+    sandbox = SkillSandbox()
+    sandbox.register("write", lambda: "created")
+    rollback = []
+    plan = SkillExecutionPlan("x", ("write",), ("write",), ("check",), True)
+    result = await sandbox.execute(
+        plan, hil_approved=True, verify_fn=lambda *_: False,
+        rollback_fn=lambda outputs: rollback.extend(outputs),
+    )
+    assert result.succeeded is False
+    assert rollback == ["created"]

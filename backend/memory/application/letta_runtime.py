@@ -5,7 +5,48 @@ import hashlib
 import time
 from typing import Any
 
-from memory.adapters.algorithms import LettaOpenMemoryEngine
+_database = None
+
+
+def configure_database(database) -> None:
+    """Inject the host database port at the composition boundary."""
+    global _database
+    _database = database
+
+
+def _get_database():
+    global _database
+    if _database is None:
+        from memory.bootstrap import legacy_memory_database
+        _database = legacy_memory_database
+    return _database
+
+
+async def _connect(table_name: str, group_id: int, *, write: bool):
+    connection = _get_database().connect(table_name, group_id, write=write)
+    if hasattr(connection, "__await__"):
+        connection = await connection
+    return connection
+
+
+def _select_blocks(records: list[dict[str, Any]], query: str, limit: int) -> list[dict[str, Any]]:
+    """Application-level bounded selector; tokenizer/budget stays in its port."""
+    terms = {part.lower() for part in str(query or "").split() if part.strip()}
+    if terms:
+        records = [
+            item for item in records
+            if terms & {part.lower() for part in str(item.get("content", "")).split()}
+        ]
+    ranked = sorted(
+        records,
+        key=lambda item: (
+            len(terms & {part.lower() for part in str(item.get("content", "")).split()}),
+            float(item.get("importance", 0.0)),
+            int(item.get("last_accessed_at", 0)),
+        ),
+        reverse=True,
+    )
+    return ranked[: max(0, limit)]
 
 
 async def _ensure(db) -> None:
@@ -38,8 +79,7 @@ async def write_memory_block(
         f"{group_id}:{bot_id}:{value}".encode()
     ).hexdigest()[:24]
     now = int(time.time() * 1000)
-    from ai.memory import _memory_db
-    async with await _memory_db("letta_memory_blocks", group_id, write=True) as db:
+    async with await _connect("letta_memory_blocks", group_id, write=True) as db:
         await _ensure(db)
         await db.execute(
             """INSERT INTO letta_memory_blocks
@@ -57,8 +97,7 @@ async def read_memory_blocks(
     *, group_id: int, bot_id: int | None, query: str, limit: int = 5,
 ) -> list[dict[str, Any]]:
     """Read active archival blocks through the bounded Letta lexical selector."""
-    from ai.memory import _memory_db
-    async with await _memory_db("letta_memory_blocks", group_id, write=True) as db:
+    async with await _connect("letta_memory_blocks", group_id, write=True) as db:
         await _ensure(db)
         async with db.execute(
             """SELECT block_id,content,importance,created_at,updated_at,last_accessed_at
@@ -72,7 +111,7 @@ async def read_memory_blocks(
              "created_at": row[3], "updated_at": row[4], "last_accessed_at": row[5]}
             for row in rows
         ]
-        selected = LettaOpenMemoryEngine.memory_read(records, query, limit=limit)
+        selected = _select_blocks(records, query, limit)
         now = int(time.time() * 1000)
         for item in selected:
             await db.execute(
@@ -87,8 +126,7 @@ async def evict_memory_blocks(*, group_id: int, bot_id: int | None, keep: int = 
     """Evict the lowest-value active blocks while retaining an audit row."""
     if keep < 1:
         raise ValueError("keep must be positive")
-    from ai.memory import _memory_db
-    async with await _memory_db("letta_memory_blocks", group_id, write=True) as db:
+    async with await _connect("letta_memory_blocks", group_id, write=True) as db:
         await _ensure(db)
         async with db.execute(
             """SELECT block_id FROM letta_memory_blocks

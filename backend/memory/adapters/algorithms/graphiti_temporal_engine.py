@@ -36,10 +36,13 @@ class TemporalEdge:
 class GraphitiTemporalEngine:
     """Audit-grade Graphiti Bi-Temporal Knowledge Graph & Invalidation Engine."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, rrf_k: int = 60) -> None:
+        if rrf_k <= 0:
+            raise ValueError("rrf_k must be positive")
         self._nodes: dict[str, TemporalEntityNode] = {}
         self._edges: list[TemporalEdge] = []
         self._aliases: dict[str, str] = {}
+        self.rrf_k = rrf_k
 
     @staticmethod
     def normalize_entity_name(name: str) -> str:
@@ -133,7 +136,7 @@ class GraphitiTemporalEngine:
         for lane in (lexical, vector, graph):
             for rank, edge in enumerate(lane, 1):
                 if edge.edge_id in active:
-                    scores[edge.edge_id] = scores.get(edge.edge_id, 0.0) + 1.0 / (60 + rank)
+                    scores[edge.edge_id] = scores.get(edge.edge_id, 0.0) + 1.0 / (self.rrf_k + rank)
         ordered = sorted(scores, key=lambda edge_id: scores[edge_id], reverse=True)
         return tuple(active[edge_id] for edge_id in ordered[: max(1, top_k)])
 

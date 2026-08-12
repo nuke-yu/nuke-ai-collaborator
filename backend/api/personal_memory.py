@@ -1,16 +1,14 @@
 from fastapi import APIRouter, Depends, HTTPException
 from core import auth
 from db import global_db
-from memory.bootstrap import build_personal_knowledge_client
+from memory.bootstrap import (
+    build_personal_knowledge_client, list_acl_audit_events, list_personal_apps,
+    register_personal_app, set_personal_app_status,
+)
 from memory.contracts import (CreatePersonalProjection, CreatePersonalRecord,
                               IngestPersonalKnowledge, MemoryAuthorizationError,
                               ObservePersonalHabit)
 from memory.domain import MemoryScope, Principal
-from ai.personal_vault import (
-    list_acl_audit_events, list_personal_apps, register_personal_app,
-    set_personal_app_status,
-)
-
 router=APIRouter()
 
 
