@@ -5,7 +5,9 @@ import time
 
 from memory.infrastructure import SQLiteMemoryDatabase
 
-_database = SQLiteMemoryDatabase()
+def _database() -> SQLiteMemoryDatabase:
+    from memory.canonical import _runtime_composition
+    return _runtime_composition().database
 
 
 async def start_run(
@@ -16,7 +18,7 @@ async def start_run(
     if group_id is None or not run_id:
         return
     now = int(time.time() * 1000)
-    async with await _database.connect("agent_runs", group_id, write=True) as db:
+    async with await _database().connect("agent_runs", group_id, write=True) as db:
         await db.execute(
             "INSERT INTO agent_runs "
             "(run_id, group_id, bot_id, thread_id, session_id, status, provider, model, "
@@ -38,7 +40,7 @@ async def finish_run(
     if status not in {"completed", "failed", "cancelled", "abandoned"}:
         raise ValueError(f"invalid terminal run status: {status}")
     now = int(time.time() * 1000)
-    async with await _database.connect("agent_runs", group_id, write=True) as db:
+    async with await _database().connect("agent_runs", group_id, write=True) as db:
         await db.execute(
             "UPDATE agent_runs SET status=?, completed_at=?, iterations=?, input_tokens=?, "
             "output_tokens=?, error_summary=?, updated_at=? WHERE run_id=? AND group_id=?",
@@ -52,7 +54,7 @@ async def touch_run(*, run_id: str, group_id: int | None) -> None:
     if group_id is None or not run_id:
         return
     now = int(time.time() * 1000)
-    async with await _database.connect("agent_runs", group_id, write=True) as db:
+    async with await _database().connect("agent_runs", group_id, write=True) as db:
         await db.execute(
             "UPDATE agent_runs SET updated_at=? WHERE run_id=? AND group_id=? AND status='running'",
             (now, run_id, group_id),
@@ -69,7 +71,7 @@ async def recover_abandoned_runs(
     now = int(time.time() * 1000)
     cutoff = now - (timeout_seconds * 1000)
 
-    async with await _database.connect("agent_runs", group_id, write=True) as db:
+    async with await _database().connect("agent_runs", group_id, write=True) as db:
         cursor = await db.execute(
             """UPDATE agent_runs
             SET status='abandoned', completed_at=?, error_summary='abandoned_stale_worker_timeout', updated_at=?

@@ -3,6 +3,7 @@ from .authorized_personal import AuthorizedPersonalKnowledgeService
 from .authorized_group import AuthorizedGroupKnowledgeService
 from .conversation import CanonicalConversationMemoryService
 from .personal_vault import CanonicalPersonalKnowledgeService
+from .personal_policy import SQLitePersonalVaultPolicy
 from .learning import CanonicalLearningService
 from .skill_projection import CanonicalSkillProjectionService
 from .case_evaluation import CanonicalCaseEvaluator
@@ -32,6 +33,7 @@ __all__ = [
     "AuthorizedPersonalKnowledgeService",
     "CanonicalConversationMemoryService",
     "CanonicalPersonalKnowledgeService",
+    "SQLitePersonalVaultPolicy",
     "CanonicalLearningService",
     "CanonicalSkillProjectionService",
     "CanonicalCaseEvaluator",

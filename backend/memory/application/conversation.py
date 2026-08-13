@@ -2,7 +2,7 @@
 
 This service is the replacement for ``ai.memory_provider``.  It stores and
 recalls bounded canonical records and deliberately has no dependency on the
-legacy AI package, Chroma, or legacy runtime adapters.
+the AI package, Chroma, or runtime adapters.
 """
 from __future__ import annotations
 

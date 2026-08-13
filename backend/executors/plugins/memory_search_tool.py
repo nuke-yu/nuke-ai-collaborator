@@ -75,7 +75,7 @@ async def _handle_search_memory(query: str = "", limit: int = 20,
     gid = ctx.get("group_id")
     if gid is None:
         return "[错误] 无群组上下文，无法检索记忆"
-    from ai.tool_events import search_events
+    from memory.application.tool_events import search_events
     rows = await search_events(gid, query or "", limit=limit, tool=tool)
     label = f'"{query}"' if query else "最近事件"
     return _render_index(rows, f"工具记忆检索 · {label} · {len(rows)} 条")
@@ -105,7 +105,7 @@ async def _handle_memory_timeline(anchor: int, before: int = 3, after: int = 3,
     gid = ctx.get("group_id")
     if gid is None:
         return "[错误] 无群组上下文，无法检索记忆"
-    from ai.tool_events import timeline_events
+    from memory.application.tool_events import timeline_events
     rows = await timeline_events(gid, anchor, before=before, after=after)
     return _render_index(rows, f"时间线 · anchor={anchor} · {len(rows)} 条")
 
@@ -139,7 +139,7 @@ async def _handle_memory_fetch(ids: list[int], context: dict = None) -> str:
         return "[错误] 无群组上下文，无法检索记忆"
     if not ids:
         return "[参数错误] ids 不能为空"
-    from ai.tool_events import fetch_events
+    from memory.application.tool_events import fetch_events
     rows = await fetch_events(gid, ids)
     if not rows:
         return "（未找到对应 ID 的事件）"

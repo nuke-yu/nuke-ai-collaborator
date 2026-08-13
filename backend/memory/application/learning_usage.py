@@ -1,19 +1,19 @@
-"""Compatibility facade for canonical Learning usage tracking."""
+"""Canonical Learning usage transition services."""
 from __future__ import annotations
 
 from typing import Any, Mapping, Sequence
 
-from memory.application.learning import CanonicalLearningService
+from memory.canonical import build_learning_client
 from memory.contracts import MarkUsageAdopted, MarkUsageExecuted, VerifyUsage
 from memory.domain import MemoryScope, UsageKind, UsageState
 
 
 def _service() -> CanonicalLearningService:
-    return CanonicalLearningService()
+    return build_learning_client()
 
 
 def _scope(group_id: int) -> MemoryScope:
-    return MemoryScope.group(group_id=group_id, actor_id="compat:usage_tracking")
+    return MemoryScope.group(group_id=group_id, actor_id="service:learning_usage")
 
 
 async def mark_adopted(
@@ -52,12 +52,12 @@ async def mark_verified(
     ))
 
 
-async def record_legacy_completion(
+async def record_completion(
     *, kind: UsageKind, item_ids: Sequence[str], run_id: str,
     group_id: int | None, outcome: str, input_tokens: int = 0,
     output_tokens: int = 0, tool_attempts: int = 0,
 ) -> int:
-    """Retain completion telemetry without reintroducing legacy SQL logic."""
+    """Record terminal completion telemetry without changing usage state."""
     if group_id is None or not item_ids:
         return 0
     service = _service()

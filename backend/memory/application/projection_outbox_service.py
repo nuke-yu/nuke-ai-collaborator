@@ -1,9 +1,9 @@
-"""Compatibility facade for the Memory module's projection outbox."""
+"""Application operations for the canonical projection outbox."""
 from __future__ import annotations
 
 from typing import Any, Mapping
 
-from memory.bootstrap import get_memory_composition
+from memory.bootstrap import memory_composition
 from memory.infrastructure import DrainResult
 
 
@@ -18,7 +18,7 @@ async def enqueue_projection(
     payload: Mapping[str, Any],
     now_ms: int | None = None,
 ) -> None:
-    await get_memory_composition().projection_outbox.enqueue(
+    await memory_composition().projection_outbox.enqueue(
         db,
         event_id=event_id,
         projection_type=projection_type,
@@ -33,7 +33,7 @@ async def enqueue_projection(
 async def drain_projection_outbox(
     group_id: int, *, limit: int = 50, event_id: str | None = None
 ) -> DrainResult:
-    return await get_memory_composition().projection_outbox.drain(
+    return await memory_composition().projection_outbox.drain(
         group_id, limit=limit, event_id=event_id
     )
 

@@ -18,7 +18,7 @@ from typing import Any
 
 from memory.bootstrap import (
     build_canonical_chroma_backfill_client,
-    get_memory_module,
+    memory_module,
 )
 from runtime.dbpaths import group_db_path
 
@@ -51,7 +51,7 @@ async def run_backfill(
             continue
         try:
             if apply:
-                await get_memory_module().ensure_group(group_id)
+                await memory_module().ensure_group(group_id)
             report = await client.backfill(
                 group_id,
                 dry_run=not apply,

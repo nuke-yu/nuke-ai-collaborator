@@ -1,8 +1,4 @@
-"""Compatibility facade for canonical Case assembly.
-
-Only deterministic, stateless helpers remain here for older imports. Durable
-case persistence is owned by ``memory.application.CanonicalLearningService``.
-"""
+"""Case evaluation and deterministic case assembly services."""
 from __future__ import annotations
 
 import re
@@ -44,8 +40,8 @@ def task_signature(task: str) -> str:
 
 
 def _safe_trace_text(value: str, limit: int) -> str:
-    from executors.redaction import redact_secrets
-    redacted, _ = redact_secrets(value)
+    from memory.domain.safety import redact_memory_secrets
+    redacted, _ = redact_memory_secrets(value)
     return re.sub(r"[\r\n\t<>]", " ", redacted).strip()[:limit]
 
 
@@ -93,7 +89,8 @@ async def assemble_case(*, run_id: str, group_id: int | None, bot_id: int | None
     from memory.domain import MemoryScope
     if group_id is None or not run_id:
         return None
-    return await CanonicalLearningService().assemble_case(AssembleCase(
+    from memory.canonical import build_learning_client
+    return await build_learning_client().assemble_case(AssembleCase(
         scope=MemoryScope.group(group_id=group_id, bot_id=bot_id, actor_id=f"bot:{bot_id or 0}"),
         run_id=run_id, task=task, outcome=outcome, tool_records=tuple(tool_records),
     ))

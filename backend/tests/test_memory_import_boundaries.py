@@ -38,7 +38,7 @@ def test_canonical_memory_layers_do_not_import_legacy_business_modules() -> None
     assert forbidden == []
 
 
-def test_legacy_imports_are_confined_to_explicit_migration_adapters() -> None:
+def test_memory_layers_do_not_import_ai_runtime_modules() -> None:
     root = Path(__file__).resolve().parents[1] / "memory"
     allowed = {"bootstrap.py"}
     violations = []

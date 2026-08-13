@@ -25,3 +25,12 @@ def test_memory_mapping_redacts_nested_secret_and_limits_depth() -> None:
     assert "[REDACTED]" in encoded
     assert "[nested payload truncated]" in encoded
     assert decoded["headers"]["Authorization"] != payload["headers"]["Authorization"]
+
+
+def test_memory_mapping_budget_never_cuts_json_in_half() -> None:
+    payload = {f"field_{index}": "value-" + "x" * 4_000 for index in range(8)}
+
+    encoded = safe_memory_mapping(payload)
+
+    assert len(encoded) <= 16_000
+    assert json.loads(encoded)["_truncated"] is True

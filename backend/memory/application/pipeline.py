@@ -229,8 +229,8 @@ class CanonicalPipelineJobRepository:
 PipelineHandler = Callable[[int, str, str], Awaitable[Mapping[str, Any]]]
 
 
-class DeferPipelineJob(Exception):
-    """Signal that a compatibility handler must process the job next."""
+class RetryablePipelineJob(Exception):
+    """Signal that a transient condition should return the job to the queue."""
 
 
 class CanonicalPipelineDispatcher:
@@ -250,9 +250,7 @@ class CanonicalPipelineDispatcher:
         jobs = await self.repository.list_ready(scope, limit=limit)
         processed = failed = 0
         for job in jobs:
-            # Leave not-yet-migrated job types untouched for the compatibility
-            # dispatcher; claiming them here would turn a partial migration
-            # into a false failure.
+            # The composition root supplies the complete canonical handler map.
             if str(job["job_type"]) not in self.handlers:
                 continue
             job_id = str(job["job_id"])
@@ -288,7 +286,7 @@ class CanonicalPipelineDispatcher:
                 )
                 processed += 1
             except Exception as exc:
-                if isinstance(exc, DeferPipelineJob):
+                if isinstance(exc, RetryablePipelineJob):
                     await self.repository.defer(scope, job_id, token)
                     continue
                 failed += 1

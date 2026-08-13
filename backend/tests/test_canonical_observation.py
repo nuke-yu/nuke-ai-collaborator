@@ -67,14 +67,15 @@ class CanonicalObservationTest(unittest.IsolatedAsyncioTestCase):
             await conn.execute(
                 """CREATE TABLE messages (
                    id INTEGER PRIMARY KEY, group_id INTEGER, member_id INTEGER,
-                   content TEXT, is_deleted INTEGER DEFAULT 0)"""
+                   content TEXT, meta TEXT, is_deleted INTEGER DEFAULT 0)"""
             )
             for message_id in range(1, 6):
                 await conn.execute(
                     """INSERT INTO messages
-                       (id,group_id,member_id,content,is_deleted)
-                       VALUES (?,?,?,?,0)""",
-                    (message_id, 7, 5, f"decision {message_id}")
+                       (id,group_id,member_id,content,meta,is_deleted)
+                       VALUES (?,?,?,?,?,0)""",
+                    (message_id, 7, 5, f"decision {message_id}",
+                     json.dumps({"thread_id": "thread:1"}))
                 )
             await conn.commit()
 
@@ -85,6 +86,7 @@ class CanonicalObservationTest(unittest.IsolatedAsyncioTestCase):
         result = await observer.observe(CanonicalObservationEvent(
             bot_id=5, group_id=7, role="developer", bot_name="Dev",
             message_id=5, text="decision 5", provider="", model="",
+            thread_id="thread:1",
         ))
         self.assertFalse(result["skipped"])
         async with db.connect(self.path) as conn:

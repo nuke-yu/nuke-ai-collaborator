@@ -5,7 +5,7 @@ import time
 import unittest
 
 import db
-from ai.execution_runs import finish_run, recover_abandoned_runs, start_run
+from memory.application.execution_runs import finish_run, recover_abandoned_runs, start_run
 from memory.infrastructure import SQLiteMemoryDatabase
 
 _memory_database = SQLiteMemoryDatabase()

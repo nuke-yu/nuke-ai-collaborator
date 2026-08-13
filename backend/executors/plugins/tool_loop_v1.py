@@ -425,7 +425,7 @@ class ToolLoopRunner:
                         else:
                             await self._execute_serial_tools(calls, iteration=self.iter_count)
 
-                        from ai.reflexion import maybe_inject
+                        from memory.application.reflexion_service import maybe_inject
                         try:
                             await maybe_inject(self, iteration=self.iter_count)
                         except aiosqlite.OperationalError:
@@ -465,7 +465,7 @@ class ToolLoopRunner:
                         "session_id": self.session_id,
                     })
                     try:
-                        from ai.execution_runs import finish_run
+                        from memory.application.execution_runs import finish_run
                         await finish_run(
                             run_id=self.run_id, group_id=self.ctx.group_id,
                             status="cancelled", iterations=self.iter_count,
@@ -485,7 +485,7 @@ class ToolLoopRunner:
             raise
         except AIError as e:
             await self.ctx.interaction.update_session_status(self.session_id, "failed")
-            from ai.execution_runs import finish_run
+            from memory.application.execution_runs import finish_run
             await finish_run(
                 run_id=self.run_id, group_id=self.ctx.group_id,
                 status="failed", iterations=self.iter_count,

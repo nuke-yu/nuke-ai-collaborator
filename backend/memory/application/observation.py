@@ -16,7 +16,7 @@ from memory.contracts import (
     SynthesizedReflection,
 )
 from memory.domain import MemoryScope
-from memory.infrastructure import SQLiteMemoryDatabase
+from memory.infrastructure import SQLiteMemoryDatabase, safe_memory_text
 
 
 def _default_fact_engine() -> Any:
@@ -214,8 +214,10 @@ class CanonicalSummaryObserver:
             async with db.execute(
                 """SELECT metadata_json FROM memory_records
                    WHERE group_id=? AND bot_id=? AND kind='summary' AND status='active'
+                     AND json_valid(metadata_json)
+                     AND json_extract(metadata_json, '$.thread_id')=?
                    ORDER BY updated_at DESC LIMIT 1""",
-                (event.group_id, event.bot_id),
+                (event.group_id, event.bot_id, thread_id),
             ) as cur:
                 row = await cur.fetchone()
         if row:
@@ -228,8 +230,10 @@ class CanonicalSummaryObserver:
             async with db.execute(
                 """SELECT id,content FROM messages
                    WHERE group_id=? AND member_id=? AND id>? AND is_deleted=0
+                     AND (meta IS NULL OR json_valid(meta))
+                     AND json_extract(COALESCE(meta, '{}'), '$.thread_id')=?
                    ORDER BY id LIMIT ?""",
-                (event.group_id, event.bot_id, last_id, self._threshold),
+                (event.group_id, event.bot_id, last_id, thread_id, self._threshold),
             ) as cur:
                 messages = await cur.fetchall()
         if len(messages) < self._threshold:
@@ -244,7 +248,10 @@ class CanonicalSummaryObserver:
             model=event.model or "deepseek-chat",
             temperature=0.2,
         )
-        summary = str(response.get("content", "") if isinstance(response, dict) else response).strip()
+        summary = safe_memory_text(
+            str(response.get("content", "") if isinstance(response, dict) else response),
+            limit=4000,
+        )
         if not summary:
             return {"stage": "summary", "skipped": True, "reason": "empty_model_result"}
         now = int(time.time() * 1000)
@@ -494,7 +501,7 @@ class CanonicalToolCompressionObserver:
                     except ValueError:
                         content, score = line, 0.7
                 if content.strip():
-                    insights.append((content.strip()[:500], score))
+                    insights.append((safe_memory_text(content, limit=500), score))
 
         now = int(time.time() * 1000)
         max_ts = max(int(row[1]) for row in rows)

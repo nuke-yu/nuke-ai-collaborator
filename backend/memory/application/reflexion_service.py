@@ -8,7 +8,9 @@ from typing import Mapping, Sequence
 from memory.infrastructure import SQLiteMemoryDatabase
 
 
-_database = SQLiteMemoryDatabase()
+def _database() -> SQLiteMemoryDatabase:
+    from memory.canonical import _runtime_composition
+    return _runtime_composition().database
 
 
 def classify_failure(tool: str, result: str) -> str:
@@ -36,7 +38,7 @@ async def record(*, run_id: str, group_id: int | None, bot_id: int | None,
     if group_id is None:
         return
     decision_id = "decision:" + hashlib.sha256(f"{run_id}:{step_id}:reflexion".encode()).hexdigest()[:24]
-    async with await _database.connect("run_decisions", group_id, write=True) as db:
+    async with await _database().connect("run_decisions", group_id, write=True) as db:
         await db.execute("""INSERT INTO run_decisions
           (decision_id,run_id,group_id,bot_id,step_id,decision_type,failure_class,
            observation,corrective_plan,created_at) VALUES (?,?,?,?,?,'reflexion',?,?,?,?)
@@ -61,7 +63,7 @@ async def record_memory_injection(
     decision_id = "decision:" + hashlib.sha256(
         f"{run_id}:{step_id}:memory_injection".encode()
     ).hexdigest()[:24]
-    async with await _database.connect("run_decisions", group_id, write=True) as db:
+    async with await _database().connect("run_decisions", group_id, write=True) as db:
         await db.execute(
             """INSERT INTO run_decisions
                (decision_id,run_id,group_id,bot_id,step_id,decision_type,
@@ -104,7 +106,7 @@ async def record_memory_adoption(
         memory_ref: list(dict.fromkeys(str(value) for value in evidence_ids))
         for memory_ref, evidence_ids in sorted(evidence_by_ref.items())
     }
-    async with await _database.connect("run_decisions", group_id, write=True) as db:
+    async with await _database().connect("run_decisions", group_id, write=True) as db:
         await db.execute(
             """INSERT INTO run_decisions
                (decision_id,run_id,group_id,bot_id,step_id,decision_type,

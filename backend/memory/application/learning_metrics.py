@@ -5,7 +5,9 @@ from dataclasses import asdict, dataclass
 
 from memory.infrastructure import SQLiteMemoryDatabase
 
-_database = SQLiteMemoryDatabase()
+def _database() -> SQLiteMemoryDatabase:
+    from memory.canonical import _runtime_composition
+    return _runtime_composition().database
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,7 +32,7 @@ async def collect_learning_shadow_metrics(
 ) -> LearningShadowMetrics:
     if group_id is None:
         return LearningShadowMetrics()
-    async with await _database.connect("experience_usage", group_id, write=False) as db:
+    async with await _database().connect("experience_usage", group_id, write=False) as db:
         experience = await _usage_counts(db, "experience_usage")
         skill = await _usage_counts(db, "skill_usage")
         async with db.execute(

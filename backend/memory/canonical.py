@@ -1,9 +1,4 @@
-"""Public factory for the canonical conversation Memory path.
-
-This module is intentionally separate from the compatibility-heavy bootstrap
-module. Runtime conversation code can import it without loading legacy Memory
-adapters or providers.
-"""
+"""Public factories for canonical Memory application services."""
 from __future__ import annotations
 
 from memory.application import (
@@ -19,46 +14,84 @@ from memory.application import (
     CanonicalExperienceDistiller,
     CanonicalSkillCompiler,
 )
-from memory.application import AuthorizedPersonalKnowledgeService, CanonicalPersonalKnowledgeService
+from memory.application import AuthorizedPersonalKnowledgeService, CanonicalPersonalKnowledgeService, SQLitePersonalVaultPolicy
 from memory.application import CanonicalLearningService
 from memory.application import CanonicalSkillProjectionService
 from memory.application.pipeline import CanonicalPipelineDispatcher
 from memory.adapters.algorithms import LettaACLAlgorithmAdapter
-from memory.adapters.projections import ChromaBotMemoryProjectionDelivery
 from memory.domain import MemoryScope
-from memory.infrastructure import ProjectionOutbox, SQLiteMemoryDatabase
+from memory.infrastructure import ProjectionOutbox
+
+
+def _runtime_composition():
+    """Resolve the single process composition at the application boundary."""
+    from memory.bootstrap import memory_composition
+    return memory_composition()
+
+
+async def call_memory_model(*args, **kwargs):
+    """Canonical model boundary used by Memory application services."""
+    from ai.client import call_ai_once
+    return await call_ai_once(*args, **kwargs)
+
+
+def build_experience_distiller():
+    composition = _runtime_composition()
+    database = composition.database
+    return CanonicalExperienceDistiller(
+        database, composition.projection_outbox
+    )
+
+
+def build_projection_reconciler():
+    from memory.application.projection_reconciliation import CanonicalProjectionReconciler
+    composition = _runtime_composition()
+    database = composition.database
+    return CanonicalProjectionReconciler(
+        database, composition.projection_outbox
+    )
+
+
+def build_projection_outbox() -> ProjectionOutbox:
+    return _runtime_composition().projection_outbox
 
 
 def build_conversation_memory_client() -> CanonicalConversationMemoryService:
-    return CanonicalConversationMemoryService(SQLiteMemoryDatabase())
+    return CanonicalConversationMemoryService(_runtime_composition().database)
 
 
 def build_personal_knowledge_client(principal):
-    """Build the canonical Personal Vault client without legacy adapters."""
+    """Build the canonical Personal Vault client at the composition boundary."""
     return AuthorizedPersonalKnowledgeService(
         CanonicalPersonalKnowledgeService(),
         LettaACLAlgorithmAdapter(),
         principal,
-        vault_policy=None,
+        vault_policy=SQLitePersonalVaultPolicy(),
     )
 
 
 def build_learning_client() -> CanonicalLearningService:
-    return CanonicalLearningService(SQLiteMemoryDatabase())
+    return CanonicalLearningService(_runtime_composition().database)
+
+
+def build_skill_compiler() -> CanonicalSkillCompiler:
+    return CanonicalSkillCompiler(_runtime_composition().database)
+
+
+def build_skill_projection_client() -> CanonicalSkillProjectionService:
+    return CanonicalSkillProjectionService(_runtime_composition().database)
 
 
 def build_pipeline_dispatcher() -> CanonicalPipelineDispatcher:
-    """Build the canonical dispatcher for handlers already migrated.
-
-    The handler map is intentionally explicit. Unsupported job types are left
-    for the compatibility dispatcher until their side effects are migrated.
-    """
-    learning = build_learning_client()
-    database = SQLiteMemoryDatabase()
+    """Build the canonical dispatcher with the complete handler map."""
+    composition = _runtime_composition()
+    database = composition.database
+    learning = CanonicalLearningService(database)
+    projection_outbox = composition.projection_outbox
     from ai.client import call_ai_once
     fact_service = BotFactObservationService(
         database,
-        ProjectionOutbox(database, ChromaBotMemoryProjectionDelivery()),
+        projection_outbox,
     )
     fact_observer = CanonicalBotFactObserver(database, fact_service, call_ai_once)
     observation_loader = CanonicalObservationLoader(database)
@@ -68,7 +101,7 @@ def build_pipeline_dispatcher() -> CanonicalPipelineDispatcher:
     )
     reflection_service = BotReflectionService(
         database,
-        ProjectionOutbox(database, ChromaBotMemoryProjectionDelivery()),
+        projection_outbox,
     )
     reflection_observer = CanonicalReflectionObserver(
         database,
@@ -91,7 +124,7 @@ def build_pipeline_dispatcher() -> CanonicalPipelineDispatcher:
     case_evaluator = CanonicalCaseEvaluator(database)
     experience_distiller = CanonicalExperienceDistiller(
         database,
-        ProjectionOutbox(database, ChromaBotMemoryProjectionDelivery()),
+        projection_outbox,
     )
     skill_compiler = CanonicalSkillCompiler(database)
 

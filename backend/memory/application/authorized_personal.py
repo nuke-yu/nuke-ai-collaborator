@@ -120,9 +120,15 @@ class AuthorizedPersonalKnowledgeService:
                         reason="Access denied: explicit OpenMemory ABAC deny rule.",
                     )
             except Exception:
-                # A missing/legacy ACL table must not broaden access; the
-                # default Nuke ACL result remains authoritative.
-                pass
+                # Policy lookup failure is an authorization failure.  Never
+                # turn an unavailable explicit-deny store into an allow.
+                from dataclasses import replace
+
+                check = replace(
+                    check,
+                    allowed=False,
+                    reason="Personal Vault policy unavailable; access denied.",
+                )
         if self._principal.user_id is not None and self._vault_policy is not None:
             try:
                 await self._vault_policy.record_audit(

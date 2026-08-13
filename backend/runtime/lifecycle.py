@@ -242,7 +242,7 @@ class LifecycleManager:
         self, group_ids: tuple[int, ...] | None = None
     ) -> None:
         """Recover stale running execution runs left behind after worker crashes."""
-        from ai.execution_runs import recover_abandoned_runs
+        from memory.application.execution_runs import recover_abandoned_runs
 
         if group_ids is None:
             async with self._lock:
@@ -271,14 +271,14 @@ class LifecycleManager:
 
     async def _drain_projection_outboxes(self) -> None:
         """Deliver durable memory projections for groups owned by this worker."""
-        from memory.bootstrap import get_memory_module
+        from memory.bootstrap import memory_module
 
         async with self._lock:
             group_ids = tuple(self._active_groups)
-        memory_module = get_memory_module()
+        module = memory_module()
         for group_id in group_ids:
             try:
-                await memory_module.drain_groups((group_id,))
+                await module.drain_groups((group_id,))
             except Exception:
                 log.exception(
                     "lifecycle: failed to drain projection outbox for group %d",
@@ -529,8 +529,8 @@ class LifecycleManager:
                 # then deliver them. This repairs the commit→Chroma crash window
                 # and external vector-index loss without blocking DB migration.
                 try:
-                    from memory.bootstrap import get_memory_module
-                    await get_memory_module().reconcile_group(group_id)
+                    from memory.bootstrap import memory_module
+                    await memory_module().reconcile_group(group_id)
                 except Exception:
                     log.exception(
                         "lifecycle: failed to reconcile memory projections for group %d",
@@ -741,8 +741,8 @@ class LifecycleManager:
         try:
             await db.aclose_writer(group_db_path(gid))
         finally:
-            from memory.bootstrap import get_memory_module
-            get_memory_module().unregister_group(gid)
+            from memory.bootstrap import memory_module
+            memory_module().unregister_group(gid)
             self._memory_projection_audits.pop(gid, None)
             self._memory_projection_audit_errors.pop(gid, None)
             self._learning_pipeline_stats.pop(gid, None)

@@ -21,11 +21,27 @@ def safe_memory_text(value: Any, *, limit: int = MAX_MEMORY_TEXT) -> str:
 
 
 def safe_memory_mapping(value: Mapping[str, Any], *, limit: int = MAX_MEMORY_JSON) -> str:
-    """Serialize a bounded, recursively sanitized JSON mapping."""
+    """Serialize a bounded mapping without ever cutting JSON text mid-token."""
+    budget = max(2, limit)
     bounded = _bound(value)
-    raw = json.dumps(bounded, ensure_ascii=False, sort_keys=True, default=str)
-    safe, _ = redact_memory_secrets(raw[: max(0, limit)])
-    return safe[: max(0, limit)]
+    safe, _ = redact_memory_secrets(
+        json.dumps(bounded, ensure_ascii=False, sort_keys=True, default=str)
+    )
+    while len(safe) > budget and isinstance(bounded, dict) and bounded:
+        removable = next(
+            (key for key in reversed(bounded) if key != "_truncated"),
+            None,
+        )
+        if removable is None:
+            break
+        bounded.pop(removable)
+        bounded["_truncated"] = True
+        safe, _ = redact_memory_secrets(
+            json.dumps(bounded, ensure_ascii=False, sort_keys=True, default=str)
+        )
+    if len(safe) > budget:
+        safe = json.dumps({"_truncated": True}, ensure_ascii=False)
+    return safe
 
 
 def _bound(value: Any, depth: int = 0) -> Any:

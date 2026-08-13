@@ -853,7 +853,7 @@ async def setup_session(runner) -> None:
             },
         )
 
-    from ai.execution_runs import start_run
+    from memory.application.execution_runs import start_run
     try:
         await start_run(
         run_id=getattr(runner, "run_id", runner.session_id),
@@ -865,7 +865,7 @@ async def setup_session(runner) -> None:
         model=runner.model_name,
         executor=runner.executor.executor_id,
         )
-        from ai.reflexion import record_memory_injection
+        from memory.application.reflexion_service import record_memory_injection
         runner.memory_injection_decision_id = await record_memory_injection(
             run_id=getattr(runner, "run_id", runner.session_id),
             group_id=runner.ctx.group_id,
@@ -1049,7 +1049,7 @@ async def _finalize_causal_memory_usage(
     learning_port,
 ) -> None:
     """Advance only cited Memory through the evidence-bearing usage lifecycle."""
-    from ai.reflexion import record_memory_adoption
+    from memory.application.reflexion_service import record_memory_adoption
     from memory.application.causal_usage import (
         collect_causal_usages,
         verification_for_usage,
@@ -1196,7 +1196,7 @@ async def cleanup_and_finalize(runner) -> ExecutionResult:
     await runner.ctx.interaction.save_session_snapshot(runner.session_id, runner.messages)
     await runner.ctx.interaction.update_session_status(runner.session_id, "completed")
     try:
-        from ai.execution_runs import finish_run
+        from memory.application.execution_runs import finish_run
         await finish_run(
             run_id=runner.run_id, group_id=runner.ctx.group_id, status="completed",
             iterations=runner.iter_count, input_tokens=runner.ai_service.usage.input_tokens,

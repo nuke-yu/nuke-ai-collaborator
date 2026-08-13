@@ -1,19 +1,13 @@
-"""Compatibility facade for canonical Experience use cases.
-
-This module deliberately contains no Experience SQL, ranking logic, or vector
-store access.  New code should import ``memory.application`` directly.
-"""
+"""Experience distillation, recall, usage, and projection services."""
 from __future__ import annotations
 
 import re
 from typing import Any
 
 from memory.application import CanonicalExperienceDistiller, CanonicalLearningService
-from memory.application.projection_reconciliation import CanonicalProjectionReconciler
-from memory.adapters.projections import ChromaBotMemoryProjectionDelivery
 from memory.contracts import AssembleCase, CompleteExperienceUsage, RecallExperiences
 from memory.domain import MemoryScope, UsageKind
-from memory.infrastructure import ProjectionOutbox, SQLiteMemoryDatabase
+from memory.infrastructure import SQLiteMemoryDatabase
 
 
 def _terms(text: str) -> set[str]:
@@ -27,17 +21,19 @@ def _terms(text: str) -> set[str]:
 def _scope(group_id: int, bot_id: int | None = None, *, run_id: str | None = None) -> MemoryScope:
     if bot_id is not None and bot_id > 0:
         return MemoryScope.bot(group_id=group_id, bot_id=bot_id, actor_id=f"bot:{bot_id}", run_id=run_id)
-    return MemoryScope.group(group_id=group_id, actor_id="compat:experiences", run_id=run_id, bot_id=bot_id)
+    return MemoryScope.group(group_id=group_id, actor_id="service:experience_memory", run_id=run_id, bot_id=bot_id)
 
 
 async def distill_case(case_id: str, group_id: int | None) -> str | None:
     if group_id is None:
         return None
-    database = SQLiteMemoryDatabase()
-    outbox = ProjectionOutbox(database, ChromaBotMemoryProjectionDelivery())
-    result = await CanonicalExperienceDistiller(database, outbox).distill(group_id, case_id)
+    from memory.canonical import build_experience_distiller
+    result = await build_experience_distiller().distill(group_id, case_id)
     if result.get("record_id"):
-        await outbox.drain(group_id, limit=1, event_id=f"experience-vector:{result['record_id']}")
+        from memory.canonical import build_projection_outbox
+        await build_projection_outbox().drain(
+            group_id, limit=1, event_id=f"experience-vector:{result['record_id']}"
+        )
     return result.get("record_id")
 
 
@@ -46,7 +42,8 @@ async def recall_experiences(*, query: str, run_id: str, group_id: int | None,
                              char_budget: int = 2400) -> tuple[str, list[str]]:
     if group_id is None or bot_id is None:
         return "", []
-    return await CanonicalLearningService().recall_experiences(
+    from memory.canonical import build_learning_client
+    return await build_learning_client().recall_experiences(
         RecallExperiences(scope=_scope(group_id, bot_id, run_id=run_id), query=query,
                           run_id=run_id, limit=limit, char_budget=char_budget)
     )
@@ -57,7 +54,8 @@ async def complete_usage(*, record_ids: list[str], run_id: str, group_id: int | 
                          tool_attempts: int) -> None:
     if group_id is None:
         return
-    await CanonicalLearningService().record_completion_telemetry(type("Completion", (), {
+    from memory.canonical import build_learning_client
+    await build_learning_client().record_completion_telemetry(type("Completion", (), {
         "scope": _scope(group_id, run_id=run_id), "kind": UsageKind.EXPERIENCE,
         "item_ids": tuple(record_ids), "run_id": run_id, "outcome": outcome,
         "input_tokens": input_tokens, "output_tokens": output_tokens,
@@ -67,16 +65,15 @@ async def complete_usage(*, record_ids: list[str], run_id: str, group_id: int | 
 
 async def decay_experiences(group_id: int, *, now_ms: int | None = None,
                             stale_days: int = 90) -> int:
-    return await CanonicalLearningService().decay_experiences(
+    from memory.canonical import build_learning_client
+    return await build_learning_client().decay_experiences(
         group_id, now_ms=now_ms, stale_days=stale_days
     )
 
 
 async def reconcile_experience_projections(group_id: int) -> int:
-    database = SQLiteMemoryDatabase()
-    return await CanonicalProjectionReconciler(
-        database, ProjectionOutbox(database, ChromaBotMemoryProjectionDelivery())
-    ).reconcile(group_id)
+    from memory.canonical import build_projection_reconciler
+    return await build_projection_reconciler().reconcile(group_id)
 
 
 __all__ = [

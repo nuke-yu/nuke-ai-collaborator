@@ -2,11 +2,16 @@ import ast
 import os
 import sys
 import unittest
+from unittest.mock import AsyncMock
 from pathlib import Path
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from memory.contracts import ObserveMemory, RecallMemory
+from memory.contracts import (
+    MarkUsageAdopted, ObserveMemory, RecallMemory,
+)
+from memory.application import CanonicalLearningService
+from memory.canonical import build_personal_knowledge_client
 from memory.domain import (
     MemoryScope,
     ScopeKind,
@@ -41,6 +46,14 @@ class TestMemoryScope(unittest.TestCase):
     def test_personal_scope_exists_outside_group_until_explicit_projection(self):
         scope = MemoryScope.personal(user_id=7, actor_id="user:7")
         self.assertEqual(scope.storage_partition(), (None, ScopeKind.PERSONAL, 7))
+
+    def test_personal_factory_always_installs_canonical_policy(self):
+        from memory.application import SQLitePersonalVaultPolicy
+        from memory.domain import Principal
+
+        service = build_personal_knowledge_client(Principal.user(7, []))
+
+        self.assertIsInstance(service._vault_policy, SQLitePersonalVaultPolicy)
 
     def test_usage_evidence_lifecycle_is_monotonic(self):
         self.assertTrue(
@@ -88,6 +101,19 @@ class TestPublicContracts(unittest.TestCase):
         self.assertIsInstance(client, MemoryCommandPort)
         self.assertIsInstance(client, MemoryQueryPort)
 
+    def test_learning_service_enforces_evidence_before_storage(self):
+        service = CanonicalLearningService(AsyncMock())
+        scope = MemoryScope.bot(group_id=9, bot_id=5, actor_id="bot:5")
+
+        with self.assertRaisesRegex(ValueError, "decision_trace"):
+            # The invalid transition must fail before the database port is
+            # touched; this protects the application boundary itself.
+            import asyncio
+            asyncio.run(service.mark_usage_adopted(MarkUsageAdopted(
+                scope=scope, kind="experience", item_ids=("exp:1",),
+                run_id="run:1", adopted_via="model_self_report", evidence={}
+            )))
+
 
 class TestMemoryArchitecture(unittest.TestCase):
     def test_domain_and_application_do_not_import_runtime_or_adapters(self):
@@ -120,14 +146,10 @@ class TestMemoryArchitecture(unittest.TestCase):
 
     def test_projection_outbox_implementation_is_owned_by_memory(self):
         backend = Path(__file__).resolve().parents[1]
-        compatibility = (backend / "ai" / "projection_outbox.py").read_text(
-            encoding="utf-8"
-        )
         implementation = (
             backend / "memory" / "infrastructure" / "projection_outbox.py"
         ).read_text(encoding="utf-8")
-        self.assertIn("memory.bootstrap", compatibility)
-        self.assertNotIn("INSERT INTO memory_projection_outbox", compatibility)
+        self.assertFalse((backend / "ai" / "projection_outbox.py").exists())
         self.assertIn("INSERT INTO memory_projection_outbox", implementation)
 
     def test_host_group_schema_reuses_memory_manifest(self):

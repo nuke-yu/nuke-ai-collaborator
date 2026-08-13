@@ -118,9 +118,9 @@ class CanonicalExperienceDistiller:
                    FROM memory_records
                    WHERE group_id=? AND bot_id=? AND kind='experience'
                      AND status IN ('active','suspended') AND semantic_cluster_key=?
-                     AND failure_signature=?
+                     AND environment_signature=? AND failure_signature=?
                    ORDER BY updated_at DESC LIMIT 1""",
-                (group_id, case[0], case[8] or "", failure_signature),
+                (group_id, case[0], case[8] or "", environment["signature"], failure_signature),
             ) as cur:
                 existing = await cur.fetchone()
             if existing:
@@ -154,8 +154,7 @@ class CanonicalExperienceDistiller:
                 source_ids = [case_id]
                 target_confidence = 0.73
                 next_status = "active"
-        content = safe_memory_mapping(content_obj, limit=100_000)
-        async with await self._database.connect("memory_records", group_id, write=True) as db:
+            content = safe_memory_mapping(content_obj, limit=100_000)
             await db.execute(
                 """INSERT INTO memory_records
                    (record_id,kind,group_id,bot_id,status,content,task_signature,

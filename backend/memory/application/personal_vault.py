@@ -170,18 +170,26 @@ class CanonicalPersonalKnowledgeService(PersonalKnowledgePort):
                 (user_id, command.scope.group_id, command.scope.bot_id, command.purpose, now),
             ) as cur:
                 rows = await cur.fetchall()
-            if rows:
+            selected_rows = []
+            used = 0
+            for row in rows:
+                line = f"- [{row[2]}/{row[4]}] {safe_memory_text(row[3], limit=2000)}"
+                if used + len(line) > command.char_budget:
+                    break
+                selected_rows.append(row)
+                used += len(line)
+            if selected_rows:
                 await db.executemany(
                     """INSERT INTO personal_memory_usage_events
                        (user_id,record_id,projection_id,group_id,bot_id,session_id,purpose,used_at)
                        VALUES(?,?,?,?,?,?,?,?)""",
                     [(user_id, row[0], row[1], command.scope.group_id, command.scope.bot_id,
-                      command.scope.run_id or "", command.purpose, now) for row in rows],
+                      command.scope.run_id or "", command.purpose, now) for row in selected_rows],
                 )
             await db.commit()
         chunks: list[str] = []
         used = 0
-        for row in rows:
+        for row in selected_rows:
             line = f"- [{row[2]}/{row[4]}] {safe_memory_text(row[3], limit=2000)}"
             if used + len(line) > command.char_budget:
                 break

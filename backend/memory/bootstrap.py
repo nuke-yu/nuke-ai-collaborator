@@ -24,6 +24,7 @@ from memory.application import (
     CanonicalRelationService,
     GroupFactService,
     CanonicalProjectionReconciler,
+    SQLitePersonalVaultPolicy,
 )
 from memory.domain import Principal
 from memory.infrastructure import MemorySchemaManager, ProjectionOutbox, SQLiteMemoryDatabase
@@ -35,22 +36,11 @@ _memory_composition: MemoryComposition | None = None
 _bot_memory_projection_rollout_gate: BotMemoryProjectionRolloutGate | None = None
 
 
-def build_memory_client(bot: dict | None = None) -> CanonicalConversationMemoryService:
-    """Build the canonical conversation Memory client.
-
-    ``bot`` remains accepted for caller compatibility but is intentionally not
-    passed to or interpreted by the Memory implementation.
-    """
-    del bot
-    from memory.canonical import build_conversation_memory_client
-    return build_conversation_memory_client()
-
-
 def build_personal_knowledge_client(principal: Principal) -> AuthorizedPersonalKnowledgeService:
     """Build the fail-closed personal-memory application boundary."""
     return AuthorizedPersonalKnowledgeService(
         CanonicalPersonalKnowledgeService(), build_memory_acl(), principal,
-        vault_policy=None,
+        vault_policy=SQLitePersonalVaultPolicy(),
     )
 
 
@@ -91,14 +81,14 @@ def build_group_knowledge_client(
 def build_bot_fact_observation_client() -> BotFactObservationService:
     return BotFactObservationService(
         SQLiteMemoryDatabase(),
-        get_memory_module().projection_outbox,
+        memory_module().projection_outbox,
     )
 
 
 def build_bot_reflection_client() -> BotReflectionService:
     return BotReflectionService(
         SQLiteMemoryDatabase(),
-        get_memory_module().projection_outbox,
+        memory_module().projection_outbox,
     )
 
 
@@ -181,7 +171,7 @@ def build_memory_acl() -> MemoryACLPort:
 def build_memory_module(*, drain_interval_seconds: float = 60.0) -> MemoryModule:
     """Compose an embeddable Memory runtime from host-specific adapters."""
     # Canonical records own projection intents. Chroma is only a derived
-    # delivery target and must not be reached through the legacy Memory facade.
+    # Chroma is only a derived delivery target.
     from memory.adapters.projections import ChromaBotMemoryProjectionDelivery
 
     delivery = ChromaBotMemoryProjectionDelivery()
@@ -203,9 +193,7 @@ def build_memory_module(*, drain_interval_seconds: float = 60.0) -> MemoryModule
 def build_memory_composition(*, drain_interval_seconds: float = 60.0) -> MemoryComposition:
     """Build the explicit process-local Memory dependency composition.
 
-    This is the preferred construction point for new runtime code.  Existing
-    callers should continue using ``get_memory_module`` until their migration
-    is complete.
+    This is the preferred construction point for runtime code.
     """
     return MemoryComposition(
         module=build_memory_module(
@@ -214,14 +202,14 @@ def build_memory_composition(*, drain_interval_seconds: float = 60.0) -> MemoryC
     )
 
 
-def get_memory_composition() -> MemoryComposition:
-    """Return the compatibility composition used by existing callers."""
+def memory_composition() -> MemoryComposition:
+    """Return the process-local canonical Memory composition."""
     global _memory_composition
     if _memory_composition is None:
         _memory_composition = build_memory_composition()
     return _memory_composition
 
 
-def get_memory_module() -> MemoryModule:
-    """Return the process-local Memory composition used by legacy callers."""
-    return get_memory_composition().module
+def memory_module() -> MemoryModule:
+    """Return the process-local canonical Memory module."""
+    return memory_composition().module

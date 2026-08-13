@@ -21,7 +21,9 @@ from memory.infrastructure import SQLiteMemoryDatabase
 
 log = logging.getLogger(__name__)
 
-_database = SQLiteMemoryDatabase()
+def _database() -> SQLiteMemoryDatabase:
+    from memory.canonical import _runtime_composition
+    return _runtime_composition().database
 
 # 事件 summary 的字段上限（字符）。事件日志只要"够认出是什么"，不需要全文——全文留在
 # 主 loop 的 tool message 里。head/tail 各留一截，中间塞省略标记，避免一个巨型 Read
@@ -47,8 +49,8 @@ def _summarize(value, cap: int = _SUMMARY_MAX_CHARS) -> str:
         except Exception:
             raw = str(value)
     try:
-        from executors.redaction import redact_secrets
-        raw, _ = redact_secrets(raw)
+        from memory.domain.safety import redact_memory_secrets
+        raw, _ = redact_memory_secrets(raw)
     except Exception:
         pass  # redaction 不可用也不该挡住事件落库
     if len(raw) <= cap:
@@ -128,7 +130,7 @@ async def record_event(
             attempt_id or "",
             json.dumps(list(memory_refs), ensure_ascii=False),
         )
-        async with await _database.connect("tool_events", group_id, write=True) as db:
+        async with await _database().connect("tool_events", group_id, write=True) as db:
             await db.execute(
                 "INSERT INTO tool_events "
                 "(ts, group_id, bot_id, thread_id, tool, args_summary, result_summary, "
@@ -241,7 +243,7 @@ async def search_events(group_id: int, query: str = "", limit: int = 20,
         return []
     limit = max(1, min(int(limit or 20), 100))
     query = (query or "").strip()
-    async with await _database.connect("tool_events", group_id, write=False) as db:
+    async with await _database().connect("tool_events", group_id, write=False) as db:
         if not query:
             return await _search_recency(db, group_id, limit, tool)
         try:
@@ -257,7 +259,7 @@ async def timeline_events(group_id: int, anchor: int, before: int = 3,
         return []
     before = max(0, min(int(before or 0), 20))
     after = max(0, min(int(after or 0), 20))
-    async with await _database.connect("tool_events", group_id, write=False) as db:
+    async with await _database().connect("tool_events", group_id, write=False) as db:
         async with db.execute(
             f"SELECT {_INDEX_COLS} FROM tool_events "
             "WHERE group_id=? AND id < ? ORDER BY id DESC LIMIT ?",
@@ -279,7 +281,7 @@ async def fetch_events(group_id: int, ids: list[int]) -> list[dict]:
         return []
     ids = [int(i) for i in ids][:50]
     ph = ",".join("?" * len(ids))
-    async with await _database.connect("tool_events", group_id, write=False) as db:
+    async with await _database().connect("tool_events", group_id, write=False) as db:
         async with db.execute(
             f"SELECT {_FULL_COLS} FROM tool_events "
             f"WHERE group_id=? AND id IN ({ph}) ORDER BY id ASC",
@@ -351,7 +353,7 @@ async def maybe_compress_tool_events(group_id: int, bot_id: int, role: str = "",
     threshold = config.TOOL_EVENT_COMPRESS_THRESHOLD
     max_batch = config.TOOL_EVENT_COMPRESS_MAX_BATCH
     try:
-        async with await _database.connect("tool_events", group_id, write=False) as db:
+        async with await _database().connect("tool_events", group_id, write=False) as db:
             async with db.execute(
                 "SELECT id, ts, tool, args_summary, result_summary, is_error, "
                 "files_touched, command FROM tool_events "
@@ -362,9 +364,9 @@ async def maybe_compress_tool_events(group_id: int, bot_id: int, role: str = "",
         if len(rows) < threshold:
             return  # 门控未到：不烧模型
 
-        from ai.client import call_ai_once
+        from memory.canonical import call_memory_model
         body = "\n".join(_compress_line(r) for r in rows)
-        res = await call_ai_once(
+        res = await call_memory_model(
             _COMPRESS_PROMPT + body,
             [{"role": "user", "content": "请提炼持久结论。"}],
             provider, model, temperature=0.3, max_tokens=512,
@@ -377,7 +379,7 @@ async def maybe_compress_tool_events(group_id: int, bot_id: int, role: str = "",
         ids = [r[0] for r in rows]
         ph = ",".join("?" * len(ids))
         max_ts = max(r[1] for r in rows)
-        async with await _database.connect("memory_records", group_id, write=True) as db:
+        async with await _database().connect("memory_records", group_id, write=True) as db:
             for idx, (insight, score) in enumerate(insights):
                 record_id = "tool-episode:" + hashlib.sha256(
                     f"{group_id}:{bot_id}:{max_ts}:{idx}".encode()
@@ -429,7 +431,7 @@ async def _prune_compressed(group_id: int) -> None:
     import time as _time
     from core import config
     cutoff_ms = int((_time.time() - config.TOOL_EVENT_RETENTION_DAYS * 86400) * 1000)
-    async with await _database.connect("tool_events", group_id, write=True) as db:
+    async with await _database().connect("tool_events", group_id, write=True) as db:
         await db.execute(
             "DELETE FROM tool_events WHERE group_id=? AND compressed=1 AND ts < ?",
             (group_id, cutoff_ms),

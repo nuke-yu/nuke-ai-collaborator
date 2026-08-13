@@ -6,9 +6,9 @@ import unittest
 from unittest.mock import AsyncMock, patch
 
 import db as database
-from ai.cases import assemble_case
-from ai.experiences import distill_case, reconcile_experience_projections
-from ai.projection_outbox import drain_projection_outbox, enqueue_projection
+from memory.application.case_service import assemble_case
+from memory.application.experience_service import distill_case, reconcile_experience_projections
+from memory.application.projection_outbox_service import drain_projection_outbox, enqueue_projection
 
 TEST_DB_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),

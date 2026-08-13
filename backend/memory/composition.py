@@ -1,9 +1,7 @@
 """Explicit dependency composition for the Memory bounded context.
 
-This module deliberately contains no business rules.  It owns the process-local
-objects that used to be assembled independently by ``bootstrap.py``.  The
-legacy factory functions remain available during migration, but all new code
-can depend on one explicit composition object.
+This module deliberately contains no business rules. It owns the process-local
+objects assembled by the Memory composition root.
 """
 from __future__ import annotations
 

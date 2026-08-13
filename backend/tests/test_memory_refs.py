@@ -156,7 +156,7 @@ class TestMemoryRefs(unittest.TestCase):
 
 class TestCausalUsageWiring(unittest.IsolatedAsyncioTestCase):
     @patch(
-        "ai.reflexion.record_memory_adoption",
+        "memory.application.reflexion_service.record_memory_adoption",
         new_callable=AsyncMock,
         return_value="decision:adoption",
     )

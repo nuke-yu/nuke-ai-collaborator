@@ -24,7 +24,9 @@ from memory.contracts import (
 )
 from memory.domain import (
     MemoryScope, ScopeKind, UsageKind, OutcomeStatus,
-    evaluate_outcome_signal, evaluate_outcome_verdict, identify_task,
+    UsageState, evaluate_outcome_signal, evaluate_outcome_verdict, identify_task,
+    require_adoption_evidence, require_execution_evidence,
+    require_verification_evidence,
 )
 from memory.infrastructure import SQLiteMemoryDatabase, safe_memory_mapping, safe_memory_text
 from memory.ports import LearningPort
@@ -246,12 +248,15 @@ class CanonicalLearningService(LearningPort):
         return cur.rowcount == 1
 
     async def mark_usage_adopted(self, command: MarkUsageAdopted) -> int:
+        require_adoption_evidence(command.adopted_via, command.evidence)
         return await self._usage_update(command, "adopted", "adopted_at", command.evidence)
 
     async def mark_usage_executed(self, command: MarkUsageExecuted) -> int:
+        require_execution_evidence(command.evidence)
         return await self._usage_update(command, "executed", "executed_at", command.evidence)
 
     async def verify_usage(self, command: VerifyUsage) -> int:
+        require_verification_evidence(command.status, command.evidence)
         return await self._usage_update(command, str(command.status.value), "verified_at", command.evidence)
 
     async def _usage_update(self, command: Any, state: str, timestamp_column: str, evidence: Any) -> int:
@@ -383,7 +388,7 @@ class CanonicalLearningService(LearningPort):
         )
         if correction:
             signals.append("corrected_success")
-        case_id = "case:" + hashlib.sha256(f"{group_id}:{command.run_id}".encode()).hexdigest()[:24]
+        generated_case_id = "case:" + hashlib.sha256(f"{group_id}:{command.run_id}".encode()).hexdigest()[:24]
         now = int(time.time()*1000)
         identity = identify_task(command.task)
         attempt_trace = []
@@ -414,6 +419,12 @@ class CanonicalLearningService(LearningPort):
             if signal is not None and signal.verifies_task and not signal.success:
                 saw_verifier_failure = True
         async with await self._database.connect("agent_cases", group_id, write=True) as db:
+            async with db.execute(
+                "SELECT case_id FROM agent_cases WHERE run_id=? AND group_id=?",
+                (command.run_id, group_id),
+            ) as existing_cursor:
+                existing = await existing_cursor.fetchone()
+            case_id = str(existing[0]) if existing else generated_case_id
             await db.execute("""INSERT INTO agent_cases
               (case_id,run_id,group_id,bot_id,task,task_signature,semantic_cluster_key,
                task_family,task_concepts_json,tools_used,files_touched,attempts,errors,

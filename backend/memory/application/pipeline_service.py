@@ -1,19 +1,12 @@
-"""Compatibility facade for callers migrating away from the old pipeline.
-
-All persistence and dispatch behavior belongs to ``memory.application``.
-This module intentionally contains no learning handlers or legacy database
-routing; it can be removed after external callers finish importing the
-canonical factories directly.
-"""
+"""Canonical application operations for Memory learning pipelines."""
 from __future__ import annotations
 
 from memory.canonical import build_learning_client, build_pipeline_dispatcher
-from memory.application.pipeline import CanonicalPipelineJobRepository
 from memory.domain import MemoryScope
 
 
 async def process_case(case_id: str, group_id: int, *, input_version: str = "1") -> str:
-    return await CanonicalPipelineJobRepository().enqueue(
+    return await build_learning_client().job_repository.enqueue(
         MemoryScope.group(group_id=group_id, actor_id="pipeline"),
         "evaluate_case", case_id, input_version,
     )
@@ -22,7 +15,7 @@ async def process_case(case_id: str, group_id: int, *, input_version: str = "1")
 async def enqueue_turn_observation(
     *, message_id: int, bot_id: int, group_id: int, input_version: str = "1"
 ) -> str:
-    repository = CanonicalPipelineJobRepository()
+    repository = build_learning_client().job_repository
     return await repository.enqueue(
         MemoryScope.group(group_id=group_id, actor_id="pipeline"),
         "observe_turn", f"{message_id}:{bot_id}", input_version,
@@ -38,15 +31,8 @@ async def dispatch_group(
     *,
     limit: int = 10,
     lease_seconds: int = 60,
-    job_types: set[str] | frozenset[str] | None = None,
 ) -> dict[str, int]:
-    # Canonical dispatch owns the complete handler map. ``job_types`` is kept
-    # for source compatibility. Learning callers historically expected a
-    # case's distill/compile/project children to finish in the same facade
-    # call, so drain only that canonical chain while preserving observation
-    # fan-out as independently leased stages.
-    del job_types
-    repository = CanonicalPipelineJobRepository()
+    repository = build_learning_client().job_repository
     scope = MemoryScope.group(group_id=group_id, actor_id="pipeline")
     ready = await repository.list_ready(scope, limit=max(limit, 100))
     learning_chain = bool(ready) and all(
@@ -78,6 +64,6 @@ async def dispatch_group(
 
 
 async def job_stats(group_id: int) -> dict[str, int]:
-    return dict(await CanonicalPipelineJobRepository().stats(
+    return dict(await build_learning_client().job_repository.stats(
         MemoryScope.group(group_id=group_id, actor_id="pipeline")
     ))

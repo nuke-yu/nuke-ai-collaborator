@@ -10,7 +10,7 @@ import db
 from memory.application.pipeline import (
     CanonicalPipelineDispatcher,
     CanonicalPipelineJobRepository,
-    DeferPipelineJob,
+    RetryablePipelineJob,
 )
 from memory.domain import MemoryScope
 from memory.infrastructure import MemorySchemaManager
@@ -92,7 +92,7 @@ class CanonicalPipelineJobsTest(unittest.IsolatedAsyncioTestCase):
         job_id = await self.repo.enqueue(self.scope, "deferred", "input:2")
 
         async def handler(*_args):
-            raise DeferPipelineJob("legacy distillation required")
+            raise RetryablePipelineJob("distillation required")
 
         result = await CanonicalPipelineDispatcher(
             self.repo, {"deferred": handler}

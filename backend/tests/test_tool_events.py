@@ -17,8 +17,8 @@ from unittest.mock import ANY, AsyncMock, patch
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import db as database
-from ai import tool_events
-from ai.tool_events import (
+from memory.application import tool_events
+from memory.application.tool_events import (
     _extract_command,
     _extract_files,
     _summarize,
@@ -27,24 +27,24 @@ from ai.tool_events import (
     search_events,
     timeline_events,
 )
-from ai.execution_runs import finish_run, start_run
-from ai.cases import assemble_case, build_attempt_trace, task_signature
-from ai.cases import evaluate_outcome
-from ai.pipeline import (
+from memory.application.execution_runs import finish_run, start_run
+from memory.application.case_service import assemble_case, build_attempt_trace, task_signature
+from memory.application.case_service import evaluate_outcome
+from memory.application.pipeline_service import (
     dispatch_group,
     enqueue_missing_turn_observations,
     job_stats,
     process_case,
 )
-from ai.reflexion import (classify_failure, maybe_inject,
+from memory.application.reflexion_service import (classify_failure, maybe_inject,
                           record_memory_adoption, record_memory_injection)
-from ai.skill_learning import (compile_candidate, complete_skill_usage,
+from memory.application.skill_service import (compile_candidate, complete_skill_usage,
                                enqueue_missing_skill_projections,
                                promote_skill, recall_skills,
                                resolve_skill_refs, validate_declaration)
-from ai.experiences import complete_usage, decay_experiences, distill_case, recall_experiences
-from ai.learning_metrics import collect_learning_shadow_metrics
-from ai.usage_tracking import mark_adopted, mark_executed, mark_verified
+from memory.application.experience_service import complete_usage, decay_experiences, distill_case, recall_experiences
+from memory.application.learning_metrics import collect_learning_shadow_metrics
+from memory.application.learning_usage import mark_adopted, mark_executed, mark_verified
 from memory.domain import MemoryScope, UsageKind, UsageState
 
 TEST_DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "test_tool_events.db")
@@ -1130,11 +1130,11 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
                 (record_id,),
             ) as cur:
                 self.assertEqual((await cur.fetchone())[0], "experience_case_snapshot")
-        from ai.skill_learning import list_everos_source_documents
+        from memory.application.skill_service import list_everos_source_documents
         sources = await list_everos_source_documents(group_id=7, record_id=record_id)
         self.assertEqual(len(sources), 1)
         self.assertEqual(sources[0]["source_type"], "experience_case_snapshot")
-        from ai.skill_learning import get_everos_source_markdown
+        from memory.application.skill_service import get_everos_source_markdown
         markdown = await get_everos_source_markdown(group_id=7, record_id=record_id)
         self.assertIn("# Experience Source", markdown)
         with self.assertRaises(ValueError):
@@ -1449,7 +1449,7 @@ class CompressionTest(unittest.IsolatedAsyncioTestCase):
                 return (await cur.fetchone())[0]
 
     async def test_below_threshold_is_noop(self):
-        from ai import tool_events as te
+        from memory.application import tool_events as te
         await self._seed(3)
         with patch("core.config.TOOL_EVENT_COMPRESS_THRESHOLD", 20), \
              patch("ai.client.call_ai_once", new=AsyncMock()) as mock_ai:
@@ -1458,7 +1458,7 @@ class CompressionTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self._compressed_count(), 0)
 
     async def test_compresses_into_canonical_tool_episode_records(self):
-        from ai import tool_events as te
+        from memory.application import tool_events as te
         await self._seed(5)
         ai_ret = {"type": "text", "content": "- 改过 f0.py 等多个文件|0.9\n- 全部成功无报错|0.6"}
         with patch("core.config.TOOL_EVENT_COMPRESS_THRESHOLD", 5), \
@@ -1480,7 +1480,7 @@ class CompressionTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self._compressed_count(), 5)
 
     async def test_no_insight_still_advances(self):
-        from ai import tool_events as te
+        from memory.application import tool_events as te
         await self._seed(5)
         with patch("core.config.TOOL_EVENT_COMPRESS_THRESHOLD", 5), \
              patch("ai.client.call_ai_once",
@@ -1491,7 +1491,7 @@ class CompressionTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self._compressed_count(), 5)  # advanced anyway
 
     async def test_prune_removes_old_compressed(self):
-        from ai import tool_events as te
+        from memory.application import tool_events as te
         await self._seed(2)
         # mark them compressed + backdate ts far past retention
         async with database.connect(TEST_DB_PATH) as db:
