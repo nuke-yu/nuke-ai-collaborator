@@ -5,6 +5,7 @@ import time
 
 from memory.ports import PersonalVaultPolicyPort
 from memory.infrastructure.personal_database import PersonalVaultDatabase
+from memory.infrastructure.safety import safe_memory_text
 
 
 class SQLitePersonalVaultPolicy(PersonalVaultPolicyPort):
@@ -17,6 +18,10 @@ class SQLitePersonalVaultPolicy(PersonalVaultPolicyPort):
         self, *, user_id: int, subject_type: str, subject_id: str,
         object_type: str, object_id: str, action: str,
     ) -> bool | None:
+        normalized = [safe_memory_text(value, limit=200).strip() for value in
+                      (subject_type, subject_id, object_type, object_id, action)]
+        if any(not value for value in normalized):
+            return None
         async with self._database.connect(user_id) as db:
             async with db.execute(
                 """SELECT subject_type,subject_id,object_type,object_id,action,effect
@@ -24,8 +29,7 @@ class SQLitePersonalVaultPolicy(PersonalVaultPolicyPort):
                    WHERE user_id=? AND subject_type IN (?, '*')
                      AND subject_id IN (?, '*') AND object_type IN (?, '*')
                      AND object_id IN (?, '*') AND action IN (?, '*')""",
-                (user_id, subject_type.strip(), subject_id.strip(), object_type.strip(),
-                 object_id.strip(), action.strip()),
+                (user_id, *normalized),
             ) as cur:
                 rows = await cur.fetchall()
         if not rows:

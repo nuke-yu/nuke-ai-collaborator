@@ -6,6 +6,7 @@ from enum import StrEnum
 from typing import Any, Mapping, Sequence
 
 from memory.domain import MemoryRelationType, MemoryScope, UsageKind, UsageState
+from memory.contracts.versions import MAX_PERSONAL_CONTEXT_CHARS
 
 CONTRACT_VERSION = "memory.v1"
 
@@ -93,6 +94,10 @@ class ObservePersonalHabit:
     context_kind: str
     observed_at: int
     polarity: str = "support"
+
+    def __post_init__(self) -> None:
+        if self.polarity not in {"support", "contradict"}:
+            raise ValueError("polarity must be support or contradict")
 
 
 @dataclass(frozen=True, slots=True)
@@ -456,6 +461,10 @@ class FormatProjectedContext:
     app_id: str | None = None
 
     def __post_init__(self) -> None:
+        if isinstance(self.char_budget, bool) or not isinstance(self.char_budget, int):
+            raise ValueError("char_budget must be an integer")
+        if not 1 <= self.char_budget <= MAX_PERSONAL_CONTEXT_CHARS:
+            raise ValueError(f"char_budget must be between 1 and {MAX_PERSONAL_CONTEXT_CHARS}")
         if self.app_id is not None and not self.app_id.strip():
             raise ValueError("app_id cannot be empty")
 

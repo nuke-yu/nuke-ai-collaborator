@@ -145,22 +145,20 @@ class CanonicalLearningService(LearningPort):
         return ("[Learned declarative skills]\n" + "\n".join(body), ids) if body else ("", [])
 
     async def complete_experience_usage(self, command: CompleteExperienceUsage) -> None:
-        group_id, _ = _scope(command.scope)
-        async with await self._database.connect("experience_usage", group_id, write=True) as db:
-            for record_id in command.record_ids:
-                await db.execute(
-                    """INSERT INTO experience_usage(record_id,run_id,group_id,bot_id,state,outcome,input_tokens,output_tokens,tool_attempts,created_at,updated_at)
-                       VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(record_id,run_id) DO UPDATE SET state='completed',outcome=excluded.outcome,updated_at=excluded.updated_at""",
-                    (record_id, command.run_id, group_id, command.scope.bot_id, "completed", safe_memory_text(command.outcome, limit=500), command.input_tokens, command.output_tokens, command.tool_attempts, int(time.time()*1000), int(time.time()*1000)),
-                )
-            await db.commit()
+        await self.record_completion_telemetry(type("Completion", (), {
+            "scope": command.scope, "kind": UsageKind.EXPERIENCE,
+            "item_ids": command.record_ids, "run_id": command.run_id,
+            "outcome": command.outcome, "input_tokens": command.input_tokens,
+            "output_tokens": command.output_tokens, "tool_attempts": command.tool_attempts,
+        })())
 
     async def complete_skill_usage(self, command: CompleteSkillUsage) -> None:
-        group_id, _ = _scope(command.scope)
-        async with await self._database.connect("skill_usage", group_id, write=True) as db:
-            for skill_id in command.skill_ids:
-                await db.execute("UPDATE skill_usage SET state='completed',outcome=?,updated_at=? WHERE skill_id=? AND run_id=? AND group_id=?", (safe_memory_text(command.outcome, limit=500), int(time.time()*1000), skill_id, command.run_id, group_id))
-            await db.commit()
+        await self.record_completion_telemetry(type("Completion", (), {
+            "scope": command.scope, "kind": UsageKind.SKILL,
+            "item_ids": command.skill_ids, "run_id": command.run_id,
+            "outcome": command.outcome, "input_tokens": 0,
+            "output_tokens": 0, "tool_attempts": 0,
+        })())
 
     async def record_completion_telemetry(self, command: Any) -> int:
         """Record terminal run telemetry without asserting Memory adoption."""
@@ -174,14 +172,14 @@ class CanonicalLearningService(LearningPort):
                 if kind is UsageKind.EXPERIENCE:
                     cur = await db.execute(
                         f"UPDATE {table} SET outcome=?,input_tokens=?,output_tokens=?,tool_attempts=?,updated_at=? WHERE {id_column}=? AND run_id=? AND group_id=?",
-                        (command.outcome, command.input_tokens, command.output_tokens,
+                        (safe_memory_text(command.outcome, limit=500), command.input_tokens, command.output_tokens,
                          command.tool_attempts, int(time.time()*1000), item_id,
                          command.run_id, group_id),
                     )
                 else:
                     cur = await db.execute(
                         f"UPDATE {table} SET outcome=?,updated_at=? WHERE {id_column}=? AND run_id=? AND group_id=?",
-                        (command.outcome, int(time.time()*1000), item_id,
+                        (safe_memory_text(command.outcome, limit=500), int(time.time()*1000), item_id,
                          command.run_id, group_id),
                     )
                 changed += cur.rowcount

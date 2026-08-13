@@ -65,7 +65,7 @@ async def delete_personal_memory_access_rule(body: dict, user=Depends(auth.get_c
         deleted = await delete_personal_access_rule(user_id=int(user["uid"]), **{
             key: str(body[key]) for key in ("subject_type", "subject_id", "object_type", "object_id", "action")
         })
-    except KeyError as exc:
+    except (KeyError, ValueError) as exc:
         raise HTTPException(400, str(exc))
     if not deleted:
         raise HTTPException(404, "Personal access rule not found")

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import asyncio
 import json
 import tempfile
 import unittest
@@ -49,8 +50,13 @@ class CanonicalPipelineJobsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([row["job_id"] for row in ready], [first])
         token = await self.repo.claim(self.scope, first)
         self.assertTrue(token and token.startswith("fence:"))
-        self.assertFalse(await self.repo.complete(self.scope, first, "fence:stale"))
-        self.assertTrue(await self.repo.complete(self.scope, first, token))
+        terminal_state = {"job_id": first, "status": "completed"}
+        self.assertFalse(await self.repo.complete_with_checkpoint(
+            self.scope, first, "fence:stale", "{}", thread_id=first, state=terminal_state,
+        ))
+        self.assertTrue(await self.repo.complete_with_checkpoint(
+            self.scope, first, token, "{}", thread_id=first, state=terminal_state,
+        ))
 
     async def test_failed_job_is_retryable_and_stats_are_canonical(self) -> None:
         job_id = await self.repo.enqueue(self.scope, "project_skill", "skill:1")
@@ -104,6 +110,22 @@ class CanonicalPipelineJobsTest(unittest.IsolatedAsyncioTestCase):
                 (job_id,),
             ) as cur:
                 self.assertEqual(await cur.fetchone(), ("pending", 0, None))
+
+    async def test_long_handler_renews_lease_and_runs_once(self) -> None:
+        await self.repo.enqueue(self.scope, "slow", "input:slow")
+        invocations = 0
+
+        async def handler(*_args):
+            nonlocal invocations
+            invocations += 1
+            await asyncio.sleep(1.5)
+            return {"ok": True}
+
+        result = await CanonicalPipelineDispatcher(
+            self.repo, {"slow": handler}
+        ).dispatch_group(7, lease_seconds=1)
+        self.assertEqual(result, {"claimed": 1, "completed": 1, "failed": 0})
+        self.assertEqual(invocations, 1)
 
     async def test_case_evaluation_can_enqueue_distill_job(self) -> None:
         from memory.application.case_evaluation import CanonicalCaseEvaluator

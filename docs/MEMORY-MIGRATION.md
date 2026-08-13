@@ -52,13 +52,16 @@ select a second storage implementation.
   across Groups.
 - Observation summaries read the production `meta.memory_observation.thread_id`
   path and retain a top-level fallback for older records.
-- Personal Vault schema v2 validates the physical schema, rebuilds legacy
+- Personal Vault schema v3 validates the physical schema, rebuilds legacy
   projection and habit-evidence tables with cascading foreign keys, removes
   orphan rows, and runs `foreign_key_check`; this repair also runs when an old
   database was incorrectly labelled v2. Vault access uses WAL, busy-timeouts,
   and a cross-process file lock. Full Vault deletion removes records,
   projections, usage/audit/governance data, and the physical database file.
   Impact analysis reports actual usage sessions.
+- Schema v3 includes source-system identity in Habit evidence keys, merges
+  historical duplicate source records deterministically, and stores
+  content-free record/projection deletion audit events.
 - Habit observations use a stable `habit_key` record, aggregate evidence by
   sample/context/time-span, reject contradictions, and only promote a habit
   after the canonical maturity thresholds are met. Export includes all Vault
@@ -67,6 +70,27 @@ select a second storage implementation.
 - Personal Vault administration is port-driven: application services receive a
   `PersonalVaultDatabasePort`, while database construction remains in the
   canonical composition roots. ABAC rules have supported set/delete commands.
+- Personal sensitivity is monotonic (`private < restricted < secret`); an
+  escalation to `secret` revokes active projections in the same transaction.
+  Habit evidence accepts only `support` or `contradict`, and all habit fields
+  pass through the canonical safety boundary.
+- Personal Vault deletion holds the cross-process lock through WAL checkpoint
+  and physical unlink. Vault opening validates every core table's final column
+  shape and rejects unsupported future schema versions.
+- Pipeline job completion and its terminal checkpoint are committed by one
+  repository transaction, so a checkpoint failure cannot leave a completed job
+  without its durable completion node.
+- Run completion commands persist telemetry only; they never overwrite the
+  evidence state machine's terminal `verified_success`/`verified_failure`
+  states with a non-existent `completed` state. Long-running pipeline handlers
+  renew their fenced lease and are cancelled when renewal fails.
+- Stable Personal Vault source identities are based on
+  `(user, source_type, source_id, kind)` when a source ID exists, so corrected
+  content updates the same record and cannot leave an older projected version
+  active. Record deletion removes its usage provenance in the same transaction.
+- Safety redaction runs before length bounding, including nested mappings and
+  all Vault metadata fields such as app names, projection purposes, session
+  IDs, and usage purposes.
 - `MemoryAuthorizationError` is translated to HTTP 403 centrally, and an
   unavailable authorization audit fails closed.
 - Experience aggregation reads and writes under one writer transaction and

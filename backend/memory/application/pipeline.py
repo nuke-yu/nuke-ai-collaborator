@@ -6,6 +6,7 @@ without changing idempotency, lease fencing, or retry behavior.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import hashlib
 import logging
@@ -20,6 +21,7 @@ from memory.domain import MemoryScope, ScopeKind
 from memory.infrastructure import (
     SQLiteMemoryDatabase, safe_memory_mapping, safe_memory_text,
 )
+from memory.ports import PipelineJobRepositoryPort
 
 log = logging.getLogger(__name__)
 
@@ -96,9 +98,46 @@ class CanonicalPipelineJobRepository:
             await db.commit()
         return lease_token if cur.rowcount == 1 else None
 
-    async def complete(
+    async def complete_with_checkpoint(
         self, scope: MemoryScope, job_id: str, lease_token: str,
-        output_json: str = "{}",
+        output_json: str, *, thread_id: str, state: Mapping[str, Any],
+        parent_checkpoint_id: str | None = None,
+    ) -> bool:
+        """Commit job completion and its terminal checkpoint atomically."""
+        if not lease_token:
+            return False
+        group_id = _group_id(scope)
+        now = _now_ms()
+        safe_state = json.loads(safe_memory_mapping(state))
+        raw_json = json.dumps(safe_state, sort_keys=True, default=str)
+        state_hash = hashlib.sha256(raw_json.encode()).hexdigest()[:16]
+        checkpoint_id = f"chk:{thread_id}:completed:{state_hash[:8]}"
+        async with await self._database.connect("pipeline_jobs", group_id, write=True) as db:
+            await _ensure_checkpoint_tables(db)
+            cur = await db.execute(
+                """UPDATE pipeline_jobs SET status='completed',lease_until=NULL,
+                   lease_token=NULL,error='',output_json=?,completed_at=?,updated_at=?
+                   WHERE job_id=? AND group_id=? AND status='running' AND lease_token=?""",
+                (safe_memory_text(output_json, limit=100_000), now, now,
+                 job_id, group_id, lease_token),
+            )
+            if cur.rowcount != 1:
+                await db.rollback()
+                return False
+            await db.execute(
+                """INSERT OR IGNORE INTO memory_checkpoints
+                   (checkpoint_id,group_id,thread_id,parent_checkpoint_id,step_name,
+                    state_hash,state_json,created_at)
+                   VALUES (?,?,?,?,?,?,?,?)""",
+                (checkpoint_id, group_id, thread_id, parent_checkpoint_id, "completed",
+                 state_hash, json.dumps(safe_state, ensure_ascii=False, sort_keys=True), now),
+            )
+            await db.commit()
+        return True
+
+    async def renew_lease(
+        self, scope: MemoryScope, job_id: str, lease_token: str,
+        lease_seconds: int = 60,
     ) -> bool:
         if not lease_token:
             return False
@@ -106,11 +145,9 @@ class CanonicalPipelineJobRepository:
         now = _now_ms()
         async with await self._database.connect("pipeline_jobs", group_id, write=True) as db:
             cur = await db.execute(
-                """UPDATE pipeline_jobs SET status='completed',lease_until=NULL,
-                   lease_token=NULL,error='',output_json=?,completed_at=?,updated_at=?
+                """UPDATE pipeline_jobs SET lease_until=?,updated_at=?
                    WHERE job_id=? AND group_id=? AND status='running' AND lease_token=?""",
-                (safe_memory_text(output_json, limit=100_000), now, now,
-                 job_id, group_id, lease_token),
+                (now + max(1, lease_seconds) * 1000, now, job_id, group_id, lease_token),
             )
             await db.commit()
         return cur.rowcount == 1
@@ -237,7 +274,7 @@ class CanonicalPipelineDispatcher:
     """Execute canonical jobs with injected, already-migrated handlers."""
 
     def __init__(
-        self, repository: CanonicalPipelineJobRepository | None = None,
+        self, repository: PipelineJobRepositoryPort | None = None,
         handlers: Mapping[str, PipelineHandler] = (),
     ) -> None:
         self.repository = repository or CanonicalPipelineJobRepository()
@@ -273,17 +310,44 @@ class CanonicalPipelineDispatcher:
                 handler = self.handlers.get(str(job["job_type"]))
                 if handler is None:
                     raise ValueError(f"unsupported pipeline job type: {job['job_type']}")
-                output = dict(await handler(group_id, str(job["input_id"]), str(job["input_version"])))
-                if not await self.repository.complete(
+                handler_task = asyncio.create_task(
+                    handler(group_id, str(job["input_id"]), str(job["input_version"]))
+                )
+                heartbeat_lost = asyncio.Event()
+
+                async def _heartbeat() -> None:
+                    while True:
+                        await asyncio.sleep(max(0.1, lease_seconds / 3))
+                        try:
+                            renewed = await self.repository.renew_lease(scope, job_id, token, lease_seconds)
+                        except Exception:
+                            renewed = False
+                        if not renewed:
+                            heartbeat_lost.set()
+                            handler_task.cancel()
+                            return
+
+                heartbeat_task = asyncio.create_task(_heartbeat())
+                try:
+                    output = dict(await handler_task)
+                except asyncio.CancelledError:
+                    if heartbeat_lost.is_set():
+                        raise LostLeaseError(f"Worker lost lease for job {job_id}")
+                    raise
+                finally:
+                    heartbeat_task.cancel()
+                    await asyncio.gather(heartbeat_task, return_exceptions=True)
+                if heartbeat_lost.is_set():
+                    raise LostLeaseError(f"Worker lost lease for job {job_id}")
+                if not await self.repository.complete_with_checkpoint(
                     scope, job_id, token, json.dumps(output, ensure_ascii=False),
+                    thread_id=job_id,
+                    state={"job_id": job_id, "job_type": str(job["job_type"]),
+                           "input_id": str(job["input_id"]), "status": "completed",
+                           "output": output},
+                    parent_checkpoint_id=claimed["checkpoint_id"],
                 ):
                     raise LostLeaseError(f"Worker lost lease for job {job_id}")
-                await self.repository.checkpoint(
-                    checkpoint_scope, job_id, "completed",
-                    {"job_id": job_id, "job_type": str(job["job_type"]),
-                     "input_id": str(job["input_id"]), "status": "completed",
-                     "output": output}, claimed["checkpoint_id"],
-                )
                 processed += 1
             except Exception as exc:
                 if isinstance(exc, RetryablePipelineJob):
