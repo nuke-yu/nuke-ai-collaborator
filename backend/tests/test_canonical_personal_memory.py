@@ -155,6 +155,34 @@ class CanonicalPersonalMemoryTest(unittest.IsolatedAsyncioTestCase):
                 except FileNotFoundError:
                     pass
 
+    async def test_v3_duplicate_migration_preserves_authoritative_record_and_conflict(self) -> None:
+        path = tempfile.mktemp(suffix="_duplicate_personal.db")
+        try:
+            from memory.infrastructure.personal_database import _DDL
+            async with aiosqlite.connect(path) as db:
+                for statement in _DDL:
+                    await db.execute(statement)
+                await db.executemany("INSERT INTO personal_schema_version(version,applied_at) VALUES(?,1)", [(1,), (2,), (3,)])
+                rows = [
+                    ("r-old", 7, "preference", "old value", "", "7", "observed", "private", "active", "profile", "profile:7", .4, 0, 10, 10, 10),
+                    ("r-new", 7, "preference", "new value", "", "7", "user_statement", "restricted", "active", "profile", "profile:7", .9, 1, 20, 20, 20),
+                ]
+                await db.executemany("""INSERT INTO personal_records
+                    (record_id,user_id,kind,content,speaker,subject,authority,sensitivity,status,source_type,source_id,confidence,explicit,valid_from,created_at,updated_at)
+                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", rows)
+                await db.commit()
+            async with _ProductionTempPersonalDatabase(path).connect(7) as db:
+                async with db.execute("SELECT record_id,content,authority,sensitivity,explicit,confidence FROM personal_records") as cur:
+                    self.assertEqual(await cur.fetchall(), [("r-new", "new value", "user_statement", "restricted", 1, .9)])
+                async with db.execute("SELECT conflicting_record_id,content FROM personal_migration_conflicts") as cur:
+                    self.assertEqual(await cur.fetchall(), [("r-old", "old value")])
+        finally:
+            for suffix in ("", "-wal", "-shm", ".lock"):
+                try:
+                    os.unlink(path + suffix)
+                except FileNotFoundError:
+                    pass
+
     async def test_impact_reports_usage_and_delete_removes_entire_vault(self) -> None:
         record_id = await self.service.create_record(CreatePersonalRecord(
             scope=self.scope, kind="preference", content="dark mode",

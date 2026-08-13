@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncIterator
@@ -10,6 +11,7 @@ import aiosqlite
 import fcntl
 
 from memory.contracts.versions import PERSONAL_SCHEMA_VERSION
+from memory.domain.safety import safe_memory_text
 
 
 _LOCKS: dict[int, asyncio.Lock] = {}
@@ -23,6 +25,7 @@ _REQUIRED_COLUMNS = {
     "personal_access_control_actions": {"rule_id", "user_id", "subject_type", "subject_id", "object_type", "object_id", "action", "effect", "created_at"},
     "habit_evidence": {"id", "record_id", "source_type", "source_key", "context_kind", "polarity", "observed_at"},
     "personal_deletion_audit_events": {"audit_id", "user_id", "actor_id", "operation", "record_id", "projection_id", "created_at"},
+    "personal_migration_conflicts": {"conflict_id", "user_id", "source_type", "source_id", "kind", "canonical_record_id", "conflicting_record_id", "content", "authority", "explicit", "confidence", "valid_from", "created_at"},
 }
 
 _DDL = (
@@ -57,6 +60,12 @@ _DDL = (
        audit_id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER NOT NULL,
        actor_id TEXT NOT NULL,operation TEXT NOT NULL,record_id TEXT,
        projection_id TEXT,created_at INTEGER NOT NULL)""",
+    """CREATE TABLE IF NOT EXISTS personal_migration_conflicts (
+       conflict_id TEXT PRIMARY KEY,user_id INTEGER NOT NULL,source_type TEXT NOT NULL,
+       source_id TEXT NOT NULL,kind TEXT NOT NULL,canonical_record_id TEXT NOT NULL,
+       conflicting_record_id TEXT NOT NULL,content TEXT NOT NULL,authority TEXT NOT NULL,
+       explicit INTEGER NOT NULL,confidence REAL NOT NULL,valid_from INTEGER NOT NULL,
+       created_at INTEGER NOT NULL)""",
     """CREATE TABLE IF NOT EXISTS personal_access_control_actions (
        rule_id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER NOT NULL,subject_type TEXT NOT NULL,
        subject_id TEXT NOT NULL,object_type TEXT NOT NULL,object_id TEXT NOT NULL,action TEXT NOT NULL,
@@ -128,10 +137,12 @@ class PersonalVaultDatabase:
                         if current < 2:
                             await db.execute("INSERT INTO personal_schema_version(version, applied_at) VALUES(2, strftime('%s','now') * 1000)")
                     if current < 3 or not habit_source_type:
-                        await _merge_duplicate_source_records(db)
                         await _rebuild_fk_tables(db)
                         if current < 3:
                             await db.execute("INSERT INTO personal_schema_version(version, applied_at) VALUES(3, strftime('%s','now') * 1000)")
+                    if current < 4:
+                        await _merge_duplicate_source_records(db)
+                        await db.execute("INSERT INTO personal_schema_version(version, applied_at) VALUES(4, strftime('%s','now') * 1000)")
                     await _validate_shape(db)
                     async with db.execute("PRAGMA foreign_key_check") as cur:
                         violations = await cur.fetchall()
@@ -168,6 +179,7 @@ class PersonalVaultDatabase:
                     await db.execute("DELETE FROM personal_access_control_actions")
                     await db.execute("DELETE FROM personal_acl_audit_events")
                     await db.execute("DELETE FROM personal_deletion_audit_events")
+                    await db.execute("DELETE FROM personal_migration_conflicts")
                     await db.commit()
                     await db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
                     for suffix in ("", "-wal", "-shm"):
@@ -235,17 +247,57 @@ async def _merge_duplicate_source_records(db: aiosqlite.Connection) -> None:
 async def _merge_records(db: aiosqlite.Connection, record_ids: list[str]) -> str | None:
     if not record_ids:
         return None
-    canonical = record_ids[0]
+    placeholders = ",".join("?" for _ in record_ids)
     async with db.execute(
-        f"SELECT sensitivity FROM personal_records WHERE record_id IN ({','.join('?' for _ in record_ids)})",
+        f"""SELECT record_id,content,authority,sensitivity,status,confidence,explicit,valid_from,created_at,updated_at
+            FROM personal_records WHERE record_id IN ({placeholders})""",
+        record_ids,
+    ) as cur:
+        rows = await cur.fetchall()
+    authority_rank = {"observed": 0, "third_party": 1, "user_statement": 2}
+    winner = max(rows, key=lambda row: (
+        int(row[6]), authority_rank.get(str(row[2]), 0), float(row[5]), int(row[9]), int(row[8]), str(row[0])
+    ))
+    canonical = str(winner[0])
+    strongest_authority = max((str(row[2]) for row in rows), key=lambda value: authority_rank.get(value, 0))
+    strongest_status = "active" if any(str(row[4]) == "active" for row in rows) else str(winner[4])
+    strongest_explicit = max(int(row[6]) for row in rows)
+    strongest_confidence = max(float(row[5]) for row in rows)
+    earliest_valid_from = min(int(row[7]) for row in rows)
+    earliest_created_at = min(int(row[8]) for row in rows)
+    latest_updated_at = max(int(row[9]) for row in rows)
+    async with db.execute(
+        f"SELECT sensitivity FROM personal_records WHERE record_id IN ({placeholders})",
         record_ids,
     ) as cur:
         sensitivities = [str(row[0]) for row in await cur.fetchall()]
     strongest = max(sensitivities, key={"private": 0, "restricted": 1, "secret": 2}.get) if sensitivities else "private"
-    await db.execute("UPDATE personal_records SET sensitivity=? WHERE record_id=?", (strongest, canonical))
+    await db.execute(
+        """UPDATE personal_records SET content=?,authority=?,sensitivity=?,status=?,confidence=?,explicit=?,
+           valid_from=?,created_at=?,updated_at=? WHERE record_id=?""",
+        (safe_memory_text(winner[1]), strongest_authority, strongest, strongest_status,
+         strongest_confidence, strongest_explicit, earliest_valid_from, earliest_created_at,
+         latest_updated_at, canonical),
+    )
+    winner_content = safe_memory_text(winner[1])
+    for row in rows:
+        conflicting_id = str(row[0])
+        if conflicting_id == canonical:
+            continue
+        if safe_memory_text(row[1]) != winner_content:
+            conflict_id = "conflict:" + hashlib.sha256(f"{canonical}:{conflicting_id}".encode()).hexdigest()[:24]
+            await db.execute(
+                """INSERT OR REPLACE INTO personal_migration_conflicts
+                   (conflict_id,user_id,source_type,source_id,kind,canonical_record_id,
+                    conflicting_record_id,content,authority,explicit,confidence,valid_from,created_at)
+                   SELECT ?,user_id,source_type,source_id,kind,?,?,?, ?,?,?,?,? FROM personal_records WHERE record_id=?""",
+                (conflict_id, canonical, conflicting_id, safe_memory_text(row[1]), str(row[2]), int(row[6]), float(row[5]), int(row[7]), int(row[9]), conflicting_id),
+            )
     if strongest == "secret":
         await db.execute("UPDATE personal_projections SET status='revoked' WHERE record_id IN ({}) AND status='active'".format(",".join("?" for _ in record_ids)), record_ids)
-    for duplicate in record_ids[1:]:
+    for duplicate in record_ids:
+        if duplicate == canonical:
+            continue
         await db.execute("UPDATE personal_memory_usage_events SET record_id=? WHERE record_id=?", (canonical, duplicate))
         await db.execute("INSERT OR IGNORE INTO personal_projections(projection_id,record_id,group_id,bot_id,purpose,status,expires_at,created_at,updated_at) SELECT projection_id,?,group_id,bot_id,purpose,status,expires_at,created_at,updated_at FROM personal_projections WHERE record_id=?", (canonical, duplicate))
         if await _has_column(db, "habit_evidence", "source_type"):

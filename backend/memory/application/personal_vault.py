@@ -289,6 +289,8 @@ class CanonicalPersonalKnowledgeService(PersonalKnowledgePort):
                 habit_evidence = await cur.fetchall()
             async with db.execute("SELECT audit_id,actor_id,operation,record_id,projection_id,created_at FROM personal_deletion_audit_events WHERE user_id=? ORDER BY audit_id LIMIT ?", (user_id, _EXPORT_LIMIT)) as cur:
                 deletion_audits = await cur.fetchall()
+            async with db.execute("SELECT conflict_id,source_type,source_id,kind,canonical_record_id,conflicting_record_id,content,authority,explicit,confidence,valid_from,created_at FROM personal_migration_conflicts WHERE user_id=? ORDER BY created_at LIMIT ?", (user_id, _EXPORT_LIMIT)) as cur:
+                migration_conflicts = await cur.fetchall()
         fields = ("record_id","kind","content","speaker","subject","authority","sensitivity","status","source_type","source_id","confidence","explicit","valid_from","valid_to")
         pfields = ("projection_id","record_id","group_id","bot_id","purpose","status","expires_at")
         ufields = ("usage_id","record_id","projection_id","group_id","bot_id","session_id","purpose","used_at")
@@ -297,6 +299,7 @@ class CanonicalPersonalKnowledgeService(PersonalKnowledgePort):
         efields = ("audit_id","actor_id","scope_kind","group_id","bot_id","action","allowed","reason","created_at")
         hfields = ("id","record_id","source_type","source_key","context_kind","polarity","observed_at")
         dfields = ("audit_id","actor_id","operation","record_id","projection_id","created_at")
+        cfields = ("conflict_id","source_type","source_id","kind","canonical_record_id","conflicting_record_id","content","authority","explicit","confidence","valid_from","created_at")
         safe_rows = lambda fields, rows: [
             {key: (safe_memory_text(value, limit=1000) if isinstance(value, str) else value)
              for key, value in zip(fields, row)} for row in rows
@@ -305,7 +308,8 @@ class CanonicalPersonalKnowledgeService(PersonalKnowledgePort):
                 "records": safe_rows(fields, records), "projections": safe_rows(pfields, projections),
                 "usage_events": safe_rows(ufields, usage_events), "apps": safe_rows(afields, apps),
                 "acl_rules": safe_rows(rfields, acl_rules), "acl_audit_events": safe_rows(efields, audit_events),
-                "habit_evidence": safe_rows(hfields, habit_evidence), "deletion_audit_events": safe_rows(dfields, deletion_audits)}
+                "habit_evidence": safe_rows(hfields, habit_evidence), "deletion_audit_events": safe_rows(dfields, deletion_audits),
+                "migration_conflicts": safe_rows(cfields, migration_conflicts)}
 
     async def get_record_impact(self, scope: MemoryScope, record_id: str) -> Mapping[str, Any]:
         user_id = _user_id(scope)
