@@ -4,6 +4,7 @@ import os
 import tempfile
 import unittest
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import aiosqlite
 
@@ -20,6 +21,9 @@ from memory.infrastructure import PersonalVaultDatabase
 class _TempPersonalDatabase(PersonalVaultDatabase):
     def __init__(self, path: str) -> None:
         self.path = path
+
+    def _path(self, user_id: int) -> Path:
+        return Path(self.path)
 
     @asynccontextmanager
     async def connect(self, user_id: int):
@@ -77,3 +81,26 @@ class CanonicalPersonalMemoryTest(unittest.IsolatedAsyncioTestCase):
             await self.service.create_projection(CreatePersonalProjection(
                 scope=self.scope, record_id=record_id, target_group_id=9,
             ))
+
+    async def test_impact_reports_usage_and_delete_removes_entire_vault(self) -> None:
+        record_id = await self.service.create_record(CreatePersonalRecord(
+            scope=self.scope, kind="preference", content="dark mode",
+            source_type="manual", sensitivity="private",
+        ))
+        async with self.database.connect(7) as db:
+            await db.execute(
+                "INSERT INTO personal_projections(projection_id,record_id,group_id,bot_id,purpose,created_at,updated_at) VALUES('p:1',?,?,?,?,1,1)",
+                (record_id, 9, 5, "assistant_context"),
+            )
+            await db.execute(
+                "INSERT INTO personal_memory_usage_events(user_id,record_id,projection_id,group_id,bot_id,session_id,purpose,used_at) VALUES(?,?,?,?,?,?,?,?)",
+                (7, record_id, "p:1", 9, 5, "run:1", "assistant_context", 2),
+            )
+            await db.execute("INSERT INTO personal_apps(app_id,user_id,name,created_at,updated_at) VALUES('app:1',7,'App',1,1)")
+            await db.execute("INSERT INTO personal_access_control_actions(user_id,subject_type,subject_id,object_type,object_id,action,effect,created_at) VALUES(7,'user','7','personal','7','read','deny',1)")
+            await db.commit()
+        impact = await self.service.get_record_impact(self.scope, record_id)
+        self.assertEqual(impact["affected_session_ids"], ["run:1"])
+        self.assertEqual(len(impact["usage_events"]), 1)
+        self.assertTrue(await self.service.delete(self.scope))
+        self.assertFalse(Path(self.path).exists())

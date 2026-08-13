@@ -10,8 +10,11 @@ import aiosqlite
 
 
 _LOCKS: dict[int, asyncio.Lock] = {}
+PERSONAL_SCHEMA_VERSION = 2
 
 _DDL = (
+    """CREATE TABLE IF NOT EXISTS personal_schema_version (
+       version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL)""",
     """CREATE TABLE IF NOT EXISTS personal_records (
        record_id TEXT PRIMARY KEY,user_id INTEGER NOT NULL,kind TEXT NOT NULL,
        content TEXT NOT NULL,speaker TEXT NOT NULL DEFAULT '',subject TEXT NOT NULL DEFAULT '',
@@ -50,20 +53,81 @@ _DDL = (
 
 
 class PersonalVaultDatabase:
+    @staticmethod
+    def _path(user_id: int) -> Path:
+        from workspace import layout
+        return Path(layout.personal_dir(user_id)) / "knowledge.db"
+
     @asynccontextmanager
     async def connect(self, user_id: int) -> AsyncIterator[aiosqlite.Connection]:
         if user_id <= 0:
             raise ValueError("user_id must be positive")
         lock = _LOCKS.setdefault(user_id, asyncio.Lock())
         async with lock:
-            from workspace import layout
-
-            path = Path(layout.personal_dir(user_id)) / "knowledge.db"
+            path = self._path(user_id)
             path.parent.mkdir(parents=True, exist_ok=True)
             async with aiosqlite.connect(str(path), timeout=5.0) as db:
                 await db.execute("PRAGMA busy_timeout=5000")
                 await db.execute("PRAGMA foreign_keys=ON")
                 for statement in _DDL:
                     await db.execute(statement)
+                async with db.execute(
+                    "SELECT COALESCE(MAX(version), 0) FROM personal_schema_version"
+                ) as cursor:
+                    current = int((await cursor.fetchone())[0])
+                if current < 1:
+                    await db.execute(
+                        "INSERT INTO personal_schema_version(version, applied_at) VALUES(1, strftime('%s','now') * 1000)"
+                    )
+                if current < 2:
+                    # Older Vaults did not enforce cleanup for orphaned rows.
+                    # Repair those rows before recording the upgraded schema.
+                    await db.execute(
+                        "DELETE FROM personal_projections WHERE record_id NOT IN (SELECT record_id FROM personal_records)"
+                    )
+                    await db.execute(
+                        "DELETE FROM personal_memory_usage_events WHERE record_id NOT IN (SELECT record_id FROM personal_records)"
+                    )
+                    await db.execute(
+                        "DELETE FROM habit_evidence WHERE record_id NOT IN (SELECT record_id FROM personal_records)"
+                    )
+                    await db.execute(
+                        "CREATE INDEX IF NOT EXISTS idx_personal_usage_record ON personal_memory_usage_events(user_id,record_id,used_at)"
+                    )
+                    await db.execute(
+                        "CREATE INDEX IF NOT EXISTS idx_personal_acl_audit_user ON personal_acl_audit_events(user_id,created_at)"
+                    )
+                    await db.execute(
+                        "INSERT INTO personal_schema_version(version, applied_at) VALUES(2, strftime('%s','now') * 1000)"
+                    )
                 await db.commit()
                 yield db
+
+    async def delete_vault(self, user_id: int) -> bool:
+        """Delete every personal artifact and remove the physical Vault file."""
+        if user_id <= 0:
+            raise ValueError("user_id must be positive")
+        path = self._path(user_id)
+        lock = _LOCKS.setdefault(user_id, asyncio.Lock())
+        async with lock:
+            if not path.exists():
+                return False
+            async with aiosqlite.connect(str(path), timeout=5.0) as db:
+                await db.execute("PRAGMA foreign_keys=ON")
+                await db.execute("DELETE FROM personal_projections")
+                await db.execute("DELETE FROM personal_memory_usage_events")
+                await db.execute(
+                    "DELETE FROM habit_evidence WHERE record_id IN (SELECT record_id FROM personal_records)"
+                )
+                await db.execute("DELETE FROM personal_records")
+                await db.execute("DELETE FROM personal_apps")
+                await db.execute("DELETE FROM personal_access_control_actions")
+                await db.execute("DELETE FROM personal_acl_audit_events")
+                await db.commit()
+            for suffix in ("", "-wal", "-shm"):
+                candidate = Path(str(path) + suffix)
+                try:
+                    candidate.unlink()
+                except FileNotFoundError:
+                    pass
+            return True

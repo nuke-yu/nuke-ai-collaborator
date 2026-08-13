@@ -231,7 +231,11 @@ class CanonicalSummaryObserver:
                 """SELECT id,content FROM messages
                    WHERE group_id=? AND member_id=? AND id>? AND is_deleted=0
                      AND (meta IS NULL OR json_valid(meta))
-                     AND json_extract(COALESCE(meta, '{}'), '$.thread_id')=?
+                     AND COALESCE(
+                           json_extract(COALESCE(meta, '{}'), '$.memory_observation.thread_id'),
+                           json_extract(COALESCE(meta, '{}'), '$.thread_id'),
+                           ''
+                         )=?
                    ORDER BY id LIMIT ?""",
                 (event.group_id, event.bot_id, last_id, thread_id, self._threshold),
             ) as cur:

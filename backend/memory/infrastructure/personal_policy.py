@@ -1,13 +1,15 @@
-"""Canonical explicit ABAC policy for Personal Vault authorization."""
+"""SQLite adapter for the Personal Vault authorization policy port."""
 from __future__ import annotations
 
 import time
 
-from memory.infrastructure import PersonalVaultDatabase
 from memory.ports import PersonalVaultPolicyPort
+from memory.infrastructure.personal_database import PersonalVaultDatabase
 
 
 class SQLitePersonalVaultPolicy(PersonalVaultPolicyPort):
+    """Concrete ABAC policy adapter; composition roots own its construction."""
+
     def __init__(self, database: PersonalVaultDatabase | None = None) -> None:
         self._database = database or PersonalVaultDatabase()
 

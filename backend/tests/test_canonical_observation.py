@@ -75,7 +75,7 @@ class CanonicalObservationTest(unittest.IsolatedAsyncioTestCase):
                        (id,group_id,member_id,content,meta,is_deleted)
                        VALUES (?,?,?,?,?,0)""",
                     (message_id, 7, 5, f"decision {message_id}",
-                     json.dumps({"thread_id": "thread:1"}))
+                     json.dumps({"memory_observation": {"thread_id": "thread:1"}}))
                 )
             await conn.commit()
 

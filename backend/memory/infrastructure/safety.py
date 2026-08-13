@@ -22,7 +22,9 @@ def safe_memory_text(value: Any, *, limit: int = MAX_MEMORY_TEXT) -> str:
 
 def safe_memory_mapping(value: Mapping[str, Any], *, limit: int = MAX_MEMORY_JSON) -> str:
     """Serialize a bounded mapping without ever cutting JSON text mid-token."""
-    budget = max(2, limit)
+    budget = max(0, limit)
+    if budget < 2:
+        return ""
     bounded = _bound(value)
     safe, _ = redact_memory_secrets(
         json.dumps(bounded, ensure_ascii=False, sort_keys=True, default=str)
@@ -40,7 +42,7 @@ def safe_memory_mapping(value: Mapping[str, Any], *, limit: int = MAX_MEMORY_JSO
             json.dumps(bounded, ensure_ascii=False, sort_keys=True, default=str)
         )
     if len(safe) > budget:
-        safe = json.dumps({"_truncated": True}, ensure_ascii=False)
+        safe = "{}"
     return safe
 
 

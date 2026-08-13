@@ -47,6 +47,16 @@ select a second storage implementation.
   actually fit the rendered context.
 - `safe_memory_mapping()` bounds the data structure before serialization and
   always returns round-trippable JSON. It never slices serialized JSON text.
+- Memory schema v12 and central DB migration 063 scope `agent_cases` identity
+  by `(group_id, run_id)`, preserving isolation when a run identifier is reused
+  across Groups.
+- Observation summaries read the production `meta.memory_observation.thread_id`
+  path and retain a top-level fallback for older records.
+- Personal Vault schema v2 repairs orphan rows; full Vault deletion removes
+  records, projections, usage/audit/governance data, and the physical database
+  file. Impact analysis reports actual usage sessions.
+- `MemoryAuthorizationError` is translated to HTTP 403 centrally, and an
+  unavailable authorization audit fails closed.
 - Experience aggregation reads and writes under one writer transaction and
   matches task, failure, and environment signatures before combining evidence.
 - Projection writes remain transactional outbox intents; Chroma is derived and

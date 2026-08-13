@@ -142,9 +142,15 @@ class AuthorizedPersonalKnowledgeService:
                     reason=check.reason or "",
                 )
             except Exception:
-                # Audit failure must never turn an already-authorized memory
-                # operation into a data-path failure; the ACL decision itself
-                # remains fail-closed below.
-                pass
+                # Authorization is not complete until its audit record is
+                # durable.  Fail closed rather than allowing an unaudited
+                # Personal Vault operation.
+                from dataclasses import replace
+
+                check = replace(
+                    check,
+                    allowed=False,
+                    reason="Personal Vault audit unavailable; access denied.",
+                )
         if not check.allowed:
             raise MemoryAuthorizationError(check.reason or "memory access denied")

@@ -7,7 +7,7 @@ import unittest
 import db
 
 from memory.application import CanonicalLearningService
-from memory.contracts import RecallExperiences, RecallSkills
+from memory.contracts import AssembleCase, RecallExperiences, RecallSkills
 from memory.domain import MemoryScope
 from memory.infrastructure import MemorySchemaManager
 from memory.ports import MemoryDatabasePort
@@ -52,3 +52,24 @@ class CanonicalLearningTest(unittest.IsolatedAsyncioTestCase):
         context, ids = await self.service.recall_skills(RecallSkills(scope=self.scope, query="repair sqlite", run_id="run:1"))
         self.assertEqual(ids, ["skill:1"])
         self.assertIn("inspect schema", context)
+
+    async def test_same_run_id_is_isolated_between_groups(self) -> None:
+        first = await self.service.assemble_case(AssembleCase(
+            scope=MemoryScope.group(group_id=1, actor_id="bot:1"),
+            run_id="run:shared", task="group one task", outcome="completed",
+        ))
+        second = await self.service.assemble_case(AssembleCase(
+            scope=MemoryScope.group(group_id=2, actor_id="bot:2"),
+            run_id="run:shared", task="group two task", outcome="completed",
+        ))
+
+        self.assertNotEqual(first, second)
+        async with db.connect(self.path) as conn:
+            async with conn.execute(
+                "SELECT group_id,run_id,case_id,task FROM agent_cases ORDER BY group_id"
+            ) as cur:
+                rows = await cur.fetchall()
+        self.assertEqual([(row[0], row[1], row[3]) for row in rows], [
+            (1, "run:shared", "group one task"),
+            (2, "run:shared", "group two task"),
+        ])

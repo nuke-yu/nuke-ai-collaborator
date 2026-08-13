@@ -40,6 +40,8 @@ from api.channels import router as channels_router
 from api.artifacts import router as artifacts_router
 from executors import registry
 from api.admin_deps import require_operator, audit_control_plane
+from memory.contracts import MemoryAuthorizationError
+from fastapi.responses import JSONResponse
 
 
 async def _channel_group_ids() -> list[int]:
@@ -235,6 +237,11 @@ async def on_unread_delta(group_id: int, payload: dict):
 
 
 app = FastAPI(lifespan=lifespan)
+
+
+@app.exception_handler(MemoryAuthorizationError)
+async def memory_authorization_error_handler(_request: Request, exc: MemoryAuthorizationError):
+    return JSONResponse(status_code=403, content={"detail": str(exc)})
 
 app.add_middleware(
     CORSMiddleware,

@@ -15,7 +15,7 @@ from memory.contracts import (
     ObservePersonalHabit,
 )
 from memory.domain import MemoryScope, ScopeKind
-from memory.infrastructure import PersonalVaultDatabase, safe_memory_text
+from memory.infrastructure import PERSONAL_SCHEMA_VERSION, PersonalVaultDatabase, safe_memory_text
 from memory.ports import PersonalKnowledgePort
 
 
@@ -203,7 +203,7 @@ class CanonicalPersonalKnowledgeService(PersonalKnowledgePort):
         async with self._database.connect(user_id) as db:
             cur = await db.execute("UPDATE personal_projections SET status='expired',updated_at=? WHERE status='active' AND expires_at IS NOT NULL AND expires_at<=?", (now, now))
             await db.commit()
-        return {"expired_projections": cur.rowcount, "schema_version": 1}
+        return {"expired_projections": cur.rowcount, "schema_version": PERSONAL_SCHEMA_VERSION}
 
     async def export(self, scope: MemoryScope) -> Mapping[str, Any]:
         user_id = _user_id(scope)
@@ -214,7 +214,7 @@ class CanonicalPersonalKnowledgeService(PersonalKnowledgePort):
                 projections = await cur.fetchall()
         fields = ("record_id","kind","content","speaker","subject","authority","sensitivity","status","source_type","source_id","confidence","explicit","valid_from","valid_to")
         pfields = ("projection_id","record_id","group_id","bot_id","purpose","status","expires_at")
-        return {"schema_version": 1, "user_id": user_id,
+        return {"schema_version": PERSONAL_SCHEMA_VERSION, "user_id": user_id,
                 "records": [dict(zip(fields, row)) for row in records],
                 "projections": [dict(zip(pfields, row)) for row in projections]}
 
@@ -223,15 +223,20 @@ class CanonicalPersonalKnowledgeService(PersonalKnowledgePort):
         async with self._database.connect(user_id) as db:
             async with db.execute("SELECT projection_id,group_id,bot_id,purpose,status,expires_at FROM personal_projections WHERE record_id=? ORDER BY created_at DESC", (record_id,)) as cur:
                 rows = await cur.fetchall()
+            async with db.execute(
+                """SELECT projection_id,group_id,bot_id,session_id,purpose,used_at
+                   FROM personal_memory_usage_events
+                   WHERE user_id=? AND record_id=? ORDER BY used_at DESC""",
+                (user_id, record_id),
+            ) as cur:
+                usage_rows = await cur.fetchall()
         projections = [{"projection_id": r[0], "group_id": r[1], "bot_id": r[2], "purpose": r[3], "status": r[4], "expires_at": r[5]} for r in rows]
-        return {"record_id": record_id, "active_projections": [p for p in projections if p["status"] == "active"], "projections": projections, "usage_events": [], "affected_group_ids": sorted({p["group_id"] for p in projections}), "affected_session_ids": []}
+        usage_events = [{"projection_id": r[0], "group_id": r[1], "bot_id": r[2], "session_id": r[3], "purpose": r[4], "used_at": r[5]} for r in usage_rows]
+        return {"record_id": record_id, "active_projections": [p for p in projections if p["status"] == "active"], "projections": projections, "usage_events": usage_events, "affected_group_ids": sorted({p["group_id"] for p in projections} | {r["group_id"] for r in usage_events}), "affected_session_ids": sorted({r["session_id"] for r in usage_events if r["session_id"]})}
 
     async def delete(self, scope: MemoryScope) -> bool:
         user_id = _user_id(scope)
-        async with self._database.connect(user_id) as db:
-            cur = await db.execute("DELETE FROM personal_records WHERE user_id=?", (user_id,))
-            await db.commit()
-        return cur.rowcount > 0
+        return await self._database.delete_vault(user_id)
 
     async def delete_record(self, scope: MemoryScope, record_id: str) -> bool:
         user_id = _user_id(scope)

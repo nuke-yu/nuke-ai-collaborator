@@ -34,3 +34,10 @@ def test_memory_mapping_budget_never_cuts_json_in_half() -> None:
 
     assert len(encoded) <= 16_000
     assert json.loads(encoded)["_truncated"] is True
+
+
+def test_memory_mapping_honors_tiny_budgets() -> None:
+    assert safe_memory_mapping({"secret": "value"}, limit=0) == ""
+    assert safe_memory_mapping({"secret": "value"}, limit=1) == ""
+    assert safe_memory_mapping({"secret": "value"}, limit=2) == "{}"
+    assert len(safe_memory_mapping({"secret": "value"}, limit=8)) <= 8

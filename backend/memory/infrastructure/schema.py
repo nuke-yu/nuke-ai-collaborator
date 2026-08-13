@@ -6,7 +6,7 @@ from typing import Final
 from memory.contracts import MemoryOperationError
 from memory.ports import MemoryDatabasePort
 
-MEMORY_SCHEMA_VERSION: Final = 11
+MEMORY_SCHEMA_VERSION: Final = 12
 
 MEMORY_GROUP_TABLES = frozenset(
     {
@@ -306,6 +306,21 @@ MEMORY_GROUP_DDL = (
     *MEMORY_V1_DDL,
 )
 
+_AGENT_CASES_V12_DDL = """CREATE TABLE agent_cases (
+        case_id TEXT PRIMARY KEY, run_id TEXT NOT NULL, group_id INTEGER NOT NULL,
+        bot_id INTEGER, task TEXT NOT NULL DEFAULT '', task_signature TEXT NOT NULL DEFAULT '',
+        semantic_cluster_key TEXT NOT NULL DEFAULT '', task_family TEXT NOT NULL DEFAULT 'other',
+        task_concepts_json TEXT NOT NULL DEFAULT '[]', tools_used TEXT NOT NULL DEFAULT '[]',
+        files_touched TEXT NOT NULL DEFAULT '[]', attempts INTEGER NOT NULL DEFAULT 0,
+        errors TEXT NOT NULL DEFAULT '[]', outcome TEXT NOT NULL,
+        outcome_confidence REAL NOT NULL DEFAULT 0.0,
+        outcome_status TEXT NOT NULL DEFAULT 'unverified_completion',
+        verification_adapter TEXT NOT NULL DEFAULT '', correction_evidence_json TEXT NOT NULL DEFAULT '{}',
+        verification_signals TEXT NOT NULL DEFAULT '[]', summary TEXT NOT NULL DEFAULT '',
+        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+        UNIQUE(group_id, run_id)
+    )"""
+
 
 class MemorySchemaManager:
     """Apply Memory-owned schema versions through an injected database port."""
@@ -489,6 +504,26 @@ class MemorySchemaManager:
                 )
                 await connection.execute(
                     "INSERT INTO memory_schema_version(version) VALUES (11)"
+                )
+            if current < 12:
+                await connection.execute("ALTER TABLE agent_cases RENAME TO agent_cases_v11")
+                await connection.execute(_AGENT_CASES_V12_DDL)
+                await connection.execute(
+                    """INSERT INTO agent_cases
+                       SELECT case_id,run_id,group_id,bot_id,task,task_signature,
+                              semantic_cluster_key,task_family,task_concepts_json,
+                              tools_used,files_touched,attempts,errors,outcome,
+                              outcome_confidence,outcome_status,verification_adapter,
+                              correction_evidence_json,verification_signals,summary,
+                              created_at,updated_at
+                       FROM agent_cases_v11"""
+                )
+                await connection.execute("DROP TABLE agent_cases_v11")
+                await connection.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_agent_cases_group_created ON agent_cases(group_id, created_at DESC)"
+                )
+                await connection.execute(
+                    "INSERT INTO memory_schema_version(version) VALUES (12)"
                 )
             await connection.commit()
         return MEMORY_SCHEMA_VERSION

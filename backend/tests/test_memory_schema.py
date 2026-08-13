@@ -190,6 +190,44 @@ class MemorySchemaTest(unittest.IsolatedAsyncioTestCase):
                     (await cursor.fetchone())[0], MEMORY_SCHEMA_VERSION
                 )
 
+    async def test_v11_cases_migrate_to_group_scoped_run_identity(self) -> None:
+        from memory.infrastructure.schema import MEMORY_V1_DDL
+
+        async with db.connect(self.path) as connection:
+            await connection.execute(
+                """CREATE TABLE memory_schema_version (
+                    version INTEGER PRIMARY KEY,
+                    applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )"""
+            )
+            for version in range(1, 12):
+                await connection.execute(
+                    "INSERT INTO memory_schema_version(version) VALUES (?)", (version,)
+                )
+            await connection.execute(MEMORY_V1_DDL[0])
+            await connection.execute(
+                """INSERT INTO agent_cases
+                   (case_id,run_id,group_id,task,outcome,created_at,updated_at)
+                   VALUES('case:old','same-run',1,'old task','completed',1,1)"""
+            )
+            await connection.commit()
+
+        await self.schema.ensure_group(7)
+        async with db.connect(self.path) as connection:
+            await connection.execute(
+                """INSERT INTO agent_cases
+                   (case_id,run_id,group_id,task,outcome,created_at,updated_at)
+                   VALUES('case:new','same-run',2,'new task','completed',2,2)"""
+            )
+            await connection.commit()
+            async with connection.execute(
+                "SELECT group_id,run_id,task FROM agent_cases ORDER BY group_id"
+            ) as cursor:
+                self.assertEqual(await cursor.fetchall(), [
+                    (1, "same-run", "old task"),
+                    (2, "same-run", "new task"),
+                ])
+
     async def test_v1_usage_tables_are_upgraded_without_losing_rows(self) -> None:
         async with db.connect(self.path) as connection:
             await connection.execute(

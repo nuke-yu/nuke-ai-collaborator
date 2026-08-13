@@ -720,7 +720,7 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
         from executors.plugins.tool_loop_v1_helpers import (
             _finalize_causal_memory_usage,
         )
-        from memory.application import CanonicalLearningService
+        from memory.canonical import build_learning_client
 
         case_id = await assemble_case(
             run_id="causal-source",
@@ -769,7 +769,7 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
             scope=MemoryScope.bot(
                 group_id=7, bot_id=3, actor_id="bot:3"
             ),
-            learning_port=CanonicalLearningService(),
+            learning_port=build_learning_client(),
         )
 
         async with database.connect(TEST_DB_PATH) as db:

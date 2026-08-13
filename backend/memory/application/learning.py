@@ -28,13 +28,13 @@ from memory.domain import (
     require_adoption_evidence, require_execution_evidence,
     require_verification_evidence,
 )
-from memory.infrastructure import SQLiteMemoryDatabase, safe_memory_mapping, safe_memory_text
-from memory.ports import LearningPort
+from memory.infrastructure import safe_memory_mapping, safe_memory_text
+from memory.ports import LearningPort, MemoryDatabasePort
 
 
 class CanonicalLearningService(LearningPort):
-    def __init__(self, database: SQLiteMemoryDatabase | None = None) -> None:
-        self._database = database or SQLiteMemoryDatabase()
+    def __init__(self, database: MemoryDatabasePort) -> None:
+        self._database = database
         self._job_repository = CanonicalPipelineJobRepository(self._database)
 
     @property
@@ -431,7 +431,7 @@ class CanonicalLearningService(LearningPort):
                outcome,outcome_confidence,outcome_status,verification_adapter,
                correction_evidence_json,verification_signals,summary,created_at,updated_at)
               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-              ON CONFLICT(run_id) DO UPDATE SET task=excluded.task,task_signature=excluded.task_signature,
+               ON CONFLICT(group_id,run_id) DO UPDATE SET task=excluded.task,task_signature=excluded.task_signature,
                semantic_cluster_key=excluded.semantic_cluster_key,task_family=excluded.task_family,
                task_concepts_json=excluded.task_concepts_json,tools_used=excluded.tools_used,
                files_touched=excluded.files_touched,attempts=excluded.attempts,errors=excluded.errors,
