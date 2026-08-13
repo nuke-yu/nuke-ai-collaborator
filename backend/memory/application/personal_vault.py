@@ -15,16 +15,16 @@ from memory.contracts import (
     ObservePersonalHabit,
 )
 from memory.domain import MemoryScope, ScopeKind
-from memory.infrastructure import PERSONAL_SCHEMA_VERSION, PersonalVaultDatabase, safe_memory_text
-from memory.ports import PersonalKnowledgePort
+from memory.infrastructure import PERSONAL_SCHEMA_VERSION, safe_memory_text
+from memory.ports import PersonalKnowledgePort, PersonalVaultDatabasePort
 
 
 _KINDS = {"profile", "expertise", "decision", "workflow", "social", "preference", "habit", "temporary"}
 _SENSITIVITIES = {"private", "restricted", "secret"}
 
 
-async def list_personal_apps(*, user_id: int, include_inactive: bool = True) -> list[dict[str, object]]:
-    async with PersonalVaultDatabase().connect(user_id) as db:
+async def list_personal_apps(*, database: PersonalVaultDatabasePort, user_id: int, include_inactive: bool = True) -> list[dict[str, object]]:
+    async with database.connect(user_id) as db:
         where = "" if include_inactive else " AND status='active'"
         async with db.execute(
             "SELECT app_id,name,status,created_at,updated_at FROM personal_apps WHERE user_id=?" + where + " ORDER BY app_id",
@@ -34,12 +34,12 @@ async def list_personal_apps(*, user_id: int, include_inactive: bool = True) -> 
     return [{"app_id": str(r[0]), "name": str(r[1]), "status": str(r[2]), "created_at": int(r[3]), "updated_at": int(r[4])} for r in rows]
 
 
-async def register_personal_app(*, user_id: int, app_id: str, name: str) -> None:
+async def register_personal_app(*, database: PersonalVaultDatabasePort, user_id: int, app_id: str, name: str) -> None:
     app_id, name = app_id.strip(), name.strip()
     if not app_id or not name:
         raise ValueError("app_id and name are required")
     now = int(time.time() * 1000)
-    async with PersonalVaultDatabase().connect(user_id) as db:
+    async with database.connect(user_id) as db:
         await db.execute(
             """INSERT INTO personal_apps(app_id,user_id,name,status,created_at,updated_at)
                VALUES(?,?,?,'active',?,?)
@@ -49,8 +49,8 @@ async def register_personal_app(*, user_id: int, app_id: str, name: str) -> None
         await db.commit()
 
 
-async def set_personal_app_status(*, user_id: int, app_id: str, active: bool) -> bool:
-    async with PersonalVaultDatabase().connect(user_id) as db:
+async def set_personal_app_status(*, database: PersonalVaultDatabasePort, user_id: int, app_id: str, active: bool) -> bool:
+    async with database.connect(user_id) as db:
         cur = await db.execute(
             "UPDATE personal_apps SET status=?,updated_at=? WHERE user_id=? AND app_id=?",
             ("active" if active else "inactive", int(time.time() * 1000), user_id, app_id.strip()),
@@ -59,8 +59,8 @@ async def set_personal_app_status(*, user_id: int, app_id: str, active: bool) ->
     return cur.rowcount == 1
 
 
-async def list_acl_audit_events(*, user_id: int, limit: int = 100) -> list[dict[str, object]]:
-    async with PersonalVaultDatabase().connect(user_id) as db:
+async def list_acl_audit_events(*, database: PersonalVaultDatabasePort, user_id: int, limit: int = 100) -> list[dict[str, object]]:
+    async with database.connect(user_id) as db:
         async with db.execute(
             """SELECT audit_id,actor_id,scope_kind,group_id,bot_id,action,allowed,reason,created_at
                FROM personal_acl_audit_events WHERE user_id=? ORDER BY created_at DESC,audit_id DESC LIMIT ?""",
@@ -70,9 +70,41 @@ async def list_acl_audit_events(*, user_id: int, limit: int = 100) -> list[dict[
     return [{"audit_id": int(r[0]), "actor_id": str(r[1]), "scope_kind": str(r[2]), "group_id": r[3], "bot_id": r[4], "action": str(r[5]), "allowed": bool(r[6]), "reason": str(r[7]), "created_at": int(r[8])} for r in rows]
 
 
+async def set_personal_access_rule(*, database: PersonalVaultDatabasePort, user_id: int, subject_type: str, subject_id: str,
+                                   object_type: str, object_id: str, action: str,
+                                   effect: str) -> None:
+    if effect not in {"allow", "deny"}:
+        raise ValueError("effect must be allow or deny")
+    values = [safe_memory_text(value, limit=200) for value in
+              (subject_type, subject_id, object_type, object_id, action)]
+    async with database.connect(user_id) as db:
+        await db.execute(
+            """INSERT INTO personal_access_control_actions
+               (user_id,subject_type,subject_id,object_type,object_id,action,effect,created_at)
+               VALUES(?,?,?,?,?,?,?,?)
+               ON CONFLICT(user_id,subject_type,subject_id,object_type,object_id,action)
+               DO UPDATE SET effect=excluded.effect,created_at=excluded.created_at""",
+            (user_id, *values, effect, int(time.time() * 1000)),
+        )
+        await db.commit()
+
+
+async def delete_personal_access_rule(*, database: PersonalVaultDatabasePort, user_id: int, subject_type: str, subject_id: str,
+                                      object_type: str, object_id: str, action: str) -> bool:
+    async with database.connect(user_id) as db:
+        cur = await db.execute(
+            """DELETE FROM personal_access_control_actions
+               WHERE user_id=? AND subject_type=? AND subject_id=? AND object_type=?
+                 AND object_id=? AND action=?""",
+            (user_id, subject_type, subject_id, object_type, object_id, action),
+        )
+        await db.commit()
+    return cur.rowcount == 1
+
+
 class CanonicalPersonalKnowledgeService(PersonalKnowledgePort):
-    def __init__(self, database: PersonalVaultDatabase | None = None) -> None:
-        self._database = database or PersonalVaultDatabase()
+    def __init__(self, database: PersonalVaultDatabasePort) -> None:
+        self._database = database
 
     async def create_record(self, command: CreatePersonalRecord) -> str:
         user_id = _user_id(command.scope)
@@ -137,17 +169,42 @@ class CanonicalPersonalKnowledgeService(PersonalKnowledgePort):
         )
 
     async def observe_habit(self, command: ObservePersonalHabit) -> str:
-        record_id = await self.ingest(IngestPersonalKnowledge(
-            scope=command.scope, kind="habit", statement=command.statement,
-            source_type=command.source_type, source_id=command.source_id,
-            context_kind=command.context_kind, observed_at=command.observed_at,
-            sensitivity="private",
-        ))
         user_id = _user_id(command.scope)
+        habit_key = safe_memory_text(command.habit_key, limit=200)
+        record_id = "habit:" + hashlib.sha256(f"{user_id}:{habit_key}".encode()).hexdigest()[:24]
+        statement = safe_memory_text(command.statement)
+        now = int(time.time() * 1000)
         async with self._database.connect(user_id) as db:
             await db.execute(
+                """INSERT INTO personal_records
+                   (record_id,user_id,kind,content,speaker,subject,authority,sensitivity,status,
+                    source_type,source_id,confidence,explicit,valid_from,created_at,updated_at)
+                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                   ON CONFLICT(record_id) DO UPDATE SET content=excluded.content,
+                     updated_at=excluded.updated_at""",
+                (record_id, user_id, "habit", statement, "", habit_key, "observed",
+                 "private", "provisional", command.source_type[:200], f"habit:{habit_key}",
+                 0.45, 0, command.observed_at, now, now),
+            )
+            await db.execute(
                 "INSERT OR REPLACE INTO habit_evidence(record_id,source_key,context_kind,polarity,observed_at) VALUES(?,?,?,?,?)",
-                (record_id, command.source_id, command.context_kind, command.polarity, command.observed_at),
+                (record_id, safe_memory_text(command.source_id, limit=300),
+                 safe_memory_text(command.context_kind, limit=200), command.polarity, command.observed_at),
+            )
+            async with db.execute(
+                """SELECT COUNT(*),COUNT(DISTINCT context_kind),MIN(observed_at),MAX(observed_at),
+                          SUM(CASE WHEN polarity IN ('oppose','contradict','negative') THEN 1 ELSE 0 END)
+                   FROM habit_evidence WHERE record_id=?""", (record_id,)
+            ) as cur:
+                samples, contexts, first_seen, last_seen, contradictions = await cur.fetchone()
+            mature = (
+                int(samples or 0) >= 3 and int(contexts or 0) >= 2
+                and int(last_seen or 0) - int(first_seen or 0) >= 14 * 86_400_000
+                and int(contradictions or 0) == 0
+            )
+            await db.execute(
+                "UPDATE personal_records SET status=?,confidence=?,updated_at=? WHERE record_id=?",
+                ("active" if mature else "provisional", min(0.95, 0.45 + 0.1 * int(samples or 0)) if mature else 0.45, now, record_id),
             )
             await db.commit()
         return record_id
@@ -212,11 +269,31 @@ class CanonicalPersonalKnowledgeService(PersonalKnowledgePort):
                 records = await cur.fetchall()
             async with db.execute("SELECT projection_id,record_id,group_id,bot_id,purpose,status,expires_at FROM personal_projections ORDER BY created_at") as cur:
                 projections = await cur.fetchall()
+            async with db.execute("SELECT usage_id,record_id,projection_id,group_id,bot_id,session_id,purpose,used_at FROM personal_memory_usage_events WHERE user_id=? ORDER BY used_at", (user_id,)) as cur:
+                usage_events = await cur.fetchall()
+            async with db.execute("SELECT app_id,name,status,created_at,updated_at FROM personal_apps WHERE user_id=? ORDER BY app_id", (user_id,)) as cur:
+                apps = await cur.fetchall()
+            async with db.execute("SELECT rule_id,subject_type,subject_id,object_type,object_id,action,effect,created_at FROM personal_access_control_actions WHERE user_id=? ORDER BY rule_id", (user_id,)) as cur:
+                acl_rules = await cur.fetchall()
+            async with db.execute("SELECT audit_id,actor_id,scope_kind,group_id,bot_id,action,allowed,reason,created_at FROM personal_acl_audit_events WHERE user_id=? ORDER BY audit_id", (user_id,)) as cur:
+                audit_events = await cur.fetchall()
+            async with db.execute("SELECT id,record_id,source_key,context_kind,polarity,observed_at FROM habit_evidence WHERE record_id IN (SELECT record_id FROM personal_records WHERE user_id=?) ORDER BY id", (user_id,)) as cur:
+                habit_evidence = await cur.fetchall()
         fields = ("record_id","kind","content","speaker","subject","authority","sensitivity","status","source_type","source_id","confidence","explicit","valid_from","valid_to")
         pfields = ("projection_id","record_id","group_id","bot_id","purpose","status","expires_at")
+        ufields = ("usage_id","record_id","projection_id","group_id","bot_id","session_id","purpose","used_at")
+        afields = ("app_id","name","status","created_at","updated_at")
+        rfields = ("rule_id","subject_type","subject_id","object_type","object_id","action","effect","created_at")
+        efields = ("audit_id","actor_id","scope_kind","group_id","bot_id","action","allowed","reason","created_at")
+        hfields = ("id","record_id","source_key","context_kind","polarity","observed_at")
         return {"schema_version": PERSONAL_SCHEMA_VERSION, "user_id": user_id,
                 "records": [dict(zip(fields, row)) for row in records],
-                "projections": [dict(zip(pfields, row)) for row in projections]}
+                "projections": [dict(zip(pfields, row)) for row in projections],
+                "usage_events": [dict(zip(ufields, row)) for row in usage_events],
+                "apps": [dict(zip(afields, row)) for row in apps],
+                "acl_rules": [dict(zip(rfields, row)) for row in acl_rules],
+                "acl_audit_events": [dict(zip(efields, row)) for row in audit_events],
+                "habit_evidence": [dict(zip(hfields, row)) for row in habit_evidence]}
 
     async def get_record_impact(self, scope: MemoryScope, record_id: str) -> Mapping[str, Any]:
         user_id = _user_id(scope)
@@ -256,15 +333,27 @@ class CanonicalPersonalKnowledgeService(PersonalKnowledgePort):
         if kind not in _KINDS or sensitivity not in _SENSITIVITIES:
             raise ValueError("unsupported personal memory kind or sensitivity")
         safe = safe_memory_text(content)
+        safe_speaker = safe_memory_text(speaker, limit=500)
+        safe_subject = safe_memory_text(subject, limit=500)
+        safe_source_type = safe_memory_text(source_type, limit=200)
+        safe_source_id = safe_memory_text(source_id, limit=500)
+        desired_authority = "user_statement" if explicit else authority
+        desired_status = "active" if explicit else "provisional"
         now = int(time.time() * 1000)
-        record_id = "personal:" + hashlib.sha256(f"{user_id}:{source_type}:{source_id}:{kind}:{safe}".encode()).hexdigest()[:24]
+        record_id = "personal:" + hashlib.sha256(f"{user_id}:{safe_source_type}:{safe_source_id}:{kind}:{safe}".encode()).hexdigest()[:24]
         async with self._database.connect(user_id) as db:
             await db.execute(
                 """INSERT INTO personal_records(record_id,user_id,kind,content,speaker,subject,authority,sensitivity,status,source_type,source_id,confidence,explicit,valid_from,created_at,updated_at)
                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                    ON CONFLICT(record_id) DO UPDATE SET content=excluded.content,updated_at=excluded.updated_at,
-                     confidence=MAX(personal_records.confidence,excluded.confidence),explicit=MAX(personal_records.explicit,excluded.explicit)""",
-                (record_id,user_id,kind,safe,speaker,subject,authority,sensitivity,"active" if explicit else "provisional",source_type,source_id,max(0,min(1,confidence)),int(explicit),now,now,now),
+                     confidence=MAX(personal_records.confidence,excluded.confidence),
+                     explicit=MAX(personal_records.explicit,excluded.explicit),
+                     authority=CASE WHEN excluded.explicit=1 THEN 'user_statement' ELSE personal_records.authority END,
+                     status=CASE WHEN excluded.explicit=1 THEN 'active' ELSE personal_records.status END,
+                     speaker=CASE WHEN excluded.explicit=1 THEN excluded.speaker ELSE personal_records.speaker END,
+                     subject=CASE WHEN excluded.explicit=1 THEN excluded.subject ELSE personal_records.subject END,
+                     sensitivity=CASE WHEN excluded.explicit=1 THEN excluded.sensitivity ELSE personal_records.sensitivity END""",
+                (record_id,user_id,kind,safe,safe_speaker,safe_subject,desired_authority,sensitivity,desired_status,safe_source_type,safe_source_id,max(0,min(1,confidence)),int(explicit),now,now,now),
             )
             await db.commit()
         return record_id

@@ -24,10 +24,9 @@ from memory.application import (
     CanonicalRelationService,
     GroupFactService,
     CanonicalProjectionReconciler,
-    SQLitePersonalVaultPolicy,
 )
 from memory.domain import Principal
-from memory.infrastructure import MemorySchemaManager, ProjectionOutbox, SQLiteMemoryDatabase
+from memory.infrastructure import MemorySchemaManager, ProjectionOutbox, SQLiteMemoryDatabase, PersonalVaultDatabase, SQLitePersonalVaultPolicy
 from memory.module import MemoryModule
 from memory.ports import MemoryACLPort
 from memory.composition import MemoryComposition
@@ -39,29 +38,29 @@ _bot_memory_projection_rollout_gate: BotMemoryProjectionRolloutGate | None = Non
 def build_personal_knowledge_client(principal: Principal) -> AuthorizedPersonalKnowledgeService:
     """Build the fail-closed personal-memory application boundary."""
     return AuthorizedPersonalKnowledgeService(
-        CanonicalPersonalKnowledgeService(), build_memory_acl(), principal,
+        CanonicalPersonalKnowledgeService(PersonalVaultDatabase()), build_memory_acl(), principal,
         vault_policy=SQLitePersonalVaultPolicy(),
     )
 
 
 async def list_personal_apps(*, user_id: int, include_inactive: bool = True):
     from memory.application.personal_vault import list_personal_apps as _list
-    return await _list(user_id=user_id, include_inactive=include_inactive)
+    return await _list(database=PersonalVaultDatabase(), user_id=user_id, include_inactive=include_inactive)
 
 
 async def register_personal_app(*, user_id: int, app_id: str, name: str) -> None:
     from memory.application.personal_vault import register_personal_app as _register
-    await _register(user_id=user_id, app_id=app_id, name=name)
+    await _register(database=PersonalVaultDatabase(), user_id=user_id, app_id=app_id, name=name)
 
 
 async def set_personal_app_status(*, user_id: int, app_id: str, active: bool) -> bool:
     from memory.application.personal_vault import set_personal_app_status as _set_status
-    return await _set_status(user_id=user_id, app_id=app_id, active=active)
+    return await _set_status(database=PersonalVaultDatabase(), user_id=user_id, app_id=app_id, active=active)
 
 
 async def list_acl_audit_events(*, user_id: int, limit: int = 100):
     from memory.application.personal_vault import list_acl_audit_events as _list_audit
-    return await _list_audit(user_id=user_id, limit=limit)
+    return await _list_audit(database=PersonalVaultDatabase(), user_id=user_id, limit=limit)
 
 
 def build_learning_client():

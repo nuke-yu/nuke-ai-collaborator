@@ -105,6 +105,12 @@ class PersonalVaultPolicyPort(Protocol):
 
 
 @runtime_checkable
+class PersonalVaultDatabasePort(Protocol):
+    def connect(self, user_id: int) -> AbstractAsyncContextManager[Any]: ...
+    async def delete_vault(self, user_id: int) -> bool: ...
+
+
+@runtime_checkable
 class CaseClusteringPort(MemoryAlgorithmPort, Protocol):
     async def cluster(self, cases_with_timestamps: Sequence[tuple[Any, float]]) -> Any: ...
 

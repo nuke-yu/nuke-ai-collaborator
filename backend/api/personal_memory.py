@@ -3,7 +3,8 @@ from core import auth
 from db import global_db
 from memory.canonical import (
     build_personal_knowledge_client, list_acl_audit_events, list_personal_apps,
-    register_personal_app, set_personal_app_status,
+    register_personal_app, set_personal_app_status, set_personal_access_rule,
+    delete_personal_access_rule,
 )
 from memory.contracts import (CreatePersonalProjection, CreatePersonalRecord,
                               IngestPersonalKnowledge, MemoryAuthorizationError,
@@ -47,6 +48,28 @@ async def set_personal_memory_app_status(app_id: str, body: dict, user=Depends(a
 @router.get("/api/personal/memory/audit")
 async def list_personal_memory_audit(limit: int = 100, user=Depends(auth.get_current_user)):
     return {"events": await list_acl_audit_events(user_id=int(user["uid"]), limit=limit)}
+
+@router.put("/api/personal/memory/access-rules")
+async def set_personal_memory_access_rule(body: dict, user=Depends(auth.get_current_user)):
+    try:
+        await set_personal_access_rule(user_id=int(user["uid"]), **{
+            key: str(body[key]) for key in ("subject_type", "subject_id", "object_type", "object_id", "action", "effect")
+        })
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(400, str(exc))
+    return {"status": "ok"}
+
+@router.delete("/api/personal/memory/access-rules")
+async def delete_personal_memory_access_rule(body: dict, user=Depends(auth.get_current_user)):
+    try:
+        deleted = await delete_personal_access_rule(user_id=int(user["uid"]), **{
+            key: str(body[key]) for key in ("subject_type", "subject_id", "object_type", "object_id", "action")
+        })
+    except KeyError as exc:
+        raise HTTPException(400, str(exc))
+    if not deleted:
+        raise HTTPException(404, "Personal access rule not found")
+    return {"status": "ok"}
 
 @router.get("/api/personal/memory")
 async def export_personal_memory(user=Depends(auth.get_current_user)):

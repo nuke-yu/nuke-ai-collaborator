@@ -13,6 +13,7 @@ from memory.contracts import (
     CreatePersonalProjection,
     CreatePersonalRecord,
     FormatProjectedContext,
+    ObservePersonalHabit,
 )
 from memory.domain import MemoryScope
 from memory.infrastructure import PersonalVaultDatabase
@@ -39,6 +40,14 @@ class _TempPersonalDatabase(PersonalVaultDatabase):
         # the same service into an isolated test file.
         from memory.infrastructure.personal_database import _DDL
         return _DDL
+
+
+class _ProductionTempPersonalDatabase(PersonalVaultDatabase):
+    def __init__(self, path: str) -> None:
+        self.path = path
+
+    def _path(self, user_id: int) -> Path:
+        return Path(self.path)
 
 
 class CanonicalPersonalMemoryTest(unittest.IsolatedAsyncioTestCase):
@@ -104,3 +113,61 @@ class CanonicalPersonalMemoryTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(impact["usage_events"]), 1)
         self.assertTrue(await self.service.delete(self.scope))
         self.assertFalse(Path(self.path).exists())
+
+    async def test_habit_uses_stable_key_and_matures_from_evidence(self) -> None:
+        base = 1_700_000_000_000
+        ids = []
+        for index, (context, offset) in enumerate((("home", 0), ("office", 7), ("home", 15))):
+            ids.append(await self.service.observe_habit(ObservePersonalHabit(
+                scope=self.scope, habit_key="daily-review", statement="review tasks",
+                source_type="observation", source_id=f"event:{index}", context_kind=context,
+                observed_at=base + offset * 86_400_000,
+            )))
+        self.assertEqual(len(set(ids)), 1)
+        exported = await self.service.export(self.scope)
+        habit = next(item for item in exported["records"] if item["record_id"] == ids[0])
+        self.assertEqual(habit["status"], "active")
+        self.assertEqual(len(exported["habit_evidence"]), 3)
+
+    async def test_mislabeled_v2_vault_is_repaired_by_shape_validation(self) -> None:
+        path = tempfile.mktemp(suffix="_legacy_personal.db")
+        try:
+            async with aiosqlite.connect(path) as db:
+                await db.executescript("""
+                    CREATE TABLE personal_schema_version(version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL);
+                    INSERT INTO personal_schema_version VALUES(2, 1);
+                    CREATE TABLE personal_records(record_id TEXT PRIMARY KEY, user_id INTEGER NOT NULL, kind TEXT NOT NULL,
+                        content TEXT NOT NULL, speaker TEXT NOT NULL DEFAULT '', subject TEXT NOT NULL DEFAULT '',
+                        authority TEXT NOT NULL, sensitivity TEXT NOT NULL DEFAULT 'private', status TEXT NOT NULL DEFAULT 'active',
+                        source_type TEXT NOT NULL, source_id TEXT NOT NULL DEFAULT '', confidence REAL NOT NULL DEFAULT 0.5,
+                        explicit INTEGER NOT NULL DEFAULT 0, valid_from INTEGER NOT NULL, valid_to INTEGER,
+                        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+                    CREATE TABLE personal_projections(projection_id TEXT PRIMARY KEY,record_id TEXT NOT NULL,group_id INTEGER NOT NULL,
+                        bot_id INTEGER,purpose TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'active',expires_at INTEGER,
+                        created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL,
+                        UNIQUE(record_id,group_id,bot_id,purpose));
+                    CREATE TABLE habit_evidence(id INTEGER PRIMARY KEY AUTOINCREMENT,record_id TEXT NOT NULL,source_key TEXT NOT NULL,
+                        context_kind TEXT NOT NULL,polarity TEXT NOT NULL,observed_at INTEGER NOT NULL,UNIQUE(record_id,source_key));
+                    INSERT INTO personal_records VALUES('r:1',7,'habit','review','','habit','observed','private','active','observation','s:1',0.45,0,1,NULL,1,1);
+                    INSERT INTO personal_projections VALUES('p:1','r:1',9,NULL,'context','active',NULL,1,1);
+                    INSERT INTO habit_evidence(record_id,source_key,context_kind,polarity,observed_at)
+                        VALUES('r:1','s:1','home','support',1);
+                """)
+                await db.commit()
+
+            database = _ProductionTempPersonalDatabase(path)
+            async with database.connect(7) as db:
+                async with db.execute("PRAGMA foreign_key_list(personal_projections)") as cur:
+                    projection_fks = await cur.fetchall()
+                async with db.execute("PRAGMA foreign_key_list(habit_evidence)") as cur:
+                    habit_fks = await cur.fetchall()
+                async with db.execute("PRAGMA foreign_key_check") as cur:
+                    self.assertEqual(await cur.fetchall(), [])
+            self.assertTrue(any(row[2] == "personal_records" and row[6] == "CASCADE" for row in projection_fks))
+            self.assertTrue(any(row[2] == "personal_records" and row[6] == "CASCADE" for row in habit_fks))
+        finally:
+            for suffix in ("", "-wal", "-shm", ".lock"):
+                try:
+                    os.unlink(path + suffix)
+                except FileNotFoundError:
+                    pass

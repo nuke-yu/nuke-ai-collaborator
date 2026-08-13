@@ -228,6 +228,21 @@ class MemorySchemaTest(unittest.IsolatedAsyncioTestCase):
                     (2, "same-run", "new task"),
                 ])
 
+    async def test_final_manifest_recreates_group_scoped_cases(self) -> None:
+        await self.schema.ensure_group(7)
+        async with db.connect(self.path) as connection:
+            await connection.execute("DROP TABLE agent_cases")
+            await connection.commit()
+        await self.schema.ensure_group(7)
+        async with db.connect(self.path) as connection:
+            await connection.execute(
+                "INSERT INTO agent_cases(case_id,run_id,group_id,task,outcome,created_at,updated_at) VALUES('case:1','same',1,'one','completed',1,1)"
+            )
+            await connection.execute(
+                "INSERT INTO agent_cases(case_id,run_id,group_id,task,outcome,created_at,updated_at) VALUES('case:2','same',2,'two','completed',1,1)"
+            )
+            await connection.commit()
+
     async def test_v1_usage_tables_are_upgraded_without_losing_rows(self) -> None:
         async with db.connect(self.path) as connection:
             await connection.execute(

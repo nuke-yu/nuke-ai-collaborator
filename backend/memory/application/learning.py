@@ -354,8 +354,10 @@ class CanonicalLearningService(LearningPort):
             args = record.get("args") or {}
             for key in ("path", "file_path"):
                 value = args.get(key) if isinstance(args, dict) else None
-                if value and value not in files:
-                    files.append(str(value))
+                if value:
+                    safe_value = safe_memory_text(str(value), limit=500)
+                    if safe_value not in files:
+                        files.append(safe_value)
             if record.get("is_error"):
                 errors.append(safe_memory_text(str(record.get("result") or ""), limit=1000))
         verdict = evaluate_outcome_verdict(
@@ -388,6 +390,10 @@ class CanonicalLearningService(LearningPort):
         )
         if correction:
             signals.append("corrected_success")
+        try:
+            correction = json.loads(safe_memory_mapping(correction, limit=16_000))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            correction = {"source": "canonical_safety_fallback"}
         generated_case_id = "case:" + hashlib.sha256(f"{group_id}:{command.run_id}".encode()).hexdigest()[:24]
         now = int(time.time()*1000)
         identity = identify_task(command.task)
@@ -468,13 +474,16 @@ class CanonicalLearningService(LearningPort):
         """Requeue committed bot messages that have no observation job."""
         now = int(time.time() * 1000)
         async with await self._database.connect("messages", group_id, write=False) as db:
+            async with db.execute("PRAGMA table_info(messages)") as columns_cursor:
+                columns = {str(row[1]) for row in await columns_cursor.fetchall()}
+            sender_filter = "AND m.sender_type='bot'" if "sender_type" in columns else ""
             async with db.execute(
-                """SELECT m.id,m.member_id FROM messages m
+                f"""SELECT m.id,m.member_id FROM messages m
                    LEFT JOIN pipeline_jobs p ON p.group_id=m.group_id
                      AND p.job_type='observe_turn'
                      AND p.input_id=CAST(m.id AS TEXT)||':'||CAST(m.member_id AS TEXT)
                      AND p.input_version='1'
-                   WHERE m.group_id=? AND m.is_deleted=0 AND p.job_id IS NULL
+                   WHERE m.group_id=? AND m.is_deleted=0 AND p.job_id IS NULL {sender_filter}
                    ORDER BY m.id LIMIT ?""",
                 (group_id, max(1, limit)),
             ) as cur:

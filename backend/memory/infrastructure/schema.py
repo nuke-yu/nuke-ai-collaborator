@@ -33,7 +33,7 @@ _VERSION_TABLE_DDL = """CREATE TABLE IF NOT EXISTS memory_schema_version (
 
 MEMORY_V1_DDL = (
     """CREATE TABLE IF NOT EXISTS agent_cases (
-        case_id TEXT PRIMARY KEY, run_id TEXT NOT NULL UNIQUE, group_id INTEGER NOT NULL,
+        case_id TEXT PRIMARY KEY, run_id TEXT NOT NULL, group_id INTEGER NOT NULL,
         bot_id INTEGER, task TEXT NOT NULL DEFAULT '', task_signature TEXT NOT NULL DEFAULT '',
         semantic_cluster_key TEXT NOT NULL DEFAULT '',
         task_family TEXT NOT NULL DEFAULT 'other',
@@ -45,7 +45,8 @@ MEMORY_V1_DDL = (
         verification_adapter TEXT NOT NULL DEFAULT '',
         correction_evidence_json TEXT NOT NULL DEFAULT '{}',
         verification_signals TEXT NOT NULL DEFAULT '[]', summary TEXT NOT NULL DEFAULT '',
-        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+        UNIQUE(group_id,run_id)
     )""",
     "CREATE INDEX IF NOT EXISTS idx_agent_cases_group_created ON agent_cases(group_id, created_at DESC)",
     """CREATE TABLE IF NOT EXISTS agent_case_attempts (

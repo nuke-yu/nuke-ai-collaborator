@@ -71,6 +71,8 @@ class CanonicalObservationLoader:
             raise MemoryOperationError(
                 f"observation bot {bot_id} is outside group {group_id}"
             )
+        if str(bot.get("type") or "").lower() != "bot":
+            return None
         config = bot.get("executor_config") or {}
         policy = str(config.get("memory", "chroma")).lower()
         if policy in {"off", "none", "null", "disabled", "false"}:

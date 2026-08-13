@@ -48,7 +48,7 @@ class TestMemoryScope(unittest.TestCase):
         self.assertEqual(scope.storage_partition(), (None, ScopeKind.PERSONAL, 7))
 
     def test_personal_factory_always_installs_canonical_policy(self):
-        from memory.application import SQLitePersonalVaultPolicy
+        from memory.infrastructure import SQLitePersonalVaultPolicy
         from memory.domain import Principal
 
         service = build_personal_knowledge_client(Principal.user(7, []))
