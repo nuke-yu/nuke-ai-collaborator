@@ -115,7 +115,7 @@ class CanonicalPersonalMemoryTest(unittest.IsolatedAsyncioTestCase):
             async with db.execute("SELECT sensitivity FROM personal_records WHERE record_id=?", (record_id,)) as cur:
                 self.assertEqual((await cur.fetchone())[0], "secret")
 
-    async def test_source_identity_survives_content_correction(self) -> None:
+    async def test_source_identity_does_not_overwrite_distinct_facts(self) -> None:
         first = await self.service.ingest(IngestPersonalKnowledge(
             scope=self.scope, kind="preference", statement="old value",
             source_type="profile", source_id="profile:7", sensitivity="private",
@@ -127,12 +127,14 @@ class CanonicalPersonalMemoryTest(unittest.IsolatedAsyncioTestCase):
             scope=self.scope, kind="preference", statement="Authorization: Bearer AAAAAAAAAAAAAAAAAAAA",
             source_type="profile", source_id="profile:7", sensitivity="secret",
         ))
-        self.assertEqual(first, second)
+        self.assertNotEqual(first, second)
         async with self.database.connect(7) as db:
-            async with db.execute("SELECT sensitivity FROM personal_records WHERE record_id=?", (first,)) as cur:
-                self.assertEqual((await cur.fetchone())[0], "secret")
+            async with db.execute("SELECT content,sensitivity FROM personal_records WHERE record_id=?", (first,)) as cur:
+                self.assertEqual((await cur.fetchone()), ("old value", "private"))
+            async with db.execute("SELECT content,sensitivity FROM personal_records WHERE record_id=?", (second,)) as cur:
+                self.assertEqual((await cur.fetchone())[1], "secret")
             async with db.execute("SELECT status FROM personal_projections WHERE record_id=?", (first,)) as cur:
-                self.assertEqual((await cur.fetchone())[0], "revoked")
+                self.assertEqual((await cur.fetchone())[0], "active")
 
     async def test_future_personal_schema_is_rejected_without_creating_tables(self) -> None:
         path = tempfile.mktemp(suffix="_future_personal.db")
@@ -162,10 +164,16 @@ class CanonicalPersonalMemoryTest(unittest.IsolatedAsyncioTestCase):
             async with aiosqlite.connect(path) as db:
                 for statement in _DDL:
                     await db.execute(statement)
+                await db.execute("DROP TABLE personal_migration_conflicts")
+                await db.execute("""CREATE TABLE personal_migration_conflicts(
+                    conflict_id TEXT PRIMARY KEY,user_id INTEGER NOT NULL,source_type TEXT NOT NULL,
+                    source_id TEXT NOT NULL,kind TEXT NOT NULL,canonical_record_id TEXT NOT NULL,
+                    conflicting_record_id TEXT NOT NULL,content TEXT NOT NULL,authority TEXT NOT NULL,
+                    explicit INTEGER NOT NULL,confidence REAL NOT NULL,valid_from INTEGER NOT NULL,created_at INTEGER NOT NULL)""")
                 await db.executemany("INSERT INTO personal_schema_version(version,applied_at) VALUES(?,1)", [(1,), (2,), (3,)])
                 rows = [
-                    ("r-old", 7, "preference", "old value", "", "7", "observed", "private", "active", "profile", "profile:7", .4, 0, 10, 10, 10),
-                    ("r-new", 7, "preference", "new value", "", "7", "user_statement", "restricted", "active", "profile", "profile:7", .9, 1, 20, 20, 20),
+                    ("r-old", 7, "preference", "same value", "", "7", "observed", "private", "active", "profile", "profile:7", .4, 0, 10, 10, 10),
+                    ("r-new", 7, "preference", "same value", "", "7", "user_statement", "restricted", "active", "profile", "profile:7", .9, 1, 20, 20, 20),
                 ]
                 await db.executemany("""INSERT INTO personal_records
                     (record_id,user_id,kind,content,speaker,subject,authority,sensitivity,status,source_type,source_id,confidence,explicit,valid_from,created_at,updated_at)
@@ -173,9 +181,9 @@ class CanonicalPersonalMemoryTest(unittest.IsolatedAsyncioTestCase):
                 await db.commit()
             async with _ProductionTempPersonalDatabase(path).connect(7) as db:
                 async with db.execute("SELECT record_id,content,authority,sensitivity,explicit,confidence FROM personal_records") as cur:
-                    self.assertEqual(await cur.fetchall(), [("r-new", "new value", "user_statement", "restricted", 1, .9)])
+                    self.assertEqual(await cur.fetchall(), [("r-new", "same value", "user_statement", "restricted", 1, .9)])
                 async with db.execute("SELECT conflicting_record_id,content FROM personal_migration_conflicts") as cur:
-                    self.assertEqual(await cur.fetchall(), [("r-old", "old value")])
+                    self.assertEqual(await cur.fetchall(), [])
         finally:
             for suffix in ("", "-wal", "-shm", ".lock"):
                 try:

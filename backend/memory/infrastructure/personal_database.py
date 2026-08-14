@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncIterator
@@ -25,7 +26,7 @@ _REQUIRED_COLUMNS = {
     "personal_access_control_actions": {"rule_id", "user_id", "subject_type", "subject_id", "object_type", "object_id", "action", "effect", "created_at"},
     "habit_evidence": {"id", "record_id", "source_type", "source_key", "context_kind", "polarity", "observed_at"},
     "personal_deletion_audit_events": {"audit_id", "user_id", "actor_id", "operation", "record_id", "projection_id", "created_at"},
-    "personal_migration_conflicts": {"conflict_id", "user_id", "source_type", "source_id", "kind", "canonical_record_id", "conflicting_record_id", "content", "authority", "explicit", "confidence", "valid_from", "created_at"},
+    "personal_migration_conflicts": {"conflict_id", "user_id", "migration_version", "resolution_status", "resolved_at", "resolved_by", "content_hash", "source_type", "source_id", "kind", "canonical_record_id", "conflicting_record_id", "content", "authority", "explicit", "confidence", "valid_from", "created_at"},
 }
 
 _DDL = (
@@ -61,7 +62,9 @@ _DDL = (
        actor_id TEXT NOT NULL,operation TEXT NOT NULL,record_id TEXT,
        projection_id TEXT,created_at INTEGER NOT NULL)""",
     """CREATE TABLE IF NOT EXISTS personal_migration_conflicts (
-       conflict_id TEXT PRIMARY KEY,user_id INTEGER NOT NULL,source_type TEXT NOT NULL,
+       conflict_id TEXT PRIMARY KEY,user_id INTEGER NOT NULL,migration_version INTEGER NOT NULL,
+       resolution_status TEXT NOT NULL DEFAULT 'unresolved',resolved_at INTEGER,
+       resolved_by TEXT,content_hash TEXT NOT NULL,source_type TEXT NOT NULL,
        source_id TEXT NOT NULL,kind TEXT NOT NULL,canonical_record_id TEXT NOT NULL,
        conflicting_record_id TEXT NOT NULL,content TEXT NOT NULL,authority TEXT NOT NULL,
        explicit INTEGER NOT NULL,confidence REAL NOT NULL,valid_from INTEGER NOT NULL,
@@ -93,9 +96,8 @@ class PersonalVaultDatabase:
         async with lock:
             path = self._path(user_id)
             path.parent.mkdir(parents=True, exist_ok=True)
-            lock_path = Path(str(path) + ".lock")
-            lock_handle = await asyncio.to_thread(lock_path.open, "a+")
-            await asyncio.to_thread(fcntl.flock, lock_handle.fileno(), fcntl.LOCK_EX)
+            lock_fd = await asyncio.to_thread(os.open, str(path.parent), os.O_RDONLY)
+            await asyncio.to_thread(fcntl.flock, lock_fd, fcntl.LOCK_EX)
             try:
                 async with aiosqlite.connect(str(path), timeout=15.0) as db:
                     await db.execute("PRAGMA busy_timeout=15000")
@@ -140,9 +142,13 @@ class PersonalVaultDatabase:
                         await _rebuild_fk_tables(db)
                         if current < 3:
                             await db.execute("INSERT INTO personal_schema_version(version, applied_at) VALUES(3, strftime('%s','now') * 1000)")
+                    if not await _has_column(db, "personal_migration_conflicts", "resolution_status"):
+                        await _upgrade_conflict_table(db)
                     if current < 4:
                         await _merge_duplicate_source_records(db)
                         await db.execute("INSERT INTO personal_schema_version(version, applied_at) VALUES(4, strftime('%s','now') * 1000)")
+                    if current < 5:
+                        await db.execute("INSERT INTO personal_schema_version(version, applied_at) VALUES(5, strftime('%s','now') * 1000)")
                     await _validate_shape(db)
                     async with db.execute("PRAGMA foreign_key_check") as cur:
                         violations = await cur.fetchall()
@@ -151,8 +157,8 @@ class PersonalVaultDatabase:
                     await db.commit()
                     yield db
             finally:
-                await asyncio.to_thread(fcntl.flock, lock_handle.fileno(), fcntl.LOCK_UN)
-                lock_handle.close()
+                await asyncio.to_thread(fcntl.flock, lock_fd, fcntl.LOCK_UN)
+                os.close(lock_fd)
 
     async def delete_vault(self, user_id: int) -> bool:
         """Delete every personal artifact and remove the physical Vault file."""
@@ -161,9 +167,9 @@ class PersonalVaultDatabase:
         path = self._path(user_id)
         lock = _LOCKS.setdefault(user_id, asyncio.Lock())
         async with lock:
-            lock_path = Path(str(path) + ".lock")
-            lock_handle = await asyncio.to_thread(lock_path.open, "a+")
-            await asyncio.to_thread(fcntl.flock, lock_handle.fileno(), fcntl.LOCK_EX)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            lock_fd = await asyncio.to_thread(os.open, str(path.parent), os.O_RDONLY)
+            await asyncio.to_thread(fcntl.flock, lock_fd, fcntl.LOCK_EX)
             try:
                 if not path.exists():
                     return False
@@ -178,7 +184,7 @@ class PersonalVaultDatabase:
                     await db.execute("DELETE FROM personal_apps")
                     await db.execute("DELETE FROM personal_access_control_actions")
                     await db.execute("DELETE FROM personal_acl_audit_events")
-                    await db.execute("DELETE FROM personal_deletion_audit_events")
+                    await _record_central_vault_deletion(user_id, enabled=type(self) is PersonalVaultDatabase)
                     await db.execute("DELETE FROM personal_migration_conflicts")
                     await db.commit()
                     await db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
@@ -188,9 +194,13 @@ class PersonalVaultDatabase:
                             candidate.unlink()
                         except FileNotFoundError:
                             pass
+                    try:
+                        Path(str(path) + ".lock").unlink()
+                    except FileNotFoundError:
+                        pass
             finally:
-                await asyncio.to_thread(fcntl.flock, lock_handle.fileno(), fcntl.LOCK_UN)
-                lock_handle.close()
+                await asyncio.to_thread(fcntl.flock, lock_fd, fcntl.LOCK_UN)
+                os.close(lock_fd)
             return True
 
 
@@ -235,13 +245,18 @@ async def _merge_duplicate_source_records(db: aiosqlite.Connection) -> None:
         groups = await cur.fetchall()
     for user_id, source_type, source_id, kind, _ in groups:
         async with db.execute(
-            """SELECT record_id FROM personal_records
+            """SELECT record_id,content FROM personal_records
                WHERE user_id=? AND source_type=? AND source_id=? AND kind=?
                ORDER BY created_at,record_id""",
             (user_id, source_type, source_id, kind),
         ) as cur:
-            ids = [str(row[0]) for row in await cur.fetchall()]
-        await _merge_records(db, ids)
+            rows = await cur.fetchall()
+        by_content: dict[str, list[str]] = {}
+        for record_id, content in rows:
+            by_content.setdefault(safe_memory_text(content), []).append(str(record_id))
+        for ids in by_content.values():
+            if len(ids) > 1:
+                await _merge_records(db, ids)
 
 
 async def _merge_records(db: aiosqlite.Connection, record_ids: list[str]) -> str | None:
@@ -288,10 +303,10 @@ async def _merge_records(db: aiosqlite.Connection, record_ids: list[str]) -> str
             conflict_id = "conflict:" + hashlib.sha256(f"{canonical}:{conflicting_id}".encode()).hexdigest()[:24]
             await db.execute(
                 """INSERT OR REPLACE INTO personal_migration_conflicts
-                   (conflict_id,user_id,source_type,source_id,kind,canonical_record_id,
-                    conflicting_record_id,content,authority,explicit,confidence,valid_from,created_at)
-                   SELECT ?,user_id,source_type,source_id,kind,?,?,?, ?,?,?,?,? FROM personal_records WHERE record_id=?""",
-                (conflict_id, canonical, conflicting_id, safe_memory_text(row[1]), str(row[2]), int(row[6]), float(row[5]), int(row[7]), int(row[9]), conflicting_id),
+                   (conflict_id,user_id,migration_version,resolution_status,resolved_at,resolved_by,content_hash,
+                    source_type,source_id,kind,canonical_record_id,conflicting_record_id,content,authority,explicit,confidence,valid_from,created_at)
+                   SELECT ?,4,'unresolved',NULL,NULL,NULL,?,source_type,source_id,kind,?,?,?, ?,?,?,?,? FROM personal_records WHERE record_id=?""",
+                (conflict_id, hashlib.sha256(safe_memory_text(row[1]).encode()).hexdigest(), canonical, conflicting_id, safe_memory_text(row[1]), str(row[2]), int(row[6]), float(row[5]), int(row[7]), int(row[9]), conflicting_id),
             )
     if strongest == "secret":
         await db.execute("UPDATE personal_projections SET status='revoked' WHERE record_id IN ({}) AND status='active'".format(",".join("?" for _ in record_ids)), record_ids)
@@ -306,6 +321,46 @@ async def _merge_records(db: aiosqlite.Connection, record_ids: list[str]) -> str
             await db.execute("INSERT OR IGNORE INTO habit_evidence(record_id,source_key,context_kind,polarity,observed_at) SELECT ?,source_key,context_kind,polarity,observed_at FROM habit_evidence WHERE record_id=?", (canonical, duplicate))
         await db.execute("DELETE FROM personal_records WHERE record_id=?", (duplicate,))
     return canonical
+
+
+async def _upgrade_conflict_table(db: aiosqlite.Connection) -> None:
+    await db.execute("ALTER TABLE personal_migration_conflicts RENAME TO personal_migration_conflicts_v4")
+    await db.execute(_DDL[7])
+    async with db.execute("PRAGMA table_info(personal_migration_conflicts_v4)") as cur:
+        columns = {str(row[1]) for row in await cur.fetchall()}
+    if "migration_version" in columns:
+        await db.execute("INSERT INTO personal_migration_conflicts SELECT * FROM personal_migration_conflicts_v4")
+    else:
+        await db.execute(
+            """INSERT INTO personal_migration_conflicts
+               (conflict_id,user_id,migration_version,resolution_status,content_hash,source_type,source_id,kind,
+                canonical_record_id,conflicting_record_id,content,authority,explicit,confidence,valid_from,created_at)
+               SELECT conflict_id,user_id,4,'unresolved','',source_type,source_id,kind,
+                      canonical_record_id,conflicting_record_id,content,authority,explicit,confidence,valid_from,created_at
+               FROM personal_migration_conflicts_v4"""
+        )
+        async with db.execute("SELECT conflict_id,content FROM personal_migration_conflicts_v4") as cur:
+            for conflict_id, content in await cur.fetchall():
+                await db.execute("UPDATE personal_migration_conflicts SET content_hash=? WHERE conflict_id=?", (hashlib.sha256(safe_memory_text(content).encode()).hexdigest(), conflict_id))
+    await db.execute("DROP TABLE personal_migration_conflicts_v4")
+
+
+async def _record_central_vault_deletion(user_id: int, *, enabled: bool = True) -> None:
+    if not enabled:
+        return
+    try:
+        from db import global_db
+        async with global_db() as db:
+            await db.execute("""CREATE TABLE IF NOT EXISTS personal_vault_deletion_audit (
+                audit_id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER NOT NULL,
+                operation TEXT NOT NULL,created_at INTEGER NOT NULL)""")
+            await db.execute(
+                "INSERT INTO personal_vault_deletion_audit(user_id,operation,created_at) VALUES(?,?,strftime('%s','now') * 1000)",
+                (user_id, "delete_vault"),
+            )
+            await db.commit()
+    except Exception as exc:
+        raise RuntimeError("central Personal Vault deletion audit unavailable") from exc
 
 
 async def _validate_shape(db: aiosqlite.Connection) -> None:

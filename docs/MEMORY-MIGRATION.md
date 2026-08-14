@@ -52,7 +52,7 @@ select a second storage implementation.
   across Groups.
 - Observation summaries read the production `meta.memory_observation.thread_id`
   path and retain a top-level fallback for older records.
-- Personal Vault schema v4 validates the physical schema, rebuilds legacy
+- Personal Vault schema v5 validates the physical schema, rebuilds legacy
   projection and habit-evidence tables with cascading foreign keys, removes
   orphan rows, and runs `foreign_key_check`; this repair also runs when an old
   database was incorrectly labelled v2. Vault access uses WAL, busy-timeouts,
@@ -65,6 +65,9 @@ select a second storage implementation.
   authoritative duplicate, merges explicitness/confidence/timestamps, and
   preserves conflicting historical content and provenance in a bounded,
   redacted migration-conflict table.
+- Schema v5 upgrades conflict records with migration version, resolution
+  status, resolver metadata, and content checksum so migration findings remain
+  governable across future upgrades.
 - Habit observations use a stable `habit_key` record, aggregate evidence by
   sample/context/time-span, reject contradictions, and only promote a habit
   after the canonical maturity thresholds are met. Export includes all Vault

@@ -29,8 +29,8 @@ async def list_personal_apps(*, database: PersonalVaultDatabasePort, user_id: in
     async with database.connect(user_id) as db:
         where = "" if include_inactive else " AND status='active'"
         async with db.execute(
-            "SELECT app_id,name,status,created_at,updated_at FROM personal_apps WHERE user_id=?" + where + " ORDER BY app_id",
-            (user_id,),
+            "SELECT app_id,name,status,created_at,updated_at FROM personal_apps WHERE user_id=?" + where + " ORDER BY app_id LIMIT ?",
+            (user_id, _EXPORT_LIMIT),
         ) as cur:
             rows = await cur.fetchall()
     return [{"app_id": safe_memory_text(r[0], limit=200), "name": safe_memory_text(r[1], limit=500), "status": safe_memory_text(r[2], limit=40), "created_at": int(r[3]), "updated_at": int(r[4])} for r in rows]
@@ -289,8 +289,24 @@ class CanonicalPersonalKnowledgeService(PersonalKnowledgePort):
                 habit_evidence = await cur.fetchall()
             async with db.execute("SELECT audit_id,actor_id,operation,record_id,projection_id,created_at FROM personal_deletion_audit_events WHERE user_id=? ORDER BY audit_id LIMIT ?", (user_id, _EXPORT_LIMIT)) as cur:
                 deletion_audits = await cur.fetchall()
-            async with db.execute("SELECT conflict_id,source_type,source_id,kind,canonical_record_id,conflicting_record_id,content,authority,explicit,confidence,valid_from,created_at FROM personal_migration_conflicts WHERE user_id=? ORDER BY created_at LIMIT ?", (user_id, _EXPORT_LIMIT)) as cur:
+            async with db.execute("SELECT conflict_id,migration_version,resolution_status,resolved_at,resolved_by,content_hash,source_type,source_id,kind,canonical_record_id,conflicting_record_id,content,authority,explicit,confidence,valid_from,created_at FROM personal_migration_conflicts WHERE user_id=? ORDER BY created_at LIMIT ?", (user_id, _EXPORT_LIMIT)) as cur:
                 migration_conflicts = await cur.fetchall()
+            counts = {}
+            for name, table, predicate in (
+                ("records", "personal_records", "user_id=?"),
+                ("usage_events", "personal_memory_usage_events", "user_id=?"),
+                ("apps", "personal_apps", "user_id=?"),
+                ("acl_audit_events", "personal_acl_audit_events", "user_id=?"),
+                ("acl_rules", "personal_access_control_actions", "user_id=?"),
+                ("deletion_audit_events", "personal_deletion_audit_events", "user_id=?"),
+                ("migration_conflicts", "personal_migration_conflicts", "user_id=?"),
+            ):
+                async with db.execute(f"SELECT COUNT(*) FROM {table} WHERE {predicate}", (user_id,)) as cur:
+                    counts[name] = int((await cur.fetchone())[0])
+            async with db.execute("SELECT COUNT(*) FROM personal_projections") as cur:
+                counts["projections"] = int((await cur.fetchone())[0])
+            async with db.execute("SELECT COUNT(*) FROM habit_evidence WHERE record_id IN (SELECT record_id FROM personal_records WHERE user_id=?)", (user_id,)) as cur:
+                counts["habit_evidence"] = int((await cur.fetchone())[0])
         fields = ("record_id","kind","content","speaker","subject","authority","sensitivity","status","source_type","source_id","confidence","explicit","valid_from","valid_to")
         pfields = ("projection_id","record_id","group_id","bot_id","purpose","status","expires_at")
         ufields = ("usage_id","record_id","projection_id","group_id","bot_id","session_id","purpose","used_at")
@@ -299,7 +315,7 @@ class CanonicalPersonalKnowledgeService(PersonalKnowledgePort):
         efields = ("audit_id","actor_id","scope_kind","group_id","bot_id","action","allowed","reason","created_at")
         hfields = ("id","record_id","source_type","source_key","context_kind","polarity","observed_at")
         dfields = ("audit_id","actor_id","operation","record_id","projection_id","created_at")
-        cfields = ("conflict_id","source_type","source_id","kind","canonical_record_id","conflicting_record_id","content","authority","explicit","confidence","valid_from","created_at")
+        cfields = ("conflict_id","migration_version","resolution_status","resolved_at","resolved_by","content_hash","source_type","source_id","kind","canonical_record_id","conflicting_record_id","content","authority","explicit","confidence","valid_from","created_at")
         safe_rows = lambda fields, rows: [
             {key: (safe_memory_text(value, limit=1000) if isinstance(value, str) else value)
              for key, value in zip(fields, row)} for row in rows
@@ -309,7 +325,9 @@ class CanonicalPersonalKnowledgeService(PersonalKnowledgePort):
                 "usage_events": safe_rows(ufields, usage_events), "apps": safe_rows(afields, apps),
                 "acl_rules": safe_rows(rfields, acl_rules), "acl_audit_events": safe_rows(efields, audit_events),
                 "habit_evidence": safe_rows(hfields, habit_evidence), "deletion_audit_events": safe_rows(dfields, deletion_audits),
-                "migration_conflicts": safe_rows(cfields, migration_conflicts)}
+                "migration_conflicts": safe_rows(cfields, migration_conflicts),
+                "export": {"limit_per_collection": _EXPORT_LIMIT, "total_counts": counts,
+                           "truncated": {name: total > _EXPORT_LIMIT for name, total in counts.items()}}}
 
     async def get_record_impact(self, scope: MemoryScope, record_id: str) -> Mapping[str, Any]:
         user_id = _user_id(scope)
@@ -376,13 +394,16 @@ class CanonicalPersonalKnowledgeService(PersonalKnowledgePort):
             if not safe_source_id:
                 return None
             async with db.execute(
-                "SELECT record_id,sensitivity FROM personal_records WHERE user_id=? AND source_type=? AND source_id=? AND kind=? ORDER BY created_at,record_id LIMIT 1",
+                "SELECT record_id,sensitivity,content FROM personal_records WHERE user_id=? AND source_type=? AND source_id=? AND kind=? ORDER BY created_at,record_id",
                 (user_id, safe_source_type, safe_source_id, kind),
             ) as cur:
-                return await cur.fetchone()
+                rows = await cur.fetchall()
+            for row in rows:
+                if str(row[2]) == safe:
+                    return row
+            return None
         record_id = "personal:" + hashlib.sha256(
-            f"{user_id}:{safe_source_type}:{safe_source_id}:{kind}".encode()
-            if safe_source_id else f"{user_id}:{safe_source_type}:{safe_source_id}:{kind}:{safe}".encode()
+            f"{user_id}:{safe_source_type}:{safe_source_id}:{kind}:{safe}".encode()
         ).hexdigest()[:24]
         async with self._database.connect(user_id) as db:
             existing_row = await _find_existing(db)
@@ -405,14 +426,9 @@ class CanonicalPersonalKnowledgeService(PersonalKnowledgePort):
             )
             if strongest_sensitivity == "secret" and existing_sensitivity != "secret":
                 await db.execute(
-                    """UPDATE personal_records SET sensitivity='secret' WHERE user_id=? AND source_type=? AND source_id=? AND kind=?""",
-                    (user_id, safe_source_type, safe_source_id, kind),
-                )
-                await db.execute(
                     """UPDATE personal_projections SET status='revoked',updated_at=?
-                       WHERE record_id IN (SELECT record_id FROM personal_records WHERE user_id=? AND source_type=? AND source_id=? AND kind=?)
-                         AND status='active'""",
-                    (now, user_id, safe_source_type, safe_source_id, kind),
+                       WHERE record_id=? AND status='active'""",
+                    (now, record_id),
                 )
             await db.commit()
         return record_id
