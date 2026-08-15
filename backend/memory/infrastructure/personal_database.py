@@ -5,6 +5,7 @@ import asyncio
 import hashlib
 import logging
 import os
+import time
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -19,6 +20,8 @@ from memory.domain.safety import safe_memory_text
 
 _LOCKS: dict[int, asyncio.Lock] = {}
 logger = logging.getLogger(__name__)
+_MAX_SWEEPER_MARKERS = 100
+_FAILED_MARKER_RETENTION_SECONDS = 7 * 24 * 60 * 60
 _REQUIRED_COLUMNS = {
     "personal_schema_version": {"version", "applied_at"},
     "personal_records": {"record_id", "user_id", "kind", "content", "speaker", "subject", "authority", "sensitivity", "status", "source_type", "source_id", "confidence", "explicit", "valid_from", "valid_to", "created_at", "updated_at"},
@@ -243,7 +246,16 @@ class PersonalVaultDatabase:
                     audit_id, "failed", error=str(exc), enabled=type(self) is PersonalVaultDatabase
                 )
                 if intent_marker is not None:
-                    intent_marker.unlink(missing_ok=True)
+                    failed_marker = Path(f"{intent_marker.with_suffix('')}.failed")
+                    try:
+                        await asyncio.to_thread(os.replace, intent_marker, failed_marker)
+                        await asyncio.to_thread(
+                            failed_marker.write_text,
+                            f"{operation_id}\n{int(time.time())}\n{safe_memory_text(str(exc), limit=1000)}",
+                            encoding="utf-8",
+                        )
+                    except FileNotFoundError:
+                        pass
                 raise
             finally:
                 if locked:
@@ -463,12 +475,29 @@ async def _create_central_vault_deletion(
             if await cur.fetchone() is None:
                 raise RuntimeError("central Personal Vault deletion audit schema is not ready")
         operation_id = operation_id or f"vault-delete:{uuid.uuid4().hex}"
-        cur = await db.execute(
-            "INSERT INTO personal_vault_deletion_audit(operation_id,user_id,operation,status,local_commit_marker,created_at) VALUES(?,?,?,?,?,strftime('%s','now') * 1000)",
-            (operation_id, user_id, "delete_vault", "pending", marker_path),
-        )
-        await db.commit()
-        return int(cur.lastrowid), operation_id
+        try:
+            cur = await db.execute(
+                "INSERT INTO personal_vault_deletion_audit(operation_id,user_id,operation,status,local_commit_marker,created_at) VALUES(?,?,?,?,?,strftime('%s','now') * 1000)",
+                (operation_id, user_id, "delete_vault", "pending", marker_path),
+            )
+            await db.commit()
+            return int(cur.lastrowid), operation_id
+        except Exception as exc:
+            # INSERT/COMMIT may have succeeded before the caller observed a
+            # constraint or transport failure.  Treat operation_id as an
+            # idempotency key and recover the committed row when possible.
+            try:
+                await db.rollback()
+                async with db.execute(
+                    "SELECT audit_id,user_id FROM personal_vault_deletion_audit WHERE operation_id=?",
+                    (operation_id,),
+                ) as cur:
+                    existing = await cur.fetchone()
+            except Exception:
+                raise exc
+            if existing is None or int(existing[1]) != user_id:
+                raise exc
+            return int(existing[0]), operation_id
 
 
 async def _finish_central_vault_deletion(
@@ -526,13 +555,49 @@ async def sweep_pending_vault_deletions(*, limit: int = 100) -> Mapping[str, int
         if marker_name:
             candidates[str(_operation_id)] = (int(user_id), Path(str(marker_name)))
     personal_root = PersonalVaultDatabase._path(1).parents[1]
-    for marker in personal_root.glob("user_*/knowledge.db.delete.*.committed"):
+
+    def discover_markers() -> tuple[list[tuple[str, int, Path]], int]:
+        discovered: list[tuple[str, int, Path]] = []
+        failed_cleaned = 0
         try:
-            user_id = int(marker.parent.name.removeprefix("user_"))
-            operation_id = marker.name.split(".delete.", 1)[1][:-len(".committed")]
-        except (ValueError, IndexError):
-            skipped += 1
-            continue
+            user_dirs = os.scandir(personal_root)
+        except FileNotFoundError:
+            return discovered, failed_cleaned
+        with user_dirs:
+            for user_entry in user_dirs:
+                if len(discovered) >= _MAX_SWEEPER_MARKERS or not user_entry.name.startswith("user_"):
+                    continue
+                try:
+                    user_id = int(user_entry.name.removeprefix("user_"))
+                except ValueError:
+                    continue
+                try:
+                    marker_entries = os.scandir(user_entry.path)
+                except OSError:
+                    continue
+                with marker_entries:
+                    for marker_entry in marker_entries:
+                        name = marker_entry.name
+                        if name.endswith(".failed"):
+                            try:
+                                if time.time() - marker_entry.stat().st_mtime > _FAILED_MARKER_RETENTION_SECONDS:
+                                    os.unlink(marker_entry.path)
+                                    failed_cleaned += 1
+                            except OSError:
+                                pass
+                            continue
+                        if not name.startswith("knowledge.db.delete.") or not name.endswith(".committed"):
+                            continue
+                        operation_id = name.split(".delete.", 1)[1][:-len(".committed")]
+                        discovered.append((operation_id, user_id, Path(marker_entry.path)))
+                        if len(discovered) >= _MAX_SWEEPER_MARKERS:
+                            break
+        return discovered, failed_cleaned
+
+    discovered, failed_cleaned = await asyncio.to_thread(discover_markers)
+    if failed_cleaned:
+        logger.info("Personal Vault sweeper removed %d expired failed markers", failed_cleaned)
+    for operation_id, user_id, marker in discovered:
         # The central row may still point at the pre-commit intent path if its
         # local_delete_committed update was interrupted.  The committed marker
         # is stronger evidence and must replace that stale path.

@@ -278,6 +278,27 @@ class CanonicalPersonalMemoryTest(unittest.IsolatedAsyncioTestCase):
                 except FileNotFoundError:
                     pass
 
+    async def test_central_deletion_audit_create_is_idempotent_by_operation_id(self) -> None:
+        central = tempfile.mktemp(suffix="_central_idempotency.db")
+        try:
+            import db
+            from memory.infrastructure.personal_database import _create_central_vault_deletion
+            await db.init_central_db(central)
+            with patch.object(db, "DB_PATH", central):
+                first = await _create_central_vault_deletion(
+                    7, operation_id="vault-delete:retry", marker_path="/tmp/retry.intent"
+                )
+                second = await _create_central_vault_deletion(
+                    7, operation_id="vault-delete:retry", marker_path="/tmp/retry.intent"
+                )
+            self.assertEqual(second, first)
+        finally:
+            for suffix in ("", "-wal", "-shm"):
+                try:
+                    os.unlink(central + suffix)
+                except FileNotFoundError:
+                    pass
+
     async def test_pending_sweeper_requires_commit_marker_and_missing_vault(self) -> None:
         central = tempfile.mktemp(suffix="_central_sweeper.db")
         vault = Path(tempfile.mktemp(suffix="_vault.db"))

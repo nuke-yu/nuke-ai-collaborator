@@ -109,7 +109,6 @@ async def lifespan(app: FastAPI):
     await db.init_central_db()
     from memory.infrastructure import sweep_pending_vault_deletions
     await sweep_pending_vault_deletions()
-    vault_deletion_sweeper_task = asyncio.create_task(_vault_deletion_sweeper_loop())
 
     # 1b. Migrate any env-provided API keys into app_config.json so the file is the
     #     single source of truth the frontend manages (config consolidation).
@@ -222,12 +221,17 @@ async def lifespan(app: FastAPI):
 
     # 7. Periodic media reaper (purges old MCP screenshots + orphaned staging; never uploads)
     media_reaper_task = asyncio.create_task(_media_reaper_loop())
+    vault_deletion_sweeper_task = asyncio.create_task(_vault_deletion_sweeper_loop())
 
-    yield
+    try:
+        yield
+    finally:
+        # Cancel first so teardown remains safe even when plugin shutdown or
+        # another later cleanup step raises.
+        await _cancel_and_wait(vault_deletion_sweeper_task)
 
     # Teardown
     await plugin_host.unload_all()
-    await _cancel_and_wait(vault_deletion_sweeper_task)
     await _cancel_and_wait(media_reaper_task)
     scheduler.stop()   # sync (returns None); awaiting it raised TypeError on teardown
     await sup.stop()
