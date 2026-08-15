@@ -6,6 +6,7 @@ interchangeable.
 """
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
@@ -36,6 +37,8 @@ from memory.composition import MemoryComposition
 from memory.application.context import (
     configure_database,
     capture_memory_context,
+    configure_composition,
+    current_composition,
     configure_service,
     restore_memory_context,
     reset_memory_context,
@@ -285,6 +288,7 @@ def install_memory_composition(composition: MemoryComposition) -> MemoryComposit
     services["pipeline"] = build_pipeline_dispatcher(composition)
 
     configure_database(composition.database)
+    configure_composition(composition)
     for name, service in services.items():
         configure_service(name, service)
     return composition
@@ -292,21 +296,25 @@ def install_memory_composition(composition: MemoryComposition) -> MemoryComposit
 
 @asynccontextmanager
 async def memory_context(composition: MemoryComposition) -> AsyncIterator[MemoryComposition]:
-    """Temporarily install a composition and stop it if started in scope."""
+    """Temporarily bind a composition for this async context.
+
+    Lifecycle ownership remains with the composition root that started the
+    module; this scope only manages dependency bindings.
+    """
     previous = capture_memory_context()
-    was_running = composition.module.running
     try:
         install_memory_composition(composition)
         yield composition
     finally:
         restore_memory_context(previous)
-        if not was_running and composition.module.running:
-            await composition.module.stop()
 
 
 def memory_composition() -> MemoryComposition:
     """Return the process-local canonical Memory composition."""
     global _memory_composition
+    scoped = current_composition()
+    if scoped is not None:
+        return scoped
     if _memory_composition is None:
         _memory_composition = install_memory_composition(
             build_memory_composition()
@@ -314,14 +322,33 @@ def memory_composition() -> MemoryComposition:
     return _memory_composition
 
 
-async def reset_memory_composition() -> None:
-    """Drop the process-local composition and all ambient service bindings."""
+class _ResetMemoryComposition:
+    """Awaitable teardown result preserving the historical sync API."""
+
+    def __init__(self, task: asyncio.Task | None = None) -> None:
+        self._task = task
+
+    def __await__(self):
+        async def wait() -> None:
+            if self._task is not None:
+                await self._task
+        return wait().__await__()
+
+
+def reset_memory_composition() -> _ResetMemoryComposition:
+    """Drop the composition; works for both sync and async callers."""
     global _memory_composition
     old = _memory_composition
     _memory_composition = None
     reset_memory_context()
-    if old is not None:
-        await old.module.stop()
+    if old is None:
+        return _ResetMemoryComposition()
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        asyncio.run(old.module.stop())
+        return _ResetMemoryComposition()
+    return _ResetMemoryComposition(loop.create_task(old.module.stop()))
 
 
 def memory_module() -> MemoryModule:

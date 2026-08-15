@@ -18,6 +18,9 @@ _database: ContextVar[MemoryDatabasePort | None] = ContextVar(
 _standalone_strict: ContextVar[bool] = ContextVar(
     "memory_standalone_strict", default=False
 )
+_composition: ContextVar[Any | None] = ContextVar(
+    "memory_composition", default=None
+)
 _services: dict[str, ContextVar[Any]] = {
     name: ContextVar(f"memory_{name}", default=None)
     for name in (
@@ -49,26 +52,37 @@ def reset_memory_context() -> None:
     """Clear all ambient Memory dependencies in the current task context."""
     _database.set(None)
     _standalone_strict.set(False)
+    _composition.set(None)
     for service in _services.values():
         service.set(None)
 
 
-def capture_memory_context() -> tuple[MemoryDatabasePort | None, bool, dict[str, Any]]:
+def capture_memory_context() -> tuple[MemoryDatabasePort | None, bool, Any | None, dict[str, Any]]:
     return (
         _database.get(),
         _standalone_strict.get(),
+        _composition.get(),
         {name: variable.get() for name, variable in _services.items()},
     )
 
 
 def restore_memory_context(
-    state: tuple[MemoryDatabasePort | None, bool, dict[str, Any]],
+    state: tuple[MemoryDatabasePort | None, bool, Any | None, dict[str, Any]],
 ) -> None:
-    database, standalone, services = state
+    database, standalone, composition, services = state
     _database.set(database)
     _standalone_strict.set(standalone)
+    _composition.set(composition)
     for name, variable in _services.items():
         variable.set(services[name])
+
+
+def configure_composition(composition: Any | None) -> None:
+    _composition.set(composition)
+
+
+def current_composition() -> Any | None:
+    return _composition.get()
 
 
 def configure_service(name: str, service: Any) -> None:

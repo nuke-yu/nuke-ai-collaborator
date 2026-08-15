@@ -66,11 +66,27 @@ def test_scoped_composition_restores_previous_bindings():
     async def exercise() -> None:
         async with memory_context(composition):
             assert require_database() is composition.database
+            assert memory_composition() is composition
 
     asyncio.run(exercise())
 
     assert require_database() is sentinel_database
     reset_memory_context()
+
+
+def test_scoped_composition_does_not_stop_owner_started_module():
+    composition = build_memory_composition()
+
+    async def exercise() -> None:
+        await composition.module.start()
+        try:
+            async with memory_context(composition):
+                assert composition.module.running
+            assert composition.module.running
+        finally:
+            await composition.module.stop()
+
+    asyncio.run(exercise())
 
 
 def test_install_failure_does_not_partially_replace_context():

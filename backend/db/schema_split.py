@@ -614,6 +614,10 @@ async def _ensure_personal_vault_deletion_audit_schema(conn) -> None:
         await conn.execute(
             "ALTER TABLE personal_vault_deletion_audit ADD COLUMN last_error TEXT NOT NULL DEFAULT ''"
         )
+    await conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_personal_vault_deletion_sweep "
+        "ON personal_vault_deletion_audit(status, audit_id)"
+    )
 
 
 async def init_group_db(path: str | None = None) -> None:

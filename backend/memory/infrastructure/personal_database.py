@@ -623,6 +623,13 @@ async def sweep_pending_vault_deletions(*, limit: int = 100) -> Mapping[str, int
         ):
             completed += 1
             marker.unlink(missing_ok=True)
+    if discovered or failed_cleaned:
+        logger.info(
+            "Personal Vault sweeper evidence: markers_discovered=%d failed_markers_cleaned=%d",
+            len(discovered), failed_cleaned,
+        )
+    # Keep the established return contract stable; operational counters are
+    # intentionally logged rather than added to this public mapping.
     return {"scanned": scanned, "completed": completed, "skipped": skipped}
 
 
