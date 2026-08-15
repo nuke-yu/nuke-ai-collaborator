@@ -91,6 +91,8 @@ async def lifespan(app: FastAPI):
     # 2. Initialize central DB (routing/members/templates)
     tracing.setup_structured_logging()
     await db.init_central_db()
+    from memory.infrastructure import sweep_pending_vault_deletions
+    await sweep_pending_vault_deletions()
 
     # 1b. Migrate any env-provided API keys into app_config.json so the file is the
     #     single source of truth the frontend manages (config consolidation).

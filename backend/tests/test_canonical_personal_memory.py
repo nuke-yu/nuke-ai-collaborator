@@ -217,7 +217,7 @@ class CanonicalPersonalMemoryTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(impact["affected_session_ids"], ["run:1"])
         self.assertEqual(len(impact["usage_events"]), 1)
         deletion = await self.service.delete(self.scope)
-        self.assertEqual(deletion, {"deleted": True, "audit_pending": False})
+        self.assertEqual(deletion, {"deleted": True, "audit_pending": False, "audit_status": "completed"})
         self.assertFalse(Path(self.path).exists())
 
     async def test_delete_returns_success_when_central_audit_needs_retry(self) -> None:
@@ -230,10 +230,10 @@ class CanonicalPersonalMemoryTest(unittest.IsolatedAsyncioTestCase):
                 await db.commit()
             database = PersonalVaultDatabase()
             with patch.object(PersonalVaultDatabase, "_path", staticmethod(lambda _user_id: Path(path))), \
-                 patch("memory.infrastructure.personal_database._create_central_vault_deletion", new=AsyncMock(return_value=17)), \
+                 patch("memory.infrastructure.personal_database._create_central_vault_deletion", new=AsyncMock(return_value=(17, "op-17"))), \
                  patch("memory.infrastructure.personal_database._finish_central_vault_deletion", new=AsyncMock(return_value=False)):
                 result = await database.delete_vault(7)
-            self.assertEqual(result, {"deleted": True, "audit_pending": True})
+            self.assertEqual(result, {"deleted": True, "audit_pending": True, "audit_status": "pending"})
             self.assertFalse(Path(path).exists())
         finally:
             for suffix in ("", "-wal", "-shm", ".lock"):
@@ -254,8 +254,8 @@ class CanonicalPersonalMemoryTest(unittest.IsolatedAsyncioTestCase):
             with patch.object(PersonalVaultDatabase, "_path", staticmethod(lambda _user_id: Path(path))), \
                  patch("memory.infrastructure.personal_database._create_central_vault_deletion", new=AsyncMock(side_effect=RuntimeError("central down"))):
                 result = await database.delete_vault(7)
-                self.assertEqual(result, {"deleted": True, "audit_pending": True})
-                self.assertEqual(await database.delete_vault(7), {"deleted": False, "audit_pending": True})
+                self.assertEqual(result, {"deleted": False, "audit_pending": False, "audit_status": "unavailable"})
+                self.assertEqual(await database.delete_vault(7), {"deleted": False, "audit_pending": False, "audit_status": "unavailable"})
         finally:
             for suffix in ("", "-wal", "-shm", ".lock"):
                 try:
@@ -277,6 +277,34 @@ class CanonicalPersonalMemoryTest(unittest.IsolatedAsyncioTestCase):
                     os.unlink(path + suffix)
                 except FileNotFoundError:
                     pass
+
+    async def test_pending_sweeper_requires_commit_marker_and_missing_vault(self) -> None:
+        central = tempfile.mktemp(suffix="_central_sweeper.db")
+        vault = Path(tempfile.mktemp(suffix="_vault.db"))
+        marker = Path(f"{vault}.delete.op-1.committed")
+        try:
+            import db
+            from memory.infrastructure.personal_database import sweep_pending_vault_deletions
+            await db.init_central_db(central)
+            marker.write_text("op-1", encoding="utf-8")
+            async with aiosqlite.connect(central) as conn:
+                await conn.execute(
+                    "INSERT INTO personal_vault_deletion_audit(operation_id,user_id,operation,status,created_at,local_commit_marker) VALUES(?,?,?,?,?,?)",
+                    ("op-1", 7, "delete_vault", "pending", 1, str(marker)),
+                )
+                await conn.commit()
+            with patch.object(db, "DB_PATH", central), \
+                 patch.object(PersonalVaultDatabase, "_path", staticmethod(lambda _user_id: vault)):
+                result = await sweep_pending_vault_deletions()
+            self.assertEqual(result, {"scanned": 1, "completed": 1, "skipped": 0})
+            self.assertFalse(marker.exists())
+        finally:
+            for path in (central, vault):
+                for suffix in ("", "-wal", "-shm"):
+                    try:
+                        os.unlink(str(path) + suffix)
+                    except FileNotFoundError:
+                        pass
 
     async def test_habit_uses_stable_key_and_matures_from_evidence(self) -> None:
         base = 1_700_000_000_000

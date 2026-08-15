@@ -207,10 +207,14 @@ _CENTRAL_DDL = [
     )""",
     """CREATE TABLE IF NOT EXISTS personal_vault_deletion_audit (
         audit_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        operation_id TEXT NOT NULL UNIQUE,
         user_id INTEGER NOT NULL,
         operation TEXT NOT NULL,
-        status TEXT NOT NULL CHECK(status IN ('pending','completed','failed','not_found')),
+        status TEXT NOT NULL CHECK(status IN ('pending','local_delete_started','local_delete_committed','completed','failed','not_found')),
         created_at INTEGER NOT NULL,
+        delete_started_at INTEGER,
+        local_commit_marker TEXT,
+        physical_delete_confirmed INTEGER NOT NULL DEFAULT 0,
         completed_at INTEGER,
         last_error TEXT NOT NULL DEFAULT ''
     )""",
@@ -588,6 +592,20 @@ async def _ensure_personal_vault_deletion_audit_schema(conn) -> None:
         await conn.execute(
             "ALTER TABLE personal_vault_deletion_audit ADD COLUMN status TEXT NOT NULL DEFAULT 'completed'"
         )
+    if "operation_id" not in columns:
+        await conn.execute("ALTER TABLE personal_vault_deletion_audit ADD COLUMN operation_id TEXT")
+        await conn.execute(
+            "UPDATE personal_vault_deletion_audit SET operation_id='legacy-delete:' || audit_id WHERE operation_id IS NULL"
+        )
+        await conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_personal_vault_deletion_operation ON personal_vault_deletion_audit(operation_id)"
+        )
+    if "delete_started_at" not in columns:
+        await conn.execute("ALTER TABLE personal_vault_deletion_audit ADD COLUMN delete_started_at INTEGER")
+    if "local_commit_marker" not in columns:
+        await conn.execute("ALTER TABLE personal_vault_deletion_audit ADD COLUMN local_commit_marker TEXT")
+    if "physical_delete_confirmed" not in columns:
+        await conn.execute("ALTER TABLE personal_vault_deletion_audit ADD COLUMN physical_delete_confirmed INTEGER NOT NULL DEFAULT 0")
     if "completed_at" not in columns:
         await conn.execute(
             "ALTER TABLE personal_vault_deletion_audit ADD COLUMN completed_at INTEGER"

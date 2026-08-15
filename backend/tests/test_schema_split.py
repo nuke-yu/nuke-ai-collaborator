@@ -127,7 +127,7 @@ class TestSchemaSplit(unittest.IsolatedAsyncioTestCase):
             async with db.connect(legacy) as conn:
                 cur = await conn.execute("PRAGMA table_info(personal_vault_deletion_audit)")
                 columns = {row[1] for row in await cur.fetchall()}
-            self.assertTrue({"status", "completed_at", "last_error"} <= columns)
+            self.assertTrue({"operation_id", "status", "delete_started_at", "local_commit_marker", "physical_delete_confirmed", "completed_at", "last_error"} <= columns)
         finally:
             for suffix in ("", "-wal", "-shm"):
                 try:
