@@ -42,8 +42,11 @@ def require_service(name: str, fallback: Callable[[], Any]) -> Any:
     except KeyError as exc:
         raise ValueError(f"unknown Memory application service: {name}") from exc
     if service is None:
-        service = fallback()
-        _services[name].set(service)
+        # Implicit host fallbacks are deliberately not cached: test hosts and
+        # embedded applications may replace their database/config between
+        # calls. Explicit configure_service() remains the stable production
+        # path and is cached by the ContextVar.
+        return fallback()
     return service
 
 
@@ -113,7 +116,6 @@ def require_model() -> Any:
     if service is None:
         from memory.canonical import call_memory_model
         service = call_memory_model
-        _services["model"].set(service)
     return service
 
 
