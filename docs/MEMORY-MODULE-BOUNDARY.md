@@ -22,15 +22,15 @@
 
 ## 仍需继续收敛的边界
 
-以下依赖仍属于宿主适配层迁移项，不得扩散到新的 application use case：
+以下依赖已经集中在 `memory.application.context` 的显式 fallback 和
+`memory.infrastructure` adapters 中，不得扩散到新的 application use case：
 
-- 中央成员目录与 ACL 查询；
-- AI model call 与运行时配置；
-- Skill workspace 文件投影；
-- Personal Vault cursor signer 和中央删除审计；
-- Chroma client 与当前项目的 executor redaction。
+- AI model call 与运行时配置的默认实现；
+- 算法和 Chroma projection 的默认实现；
+- 当前项目 SQLite、workspace、中央成员目录和 secret provider。
 
-这些能力应分别转换成 host port，由 `memory.bootstrap` 或外部项目的 composition root 注入。
+这些能力都已有 host port；standalone 项目应在 composition root 显式注入，
+并可移除 `context.py` 中仅为当前项目保留的 lazy fallback。
 
 ## 依赖方向
 
