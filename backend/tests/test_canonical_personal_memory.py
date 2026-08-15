@@ -174,6 +174,7 @@ class CanonicalPersonalMemoryTest(unittest.IsolatedAsyncioTestCase):
                 rows = [
                     ("r-old", 7, "preference", "same value", "", "7", "observed", "private", "active", "profile", "profile:7", .4, 0, 10, 10, 10),
                     ("r-new", 7, "preference", "same value", "", "7", "user_statement", "restricted", "active", "profile", "profile:7", .9, 1, 20, 20, 20),
+                    ("r-other", 7, "preference", "new statement", "", "7", "observed", "private", "active", "profile", "profile:7", .6, 0, 30, 30, 30),
                 ]
                 await db.executemany("""INSERT INTO personal_records
                     (record_id,user_id,kind,content,speaker,subject,authority,sensitivity,status,source_type,source_id,confidence,explicit,valid_from,created_at,updated_at)
@@ -181,9 +182,12 @@ class CanonicalPersonalMemoryTest(unittest.IsolatedAsyncioTestCase):
                 await db.commit()
             async with _ProductionTempPersonalDatabase(path).connect(7) as db:
                 async with db.execute("SELECT record_id,content,authority,sensitivity,explicit,confidence FROM personal_records") as cur:
-                    self.assertEqual(await cur.fetchall(), [("r-new", "same value", "user_statement", "restricted", 1, .9)])
+                    self.assertEqual(await cur.fetchall(), [
+                        ("r-new", "same value", "user_statement", "restricted", 1, .9),
+                        ("r-other", "new statement", "observed", "private", 0, .6),
+                    ])
                 async with db.execute("SELECT conflicting_record_id,content FROM personal_migration_conflicts") as cur:
-                    self.assertEqual(await cur.fetchall(), [])
+                    self.assertEqual(await cur.fetchall(), [("r-other", "new statement")])
         finally:
             for suffix in ("", "-wal", "-shm", ".lock"):
                 try:
@@ -240,6 +244,20 @@ class CanonicalPersonalMemoryTest(unittest.IsolatedAsyncioTestCase):
         exported = await self.service.export(self.scope)
         self.assertEqual(len(exported["habit_evidence"]), 2)
         self.assertEqual({row["source_type"] for row in exported["habit_evidence"]}, {"calendar", "chat"})
+
+    async def test_export_cursor_reports_and_retrieves_remaining_collections(self) -> None:
+        for index in range(3):
+            await self.service.create_record(CreatePersonalRecord(
+                scope=self.scope, kind="preference", content=f"value-{index}",
+                source_type="test", source_id=f"test:{index}",
+            ))
+        first = await self.service.export(self.scope, limit=2)
+        self.assertEqual(len(first["records"]), 2)
+        self.assertEqual(first["export"]["next_cursor"], 2)
+        self.assertTrue(first["export"]["has_more"]["records"])
+        second = await self.service.export(self.scope, cursor=2, limit=2)
+        self.assertEqual(len(second["records"]), 1)
+        self.assertIsNone(second["export"]["next_cursor"])
 
     async def test_record_and_projection_deletion_write_audit_without_content(self) -> None:
         record_id = await self.service.create_record(CreatePersonalRecord(

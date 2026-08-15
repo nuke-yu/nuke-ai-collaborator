@@ -270,26 +270,30 @@ class CanonicalPersonalKnowledgeService(PersonalKnowledgePort):
             await db.commit()
         return {"expired_projections": cur.rowcount, "schema_version": PERSONAL_SCHEMA_VERSION}
 
-    async def export(self, scope: MemoryScope) -> Mapping[str, Any]:
+    async def export(self, scope: MemoryScope, *, cursor: int = 0, limit: int = _EXPORT_LIMIT) -> Mapping[str, Any]:
         user_id = _user_id(scope)
+        if isinstance(cursor, bool) or not isinstance(cursor, int) or cursor < 0:
+            raise ValueError("cursor must be a non-negative integer")
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= _EXPORT_LIMIT:
+            raise ValueError(f"limit must be between 1 and {_EXPORT_LIMIT}")
         async with self._database.connect(user_id) as db:
-            async with db.execute("SELECT record_id,kind,content,speaker,subject,authority,sensitivity,status,source_type,source_id,confidence,explicit,valid_from,valid_to FROM personal_records WHERE user_id=? ORDER BY created_at LIMIT ?", (user_id, _EXPORT_LIMIT)) as cur:
+            async with db.execute("SELECT record_id,kind,content,speaker,subject,authority,sensitivity,status,source_type,source_id,confidence,explicit,valid_from,valid_to FROM personal_records WHERE user_id=? ORDER BY created_at,record_id LIMIT ? OFFSET ?", (user_id, limit, cursor)) as cur:
                 records = await cur.fetchall()
-            async with db.execute("SELECT projection_id,record_id,group_id,bot_id,purpose,status,expires_at FROM personal_projections ORDER BY created_at LIMIT ?", (_EXPORT_LIMIT,)) as cur:
+            async with db.execute("SELECT p.projection_id,p.record_id,p.group_id,p.bot_id,p.purpose,p.status,p.expires_at FROM personal_projections p JOIN personal_records r ON r.record_id=p.record_id WHERE r.user_id=? ORDER BY p.created_at,p.projection_id LIMIT ? OFFSET ?", (user_id, limit, cursor)) as cur:
                 projections = await cur.fetchall()
-            async with db.execute("SELECT usage_id,record_id,projection_id,group_id,bot_id,session_id,purpose,used_at FROM personal_memory_usage_events WHERE user_id=? ORDER BY used_at LIMIT ?", (user_id, _EXPORT_LIMIT)) as cur:
+            async with db.execute("SELECT usage_id,record_id,projection_id,group_id,bot_id,session_id,purpose,used_at FROM personal_memory_usage_events WHERE user_id=? ORDER BY used_at,usage_id LIMIT ? OFFSET ?", (user_id, limit, cursor)) as cur:
                 usage_events = await cur.fetchall()
-            async with db.execute("SELECT app_id,name,status,created_at,updated_at FROM personal_apps WHERE user_id=? ORDER BY app_id LIMIT ?", (user_id, _EXPORT_LIMIT)) as cur:
+            async with db.execute("SELECT app_id,name,status,created_at,updated_at FROM personal_apps WHERE user_id=? ORDER BY app_id LIMIT ? OFFSET ?", (user_id, limit, cursor)) as cur:
                 apps = await cur.fetchall()
-            async with db.execute("SELECT rule_id,subject_type,subject_id,object_type,object_id,action,effect,created_at FROM personal_access_control_actions WHERE user_id=? ORDER BY rule_id LIMIT ?", (user_id, _EXPORT_LIMIT)) as cur:
+            async with db.execute("SELECT rule_id,subject_type,subject_id,object_type,object_id,action,effect,created_at FROM personal_access_control_actions WHERE user_id=? ORDER BY rule_id LIMIT ? OFFSET ?", (user_id, limit, cursor)) as cur:
                 acl_rules = await cur.fetchall()
-            async with db.execute("SELECT audit_id,actor_id,scope_kind,group_id,bot_id,action,allowed,reason,created_at FROM personal_acl_audit_events WHERE user_id=? ORDER BY audit_id LIMIT ?", (user_id, _EXPORT_LIMIT)) as cur:
+            async with db.execute("SELECT audit_id,actor_id,scope_kind,group_id,bot_id,action,allowed,reason,created_at FROM personal_acl_audit_events WHERE user_id=? ORDER BY audit_id LIMIT ? OFFSET ?", (user_id, limit, cursor)) as cur:
                 audit_events = await cur.fetchall()
-            async with db.execute("SELECT id,record_id,source_type,source_key,context_kind,polarity,observed_at FROM habit_evidence WHERE record_id IN (SELECT record_id FROM personal_records WHERE user_id=?) ORDER BY id LIMIT ?", (user_id, _EXPORT_LIMIT)) as cur:
+            async with db.execute("SELECT id,record_id,source_type,source_key,context_kind,polarity,observed_at FROM habit_evidence WHERE record_id IN (SELECT record_id FROM personal_records WHERE user_id=?) ORDER BY id LIMIT ? OFFSET ?", (user_id, limit, cursor)) as cur:
                 habit_evidence = await cur.fetchall()
-            async with db.execute("SELECT audit_id,actor_id,operation,record_id,projection_id,created_at FROM personal_deletion_audit_events WHERE user_id=? ORDER BY audit_id LIMIT ?", (user_id, _EXPORT_LIMIT)) as cur:
+            async with db.execute("SELECT audit_id,actor_id,operation,record_id,projection_id,created_at FROM personal_deletion_audit_events WHERE user_id=? ORDER BY audit_id LIMIT ? OFFSET ?", (user_id, limit, cursor)) as cur:
                 deletion_audits = await cur.fetchall()
-            async with db.execute("SELECT conflict_id,migration_version,resolution_status,resolved_at,resolved_by,content_hash,source_type,source_id,kind,canonical_record_id,conflicting_record_id,content,authority,explicit,confidence,valid_from,created_at FROM personal_migration_conflicts WHERE user_id=? ORDER BY created_at LIMIT ?", (user_id, _EXPORT_LIMIT)) as cur:
+            async with db.execute("SELECT conflict_id,migration_version,resolution_status,resolved_at,resolved_by,content_hash,source_type,source_id,kind,canonical_record_id,conflicting_record_id,content,authority,explicit,confidence,valid_from,created_at FROM personal_migration_conflicts WHERE user_id=? ORDER BY created_at,conflict_id LIMIT ? OFFSET ?", (user_id, limit, cursor)) as cur:
                 migration_conflicts = await cur.fetchall()
             counts = {}
             for name, table, predicate in (
@@ -303,7 +307,7 @@ class CanonicalPersonalKnowledgeService(PersonalKnowledgePort):
             ):
                 async with db.execute(f"SELECT COUNT(*) FROM {table} WHERE {predicate}", (user_id,)) as cur:
                     counts[name] = int((await cur.fetchone())[0])
-            async with db.execute("SELECT COUNT(*) FROM personal_projections") as cur:
+            async with db.execute("SELECT COUNT(*) FROM personal_projections p JOIN personal_records r ON r.record_id=p.record_id WHERE r.user_id=?", (user_id,)) as cur:
                 counts["projections"] = int((await cur.fetchone())[0])
             async with db.execute("SELECT COUNT(*) FROM habit_evidence WHERE record_id IN (SELECT record_id FROM personal_records WHERE user_id=?)", (user_id,)) as cur:
                 counts["habit_evidence"] = int((await cur.fetchone())[0])
@@ -326,8 +330,12 @@ class CanonicalPersonalKnowledgeService(PersonalKnowledgePort):
                 "acl_rules": safe_rows(rfields, acl_rules), "acl_audit_events": safe_rows(efields, audit_events),
                 "habit_evidence": safe_rows(hfields, habit_evidence), "deletion_audit_events": safe_rows(dfields, deletion_audits),
                 "migration_conflicts": safe_rows(cfields, migration_conflicts),
-                "export": {"limit_per_collection": _EXPORT_LIMIT, "total_counts": counts,
-                           "truncated": {name: total > _EXPORT_LIMIT for name, total in counts.items()}}}
+                "export": {
+                    "page_size": limit, "cursor": cursor,
+                    "next_cursor": cursor + limit if any(total > cursor + limit for total in counts.values()) else None,
+                    "has_more": {name: total > cursor + limit for name, total in counts.items()},
+                    "total_counts": counts,
+                }}
 
     async def get_record_impact(self, scope: MemoryScope, record_id: str) -> Mapping[str, Any]:
         user_id = _user_id(scope)

@@ -142,7 +142,7 @@ class PersonalVaultDatabase:
                         await _rebuild_fk_tables(db)
                         if current < 3:
                             await db.execute("INSERT INTO personal_schema_version(version, applied_at) VALUES(3, strftime('%s','now') * 1000)")
-                    if not await _has_column(db, "personal_migration_conflicts", "resolution_status"):
+                    if await _missing_columns(db, "personal_migration_conflicts"):
                         await _upgrade_conflict_table(db)
                     if current < 4:
                         await _merge_duplicate_source_records(db)
@@ -184,7 +184,6 @@ class PersonalVaultDatabase:
                     await db.execute("DELETE FROM personal_apps")
                     await db.execute("DELETE FROM personal_access_control_actions")
                     await db.execute("DELETE FROM personal_acl_audit_events")
-                    await _record_central_vault_deletion(user_id, enabled=type(self) is PersonalVaultDatabase)
                     await db.execute("DELETE FROM personal_migration_conflicts")
                     await db.commit()
                     await db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
@@ -198,6 +197,10 @@ class PersonalVaultDatabase:
                         Path(str(path) + ".lock").unlink()
                     except FileNotFoundError:
                         pass
+                # The central audit is written only after the local transaction
+                # commits and the physical artifacts are gone.  It must never
+                # claim a deletion that subsequently failed locally.
+                await _record_central_vault_deletion(user_id, enabled=type(self) is PersonalVaultDatabase)
             finally:
                 await asyncio.to_thread(fcntl.flock, lock_fd, fcntl.LOCK_UN)
                 os.close(lock_fd)
@@ -237,6 +240,12 @@ async def _has_column(db: aiosqlite.Connection, table: str, column: str) -> bool
         return column in {str(row[1]) for row in await cur.fetchall()}
 
 
+async def _missing_columns(db: aiosqlite.Connection, table: str) -> set[str]:
+    async with db.execute(f"PRAGMA table_info({table})") as cur:
+        actual = {str(row[1]) for row in await cur.fetchall()}
+    return _REQUIRED_COLUMNS[table] - actual
+
+
 async def _merge_duplicate_source_records(db: aiosqlite.Connection) -> None:
     async with db.execute(
         """SELECT user_id,source_type,source_id,kind,COUNT(*) FROM personal_records
@@ -245,18 +254,65 @@ async def _merge_duplicate_source_records(db: aiosqlite.Connection) -> None:
         groups = await cur.fetchall()
     for user_id, source_type, source_id, kind, _ in groups:
         async with db.execute(
-            """SELECT record_id,content FROM personal_records
+            """SELECT record_id,content,authority,sensitivity,status,confidence,explicit,
+                      valid_from,created_at,updated_at
+               FROM personal_records
                WHERE user_id=? AND source_type=? AND source_id=? AND kind=?
                ORDER BY created_at,record_id""",
             (user_id, source_type, source_id, kind),
         ) as cur:
             rows = await cur.fetchall()
         by_content: dict[str, list[str]] = {}
-        for record_id, content in rows:
-            by_content.setdefault(safe_memory_text(content), []).append(str(record_id))
+        for row in rows:
+            by_content.setdefault(safe_memory_text(row[1]), []).append(str(row[0]))
         for ids in by_content.values():
             if len(ids) > 1:
                 await _merge_records(db, ids)
+        # Different statements sharing a source are valid history, not records
+        # to delete.  Preserve every record and retain an explicit migration
+        # conflict for operators/auditors.
+        if len(by_content) > 1:
+            authority_rank = {"observed": 0, "third_party": 1, "user_statement": 2}
+            canonical = max(rows, key=lambda row: (
+                int(row[6]), authority_rank.get(str(row[2]), 0), float(row[5]),
+                int(row[9]), int(row[8]), str(row[0]),
+            ))[0]
+            canonical_content = safe_memory_text(next(row[1] for row in rows if row[0] == canonical))
+            for row in rows:
+                if str(row[0]) != str(canonical) and safe_memory_text(row[1]) != canonical_content:
+                    await _record_migration_conflict(
+                        db, user_id=int(user_id), source_type=str(source_type),
+                        source_id=str(source_id), kind=str(kind),
+                        canonical_record_id=str(canonical), row=row,
+                    )
+
+
+async def _record_migration_conflict(
+    db: aiosqlite.Connection,
+    *,
+    user_id: int,
+    source_type: str,
+    source_id: str,
+    kind: str,
+    canonical_record_id: str,
+    row: tuple[object, ...],
+) -> None:
+    conflicting_record_id = str(row[0])
+    content = safe_memory_text(row[1])
+    content_hash = hashlib.sha256(content.encode()).hexdigest()
+    conflict_id = "conflict:" + hashlib.sha256(
+        f"4:{canonical_record_id}:{conflicting_record_id}:{content_hash}".encode()
+    ).hexdigest()[:24]
+    await db.execute(
+        """INSERT OR IGNORE INTO personal_migration_conflicts
+           (conflict_id,user_id,migration_version,resolution_status,resolved_at,
+            resolved_by,content_hash,source_type,source_id,kind,canonical_record_id,
+            conflicting_record_id,content,authority,explicit,confidence,valid_from,created_at)
+           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (conflict_id, user_id, 4, "unresolved", None, None, content_hash,
+         source_type, source_id, kind, canonical_record_id, conflicting_record_id,
+         content, str(row[2]), int(row[6]), float(row[5]), int(row[7]), int(row[9])),
+    )
 
 
 async def _merge_records(db: aiosqlite.Connection, record_ids: list[str]) -> str | None:
@@ -294,20 +350,10 @@ async def _merge_records(db: aiosqlite.Connection, record_ids: list[str]) -> str
          strongest_confidence, strongest_explicit, earliest_valid_from, earliest_created_at,
          latest_updated_at, canonical),
     )
-    winner_content = safe_memory_text(winner[1])
     for row in rows:
         conflicting_id = str(row[0])
         if conflicting_id == canonical:
             continue
-        if safe_memory_text(row[1]) != winner_content:
-            conflict_id = "conflict:" + hashlib.sha256(f"{canonical}:{conflicting_id}".encode()).hexdigest()[:24]
-            await db.execute(
-                """INSERT OR REPLACE INTO personal_migration_conflicts
-                   (conflict_id,user_id,migration_version,resolution_status,resolved_at,resolved_by,content_hash,
-                    source_type,source_id,kind,canonical_record_id,conflicting_record_id,content,authority,explicit,confidence,valid_from,created_at)
-                   SELECT ?,4,'unresolved',NULL,NULL,NULL,?,source_type,source_id,kind,?,?,?, ?,?,?,?,? FROM personal_records WHERE record_id=?""",
-                (conflict_id, hashlib.sha256(safe_memory_text(row[1]).encode()).hexdigest(), canonical, conflicting_id, safe_memory_text(row[1]), str(row[2]), int(row[6]), float(row[5]), int(row[7]), int(row[9]), conflicting_id),
-            )
     if strongest == "secret":
         await db.execute("UPDATE personal_projections SET status='revoked' WHERE record_id IN ({}) AND status='active'".format(",".join("?" for _ in record_ids)), record_ids)
     for duplicate in record_ids:
@@ -328,20 +374,34 @@ async def _upgrade_conflict_table(db: aiosqlite.Connection) -> None:
     await db.execute(_DDL[7])
     async with db.execute("PRAGMA table_info(personal_migration_conflicts_v4)") as cur:
         columns = {str(row[1]) for row in await cur.fetchall()}
-    if "migration_version" in columns:
-        await db.execute("INSERT INTO personal_migration_conflicts SELECT * FROM personal_migration_conflicts_v4")
-    else:
+    async with db.execute("SELECT * FROM personal_migration_conflicts_v4") as cur:
+        legacy_rows = await cur.fetchall()
+    indexes = {name: index for index, name in enumerate(columns)}
+    # PRAGMA column order is stable for SQLite tables, but use the names from
+    # the table definition rather than assuming a particular legacy layout.
+    async with db.execute("PRAGMA table_info(personal_migration_conflicts_v4)") as cur:
+        indexes = {str(row[1]): int(row[0]) for row in await cur.fetchall()}
+    for legacy in legacy_rows:
+        def value(name: str, default: object = None) -> object:
+            index = indexes.get(name)
+            return legacy[index] if index is not None else default
+
+        content = safe_memory_text(value("content", ""))
         await db.execute(
             """INSERT INTO personal_migration_conflicts
-               (conflict_id,user_id,migration_version,resolution_status,content_hash,source_type,source_id,kind,
-                canonical_record_id,conflicting_record_id,content,authority,explicit,confidence,valid_from,created_at)
-               SELECT conflict_id,user_id,4,'unresolved','',source_type,source_id,kind,
-                      canonical_record_id,conflicting_record_id,content,authority,explicit,confidence,valid_from,created_at
-               FROM personal_migration_conflicts_v4"""
+               (conflict_id,user_id,migration_version,resolution_status,resolved_at,resolved_by,
+                content_hash,source_type,source_id,kind,canonical_record_id,conflicting_record_id,
+                content,authority,explicit,confidence,valid_from,created_at)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (str(value("conflict_id", "")), int(value("user_id", 0)),
+             int(value("migration_version", 4)), str(value("resolution_status", "unresolved")),
+             value("resolved_at"), value("resolved_by"),
+             str(value("content_hash") or hashlib.sha256(content.encode()).hexdigest()),
+             str(value("source_type", "")), str(value("source_id", "")), str(value("kind", "")),
+             str(value("canonical_record_id", "")), str(value("conflicting_record_id", "")),
+             content, str(value("authority", "observed")), int(value("explicit", 0)),
+             float(value("confidence", 0.0)), int(value("valid_from", 0)), int(value("created_at", 0))),
         )
-        async with db.execute("SELECT conflict_id,content FROM personal_migration_conflicts_v4") as cur:
-            for conflict_id, content in await cur.fetchall():
-                await db.execute("UPDATE personal_migration_conflicts SET content_hash=? WHERE conflict_id=?", (hashlib.sha256(safe_memory_text(content).encode()).hexdigest(), conflict_id))
     await db.execute("DROP TABLE personal_migration_conflicts_v4")
 
 

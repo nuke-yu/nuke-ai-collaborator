@@ -72,10 +72,14 @@ async def delete_personal_memory_access_rule(body: dict, user=Depends(auth.get_c
     return {"status": "ok"}
 
 @router.get("/api/personal/memory")
-async def export_personal_memory(user=Depends(auth.get_current_user)):
+async def export_personal_memory(cursor: int = 0, limit: int = 1000, user=Depends(auth.get_current_user)):
     uid=int(user["uid"])
-    return await _personal_client(uid).export(MemoryScope.personal(
-        user_id=uid,actor_id=f"user:{uid}",purpose="personal_memory_export"))
+    try:
+        return await _personal_client(uid).export(MemoryScope.personal(
+            user_id=uid,actor_id=f"user:{uid}",purpose="personal_memory_export"),
+            cursor=cursor, limit=limit)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
 
 @router.post("/api/personal/memory/records")
 async def create_personal_record(body:dict,user=Depends(auth.get_current_user)):

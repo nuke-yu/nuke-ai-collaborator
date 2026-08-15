@@ -67,9 +67,9 @@ class AuthorizedPersonalKnowledgeService:
         await self._authorize(scope, "write")
         return await self._delegate.rebuild(scope)
 
-    async def export(self, scope: MemoryScope) -> Mapping[str, Any]:
+    async def export(self, scope: MemoryScope, *, cursor: int = 0, limit: int = 1000) -> Mapping[str, Any]:
         await self._authorize(scope, "read")
-        return await self._delegate.export(scope)
+        return await self._delegate.export(scope, cursor=cursor, limit=limit)
 
     async def get_record_impact(self, scope: MemoryScope, record_id: str) -> Mapping[str, Any]:
         await self._authorize(scope, "read")
