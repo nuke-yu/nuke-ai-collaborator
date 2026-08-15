@@ -37,6 +37,10 @@ class MemoryModule:
     def running(self) -> bool:
         return self._task is not None and not self._task.done()
 
+    @property
+    def reconciler(self) -> ProjectionReconcilerPort:
+        return self._reconciler
+
     def register_group(self, group_id: int) -> None:
         if group_id <= 0:
             raise ValueError("group_id must be positive")

@@ -5,22 +5,17 @@ import hashlib
 import time
 from typing import Any
 
+from memory.application.context import configure_database as configure_memory_database
 from memory.application.context import require_database
-
-_database = None
 
 
 def configure_database(database) -> None:
     """Inject the host database port at the composition boundary."""
-    global _database
-    _database = database
+    configure_memory_database(database)
 
 
 def _get_database():
-    global _database
-    if _database is None:
-        _database = require_database()
-    return _database
+    return require_database()
 
 
 async def _connect(table_name: str, group_id: int, *, write: bool):

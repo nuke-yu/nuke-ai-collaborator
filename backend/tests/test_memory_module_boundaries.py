@@ -26,8 +26,6 @@ def test_application_does_not_import_host_or_concrete_infrastructure() -> None:
         "memory.infrastructure",
     )
     for path in (MEMORY_ROOT / "application").glob("*.py"):
-        if path.name == "context.py":
-            continue
         for imported in _imports(path):
             assert not any(
                 imported == prefix or imported.startswith(prefix + ".")

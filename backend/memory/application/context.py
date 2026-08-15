@@ -8,7 +8,6 @@ service constructors remain preferred for embedding.
 from __future__ import annotations
 
 from contextvars import ContextVar
-import importlib
 from typing import Any, Callable
 
 from memory.ports import MemoryDatabasePort
@@ -53,101 +52,92 @@ def require_service(name: str, fallback: Callable[[], Any]) -> Any:
 def require_database() -> MemoryDatabasePort:
     database = _database.get()
     if database is None:
-        # Transitional host default for function-style entry points.  It is
-        # resolved lazily, never imported by application modules at import
-        # time, and can be omitted entirely by standalone hosts that inject a
-        # port through configure_database().
-        from memory.infrastructure.sqlite_database import SQLiteMemoryDatabase
-        database = SQLiteMemoryDatabase()
-        _database.set(database)
+        from memory.legacy_fallback import default_database
+        return default_database()
     return database
 
 
 def require_learning() -> Any:
-    return require_service("learning", lambda: _canonical_factory("build_learning_client"))
+    return require_service("learning", lambda: _legacy_factory("build_learning_client"))
 
 
 def require_pipeline() -> Any:
-    return require_service("pipeline", lambda: _canonical_factory("build_pipeline_dispatcher"))
+    return require_service("pipeline", lambda: _legacy_factory("build_pipeline_dispatcher"))
 
 
 def require_skill_compiler() -> Any:
-    return require_service("skill_compiler", lambda: _canonical_factory("build_skill_compiler"))
+    return require_service("skill_compiler", lambda: _legacy_factory("build_skill_compiler"))
 
 
 def require_skill_projection() -> Any:
-    return require_service("skill_projection", lambda: _canonical_factory("build_skill_projection_client"))
+    return require_service("skill_projection", lambda: _legacy_factory("build_skill_projection_client"))
 
 
 def require_experience_distiller() -> Any:
-    return require_service("experience_distiller", lambda: _canonical_factory("build_experience_distiller"))
+    return require_service("experience_distiller", lambda: _legacy_factory("build_experience_distiller"))
 
 
 def require_projection_outbox() -> Any:
-    return require_service("projection_outbox", lambda: _canonical_factory("build_projection_outbox"))
+    return require_service("projection_outbox", lambda: _legacy_factory("build_projection_outbox"))
 
 
 def require_projection_reconciler() -> Any:
-    return require_service("projection_reconciler", lambda: _canonical_factory("build_projection_reconciler"))
+    return require_service("projection_reconciler", lambda: _legacy_factory("build_projection_reconciler"))
 
 
 def require_member_directory() -> Any:
-    return require_service("member_directory", _default_member_directory)
+    return require_service("member_directory", _legacy_default_member_directory)
 
 
 def require_secret_provider() -> Any:
-    return require_service("secret_provider", _default_secret_provider)
+    return require_service("secret_provider", _legacy_default_secret_provider)
 
 
 def require_skill_workspace() -> Any:
-    return require_service("skill_workspace", _default_skill_workspace)
+    return require_service("skill_workspace", _legacy_default_skill_workspace)
 
 
 def require_fact_engine() -> Any:
-    return require_service("fact_engine", _default_fact_engine)
+    return require_service("fact_engine", _legacy_default_fact_engine)
 
 
 def require_settings() -> Any:
-    return require_service("settings", _default_settings)
+    return require_service("settings", _legacy_default_settings)
 
 
 def require_model() -> Any:
     service = _services["model"].get()
     if service is None:
-        from memory.canonical import call_memory_model
-        service = call_memory_model
+        from memory.legacy_fallback import default_model
+        service = default_model()
     return service
 
 
-def _canonical_factory(name: str) -> Any:
-    # This is the single legacy host bridge.  Standalone hosts should register
-    # concrete services with configure_service and never load this fallback.
-    from memory import canonical
-    factory = getattr(canonical, name)
-    return factory()
+def _legacy_factory(name: str) -> Any:
+    from memory.legacy_fallback import canonical_factory
+    return canonical_factory(name)
 
 
-def _default_member_directory() -> Any:
-    from memory.infrastructure.member_directory import CentralMemberDirectory
-    return CentralMemberDirectory()
+def _legacy_default_member_directory() -> Any:
+    from memory.legacy_fallback import default_member_directory
+    return default_member_directory()
 
 
-def _default_secret_provider() -> Any:
-    from memory.infrastructure.secret_provider import CurrentMemorySecretProvider
-    return CurrentMemorySecretProvider()
+def _legacy_default_secret_provider() -> Any:
+    from memory.legacy_fallback import default_secret_provider
+    return default_secret_provider()
 
 
-def _default_skill_workspace() -> Any:
-    from memory.infrastructure.skill_workspace import CurrentSkillWorkspace
-    return CurrentSkillWorkspace()
+def _legacy_default_skill_workspace() -> Any:
+    from memory.legacy_fallback import default_skill_workspace
+    return default_skill_workspace()
 
 
-def _default_fact_engine() -> Any:
-    module = importlib.import_module("memory.adapters.algorithms")
-    return module.Mem0FactEngine()
+def _legacy_default_fact_engine() -> Any:
+    from memory.legacy_fallback import default_fact_engine
+    return default_fact_engine()
 
 
-def _default_settings() -> Any:
-    from memory.infrastructure.settings import CurrentMemorySettings
-    return CurrentMemorySettings()
-    return database
+def _legacy_default_settings() -> Any:
+    from memory.legacy_fallback import default_settings
+    return default_settings()

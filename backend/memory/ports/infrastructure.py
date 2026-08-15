@@ -233,6 +233,13 @@ class ProjectionDeliveryPort(Protocol):
     ) -> None: ...
 
 
+@dataclass(frozen=True, slots=True)
+class ProjectionDrainResult:
+    claimed: int = 0
+    completed: int = 0
+    failed: int = 0
+
+
 @runtime_checkable
 class ProjectionReconcilerPort(Protocol):
     """Rebuild projection intents from canonical state for one tenant."""

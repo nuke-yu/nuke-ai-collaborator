@@ -10,7 +10,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Mapping
 
-from memory.ports import MemoryDatabasePort, ProjectionDeliveryPort
+from memory.ports import MemoryDatabasePort, ProjectionDeliveryPort, ProjectionDrainResult
 
 log = logging.getLogger(__name__)
 
@@ -18,11 +18,7 @@ _LEASE_MS = 30_000
 _MAX_BACKOFF_MS = 60_000
 
 
-@dataclass(frozen=True, slots=True)
-class DrainResult:
-    claimed: int = 0
-    completed: int = 0
-    failed: int = 0
+DrainResult = ProjectionDrainResult
 
 
 class ProjectionOutbox:

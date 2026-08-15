@@ -30,7 +30,7 @@ from memory.infrastructure import MemorySchemaManager, ProjectionOutbox, SQLiteM
 from memory.module import MemoryModule
 from memory.ports import MemoryACLPort
 from memory.composition import MemoryComposition
-from memory.application.context import configure_database
+from memory.application.context import configure_database, configure_service
 
 _memory_composition: MemoryComposition | None = None
 _bot_memory_projection_rollout_gate: BotMemoryProjectionRolloutGate | None = None
@@ -196,11 +196,28 @@ def build_memory_composition(*, drain_interval_seconds: float = 60.0) -> MemoryC
 
     This is the preferred construction point for runtime code.
     """
-    return MemoryComposition(
+    from memory.application import (
+        CanonicalExperienceDistiller,
+        CanonicalLearningService,
+        CanonicalSkillCompiler,
+        CanonicalSkillProjectionService,
+    )
+    composition = MemoryComposition(
         module=build_memory_module(
             drain_interval_seconds=drain_interval_seconds,
         )
     )
+    # Production composition owns service identity and lifetime.  Tests and
+    # standalone hosts may instead call configure_service() with their fakes.
+    configure_service("learning", CanonicalLearningService(composition.database))
+    configure_service("skill_compiler", CanonicalSkillCompiler(composition.database))
+    configure_service("skill_projection", CanonicalSkillProjectionService(composition.database))
+    configure_service("experience_distiller", CanonicalExperienceDistiller(
+        composition.database, composition.projection_outbox
+    ))
+    configure_service("projection_outbox", composition.projection_outbox)
+    configure_service("projection_reconciler", composition.module.reconciler)
+    return composition
 
 
 def memory_composition() -> MemoryComposition:
@@ -208,6 +225,10 @@ def memory_composition() -> MemoryComposition:
     global _memory_composition
     if _memory_composition is None:
         _memory_composition = build_memory_composition()
+        # Pipeline handlers need the fully assigned composition above; build
+        # this last so no factory can recursively construct another root.
+        from memory.canonical import build_pipeline_dispatcher
+        configure_service("pipeline", build_pipeline_dispatcher())
     return _memory_composition
 
 
