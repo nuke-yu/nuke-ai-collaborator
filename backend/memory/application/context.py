@@ -15,6 +15,9 @@ from memory.ports import MemoryDatabasePort
 _database: ContextVar[MemoryDatabasePort | None] = ContextVar(
     "memory_database", default=None
 )
+_standalone_strict: ContextVar[bool] = ContextVar(
+    "memory_standalone_strict", default=False
+)
 _services: dict[str, ContextVar[Any]] = {
     name: ContextVar(f"memory_{name}", default=None)
     for name in (
@@ -26,6 +29,24 @@ _services: dict[str, ContextVar[Any]] = {
 
 def configure_database(database: MemoryDatabasePort) -> None:
     _database.set(database)
+
+
+def configure_standalone_mode(enabled: bool = True) -> None:
+    """Require explicit host dependencies instead of the project bridge.
+
+    Embedded/standalone hosts should enable this before serving requests.  The
+    default remains permissive only for the legacy application entry points in
+    the current product; it is not used by the Memory composition itself.
+    """
+    _standalone_strict.set(bool(enabled))
+
+
+def reset_memory_context() -> None:
+    """Clear all ambient Memory dependencies in the current task context."""
+    _database.set(None)
+    _standalone_strict.set(False)
+    for service in _services.values():
+        service.set(None)
 
 
 def configure_service(name: str, service: Any) -> None:
@@ -41,6 +62,10 @@ def require_service(name: str, fallback: Callable[[], Any]) -> Any:
     except KeyError as exc:
         raise ValueError(f"unknown Memory application service: {name}") from exc
     if service is None:
+        if _standalone_strict.get():
+            raise RuntimeError(
+                f"Memory service {name!r} is not configured for standalone host"
+            )
         # Implicit host fallbacks are deliberately not cached: test hosts and
         # embedded applications may replace their database/config between
         # calls. Explicit configure_service() remains the stable production
@@ -52,6 +77,8 @@ def require_service(name: str, fallback: Callable[[], Any]) -> Any:
 def require_database() -> MemoryDatabasePort:
     database = _database.get()
     if database is None:
+        if _standalone_strict.get():
+            raise RuntimeError("Memory database is not configured for standalone host")
         from memory.legacy_fallback import default_database
         return default_database()
     return database
@@ -108,6 +135,8 @@ def require_settings() -> Any:
 def require_model() -> Any:
     service = _services["model"].get()
     if service is None:
+        if _standalone_strict.get():
+            raise RuntimeError("Memory model is not configured for standalone host")
         from memory.legacy_fallback import default_model
         service = default_model()
     return service
