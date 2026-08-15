@@ -6,6 +6,9 @@ interchangeable.
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
+from typing import Iterator
+
 from memory.adapters.runtime import (
     redact_projection_content,
     redact_projection_error,
@@ -205,10 +208,25 @@ def build_memory_composition(*, drain_interval_seconds: float = 60.0) -> MemoryC
         CanonicalSkillCompiler,
         CanonicalSkillProjectionService,
     )
+    from memory.adapters.algorithms import Mem0FactEngine
+    from memory.infrastructure import (
+        CentralMemberDirectory,
+        CurrentMemorySecretProvider,
+        CurrentMemorySettings,
+        CurrentSkillWorkspace,
+    )
+    from ai.client import call_ai_once
+
     composition = MemoryComposition(
         module=build_memory_module(
             drain_interval_seconds=drain_interval_seconds,
-        )
+        ),
+        member_directory=CentralMemberDirectory(),
+        secret_provider=CurrentMemorySecretProvider(),
+        skill_workspace=CurrentSkillWorkspace(),
+        fact_engine=Mem0FactEngine(),
+        settings=CurrentMemorySettings(),
+        model=call_ai_once,
     )
     return composition
 
@@ -240,8 +258,33 @@ def install_memory_composition(composition: MemoryComposition) -> MemoryComposit
     )
     configure_service("projection_outbox", composition.projection_outbox)
     configure_service("projection_reconciler", composition.module.reconciler)
+    configure_service("member_directory", composition.member_directory)
+    configure_service("secret_provider", composition.secret_provider)
+    configure_service("skill_workspace", composition.skill_workspace)
+    configure_service("fact_engine", composition.fact_engine)
+    configure_service("settings", composition.settings)
+    configure_service("model", composition.model)
     configure_service("pipeline", build_pipeline_dispatcher(composition))
     return composition
+
+
+@contextmanager
+def memory_context(composition: MemoryComposition) -> Iterator[MemoryComposition]:
+    """Temporarily install a composition and restore the previous bindings."""
+    from memory.application import context as memory_context_module
+
+    previous_database = memory_context_module._database.get()
+    previous_services = {
+        name: variable.get()
+        for name, variable in memory_context_module._services.items()
+    }
+    try:
+        install_memory_composition(composition)
+        yield composition
+    finally:
+        memory_context_module._database.set(previous_database)
+        for name, service in previous_services.items():
+            memory_context_module._services[name].set(service)
 
 
 def memory_composition() -> MemoryComposition:
@@ -254,11 +297,14 @@ def memory_composition() -> MemoryComposition:
     return _memory_composition
 
 
-def reset_memory_composition() -> None:
+async def reset_memory_composition() -> None:
     """Drop the process-local composition and all ambient service bindings."""
     global _memory_composition
+    old = _memory_composition
     _memory_composition = None
     reset_memory_context()
+    if old is not None:
+        await old.module.stop()
 
 
 def memory_module() -> MemoryModule:

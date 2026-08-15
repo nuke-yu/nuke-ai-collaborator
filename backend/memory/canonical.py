@@ -87,6 +87,12 @@ def build_pipeline_dispatcher() -> CanonicalPipelineDispatcher:
 
     New composition roots use ``memory.composition_pipeline`` directly.
     """
+    from memory.application.context import standalone_mode_enabled
+    if standalone_mode_enabled():
+        raise RuntimeError(
+            "canonical.build_pipeline_dispatcher() is unavailable in standalone mode; "
+            "use memory.composition_pipeline.build_pipeline_dispatcher(composition)"
+        )
     from memory.composition_pipeline import build_pipeline_dispatcher as _build
     return _build(_runtime_composition())
 

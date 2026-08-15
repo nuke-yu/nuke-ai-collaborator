@@ -9,6 +9,14 @@ from dataclasses import dataclass
 
 from memory.infrastructure import ProjectionOutbox
 from memory.module import MemoryModule
+from memory.ports import (
+    FactEnginePort,
+    MemberDirectoryPort,
+    MemorySecretPort,
+    MemorySettingsPort,
+    ModelPort,
+    SkillWorkspacePort,
+)
 
 
 @dataclass(slots=True)
@@ -22,6 +30,12 @@ class MemoryComposition:
     """
 
     module: MemoryModule
+    member_directory: MemberDirectoryPort | None = None
+    secret_provider: MemorySecretPort | None = None
+    skill_workspace: SkillWorkspacePort | None = None
+    fact_engine: FactEnginePort | None = None
+    settings: MemorySettingsPort | None = None
+    model: ModelPort | None = None
 
     @property
     def database(self):

@@ -41,6 +41,10 @@ def configure_standalone_mode(enabled: bool = True) -> None:
     _standalone_strict.set(bool(enabled))
 
 
+def standalone_mode_enabled() -> bool:
+    return _standalone_strict.get()
+
+
 def reset_memory_context() -> None:
     """Clear all ambient Memory dependencies in the current task context."""
     _database.set(None)

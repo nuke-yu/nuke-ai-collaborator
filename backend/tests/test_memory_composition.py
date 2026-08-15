@@ -12,6 +12,7 @@ from memory.application.context import (
 )
 from memory.bootstrap import (
     build_memory_composition,
+    memory_context,
     memory_composition,
     memory_module,
 )
@@ -52,3 +53,15 @@ def test_standalone_context_fails_fast_without_explicit_ports():
             require_learning()
     finally:
         reset_memory_context()
+
+
+def test_scoped_composition_restores_previous_bindings():
+    sentinel_database = object()
+    configure_database(sentinel_database)  # type: ignore[arg-type]
+    composition = build_memory_composition()
+
+    with memory_context(composition):
+        assert require_database() is composition.database
+
+    assert require_database() is sentinel_database
+    reset_memory_context()

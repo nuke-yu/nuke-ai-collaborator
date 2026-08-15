@@ -51,8 +51,10 @@ class CanonicalObservationLoader:
     def __init__(self, database: MemoryDatabasePort | None = None,
                  member_directory: MemberDirectoryPort | None = None) -> None:
         self._database = database or require_database()
-        from memory.application.context import require_member_directory
-        self._member_directory = member_directory or require_member_directory()
+        if member_directory is None:
+            from memory.application.context import require_member_directory
+            member_directory = require_member_directory()
+        self._member_directory = member_directory
 
     async def load(self, group_id: int, input_id: str) -> CanonicalObservationEvent | None:
         message_id, bot_id = _parse_input(input_id)
@@ -108,10 +110,12 @@ class CanonicalBotFactObserver:
         database: MemoryDatabasePort,
         fact_service: Any,
         ai_call_fn: Callable[..., Awaitable[Any]] | None = None,
+        fact_engine: Any | None = None,
     ) -> None:
         self._database = database
         self._fact_service = fact_service
         self._ai_call_fn = ai_call_fn
+        self._fact_engine = fact_engine
 
     async def observe(self, event: CanonicalObservationEvent) -> tuple[str, ...]:
         async with await self._database.connect("memory_records", event.group_id, write=False) as db:
@@ -134,7 +138,7 @@ class CanonicalBotFactObserver:
             if projection_id:
                 projection_by_record[str(record_id)] = projection_id
 
-        engine = _default_fact_engine()
+        engine = self._fact_engine or _default_fact_engine()
         ai_call_fn = self._ai_call_fn
         if ai_call_fn is not None:
             model_call = ai_call_fn

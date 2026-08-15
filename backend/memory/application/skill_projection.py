@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from typing import Any
 from memory.contracts import MemoryOperationError
 from memory.application.context import require_database
 from memory.domain.safety import safe_memory_text
@@ -11,8 +12,10 @@ from memory.ports import MemoryDatabasePort
 class CanonicalSkillProjectionService:
     """Project an existing canonical Skill without changing its authority."""
 
-    def __init__(self, database: MemoryDatabasePort | None = None) -> None:
+    def __init__(self, database: MemoryDatabasePort | None = None,
+                 workspace: Any | None = None) -> None:
         self._database = database or require_database()
+        self._workspace = workspace
 
     async def project(self, skill_id: str, group_id: int) -> str:
         async with await self._database.connect("skills", group_id, write=False) as db:
@@ -47,8 +50,10 @@ class CanonicalSkillProjectionService:
                 for index, step in enumerate(declaration["procedure"])
             ) + "\n"
         )
-        from memory.application.context import require_skill_workspace
-        return require_skill_workspace().write_skill(
+        if self._workspace is None:
+            from memory.application.context import require_skill_workspace
+            self._workspace = require_skill_workspace()
+        return self._workspace.write_skill(
             group_id=group_id, bot_id=int(bot_id), name=name,
             folder=folder, content=content,
         )

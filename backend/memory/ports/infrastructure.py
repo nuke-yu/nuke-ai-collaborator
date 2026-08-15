@@ -29,6 +29,16 @@ class FactExtractionPort(MemoryAlgorithmPort, Protocol):
 
 
 @runtime_checkable
+class FactEnginePort(Protocol):
+    async def extract_and_reconcile(self, text: str, existing: Sequence[Mapping[str, Any]], *, ai_call_fn: Any = None) -> Any: ...
+
+
+@runtime_checkable
+class ModelPort(Protocol):
+    async def __call__(self, *args: Any, **kwargs: Any) -> Any: ...
+
+
+@runtime_checkable
 class CaseExtractionPort(MemoryAlgorithmPort, Protocol):
     async def extract_case(self, command: Any) -> Any: ...
 

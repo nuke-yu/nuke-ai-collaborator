@@ -27,38 +27,55 @@ from memory.domain import MemoryScope
 
 def build_pipeline_dispatcher(composition: MemoryComposition) -> CanonicalPipelineDispatcher:
     """Build all pipeline handlers against the supplied composition only."""
+    required = {
+        "member_directory": composition.member_directory,
+        "fact_engine": composition.fact_engine,
+        "skill_workspace": composition.skill_workspace,
+        "settings": composition.settings,
+        "model": composition.model,
+    }
+    missing = [name for name, value in required.items() if value is None]
+    if missing:
+        raise RuntimeError(
+            "Memory composition is incomplete; missing: " + ", ".join(missing)
+        )
     database = composition.database
     projection_outbox = composition.projection_outbox
     learning = CanonicalLearningService(database)
-
-    from ai.client import call_ai_once
-    from core import config
+    model = composition.model
+    settings = composition.settings
 
     fact_service = BotFactObservationService(database, projection_outbox)
-    fact_observer = CanonicalBotFactObserver(database, fact_service, call_ai_once)
-    observation_loader = CanonicalObservationLoader(database)
+    fact_observer = CanonicalBotFactObserver(
+        database, fact_service, model, composition.fact_engine
+    )
+    observation_loader = CanonicalObservationLoader(
+        database, composition.member_directory
+    )
     summary_observer = CanonicalSummaryObserver(
-        database, call_ai_once, threshold=getattr(config, "SUMMARY_THRESHOLD", 5)
+        database, model, threshold=settings.get("SUMMARY_THRESHOLD", 5)
     )
     reflection_service = BotReflectionService(database, projection_outbox)
     reflection_observer = CanonicalReflectionObserver(
         database,
         reflection_service,
-        call_ai_once,
-        min_facts=getattr(config, "REFLECT_MIN_FACTS", 5),
-        importance_threshold=getattr(config, "REFLECT_IMPORTANCE_THRESHOLD", 3.0),
-        max_insights=getattr(config, "REFLECT_MAX_INSIGHTS", 5),
-        max_backlog=getattr(config, "REFLECT_MAX_BACKLOG", 50),
-        max_level=getattr(config, "REFLECT_MAX_LEVEL", 2),
+        model,
+        min_facts=settings.get("REFLECT_MIN_FACTS", 5),
+        importance_threshold=settings.get("REFLECT_IMPORTANCE_THRESHOLD", 3.0),
+        max_insights=settings.get("REFLECT_MAX_INSIGHTS", 5),
+        max_backlog=settings.get("REFLECT_MAX_BACKLOG", 50),
+        max_level=settings.get("REFLECT_MAX_LEVEL", 2),
     )
     tool_compression_observer = CanonicalToolCompressionObserver(
         database,
-        call_ai_once,
-        threshold=getattr(config, "TOOL_EVENT_COMPRESS_THRESHOLD", 10),
-        max_batch=getattr(config, "TOOL_EVENT_COMPRESS_MAX_BATCH", 50),
-        max_insights=getattr(config, "TOOL_EVENT_COMPRESS_MAX_INSIGHTS", 5),
+        model,
+        threshold=settings.get("TOOL_EVENT_COMPRESS_THRESHOLD", 10),
+        max_batch=settings.get("TOOL_EVENT_COMPRESS_MAX_BATCH", 50),
+        max_insights=settings.get("TOOL_EVENT_COMPRESS_MAX_INSIGHTS", 5),
     )
-    skill_projection = CanonicalSkillProjectionService(database)
+    skill_projection = CanonicalSkillProjectionService(
+        database, composition.skill_workspace
+    )
     case_evaluator = CanonicalCaseEvaluator(database)
     experience_distiller = CanonicalExperienceDistiller(database, projection_outbox)
     skill_compiler = CanonicalSkillCompiler(database)
