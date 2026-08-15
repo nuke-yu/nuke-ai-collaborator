@@ -254,8 +254,8 @@ class CanonicalPersonalMemoryTest(unittest.IsolatedAsyncioTestCase):
             with patch.object(PersonalVaultDatabase, "_path", staticmethod(lambda _user_id: Path(path))), \
                  patch("memory.infrastructure.personal_database._create_central_vault_deletion", new=AsyncMock(side_effect=RuntimeError("central down"))):
                 result = await database.delete_vault(7)
-                self.assertEqual(result, {"deleted": False, "audit_pending": False, "audit_status": "unavailable"})
-                self.assertEqual(await database.delete_vault(7), {"deleted": False, "audit_pending": False, "audit_status": "unavailable"})
+                self.assertEqual(result, {"deleted": True, "audit_pending": True, "audit_status": "pending"})
+                self.assertEqual(await database.delete_vault(7), {"deleted": False, "audit_pending": False, "audit_status": "not_found"})
         finally:
             for suffix in ("", "-wal", "-shm", ".lock"):
                 try:
@@ -305,6 +305,48 @@ class CanonicalPersonalMemoryTest(unittest.IsolatedAsyncioTestCase):
                         os.unlink(str(path) + suffix)
                     except FileNotFoundError:
                         pass
+
+    async def test_sweeper_recovers_when_commit_status_update_was_lost(self) -> None:
+        central = tempfile.mktemp(suffix="_central_stale_marker.db")
+        root = Path(tempfile.mkdtemp())
+        vault = root / "user_7" / "knowledge.db"
+        vault.parent.mkdir(parents=True)
+        operation_id = "vault-delete:stale-commit"
+        intent = Path(f"{vault}.delete.{operation_id}.intent")
+        committed = Path(f"{vault}.delete.{operation_id}.committed")
+        try:
+            import db
+            from memory.infrastructure.personal_database import sweep_pending_vault_deletions
+            await db.init_central_db(central)
+            committed.write_text(operation_id, encoding="utf-8")
+            async with aiosqlite.connect(central) as conn:
+                await conn.execute(
+                    "INSERT INTO personal_vault_deletion_audit(operation_id,user_id,operation,status,created_at,local_commit_marker) VALUES(?,?,?,?,?,?)",
+                    (operation_id, 7, "delete_vault", "local_delete_started", 1, str(intent)),
+                )
+                await conn.commit()
+            with patch.object(db, "DB_PATH", central), \
+                 patch.object(PersonalVaultDatabase, "_path", staticmethod(lambda _user_id: vault)):
+                result = await sweep_pending_vault_deletions()
+            self.assertEqual(result, {"scanned": 1, "completed": 1, "skipped": 0})
+            self.assertFalse(committed.exists())
+            async with aiosqlite.connect(central) as conn:
+                row = await (await conn.execute(
+                    "SELECT status,local_commit_marker,physical_delete_confirmed FROM personal_vault_deletion_audit WHERE operation_id=?",
+                    (operation_id,),
+                )).fetchone()
+            self.assertEqual(row, ("completed", str(committed), 1))
+        finally:
+            for path in (central,):
+                for suffix in ("", "-wal", "-shm"):
+                    try:
+                        os.unlink(str(path) + suffix)
+                    except FileNotFoundError:
+                        pass
+            for artifact in root.glob("user_7/*"):
+                artifact.unlink(missing_ok=True)
+            vault.parent.rmdir()
+            root.rmdir()
 
     async def test_habit_uses_stable_key_and_matures_from_evidence(self) -> None:
         base = 1_700_000_000_000

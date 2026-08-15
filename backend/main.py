@@ -74,6 +74,22 @@ async def _cancel_and_wait(task: asyncio.Task | None) -> None:
         await task
 
 
+async def _vault_deletion_sweeper_loop() -> None:
+    """Retry durable Personal Vault deletion evidence while the supervisor lives."""
+    from memory.infrastructure import sweep_pending_vault_deletions
+    interval = max(5.0, float(os.getenv("NUKE_VAULT_DELETION_SWEEP_INTERVAL", "60")))
+    while True:
+        try:
+            await asyncio.sleep(interval)
+            result = await sweep_pending_vault_deletions()
+            if result["completed"] or result["skipped"]:
+                logging.getLogger("main").info("Personal Vault deletion sweep: %s", result)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logging.getLogger("main").exception("Personal Vault deletion sweep failed")
+
+
 def _clear_supervisor_ref(sup) -> None:
     """Drop the global supervisor reference if it still points at `sup`."""
     if sup_mod.supervisor is sup:
@@ -93,6 +109,7 @@ async def lifespan(app: FastAPI):
     await db.init_central_db()
     from memory.infrastructure import sweep_pending_vault_deletions
     await sweep_pending_vault_deletions()
+    vault_deletion_sweeper_task = asyncio.create_task(_vault_deletion_sweeper_loop())
 
     # 1b. Migrate any env-provided API keys into app_config.json so the file is the
     #     single source of truth the frontend manages (config consolidation).
@@ -210,6 +227,7 @@ async def lifespan(app: FastAPI):
 
     # Teardown
     await plugin_host.unload_all()
+    await _cancel_and_wait(vault_deletion_sweeper_task)
     await _cancel_and_wait(media_reaper_task)
     scheduler.stop()   # sync (returns None); awaiting it raised TypeError on teardown
     await sup.stop()
