@@ -203,6 +203,28 @@ class MemoryDatabasePort(Protocol):
 
 
 @runtime_checkable
+class MemberDirectoryPort(Protocol):
+    async def get_member(self, member_id: int) -> Mapping[str, Any] | None: ...
+
+
+@runtime_checkable
+class MemorySecretPort(Protocol):
+    def export_cursor_secret(self) -> bytes: ...
+
+
+@runtime_checkable
+class SkillWorkspacePort(Protocol):
+    def write_skill(self, *, group_id: int, bot_id: int, name: str,
+                    folder: str, content: str) -> str: ...
+
+
+@runtime_checkable
+class MemorySettingsPort(Protocol):
+    def get(self, name: str, default: Any = None) -> Any: ...
+    def is_missing_schema_error(self, error: BaseException) -> bool: ...
+
+
+@runtime_checkable
 class ProjectionDeliveryPort(Protocol):
     """Deliver a durable canonical-memory event to a derived projection."""
 

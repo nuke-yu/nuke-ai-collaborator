@@ -10,7 +10,6 @@ from memory.contracts import (
     CompleteSkillUsage, ListSkillCandidates, RecallSkills, ResolveLearningRefs,
 )
 from memory.domain import MemoryScope, UsageKind
-from memory.ports import MemoryDatabasePort
 
 _SAFE_TOOL = re.compile(r"^[a-zA-Z][a-zA-Z0-9_]{0,79}$")
 _BANNED = {"run_shell", "bash", "shell", "eval", "exec"}

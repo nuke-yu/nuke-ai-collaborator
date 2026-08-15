@@ -7,7 +7,6 @@ from typing import Any
 from memory.application import CanonicalExperienceDistiller, CanonicalLearningService
 from memory.contracts import AssembleCase, CompleteExperienceUsage, RecallExperiences
 from memory.domain import MemoryScope, UsageKind
-from memory.ports import MemoryDatabasePort
 
 
 def _terms(text: str) -> set[str]:

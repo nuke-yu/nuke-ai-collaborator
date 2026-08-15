@@ -30,8 +30,8 @@ _EXPORT_CURSOR_VERSION = 1
 
 
 def _export_cursor_secret() -> bytes:
-    from core.auth import SECRET_KEY
-    return SECRET_KEY.encode("utf-8")
+    from memory.application.context import require_secret_provider
+    return require_secret_provider().export_cursor_secret()
 
 
 def _decode_export_cursor(cursor: str | None, *, user_id: int, limit: int) -> tuple[int, dict[str, list[object]]]:

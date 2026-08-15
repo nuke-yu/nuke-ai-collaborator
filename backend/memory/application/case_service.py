@@ -84,7 +84,6 @@ def build_attempt_trace(run_id: str, tool_records: list[dict]) -> list[dict]:
 
 async def assemble_case(*, run_id: str, group_id: int | None, bot_id: int | None,
                         task: str, outcome: str, tool_records: list[dict]) -> str | None:
-    from memory.application import CanonicalLearningService
     from memory.contracts import AssembleCase
     from memory.domain import MemoryScope
     if group_id is None or not run_id:

@@ -2,10 +2,6 @@
 from __future__ import annotations
 
 import json
-import os
-import tempfile
-from pathlib import Path
-
 from memory.contracts import MemoryOperationError
 from memory.application.context import require_database
 from memory.domain.safety import safe_memory_text
@@ -41,13 +37,7 @@ class CanonicalSkillProjectionService:
             raise MemoryOperationError("canonical Skill declaration is invalid JSON") from exc
         _validate_declaration(declaration)
 
-        from skills.constants import bot_ws
-        from skills.lifecycle import file_lock
-
         folder = "active" if str(maturity) in {"active", "stable"} and str(status) == "active" else "draft"
-        learned = bot_ws(int(bot_id), group_id) / "skills" / "learned"
-        path = learned / folder / f"{name}.md"
-        alternate = learned / ("draft" if folder == "active" else "active") / f"{name}.md"
         content = (
             f"---\nname: {name}\nlayer: learned\nstatus: {maturity}\n"
             f"risk_level: {declaration['risk_level']}\ncanonical_skill_id: {skill_id}\n"
@@ -57,31 +47,11 @@ class CanonicalSkillProjectionService:
                 for index, step in enumerate(declaration["procedure"])
             ) + "\n"
         )
-        learned.mkdir(parents=True, exist_ok=True)
-        projection_lock = learned / f".{name}.projection"
-        temp_path: str | None = None
-        with file_lock(projection_lock):
-            path.parent.mkdir(parents=True, exist_ok=True)
-            try:
-                with tempfile.NamedTemporaryFile(
-                    mode="w", encoding="utf-8", dir=path.parent,
-                    prefix=f".{path.name}.", suffix=".tmp", delete=False,
-                ) as temp_file:
-                    temp_file.write(content)
-                    temp_file.flush()
-                    os.fsync(temp_file.fileno())
-                    temp_path = temp_file.name
-                os.replace(temp_path, path)
-                temp_path = None
-                if alternate.exists():
-                    alternate.unlink()
-            finally:
-                if temp_path is not None:
-                    try:
-                        os.unlink(temp_path)
-                    except FileNotFoundError:
-                        pass
-        return str(path)
+        from memory.application.context import require_skill_workspace
+        return require_skill_workspace().write_skill(
+            group_id=group_id, bot_id=int(bot_id), name=name,
+            folder=folder, content=content,
+        )
 
 
 def _safe_name(name: str) -> bool:

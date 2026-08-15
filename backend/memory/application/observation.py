@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 import hashlib
-import importlib
 import time
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
@@ -18,7 +17,7 @@ from memory.contracts import (
 from memory.domain import MemoryScope
 from memory.domain.safety import safe_memory_text
 from memory.application.context import require_database
-from memory.ports import MemoryDatabasePort
+from memory.ports import MemberDirectoryPort, MemoryDatabasePort
 
 
 def _default_fact_engine() -> Any:
@@ -28,8 +27,8 @@ def _default_fact_engine() -> Any:
     while the default concrete algorithm remains replaceable by the factory.
     Tests and deployments may inject another implementation directly.
     """
-    module = importlib.import_module("memory.adapters.algorithms")
-    return module.Mem0FactEngine()
+    from memory.application.context import require_fact_engine
+    return require_fact_engine()
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,8 +48,11 @@ class CanonicalObservationEvent:
 class CanonicalObservationLoader:
     """Load an observation from canonical group storage and central metadata."""
 
-    def __init__(self, database: MemoryDatabasePort | None = None) -> None:
+    def __init__(self, database: MemoryDatabasePort | None = None,
+                 member_directory: MemberDirectoryPort | None = None) -> None:
         self._database = database or require_database()
+        from memory.application.context import require_member_directory
+        self._member_directory = member_directory or require_member_directory()
 
     async def load(self, group_id: int, input_id: str) -> CanonicalObservationEvent | None:
         message_id, bot_id = _parse_input(input_id)
@@ -64,9 +66,7 @@ class CanonicalObservationLoader:
         if not row or row[5]:
             return None
 
-        import db
-        async with db.global_db() as central:
-            bot = await db.get_member(central, bot_id)
+        bot = await self._member_directory.get_member(bot_id)
         if bot is None:
             return None
         if int(bot.get("group_id") or 0) != group_id:

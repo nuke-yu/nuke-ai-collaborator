@@ -141,10 +141,10 @@ async def record_event(
             )
             await db.commit()
     except Exception:
-        from db.errors import is_missing_schema_error
+        from memory.application.context import require_settings
         import sys
         e = sys.exc_info()[1]
-        if e is not None and is_missing_schema_error(e):
+        if e is not None and require_settings().is_missing_schema_error(e):
             # 缺表/缺列是迁移缺口，响亮上抛而非当成"没记成"咽下。
             raise
         log.debug("record_event swallowed (group_id=%s, tool=%s)", group_id, tool, exc_info=True)
@@ -349,9 +349,10 @@ async def maybe_compress_tool_events(group_id: int, bot_id: int, role: str = "",
     """L4：条数门控压缩。未达阈值即早退（不调模型）。fail-soft，schema 缺口上抛。"""
     if group_id is None or bot_id is None:
         return
-    from core import config
-    threshold = config.TOOL_EVENT_COMPRESS_THRESHOLD
-    max_batch = config.TOOL_EVENT_COMPRESS_MAX_BATCH
+    from memory.application.context import require_settings
+    settings = require_settings()
+    threshold = settings.get("TOOL_EVENT_COMPRESS_THRESHOLD", 10)
+    max_batch = settings.get("TOOL_EVENT_COMPRESS_MAX_BATCH", 50)
     try:
         async with await _database().connect("tool_events", group_id, write=False) as db:
             async with db.execute(
@@ -372,7 +373,9 @@ async def maybe_compress_tool_events(group_id: int, bot_id: int, role: str = "",
             provider, model, temperature=0.3, max_tokens=512,
         )
         text = (res.get("content") if isinstance(res, dict) and res.get("type") == "text" else "") or ""
-        insights = _parse_insights(text, config.TOOL_EVENT_COMPRESS_MAX_INSIGHTS)
+        insights = _parse_insights(
+            text, settings.get("TOOL_EVENT_COMPRESS_MAX_INSIGHTS", 5)
+        )
 
         # Write tool episodes into canonical records in the same transaction as
         # the source-event watermark. Chroma is populated later by the outbox.
@@ -417,10 +420,10 @@ async def maybe_compress_tool_events(group_id: int, bot_id: int, role: str = "",
         if random.random() < 0.1:
             await _prune_compressed(group_id)
     except Exception:
-        from db.errors import is_missing_schema_error
+        from memory.application.context import require_settings
         import sys
         e = sys.exc_info()[1]
-        if strict or (e is not None and is_missing_schema_error(e)):
+        if strict or (e is not None and require_settings().is_missing_schema_error(e)):
             raise
         log.debug("maybe_compress_tool_events swallowed (group=%s, bot=%s)",
                   group_id, bot_id, exc_info=True)
@@ -429,8 +432,9 @@ async def maybe_compress_tool_events(group_id: int, bot_id: int, role: str = "",
 async def _prune_compressed(group_id: int) -> None:
     """删除 compressed=1 且超过保留天数的原始事件行。"""
     import time as _time
-    from core import config
-    cutoff_ms = int((_time.time() - config.TOOL_EVENT_RETENTION_DAYS * 86400) * 1000)
+    from memory.application.context import require_settings
+    retention_days = require_settings().get("TOOL_EVENT_RETENTION_DAYS", 90)
+    cutoff_ms = int((_time.time() - retention_days * 86400) * 1000)
     async with await _database().connect("tool_events", group_id, write=True) as db:
         await db.execute(
             "DELETE FROM tool_events WHERE group_id=? AND compressed=1 AND ts < ?",

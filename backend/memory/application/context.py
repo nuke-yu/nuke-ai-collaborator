@@ -19,7 +19,7 @@ _services: dict[str, ContextVar[Any]] = {
     name: ContextVar(f"memory_{name}", default=None)
     for name in (
         "learning", "pipeline", "skill_compiler", "skill_projection",
-        "experience_distiller", "projection_outbox", "projection_reconciler", "model",
+        "experience_distiller", "projection_outbox", "projection_reconciler", "member_directory", "secret_provider", "skill_workspace", "fact_engine", "settings", "model",
     )
 }
 
@@ -87,6 +87,26 @@ def require_projection_reconciler() -> Any:
     return require_service("projection_reconciler", lambda: _canonical_factory("build_projection_reconciler"))
 
 
+def require_member_directory() -> Any:
+    return require_service("member_directory", _default_member_directory)
+
+
+def require_secret_provider() -> Any:
+    return require_service("secret_provider", _default_secret_provider)
+
+
+def require_skill_workspace() -> Any:
+    return require_service("skill_workspace", _default_skill_workspace)
+
+
+def require_fact_engine() -> Any:
+    return require_service("fact_engine", _default_fact_engine)
+
+
+def require_settings() -> Any:
+    return require_service("settings", _default_settings)
+
+
 def require_model() -> Any:
     service = _services["model"].get()
     if service is None:
@@ -102,4 +122,29 @@ def _canonical_factory(name: str) -> Any:
     from memory import canonical
     factory = getattr(canonical, name)
     return factory()
+
+
+def _default_member_directory() -> Any:
+    from memory.infrastructure.member_directory import CentralMemberDirectory
+    return CentralMemberDirectory()
+
+
+def _default_secret_provider() -> Any:
+    from memory.infrastructure.secret_provider import CurrentMemorySecretProvider
+    return CurrentMemorySecretProvider()
+
+
+def _default_skill_workspace() -> Any:
+    from memory.infrastructure.skill_workspace import CurrentSkillWorkspace
+    return CurrentSkillWorkspace()
+
+
+def _default_fact_engine() -> Any:
+    from memory.adapters.algorithms import Mem0FactEngine
+    return Mem0FactEngine()
+
+
+def _default_settings() -> Any:
+    from memory.infrastructure.settings import CurrentMemorySettings
+    return CurrentMemorySettings()
     return database
