@@ -7,14 +7,16 @@ import tempfile
 from pathlib import Path
 
 from memory.contracts import MemoryOperationError
-from memory.infrastructure import SQLiteMemoryDatabase, safe_memory_text
+from memory.application.context import require_database
+from memory.domain.safety import safe_memory_text
+from memory.ports import MemoryDatabasePort
 
 
 class CanonicalSkillProjectionService:
     """Project an existing canonical Skill without changing its authority."""
 
-    def __init__(self, database: SQLiteMemoryDatabase | None = None) -> None:
-        self._database = database or SQLiteMemoryDatabase()
+    def __init__(self, database: MemoryDatabasePort | None = None) -> None:
+        self._database = database or require_database()
 
     async def project(self, skill_id: str, group_id: int) -> str:
         async with await self._database.connect("skills", group_id, write=False) as db:

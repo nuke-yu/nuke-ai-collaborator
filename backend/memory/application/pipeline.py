@@ -18,10 +18,9 @@ from typing import Any
 from memory.application.jobs import pipeline_job_identity
 from memory.contracts import LostLeaseError, MemoryOperationError
 from memory.domain import MemoryScope, ScopeKind
-from memory.infrastructure import (
-    SQLiteMemoryDatabase, safe_memory_mapping, safe_memory_text,
-)
-from memory.ports import PipelineJobRepositoryPort
+from memory.domain.safety import safe_memory_mapping, safe_memory_text
+from memory.application.context import require_database
+from memory.ports import MemoryDatabasePort, PipelineJobRepositoryPort
 
 log = logging.getLogger(__name__)
 
@@ -29,8 +28,8 @@ log = logging.getLogger(__name__)
 class CanonicalPipelineJobRepository:
     """Durable group-scoped repository for background Memory jobs."""
 
-    def __init__(self, database: SQLiteMemoryDatabase | None = None) -> None:
-        self._database = database or SQLiteMemoryDatabase()
+    def __init__(self, database: MemoryDatabasePort | None = None) -> None:
+        self._database = database or require_database()
 
     async def enqueue(
         self, scope: MemoryScope, job_type: str, input_id: str,

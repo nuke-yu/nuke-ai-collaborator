@@ -3,11 +3,11 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 
-from memory.infrastructure import SQLiteMemoryDatabase
+from memory.application.context import require_database
+from memory.ports import MemoryDatabasePort
 
-def _database() -> SQLiteMemoryDatabase:
-    from memory.canonical import _runtime_composition
-    return _runtime_composition().database
+def _database() -> MemoryDatabasePort:
+    return require_database()
 
 
 @dataclass(frozen=True, slots=True)

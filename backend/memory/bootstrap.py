@@ -30,6 +30,7 @@ from memory.infrastructure import MemorySchemaManager, ProjectionOutbox, SQLiteM
 from memory.module import MemoryModule
 from memory.ports import MemoryACLPort
 from memory.composition import MemoryComposition
+from memory.application.context import configure_database
 
 _memory_composition: MemoryComposition | None = None
 _bot_memory_projection_rollout_gate: BotMemoryProjectionRolloutGate | None = None
@@ -175,6 +176,7 @@ def build_memory_module(*, drain_interval_seconds: float = 60.0) -> MemoryModule
 
     delivery = ChromaBotMemoryProjectionDelivery()
     database = SQLiteMemoryDatabase()
+    configure_database(database)
     outbox = ProjectionOutbox(
         database,
         delivery,

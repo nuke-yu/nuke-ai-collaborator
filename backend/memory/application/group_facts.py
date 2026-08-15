@@ -21,7 +21,7 @@ from memory.domain import (
     admit_group_fact,
 )
 from memory.ports import MemoryDatabasePort
-from memory.infrastructure import safe_memory_mapping, safe_memory_text
+from memory.domain.safety import safe_memory_mapping, safe_memory_text
 
 _CONFIDENCE = {
     FactAuthority.USER_EXPLICIT: 0.95,

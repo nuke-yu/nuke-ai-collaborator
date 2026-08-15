@@ -9,9 +9,10 @@ import logging
 from typing import Any
 
 from memory.application.pipeline import CanonicalPipelineJobRepository
+from memory.application.context import require_database
 from memory.domain import MemoryScope
-from memory.infrastructure import SQLiteMemoryDatabase, safe_memory_mapping, safe_memory_text
-from memory.ports import ProjectionOutboxPort
+from memory.domain.safety import safe_memory_mapping, safe_memory_text
+from memory.ports import MemoryDatabasePort, ProjectionOutboxPort
 
 log = logging.getLogger(__name__)
 
@@ -19,10 +20,10 @@ log = logging.getLogger(__name__)
 class CanonicalExperienceDistiller:
     def __init__(
         self,
-        database: SQLiteMemoryDatabase | None = None,
+        database: MemoryDatabasePort | None = None,
         projection_outbox: ProjectionOutboxPort | None = None,
     ) -> None:
-        self._database = database or SQLiteMemoryDatabase()
+        self._database = database or require_database()
         self._jobs = CanonicalPipelineJobRepository(self._database)
         self._projection_outbox = projection_outbox
 

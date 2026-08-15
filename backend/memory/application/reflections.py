@@ -8,7 +8,7 @@ import time
 from memory.contracts import IngestBotReflections, MemoryAuthorizationError
 from memory.domain import ScopeKind
 from memory.ports import MemoryDatabasePort, ProjectionOutboxPort
-from memory.infrastructure import safe_memory_mapping, safe_memory_text
+from memory.domain.safety import safe_memory_mapping, safe_memory_text
 
 from .vector_projection import enqueue_bot_memory_projection
 

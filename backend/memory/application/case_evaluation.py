@@ -4,12 +4,13 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from memory.infrastructure import SQLiteMemoryDatabase
+from memory.application.context import require_database
+from memory.ports import MemoryDatabasePort
 
 
 class CanonicalCaseEvaluator:
-    def __init__(self, database: SQLiteMemoryDatabase | None = None) -> None:
-        self._database = database or SQLiteMemoryDatabase()
+    def __init__(self, database: MemoryDatabasePort | None = None) -> None:
+        self._database = database or require_database()
 
     async def evaluate(self, group_id: int, case_id: str) -> dict[str, Any]:
         async with await self._database.connect("agent_cases", group_id, write=False) as db:

@@ -17,13 +17,13 @@ import hashlib
 import logging
 import time
 
-from memory.infrastructure import SQLiteMemoryDatabase
+from memory.application.context import require_database
+from memory.ports import MemoryDatabasePort
 
 log = logging.getLogger(__name__)
 
-def _database() -> SQLiteMemoryDatabase:
-    from memory.canonical import _runtime_composition
-    return _runtime_composition().database
+def _database() -> MemoryDatabasePort:
+    return require_database()
 
 # 事件 summary 的字段上限（字符）。事件日志只要"够认出是什么"，不需要全文——全文留在
 # 主 loop 的 tool message 里。head/tail 各留一截，中间塞省略标记，避免一个巨型 Read
@@ -364,9 +364,9 @@ async def maybe_compress_tool_events(group_id: int, bot_id: int, role: str = "",
         if len(rows) < threshold:
             return  # 门控未到：不烧模型
 
-        from memory.canonical import call_memory_model
+        from memory.application.context import require_model
         body = "\n".join(_compress_line(r) for r in rows)
-        res = await call_memory_model(
+        res = await require_model()(
             _COMPRESS_PROMPT + body,
             [{"role": "user", "content": "请提炼持久结论。"}],
             provider, model, temperature=0.3, max_tokens=512,

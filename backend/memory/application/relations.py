@@ -16,7 +16,7 @@ from memory.contracts import (
 )
 from memory.domain import MemoryRelationType, ScopeKind
 from memory.ports import MemoryDatabasePort
-from memory.infrastructure import safe_memory_mapping, safe_memory_text
+from memory.domain.safety import safe_memory_mapping, safe_memory_text
 
 
 class CanonicalRelationService:

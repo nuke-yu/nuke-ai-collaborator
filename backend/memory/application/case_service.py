@@ -89,8 +89,8 @@ async def assemble_case(*, run_id: str, group_id: int | None, bot_id: int | None
     from memory.domain import MemoryScope
     if group_id is None or not run_id:
         return None
-    from memory.canonical import build_learning_client
-    return await build_learning_client().assemble_case(AssembleCase(
+    from memory.application.context import require_learning
+    return await require_learning().assemble_case(AssembleCase(
         scope=MemoryScope.group(group_id=group_id, bot_id=bot_id, actor_id=f"bot:{bot_id or 0}"),
         run_id=run_id, task=task, outcome=outcome, tool_records=tuple(tool_records),
     ))

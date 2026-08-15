@@ -28,7 +28,7 @@ from memory.domain import (
     require_adoption_evidence, require_execution_evidence,
     require_verification_evidence,
 )
-from memory.infrastructure import safe_memory_mapping, safe_memory_text
+from memory.domain.safety import safe_memory_mapping, safe_memory_text
 from memory.ports import LearningPort, MemoryDatabasePort
 
 

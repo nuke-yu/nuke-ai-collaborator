@@ -5,12 +5,12 @@ import json
 import time
 from typing import Mapping, Sequence
 
-from memory.infrastructure import SQLiteMemoryDatabase
+from memory.application.context import require_database
+from memory.ports import MemoryDatabasePort
 
 
-def _database() -> SQLiteMemoryDatabase:
-    from memory.canonical import _runtime_composition
-    return _runtime_composition().database
+def _database() -> MemoryDatabasePort:
+    return require_database()
 
 
 def classify_failure(tool: str, result: str) -> str:

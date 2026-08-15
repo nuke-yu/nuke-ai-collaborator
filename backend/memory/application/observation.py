@@ -16,7 +16,9 @@ from memory.contracts import (
     SynthesizedReflection,
 )
 from memory.domain import MemoryScope
-from memory.infrastructure import SQLiteMemoryDatabase, safe_memory_text
+from memory.domain.safety import safe_memory_text
+from memory.application.context import require_database
+from memory.ports import MemoryDatabasePort
 
 
 def _default_fact_engine() -> Any:
@@ -47,8 +49,8 @@ class CanonicalObservationEvent:
 class CanonicalObservationLoader:
     """Load an observation from canonical group storage and central metadata."""
 
-    def __init__(self, database: SQLiteMemoryDatabase | None = None) -> None:
-        self._database = database or SQLiteMemoryDatabase()
+    def __init__(self, database: MemoryDatabasePort | None = None) -> None:
+        self._database = database or require_database()
 
     async def load(self, group_id: int, input_id: str) -> CanonicalObservationEvent | None:
         message_id, bot_id = _parse_input(input_id)
@@ -103,7 +105,7 @@ class CanonicalBotFactObserver:
 
     def __init__(
         self,
-        database: SQLiteMemoryDatabase,
+        database: MemoryDatabasePort,
         fact_service: Any,
         ai_call_fn: Callable[..., Awaitable[Any]] | None = None,
     ) -> None:
@@ -200,7 +202,7 @@ class CanonicalSummaryObserver:
 
     def __init__(
         self,
-        database: SQLiteMemoryDatabase,
+        database: MemoryDatabasePort,
         ai_call_fn: Callable[..., Awaitable[Any]],
         *,
         threshold: int = 5,
@@ -295,7 +297,7 @@ class CanonicalReflectionObserver:
 
     def __init__(
         self,
-        database: SQLiteMemoryDatabase,
+        database: MemoryDatabasePort,
         reflection_service: Any,
         ai_call_fn: Callable[..., Awaitable[Any]],
         *,
@@ -455,7 +457,7 @@ class CanonicalToolCompressionObserver:
 
     def __init__(
         self,
-        database: SQLiteMemoryDatabase,
+        database: MemoryDatabasePort,
         ai_call_fn: Callable[..., Awaitable[Any]],
         *,
         threshold: int = 10,

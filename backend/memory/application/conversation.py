@@ -21,7 +21,7 @@ from memory.contracts import (
     MemoryHit,
 )
 from memory.domain import MemoryScope, ScopeKind
-from memory.infrastructure import safe_memory_mapping, safe_memory_text
+from memory.domain.safety import safe_memory_mapping, safe_memory_text
 from memory.ports import MemoryDatabasePort, MemoryQueryPort, MemoryCommandPort
 
 

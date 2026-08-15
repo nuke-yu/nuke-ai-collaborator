@@ -7,13 +7,15 @@ import time
 from typing import Any
 
 from memory.application.pipeline import CanonicalPipelineJobRepository
+from memory.application.context import require_database
 from memory.domain import MemoryScope
-from memory.infrastructure import SQLiteMemoryDatabase, safe_memory_mapping, safe_memory_text
+from memory.domain.safety import safe_memory_mapping, safe_memory_text
+from memory.ports import MemoryDatabasePort
 
 
 class CanonicalSkillCompiler:
-    def __init__(self, database: SQLiteMemoryDatabase | None = None) -> None:
-        self._database = database or SQLiteMemoryDatabase()
+    def __init__(self, database: MemoryDatabasePort | None = None) -> None:
+        self._database = database or require_database()
         self._jobs = CanonicalPipelineJobRepository(self._database)
 
     async def compile(self, group_id: int, record_id: str, input_version: str = "1") -> dict[str, Any]:

@@ -3,13 +3,13 @@ from __future__ import annotations
 
 from typing import Any, Mapping, Sequence
 
-from memory.canonical import build_learning_client
+from memory.application.context import require_learning
 from memory.contracts import MarkUsageAdopted, MarkUsageExecuted, VerifyUsage
 from memory.domain import MemoryScope, UsageKind, UsageState
 
 
 def _service() -> CanonicalLearningService:
-    return build_learning_client()
+    return require_learning()
 
 
 def _scope(group_id: int) -> MemoryScope:

@@ -7,7 +7,7 @@ from typing import Any
 from memory.application import CanonicalExperienceDistiller, CanonicalLearningService
 from memory.contracts import AssembleCase, CompleteExperienceUsage, RecallExperiences
 from memory.domain import MemoryScope, UsageKind
-from memory.infrastructure import SQLiteMemoryDatabase
+from memory.ports import MemoryDatabasePort
 
 
 def _terms(text: str) -> set[str]:
@@ -27,11 +27,10 @@ def _scope(group_id: int, bot_id: int | None = None, *, run_id: str | None = Non
 async def distill_case(case_id: str, group_id: int | None) -> str | None:
     if group_id is None:
         return None
-    from memory.canonical import build_experience_distiller
-    result = await build_experience_distiller().distill(group_id, case_id)
+    from memory.application.context import require_experience_distiller, require_projection_outbox
+    result = await require_experience_distiller().distill(group_id, case_id)
     if result.get("record_id"):
-        from memory.canonical import build_projection_outbox
-        await build_projection_outbox().drain(
+        await require_projection_outbox().drain(
             group_id, limit=1, event_id=f"experience-vector:{result['record_id']}"
         )
     return result.get("record_id")
@@ -42,8 +41,8 @@ async def recall_experiences(*, query: str, run_id: str, group_id: int | None,
                              char_budget: int = 2400) -> tuple[str, list[str]]:
     if group_id is None or bot_id is None:
         return "", []
-    from memory.canonical import build_learning_client
-    return await build_learning_client().recall_experiences(
+    from memory.application.context import require_learning
+    return await require_learning().recall_experiences(
         RecallExperiences(scope=_scope(group_id, bot_id, run_id=run_id), query=query,
                           run_id=run_id, limit=limit, char_budget=char_budget)
     )
@@ -54,8 +53,8 @@ async def complete_usage(*, record_ids: list[str], run_id: str, group_id: int | 
                          tool_attempts: int) -> None:
     if group_id is None:
         return
-    from memory.canonical import build_learning_client
-    await build_learning_client().record_completion_telemetry(type("Completion", (), {
+    from memory.application.context import require_learning
+    await require_learning().record_completion_telemetry(type("Completion", (), {
         "scope": _scope(group_id, run_id=run_id), "kind": UsageKind.EXPERIENCE,
         "item_ids": tuple(record_ids), "run_id": run_id, "outcome": outcome,
         "input_tokens": input_tokens, "output_tokens": output_tokens,
@@ -65,15 +64,15 @@ async def complete_usage(*, record_ids: list[str], run_id: str, group_id: int | 
 
 async def decay_experiences(group_id: int, *, now_ms: int | None = None,
                             stale_days: int = 90) -> int:
-    from memory.canonical import build_learning_client
-    return await build_learning_client().decay_experiences(
+    from memory.application.context import require_learning
+    return await require_learning().decay_experiences(
         group_id, now_ms=now_ms, stale_days=stale_days
     )
 
 
 async def reconcile_experience_projections(group_id: int) -> int:
-    from memory.canonical import build_projection_reconciler
-    return await build_projection_reconciler().reconcile(group_id)
+    from memory.application.context import require_projection_reconciler
+    return await require_projection_reconciler().reconcile(group_id)
 
 
 __all__ = [

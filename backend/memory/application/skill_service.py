@@ -10,7 +10,7 @@ from memory.contracts import (
     CompleteSkillUsage, ListSkillCandidates, RecallSkills, ResolveLearningRefs,
 )
 from memory.domain import MemoryScope, UsageKind
-from memory.infrastructure import SQLiteMemoryDatabase
+from memory.ports import MemoryDatabasePort
 
 _SAFE_TOOL = re.compile(r"^[a-zA-Z][a-zA-Z0-9_]{0,79}$")
 _BANNED = {"run_shell", "bash", "shell", "eval", "exec"}
@@ -53,11 +53,10 @@ def _bot_scope(group_id: int, bot_id: int, run_id: str | None = None) -> MemoryS
 
 
 async def compile_candidate(record_id: str, group_id: int) -> str | None:
-    from memory.canonical import build_skill_compiler
-    result = await build_skill_compiler().compile(group_id, record_id)
+    from memory.application.context import require_skill_compiler, require_database
+    result = await require_skill_compiler().compile(group_id, record_id)
     if result.get("skill_id"):
-        from memory.canonical import _runtime_composition
-        database = _runtime_composition().database
+        database = require_database()
         async with await database.connect("pipeline_jobs", group_id, write=True) as db:
             await db.execute(
                 """UPDATE pipeline_jobs SET status='completed',output_json=?,completed_at=updated_at
@@ -70,8 +69,8 @@ async def compile_candidate(record_id: str, group_id: int) -> str | None:
 
 async def list_everos_source_documents(*, group_id: int, record_id: str | None = None,
                                        limit: int = 100) -> list[dict[str, object]]:
-    from memory.canonical import _runtime_composition
-    database = _runtime_composition().database
+    from memory.application.context import require_database
+    database = require_database()
     async with await database.connect("skills", group_id, write=False) as db:
         query = "SELECT source_id,record_id,source_type,content_json,created_at FROM everos_source_documents WHERE group_id=?"
         params: list[object] = [group_id]
@@ -90,8 +89,8 @@ async def list_everos_source_documents(*, group_id: int, record_id: str | None =
 
 
 async def get_everos_source_markdown(*, group_id: int, record_id: str) -> str | None:
-    from memory.canonical import _runtime_composition
-    async with await _runtime_composition().database.connect("skills", group_id, write=False) as db:
+    from memory.application.context import require_database
+    async with await require_database().connect("skills", group_id, write=False) as db:
         try:
             async with db.execute(
                 "SELECT markdown FROM everos_source_markdown WHERE group_id=? AND record_id=? ORDER BY created_at DESC LIMIT 1",
@@ -104,8 +103,8 @@ async def get_everos_source_markdown(*, group_id: int, record_id: str) -> str | 
 
 
 async def list_skill_candidates(*, group_id: int, bot_id: int) -> list[dict]:
-    from memory.canonical import build_learning_client
-    candidates = await build_learning_client().list_skill_candidates(
+    from memory.application.context import require_learning
+    candidates = await require_learning().list_skill_candidates(
         ListSkillCandidates(scope=_bot_scope(group_id, bot_id))
     )
     return [{"skill_id": item.skill_id, "name": item.name, "maturity": item.maturity,
@@ -117,8 +116,8 @@ async def list_skill_candidates(*, group_id: int, bot_id: int) -> list[dict]:
 
 async def promote_skill(skill_id: str, group_id: int, target_maturity: str = "active",
                         *, bot_id: int | None = None, actor_id: str, reason: str) -> bool:
-    from memory.canonical import build_learning_client
-    return await build_learning_client().promote_skill(
+    from memory.application.context import require_learning
+    return await require_learning().promote_skill(
         skill_id=skill_id, group_id=group_id, target_maturity=target_maturity,
         bot_id=bot_id, actor_id=actor_id, reason=reason,
     )
@@ -128,16 +127,16 @@ async def recall_skills(*, query: str, run_id: str, group_id: int | None,
                         bot_id: int | None, limit: int = 2) -> tuple[str, list[str]]:
     if group_id is None or bot_id is None:
         return "", []
-    from memory.canonical import build_learning_client
-    return await build_learning_client().recall_skills(
+    from memory.application.context import require_learning
+    return await require_learning().recall_skills(
         RecallSkills(scope=_bot_scope(group_id, bot_id, run_id), query=query,
                      run_id=run_id, limit=limit)
     )
 
 
 async def resolve_skill_refs(*, skill_ids: list[str], group_id: int, bot_id: int) -> tuple[str, ...]:
-    from memory.canonical import build_learning_client
-    return await build_learning_client().resolve_learning_refs(ResolveLearningRefs(
+    from memory.application.context import require_learning
+    return await require_learning().resolve_learning_refs(ResolveLearningRefs(
         scope=_bot_scope(group_id, bot_id), skill_ids=tuple(skill_ids)
     ))
 
@@ -146,8 +145,8 @@ async def complete_skill_usage(*, skill_ids: list[str], run_id: str,
                                group_id: int | None, outcome: str) -> None:
     if group_id is None:
         return
-    from memory.canonical import build_learning_client
-    await build_learning_client().record_completion_telemetry(type("Completion", (), {
+    from memory.application.context import require_learning
+    await require_learning().record_completion_telemetry(type("Completion", (), {
         "scope": MemoryScope.group(group_id=group_id, actor_id="service:skill_usage"),
         "kind": UsageKind.SKILL, "item_ids": tuple(skill_ids), "run_id": run_id,
         "outcome": outcome, "input_tokens": 0, "output_tokens": 0,
@@ -156,13 +155,13 @@ async def complete_skill_usage(*, skill_ids: list[str], run_id: str,
 
 
 async def project_skill(skill_id: str, group_id: int) -> str | None:
-    from memory.canonical import build_skill_projection_client
-    return await build_skill_projection_client().project(skill_id, group_id)
+    from memory.application.context import require_skill_projection
+    return await require_skill_projection().project(skill_id, group_id)
 
 
 async def enqueue_missing_skill_projections(group_id: int) -> int:
-    from memory.canonical import build_learning_client
-    return await build_learning_client().repair_skill_projection_gaps(group_id)
+    from memory.application.context import require_learning
+    return await require_learning().repair_skill_projection_gaps(group_id)
 
 
 __all__ = ["_bounded_snapshot", "validate_declaration", "compile_candidate",

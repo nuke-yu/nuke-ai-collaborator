@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 from memory.bootstrap import memory_composition
-from memory.infrastructure import DrainResult
+from memory.infrastructure.projection_outbox import DrainResult
 
 
 async def enqueue_projection(
