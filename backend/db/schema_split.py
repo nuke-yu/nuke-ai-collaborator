@@ -32,6 +32,7 @@ CENTRAL_TABLES = frozenset({
     "users", "groups", "group_memberships", "members", "role_templates", "permission_rules", "cron_jobs",
     "unread_counts", "bot_skills", "external_skills", "agent_tasks",
     "agent_task_requests", "agent_task_retry_claims",
+    "personal_vault_deletion_audit",
 })
 GROUP_TABLES = frozenset({
     "messages", "role_summaries", "message_embeddings", "member_read",
@@ -203,6 +204,15 @@ _CENTRAL_DDL = [
         automatic      INTEGER NOT NULL DEFAULT 0,
         claimed_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (task_id) REFERENCES agent_tasks(task_id) ON DELETE CASCADE
+    )""",
+    """CREATE TABLE IF NOT EXISTS personal_vault_deletion_audit (
+        audit_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        operation TEXT NOT NULL,
+        status TEXT NOT NULL CHECK(status IN ('pending','completed','failed','not_found')),
+        created_at INTEGER NOT NULL,
+        completed_at INTEGER,
+        last_error TEXT NOT NULL DEFAULT ''
     )""",
 ]
 
@@ -556,11 +566,36 @@ async def init_central_db(path: str | None = None) -> None:
     async with _db.connect(path or DB_PATH) as conn:
         for ddl in _CENTRAL_DDL:
             await conn.execute(ddl)
+        await _ensure_personal_vault_deletion_audit_schema(conn)
         await conn.commit()
         await _stamp_version(conn)
         await run_migrations(conn)
         await _seed_templates(conn)
         await conn.commit()
+
+
+async def _ensure_personal_vault_deletion_audit_schema(conn) -> None:
+    """Upgrade the short-lived pre-outbox audit table in-place.
+
+    Older deployments created this table from the request path with only
+    ``audit_id/user_id/operation/created_at``.  Central initialization is the
+    sole schema owner now, so it performs the additive upgrade before any
+    Personal Vault deletion can use the table.
+    """
+    async with conn.execute("PRAGMA table_info(personal_vault_deletion_audit)") as cur:
+        columns = {str(row[1]) for row in await cur.fetchall()}
+    if "status" not in columns:
+        await conn.execute(
+            "ALTER TABLE personal_vault_deletion_audit ADD COLUMN status TEXT NOT NULL DEFAULT 'completed'"
+        )
+    if "completed_at" not in columns:
+        await conn.execute(
+            "ALTER TABLE personal_vault_deletion_audit ADD COLUMN completed_at INTEGER"
+        )
+    if "last_error" not in columns:
+        await conn.execute(
+            "ALTER TABLE personal_vault_deletion_audit ADD COLUMN last_error TEXT NOT NULL DEFAULT ''"
+        )
 
 
 async def init_group_db(path: str | None = None) -> None:

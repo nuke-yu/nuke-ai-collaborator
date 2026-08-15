@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import base64
+import binascii
 import time
 from typing import Any, Mapping
 
@@ -23,6 +25,31 @@ from memory.ports import PersonalKnowledgePort, PersonalVaultDatabasePort
 _KINDS = {"profile", "expertise", "decision", "workflow", "social", "preference", "habit", "temporary"}
 _SENSITIVITIES = {"private", "restricted", "secret"}
 _EXPORT_LIMIT = 1_000
+_EXPORT_CURSOR_VERSION = 1
+
+
+def _decode_export_cursor(cursor: str | None) -> tuple[int, dict[str, list[object]]]:
+    if cursor is None:
+        return int(time.time() * 1000), {}
+    if not isinstance(cursor, str) or not cursor:
+        raise ValueError("cursor must be an opaque export cursor")
+    try:
+        raw = base64.urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4))
+        payload = json.loads(raw.decode("utf-8"))
+        if payload.get("v") != _EXPORT_CURSOR_VERSION:
+            raise ValueError
+        snapshot = int(payload["snapshot"])
+        after = payload.get("after", {})
+        if snapshot < 0 or not isinstance(after, dict):
+            raise ValueError
+        return snapshot, after
+    except (ValueError, TypeError, KeyError, json.JSONDecodeError, UnicodeDecodeError, binascii.Error) as exc:
+        raise ValueError("invalid export cursor") from exc
+
+
+def _encode_export_cursor(snapshot: int, after: Mapping[str, list[object]]) -> str:
+    raw = json.dumps({"v": _EXPORT_CURSOR_VERSION, "snapshot": snapshot, "after": after}, separators=(",", ":")).encode()
+    return base64.urlsafe_b64encode(raw).decode().rstrip("=")
 
 
 async def list_personal_apps(*, database: PersonalVaultDatabasePort, user_id: int, include_inactive: bool = True) -> list[dict[str, object]]:
@@ -270,47 +297,57 @@ class CanonicalPersonalKnowledgeService(PersonalKnowledgePort):
             await db.commit()
         return {"expired_projections": cur.rowcount, "schema_version": PERSONAL_SCHEMA_VERSION}
 
-    async def export(self, scope: MemoryScope, *, cursor: int = 0, limit: int = _EXPORT_LIMIT) -> Mapping[str, Any]:
+    async def export(self, scope: MemoryScope, *, cursor: str | None = None, limit: int = _EXPORT_LIMIT) -> Mapping[str, Any]:
         user_id = _user_id(scope)
-        if isinstance(cursor, bool) or not isinstance(cursor, int) or cursor < 0:
-            raise ValueError("cursor must be a non-negative integer")
         if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= _EXPORT_LIMIT:
             raise ValueError(f"limit must be between 1 and {_EXPORT_LIMIT}")
+        snapshot, after = _decode_export_cursor(cursor)
         async with self._database.connect(user_id) as db:
-            async with db.execute("SELECT record_id,kind,content,speaker,subject,authority,sensitivity,status,source_type,source_id,confidence,explicit,valid_from,valid_to FROM personal_records WHERE user_id=? ORDER BY created_at,record_id LIMIT ? OFFSET ?", (user_id, limit, cursor)) as cur:
-                records = await cur.fetchall()
-            async with db.execute("SELECT p.projection_id,p.record_id,p.group_id,p.bot_id,p.purpose,p.status,p.expires_at FROM personal_projections p JOIN personal_records r ON r.record_id=p.record_id WHERE r.user_id=? ORDER BY p.created_at,p.projection_id LIMIT ? OFFSET ?", (user_id, limit, cursor)) as cur:
-                projections = await cur.fetchall()
-            async with db.execute("SELECT usage_id,record_id,projection_id,group_id,bot_id,session_id,purpose,used_at FROM personal_memory_usage_events WHERE user_id=? ORDER BY used_at,usage_id LIMIT ? OFFSET ?", (user_id, limit, cursor)) as cur:
-                usage_events = await cur.fetchall()
-            async with db.execute("SELECT app_id,name,status,created_at,updated_at FROM personal_apps WHERE user_id=? ORDER BY app_id LIMIT ? OFFSET ?", (user_id, limit, cursor)) as cur:
-                apps = await cur.fetchall()
-            async with db.execute("SELECT rule_id,subject_type,subject_id,object_type,object_id,action,effect,created_at FROM personal_access_control_actions WHERE user_id=? ORDER BY rule_id LIMIT ? OFFSET ?", (user_id, limit, cursor)) as cur:
-                acl_rules = await cur.fetchall()
-            async with db.execute("SELECT audit_id,actor_id,scope_kind,group_id,bot_id,action,allowed,reason,created_at FROM personal_acl_audit_events WHERE user_id=? ORDER BY audit_id LIMIT ? OFFSET ?", (user_id, limit, cursor)) as cur:
-                audit_events = await cur.fetchall()
-            async with db.execute("SELECT id,record_id,source_type,source_key,context_kind,polarity,observed_at FROM habit_evidence WHERE record_id IN (SELECT record_id FROM personal_records WHERE user_id=?) ORDER BY id LIMIT ? OFFSET ?", (user_id, limit, cursor)) as cur:
-                habit_evidence = await cur.fetchall()
-            async with db.execute("SELECT audit_id,actor_id,operation,record_id,projection_id,created_at FROM personal_deletion_audit_events WHERE user_id=? ORDER BY audit_id LIMIT ? OFFSET ?", (user_id, limit, cursor)) as cur:
-                deletion_audits = await cur.fetchall()
-            async with db.execute("SELECT conflict_id,migration_version,resolution_status,resolved_at,resolved_by,content_hash,source_type,source_id,kind,canonical_record_id,conflicting_record_id,content,authority,explicit,confidence,valid_from,created_at FROM personal_migration_conflicts WHERE user_id=? ORDER BY created_at,conflict_id LIMIT ? OFFSET ?", (user_id, limit, cursor)) as cur:
-                migration_conflicts = await cur.fetchall()
+            await db.execute("BEGIN")
+            async def fetch_page(name: str, select: str, where: str, params: list[object], primary: str, tie: str) -> tuple[list[tuple[object, ...]], bool]:
+                previous = after.get(name)
+                after_sql = ""
+                after_params: list[object] = []
+                if previous is not None:
+                    if not isinstance(previous, list) or len(previous) != 2:
+                        raise ValueError("invalid export cursor")
+                    after_sql = f" AND ({primary} > ? OR ({primary} = ? AND {tie} > ?))"
+                    after_params = [previous[0], previous[0], previous[1]]
+                async with db.execute(
+                    f"{select} {where} AND {primary} <= ?{after_sql} ORDER BY {primary},{tie} LIMIT ?",
+                    (*params, snapshot, *after_params, limit + 1),
+                ) as cur:
+                    rows = await cur.fetchall()
+                more = len(rows) > limit
+                return rows[:limit], more
+
+            records, more_records = await fetch_page("records", "SELECT r.record_id,r.kind,r.content,r.speaker,r.subject,r.authority,r.sensitivity,r.status,r.source_type,r.source_id,r.confidence,r.explicit,r.valid_from,r.valid_to,r.created_at", "FROM personal_records r WHERE r.user_id=?", [user_id], "r.created_at", "r.record_id")
+            projections, more_projections = await fetch_page("projections", "SELECT p.projection_id,p.record_id,p.group_id,p.bot_id,p.purpose,p.status,p.expires_at,p.created_at", "FROM personal_projections p JOIN personal_records r ON r.record_id=p.record_id WHERE r.user_id=?", [user_id], "p.created_at", "p.projection_id")
+            usage_events, more_usage = await fetch_page("usage_events", "SELECT usage_id,record_id,projection_id,group_id,bot_id,session_id,purpose,used_at,used_at", "FROM personal_memory_usage_events WHERE user_id=?", [user_id], "used_at", "usage_id")
+            apps, more_apps = await fetch_page("apps", "SELECT app_id,name,status,created_at,updated_at,created_at", "FROM personal_apps WHERE user_id=?", [user_id], "created_at", "app_id")
+            acl_rules, more_acl = await fetch_page("acl_rules", "SELECT rule_id,subject_type,subject_id,object_type,object_id,action,effect,created_at,created_at", "FROM personal_access_control_actions WHERE user_id=?", [user_id], "created_at", "rule_id")
+            audit_events, more_acl_audit = await fetch_page("acl_audit_events", "SELECT audit_id,actor_id,scope_kind,group_id,bot_id,action,allowed,reason,created_at,created_at", "FROM personal_acl_audit_events WHERE user_id=?", [user_id], "created_at", "audit_id")
+            habit_evidence, more_habits = await fetch_page("habit_evidence", "SELECT id,record_id,source_type,source_key,context_kind,polarity,observed_at,observed_at", "FROM habit_evidence WHERE record_id IN (SELECT record_id FROM personal_records WHERE user_id=?)", [user_id], "observed_at", "id")
+            deletion_audits, more_deletions = await fetch_page("deletion_audit_events", "SELECT audit_id,actor_id,operation,record_id,projection_id,created_at,created_at", "FROM personal_deletion_audit_events WHERE user_id=?", [user_id], "created_at", "audit_id")
+            migration_conflicts, more_conflicts = await fetch_page("migration_conflicts", "SELECT conflict_id,migration_version,resolution_status,resolved_at,resolved_by,content_hash,source_type,source_id,kind,canonical_record_id,conflicting_record_id,content,authority,explicit,confidence,valid_from,created_at,created_at", "FROM personal_migration_conflicts WHERE user_id=?", [user_id], "created_at", "conflict_id")
+            more = {"records": more_records, "projections": more_projections, "usage_events": more_usage, "apps": more_apps, "acl_rules": more_acl, "acl_audit_events": more_acl_audit, "habit_evidence": more_habits, "deletion_audit_events": more_deletions, "migration_conflicts": more_conflicts}
             counts = {}
-            for name, table, predicate in (
-                ("records", "personal_records", "user_id=?"),
-                ("usage_events", "personal_memory_usage_events", "user_id=?"),
-                ("apps", "personal_apps", "user_id=?"),
-                ("acl_audit_events", "personal_acl_audit_events", "user_id=?"),
-                ("acl_rules", "personal_access_control_actions", "user_id=?"),
-                ("deletion_audit_events", "personal_deletion_audit_events", "user_id=?"),
-                ("migration_conflicts", "personal_migration_conflicts", "user_id=?"),
+            for name, table, predicate, timestamp_column in (
+                ("records", "personal_records", "user_id=?", "created_at"),
+                ("usage_events", "personal_memory_usage_events", "user_id=?", "used_at"),
+                ("apps", "personal_apps", "user_id=?", "created_at"),
+                ("acl_audit_events", "personal_acl_audit_events", "user_id=?", "created_at"),
+                ("acl_rules", "personal_access_control_actions", "user_id=?", "created_at"),
+                ("deletion_audit_events", "personal_deletion_audit_events", "user_id=?", "created_at"),
+                ("migration_conflicts", "personal_migration_conflicts", "user_id=?", "created_at"),
             ):
-                async with db.execute(f"SELECT COUNT(*) FROM {table} WHERE {predicate}", (user_id,)) as cur:
+                async with db.execute(f"SELECT COUNT(*) FROM {table} WHERE {predicate} AND {timestamp_column}<=?", (user_id, snapshot)) as cur:
                     counts[name] = int((await cur.fetchone())[0])
-            async with db.execute("SELECT COUNT(*) FROM personal_projections p JOIN personal_records r ON r.record_id=p.record_id WHERE r.user_id=?", (user_id,)) as cur:
+            async with db.execute("SELECT COUNT(*) FROM personal_projections p JOIN personal_records r ON r.record_id=p.record_id WHERE r.user_id=? AND p.created_at<=?", (user_id, snapshot)) as cur:
                 counts["projections"] = int((await cur.fetchone())[0])
-            async with db.execute("SELECT COUNT(*) FROM habit_evidence WHERE record_id IN (SELECT record_id FROM personal_records WHERE user_id=?)", (user_id,)) as cur:
+            async with db.execute("SELECT COUNT(*) FROM habit_evidence WHERE record_id IN (SELECT record_id FROM personal_records WHERE user_id=?) AND observed_at<=?", (user_id, snapshot)) as cur:
                 counts["habit_evidence"] = int((await cur.fetchone())[0])
+            await db.commit()
         fields = ("record_id","kind","content","speaker","subject","authority","sensitivity","status","source_type","source_id","confidence","explicit","valid_from","valid_to")
         pfields = ("projection_id","record_id","group_id","bot_id","purpose","status","expires_at")
         ufields = ("usage_id","record_id","projection_id","group_id","bot_id","session_id","purpose","used_at")
@@ -324,16 +361,22 @@ class CanonicalPersonalKnowledgeService(PersonalKnowledgePort):
             {key: (safe_memory_text(value, limit=1000) if isinstance(value, str) else value)
              for key, value in zip(fields, row)} for row in rows
         ]
+        after_next = dict(after)
+        page_rows = {"records": records, "projections": projections, "usage_events": usage_events, "apps": apps, "acl_rules": acl_rules, "acl_audit_events": audit_events, "habit_evidence": habit_evidence, "deletion_audit_events": deletion_audits, "migration_conflicts": migration_conflicts}
+        for name, rows in page_rows.items():
+            if rows:
+                after_next[name] = [rows[-1][-1], rows[-1][0]]
+        next_cursor = _encode_export_cursor(snapshot, after_next) if any(more.values()) else None
         return {"schema_version": PERSONAL_SCHEMA_VERSION, "user_id": user_id,
-                "records": safe_rows(fields, records), "projections": safe_rows(pfields, projections),
-                "usage_events": safe_rows(ufields, usage_events), "apps": safe_rows(afields, apps),
-                "acl_rules": safe_rows(rfields, acl_rules), "acl_audit_events": safe_rows(efields, audit_events),
-                "habit_evidence": safe_rows(hfields, habit_evidence), "deletion_audit_events": safe_rows(dfields, deletion_audits),
-                "migration_conflicts": safe_rows(cfields, migration_conflicts),
+                "records": safe_rows(fields, [row[:-1] for row in records]), "projections": safe_rows(pfields, [row[:-1] for row in projections]),
+                "usage_events": safe_rows(ufields, [row[:-1] for row in usage_events]), "apps": safe_rows(afields, [row[:-1] for row in apps]),
+                "acl_rules": safe_rows(rfields, [row[:-1] for row in acl_rules]), "acl_audit_events": safe_rows(efields, [row[:-1] for row in audit_events]),
+                "habit_evidence": safe_rows(hfields, [row[:-1] for row in habit_evidence]), "deletion_audit_events": safe_rows(dfields, [row[:-1] for row in deletion_audits]),
+                "migration_conflicts": safe_rows(cfields, [row[:-1] for row in migration_conflicts]),
                 "export": {
-                    "page_size": limit, "cursor": cursor,
-                    "next_cursor": cursor + limit if any(total > cursor + limit for total in counts.values()) else None,
-                    "has_more": {name: total > cursor + limit for name, total in counts.items()},
+                    "page_size": limit, "cursor": cursor, "snapshot_at": snapshot,
+                    "next_cursor": next_cursor,
+                    "has_more": more,
                     "total_counts": counts,
                 }}
 
@@ -353,7 +396,7 @@ class CanonicalPersonalKnowledgeService(PersonalKnowledgePort):
         usage_events = [{"projection_id": r[0], "group_id": r[1], "bot_id": r[2], "session_id": r[3], "purpose": r[4], "used_at": r[5]} for r in usage_rows]
         return {"record_id": record_id, "active_projections": [p for p in projections if p["status"] == "active"], "projections": projections, "usage_events": usage_events, "affected_group_ids": sorted({p["group_id"] for p in projections} | {r["group_id"] for r in usage_events}), "affected_session_ids": sorted({r["session_id"] for r in usage_events if r["session_id"]})}
 
-    async def delete(self, scope: MemoryScope) -> bool:
+    async def delete(self, scope: MemoryScope) -> Mapping[str, Any]:
         user_id = _user_id(scope)
         return await self._database.delete_vault(user_id)
 

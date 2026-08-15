@@ -6,7 +6,7 @@ import hashlib
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import AsyncIterator
+from typing import Any, AsyncIterator, Mapping
 
 import aiosqlite
 import fcntl
@@ -160,7 +160,7 @@ class PersonalVaultDatabase:
                 await asyncio.to_thread(fcntl.flock, lock_fd, fcntl.LOCK_UN)
                 os.close(lock_fd)
 
-    async def delete_vault(self, user_id: int) -> bool:
+    async def delete_vault(self, user_id: int) -> Mapping[str, Any]:
         """Delete every personal artifact and remove the physical Vault file."""
         if user_id <= 0:
             raise ValueError("user_id must be positive")
@@ -170,9 +170,11 @@ class PersonalVaultDatabase:
             path.parent.mkdir(parents=True, exist_ok=True)
             lock_fd = await asyncio.to_thread(os.open, str(path.parent), os.O_RDONLY)
             await asyncio.to_thread(fcntl.flock, lock_fd, fcntl.LOCK_EX)
+            audit_id = await _create_central_vault_deletion(user_id, enabled=type(self) is PersonalVaultDatabase)
             try:
                 if not path.exists():
-                    return False
+                    await _finish_central_vault_deletion(audit_id, "not_found", enabled=type(self) is PersonalVaultDatabase)
+                    return {"deleted": False, "audit_pending": False}
                 async with aiosqlite.connect(str(path), timeout=15.0) as db:
                     await db.execute("PRAGMA journal_mode=WAL")
                     await db.execute("PRAGMA busy_timeout=15000")
@@ -187,24 +189,29 @@ class PersonalVaultDatabase:
                     await db.execute("DELETE FROM personal_migration_conflicts")
                     await db.commit()
                     await db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-                    for suffix in ("", "-wal", "-shm"):
-                        candidate = Path(str(path) + suffix)
-                        try:
-                            candidate.unlink()
-                        except FileNotFoundError:
-                            pass
+                # The connection is closed before unlinking SQLite artifacts.
+                for suffix in ("", "-wal", "-shm"):
+                    candidate = Path(str(path) + suffix)
                     try:
-                        Path(str(path) + ".lock").unlink()
+                        candidate.unlink()
                     except FileNotFoundError:
                         pass
-                # The central audit is written only after the local transaction
-                # commits and the physical artifacts are gone.  It must never
-                # claim a deletion that subsequently failed locally.
-                await _record_central_vault_deletion(user_id, enabled=type(self) is PersonalVaultDatabase)
+                try:
+                    Path(str(path) + ".lock").unlink()
+                except FileNotFoundError:
+                    pass
+                audit_pending = not await _finish_central_vault_deletion(
+                    audit_id, "completed", enabled=type(self) is PersonalVaultDatabase
+                )
+                return {"deleted": True, "audit_pending": audit_pending}
+            except Exception as exc:
+                await _finish_central_vault_deletion(
+                    audit_id, "failed", error=str(exc), enabled=type(self) is PersonalVaultDatabase
+                )
+                raise
             finally:
                 await asyncio.to_thread(fcntl.flock, lock_fd, fcntl.LOCK_UN)
                 os.close(lock_fd)
-            return True
 
 
 async def _rebuild_fk_tables(db: aiosqlite.Connection) -> None:
@@ -405,22 +412,41 @@ async def _upgrade_conflict_table(db: aiosqlite.Connection) -> None:
     await db.execute("DROP TABLE personal_migration_conflicts_v4")
 
 
-async def _record_central_vault_deletion(user_id: int, *, enabled: bool = True) -> None:
+async def _create_central_vault_deletion(user_id: int, *, enabled: bool = True) -> int | None:
     if not enabled:
-        return
+        return None
+    from db import global_db
+    async with global_db() as db:
+        cur = await db.execute(
+            "INSERT INTO personal_vault_deletion_audit(user_id,operation,status,created_at) VALUES(?,?,?,strftime('%s','now') * 1000)",
+            (user_id, "delete_vault", "pending"),
+        )
+        await db.commit()
+        return int(cur.lastrowid)
+
+
+async def _finish_central_vault_deletion(
+    audit_id: int | None,
+    status: str,
+    *,
+    error: str = "",
+    enabled: bool = True,
+) -> bool:
+    if not enabled or audit_id is None:
+        return True
     try:
         from db import global_db
         async with global_db() as db:
-            await db.execute("""CREATE TABLE IF NOT EXISTS personal_vault_deletion_audit (
-                audit_id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER NOT NULL,
-                operation TEXT NOT NULL,created_at INTEGER NOT NULL)""")
             await db.execute(
-                "INSERT INTO personal_vault_deletion_audit(user_id,operation,created_at) VALUES(?,?,strftime('%s','now') * 1000)",
-                (user_id, "delete_vault"),
+                "UPDATE personal_vault_deletion_audit SET status=?,completed_at=strftime('%s','now') * 1000,last_error=? WHERE audit_id=?",
+                (status, safe_memory_text(error, limit=1000), audit_id),
             )
             await db.commit()
-    except Exception as exc:
-        raise RuntimeError("central Personal Vault deletion audit unavailable") from exc
+        return True
+    except Exception:
+        # The local deletion is already durable.  The pending central row is
+        # the retryable outbox; callers must receive success plus pending state.
+        return False
 
 
 async def _validate_shape(db: aiosqlite.Connection) -> None:

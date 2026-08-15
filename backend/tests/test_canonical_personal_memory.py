@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from contextlib import asynccontextmanager
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 import aiosqlite
 
@@ -215,8 +216,31 @@ class CanonicalPersonalMemoryTest(unittest.IsolatedAsyncioTestCase):
         impact = await self.service.get_record_impact(self.scope, record_id)
         self.assertEqual(impact["affected_session_ids"], ["run:1"])
         self.assertEqual(len(impact["usage_events"]), 1)
-        self.assertTrue(await self.service.delete(self.scope))
+        deletion = await self.service.delete(self.scope)
+        self.assertEqual(deletion, {"deleted": True, "audit_pending": False})
         self.assertFalse(Path(self.path).exists())
+
+    async def test_delete_returns_success_when_central_audit_needs_retry(self) -> None:
+        path = tempfile.mktemp(suffix="_central_audit_pending.db")
+        try:
+            from memory.infrastructure.personal_database import _DDL
+            async with aiosqlite.connect(path) as db:
+                for statement in _DDL:
+                    await db.execute(statement)
+                await db.commit()
+            database = PersonalVaultDatabase()
+            with patch.object(PersonalVaultDatabase, "_path", staticmethod(lambda _user_id: Path(path))), \
+                 patch("memory.infrastructure.personal_database._create_central_vault_deletion", new=AsyncMock(return_value=17)), \
+                 patch("memory.infrastructure.personal_database._finish_central_vault_deletion", new=AsyncMock(return_value=False)):
+                result = await database.delete_vault(7)
+            self.assertEqual(result, {"deleted": True, "audit_pending": True})
+            self.assertFalse(Path(path).exists())
+        finally:
+            for suffix in ("", "-wal", "-shm", ".lock"):
+                try:
+                    os.unlink(path + suffix)
+                except FileNotFoundError:
+                    pass
 
     async def test_habit_uses_stable_key_and_matures_from_evidence(self) -> None:
         base = 1_700_000_000_000
@@ -253,9 +277,9 @@ class CanonicalPersonalMemoryTest(unittest.IsolatedAsyncioTestCase):
             ))
         first = await self.service.export(self.scope, limit=2)
         self.assertEqual(len(first["records"]), 2)
-        self.assertEqual(first["export"]["next_cursor"], 2)
+        self.assertIsInstance(first["export"]["next_cursor"], str)
         self.assertTrue(first["export"]["has_more"]["records"])
-        second = await self.service.export(self.scope, cursor=2, limit=2)
+        second = await self.service.export(self.scope, cursor=first["export"]["next_cursor"], limit=2)
         self.assertEqual(len(second["records"]), 1)
         self.assertIsNone(second["export"]["next_cursor"])
 

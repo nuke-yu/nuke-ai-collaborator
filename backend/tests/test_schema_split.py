@@ -53,6 +53,7 @@ class TestSchemaSplit(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(CENTRAL_TABLES <= tables, CENTRAL_TABLES - tables)
         self.assertFalse(GROUP_TABLES & tables, GROUP_TABLES & tables)
         self.assertIn("agent_tasks", tables)
+        self.assertIn("personal_vault_deletion_audit", tables)
         self.assertIn("agent_task_requests", tables)
         self.assertIn("agent_task_retry_claims", tables)
 
@@ -110,6 +111,29 @@ class TestSchemaSplit(unittest.IsolatedAsyncioTestCase):
         async with db.connect(self.central) as conn:
             cur = await conn.execute("SELECT MAX(version) FROM _schema_version")
             self.assertEqual((await cur.fetchone())[0], len(MIGRATIONS))
+
+    async def test_legacy_personal_deletion_audit_table_is_upgraded(self):
+        legacy = tempfile.mktemp(suffix="_legacy_central_audit.db")
+        try:
+            async with db.connect(legacy) as conn:
+                await conn.execute(
+                    """CREATE TABLE personal_vault_deletion_audit(
+                       audit_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                       user_id INTEGER NOT NULL, operation TEXT NOT NULL,
+                       created_at INTEGER NOT NULL)"""
+                )
+                await conn.commit()
+            await db.init_central_db(legacy)
+            async with db.connect(legacy) as conn:
+                cur = await conn.execute("PRAGMA table_info(personal_vault_deletion_audit)")
+                columns = {row[1] for row in await cur.fetchall()}
+            self.assertTrue({"status", "completed_at", "last_error"} <= columns)
+        finally:
+            for suffix in ("", "-wal", "-shm"):
+                try:
+                    os.unlink(legacy + suffix)
+                except FileNotFoundError:
+                    pass
 
     async def test_init_central_db_catches_up_legacy_db(self):
         """回归：分库前的老单库被改用作中央库时，带着一张缺新列的 messages 表、

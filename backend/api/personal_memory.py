@@ -72,7 +72,7 @@ async def delete_personal_memory_access_rule(body: dict, user=Depends(auth.get_c
     return {"status": "ok"}
 
 @router.get("/api/personal/memory")
-async def export_personal_memory(cursor: int = 0, limit: int = 1000, user=Depends(auth.get_current_user)):
+async def export_personal_memory(cursor: str | None = None, limit: int = 1000, user=Depends(auth.get_current_user)):
     uid=int(user["uid"])
     try:
         return await _personal_client(uid).export(MemoryScope.personal(
@@ -156,9 +156,9 @@ async def rebuild_personal_memory(user=Depends(auth.get_current_user)):
 @router.delete("/api/personal/memory")
 async def delete_personal_memory(user=Depends(auth.get_current_user)):
     uid=int(user["uid"])
-    deleted=await _personal_client(uid).delete(MemoryScope.personal(
+    result=await _personal_client(uid).delete(MemoryScope.personal(
         user_id=uid,actor_id=f"user:{uid}",purpose="personal_memory_deletion"))
-    return {"deleted":deleted}
+    return result
 
 @router.delete("/api/personal/memory/records/{record_id}")
 async def delete_personal_record(record_id: str, user=Depends(auth.get_current_user)):

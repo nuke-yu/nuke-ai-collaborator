@@ -67,7 +67,7 @@ class AuthorizedPersonalKnowledgeService:
         await self._authorize(scope, "write")
         return await self._delegate.rebuild(scope)
 
-    async def export(self, scope: MemoryScope, *, cursor: int = 0, limit: int = 1000) -> Mapping[str, Any]:
+    async def export(self, scope: MemoryScope, *, cursor: str | None = None, limit: int = 1000) -> Mapping[str, Any]:
         await self._authorize(scope, "read")
         return await self._delegate.export(scope, cursor=cursor, limit=limit)
 
@@ -75,7 +75,7 @@ class AuthorizedPersonalKnowledgeService:
         await self._authorize(scope, "read")
         return await self._delegate.get_record_impact(scope, record_id)
 
-    async def delete(self, scope: MemoryScope) -> bool:
+    async def delete(self, scope: MemoryScope) -> Mapping[str, Any]:
         await self._authorize(scope, "delete")
         return await self._delegate.delete(scope)
 
