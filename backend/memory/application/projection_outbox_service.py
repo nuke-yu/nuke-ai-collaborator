@@ -4,7 +4,6 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 from memory.bootstrap import memory_composition
-from memory.infrastructure.projection_outbox import DrainResult
 
 
 async def enqueue_projection(
@@ -32,10 +31,10 @@ async def enqueue_projection(
 
 async def drain_projection_outbox(
     group_id: int, *, limit: int = 50, event_id: str | None = None
-) -> DrainResult:
+) -> Any:
     return await memory_composition().projection_outbox.drain(
         group_id, limit=limit, event_id=event_id
     )
 
 
-__all__ = ["DrainResult", "drain_projection_outbox", "enqueue_projection"]
+__all__ = ["drain_projection_outbox", "enqueue_projection"]

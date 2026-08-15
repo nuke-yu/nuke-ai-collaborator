@@ -8,6 +8,7 @@ service constructors remain preferred for embedding.
 from __future__ import annotations
 
 from contextvars import ContextVar
+import importlib
 from typing import Any, Callable
 
 from memory.ports import MemoryDatabasePort
@@ -140,8 +141,8 @@ def _default_skill_workspace() -> Any:
 
 
 def _default_fact_engine() -> Any:
-    from memory.adapters.algorithms import Mem0FactEngine
-    return Mem0FactEngine()
+    module = importlib.import_module("memory.adapters.algorithms")
+    return module.Mem0FactEngine()
 
 
 def _default_settings() -> Any:
