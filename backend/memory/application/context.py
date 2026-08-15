@@ -53,6 +53,24 @@ def reset_memory_context() -> None:
         service.set(None)
 
 
+def capture_memory_context() -> tuple[MemoryDatabasePort | None, bool, dict[str, Any]]:
+    return (
+        _database.get(),
+        _standalone_strict.get(),
+        {name: variable.get() for name, variable in _services.items()},
+    )
+
+
+def restore_memory_context(
+    state: tuple[MemoryDatabasePort | None, bool, dict[str, Any]],
+) -> None:
+    database, standalone, services = state
+    _database.set(database)
+    _standalone_strict.set(standalone)
+    for name, variable in _services.items():
+        variable.set(services[name])
+
+
 def configure_service(name: str, service: Any) -> None:
     try:
         _services[name].set(service)

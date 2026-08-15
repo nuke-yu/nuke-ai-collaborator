@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+from dataclasses import replace
 import pytest
 
 from memory.application.context import (
@@ -9,6 +11,7 @@ from memory.application.context import (
     require_database,
     require_learning,
     reset_memory_context,
+    standalone_mode_enabled,
 )
 from memory.bootstrap import (
     build_memory_composition,
@@ -60,8 +63,40 @@ def test_scoped_composition_restores_previous_bindings():
     configure_database(sentinel_database)  # type: ignore[arg-type]
     composition = build_memory_composition()
 
-    with memory_context(composition):
-        assert require_database() is composition.database
+    async def exercise() -> None:
+        async with memory_context(composition):
+            assert require_database() is composition.database
+
+    asyncio.run(exercise())
 
     assert require_database() is sentinel_database
+    reset_memory_context()
+
+
+def test_install_failure_does_not_partially_replace_context():
+    sentinel_database = object()
+    sentinel_learning = object()
+    configure_database(sentinel_database)  # type: ignore[arg-type]
+    configure_service("learning", sentinel_learning)
+    composition = replace(build_memory_composition(), member_directory=object())
+
+    with pytest.raises(TypeError, match="member_directory"):
+        from memory.bootstrap import install_memory_composition
+        install_memory_composition(composition)
+
+    assert require_database() is sentinel_database
+    assert require_learning() is sentinel_learning
+    reset_memory_context()
+
+
+def test_scoped_composition_restores_standalone_mode():
+    configure_standalone_mode(True)
+    composition = build_memory_composition()
+
+    async def exercise() -> None:
+        async with memory_context(composition):
+            assert standalone_mode_enabled() is True
+
+    asyncio.run(exercise())
+    assert standalone_mode_enabled() is True
     reset_memory_context()

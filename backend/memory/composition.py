@@ -30,12 +30,12 @@ class MemoryComposition:
     """
 
     module: MemoryModule
-    member_directory: MemberDirectoryPort | None = None
-    secret_provider: MemorySecretPort | None = None
-    skill_workspace: SkillWorkspacePort | None = None
-    fact_engine: FactEnginePort | None = None
-    settings: MemorySettingsPort | None = None
-    model: ModelPort | None = None
+    member_directory: MemberDirectoryPort
+    secret_provider: MemorySecretPort
+    skill_workspace: SkillWorkspacePort
+    fact_engine: FactEnginePort
+    settings: MemorySettingsPort
+    model: ModelPort
 
     @property
     def database(self):

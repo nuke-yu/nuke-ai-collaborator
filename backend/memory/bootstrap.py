@@ -6,8 +6,8 @@ interchangeable.
 """
 from __future__ import annotations
 
-from contextlib import contextmanager
-from typing import Iterator
+from contextlib import asynccontextmanager
+from typing import AsyncIterator
 
 from memory.adapters.runtime import (
     redact_projection_content,
@@ -35,7 +35,9 @@ from memory.ports import MemoryACLPort
 from memory.composition import MemoryComposition
 from memory.application.context import (
     configure_database,
+    capture_memory_context,
     configure_service,
+    restore_memory_context,
     reset_memory_context,
 )
 
@@ -245,46 +247,61 @@ def install_memory_composition(composition: MemoryComposition) -> MemoryComposit
         CanonicalSkillProjectionService,
     )
     from memory.composition_pipeline import build_pipeline_dispatcher
+    from memory.ports import (
+        FactEnginePort,
+        MemberDirectoryPort,
+        MemorySecretPort,
+        MemorySettingsPort,
+        ModelPort,
+        SkillWorkspacePort,
+    )
 
-    configure_database(composition.database)
-    configure_service("learning", CanonicalLearningService(composition.database))
-    configure_service("skill_compiler", CanonicalSkillCompiler(composition.database))
-    configure_service("skill_projection", CanonicalSkillProjectionService(composition.database))
-    configure_service(
-        "experience_distiller",
-        CanonicalExperienceDistiller(
+    dependencies = {
+        "member_directory": (composition.member_directory, MemberDirectoryPort),
+        "secret_provider": (composition.secret_provider, MemorySecretPort),
+        "skill_workspace": (composition.skill_workspace, SkillWorkspacePort),
+        "fact_engine": (composition.fact_engine, FactEnginePort),
+        "settings": (composition.settings, MemorySettingsPort),
+        "model": (composition.model, ModelPort),
+    }
+    for name, (dependency, protocol) in dependencies.items():
+        if not isinstance(dependency, protocol):
+            raise TypeError(f"Memory composition dependency {name!r} does not implement {protocol.__name__}")
+
+    # Construct the complete service graph before touching any ambient state.
+    services = {
+        "learning": CanonicalLearningService(composition.database),
+        "skill_compiler": CanonicalSkillCompiler(composition.database),
+        "skill_projection": CanonicalSkillProjectionService(
+            composition.database, composition.skill_workspace
+        ),
+        "experience_distiller": CanonicalExperienceDistiller(
             composition.database, composition.projection_outbox
         ),
-    )
-    configure_service("projection_outbox", composition.projection_outbox)
-    configure_service("projection_reconciler", composition.module.reconciler)
-    configure_service("member_directory", composition.member_directory)
-    configure_service("secret_provider", composition.secret_provider)
-    configure_service("skill_workspace", composition.skill_workspace)
-    configure_service("fact_engine", composition.fact_engine)
-    configure_service("settings", composition.settings)
-    configure_service("model", composition.model)
-    configure_service("pipeline", build_pipeline_dispatcher(composition))
+        "projection_outbox": composition.projection_outbox,
+        "projection_reconciler": composition.module.reconciler,
+        **{name: dependency for name, (dependency, _) in dependencies.items()},
+    }
+    services["pipeline"] = build_pipeline_dispatcher(composition)
+
+    configure_database(composition.database)
+    for name, service in services.items():
+        configure_service(name, service)
     return composition
 
 
-@contextmanager
-def memory_context(composition: MemoryComposition) -> Iterator[MemoryComposition]:
-    """Temporarily install a composition and restore the previous bindings."""
-    from memory.application import context as memory_context_module
-
-    previous_database = memory_context_module._database.get()
-    previous_services = {
-        name: variable.get()
-        for name, variable in memory_context_module._services.items()
-    }
+@asynccontextmanager
+async def memory_context(composition: MemoryComposition) -> AsyncIterator[MemoryComposition]:
+    """Temporarily install a composition and stop it if started in scope."""
+    previous = capture_memory_context()
+    was_running = composition.module.running
     try:
         install_memory_composition(composition)
         yield composition
     finally:
-        memory_context_module._database.set(previous_database)
-        for name, service in previous_services.items():
-            memory_context_module._services[name].set(service)
+        restore_memory_context(previous)
+        if not was_running and composition.module.running:
+            await composition.module.stop()
 
 
 def memory_composition() -> MemoryComposition:
