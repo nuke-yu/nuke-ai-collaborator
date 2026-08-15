@@ -125,28 +125,24 @@ def _apply_memory_context_budget(
 
 
 def _drop_oldest_message_group(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Remove one complete conversational/tool turn, never an orphan tool result."""
+    """Remove one complete turn while preserving provider message invariants.
+
+    A turn starts at a user message (or an assistant/tool recovery fragment when
+    the history is already malformed) and extends up to the next user message.
+    This keeps assistant tool calls and every result belonging to that turn
+    inseparable during emergency pruning. System messages are never pruned.
+    """
     if not messages:
         return messages
-    first = messages[0]
-    tool_calls = first.get("tool_calls") if isinstance(first, dict) else None
-    if isinstance(tool_calls, list):
-        call_ids = {
-            str(call.get("id")) for call in tool_calls
-            if isinstance(call, dict) and call.get("id")
-        }
-        end = 1
-        while end < len(messages):
-            item = messages[end]
-            if item.get("role") == "tool" and str(item.get("tool_call_id")) in call_ids:
-                end += 1
-                continue
-            break
-        return messages[end:]
-    if first.get("role") == "tool":
-        # A malformed/orphan tool result is safest removed as a single item.
-        return messages[1:]
-    return messages[1:]
+    index = 0
+    while index < len(messages) and messages[index].get("role") == "system":
+        index += 1
+    if index >= len(messages):
+        return messages
+    end = index + 1
+    while end < len(messages) and messages[end].get("role") != "user":
+        end += 1
+    return messages[:index] + messages[end:]
 
 
 def _enforce_final_context_budget(runner: Any) -> None:
@@ -180,7 +176,10 @@ def _enforce_final_context_budget(runner: Any) -> None:
             # until a real completion budget exists.
             messages = list(getattr(runner, "messages", ()) or ())
             while len(messages) > 1 and allocation.available_for_generation <= 256:
-                messages = _drop_oldest_message_group(messages)
+                pruned = _drop_oldest_message_group(messages)
+                if len(pruned) == len(messages):
+                    break
+                messages = pruned
                 runner.messages = messages
                 working_memory = "\n".join(
                     str(message.get("content") or "")

@@ -17,8 +17,12 @@ class HybridRerankEngine:
     """Audit-grade RRF + MMR Hybrid Search and Diversity Reranking Engine."""
 
     def __init__(self, rrf_k: int = 60, mmr_lambda: float = 0.7) -> None:
+        if isinstance(rrf_k, bool) or not isinstance(rrf_k, int) or rrf_k <= 0:
+            raise ValueError("rrf_k must be positive")
+        if not isinstance(mmr_lambda, (int, float)) or not 0.0 <= float(mmr_lambda) <= 1.0:
+            raise ValueError("mmr_lambda must be between 0 and 1")
         self.rrf_k = rrf_k
-        self.mmr_lambda = mmr_lambda
+        self.mmr_lambda = float(mmr_lambda)
 
     def rrf_fusion(
         self, rank_lists: Sequence[Sequence[Mapping[str, Any]]]
@@ -30,9 +34,9 @@ class HybridRerankEngine:
         scores: dict[str, float] = {}
         candidate_map: dict[str, dict[str, Any]] = {}
 
-        for rank_list in rank_lists:
+        for lane_index, rank_list in enumerate(rank_lists):
             for rank, item in enumerate(rank_list, start=1):
-                item_id = str(item.get("id") or item.get("record_id") or item.get("content"))
+                item_id = str(item.get("id") or item.get("record_id") or f"lane:{lane_index}:rank:{rank}")
                 candidate_map[item_id] = dict(item)
                 rrf_increment = 1.0 / (self.rrf_k + rank)
                 scores[item_id] = scores.get(item_id, 0.0) + rrf_increment
@@ -71,6 +75,8 @@ class HybridRerankEngine:
 
         Formula: MMR = argmax_{d_i} [ lambda * Sim1(d_i, q) - (1-lambda) * max_{d_j} Sim2(d_i, d_j) ]
         """
+        if isinstance(top_k, bool) or not isinstance(top_k, int) or top_k < 0:
+            raise ValueError("top_k must be non-negative")
         if not candidates:
             return []
 

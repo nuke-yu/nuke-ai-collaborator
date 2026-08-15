@@ -27,6 +27,21 @@ class TestHybridRerankEngine(unittest.TestCase):
         expected_score = (1.0 / 62) + (1.0 / 61)
         self.assertAlmostEqual(doc2["rrf_score"], expected_score, places=5)
 
+    def test_invalid_parameters_are_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            HybridRerankEngine(rrf_k=0)
+        with self.assertRaises(ValueError):
+            HybridRerankEngine(mmr_lambda=1.1)
+        with self.assertRaises(ValueError):
+            self.engine.mmr_diversify([], "query", top_k=-1)
+
+    def test_missing_ids_do_not_merge_same_content_from_different_lanes(self) -> None:
+        fused = self.engine.rrf_fusion([
+            [{"content": "same"}],
+            [{"content": "same"}],
+        ])
+        self.assertEqual(len(fused), 2)
+
     def test_mmr_diversify_penalizes_redundant_results(self) -> None:
         candidates = [
             {"id": "doc1", "content": "Python FastAPI backend server", "rrf_score": 0.03},

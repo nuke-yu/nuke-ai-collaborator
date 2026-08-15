@@ -18,6 +18,21 @@ def test_emergency_pruning_removes_tool_call_and_results_atomically():
     assert _drop_oldest_message_group(messages) == [{"role": "user", "content": "keep me"}]
 
 
+def test_emergency_pruning_preserves_system_and_removes_complete_user_turn():
+    messages = [
+        {"role": "system", "content": "keep system"},
+        {"role": "user", "content": "remove"},
+        {"role": "assistant", "tool_calls": [{"id": "c1"}], "content": ""},
+        {"role": "tool", "tool_call_id": "c1", "content": "result"},
+        {"role": "assistant", "content": "done"},
+        {"role": "user", "content": "keep user"},
+    ]
+    assert _drop_oldest_message_group(messages) == [
+        {"role": "system", "content": "keep system"},
+        {"role": "user", "content": "keep user"},
+    ]
+
+
 def test_final_context_budget_reduces_generation_when_window_is_exhausted() -> None:
     runner = SimpleNamespace(
         provider="deepseek",

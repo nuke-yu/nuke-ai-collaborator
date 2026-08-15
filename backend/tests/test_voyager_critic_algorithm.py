@@ -80,6 +80,25 @@ class TestVoyagerCriticEngine(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.score, 0.98)
         self.assertEqual(result.verification_mode, "llm_reflection")
 
+    async def test_evaluate_success_with_llm_parses_string_false_and_bounds_values(self) -> None:
+        mock_ai_call = AsyncMock(return_value={
+            "content": '{"passed": "false", "score": 4, "critique": "' + ("x" * 3000) + '"}'
+        })
+        result = await self.engine.evaluate_success_with_llm(
+            "Verify build", "completed", [], ai_call_fn=mock_ai_call
+        )
+        self.assertFalse(result.passed)
+        self.assertEqual(result.score, 1.0)
+        self.assertEqual(len(result.critique), 2000)
+
+    async def test_invalid_llm_boolean_falls_back_to_deterministic_evaluator(self) -> None:
+        mock_ai_call = AsyncMock(return_value={"content": '{"passed": "maybe", "score": 0.9}'})
+        result = await self.engine.evaluate_success_with_llm(
+            "Verify build", "completed", [], ai_call_fn=mock_ai_call
+        )
+        self.assertTrue(result.passed)
+        self.assertEqual(result.verification_mode, "deterministic_rules")
+
 
 class TestVoyagerCriticAlgorithmAdapter(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:

@@ -53,3 +53,28 @@ async def test_sandbox_recomputes_hil_for_write_tool_even_when_plan_lies():
     plan = SkillExecutionPlan("x", ("write_file",), ("write_file",), (), False)
     with pytest.raises(PermissionError):
         await sandbox.execute(plan)
+
+
+@pytest.mark.asyncio
+async def test_sandbox_rolls_back_when_a_later_tool_raises():
+    sandbox = SkillSandbox()
+    rollback = []
+    sandbox.register("write", lambda: "created")
+    sandbox.register("explode", lambda: (_ for _ in ()).throw(RuntimeError("boom")))
+    plan = SkillExecutionPlan("x", ("write", "explode"), ("write", "explode"), (), True)
+    with pytest.raises(RuntimeError, match="boom"):
+        await sandbox.execute(plan, hil_approved=True, rollback_fn=lambda outputs: rollback.extend(outputs))
+    assert rollback == ["created"]
+
+
+@pytest.mark.asyncio
+async def test_sandbox_exposes_rollback_failure_after_bad_verification():
+    sandbox = SkillSandbox()
+    sandbox.register("write", lambda: "created")
+    plan = SkillExecutionPlan("x", ("write",), ("write",), ("check",), True)
+    result = await sandbox.execute(
+        plan, hil_approved=True, verify_fn=lambda *_: False,
+        rollback_fn=lambda _outputs: (_ for _ in ()).throw(RuntimeError("rollback down")),
+    )
+    assert result.rollback_attempted is True
+    assert result.rollback_failed is True

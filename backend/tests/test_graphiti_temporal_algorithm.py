@@ -48,6 +48,23 @@ class TestGraphitiTemporalEngine(unittest.TestCase):
         self.assertEqual(len(active_t1), 1)
         self.assertEqual(active_t1[0].edge_id, e2.edge_id)
 
+    def test_backdated_functional_edge_preserves_future_state(self) -> None:
+        a = self.engine.add_edge("User", "lives_in", "A", "A", valid_at=100)
+        b = self.engine.add_edge("User", "lives_in", "B", "B", valid_at=200)
+        c = self.engine.add_edge("User", "lives_in", "C", "C", valid_at=150)
+        self.assertEqual((a.valid_at, a.invalid_at), (100, 150))
+        self.assertEqual((c.valid_at, c.invalid_at), (150, 200))
+        self.assertEqual((b.valid_at, b.invalid_at), (200, None))
+        for edge in (a, b, c):
+            if edge.invalid_at is not None:
+                self.assertLess(edge.valid_at, edge.invalid_at)
+        self.assertEqual([e.target_node_id for e in self.engine.get_active_edges(as_of=250)], [b.target_node_id])
+
+    def test_edge_ids_are_unique_within_same_second(self) -> None:
+        first = self.engine.add_edge("A", "knows", "B", "first", valid_at=100)
+        second = self.engine.add_edge("A", "knows", "B", "second", valid_at=100)
+        self.assertNotEqual(first.edge_id, second.edge_id)
+
     def test_nonfunctional_relation_keeps_multiple_active_targets(self) -> None:
         first = self.engine.add_edge("A", "member_of", "Team1", "membership", valid_at=1)
         second = self.engine.add_edge("A", "member_of", "Team2", "membership", valid_at=2)

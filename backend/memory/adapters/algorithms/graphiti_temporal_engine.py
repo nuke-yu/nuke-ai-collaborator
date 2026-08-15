@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import time
 import re
+import uuid
 from difflib import SequenceMatcher
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Sequence
@@ -226,13 +227,29 @@ class GraphitiTemporalEngine:
 
         # Invalidate prior active edges with same source and relation
         if relation in self._functional_relations:
+            if any(
+                edge.source_node_id == src_node.node_id
+                and edge.relation == relation
+                and edge.valid_at == now
+                for edge in self._edges
+            ):
+                raise ValueError("functional relation already has an edge at valid_at")
             self.invalidate_conflicting_edges(
                 source_node_id=src_node.node_id,
                 relation=relation,
                 invalid_at=now,
             )
+            future_starts = [
+                edge.valid_at for edge in self._edges
+                if edge.source_node_id == src_node.node_id
+                and edge.relation == relation
+                and edge.valid_at > now
+            ]
+            invalid_at = min(future_starts, default=None)
+        else:
+            invalid_at = None
 
-        edge_id = f"edge:{src_node.node_id}:{relation}:{tgt_node.node_id}:{int(now)}"
+        edge_id = f"edge:{uuid.uuid4().hex}"
         edge = TemporalEdge(
             edge_id=edge_id,
             source_node_id=src_node.node_id,
@@ -240,7 +257,7 @@ class GraphitiTemporalEngine:
             relation=relation,
             fact_statement=fact_statement,
             valid_at=now,
-            invalid_at=None,
+            invalid_at=invalid_at,
         )
         self._edges.append(edge)
         return edge
@@ -259,7 +276,8 @@ class GraphitiTemporalEngine:
             if (
                 edge.source_node_id == source_node_id
                 and edge.relation == relation
-                and edge.invalid_at is None
+                and edge.valid_at < now
+                and (edge.invalid_at is None or edge.invalid_at > now)
             ):
                 edge.invalid_at = now
                 invalidated.append(edge)

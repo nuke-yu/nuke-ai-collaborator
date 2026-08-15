@@ -184,13 +184,28 @@ class VoyagerCriticEngine:
                 match = re.search(r"\{.*\}", content, re.DOTALL)
                 if match:
                     obj = json.loads(match.group(0))
+                    passed = self._parse_bool(obj.get("passed"))
+                    score = max(0.0, min(1.0, float(obj.get("score", 0.0))))
+                    critique = str(obj.get("critique", "LLM Critic Evaluation"))[:2000]
                     return CriticResult(
-                        passed=bool(obj.get("passed", True)),
-                        score=float(obj.get("score", 0.9)),
-                        critique=str(obj.get("critique", "LLM Critic Evaluation")),
+                        passed=passed,
+                        score=score,
+                        critique=critique,
                         verification_mode="llm_reflection",
                     )
             except Exception:
                 pass
 
         return self.evaluate_success(task, outcome, tool_records, error_traces)
+
+    @staticmethod
+    def _parse_bool(value: Any) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"true", "1", "yes"}:
+                return True
+            if normalized in {"false", "0", "no"}:
+                return False
+        raise ValueError("invalid passed value")
