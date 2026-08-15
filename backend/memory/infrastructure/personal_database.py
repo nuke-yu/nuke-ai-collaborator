@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -16,6 +17,7 @@ from memory.domain.safety import safe_memory_text
 
 
 _LOCKS: dict[int, asyncio.Lock] = {}
+logger = logging.getLogger(__name__)
 _REQUIRED_COLUMNS = {
     "personal_schema_version": {"version", "applied_at"},
     "personal_records": {"record_id", "user_id", "kind", "content", "speaker", "subject", "authority", "sensitivity", "status", "source_type", "source_id", "confidence", "explicit", "valid_from", "valid_to", "created_at", "updated_at"},
@@ -169,12 +171,25 @@ class PersonalVaultDatabase:
         async with lock:
             path.parent.mkdir(parents=True, exist_ok=True)
             lock_fd = await asyncio.to_thread(os.open, str(path.parent), os.O_RDONLY)
-            await asyncio.to_thread(fcntl.flock, lock_fd, fcntl.LOCK_EX)
-            audit_id = await _create_central_vault_deletion(user_id, enabled=type(self) is PersonalVaultDatabase)
+            locked = False
             try:
+                await asyncio.to_thread(fcntl.flock, lock_fd, fcntl.LOCK_EX)
+                locked = True
+                audit_id = None
+                audit_pending = False
+                try:
+                    audit_id = await _create_central_vault_deletion(
+                        user_id, enabled=type(self) is PersonalVaultDatabase
+                    )
+                except Exception:
+                    # The local deletion remains authoritative.  The caller is
+                    # told that the central outbox needs compensation; most
+                    # importantly, lock cleanup does not depend on this call.
+                    logger.exception("central Personal Vault deletion audit unavailable")
+                    audit_pending = True
                 if not path.exists():
                     await _finish_central_vault_deletion(audit_id, "not_found", enabled=type(self) is PersonalVaultDatabase)
-                    return {"deleted": False, "audit_pending": False}
+                    return {"deleted": False, "audit_pending": audit_pending}
                 async with aiosqlite.connect(str(path), timeout=15.0) as db:
                     await db.execute("PRAGMA journal_mode=WAL")
                     await db.execute("PRAGMA busy_timeout=15000")
@@ -200,7 +215,7 @@ class PersonalVaultDatabase:
                     Path(str(path) + ".lock").unlink()
                 except FileNotFoundError:
                     pass
-                audit_pending = not await _finish_central_vault_deletion(
+                audit_pending = audit_pending or not await _finish_central_vault_deletion(
                     audit_id, "completed", enabled=type(self) is PersonalVaultDatabase
                 )
                 return {"deleted": True, "audit_pending": audit_pending}
@@ -210,7 +225,8 @@ class PersonalVaultDatabase:
                 )
                 raise
             finally:
-                await asyncio.to_thread(fcntl.flock, lock_fd, fcntl.LOCK_UN)
+                if locked:
+                    await asyncio.to_thread(fcntl.flock, lock_fd, fcntl.LOCK_UN)
                 os.close(lock_fd)
 
 
@@ -417,6 +433,11 @@ async def _create_central_vault_deletion(user_id: int, *, enabled: bool = True) 
         return None
     from db import global_db
     async with global_db() as db:
+        async with db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='personal_vault_deletion_audit'"
+        ) as cur:
+            if await cur.fetchone() is None:
+                raise RuntimeError("central Personal Vault deletion audit schema is not ready")
         cur = await db.execute(
             "INSERT INTO personal_vault_deletion_audit(user_id,operation,status,created_at) VALUES(?,?,?,strftime('%s','now') * 1000)",
             (user_id, "delete_vault", "pending"),

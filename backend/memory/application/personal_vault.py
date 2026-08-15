@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import base64
 import binascii
@@ -28,16 +29,28 @@ _EXPORT_LIMIT = 1_000
 _EXPORT_CURSOR_VERSION = 1
 
 
-def _decode_export_cursor(cursor: str | None) -> tuple[int, dict[str, list[object]]]:
+def _export_cursor_secret() -> bytes:
+    from core.auth import SECRET_KEY
+    return SECRET_KEY.encode("utf-8")
+
+
+def _decode_export_cursor(cursor: str | None, *, user_id: int, limit: int) -> tuple[int, dict[str, list[object]]]:
     if cursor is None:
         return int(time.time() * 1000), {}
     if not isinstance(cursor, str) or not cursor:
         raise ValueError("cursor must be an opaque export cursor")
     try:
-        raw = base64.urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4))
+        encoded_payload, encoded_signature = cursor.split(".", 1)
+        expected = hmac.new(_export_cursor_secret(), encoded_payload.encode(), hashlib.sha256).digest()
+        actual = base64.urlsafe_b64decode(encoded_signature + "=" * (-len(encoded_signature) % 4))
+        if not hmac.compare_digest(expected, actual):
+            raise ValueError
+        raw = base64.urlsafe_b64decode(encoded_payload + "=" * (-len(encoded_payload) % 4))
         payload = json.loads(raw.decode("utf-8"))
         if payload.get("v") != _EXPORT_CURSOR_VERSION:
             raise ValueError
+        if int(payload["user_id"]) != user_id or int(payload["limit"]) != limit:
+            raise ValueError("export cursor does not match caller")
         snapshot = int(payload["snapshot"])
         after = payload.get("after", {})
         if snapshot < 0 or not isinstance(after, dict):
@@ -47,9 +60,17 @@ def _decode_export_cursor(cursor: str | None) -> tuple[int, dict[str, list[objec
         raise ValueError("invalid export cursor") from exc
 
 
-def _encode_export_cursor(snapshot: int, after: Mapping[str, list[object]]) -> str:
-    raw = json.dumps({"v": _EXPORT_CURSOR_VERSION, "snapshot": snapshot, "after": after}, separators=(",", ":")).encode()
-    return base64.urlsafe_b64encode(raw).decode().rstrip("=")
+def _encode_export_cursor(snapshot: int, after: Mapping[str, list[object]], *, user_id: int, limit: int) -> str:
+    raw = json.dumps(
+        {"v": _EXPORT_CURSOR_VERSION, "user_id": user_id, "limit": limit,
+         "snapshot": snapshot, "after": after},
+        separators=(",", ":"),
+    ).encode()
+    encoded = base64.urlsafe_b64encode(raw).decode().rstrip("=")
+    signature = base64.urlsafe_b64encode(
+        hmac.new(_export_cursor_secret(), encoded.encode(), hashlib.sha256).digest()
+    ).decode().rstrip("=")
+    return f"{encoded}.{signature}"
 
 
 async def list_personal_apps(*, database: PersonalVaultDatabasePort, user_id: int, include_inactive: bool = True) -> list[dict[str, object]]:
@@ -301,7 +322,7 @@ class CanonicalPersonalKnowledgeService(PersonalKnowledgePort):
         user_id = _user_id(scope)
         if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= _EXPORT_LIMIT:
             raise ValueError(f"limit must be between 1 and {_EXPORT_LIMIT}")
-        snapshot, after = _decode_export_cursor(cursor)
+        snapshot, after = _decode_export_cursor(cursor, user_id=user_id, limit=limit)
         async with self._database.connect(user_id) as db:
             await db.execute("BEGIN")
             async def fetch_page(name: str, select: str, where: str, params: list[object], primary: str, tie: str) -> tuple[list[tuple[object, ...]], bool]:
@@ -314,8 +335,8 @@ class CanonicalPersonalKnowledgeService(PersonalKnowledgePort):
                     after_sql = f" AND ({primary} > ? OR ({primary} = ? AND {tie} > ?))"
                     after_params = [previous[0], previous[0], previous[1]]
                 async with db.execute(
-                    f"{select} {where} AND {primary} <= ?{after_sql} ORDER BY {primary},{tie} LIMIT ?",
-                    (*params, snapshot, *after_params, limit + 1),
+                    f"{select} {where}{after_sql} ORDER BY {primary},{tie} LIMIT ?",
+                    (*params, *after_params, limit + 1),
                 ) as cur:
                     rows = await cur.fetchall()
                 more = len(rows) > limit
@@ -332,20 +353,20 @@ class CanonicalPersonalKnowledgeService(PersonalKnowledgePort):
             migration_conflicts, more_conflicts = await fetch_page("migration_conflicts", "SELECT conflict_id,migration_version,resolution_status,resolved_at,resolved_by,content_hash,source_type,source_id,kind,canonical_record_id,conflicting_record_id,content,authority,explicit,confidence,valid_from,created_at,created_at", "FROM personal_migration_conflicts WHERE user_id=?", [user_id], "created_at", "conflict_id")
             more = {"records": more_records, "projections": more_projections, "usage_events": more_usage, "apps": more_apps, "acl_rules": more_acl, "acl_audit_events": more_acl_audit, "habit_evidence": more_habits, "deletion_audit_events": more_deletions, "migration_conflicts": more_conflicts}
             counts = {}
-            for name, table, predicate, timestamp_column in (
-                ("records", "personal_records", "user_id=?", "created_at"),
-                ("usage_events", "personal_memory_usage_events", "user_id=?", "used_at"),
-                ("apps", "personal_apps", "user_id=?", "created_at"),
-                ("acl_audit_events", "personal_acl_audit_events", "user_id=?", "created_at"),
-                ("acl_rules", "personal_access_control_actions", "user_id=?", "created_at"),
-                ("deletion_audit_events", "personal_deletion_audit_events", "user_id=?", "created_at"),
-                ("migration_conflicts", "personal_migration_conflicts", "user_id=?", "created_at"),
+            for name, table, predicate in (
+                ("records", "personal_records", "user_id=?"),
+                ("usage_events", "personal_memory_usage_events", "user_id=?"),
+                ("apps", "personal_apps", "user_id=?"),
+                ("acl_audit_events", "personal_acl_audit_events", "user_id=?"),
+                ("acl_rules", "personal_access_control_actions", "user_id=?"),
+                ("deletion_audit_events", "personal_deletion_audit_events", "user_id=?"),
+                ("migration_conflicts", "personal_migration_conflicts", "user_id=?"),
             ):
-                async with db.execute(f"SELECT COUNT(*) FROM {table} WHERE {predicate} AND {timestamp_column}<=?", (user_id, snapshot)) as cur:
+                async with db.execute(f"SELECT COUNT(*) FROM {table} WHERE {predicate}", (user_id,)) as cur:
                     counts[name] = int((await cur.fetchone())[0])
-            async with db.execute("SELECT COUNT(*) FROM personal_projections p JOIN personal_records r ON r.record_id=p.record_id WHERE r.user_id=? AND p.created_at<=?", (user_id, snapshot)) as cur:
+            async with db.execute("SELECT COUNT(*) FROM personal_projections p JOIN personal_records r ON r.record_id=p.record_id WHERE r.user_id=?", (user_id,)) as cur:
                 counts["projections"] = int((await cur.fetchone())[0])
-            async with db.execute("SELECT COUNT(*) FROM habit_evidence WHERE record_id IN (SELECT record_id FROM personal_records WHERE user_id=?) AND observed_at<=?", (user_id, snapshot)) as cur:
+            async with db.execute("SELECT COUNT(*) FROM habit_evidence WHERE record_id IN (SELECT record_id FROM personal_records WHERE user_id=?)", (user_id,)) as cur:
                 counts["habit_evidence"] = int((await cur.fetchone())[0])
             await db.commit()
         fields = ("record_id","kind","content","speaker","subject","authority","sensitivity","status","source_type","source_id","confidence","explicit","valid_from","valid_to")
@@ -366,7 +387,7 @@ class CanonicalPersonalKnowledgeService(PersonalKnowledgePort):
         for name, rows in page_rows.items():
             if rows:
                 after_next[name] = [rows[-1][-1], rows[-1][0]]
-        next_cursor = _encode_export_cursor(snapshot, after_next) if any(more.values()) else None
+        next_cursor = _encode_export_cursor(snapshot, after_next, user_id=user_id, limit=limit) if any(more.values()) else None
         return {"schema_version": PERSONAL_SCHEMA_VERSION, "user_id": user_id,
                 "records": safe_rows(fields, [row[:-1] for row in records]), "projections": safe_rows(pfields, [row[:-1] for row in projections]),
                 "usage_events": safe_rows(ufields, [row[:-1] for row in usage_events]), "apps": safe_rows(afields, [row[:-1] for row in apps]),

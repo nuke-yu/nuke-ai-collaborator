@@ -242,6 +242,42 @@ class CanonicalPersonalMemoryTest(unittest.IsolatedAsyncioTestCase):
                 except FileNotFoundError:
                     pass
 
+    async def test_delete_releases_lock_when_central_audit_creation_fails(self) -> None:
+        path = tempfile.mktemp(suffix="_central_audit_unavailable.db")
+        try:
+            from memory.infrastructure.personal_database import _DDL
+            async with aiosqlite.connect(path) as db:
+                for statement in _DDL:
+                    await db.execute(statement)
+                await db.commit()
+            database = PersonalVaultDatabase()
+            with patch.object(PersonalVaultDatabase, "_path", staticmethod(lambda _user_id: Path(path))), \
+                 patch("memory.infrastructure.personal_database._create_central_vault_deletion", new=AsyncMock(side_effect=RuntimeError("central down"))):
+                result = await database.delete_vault(7)
+                self.assertEqual(result, {"deleted": True, "audit_pending": True})
+                self.assertEqual(await database.delete_vault(7), {"deleted": False, "audit_pending": True})
+        finally:
+            for suffix in ("", "-wal", "-shm", ".lock"):
+                try:
+                    os.unlink(path + suffix)
+                except FileNotFoundError:
+                    pass
+
+    async def test_missing_central_audit_schema_fails_readiness_check(self) -> None:
+        path = tempfile.mktemp(suffix="_central_without_audit.db")
+        try:
+            import db
+            from memory.infrastructure.personal_database import _create_central_vault_deletion
+            with patch.object(db, "DB_PATH", path):
+                with self.assertRaisesRegex(RuntimeError, "schema is not ready"):
+                    await _create_central_vault_deletion(7)
+        finally:
+            for suffix in ("", "-wal", "-shm"):
+                try:
+                    os.unlink(path + suffix)
+                except FileNotFoundError:
+                    pass
+
     async def test_habit_uses_stable_key_and_matures_from_evidence(self) -> None:
         base = 1_700_000_000_000
         ids = []
@@ -279,6 +315,10 @@ class CanonicalPersonalMemoryTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(first["records"]), 2)
         self.assertIsInstance(first["export"]["next_cursor"], str)
         self.assertTrue(first["export"]["has_more"]["records"])
+        with self.assertRaises(ValueError):
+            await self.service.export(self.scope, cursor=first["export"]["next_cursor"][:-1] + "x", limit=2)
+        with self.assertRaises(ValueError):
+            await self.service.export(self.scope, cursor=first["export"]["next_cursor"], limit=1)
         second = await self.service.export(self.scope, cursor=first["export"]["next_cursor"], limit=2)
         self.assertEqual(len(second["records"]), 1)
         self.assertIsNone(second["export"]["next_cursor"])
