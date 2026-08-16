@@ -76,3 +76,9 @@ def default_model() -> Any:
     _used("model")
     from memory.canonical import call_memory_model
     return call_memory_model
+
+
+def default_temporal_graph() -> Any:
+    _used("temporal_graph")
+    from memory.adapters.algorithms import GraphitiTemporalAlgorithmAdapter
+    return GraphitiTemporalAlgorithmAdapter()

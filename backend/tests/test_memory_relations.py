@@ -163,6 +163,26 @@ class CanonicalRelationServiceTest(unittest.IsolatedAsyncioTestCase):
         ))
         self.assertEqual(len(relations), 2)
 
+    async def test_invalid_relations_archive_and_remain_recallable_as_history(self) -> None:
+        await self.service.create(CreateMemoryRelation(
+            scope=MemoryScope.group(group_id=7, actor_id="system:archive"),
+            from_record_id="fact:new", to_record_id="fact:old",
+            relation_type=MemoryRelationType.SUPERSEDES,
+            source_type="timeline", source_id="archive:1", effective_from=100,
+        ))
+        async with db.connect(self.path) as connection:
+            await connection.execute("UPDATE memory_relations SET valid_to=200")
+            await connection.commit()
+        scope = MemoryScope.group(group_id=7, actor_id="system:archive")
+        self.assertEqual(await self.service.archive_before(scope, 300), 1)
+        historical = await self.service.recall(RecallMemoryRelations(
+            scope=scope, record_id="fact:new", as_of=150
+        ))
+        self.assertEqual(len(historical), 1)
+        async with db.connect(self.path) as connection:
+            async with connection.execute("SELECT COUNT(*) FROM memory_relations") as cursor:
+                self.assertEqual((await cursor.fetchone())[0], 0)
+
     async def test_cross_group_endpoint_fails_closed(self) -> None:
         await self._insert_record("fact:other-group", 8)
 

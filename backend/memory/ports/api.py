@@ -51,6 +51,7 @@ class MemoryRelationPort(Protocol):
     async def recall(
         self, query: RecallMemoryRelations
     ) -> tuple[MemoryRelation, ...]: ...
+    async def archive_before(self, scope: MemoryScope, before: int, limit: int = 1000) -> int: ...
 
 
 @runtime_checkable

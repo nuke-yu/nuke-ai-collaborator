@@ -15,6 +15,7 @@ from memory.adapters.runtime import (
     redact_projection_error,
 )
 from memory.adapters.projections import ChromaBotMemoryProjectionReader
+from memory.adapters.algorithms import GraphitiTemporalAlgorithmAdapter
 from memory.application import (
     AuthorizedPersonalKnowledgeService,
     CanonicalConversationMemoryService,
@@ -29,10 +30,11 @@ from memory.application import (
     GroupFactService,
     CanonicalProjectionReconciler,
 )
+from memory.application.letta_controller import LettaMemoryFunctionController
 from memory.domain import Principal
 from memory.infrastructure import MemorySchemaManager, ProjectionOutbox, SQLiteMemoryDatabase, PersonalVaultDatabase, SQLitePersonalVaultPolicy
 from memory.module import MemoryModule
-from memory.ports import MemoryACLPort
+from memory.ports import MemoryACLPort, TemporalGraphPort
 from memory.composition import MemoryComposition
 from memory.application.context import (
     configure_database,
@@ -129,6 +131,11 @@ def build_memory_relation_client() -> CanonicalRelationService:
                     return await cur.fetchone() is not None
         return False
     return CanonicalRelationService(SQLiteMemoryDatabase(), authorize_relation)
+
+
+def build_temporal_graph_client() -> TemporalGraphPort:
+    """Return the composition-owned Graphiti temporal graph port."""
+    return memory_composition().temporal_graph
 
 
 def build_bot_memory_projection_auditor() -> BotMemoryProjectionAuditService:
@@ -232,6 +239,10 @@ def build_memory_composition(*, drain_interval_seconds: float = 60.0) -> MemoryC
         fact_engine=Mem0FactEngine(),
         settings=CurrentMemorySettings(),
         model=call_ai_once,
+        temporal_graph=GraphitiTemporalAlgorithmAdapter(),
+    )
+    composition.memory_functions = LettaMemoryFunctionController(
+        composition.database, composition.projection_outbox, build_memory_acl()
     )
     return composition
 
@@ -257,6 +268,7 @@ def install_memory_composition(composition: MemoryComposition) -> MemoryComposit
         MemorySettingsPort,
         ModelPort,
         SkillWorkspacePort,
+        TemporalGraphPort,
     )
 
     dependencies = {
@@ -266,6 +278,7 @@ def install_memory_composition(composition: MemoryComposition) -> MemoryComposit
         "fact_engine": (composition.fact_engine, FactEnginePort),
         "settings": (composition.settings, MemorySettingsPort),
         "model": (composition.model, ModelPort),
+        "temporal_graph": (composition.temporal_graph, TemporalGraphPort),
     }
     for name, (dependency, protocol) in dependencies.items():
         if not isinstance(dependency, protocol):
@@ -283,6 +296,7 @@ def install_memory_composition(composition: MemoryComposition) -> MemoryComposit
         ),
         "projection_outbox": composition.projection_outbox,
         "projection_reconciler": composition.module.reconciler,
+        "memory_functions": composition.memory_functions,
         **{name: dependency for name, (dependency, _) in dependencies.items()},
     }
     services["pipeline"] = build_pipeline_dispatcher(composition)

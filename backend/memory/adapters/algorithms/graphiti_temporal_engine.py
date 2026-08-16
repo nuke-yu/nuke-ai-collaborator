@@ -34,6 +34,24 @@ class TemporalEdge:
     invalid_at: float | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class TemporalCommunity:
+    """A materialized community view, including its internal graph edges."""
+
+    community_id: str
+    node_ids: tuple[str, ...]
+    edge_ids: tuple[str, ...]
+    density: float
+
+
+@dataclass(frozen=True, slots=True)
+class TemporalGraphPath:
+    """One bounded path discovered by multi-hop traversal."""
+
+    node_ids: tuple[str, ...]
+    edge_ids: tuple[str, ...]
+
+
 class GraphitiTemporalEngine:
     """Audit-grade Graphiti Bi-Temporal Knowledge Graph & Invalidation Engine."""
 
@@ -43,6 +61,8 @@ class GraphitiTemporalEngine:
         self._nodes: dict[str, TemporalEntityNode] = {}
         self._edges: list[TemporalEdge] = []
         self._aliases: dict[str, str] = {}
+        self._token_index: dict[str, set[str]] = {}
+        self._archived_edges: dict[str, TemporalEdge] = {}
         self.rrf_k = rrf_k
         self._functional_relations = frozenset({"has_status", "primary_role", "current_location", "lives_in", "preference"})
 
@@ -61,6 +81,8 @@ class GraphitiTemporalEngine:
             raise ValueError("entity alias and canonical name are required")
         node = self.get_or_create_node(canonical_name)
         self._aliases[alias_key] = node.node_id
+        for token in alias_key.split():
+            self._token_index.setdefault(token, set()).add(node.node_id)
         return node
 
     def resolve_entity(self, name: str) -> TemporalEntityNode | None:
@@ -82,8 +104,15 @@ class GraphitiTemporalEngine:
         query = set(self.normalize_entity_name(name).split())
         if not query:
             return None
+        candidate_ids: set[str] = set()
+        for token in query:
+            candidate_ids.update(self._token_index.get(token, ()))
+        # Keep fuzzy matching bounded for large graphs.  If no indexed token
+        # matches, inspect only a deterministic sample of recent node IDs.
+        candidates = (candidate_ids or set(sorted(self._nodes)[-256:]))
         best: tuple[float, TemporalEntityNode | None] = (0.0, None)
-        for node in self._nodes.values():
+        for node_id in candidates:
+            node = self._nodes[node_id]
             tokens = set(self.normalize_entity_name(node.name).split())
             normalized = self.normalize_entity_name(node.name)
             score = max(
@@ -93,6 +122,33 @@ class GraphitiTemporalEngine:
             if score > best[0]:
                 best = (score, node)
         return best[1] if best[0] >= threshold else None
+
+    def disambiguate_entities(
+        self, name: str, *, threshold: float = 0.5, limit: int = 5
+    ) -> tuple[TemporalEntityNode, ...]:
+        """Return ranked, bounded candidates for large-scale entity linking."""
+        if limit < 1:
+            raise ValueError("limit must be positive")
+        query = self.normalize_entity_name(name)
+        query_tokens = set(query.split())
+        ids: set[str] = set()
+        for token in query_tokens:
+            ids.update(self._token_index.get(token, ()))
+        if not ids:
+            ids = set(sorted(self._nodes)[-256:])
+        ranked: list[tuple[float, TemporalEntityNode]] = []
+        for node_id in ids:
+            node = self._nodes[node_id]
+            normalized = self.normalize_entity_name(node.name)
+            tokens = set(normalized.split())
+            score = max(
+                len(query_tokens & tokens) / max(1, len(query_tokens | tokens)),
+                SequenceMatcher(None, query, normalized).ratio(),
+            )
+            if score >= threshold:
+                ranked.append((score, node))
+        ranked.sort(key=lambda item: (-item[0], item[1].node_id))
+        return tuple(node for _, node in ranked[:limit])
 
     def discover_communities(self, as_of: float | None = None) -> tuple[tuple[str, ...], ...]:
         """Return connected components of the active temporal graph."""
@@ -115,6 +171,62 @@ class GraphitiTemporalEngine:
                 stack.extend(adjacency.get(node_id, ()))
             communities.append(tuple(sorted(component)))
         return tuple(sorted(communities, key=lambda group: group[0] if group else ""))
+
+    def community_graph(self, as_of: float | None = None) -> tuple[TemporalCommunity, ...]:
+        """Materialize connected communities with edge membership and density."""
+        active = self.get_active_edges(as_of=as_of)
+        components = self.discover_communities(as_of=as_of)
+        result: list[TemporalCommunity] = []
+        for nodes in components:
+            node_set = set(nodes)
+            edges = tuple(edge for edge in active
+                          if edge.source_node_id in node_set and edge.target_node_id in node_set)
+            possible = len(nodes) * (len(nodes) - 1)
+            density = len(edges) / possible if possible else 0.0
+            community_id = "community:" + uuid.uuid5(uuid.NAMESPACE_URL, ":".join(nodes)).hex
+            result.append(TemporalCommunity(community_id, nodes,
+                                            tuple(edge.edge_id for edge in edges), density))
+        return tuple(result)
+
+    def multi_hop_search(
+        self, start_name: str, *, max_hops: int = 3, as_of: float | None = None,
+        relation_types: Sequence[str] = (), max_paths: int = 100,
+    ) -> tuple[TemporalGraphPath, ...]:
+        """Perform bounded BFS with cycle protection and deterministic limits."""
+        if max_hops < 1 or max_hops > 8:
+            raise ValueError("max_hops must be between 1 and 8")
+        if max_paths < 1:
+            raise ValueError("max_paths must be positive")
+        start = self.resolve_entity(start_name) or self.disambiguate_entity(start_name)
+        if start is None:
+            return ()
+        allowed = set(relation_types)
+        edges = self.get_active_edges(as_of=as_of)
+        adjacency: dict[str, list[tuple[str, TemporalEdge]]] = {}
+        for edge in edges:
+            if allowed and edge.relation not in allowed:
+                continue
+            adjacency.setdefault(edge.source_node_id, []).append((edge.target_node_id, edge))
+            adjacency.setdefault(edge.target_node_id, []).append((edge.source_node_id, edge))
+        paths: list[TemporalGraphPath] = []
+        frontier = [(start.node_id, (start.node_id,), ())]
+        seen = {start.node_id}
+        for _ in range(max_hops):
+            next_frontier = []
+            for node_id, node_path, edge_path in frontier:
+                for neighbor, edge in sorted(adjacency.get(node_id, ()), key=lambda item: item[1].edge_id):
+                    if edge.edge_id in edge_path or neighbor in seen:
+                        continue
+                    path = TemporalGraphPath(node_path + (neighbor,), edge_path + (edge.edge_id,))
+                    paths.append(path)
+                    if len(paths) >= max_paths:
+                        return tuple(paths)
+                    seen.add(neighbor)
+                    next_frontier.append((neighbor, path.node_ids, path.edge_ids))
+            frontier = next_frontier
+            if not frontier:
+                break
+        return tuple(paths)
 
     def hybrid_search(
         self,
@@ -210,6 +322,8 @@ class GraphitiTemporalEngine:
                 entity_type=entity_type,
                 created_at=time.time(),
             )
+            for token in normalized.split():
+                self._token_index.setdefault(token, set()).add(node_id)
         return self._nodes[node_id]
 
     def add_edge(
@@ -289,9 +403,26 @@ class GraphitiTemporalEngine:
         query_time = time.time() if as_of is None else as_of
         active: list[TemporalEdge] = []
 
-        for edge in self._edges:
+        for edge in (*self._edges, *self._archived_edges.values()):
             if edge.valid_at <= query_time:
                 if edge.invalid_at is None or edge.invalid_at > query_time:
                     active.append(edge)
 
         return active
+
+    def archive_before(self, cutoff: float, *, limit: int = 1000) -> int:
+        """Move invalid historical edges to cold storage without losing history."""
+        if limit < 1:
+            raise ValueError("limit must be positive")
+        candidates = [edge for edge in self._edges
+                      if edge.invalid_at is not None and edge.invalid_at <= cutoff]
+        moved = 0
+        for edge in sorted(candidates, key=lambda item: (item.invalid_at or 0, item.edge_id))[:limit]:
+            self._archived_edges[edge.edge_id] = edge
+            self._edges.remove(edge)
+            moved += 1
+        return moved
+
+    def get_archived_edges(self) -> tuple[TemporalEdge, ...]:
+        """Return cold historical edges for maintenance and audit tooling."""
+        return tuple(sorted(self._archived_edges.values(), key=lambda edge: edge.edge_id))

@@ -194,12 +194,22 @@ class CanonicalRelationService:
                     params: list[object] = [group_id, *batch, *batch]
                     params.extend(temporal_params)
                     params.extend(type_params)
+                    source_table = (
+                        "(SELECT relation_id,group_id,from_record_id,to_record_id,relation_type,"
+                        "source_type,source_id,evidence_json,created_by,effective_from,valid_to,status "
+                        "FROM memory_relations UNION ALL SELECT relation_id,group_id,from_record_id,"
+                        "to_record_id,relation_type,source_type,source_id,evidence_json,created_by,"
+                        "effective_from,valid_to,status FROM memory_relations_archive)"
+                    )
+                    status_filter = "status='active'"
+                    if query.as_of is not None:
+                        status_filter = "status IN ('active','archived')"
                     async with db.execute(
                         """SELECT relation_id,group_id,from_record_id,to_record_id,
                             relation_type,source_type,source_id,evidence_json,
                             created_by,effective_from,valid_to,status
-                        FROM memory_relations
-                        WHERE group_id=? AND status='active'
+                        FROM """ + source_table + """
+                        WHERE group_id=? AND """ + status_filter + """
                           AND (from_record_id IN ("""
                         + placeholders
                         + ") OR to_record_id IN ("
@@ -241,6 +251,36 @@ class CanonicalRelationService:
             )
             for row in rows
         )
+
+    async def archive_before(self, scope, before: int, limit: int = 1000) -> int:
+        """Move invalidated historical edges to a cold table atomically."""
+        group_id = _require_group_scope(scope.kind, scope.group_id)
+        if before < 0 or limit < 1:
+            raise ValueError("before must be non-negative and limit must be positive")
+        if self._authorizer is not None and not await self._authorizer(scope):
+            raise MemoryAuthorizationError("actor is not authorized to archive memory relations")
+        async with await self._database.connect("memory_relations", group_id, write=True) as db:
+            await db.execute(
+                """INSERT OR IGNORE INTO memory_relations_archive
+                   (relation_id,group_id,from_record_id,to_record_id,relation_type,status,
+                    source_type,source_id,evidence_json,created_by,effective_from,valid_to,
+                    created_at,archived_at)
+                   SELECT relation_id,group_id,from_record_id,to_record_id,relation_type,'archived',
+                          source_type,source_id,evidence_json,created_by,effective_from,valid_to,
+                          created_at,CAST(strftime('%s','now') AS INTEGER)*1000
+                   FROM memory_relations
+                   WHERE group_id=? AND valid_to IS NOT NULL AND valid_to<=? AND status='active'
+                   ORDER BY valid_to,relation_id LIMIT ?""",
+                (group_id, before, limit),
+            )
+            cursor = await db.execute(
+                """DELETE FROM memory_relations
+                   WHERE group_id=? AND valid_to IS NOT NULL AND valid_to<=? AND status='active'
+                     AND relation_id IN (SELECT relation_id FROM memory_relations_archive WHERE group_id=?)""",
+                (group_id, before, group_id),
+            )
+            await db.commit()
+            return int(cursor.rowcount if cursor.rowcount is not None else 0)
 
 
 def _require_group_scope(kind: ScopeKind, group_id: int | None) -> int:

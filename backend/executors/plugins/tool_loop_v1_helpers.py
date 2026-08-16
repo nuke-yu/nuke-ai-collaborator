@@ -89,6 +89,12 @@ def _apply_memory_context_budget(
         engine = LettaOpenMemoryEngine()
         tokenizer = getattr(runner, "tokenizer", None)
         input_budget = max(1024, descriptor.context_window - int(runner.max_tokens) - 1024)
+        working_set = getattr(runner, "letta_working_memory", None)
+        if working_set is not None:
+            paged_working = working_set.page(max(256, input_budget // 4))
+            if paged_working:
+                working_overlay = "\n\n".join(str(item.get("content", "")) for item in paged_working)
+                memory = f"{memory}\n\n[working memory]\n{working_overlay}" if memory else working_overlay
         recall_text = "\n\n".join(value for value in learned_contexts if value)
         memory_tokens = engine.estimate_tokens(memory, tokenizer)
         recall_tokens = engine.estimate_tokens(recall_text, tokenizer)
@@ -788,6 +794,17 @@ async def setup_session(runner) -> None:
         from executors import tool_executor
         runner.tool_schemas = tool_executor.get_schemas(tool_names)
     runner.tool_schemas = prompt_builder.restrict_schemas(runner.tool_schemas, runner.bot.get("allowed_tools"))
+    # Letta active memory functions are explicitly opt-in. They are not added
+    # to the generic tool registry; dispatch_tool routes them to the composed
+    # Memory controller, preserving the existing ToolRouter policy.
+    _executor_config = runner.bot.get("executor_config") or {}
+    _allowed_tools = runner.bot.get("allowed_tools")
+    _memory_tools_allowed = not _allowed_tools or all(
+        name in _allowed_tools for name in ("memory_read", "memory_write")
+    )
+    if (_executor_config.get("memory_functions_enabled") and _memory_tools_allowed
+            and getattr(runner, "memory_functions", None) is not None):
+        runner.tool_schemas.extend(runner.memory_functions.tool_schemas())
     from memory.application.references import add_tool_ref_parameter
     runner.tool_schemas = add_tool_ref_parameter(
         runner.tool_schemas, runner.injected_memory_refs

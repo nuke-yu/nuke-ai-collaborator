@@ -26,6 +26,7 @@ def test_memory_composition_owns_canonical_dependencies() -> None:
 
     assert composition.database is composition.module.database
     assert composition.projection_outbox is composition.module.projection_outbox
+    assert "multi_hop_retrieval" in composition.temporal_graph.descriptor.capabilities
 
 
 def test_process_local_accessors_are_canonical():

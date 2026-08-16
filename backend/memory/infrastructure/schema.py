@@ -15,6 +15,7 @@ MEMORY_GROUP_TABLES = frozenset(
         "agent_case_attempts",
         "memory_records",
         "memory_relations",
+        "memory_relations_archive",
         "memory_projection_outbox",
         "memory_projection_rollout",
         "experience_usage",
@@ -100,6 +101,17 @@ MEMORY_V1_DDL = (
     )""",
     "CREATE INDEX IF NOT EXISTS idx_memory_relations_from ON memory_relations(group_id,from_record_id,status,relation_type)",
     "CREATE INDEX IF NOT EXISTS idx_memory_relations_to ON memory_relations(group_id,to_record_id,status,relation_type)",
+    """CREATE TABLE IF NOT EXISTS memory_relations_archive (
+        relation_id TEXT PRIMARY KEY, group_id INTEGER NOT NULL,
+        from_record_id TEXT NOT NULL, to_record_id TEXT NOT NULL,
+        relation_type TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'archived',
+        source_type TEXT NOT NULL, source_id TEXT NOT NULL,
+        evidence_json TEXT NOT NULL DEFAULT '{}', created_by TEXT NOT NULL,
+        effective_from INTEGER NOT NULL, valid_to INTEGER,
+        created_at INTEGER NOT NULL, archived_at INTEGER NOT NULL,
+        UNIQUE(group_id,relation_id)
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_memory_relations_archive_lookup ON memory_relations_archive(group_id,from_record_id,valid_to)",
     """CREATE TABLE IF NOT EXISTS memory_projection_outbox (
         event_id TEXT PRIMARY KEY, projection_type TEXT NOT NULL,
         aggregate_id TEXT NOT NULL, aggregate_version TEXT NOT NULL,

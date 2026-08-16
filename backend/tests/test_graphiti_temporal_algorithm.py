@@ -107,6 +107,30 @@ class TestGraphitiTemporalEngine(unittest.TestCase):
         )
         self.assertEqual({edge.edge_id for edge in results}, {first.edge_id, second.edge_id})
 
+    def test_large_scale_disambiguation_is_indexed_and_bounded(self) -> None:
+        self.engine.add_edge("Alice Smith", "knows", "Bob", "team", valid_at=1)
+        for i in range(1000):
+            self.engine.get_or_create_node(f"Entity {i}")
+        candidates = self.engine.disambiguate_entities("Alice Smit", limit=3)
+        self.assertEqual(candidates[0].name, "Alice Smith")
+        self.assertLessEqual(len(candidates), 3)
+
+    def test_multi_hop_search_and_community_graph(self) -> None:
+        self.engine.add_edge("A", "knows", "B", "ab", valid_at=1)
+        self.engine.add_edge("B", "uses", "C", "bc", valid_at=1)
+        paths = self.engine.multi_hop_search("A", max_hops=2, as_of=2)
+        self.assertEqual(paths[-1].node_ids[-1], self.engine.resolve_entity("C").node_id)
+        communities = self.engine.community_graph(as_of=2)
+        self.assertEqual(len(communities), 1)
+        self.assertEqual(len(communities[0].edge_ids), 2)
+
+    def test_invalid_edges_can_move_to_cold_archive_without_losing_history(self) -> None:
+        old = self.engine.add_edge("A", "lives_in", "X", "old", valid_at=1)
+        self.engine.add_edge("A", "lives_in", "Y", "new", valid_at=2)
+        self.assertEqual(self.engine.archive_before(2), 1)
+        self.assertEqual(self.engine.get_archived_edges()[0].edge_id, old.edge_id)
+        self.assertEqual(self.engine.get_active_edges(as_of=1)[0].edge_id, old.edge_id)
+
     def test_llm_entity_candidates_fallback_and_parse(self) -> None:
         async def ai_call(_system, _messages):
             return {"content": '["Nuke", "SQLite"]'}
@@ -142,6 +166,12 @@ class TestGraphitiTemporalAlgorithmAdapter(unittest.IsolatedAsyncioTestCase):
     async def test_adapter_exposes_hybrid_search(self) -> None:
         await self.adapter.add_temporal_fact("A", "knows", "B", "deployment", valid_at=1)
         self.assertEqual(len(await self.adapter.hybrid_search("deployment", as_of=2)), 1)
+
+    async def test_adapter_exposes_graphiti_scale_and_operations(self) -> None:
+        await self.adapter.add_temporal_fact("A", "knows", "B", "ab", valid_at=1)
+        await self.adapter.add_temporal_fact("B", "uses", "C", "bc", valid_at=1)
+        self.assertEqual(len(await self.adapter.multi_hop_search("A", max_hops=2)), 2)
+        self.assertEqual(len(await self.adapter.community_graph(as_of=2)), 1)
 
 
 if __name__ == "__main__":

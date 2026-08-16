@@ -18,7 +18,8 @@ from executors.plugins.memory_search_tool import MEMORY_TOOLS
 import executors.compact as compact
 from ai.client import call_ai_once, call_ai_stream_messages, AIError, AIContextOverflowError
 from memory.canonical import build_conversation_memory_client, build_personal_knowledge_client, build_learning_client
-from memory.domain import Principal
+from memory.application.letta_controller import LettaWorkingMemory
+from memory.domain import MemoryScope, Principal
 import workspace as _ws
 from core.orchestration.ai_service import AIService
 from ai.model_limits import resolve_max_tokens
@@ -143,7 +144,22 @@ class ToolLoopRunner:
         self.tool_schemas = []
 
         self.rewake_queue = asyncio.Queue()
-        self.execution_ctx = {}
+        try:
+            from memory.bootstrap import memory_composition
+            self.memory_functions = memory_composition().memory_functions
+        except Exception:
+            self.memory_functions = None
+        self.execution_ctx = {
+            "_memory_functions": self.memory_functions,
+            "_memory_scope": MemoryScope.bot(
+                bot_id=int(self.bot["id"]), group_id=ctx.group_id,
+                thread_id=self.session_id,
+                run_id=self.session_id,
+                actor_id=f"bot:{int(self.bot['id'])}",
+            ) if ctx.group_id is not None and self.bot.get("id") is not None else None,
+        }
+        self.letta_working_memory = LettaWorkingMemory()
+        self.execution_ctx["_working_memory"] = self.letta_working_memory
         self.retrieved_experience_ids = []
         self.reflexion_used = False
         self.retrieved_skill_ids = []

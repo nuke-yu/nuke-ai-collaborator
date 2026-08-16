@@ -6,6 +6,7 @@ objects assembled by the Memory composition root.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 from memory.infrastructure import ProjectionOutbox
 from memory.module import MemoryModule
@@ -16,6 +17,7 @@ from memory.ports import (
     MemorySettingsPort,
     ModelPort,
     SkillWorkspacePort,
+    TemporalGraphPort,
 )
 
 
@@ -36,6 +38,8 @@ class MemoryComposition:
     fact_engine: FactEnginePort
     settings: MemorySettingsPort
     model: ModelPort
+    temporal_graph: TemporalGraphPort
+    memory_functions: Any | None = None
 
     @property
     def database(self):

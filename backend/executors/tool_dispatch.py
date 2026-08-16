@@ -81,6 +81,28 @@ async def dispatch_tool(name: str, arguments: dict, context: dict) -> tuple[str,
         return result, True
     context["_validated_memory_refs"] = memory_refs
 
+    # Opt-in Letta memory functions stay behind the Memory application
+    # controller. They never enter the generic tool registry and therefore
+    # cannot bypass ACL, canonical writes, redaction, or the projection outbox.
+    if name in {"memory_read", "memory_write"} and context.get("_memory_functions") is not None:
+        try:
+            import json
+            result = await context["_memory_functions"].execute(
+                context["_memory_scope"], name, safe_arguments
+            )
+            if name == "memory_write" and context.get("_working_memory") is not None:
+                context["_working_memory"].write(
+                    str(safe_arguments.get("content", "")),
+                    importance=float(safe_arguments.get("importance", 0.5)),
+                )
+            payload = {"operation": result.operation, "records": list(result.records), "record_ids": list(result.record_ids)}
+            _record_event_l1(name, safe_arguments, json.dumps(payload, ensure_ascii=False), False, context)
+            return json.dumps(payload, ensure_ascii=False), False
+        except Exception as exc:
+            result = f"Memory function failed: {exc}"
+            _record_event_l1(name, safe_arguments, result, True, context)
+            return result, True
+
     if not tool_executor.has_tool(name):
         from executors.tool_router import router as _tool_router
         if _tool_router.has_providers():

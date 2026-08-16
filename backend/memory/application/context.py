@@ -26,6 +26,8 @@ _services: dict[str, ContextVar[Any]] = {
     for name in (
         "learning", "pipeline", "skill_compiler", "skill_projection",
         "experience_distiller", "projection_outbox", "projection_reconciler", "member_directory", "secret_provider", "skill_workspace", "fact_engine", "settings", "model",
+        "temporal_graph",
+        "memory_functions",
     )
 }
 
@@ -118,6 +120,32 @@ def require_database() -> MemoryDatabasePort:
         from memory.legacy_fallback import default_database
         return default_database()
     return database
+
+
+def require_temporal_graph() -> Any:
+    """Return the composition-owned Graphiti temporal graph adapter."""
+    from memory.ports import TemporalGraphPort
+    service = require_service("temporal_graph", _legacy_temporal_graph)
+    if not isinstance(service, TemporalGraphPort):
+        raise TypeError("configured temporal_graph does not implement TemporalGraphPort")
+    return service
+
+
+def require_memory_functions() -> Any:
+    """Return the explicitly composed active-memory controller.
+
+    Active memory functions intentionally have no legacy fallback: silently
+    constructing one would bypass the composition root's ACL and outbox.
+    """
+    service = _services["memory_functions"].get()
+    if service is None:
+        raise RuntimeError("active Memory functions are not configured")
+    return service
+
+
+def _legacy_temporal_graph() -> Any:
+    from memory.legacy_fallback import default_temporal_graph
+    return default_temporal_graph()
 
 
 def require_learning() -> Any:
