@@ -1,7 +1,7 @@
 """Composition entry points for the Code Mode bounded context."""
 from __future__ import annotations
 
-from .adapters import CallbackBashAdapter, WorkspaceAdapter
+from .adapters import CallbackBashAdapter, SubprocessCodeExecutionAdapter, WorkspaceAdapter
 from .application import CodeModeService, CodeTools
 from .domain import CodeModeLimits, CodeModeRejected
 
@@ -21,4 +21,4 @@ def run_code(
         WorkspaceAdapter(bot_id=bot_id, group_id=group_id, session_id=session_id),
         CallbackBashAdapter(bash_executor),
     )
-    return CodeModeService().run(code, tools, limits)
+    return CodeModeService(SubprocessCodeExecutionAdapter()).run(code, tools, limits)

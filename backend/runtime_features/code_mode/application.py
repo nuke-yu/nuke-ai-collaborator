@@ -1,14 +1,10 @@
 from __future__ import annotations
 
 import ast
-import contextlib
-import io
-import sys
-import time
 
 from .domain import CODE_MODE_PROMPT, CodeModeLimits, CodeModeRejected
-from .ports import BashPort, WorkspacePort
-from .validator import ALLOWED_BUILTINS, validate
+from .ports import BashPort, CodeExecutionPort, WorkspacePort
+from .validator import validate
 
 
 class CodeTools:
@@ -33,6 +29,9 @@ class CodeTools:
 
 class CodeModeService:
     """Application service; all environment effects arrive through ports."""
+    def __init__(self, executor: CodeExecutionPort):
+        self._executor = executor
+
     def run(self, code: str, tools: CodeTools, limits: CodeModeLimits) -> str:
         if not isinstance(code, str) or not code.strip():
             raise CodeModeRejected("code 不能为空")
@@ -43,29 +42,7 @@ class CodeModeService:
         except SyntaxError as exc:
             raise CodeModeRejected(f"代码语法错误: {exc}") from exc
         validate(tree)
-
-        output = io.StringIO()
-        started = time.monotonic()
-        steps = 0
-
-        def trace(_frame, _event, _arg):
-            nonlocal steps
-            steps += 1
-            if steps > limits.max_steps or time.monotonic() - started > limits.timeout_seconds:
-                raise TimeoutError("Code Mode 超过执行预算")
-            return trace
-
-        env = {"__builtins__": {**ALLOWED_BUILTINS, "print": print}, "tools": tools}
-        try:
-            sys.settrace(trace)
-            with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
-                exec(compile(tree, "<run_code>", "exec"), env, {})
-        finally:
-            sys.settrace(None)
-        result = output.getvalue()
-        if len(result) > limits.max_output_chars:
-            result = result[:limits.max_output_chars] + "\n[Code Mode 输出已限制]"
-        return result or "[Code Mode] 执行完成，无输出"
+        return self._executor.execute(code, tools, limits)
 
 
 def append_code_mode_prompt(prompt: str, tool_schemas: list[dict]) -> str:

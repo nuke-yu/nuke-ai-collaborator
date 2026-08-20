@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Protocol
 
+from .domain import CodeModeLimits
+
 
 class WorkspacePort(Protocol):
     def read(self, path: str, offset: int | None = None, limit: int | None = None) -> str:
@@ -16,4 +18,9 @@ class WorkspacePort(Protocol):
 
 class BashPort(Protocol):
     def execute(self, cmd: str, cwd: str = ".") -> str:
+        ...
+
+
+class CodeExecutionPort(Protocol):
+    def execute(self, code: str, tools: object, limits: CodeModeLimits) -> str:
         ...
