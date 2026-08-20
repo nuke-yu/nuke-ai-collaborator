@@ -39,6 +39,26 @@ _BLOCKED_NAMES = frozenset({
     "globals", "locals", "input", "breakpoint", "help", "quit", "exit",
 })
 
+CODE_MODE_PROMPT = """
+【Code Mode 批处理规则】
+当需要批量读取、筛选或处理多个工作区文件时，可以调用 run_code，将逻辑写成短小的 Python 脚本。
+脚本只能使用 tools.read(path, offset=None, limit=None)、tools.write(path, content)、
+tools.grep(pattern, path='.')；禁止 import、shell、网络、任意文件 API 和动态调用。
+已有文件必须先通过 tools.read 观察，再调用 tools.write；脚本应返回少量结构化摘要，避免打印完整日志。
+""".strip()
+
+
+def append_code_mode_prompt(prompt: str, tool_schemas: list[dict]) -> str:
+    """Append the SDK contract only when the filtered tool set exposes run_code."""
+    names = {
+        schema.get("function", {}).get("name")
+        for schema in tool_schemas or ()
+        if isinstance(schema, dict)
+    }
+    if "run_code" not in names or CODE_MODE_PROMPT in prompt:
+        return prompt
+    return f"{prompt}\n\n{CODE_MODE_PROMPT}"
+
 
 def _validate(tree: ast.AST) -> None:
     for node in ast.walk(tree):
