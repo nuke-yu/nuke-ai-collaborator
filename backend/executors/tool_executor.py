@@ -3,7 +3,7 @@ import inspect
 import re
 import time
 from dataclasses import dataclass
-from typing import Callable
+from typing import Awaitable, Callable
 
 from executors.base import ToolDef
 
@@ -89,6 +89,7 @@ class _HookEntry:
 
 _before_hooks: list[_HookEntry] = []
 _after_hooks:  list[_HookEntry] = []
+_middlewares: list[Callable[..., Awaitable[tuple[str, bool]]]] = []
 
 
 # ---------------------------------------------------------------------------
@@ -186,6 +187,16 @@ def clear_after_hooks() -> None:
     _after_hooks.clear()
 
 
+def add_middleware(middleware: Callable[..., Awaitable[tuple[str, bool]]]) -> None:
+    """Add an onion middleware: ``(name, args, ctx, next) -> (result, error)``."""
+    if middleware not in _middlewares:
+        _middlewares.append(middleware)
+
+
+def clear_middlewares() -> None:
+    _middlewares.clear()
+
+
 def _claim_once(hooks: list, entry: _HookEntry) -> bool:
     """Atomically claim a `once` hook before firing it (DFT-026).
 
@@ -203,7 +214,7 @@ def _claim_once(hooks: list, entry: _HookEntry) -> bool:
 # Execution
 # ---------------------------------------------------------------------------
 
-async def execute(name: str, arguments: dict, context: dict | None = None) -> tuple[str, bool]:
+async def _execute_core(name: str, arguments: dict, context: dict | None = None) -> tuple[str, bool]:
     """Execute a tool and return (result_string, is_error).
     
     Point 1: Accurate Error Tracking (DFT-034).
@@ -300,6 +311,26 @@ async def execute(name: str, arguments: dict, context: dict | None = None) -> tu
             is_error = True
 
     return tool_result, is_error
+
+
+async def execute(name: str, arguments: dict, context: dict | None = None) -> tuple[str, bool]:
+    """Execute through the registered onion middlewares and legacy core."""
+    ctx = context or {}
+
+    async def dispatch(index: int) -> tuple[str, bool]:
+        if index >= len(_middlewares):
+            return await _execute_core(name, arguments, context)
+        middleware = _middlewares[index]
+
+        async def next_call() -> tuple[str, bool]:
+            return await dispatch(index + 1)
+
+        try:
+            return await middleware(name, arguments, ctx, next_call)
+        except Exception as exc:
+            return f"[中间件错误] {exc}", True
+
+    return await dispatch(0)
 
 
 # ---------------------------------------------------------------------------
