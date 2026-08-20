@@ -2,6 +2,7 @@ import fnmatch
 import inspect
 import re
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Awaitable, Callable
 
@@ -90,6 +91,50 @@ class _HookEntry:
 _before_hooks: list[_HookEntry] = []
 _after_hooks:  list[_HookEntry] = []
 _middlewares: list[Callable[..., Awaitable[tuple[str, bool]]]] = []
+_active_disposer = None
+
+
+class Disposer:
+    """Idempotent reverse-order cleanup for one plugin registration."""
+    def __init__(self) -> None:
+        self._cleanups: list[Callable[[], None]] = []
+        self._disposed = False
+
+    def add(self, cleanup: Callable[[], None]) -> None:
+        if self._disposed:
+            cleanup()
+            return
+        self._cleanups.append(cleanup)
+
+    def dispose(self) -> None:
+        if self._disposed:
+            return
+        self._disposed = True
+        for cleanup in reversed(self._cleanups):
+            try:
+                cleanup()
+            except Exception:
+                import logging
+                logging.getLogger(__name__).exception("plugin disposer cleanup failed")
+        self._cleanups.clear()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        if exc is not None:
+            self.dispose()
+
+
+@contextmanager
+def registration_scope(disposer: Disposer):
+    global _active_disposer
+    previous = _active_disposer
+    _active_disposer = disposer
+    try:
+        yield disposer
+    finally:
+        _active_disposer = previous
 
 
 # ---------------------------------------------------------------------------
@@ -137,8 +182,17 @@ def register(tool_def: ToolDef, handler: Callable) -> None:
     External callers (plugin register_tools() methods) keep the same
     signature — no plugin changes required.
     """
+    previous = _registry.get(tool_def.name)
     tool_def.handler = handler
     _registry[tool_def.name] = tool_def
+    if _active_disposer is not None:
+        def restore() -> None:
+            if _registry.get(tool_def.name) is tool_def:
+                if previous is None:
+                    _registry.pop(tool_def.name, None)
+                else:
+                    _registry[tool_def.name] = previous
+        _active_disposer.add(restore)
 
 
 def has_tool(name: str) -> bool:
@@ -160,7 +214,10 @@ def add_before_hook(hook: Callable, *, condition: str | None = None, once: bool 
     Return {"block": True, "reason": "..."} to block execution; None to allow.
     """
     if not any(e.fn is hook and e.condition == condition for e in _before_hooks):
-        _before_hooks.append(_HookEntry(fn=hook, condition=condition, once=once))
+        entry = _HookEntry(fn=hook, condition=condition, once=once)
+        _before_hooks.append(entry)
+        if _active_disposer is not None:
+            _active_disposer.add(lambda: _before_hooks.remove(entry) if entry in _before_hooks else None)
 
 
 def add_after_hook(hook: Callable, *, condition: str | None = None, once: bool = False) -> None:
@@ -176,7 +233,10 @@ def add_after_hook(hook: Callable, *, condition: str | None = None, once: bool =
                   a [系统唤醒] message into the next AI round.
     """
     if not any(e.fn is hook and e.condition == condition for e in _after_hooks):
-        _after_hooks.append(_HookEntry(fn=hook, condition=condition, once=once))
+        entry = _HookEntry(fn=hook, condition=condition, once=once)
+        _after_hooks.append(entry)
+        if _active_disposer is not None:
+            _active_disposer.add(lambda: _after_hooks.remove(entry) if entry in _after_hooks else None)
 
 
 def clear_before_hooks() -> None:
@@ -191,6 +251,8 @@ def add_middleware(middleware: Callable[..., Awaitable[tuple[str, bool]]]) -> No
     """Add an onion middleware: ``(name, args, ctx, next) -> (result, error)``."""
     if middleware not in _middlewares:
         _middlewares.append(middleware)
+        if _active_disposer is not None:
+            _active_disposer.add(lambda: _middlewares.remove(middleware) if middleware in _middlewares else None)
 
 
 def clear_middlewares() -> None:

@@ -8,6 +8,7 @@ from executors.base import BotExecutor
 logger = logging.getLogger(__name__)
 
 _registry: dict[str, BotExecutor] = {}
+_disposers: dict[str, object] = {}
 _failures: dict[str, str] = {}
 PLUGIN_DIR = Path(__file__).parent / "plugins"
 
@@ -53,7 +54,15 @@ def _load_file(path: Path):
         ):
             instance = cls()
             _registry[instance.executor_id] = instance
-            instance.register_tools()
+            from executors import tool_executor
+            disposer = tool_executor.Disposer()
+            try:
+                with tool_executor.registration_scope(disposer):
+                    instance.register_tools()
+            except Exception:
+                disposer.dispose()
+                raise
+            _disposers[instance.executor_id] = disposer
             logger.info(f"Registered plugin: {instance.executor_id}")
 
 
@@ -70,6 +79,9 @@ def discover():
     _registry.clear()
     _failures.clear()
     from executors import tool_executor
+    for disposer in _disposers.values():
+        disposer.dispose()
+    _disposers.clear()
     tool_executor.clear_before_hooks()
     tool_executor.clear_after_hooks()
     
