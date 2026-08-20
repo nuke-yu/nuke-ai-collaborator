@@ -992,7 +992,7 @@ async def _handle_slice_read(
 
 
 async def _handle_run_code(code: str, context: dict = None) -> str:
-    from executors.code_mode import run_code
+    from runtime_features.code_mode import run_code
     from executors import tool_executor
     from concurrent.futures import TimeoutError as FutureTimeoutError
 

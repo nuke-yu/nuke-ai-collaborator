@@ -794,7 +794,7 @@ async def setup_session(runner) -> None:
         from executors import tool_executor
         runner.tool_schemas = tool_executor.get_schemas(tool_names)
     runner.tool_schemas = prompt_builder.restrict_schemas(runner.tool_schemas, runner.bot.get("allowed_tools"))
-    from executors.code_mode import append_code_mode_prompt
+    from runtime_features.code_mode import append_code_mode_prompt
     runner.system_prompt_base = append_code_mode_prompt(
         runner.system_prompt_base, runner.tool_schemas
     )
