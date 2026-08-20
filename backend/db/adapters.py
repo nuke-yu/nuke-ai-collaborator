@@ -8,10 +8,10 @@ fallback to SQLite.
 from __future__ import annotations
 
 from contextlib import AbstractAsyncContextManager, AbstractContextManager
-from typing import Protocol
+from typing import Awaitable, Callable, Protocol
 
 
-class StorageAdapter(Protocol):
+class ConnectionPort(Protocol):
     name: str
 
     def connect(self, path: str | None = None) -> AbstractAsyncContextManager:
@@ -22,6 +22,39 @@ class StorageAdapter(Protocol):
 
     def write_connect(self, path: str | None = None) -> AbstractAsyncContextManager:
         ...
+
+
+class TransactionPort(Protocol):
+    """Serialized write transaction capability."""
+
+    def write_connect(self, path: str | None = None) -> AbstractAsyncContextManager:
+        ...
+
+
+class MigrationPort(Protocol):
+    async def migrate(
+        self, path: str | None = None,
+        migration: Callable[[object], Awaitable[None]] | None = None,
+    ) -> None:
+        ...
+
+
+class HealthCheckPort(Protocol):
+    async def health_check(self, path: str | None = None) -> dict[str, object]:
+        ...
+
+
+class LifecyclePort(Protocol):
+    async def close(self) -> None:
+        ...
+
+
+class StoragePort(ConnectionPort, TransactionPort, MigrationPort, HealthCheckPort, LifecyclePort, Protocol):
+    """Complete storage boundary required by a replaceable backend."""
+
+
+# Compatibility name used by existing adapter registration callers.
+StorageAdapter = StoragePort
 
 
 class StorageAdapterError(RuntimeError):
@@ -38,7 +71,9 @@ def register_storage_adapter(name: str, adapter: StorageAdapter) -> None:
         raise ValueError("external storage adapter name is required")
     if getattr(adapter, "name", normalized).lower() != normalized:
         raise ValueError("storage adapter name does not match registration name")
-    for method in ("connect", "connect_sync", "write_connect"):
+    for method in (
+        "connect", "connect_sync", "write_connect", "migrate", "health_check", "close",
+    ):
         if not callable(getattr(adapter, method, None)):
             raise TypeError(f"storage adapter must implement {method}()")
     _adapters[normalized] = adapter
@@ -69,3 +104,41 @@ def selected_storage_backend() -> str:
 
 def selected_external_adapter() -> StorageAdapter | None:
     return _adapters.get(_selected)
+
+
+class SQLiteStorageAdapter:
+    """Concrete capability object for the built-in SQLite implementation.
+
+    The legacy ``db`` module remains the routing facade; this adapter exposes
+    the same backend's complete port for composition roots and contract tests.
+    """
+
+    name = "sqlite"
+
+    def connect(self, path: str | None = None):
+        from db import connect
+        return connect(path)
+
+    def connect_sync(self, path: str | None = None):
+        from db import connect_sync
+        return connect_sync(path)
+
+    def write_connect(self, path: str | None = None):
+        from db.writer import write_connect
+        return write_connect(path)
+
+    async def migrate(self, path=None, migration=None) -> None:
+        if migration is None:
+            return
+        async with self.write_connect(path) as connection:
+            await migration(connection)
+            await connection.commit()
+
+    async def health_check(self, path=None) -> dict[str, object]:
+        async with self.connect(path) as connection:
+            await connection.execute("SELECT 1")
+        return {"backend": self.name, "healthy": True}
+
+    async def close(self) -> None:
+        from db import aclose_writer
+        await aclose_writer()

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 from contextlib import asynccontextmanager, contextmanager
+from tempfile import NamedTemporaryFile
 
 from db.adapters import (
     StorageAdapterError,
@@ -28,8 +29,17 @@ class _FakeAdapter:
     async def write_connect(self, path=None):
         yield ("write", path)
 
+    async def migrate(self, path=None, migration=None):
+        return None
 
-class StorageAdapterTest(unittest.TestCase):
+    async def health_check(self, path=None):
+        return {"backend": self.name, "healthy": True}
+
+    async def close(self):
+        return None
+
+
+class StorageAdapterTest(unittest.IsolatedAsyncioTestCase):
     def tearDown(self) -> None:
         select_storage_backend("sqlite")
         try:
@@ -52,6 +62,31 @@ class StorageAdapterTest(unittest.TestCase):
     def test_registry_rejects_incomplete_adapter(self) -> None:
         with self.assertRaises(TypeError):
             register_storage_adapter("fake", object())
+
+    async def test_sqlite_adapter_exposes_complete_storage_port(self) -> None:
+        from db.adapters import SQLiteStorageAdapter
+
+        adapter = SQLiteStorageAdapter()
+        for method in ("connect", "connect_sync", "write_connect", "migrate", "health_check", "close"):
+            self.assertTrue(callable(getattr(adapter, method)))
+
+    async def test_sqlite_adapter_health_and_migration(self) -> None:
+        from db.adapters import SQLiteStorageAdapter
+
+        adapter = SQLiteStorageAdapter()
+        with NamedTemporaryFile(suffix=".db") as file:
+            health = await adapter.health_check(file.name)
+            self.assertEqual(health, {"backend": "sqlite", "healthy": True})
+
+            async def migration(connection):
+                await connection.execute("CREATE TABLE storage_contract_probe (id INTEGER)")
+
+            await adapter.migrate(file.name, migration)
+            async with adapter.connect(file.name) as connection:
+                cursor = await connection.execute(
+                    "SELECT name FROM sqlite_master WHERE name = 'storage_contract_probe'"
+                )
+                self.assertIsNotNone(await cursor.fetchone())
 
 
 if __name__ == "__main__":
