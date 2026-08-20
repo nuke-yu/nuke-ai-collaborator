@@ -259,6 +259,16 @@ def clear_middlewares() -> None:
     _middlewares.clear()
 
 
+def track_disposable(resource) -> None:
+    """Attach a close/dispose-able plugin resource to the active registration."""
+    if _active_disposer is None:
+        return
+    cleanup = getattr(resource, "close", None) or getattr(resource, "dispose", None)
+    if not callable(cleanup):
+        raise TypeError("plugin resource must expose close() or dispose()")
+    _active_disposer.add(cleanup)
+
+
 def _claim_once(hooks: list, entry: _HookEntry) -> bool:
     """Atomically claim a `once` hook before firing it (DFT-026).
 

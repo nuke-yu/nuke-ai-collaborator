@@ -28,6 +28,7 @@ class Subscription:
     def __init__(self, queue: asyncio.Queue, cleanup: Callable[[], None]):
         self._queue = queue
         self._cleanup = cleanup
+        self._closed = False
 
     def __aiter__(self) -> AsyncIterator[dict]:
         return self
@@ -39,7 +40,13 @@ class Subscription:
         return self
 
     async def __aexit__(self, *_) -> None:
-        self._cleanup()
+        self.close()
+
+    def close(self) -> None:
+        """Idempotently unsubscribe this listener."""
+        if not self._closed:
+            self._closed = True
+            self._cleanup()
 
 
 class EventBus:
