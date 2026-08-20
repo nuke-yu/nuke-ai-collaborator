@@ -230,7 +230,10 @@ class BotExecutor(ABC):
     executor_id: str = ""
     display_name: str = ""
     manifest: PluginManifest = field(default_factory=PluginManifest)
-    dependencies: dict[str, object] = {}
+    def __new__(cls, *args, **kwargs):
+        instance = super().__new__(cls)
+        instance.dependencies = {}
+        return instance
 
     @abstractmethod
     async def run(self, ctx: ExecutionContext) -> ExecutionResult:

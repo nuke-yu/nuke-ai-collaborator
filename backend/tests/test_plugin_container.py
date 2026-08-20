@@ -1,7 +1,7 @@
 import unittest
 
 from executors.container import DependencyContainer, DependencyNotFound, PluginComposition
-from executors.base import PluginManifest
+from executors.base import BotExecutor, ExecutionResult, PluginManifest
 
 
 class PluginContainerTest(unittest.TestCase):
@@ -31,6 +31,17 @@ class PluginContainerTest(unittest.TestCase):
         second = PluginComposition().bind("db", second_value)
         self.assertIs(first.dependencies.resolve("db"), first_value)
         self.assertIs(second.dependencies.resolve("db"), second_value)
+
+    def test_executor_dependencies_are_instance_owned(self) -> None:
+        class Executor(BotExecutor):
+            async def run(self, _ctx) -> ExecutionResult:
+                raise NotImplementedError
+
+        first = Executor()
+        second = Executor()
+        first.dependencies["db"] = object()
+        self.assertNotIn("db", second.dependencies)
+        self.assertIsNot(first.dependencies, second.dependencies)
 
 
 if __name__ == "__main__":
