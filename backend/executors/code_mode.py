@@ -28,7 +28,7 @@ class CodeModeLimits:
     max_output_chars: int = 16_000
 
 
-_ALLOWED_TOOLS = frozenset({"read", "write", "grep"})
+_ALLOWED_TOOLS = frozenset({"read", "write", "grep", "bash"})
 _ALLOWED_BUILTINS = {
     "bool": bool, "dict": dict, "enumerate": enumerate, "float": float,
     "int": int, "len": len, "list": list, "range": range, "sorted": sorted,
@@ -43,7 +43,8 @@ CODE_MODE_PROMPT = """
 【Code Mode 批处理规则】
 当需要批量读取、筛选或处理多个工作区文件时，可以调用 run_code，将逻辑写成短小的 Python 脚本。
 脚本只能使用 tools.read(path, offset=None, limit=None)、tools.write(path, content)、
-tools.grep(pattern, path='.')；禁止 import、shell、网络、任意文件 API 和动态调用。
+tools.grep(pattern, path='.')、tools.bash(cmd, cwd='.')；禁止 import、网络、任意文件 API 和动态调用。
+tools.bash 仍经过现有工作区沙箱、危险命令拦截和资源限制，不得用于绕过工具权限。
 已有文件必须先通过 tools.read 观察，再调用 tools.write；脚本应返回少量结构化摘要，避免打印完整日志。
 """.strip()
 
@@ -136,6 +137,22 @@ class _SDK:
             except (OSError, UnicodeDecodeError):
                 continue
         return matches
+
+    def bash(self, cmd: str, cwd: str = ".") -> str:
+        if not isinstance(cmd, str) or not cmd.strip() or len(cmd) > 10_000:
+            raise CodeModeRejected("bash 命令不能为空且不得超过 10,000 字符")
+        from executors.plugins.workspace_tools import _check_shell_command, _handle_run_shell
+        blocked, reason = _check_shell_command(cmd)
+        if blocked:
+            raise CodeModeRejected(f"bash 命令被安全策略拒绝: {reason}")
+        return asyncio.run(_handle_run_shell(
+            cmd, cwd=cwd, timeout=30, background=False,
+            context={
+                "bot_id": self.bot_id,
+                "group_id": self.group_id,
+                "session_id": self.session_id,
+            },
+        ))
 
 
 def run_code(

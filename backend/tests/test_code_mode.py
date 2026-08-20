@@ -3,7 +3,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import workspace
 from executors.code_mode import CodeModeRejected, run_code
@@ -42,6 +42,22 @@ class CodeModeTest(unittest.TestCase):
     def test_requires_group_scope(self) -> None:
         with self.assertRaises(CodeModeRejected):
             run_code("print(1)", bot_id=7, group_id=None, session_id="code-session")
+
+    def test_bash_uses_existing_sandbox_and_blocks_dangerous_commands(self) -> None:
+        async def fake_shell(*_args, **_kwargs):
+            return "exit_code: 0\\nstdout:\\npytest"
+
+        with patch(
+            "executors.plugins.workspace_tools._handle_run_shell",
+            new=AsyncMock(side_effect=fake_shell),
+        ):
+            result = run_code(
+                "print(tools.bash('pytest -q'))",
+                bot_id=7, group_id=3, session_id="code-session",
+            )
+        self.assertIn("exit_code: 0", result)
+        with self.assertRaises(CodeModeRejected):
+            run_code("tools.bash('rm -rf /')", bot_id=7, group_id=3, session_id="code-session")
 
 
 if __name__ == "__main__":
