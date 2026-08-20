@@ -139,15 +139,30 @@ class SubprocessCodeExecutionAdapter:
             while time.monotonic() < deadline:
                 if not parent.poll(min(0.05, max(0.0, deadline - time.monotonic()))):
                     continue
-                message = parent.recv()
+                try:
+                    message = parent.recv()
+                except (EOFError, OSError) as exc:
+                    exit_code = process.exitcode
+                    raise CodeModeRejected(
+                        "Code Mode 子进程异常退出"
+                        + (f" (exit code: {exit_code})" if exit_code is not None else "")
+                    ) from exc
                 kind = message[0]
                 if kind == "call":
                     _, name, args, kwargs = message
                     try:
                         value = getattr(tools, name)(*args, **kwargs)
-                        parent.send(("result", value))
+                        try:
+                            parent.send(("result", value))
+                        except (BrokenPipeError, EOFError, OSError) as exc:
+                            raise CodeModeRejected("Code Mode 子进程已退出") from exc
+                    except CodeModeRejected:
+                        raise
                     except BaseException as exc:
-                        parent.send(("error", f"{type(exc).__name__}: {exc}"))
+                        try:
+                            parent.send(("error", f"{type(exc).__name__}: {exc}"))
+                        except (BrokenPipeError, EOFError, OSError) as pipe_exc:
+                            raise CodeModeRejected("Code Mode 子进程已退出") from pipe_exc
                 elif kind == "done":
                     return message[1]
                 elif kind == "failed":
