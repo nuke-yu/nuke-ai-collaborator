@@ -10,7 +10,7 @@
 换 integrations 实现即可，这里不变。这些是内部记账型工具，人把关在工作流的 4 道门，
 不在每次工具调用——故在 workspace_tools 的权限钩子里 auto-allow（见 _AUTO_ALLOW_TOOLS）。
 """
-from executors.base import ToolDef
+from executors.base import ToolDef, ToolResult
 from executors import tool_executor
 from integrations.jira import get_jira
 from integrations.git import get_git
@@ -93,7 +93,7 @@ async def _update_jira(ticket_id, status, project=None, context=None):
     try:
         result = await get_jira().update_ticket(gid, ticket_id, status, project=project)
     except ValueError as e:
-        return f"[错误] {e}"
+        return ToolResult.error(f"[错误] {e}")
     from core.orchestration.rd_manager import rd_manager
     await rd_manager.render_board(gid)
     label = {"backlog": "待开发", "in_progress": "进行中", "done": "已完成"}.get(status, status)

@@ -10,6 +10,7 @@ import threading
 from pathlib import Path
 from datetime import date, datetime
 from typing import Dict
+from executors.base import ToolResult
 
 from skills.constants import WORKSPACE_ROOT, LEARNED_ACTIVE as _LEARNED_ACTIVE, LEARNED_DRAFT as _LEARNED_DRAFT
 from workspace.templates import (
@@ -170,9 +171,9 @@ async def read_file(bot_id: int, path: str, offset: int | None = None, limit: in
     ws, path = _get_effective_ws(bot_id, path, group_id)
     p = _safe_path(ws, path)
     if p is None:
-        return f"[错误] 非法路径: {path}"
+        return ToolResult.error(f"[错误] 非法路径: {path}")
     if not p.exists():
-        return f"[文件不存在] {path}"
+        return ToolResult.error(f"[文件不存在] {path}")
     
     lock = _get_path_lock(p)
     async with lock:
@@ -202,7 +203,7 @@ async def read_file(bot_id: int, path: str, offset: int | None = None, limit: in
                 return text[start:end]
             return text
         except Exception as e:
-            return f"[读取错误] {e}"
+            return ToolResult.error(f"[读取错误] {e}")
 
 
 _WRITE_PROTECTED = {"MEMORY.md", "RETRO_LATEST.md"}
@@ -247,17 +248,17 @@ def read_file_history_version(bot_id: int, path: str, ts: str, group_id: int | N
     ws, path = _get_effective_ws(bot_id, path, group_id)
     p = _safe_path(ws, path)
     if p is None:
-        return "[错误] 非法路径"
+        return ToolResult.error("[错误] 非法路径")
     if not ts.replace("T", "").isdigit():
-        return "[错误] 非法版本标识"
+        return ToolResult.error("[错误] 非法版本标识")
     hdir = _history_dir(ws, p)
     version_file = hdir / f"{ts}.md"
     if not version_file.exists():
-        return "[版本不存在]"
+        return ToolResult.error("[版本不存在]")
     try:
         return version_file.read_text(encoding="utf-8")
     except Exception as e:
-        return f"[读取错误] {e}"
+        return ToolResult.error(f"[读取错误] {e}")
 
 
 async def _commit_text(ws: Path, p: Path, rel: str, path: str, new_text: str, bot_id: int, action: str, *, session_id: str | None = None, group_id: int | None = None) -> str:
@@ -337,11 +338,11 @@ async def write_file(bot_id: int, path: str, content: str, group_id: int | None 
     ws, path = _get_effective_ws(bot_id, path, group_id)
     p = _safe_path(ws, path)
     if p is None:
-        return f"[错误] 非法路径: {path}"
+        return ToolResult.error(f"[错误] 非法路径: {path}")
     if not p.is_relative_to(ws.resolve()):
-        return f"[只读] {path} 位于只读共享区域，无法写入。"
+        return ToolResult.error(f"[只读] {path} 位于只读共享区域，无法写入。")
     if p.name in _WRITE_PROTECTED:
-        return f"[受保护] {p.name} 是永久记忆文件，Bot 无法覆盖。如需追加记录，请通过工作区面板手动编辑。"
+        return ToolResult.error(f"[受保护] {p.name} 是永久记忆文件，Bot 无法覆盖。如需追加记录，请通过工作区面板手动编辑。")
     rel = str(p.relative_to(ws)).replace("\\", "/")
 
     lock = _get_path_lock(p)
@@ -349,7 +350,7 @@ async def write_file(bot_id: int, path: str, content: str, group_id: int | None 
         try:
             return await _commit_text(ws, p, rel, path, content, bot_id, "write", session_id=session_id, group_id=group_id)
         except UnobservedFileMutationError as exc:
-            return f"[安全拦截] {exc}"
+            return ToolResult.error(f"[安全拦截] {exc}")
 
 
 def make_dir(bot_id: int, path: str, group_id: int | None = None) -> str:
@@ -362,11 +363,11 @@ def make_dir(bot_id: int, path: str, group_id: int | None = None) -> str:
     ws, path = _get_effective_ws(bot_id, path, group_id)
     p = _safe_path(ws, path)
     if p is None:
-        return f"[错误] 非法路径: {path}"
+        return ToolResult.error(f"[错误] 非法路径: {path}")
     if not p.is_relative_to(ws.resolve()):
-        return f"[只读] {path} 位于只读共享区域，无法创建子目录。"
+        return ToolResult.error(f"[只读] {path} 位于只读共享区域，无法创建子目录。")
     if p.exists():
-        return "目录已存在" if p.is_dir() else f"[错误] 已存在同名文件: {path}"
+        return "目录已存在" if p.is_dir() else ToolResult.error(f"[错误] 已存在同名文件: {path}")
     p.mkdir(parents=True, exist_ok=True)
     return f"已创建目录 {path}"
 
@@ -382,15 +383,15 @@ def delete_path(bot_id: int, path: str, group_id: int | None = None) -> str:
     ws, path = _get_effective_ws(bot_id, path, group_id)
     p = _safe_path(ws, path)
     if p is None:
-        return f"[错误] 非法路径: {path}"
+        return ToolResult.error(f"[错误] 非法路径: {path}")
     if not p.is_relative_to(ws.resolve()):
-        return f"[只读] {path} 位于只读共享区域，无法删除。"
+        return ToolResult.error(f"[只读] {path} 位于只读共享区域，无法删除。")
     if p == ws.resolve():
-        return "[错误] 不能删除工作区根目录"
+        return ToolResult.error("[错误] 不能删除工作区根目录")
     if p.name in _WRITE_PROTECTED:
-        return f"[受保护] {p.name} 不可删除"
+        return ToolResult.error(f"[受保护] {p.name} 不可删除")
     if not p.exists():
-        return f"[文件不存在] {path}"
+        return ToolResult.error(f"[文件不存在] {path}")
     if p.is_dir():
         shutil.rmtree(p)
     else:
@@ -404,13 +405,13 @@ async def edit_file(bot_id: int, path: str, old_string: str | None = None, new_s
     ws, path = _get_effective_ws(bot_id, path, group_id)
     p = _safe_path(ws, path)
     if p is None:
-        return f"[错误] 非法路径: {path}"
+        return ToolResult.error(f"[错误] 非法路径: {path}")
     if not p.is_relative_to(ws.resolve()):
-        return f"[只读] {path} 位于只读共享区域，无法修改。"
+        return ToolResult.error(f"[只读] {path} 位于只读共享区域，无法修改。")
     if p.name in _WRITE_PROTECTED:
-        return f"[受保护] {p.name} 是永久记忆文件，Bot 无法编辑。如需修改记录，请通过工作区面板手动编辑。"
+        return ToolResult.error(f"[受保护] {p.name} 是永久记忆文件，Bot 无法编辑。如需修改记录，请通过工作区面板手动编辑。")
     if not p.exists():
-        return f"[文件不存在] {path}"
+        return ToolResult.error(f"[文件不存在] {path}")
 
     rel = str(p.relative_to(ws)).replace("\\", "/")
     lock = _get_path_lock(p)
@@ -418,7 +419,7 @@ async def edit_file(bot_id: int, path: str, old_string: str | None = None, new_s
         try:
             raw = await asyncio.to_thread(p.read_text, encoding="utf-8")
         except Exception as e:
-            return f"[读取错误] {e}"
+            return ToolResult.error(f"[读取错误] {e}")
 
         import editing
         # IO 边界：在「无 BOM 的 LF」平面做匹配，写回时还原原行尾/BOM。
@@ -435,7 +436,7 @@ async def edit_file(bot_id: int, path: str, old_string: str | None = None, new_s
             try:
                 updated, applied, skipped = editing.apply_batch(current, norm)
             except editing.EditError as e:
-                return f"[编辑失败] {e}"
+                return ToolResult.error(f"[编辑失败] {e}")
             suffix = f"（{applied} 处已改" + (f"，{skipped} 处已是目标态跳过）" if skipped else "）")
         else:
             old_lf = editing.to_lf(old_string)
@@ -447,7 +448,7 @@ async def edit_file(bot_id: int, path: str, old_string: str | None = None, new_s
                 if editing.idempotent_skip(current, old_lf, new_lf):
                     return "[已是目标状态] new_string 已存在且 old_string 不在文件中，视为已应用，未改动"
                 # 失配 hint：回吐近邻上下文帮模型重锚 old_string。
-                return f"[编辑失败] {e}\n{editing.mismatch_hint(current, old_lf)}"
+                return ToolResult.error(f"[编辑失败] {e}\n{editing.mismatch_hint(current, old_lf)}")
 
         if updated == current:
             return "[无改动] 替换前后内容一致"
@@ -456,7 +457,7 @@ async def edit_file(bot_id: int, path: str, old_string: str | None = None, new_s
         try:
             result = await _commit_text(ws, p, rel, path, out, bot_id, "edit", session_id=session_id, group_id=group_id)
         except UnobservedFileMutationError as exc:
-            return f"[安全拦截] {exc}"
+            return ToolResult.error(f"[安全拦截] {exc}")
         return f"{result}{suffix}" if suffix else result
 
 
@@ -465,9 +466,9 @@ async def read_anchored(bot_id: int, path: str, group_id: int | None = None, ses
     ws, path = _get_effective_ws(bot_id, path, group_id)
     p = _safe_path(ws, path)
     if p is None:
-        return f"[错误] 非法路径: {path}"
+        return ToolResult.error(f"[错误] 非法路径: {path}")
     if not p.exists():
-        return f"[文件不存在] {path}"
+        return ToolResult.error(f"[文件不存在] {path}")
     try:
         raw_bytes = await asyncio.to_thread(p.read_bytes)
         raw = raw_bytes.decode("utf-8")
@@ -477,7 +478,7 @@ async def read_anchored(bot_id: int, path: str, group_id: int | None = None, ses
                 version=hashlib.sha256(raw_bytes).hexdigest(), exists=True,
             )
     except Exception as e:
-        return f"[读取错误] {e}"
+        return ToolResult.error(f"[读取错误] {e}")
     import editing
     _, body = editing.strip_bom(raw)
     return editing.annotate(editing.to_lf(body))
@@ -489,11 +490,11 @@ async def edit_anchored(bot_id: int, path: str, edits: list, group_id: int | Non
     ws, path = _get_effective_ws(bot_id, path, group_id)
     p = _safe_path(ws, path)
     if p is None:
-        return f"[错误] 非法路径: {path}"
+        return ToolResult.error(f"[错误] 非法路径: {path}")
     if p.name in _WRITE_PROTECTED:
-        return f"[受保护] {p.name} 是永久记忆文件，Bot 无法编辑。如需修改记录，请通过工作区面板手动编辑。"
+        return ToolResult.error(f"[受保护] {p.name} 是永久记忆文件，Bot 无法编辑。如需修改记录，请通过工作区面板手动编辑。")
     if not p.exists():
-        return f"[文件不存在] {path}"
+        return ToolResult.error(f"[文件不存在] {path}")
 
     rel = str(p.relative_to(ws)).replace("\\", "/")
     lock = _get_path_lock(p)
@@ -501,7 +502,7 @@ async def edit_anchored(bot_id: int, path: str, edits: list, group_id: int | Non
         try:
             raw = await asyncio.to_thread(p.read_text, encoding="utf-8")
         except Exception as e:
-            return f"[读取错误] {e}"
+            return ToolResult.error(f"[读取错误] {e}")
         import editing
         bom, body = editing.strip_bom(raw)
         eol = editing.detect_eol(body)
@@ -510,7 +511,7 @@ async def edit_anchored(bot_id: int, path: str, edits: list, group_id: int | Non
         try:
             updated = editing.apply_anchored_edits(current, norm)
         except editing.HashlineError as e:
-            return f"[锚点编辑失败] {e}"
+            return ToolResult.error(f"[锚点编辑失败] {e}")
 
         if updated == current:
             return "[无改动] 替换前后内容一致"
@@ -519,7 +520,7 @@ async def edit_anchored(bot_id: int, path: str, edits: list, group_id: int | Non
         try:
             return await _commit_text(ws, p, rel, path, out, bot_id, "edit", session_id=session_id, group_id=group_id)
         except UnobservedFileMutationError as exc:
-            return f"[安全拦截] {exc}"
+            return ToolResult.error(f"[安全拦截] {exc}")
 
 
 # 遍历工作区时剪枝掉的重型目录（依赖/构建产物）。rglob("*") 会急切枚举整棵树——

@@ -6,6 +6,19 @@ from typing import Any, Callable
 
 from pydantic import BaseModel
 
+
+class ToolResult(str):
+    """String-compatible tool result carrying an explicit error state."""
+
+    def __new__(cls, value: str, *, is_error: bool = False):
+        instance = super().__new__(cls, value)
+        instance.is_error = is_error
+        return instance
+
+    @classmethod
+    def error(cls, value: str) -> "ToolResult":
+        return cls(value, is_error=True)
+
 @dataclass
 class ToolDef:
     name: str

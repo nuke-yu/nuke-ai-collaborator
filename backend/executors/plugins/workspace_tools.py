@@ -15,7 +15,7 @@ import stat as stat_module
 import sys
 from pathlib import Path
 
-from executors.base import ExecutionContext, ExecutionResult, ToolDef
+from executors.base import ExecutionContext, ExecutionResult, ToolDef, ToolResult
 from core import config
 from executors import tool_executor, registry as _executor_registry
 import workspace as _ws
@@ -971,7 +971,7 @@ async def _handle_read_file(path: str, offset: int | None = None, limit: int | N
     ctx = context or {}
     bot_id = ctx.get("bot_id")
     if not bot_id:
-        return "[错误] 缺少 bot_id"
+        return ToolResult.error("[错误] 缺少 bot_id")
     options = {"offset": offset, "limit": limit, "group_id": ctx.get("group_id")}
     if ctx.get("session_id"):
         options["session_id"] = ctx["session_id"]
@@ -1034,7 +1034,7 @@ async def _handle_write_file(path: str, content: str, context: dict = None) -> s
     ctx = context or {}
     bot_id = ctx.get("bot_id")
     if not bot_id:
-        return "[错误] 缺少 bot_id"
+        return ToolResult.error("[错误] 缺少 bot_id")
     options = {"group_id": ctx.get("group_id")}
     if ctx.get("session_id"):
         options["session_id"] = ctx["session_id"]
@@ -1067,9 +1067,9 @@ async def _handle_edit_file(path: str, old_string: str = None, new_string: str =
     ctx = context or {}
     bot_id = ctx.get("bot_id")
     if not bot_id:
-        return "[错误] 缺少 bot_id"
+        return ToolResult.error("[错误] 缺少 bot_id")
     if edits is None and (old_string is None or new_string is None):
-        return "[参数错误] 需提供 old_string+new_string（单次替换），或 edits 数组（批量替换）"
+        return ToolResult.error("[参数错误] 需提供 old_string+new_string（单次替换），或 edits 数组（批量替换）")
     options = {"replace_all": replace_all, "group_id": ctx.get("group_id"), "edits": edits}
     if ctx.get("session_id"):
         options["session_id"] = ctx["session_id"]
@@ -1079,7 +1079,7 @@ async def _handle_edit_file(path: str, old_string: str = None, new_string: str =
 async def _handle_read_anchored(path: str, context: dict = None, **kwargs) -> str:
     bot_id = (context or {}).get("bot_id")
     if not bot_id:
-        return "[错误] 缺少 bot_id"
+        return ToolResult.error("[错误] 缺少 bot_id")
     ctx = context or {}
     options = {"group_id": ctx.get("group_id")}
     if ctx.get("session_id"):
@@ -1093,7 +1093,7 @@ async def _handle_edit_anchored(path: str, edits: list = None, context: dict = N
     if not bot_id:
         return "[错误] 缺少 bot_id"
     if not edits:
-        return "[参数错误] 需提供 edits 数组（每项 {anchor, op, text}）"
+        return ToolResult.error("[参数错误] 需提供 edits 数组（每项 {anchor, op, text}）")
     options = {"group_id": ctx.get("group_id")}
     if ctx.get("session_id"):
         options["session_id"] = ctx["session_id"]
@@ -1103,12 +1103,12 @@ async def _handle_edit_anchored(path: str, edits: list = None, context: dict = N
 async def _handle_list_workspace(context: dict = None) -> str:
     ctx = context or {}
     bot_id = ctx.get("bot_id")
-    return await _ws.list_workspace(bot_id, group_id=ctx.get("group_id")) if bot_id else "[错误] 缺少 bot_id"
+    return await _ws.list_workspace(bot_id, group_id=ctx.get("group_id")) if bot_id else ToolResult.error("[错误] 缺少 bot_id")
 
 
 async def _handle_run_skill(name: str, args: str = "", context: dict = None) -> str:
     bot_id = (context or {}).get("bot_id")
-    return await run_skill(bot_id, name, args, ctx=context) if bot_id else "[错误] 缺少 bot_id"
+    return await run_skill(bot_id, name, args, ctx=context) if bot_id else ToolResult.error("[错误] 缺少 bot_id")
 
 
 # --- run_shell sandbox tier 3: dynamic port allocation ----------------------
@@ -1548,7 +1548,7 @@ async def _handle_read_local_file(path: str, context: dict = None) -> str:
     except (NotADirectoryError, OSError) as e:
         return f"[安全拒绝] 无法安全读取路径：{e}"
     except Exception as e:
-        return f"[读取错误] {e}"
+        return ToolResult.error(f"[读取错误] {e}")
 
 
 async def _handle_write_local_file(path: str, content: str, context: dict = None) -> str:
@@ -1561,7 +1561,7 @@ async def _handle_write_local_file(path: str, content: str, context: dict = None
     except (FileExistsError, NotADirectoryError, OSError) as e:
         return f"[安全拒绝] 无法安全写入路径：{e}"
     except Exception as e:
-        return f"[写入错误] {e}"
+        return ToolResult.error(f"[写入错误] {e}")
 
 
 async def _handle_mcp_authenticate(server: str, context: dict = None) -> str:

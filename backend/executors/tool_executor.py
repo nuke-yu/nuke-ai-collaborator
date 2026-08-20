@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Awaitable, Callable
 
-from executors.base import ToolDef
+from executors.base import ToolDef, ToolResult
 
 # Single registry: name -> ToolDef (with .handler bound).
 # Replaces the two parallel dicts (_defs / _handlers) that used to exist.
@@ -339,10 +339,20 @@ async def _execute_core(name: str, arguments: dict, context: dict | None = None)
             is_error = True
         else:
             if "context" in sig.parameters and context is not None:
-                tool_result = await handler(**arguments, context=context)
+                raw_result = await handler(**arguments, context=context)
             else:
-                tool_result = await handler(**arguments)
-            tool_result = str(tool_result) if tool_result is not None else "完成"
+                raw_result = await handler(**arguments)
+            if isinstance(raw_result, ToolResult):
+                tool_result = str(raw_result)
+                is_error = raw_result.is_error
+            elif (
+                isinstance(raw_result, tuple)
+                and len(raw_result) == 2
+                and isinstance(raw_result[1], bool)
+            ):
+                tool_result, is_error = str(raw_result[0]), raw_result[1]
+            else:
+                tool_result = str(raw_result) if raw_result is not None else "完成"
 
             if is_truncated:
                 import editing
@@ -350,13 +360,6 @@ async def _execute_core(name: str, arguments: dict, context: dict | None = None)
                     name, arguments.get("path", ""), len(arguments.get("content", "") or "")
                 )
 
-            # Point 1: Accurate Error Tracking (DFT-034).
-            # Check if the output has a bracketed prefix containing error/block keywords.
-            if tool_result.startswith("[") and "]" in tool_result:
-                prefix = tool_result.split("]", 1)[0] + "]"
-                if any(k in prefix for k in ("错误", "拒绝", "不存在", "受保护", "拦截", "异常", "fail", "error", "denied", "blocked")):
-                    is_error = True
-            
     except Exception as e:
         tool_result = f"[执行错误] {e}"
         is_error = True

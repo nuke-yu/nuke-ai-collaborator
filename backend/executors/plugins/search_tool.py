@@ -25,7 +25,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import Optional
 
-from executors.base import ToolDef
+from executors.base import ToolDef, ToolResult
 # Reuse run_shell's confinement + secret-stripped env so search obeys the same
 # group-workspace boundary. workspace_tools imports THIS module only lazily
 # (inside register_workspace_tools), so there is no import cycle.
@@ -246,7 +246,7 @@ async def _handle_search(
 ) -> str:
     ctx = context or {}
     if not pattern:
-        return "[参数错误] pattern 不能为空"
+        return ToolResult.error("[参数错误] pattern 不能为空")
     if shutil.which("rg") is None:
         return "[系统错误] 未找到 ripgrep（rg），请安装 ripgrep（与 OpenCode 同款依赖）"
     # Confine the search root to the group workspace (same boundary as run_shell);

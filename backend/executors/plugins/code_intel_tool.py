@@ -14,7 +14,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import Optional
 
-from executors.base import ToolDef
+from executors.base import ToolDef, ToolResult
 from executors.code_intel import router
 # Reuse run_shell's confinement so code_intel obeys the group-workspace boundary.
 # workspace_tools imports THIS module only lazily (in register_workspace_tools),
@@ -96,23 +96,23 @@ async def _handle_code_intel(
     bot_id, group_id = ctx.get("bot_id"), ctx.get("group_id")
 
     if operation not in _OPERATIONS:
-        return f"[参数错误] operation 必须是：{', '.join(_OPERATIONS)}"
+        return ToolResult.error(f"[参数错误] operation 必须是：{', '.join(_OPERATIONS)}")
 
     abs_file, err = _resolve_shell_cwd(file, bot_id, group_id)
     if err:
-        return f"[安全拒绝] {err}"
+        return ToolResult.error(f"[安全拒绝] {err}")
     abs_file = Path(abs_file)
     if not abs_file.is_file():
-        return f"[文件不存在] {file}"
+        return ToolResult.error(f"[文件不存在] {file}")
 
     engine = router.get_engine(abs_file.suffix)
     if engine is None:
         if abs_file.suffix.lower() in router.supported_extensions():
-            return (
+            return ToolResult.error(
                 f"[引擎未就绪] {abs_file.suffix} 的语义引擎不可用"
                 "（JS/TS 需安装 typescript-language-server）。请用 search 工具按符号名检索。"
             )
-        return (
+        return ToolResult.error(
             f"[暂不支持] code_intel 不支持 {abs_file.suffix or '该文件类型'}。"
             f"支持：{', '.join(router.supported_extensions())}。其他类型用 search 工具。"
         )
@@ -126,7 +126,7 @@ async def _handle_code_intel(
         return _format_locations(locs, ws_root, header=f"{file} 的符号")
 
     if line is None or character is None:
-        return "[参数错误] definition/references/hover 需要 line 和 character（均 1-based）"
+        return ToolResult.error("[参数错误] definition/references/hover 需要 line 和 character（均 1-based）")
 
     if operation == "definition":
         locs = await engine.definition(abs_file, line, character, root)
