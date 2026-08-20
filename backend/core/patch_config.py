@@ -74,13 +74,19 @@ def _validate_settings(settings: Any) -> dict[str, Any]:
     if not isinstance(settings, dict):
         raise PatchConfigError("settings 必须是 mapping")
     allowed = {
-        "tool_result_max_chars", "mcp_call_timeout_seconds", "shell_exec_backend",
+        "storage_backend", "tool_result_max_chars", "mcp_call_timeout_seconds", "shell_exec_backend",
         "sandbox", "lsp_idle_timeout_s",
     }
     unknown = set(settings) - allowed
     if unknown:
         raise PatchConfigError(f"未知配置键: {sorted(unknown)}")
     updates: dict[str, Any] = {}
+    if "storage_backend" in settings:
+        backend = _string(
+            settings["storage_backend"], "storage_backend",
+            pattern=r"[A-Za-z0-9_-]{1,64}",
+        )
+        updates["__STORAGE_BACKEND__"] = backend
     if "tool_result_max_chars" in settings:
         updates["TOOL_RESULT_MAX_CHARS"] = _bounded_int(
             settings["tool_result_max_chars"], "tool_result_max_chars", 1024, 1_000_000
@@ -148,8 +154,15 @@ def apply_patch_file(path: str | Path | None = None, *, target: Any | None = Non
     updates = _validate_settings(document["settings"])
     if target is None:
         from core import config as target
+    storage_backend = updates.pop("__STORAGE_BACKEND__", None)
+    if storage_backend is not None:
+        from db.adapters import select_storage_backend
+        select_storage_backend(storage_backend)
     for attribute, value in updates.items():
         setattr(target, attribute, value)
-    report = PatchReport(str(patch_path), digest, tuple(sorted(updates)))
+    applied = list(updates)
+    if storage_backend is not None:
+        applied.append("storage_backend")
+    report = PatchReport(str(patch_path), digest, tuple(sorted(applied)))
     log.info("Applied nuke.patch.yml sha256=%s keys=%s", digest, report.applied)
     return report

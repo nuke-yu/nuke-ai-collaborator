@@ -99,6 +99,13 @@ async def write_connect(path: str | None = None):
     unchanged. Concurrent callers to the SAME db queue on its lock; callers to
     DIFFERENT dbs (e.g. different group private DBs) never contend.
     """
+    from db.adapters import selected_external_adapter
+    adapter = selected_external_adapter()
+    if adapter is not None:
+        async with adapter.write_connect(_resolve(path)) as conn:
+            yield conn
+        return
+
     db_path = _resolve(path)
     st = _conn_state(db_path)
     wait_started = time.perf_counter()

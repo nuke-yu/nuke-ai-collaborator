@@ -48,6 +48,10 @@ class PatchConfigTest(unittest.TestCase):
     def test_missing_file_is_noop(self) -> None:
         self.assertIsNone(apply_patch_file("/tmp/nuke-patch-does-not-exist.yml", target=SimpleNamespace()))
 
+    def test_storage_backend_patch_is_explicitly_selected(self) -> None:
+        report = self._apply("version: 1\nsettings:\n  storage_backend: sqlite\n")
+        self.assertIn("storage_backend", report.applied)
+
 
 if __name__ == "__main__":
     unittest.main()

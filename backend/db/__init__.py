@@ -3,12 +3,18 @@ import os
 from contextlib import asynccontextmanager, contextmanager
 
 from db.context import resolve as _route, bind_db, current_db_path
+from db.adapters import selected_external_adapter
 
 DB_PATH = os.environ.get("NUKE_DB_PATH") or os.path.join(os.path.dirname(__file__), "chat.db")
 
 
 @asynccontextmanager
 async def connect(path: str | None = None):
+    adapter = selected_external_adapter()
+    if adapter is not None:
+        async with adapter.connect(_route(path, DB_PATH)) as conn:
+            yield conn
+        return
     # DFT-028/029: single connect helper. WAL + busy_timeout avoid
     # "database is locked" under concurrent writers; foreign_keys=ON makes
     # SQLite actually enforce the FK constraints (it ignores them by default).
@@ -32,6 +38,11 @@ async def connect(path: str | None = None):
 @contextmanager
 def connect_sync(path: str | None = None):
     """Synchronous connection for low-frequency lookups (e.g. workspace redirection)."""
+    adapter = selected_external_adapter()
+    if adapter is not None:
+        with adapter.connect_sync(_route(path, DB_PATH)) as conn:
+            yield conn
+        return
     import sqlite3
     conn = sqlite3.connect(_route(path, DB_PATH))
     try:
