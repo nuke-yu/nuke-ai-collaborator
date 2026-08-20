@@ -99,6 +99,8 @@ def _clear_supervisor_ref(sup) -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """CELL-22: Supervisor lifespan. Manages central DB and Worker fleet."""
+    from core.patch_config import apply_patch_file
+    apply_patch_file()
     core_config.validate_runtime_security()
 
     # 1. Initialize feature flags

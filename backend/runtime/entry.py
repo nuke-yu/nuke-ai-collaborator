@@ -57,6 +57,8 @@ def _init_tool_router() -> None:
 
 
 async def run_worker(worker_id: str, addr: str) -> None:
+    from core.patch_config import apply_patch_file
+    apply_patch_file()
     from executors import registry
     registry.discover()                       # load bot executor plugins (once, at startup)
 
