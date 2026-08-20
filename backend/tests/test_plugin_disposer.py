@@ -59,6 +59,21 @@ class PluginDisposerTest(unittest.TestCase):
         disposer.dispose()
         self.assertEqual(events, ["second", "first"])
 
+    def test_nested_registration_scopes_restore_outer_disposer(self) -> None:
+        outer = te.Disposer()
+        inner = te.Disposer()
+        events: list[str] = []
+
+        with te.registration_scope(outer):
+            outer.add(lambda: events.append("outer"))
+            with te.registration_scope(inner):
+                inner.add(lambda: events.append("inner"))
+            outer.add(lambda: events.append("outer-after-inner"))
+
+        inner.dispose()
+        outer.dispose()
+        self.assertEqual(events, ["inner", "outer-after-inner", "outer"])
+
 
 if __name__ == "__main__":
     unittest.main()

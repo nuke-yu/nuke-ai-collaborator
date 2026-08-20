@@ -2,6 +2,7 @@ import fnmatch
 import inspect
 import re
 import time
+from contextvars import ContextVar
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Awaitable, Callable
@@ -91,7 +92,9 @@ class _HookEntry:
 _before_hooks: list[_HookEntry] = []
 _after_hooks:  list[_HookEntry] = []
 _middlewares: list[Callable[..., Awaitable[tuple[str, bool]]]] = []
-_active_disposer = None
+_active_disposer: ContextVar["Disposer | None"] = ContextVar(
+    "active_plugin_disposer", default=None
+)
 
 
 class Disposer:
@@ -128,13 +131,11 @@ class Disposer:
 
 @contextmanager
 def registration_scope(disposer: Disposer):
-    global _active_disposer
-    previous = _active_disposer
-    _active_disposer = disposer
+    token = _active_disposer.set(disposer)
     try:
         yield disposer
     finally:
-        _active_disposer = previous
+        _active_disposer.reset(token)
 
 
 # ---------------------------------------------------------------------------
@@ -185,14 +186,15 @@ def register(tool_def: ToolDef, handler: Callable) -> None:
     previous = _registry.get(tool_def.name)
     tool_def.handler = handler
     _registry[tool_def.name] = tool_def
-    if _active_disposer is not None:
+    active_disposer = _active_disposer.get()
+    if active_disposer is not None:
         def restore() -> None:
             if _registry.get(tool_def.name) is tool_def:
                 if previous is None:
                     _registry.pop(tool_def.name, None)
                 else:
                     _registry[tool_def.name] = previous
-        _active_disposer.add(restore)
+        active_disposer.add(restore)
 
 
 def has_tool(name: str) -> bool:
@@ -216,8 +218,9 @@ def add_before_hook(hook: Callable, *, condition: str | None = None, once: bool 
     if not any(e.fn is hook and e.condition == condition for e in _before_hooks):
         entry = _HookEntry(fn=hook, condition=condition, once=once)
         _before_hooks.append(entry)
-        if _active_disposer is not None:
-            _active_disposer.add(lambda: _before_hooks.remove(entry) if entry in _before_hooks else None)
+        active_disposer = _active_disposer.get()
+        if active_disposer is not None:
+            active_disposer.add(lambda: _before_hooks.remove(entry) if entry in _before_hooks else None)
 
 
 def add_after_hook(hook: Callable, *, condition: str | None = None, once: bool = False) -> None:
@@ -235,8 +238,9 @@ def add_after_hook(hook: Callable, *, condition: str | None = None, once: bool =
     if not any(e.fn is hook and e.condition == condition for e in _after_hooks):
         entry = _HookEntry(fn=hook, condition=condition, once=once)
         _after_hooks.append(entry)
-        if _active_disposer is not None:
-            _active_disposer.add(lambda: _after_hooks.remove(entry) if entry in _after_hooks else None)
+        active_disposer = _active_disposer.get()
+        if active_disposer is not None:
+            active_disposer.add(lambda: _after_hooks.remove(entry) if entry in _after_hooks else None)
 
 
 def clear_before_hooks() -> None:
@@ -251,8 +255,9 @@ def add_middleware(middleware: Callable[..., Awaitable[tuple[str, bool]]]) -> No
     """Add an onion middleware: ``(name, args, ctx, next) -> (result, error)``."""
     if middleware not in _middlewares:
         _middlewares.append(middleware)
-        if _active_disposer is not None:
-            _active_disposer.add(lambda: _middlewares.remove(middleware) if middleware in _middlewares else None)
+        active_disposer = _active_disposer.get()
+        if active_disposer is not None:
+            active_disposer.add(lambda: _middlewares.remove(middleware) if middleware in _middlewares else None)
 
 
 def clear_middlewares() -> None:
@@ -261,12 +266,13 @@ def clear_middlewares() -> None:
 
 def track_disposable(resource) -> None:
     """Attach a close/dispose-able plugin resource to the active registration."""
-    if _active_disposer is None:
+    active_disposer = _active_disposer.get()
+    if active_disposer is None:
         return
     cleanup = getattr(resource, "close", None) or getattr(resource, "dispose", None)
     if not callable(cleanup):
         raise TypeError("plugin resource must expose close() or dispose()")
-    _active_disposer.add(cleanup)
+    active_disposer.add(cleanup)
 
 
 def _claim_once(hooks: list, entry: _HookEntry) -> bool:
