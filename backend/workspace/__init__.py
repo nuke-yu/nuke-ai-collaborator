@@ -4,7 +4,7 @@ import hashlib
 from workspace.observation import (
     UnobservedFileMutationError,
     file_version,
-    store as observation_store,
+    get_observation_store,
 )
 import threading
 from pathlib import Path
@@ -180,7 +180,7 @@ async def read_file(bot_id: int, path: str, offset: int | None = None, limit: in
             raw = await asyncio.to_thread(p.read_bytes)
             text = raw.decode("utf-8")
             if session_id:
-                observation_store.record(
+                get_observation_store().record(
                     session_id=session_id, group_id=group_id, path=p,
                     version=hashlib.sha256(raw).hexdigest(), exists=True,
                 )
@@ -265,7 +265,7 @@ async def _commit_text(ws: Path, p: Path, rel: str, path: str, new_text: str, bo
     def _do_write() -> str:
         exists = p.exists()
         current_version = file_version(p) if exists else None
-        observation_store.assert_mutation_allowed(
+        get_observation_store().assert_mutation_allowed(
             session_id=session_id, group_id=group_id, path=p,
             current_version=current_version, exists=exists,
             allow_create=action == "write",
@@ -300,7 +300,7 @@ async def _commit_text(ws: Path, p: Path, rel: str, path: str, new_text: str, bo
         # Active learned files are copied into a draft; the observed source
         # remains the authorization basis for the next mutation.
         if p.exists():
-            observation_store.record(
+            get_observation_store().record(
                 session_id=session_id, group_id=group_id, path=p,
                 version=await asyncio.to_thread(file_version, p), exists=True,
             )
@@ -472,7 +472,7 @@ async def read_anchored(bot_id: int, path: str, group_id: int | None = None, ses
         raw_bytes = await asyncio.to_thread(p.read_bytes)
         raw = raw_bytes.decode("utf-8")
         if session_id:
-            observation_store.record(
+            get_observation_store().record(
                 session_id=session_id, group_id=group_id, path=p,
                 version=hashlib.sha256(raw_bytes).hexdigest(), exists=True,
             )

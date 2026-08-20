@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import hashlib
 import threading
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -27,7 +29,11 @@ class FileObservation:
 
 def file_version(path: Path) -> str:
     """Return a content version without exposing file contents."""
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 class ObservationStore:
@@ -92,4 +98,25 @@ class ObservationStore:
             }
 
 
-store = ObservationStore()
+_current_store: ContextVar[ObservationStore | None] = ContextVar(
+    "workspace_observation_store", default=None
+)
+
+
+def get_observation_store() -> ObservationStore:
+    """Return the store for the current host context, creating a local default."""
+    current = _current_store.get()
+    if current is None:
+        current = ObservationStore()
+        _current_store.set(current)
+    return current
+
+
+@contextmanager
+def observation_scope(store: ObservationStore):
+    """Temporarily inject an observation store into the current context."""
+    token = _current_store.set(store)
+    try:
+        yield store
+    finally:
+        _current_store.reset(token)

@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import workspace
-from workspace.observation import store as observation_store
+from workspace.observation import get_observation_store
 
 
 class ReadBeforeMutateTest(unittest.IsolatedAsyncioTestCase):
@@ -15,8 +15,8 @@ class ReadBeforeMutateTest(unittest.IsolatedAsyncioTestCase):
         self.root = Path(self.temp_dir.name).resolve()
         self.path = self.root / "sample.txt"
         self.path.write_text("one\ntwo\n", encoding="utf-8")
-        observation_store.clear_session("session-a")
-        observation_store.clear_session("session-b")
+        get_observation_store().clear_session("session-a")
+        get_observation_store().clear_session("session-b")
         self.workspace_patch = patch.object(
             workspace, "_get_effective_ws", return_value=(self.root, "sample.txt")
         )
