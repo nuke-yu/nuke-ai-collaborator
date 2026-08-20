@@ -1,5 +1,11 @@
 import logging
 import asyncio
+import hashlib
+from workspace.observation import (
+    UnobservedFileMutationError,
+    file_version,
+    store as observation_store,
+)
 import threading
 from pathlib import Path
 from datetime import date, datetime
@@ -160,7 +166,7 @@ def _get_effective_ws(bot_id: int, path_str: str, group_id: int | None = None) -
 
 
 
-async def read_file(bot_id: int, path: str, offset: int | None = None, limit: int | None = None, group_id: int | None = None) -> str:
+async def read_file(bot_id: int, path: str, offset: int | None = None, limit: int | None = None, group_id: int | None = None, session_id: str | None = None) -> str:
     ws, path = _get_effective_ws(bot_id, path, group_id)
     p = _safe_path(ws, path)
     if p is None:
@@ -171,7 +177,13 @@ async def read_file(bot_id: int, path: str, offset: int | None = None, limit: in
     lock = _get_path_lock(p)
     async with lock:
         try:
-            text = await asyncio.to_thread(p.read_text, encoding="utf-8")
+            raw = await asyncio.to_thread(p.read_bytes)
+            text = raw.decode("utf-8")
+            if session_id:
+                observation_store.record(
+                    session_id=session_id, group_id=group_id, path=p,
+                    version=hashlib.sha256(raw).hexdigest(), exists=True,
+                )
             if offset is not None or limit is not None:
                 try:
                     start = int(offset) if offset is not None else 0
@@ -248,9 +260,16 @@ def read_file_history_version(bot_id: int, path: str, ts: str, group_id: int | N
         return f"[读取错误] {e}"
 
 
-async def _commit_text(ws: Path, p: Path, rel: str, path: str, new_text: str, bot_id: int, action: str) -> str:
+async def _commit_text(ws: Path, p: Path, rel: str, path: str, new_text: str, bot_id: int, action: str, *, session_id: str | None = None, group_id: int | None = None) -> str:
     """Internal helper to write text to VFS/disk, handle history/drafts, and dispatch CodeCommitted events."""
     def _do_write() -> str:
+        exists = p.exists()
+        current_version = file_version(p) if exists else None
+        observation_store.assert_mutation_allowed(
+            session_id=session_id, group_id=group_id, path=p,
+            current_version=current_version, exists=exists,
+            allow_create=action == "write",
+        )
         # Redirect learned/active writes → learned/draft (requires user approval)
         if rel.startswith(_LEARNED_ACTIVE):
             draft_path = ws / _LEARNED_DRAFT / p.name
@@ -277,6 +296,14 @@ async def _commit_text(ws: Path, p: Path, rel: str, path: str, new_text: str, bo
             return f"已修改 {path}"
 
     result = await asyncio.to_thread(_do_write)
+    if session_id:
+        # Active learned files are copied into a draft; the observed source
+        # remains the authorization basis for the next mutation.
+        if p.exists():
+            observation_store.record(
+                session_id=session_id, group_id=group_id, path=p,
+                version=await asyncio.to_thread(file_version, p), exists=True,
+            )
 
     # Emit CodeCommitted event if a code file is written (main thread async)
     is_shared = ws.parent.name.startswith("group_")
@@ -304,7 +331,7 @@ async def _commit_text(ws: Path, p: Path, rel: str, path: str, new_text: str, bo
     return result
 
 
-async def write_file(bot_id: int, path: str, content: str, group_id: int | None = None) -> str:
+async def write_file(bot_id: int, path: str, content: str, group_id: int | None = None, session_id: str | None = None) -> str:
     # group_id 显式贯穿：交给 _get_effective_ws 统一路由（默认群组 shared，仅私有命名空间
     # skills//logs//身份记忆文件落 bot 私有）。bot_id=0 的系统写（BOARD.md / prs/）走共享分支。
     ws, path = _get_effective_ws(bot_id, path, group_id)
@@ -319,7 +346,10 @@ async def write_file(bot_id: int, path: str, content: str, group_id: int | None 
 
     lock = _get_path_lock(p)
     async with lock:
-        return await _commit_text(ws, p, rel, path, content, bot_id, "write")
+        try:
+            return await _commit_text(ws, p, rel, path, content, bot_id, "write", session_id=session_id, group_id=group_id)
+        except UnobservedFileMutationError as exc:
+            return f"[安全拦截] {exc}"
 
 
 def make_dir(bot_id: int, path: str, group_id: int | None = None) -> str:
@@ -370,7 +400,7 @@ def delete_path(bot_id: int, path: str, group_id: int | None = None) -> str:
 
 async def edit_file(bot_id: int, path: str, old_string: str | None = None, new_string: str | None = None,
                     replace_all: bool = False, group_id: int | None = None,
-                    edits: list | None = None) -> str:
+                    edits: list | None = None, session_id: str | None = None) -> str:
     ws, path = _get_effective_ws(bot_id, path, group_id)
     p = _safe_path(ws, path)
     if p is None:
@@ -423,11 +453,14 @@ async def edit_file(bot_id: int, path: str, old_string: str | None = None, new_s
             return "[无改动] 替换前后内容一致"
 
         out = bom + editing.restore_eol(updated, eol)
-        result = await _commit_text(ws, p, rel, path, out, bot_id, "edit")
+        try:
+            result = await _commit_text(ws, p, rel, path, out, bot_id, "edit", session_id=session_id, group_id=group_id)
+        except UnobservedFileMutationError as exc:
+            return f"[安全拦截] {exc}"
         return f"{result}{suffix}" if suffix else result
 
 
-async def read_anchored(bot_id: int, path: str, group_id: int | None = None) -> str:
+async def read_anchored(bot_id: int, path: str, group_id: int | None = None, session_id: str | None = None) -> str:
     """带行哈希锚的只读视图：每行前缀 L<n>#<hash>，供 edit_anchored 按锚精准定位。"""
     ws, path = _get_effective_ws(bot_id, path, group_id)
     p = _safe_path(ws, path)
@@ -436,7 +469,13 @@ async def read_anchored(bot_id: int, path: str, group_id: int | None = None) -> 
     if not p.exists():
         return f"[文件不存在] {path}"
     try:
-        raw = await asyncio.to_thread(p.read_text, encoding="utf-8")
+        raw_bytes = await asyncio.to_thread(p.read_bytes)
+        raw = raw_bytes.decode("utf-8")
+        if session_id:
+            observation_store.record(
+                session_id=session_id, group_id=group_id, path=p,
+                version=hashlib.sha256(raw_bytes).hexdigest(), exists=True,
+            )
     except Exception as e:
         return f"[读取错误] {e}"
     import editing
@@ -444,7 +483,7 @@ async def read_anchored(bot_id: int, path: str, group_id: int | None = None) -> 
     return editing.annotate(editing.to_lf(body))
 
 
-async def edit_anchored(bot_id: int, path: str, edits: list, group_id: int | None = None) -> str:
+async def edit_anchored(bot_id: int, path: str, edits: list, group_id: int | None = None, session_id: str | None = None) -> str:
     """按行哈希锚编辑：edits=[{anchor, op(replace/delete/insert_after), text}]。
     锚用内容哈希定位，行位移也有效；原子（任一锚失效/冲突即整体不落盘）。"""
     ws, path = _get_effective_ws(bot_id, path, group_id)
@@ -477,7 +516,10 @@ async def edit_anchored(bot_id: int, path: str, edits: list, group_id: int | Non
             return "[无改动] 替换前后内容一致"
 
         out = bom + editing.restore_eol(updated, eol)
-        return await _commit_text(ws, p, rel, path, out, bot_id, "edit")
+        try:
+            return await _commit_text(ws, p, rel, path, out, bot_id, "edit", session_id=session_id, group_id=group_id)
+        except UnobservedFileMutationError as exc:
+            return f"[安全拦截] {exc}"
 
 
 # 遍历工作区时剪枝掉的重型目录（依赖/构建产物）。rglob("*") 会急切枚举整棵树——

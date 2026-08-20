@@ -948,7 +948,12 @@ def _with_personality(base_prompt: str, bot: dict) -> str:
 async def _handle_read_file(path: str, offset: int | None = None, limit: int | None = None, context: dict = None, **kwargs) -> str:
     ctx = context or {}
     bot_id = ctx.get("bot_id")
-    return await _ws.read_file(bot_id, path, offset=offset, limit=limit, group_id=ctx.get("group_id")) if bot_id else "[错误] 缺少 bot_id"
+    if not bot_id:
+        return "[错误] 缺少 bot_id"
+    options = {"offset": offset, "limit": limit, "group_id": ctx.get("group_id")}
+    if ctx.get("session_id"):
+        options["session_id"] = ctx["session_id"]
+    return await _ws.read_file(bot_id, path, **options)
 
 
 async def _handle_write_file(path: str, content: str, context: dict = None) -> str:
@@ -956,7 +961,10 @@ async def _handle_write_file(path: str, content: str, context: dict = None) -> s
     bot_id = ctx.get("bot_id")
     if not bot_id:
         return "[错误] 缺少 bot_id"
-    res = await _ws.write_file(bot_id, path, content, group_id=ctx.get("group_id"))
+    options = {"group_id": ctx.get("group_id")}
+    if ctx.get("session_id"):
+        options["session_id"] = ctx["session_id"]
+    res = await _ws.write_file(bot_id, path, content, **options)
     if "[已写入" in res or "成功" in res or not res.startswith("["):
         try:
             from artifacts import register_artifact, ArtifactOrigin, calculate_checksum
@@ -988,15 +996,21 @@ async def _handle_edit_file(path: str, old_string: str = None, new_string: str =
         return "[错误] 缺少 bot_id"
     if edits is None and (old_string is None or new_string is None):
         return "[参数错误] 需提供 old_string+new_string（单次替换），或 edits 数组（批量替换）"
-    return await _ws.edit_file(bot_id, path, old_string, new_string,
-                               replace_all=replace_all, group_id=ctx.get("group_id"), edits=edits)
+    options = {"replace_all": replace_all, "group_id": ctx.get("group_id"), "edits": edits}
+    if ctx.get("session_id"):
+        options["session_id"] = ctx["session_id"]
+    return await _ws.edit_file(bot_id, path, old_string, new_string, **options)
 
 
 async def _handle_read_anchored(path: str, context: dict = None, **kwargs) -> str:
     bot_id = (context or {}).get("bot_id")
     if not bot_id:
         return "[错误] 缺少 bot_id"
-    return await _ws.read_anchored(bot_id, path, group_id=(context or {}).get("group_id"))
+    ctx = context or {}
+    options = {"group_id": ctx.get("group_id")}
+    if ctx.get("session_id"):
+        options["session_id"] = ctx["session_id"]
+    return await _ws.read_anchored(bot_id, path, **options)
 
 
 async def _handle_edit_anchored(path: str, edits: list = None, context: dict = None, **kwargs) -> str:
@@ -1006,7 +1020,10 @@ async def _handle_edit_anchored(path: str, edits: list = None, context: dict = N
         return "[错误] 缺少 bot_id"
     if not edits:
         return "[参数错误] 需提供 edits 数组（每项 {anchor, op, text}）"
-    return await _ws.edit_anchored(bot_id, path, edits, group_id=ctx.get("group_id"))
+    options = {"group_id": ctx.get("group_id")}
+    if ctx.get("session_id"):
+        options["session_id"] = ctx["session_id"]
+    return await _ws.edit_anchored(bot_id, path, edits, **options)
 
 
 async def _handle_list_workspace(context: dict = None) -> str:
