@@ -14,7 +14,7 @@ import re
 import sys
 import time
 from dataclasses import dataclass
-from pathlib import Path
+from typing import Callable
 
 
 class CodeModeRejected(ValueError):
@@ -26,6 +26,9 @@ class CodeModeLimits:
     timeout_seconds: float = 5.0
     max_steps: int = 25_000
     max_output_chars: int = 16_000
+
+
+BashExecutor = Callable[[str, str], str]
 
 
 _ALLOWED_TOOLS = frozenset({"read", "write", "grep", "bash"})
@@ -95,10 +98,14 @@ def _validate(tree: ast.AST) -> None:
 
 
 class _SDK:
-    def __init__(self, *, bot_id: int, group_id: int, session_id: str | None):
+    def __init__(
+        self, *, bot_id: int, group_id: int, session_id: str | None,
+        bash_executor: BashExecutor | None = None,
+    ):
         self.bot_id = bot_id
         self.group_id = group_id
         self.session_id = session_id
+        self._bash_executor = bash_executor
 
     def read(self, path: str, offset: int | None = None, limit: int | None = None) -> str:
         from workspace import read_file
@@ -141,23 +148,14 @@ class _SDK:
     def bash(self, cmd: str, cwd: str = ".") -> str:
         if not isinstance(cmd, str) or not cmd.strip() or len(cmd) > 10_000:
             raise CodeModeRejected("bash 命令不能为空且不得超过 10,000 字符")
-        from executors.plugins.workspace_tools import _check_shell_command, _handle_run_shell
-        blocked, reason = _check_shell_command(cmd)
-        if blocked:
-            raise CodeModeRejected(f"bash 命令被安全策略拒绝: {reason}")
-        return asyncio.run(_handle_run_shell(
-            cmd, cwd=cwd, timeout=30, background=False,
-            context={
-                "bot_id": self.bot_id,
-                "group_id": self.group_id,
-                "session_id": self.session_id,
-            },
-        ))
+        if self._bash_executor is None:
+            raise CodeModeRejected("Code Mode 未配置 BashPort")
+        return self._bash_executor(cmd, cwd)
 
 
 def run_code(
     code: str, *, bot_id: int, group_id: int | None, session_id: str | None,
-    limits: CodeModeLimits = CodeModeLimits(),
+    limits: CodeModeLimits = CodeModeLimits(), bash_executor: BashExecutor | None = None,
 ) -> str:
     if not isinstance(code, str) or not code.strip():
         raise CodeModeRejected("code 不能为空")
@@ -184,7 +182,10 @@ def run_code(
 
     env = {
         "__builtins__": {**_ALLOWED_BUILTINS, "print": print},
-        "tools": _SDK(bot_id=bot_id, group_id=group_id, session_id=session_id),
+        "tools": _SDK(
+            bot_id=bot_id, group_id=group_id, session_id=session_id,
+            bash_executor=bash_executor,
+        ),
     }
     try:
         sys.settrace(trace)

@@ -993,8 +993,30 @@ async def _handle_slice_read(
 
 async def _handle_run_code(code: str, context: dict = None) -> str:
     from executors.code_mode import run_code
+    from executors import tool_executor
+    from concurrent.futures import TimeoutError as FutureTimeoutError
 
     ctx = context or {}
+    loop = asyncio.get_running_loop()
+
+    def execute_bash(cmd: str, cwd: str) -> str:
+        future = asyncio.run_coroutine_threadsafe(
+            tool_executor.execute(
+                "run_shell",
+                {"cmd": cmd, "cwd": cwd, "timeout": 30, "background": False},
+                context=ctx,
+            ),
+            loop,
+        )
+        try:
+            result, is_error = future.result(timeout=35)
+        except FutureTimeoutError as exc:
+            future.cancel()
+            raise RuntimeError("Code Mode bash dispatch timeout") from exc
+        if is_error:
+            raise RuntimeError(result)
+        return result
+
     try:
         return await asyncio.to_thread(
             run_code,
@@ -1002,6 +1024,7 @@ async def _handle_run_code(code: str, context: dict = None) -> str:
             bot_id=ctx.get("bot_id"),
             group_id=ctx.get("group_id"),
             session_id=ctx.get("session_id"),
+            bash_executor=execute_bash,
         )
     except Exception as exc:
         return f"[Code Mode 拒绝] {exc}"
