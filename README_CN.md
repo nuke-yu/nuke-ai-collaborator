@@ -97,6 +97,20 @@ Nuke AI Collaborator 围绕**组织级协作**、**认知记忆沉淀**与**企�
 - **敏感数据自动脱敏 (Output Redaction)**：所有输出实时过滤 JWT、AWS 密钥、GitHub Token、私钥 PEM 等敏感数据。
 - **子 Agent 权限衰减**：向下派生子任务时强制收紧权限，防止高危权限向下渗透扩散。
 
+#### 📊 后台代码修改安全体系评估 (Autonomous Coding Safety Assessment)
+```
+================================================================================
+🏛️ Nuke AI Collaborator 后台代码修改安全体系评估
+--------------------------------------------------------------------------------
+✅ 1. Git Worktree 物理隔离：    已闭环 (git_worktree.py · Promote/Discard)
+✅ 2. 局部高精度原子修改：       已闭环 (editing/ · Hashline 行哈希防漂移)
+✅ 3. 自动化测试与证据门禁：     已闭环 (Outcome Evidence · 测试未通过不入库)
+✅ 4. 卡死检测与 Fenced Lease：  已闭环 (pipeline.py · 异步租约续期与熔断)
+✅ 5. 凭据脱敏与超限保护：       已闭环 (redaction.py · 密钥/Token 自动消除)
+✅ 6. PR Gate 准入门禁：         已闭环 (coding_agent.py · 缺失 PR 强制阻断)
+================================================================================
+```
+
 ### 4. 🏰 物理级多租户隔离与原生 MCP (Physical Isolation & Native MCP)
 - **真正的群物理隔离**：每个群拥有专属的独立 SQLite 数据库（`workspaces/group_X/chat.db`）与文件工作区，群组之间数据物理隔离，永不串群。
 - **原生 MCP (Model Context Protocol) 跨进程架构**：独占式 MCP Collector 维持 Stdio/SSE 连接，Worker 进程轻量代理调用，提供无限横向扩展的工具生态。
