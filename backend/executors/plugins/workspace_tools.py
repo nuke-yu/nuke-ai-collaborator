@@ -50,6 +50,11 @@ class ReadFileParams(BaseModel):
     offset: Optional[int] = Field(None, description="读取文件的起始字符偏移量")
     limit: Optional[int] = Field(None, description="最大读取字符长度")
 
+class SliceReadParams(BaseModel):
+    locator: str = Field(..., description="超长工具输出返回的 spill:// 句柄")
+    start_line: int = Field(..., description="起始行，1-based，包含")
+    end_line: int = Field(..., description="结束行，1-based，包含；单次最多 200 行")
+
 class WriteFileParams(BaseModel):
     path: str
     content: str
@@ -116,6 +121,12 @@ _WORKSPACE_TOOLS = [
         name="read_file",
         description="读取 Bot 工作区内的文件内容",
         parameters=ReadFileParams,
+        concurrency_safe=True,
+    ),
+    ToolDef(
+        name="slice_read",
+        description="按 spill locator 读取超长工具输出的有限行范围",
+        parameters=SliceReadParams,
         concurrency_safe=True,
     ),
     ToolDef(
@@ -820,13 +831,16 @@ async def _default_secret_redactor(
 async def _default_output_truncator(
     name: str, arguments: dict, result: str, context: dict
 ) -> str | None:
-    """Truncate long tool results using head+tail strategy."""
-    if len(result) <= _TOOL_RESULT_MAX_CHARS:
-        return None
-    dropped = len(result) - _TOOL_RESULT_MAX_CHARS
-    head = result[:_TOOL_RESULT_HEAD_TAIL]
-    tail = result[-_TOOL_RESULT_HEAD_TAIL:]
-    return head + f"\n\n[... {dropped:,} 字符已省略 ...]\n\n" + tail
+    """Spill long results and return a bounded preview with a locator."""
+    from executors.spill import spill_output
+
+    preview, locator = spill_output(
+        group_id=(context or {}).get("group_id"),
+        tool_name=name,
+        text=result,
+        limit=_TOOL_RESULT_MAX_CHARS,
+    )
+    return preview if locator is not None or preview != result else None
 
 
 async def _default_shell_guard(name: str, arguments: dict, context: dict) -> dict | None:
@@ -868,7 +882,7 @@ _AUTO_ALLOW_TOOLS = frozenset({
 # so explicit deny rules still win in permissions.check(), while the default
 # policy does not suspend an autonomous run waiting for a meaningless approval.
 _READ_ONLY_CONFINED_TOOLS = frozenset({
-    "list_workspace", "read_file", "read_anchored", "memory_search",
+    "list_workspace", "read_file", "read_anchored", "slice_read", "memory_search",
 })
 
 
@@ -954,6 +968,19 @@ async def _handle_read_file(path: str, offset: int | None = None, limit: int | N
     if ctx.get("session_id"):
         options["session_id"] = ctx["session_id"]
     return await _ws.read_file(bot_id, path, **options)
+
+
+async def _handle_slice_read(
+    locator: str, start_line: int, end_line: int, context: dict = None
+) -> str:
+    from executors.spill import read_spilled_lines
+
+    return read_spilled_lines(
+        group_id=(context or {}).get("group_id"),
+        locator=locator,
+        start_line=start_line,
+        end_line=end_line,
+    )
 
 
 async def _handle_write_file(path: str, content: str, context: dict = None) -> str:
@@ -1514,6 +1541,7 @@ def register_workspace_tools() -> None:
     tool_executor.add_after_hook(_default_output_truncator)
     handlers = {
         "read_file":        _handle_read_file,
+        "slice_read":       _handle_slice_read,
         "write_file":       _handle_write_file,
         "edit_file":        _handle_edit_file,
         "read_anchored":    _handle_read_anchored,
