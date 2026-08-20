@@ -1,6 +1,8 @@
 import importlib.util
 import logging
 import sys
+from contextvars import ContextVar
+from contextlib import contextmanager
 from pathlib import Path
 
 from executors.base import BotExecutor
@@ -9,17 +11,35 @@ logger = logging.getLogger(__name__)
 
 _registry: dict[str, BotExecutor] = {}
 _disposers: dict[str, object] = {}
-from executors.container import DependencyContainer
-_container = DependencyContainer()
+from executors.container import PluginComposition
+
+_active_composition: ContextVar[PluginComposition | None] = ContextVar(
+    "active_plugin_composition", default=None
+)
 
 
 def configure_dependency(name: str, value: object) -> None:
-    _container.bind(name, value)
+    """Compatibility binding for callers already inside dependency_scope."""
+    composition = _active_composition.get()
+    if composition is None:
+        composition = PluginComposition()
+        _active_composition.set(composition)
+    composition.bind(name, value)
 
 
 def clear_dependencies() -> None:
-    global _container
-    _container = DependencyContainer()
+    _active_composition.set(None)
+
+
+@contextmanager
+def dependency_scope(composition: PluginComposition | None = None):
+    """Install a plugin composition only for the current execution context."""
+    composition = composition or PluginComposition()
+    token = _active_composition.set(composition)
+    try:
+        yield composition
+    finally:
+        _active_composition.reset(token)
 _failures: dict[str, str] = {}
 PLUGIN_DIR = Path(__file__).parent / "plugins"
 
@@ -35,7 +55,7 @@ def get_external_plugins_dir() -> Path | None:
     return Path(__file__).parent.parent.parent / "workspaces" / "plugins"
 
 
-def _load_file(path: Path):
+def _load_file(path: Path, composition: PluginComposition):
     parent_dir = str(path.parent.resolve())
     if parent_dir not in sys.path:
         sys.path.append(parent_dir)
@@ -64,7 +84,7 @@ def _load_file(path: Path):
             and getattr(cls, "executor_id", "")
         ):
             instance = cls()
-            instance.dependencies = _container.resolve_many(
+            instance.dependencies = composition.dependencies.resolve_many(
                 getattr(instance.manifest, "inject", ())
             )
             _registry[instance.executor_id] = instance
@@ -80,7 +100,7 @@ def _load_file(path: Path):
             logger.info(f"Registered plugin: {instance.executor_id}")
 
 
-def discover():
+def discover(*, composition: PluginComposition | None = None):
     """Scan plugins/ and load all non-private .py files.
 
     Idempotent: re-discovery (startup AND /api/plugins/reload) re-execs plugin
@@ -90,6 +110,7 @@ def discover():
     rebuilds exactly one set; tool defs/handlers are keyed by name and overwrite,
     so they need no reset.
     """
+    composition = composition or _active_composition.get() or PluginComposition()
     _registry.clear()
     _failures.clear()
     from executors import tool_executor
@@ -102,7 +123,7 @@ def discover():
     # 1. Load built-in plugins
     for f in sorted(PLUGIN_DIR.glob("*.py")):
         if not f.name.startswith("_"):
-            _load_file(f)
+            _load_file(f, composition)
             
     # 2. Load external plugins
     ext_dir = get_external_plugins_dir()
@@ -110,7 +131,7 @@ def discover():
         logger.info(f"Scanning external plugins from: {ext_dir}")
         for f in sorted(ext_dir.glob("*.py")):
             if not f.name.startswith("_"):
-                _load_file(f)
+                _load_file(f, composition)
 
 
 def failures() -> dict[str, str]:

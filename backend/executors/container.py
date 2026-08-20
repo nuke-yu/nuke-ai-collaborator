@@ -1,6 +1,8 @@
 """Small explicit dependency container for executor plugins."""
 from __future__ import annotations
 
+from dataclasses import dataclass, field
+
 
 class DependencyNotFound(RuntimeError):
     pass
@@ -31,3 +33,14 @@ class DependencyContainer:
         if len(set(names)) != len(names):
             raise ValueError("plugin dependency declarations must be unique")
         return {name: self.resolve(name) for name in names}
+
+
+@dataclass
+class PluginComposition:
+    """Dependencies owned by one plugin discovery/host composition."""
+
+    dependencies: DependencyContainer = field(default_factory=DependencyContainer)
+
+    def bind(self, name: str, value: object) -> "PluginComposition":
+        self.dependencies.bind(name, value)
+        return self

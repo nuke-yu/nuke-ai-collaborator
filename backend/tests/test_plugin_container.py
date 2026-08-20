@@ -1,6 +1,6 @@
 import unittest
 
-from executors.container import DependencyContainer, DependencyNotFound
+from executors.container import DependencyContainer, DependencyNotFound, PluginComposition
 from executors.base import PluginManifest
 
 
@@ -23,6 +23,14 @@ class PluginContainerTest(unittest.TestCase):
         container.bind("db", object())
         with self.assertRaises(ValueError):
             container.resolve_many(["db", "db"])
+
+    def test_plugin_composition_owns_bindings(self) -> None:
+        first_value = object()
+        second_value = object()
+        first = PluginComposition().bind("db", first_value)
+        second = PluginComposition().bind("db", second_value)
+        self.assertIs(first.dependencies.resolve("db"), first_value)
+        self.assertIs(second.dependencies.resolve("db"), second_value)
 
 
 if __name__ == "__main__":
