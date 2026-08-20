@@ -87,10 +87,21 @@ def read_spilled_lines(*, group_id: int | None, locator: str, start_line: int, e
     if not target.is_relative_to(spill_root) or not target.is_file():
         return "[错误] spill 内容不存在"
     try:
-        lines = target.read_text(encoding="utf-8").splitlines(keepends=True)
-    except OSError as exc:
+        selected: list[str] = []
+        selected_chars = 0
+        with target.open("r", encoding="utf-8") as stream:
+            for line_number, line in enumerate(stream, 1):
+                if line_number < start_line:
+                    continue
+                if line_number > end_line:
+                    break
+                selected.append(line)
+                selected_chars += len(line)
+                if selected_chars >= MAX_SLICE_CHARS:
+                    break
+    except (OSError, UnicodeError) as exc:
         return f"[读取错误] {exc}"
-    selected = "".join(lines[start_line - 1:end_line])
-    if len(selected) > MAX_SLICE_CHARS:
-        selected = selected[:MAX_SLICE_CHARS] + "\n[... slice_read 输出已限制 ...]"
-    return selected or "[空范围]"
+    result = "".join(selected)
+    if len(result) > MAX_SLICE_CHARS:
+        result = result[:MAX_SLICE_CHARS] + "\n[... slice_read 输出已限制 ...]"
+    return result or "[空范围]"

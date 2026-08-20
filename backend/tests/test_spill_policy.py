@@ -48,6 +48,18 @@ class SpillPolicyTest(unittest.IsolatedAsyncioTestCase):
         result = await _default_output_truncator("read_file", {}, "small", {})
         self.assertIsNone(result)
 
+    async def test_slice_read_does_not_load_entire_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            text = "".join(f"line-{i}\n" for i in range(100_000))
+            with patch("workspace.group_workspace", return_value=root):
+                _preview, locator = spill_output(
+                    group_id=12, tool_name="test", text=text, limit=10
+                )
+                with patch.object(Path, "read_text", side_effect=AssertionError("full read")):
+                    result = await _handle_slice_read(locator, 50_000, 50_002, {"group_id": 12})
+            self.assertEqual(result, "line-49999\nline-50000\nline-50001\n")
+
 
 if __name__ == "__main__":
     unittest.main()
