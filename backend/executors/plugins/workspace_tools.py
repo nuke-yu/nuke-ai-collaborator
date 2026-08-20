@@ -55,6 +55,9 @@ class SliceReadParams(BaseModel):
     start_line: int = Field(..., description="起始行，1-based，包含")
     end_line: int = Field(..., description="结束行，1-based，包含；单次最多 200 行")
 
+class RunCodeParams(BaseModel):
+    code: str = Field(..., description="使用 tools.read/write/grep SDK 的受限 Python 脚本")
+
 class WriteFileParams(BaseModel):
     path: str
     content: str
@@ -128,6 +131,11 @@ _WORKSPACE_TOOLS = [
         description="按 spill locator 读取超长工具输出的有限行范围",
         parameters=SliceReadParams,
         concurrency_safe=True,
+    ),
+    ToolDef(
+        name="run_code",
+        description="在受限本地 Code Mode 中批量执行 workspace SDK 脚本；禁止 import、shell、网络和任意文件访问",
+        parameters=RunCodeParams,
     ),
     ToolDef(
         name="write_file",
@@ -869,7 +877,7 @@ async def _default_shell_guard(name: str, arguments: dict, context: dict) -> dic
 # the old react_v1) would run these with zero checks. Read-only workspace tools
 # stay allowed so such a bot can still inspect its own workspace.
 _APPROVAL_REQUIRED_TOOLS = frozenset({
-    "run_shell", "write_file", "read_local_file", "write_local_file", "spawn_agent",
+    "run_shell", "write_file", "read_local_file", "write_local_file", "spawn_agent", "run_code",
 })
 
 # RD 流水线的内部记账工具（Jira/PR 替身）：人把关在工作流的 4 道门，不在每次工具调用，
@@ -981,6 +989,22 @@ async def _handle_slice_read(
         start_line=start_line,
         end_line=end_line,
     )
+
+
+async def _handle_run_code(code: str, context: dict = None) -> str:
+    from executors.code_mode import run_code
+
+    ctx = context or {}
+    try:
+        return await asyncio.to_thread(
+            run_code,
+            code,
+            bot_id=ctx.get("bot_id"),
+            group_id=ctx.get("group_id"),
+            session_id=ctx.get("session_id"),
+        )
+    except Exception as exc:
+        return f"[Code Mode 拒绝] {exc}"
 
 
 async def _handle_write_file(path: str, content: str, context: dict = None) -> str:
@@ -1542,6 +1566,7 @@ def register_workspace_tools() -> None:
     handlers = {
         "read_file":        _handle_read_file,
         "slice_read":       _handle_slice_read,
+        "run_code":         _handle_run_code,
         "write_file":       _handle_write_file,
         "edit_file":        _handle_edit_file,
         "read_anchored":    _handle_read_anchored,
