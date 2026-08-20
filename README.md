@@ -31,6 +31,20 @@
 
 ---
 
+## 🆕 Latest Updates — 2026-08-21
+
+- **Isolated Code Mode**: `run_code` is now organized as an independent bounded context with explicit domain, application, ports, adapters, and composition layers.
+- **Subprocess execution**: Code Mode scripts run in disposable subprocesses; workspace and Bash operations return through parent-mediated IPC and the existing authorization chain.
+- **Stronger execution failure handling**: Child-process EOF/pipe failures are converted into controlled Code Mode rejections instead of leaking transport exceptions.
+- **Structured tool results**: Tool errors use explicit `ToolResult` status values, eliminating false failures when normal user output begins with `[error]` or similar text.
+- **Bounded output and observation safety**: Spill slices are read line-by-line, file versions use chunked SHA-256 hashing, and observation stores can be injected per runtime context.
+- **Scoped plugin architecture**: Plugin disposer lifecycles and dependency bindings are isolated by context/composition; executor dependency dictionaries are instance-owned.
+- **Complete storage contract**: Storage adapters now expose connection, serialized transaction, migration, health-check, and lifecycle capabilities, with a concrete SQLite adapter.
+
+These changes are documented in [Runtime Features Architecture](docs/runtime-features-architecture.md).
+
+---
+
 ## 🎬 Product Demo Videos
 
 ### 📹 Demo 1: Nuke AI Collaborator Platform Walkthrough
