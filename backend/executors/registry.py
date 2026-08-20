@@ -9,6 +9,17 @@ logger = logging.getLogger(__name__)
 
 _registry: dict[str, BotExecutor] = {}
 _disposers: dict[str, object] = {}
+from executors.container import DependencyContainer
+_container = DependencyContainer()
+
+
+def configure_dependency(name: str, value: object) -> None:
+    _container.bind(name, value)
+
+
+def clear_dependencies() -> None:
+    global _container
+    _container = DependencyContainer()
 _failures: dict[str, str] = {}
 PLUGIN_DIR = Path(__file__).parent / "plugins"
 
@@ -53,6 +64,9 @@ def _load_file(path: Path):
             and getattr(cls, "executor_id", "")
         ):
             instance = cls()
+            instance.dependencies = _container.resolve_many(
+                getattr(instance.manifest, "inject", ())
+            )
             _registry[instance.executor_id] = instance
             from executors import tool_executor
             disposer = tool_executor.Disposer()

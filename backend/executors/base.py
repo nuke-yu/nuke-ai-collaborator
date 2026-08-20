@@ -65,6 +65,7 @@ class PluginManifest:
     description: str = ""
     tools: list[ToolDef] = field(default_factory=list)
     memory_layers: list[str] = field(default_factory=lambda: ["short_term"])
+    inject: list[str] = field(default_factory=list)
     workspace: WorkspaceConfig = field(default_factory=WorkspaceConfig)
     collaboration: CollabConfig = field(default_factory=CollabConfig)
     max_iterations: int = 1
@@ -74,6 +75,7 @@ class PluginManifest:
             "description": self.description,
             "tools": [{"name": t.name, "description": t.description, "concurrency_safe": t.concurrency_safe} for t in self.tools],
             "memory_layers": self.memory_layers,
+            "inject": list(self.inject),
             "workspace": {
                 "startup_files": self.workspace.startup_files,
                 "skill_discovery": self.workspace.skill_discovery,
@@ -215,6 +217,7 @@ class BotExecutor(ABC):
     executor_id: str = ""
     display_name: str = ""
     manifest: PluginManifest = field(default_factory=PluginManifest)
+    dependencies: dict[str, object] = {}
 
     @abstractmethod
     async def run(self, ctx: ExecutionContext) -> ExecutionResult:
