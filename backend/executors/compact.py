@@ -23,6 +23,10 @@ from ai.client import call_ai_once, AIContextOverflowError
 from executors.compact_tokens import estimate_tokens as _estimate_tokens_impl
 from executors.compact_tokens import clean_multimodal_content as _clean_multimodal_content_impl
 from executors.compact_tokens import _token_cache as _token_cache_impl
+from executors.compact_thresholds import (
+    autocompact_threshold as _autocompact_threshold_impl,
+    snip_threshold as _snip_threshold_impl,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -276,14 +280,22 @@ def autocompact_threshold(model_name: str) -> int:
         effectiveWindow = contextWindow - MAX_OUTPUT_TOKENS_FOR_SUMMARY
         threshold       = effectiveWindow - AUTOCOMPACT_BUFFER_TOKENS
     """
-    window = _MODEL_CONTEXT_WINDOWS.get(model_name, _DEFAULT_CONTEXT_WINDOW)
-    return window - MAX_OUTPUT_TOKENS_FOR_SUMMARY - AUTOCOMPACT_BUFFER_TOKENS
+    return _autocompact_threshold_impl(
+        model_name,
+        context_windows=_MODEL_CONTEXT_WINDOWS,
+        default_context_window=_DEFAULT_CONTEXT_WINDOW,
+        summary_output_tokens=MAX_OUTPUT_TOKENS_FOR_SUMMARY,
+        buffer_tokens=AUTOCOMPACT_BUFFER_TOKENS,
+    )
 
 
 def snip_threshold(model_name: str) -> int:
     """Snip fires at 70% of context window — before AI compaction headroom runs out."""
-    window = _MODEL_CONTEXT_WINDOWS.get(model_name, _DEFAULT_CONTEXT_WINDOW)
-    return int(window * 0.70)
+    return _snip_threshold_impl(
+        model_name,
+        context_windows=_MODEL_CONTEXT_WINDOWS,
+        default_context_window=_DEFAULT_CONTEXT_WINDOW,
+    )
 
 
 # ---------------------------------------------------------------------------
