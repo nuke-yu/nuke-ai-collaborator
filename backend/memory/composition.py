@@ -16,6 +16,7 @@ from memory.ports import (
     MemorySecretPort,
     MemorySettingsPort,
     ModelPort,
+    PipelineJobRepositoryPort,
     SkillWorkspacePort,
     TemporalGraphPort,
 )
@@ -39,6 +40,7 @@ class MemoryComposition:
     settings: MemorySettingsPort
     model: ModelPort
     temporal_graph: TemporalGraphPort
+    pipeline_repository: PipelineJobRepositoryPort
     memory_functions: Any | None = None
 
     @property

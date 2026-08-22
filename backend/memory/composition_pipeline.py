@@ -23,7 +23,6 @@ from memory.application import (
 from memory.application.pipeline import CanonicalPipelineDispatcher
 from memory.composition import MemoryComposition
 from memory.domain import MemoryScope
-from memory.infrastructure.pipeline_jobs import CanonicalPipelineJobRepository
 
 
 def build_pipeline_dispatcher(composition: MemoryComposition) -> CanonicalPipelineDispatcher:
@@ -42,7 +41,7 @@ def build_pipeline_dispatcher(composition: MemoryComposition) -> CanonicalPipeli
         )
     database = composition.database
     projection_outbox = composition.projection_outbox
-    job_repository = CanonicalPipelineJobRepository(database)
+    job_repository = composition.pipeline_repository
     learning = CanonicalLearningService(database, job_repository)
     model = composition.model
     settings = composition.settings

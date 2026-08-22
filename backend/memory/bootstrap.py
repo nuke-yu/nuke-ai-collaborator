@@ -228,11 +228,11 @@ def build_memory_composition(*, drain_interval_seconds: float = 60.0) -> MemoryC
         CurrentSkillWorkspace,
     )
     from ai.client import call_ai_once
+    from memory.infrastructure.pipeline_jobs import CanonicalPipelineJobRepository
 
+    module = build_memory_module(drain_interval_seconds=drain_interval_seconds)
     composition = MemoryComposition(
-        module=build_memory_module(
-            drain_interval_seconds=drain_interval_seconds,
-        ),
+        module=module,
         member_directory=CentralMemberDirectory(),
         secret_provider=CurrentMemorySecretProvider(),
         skill_workspace=CurrentSkillWorkspace(),
@@ -240,6 +240,7 @@ def build_memory_composition(*, drain_interval_seconds: float = 60.0) -> MemoryC
         settings=CurrentMemorySettings(),
         model=call_ai_once,
         temporal_graph=GraphitiTemporalAlgorithmAdapter(),
+        pipeline_repository=CanonicalPipelineJobRepository(module.database),
     )
     composition.memory_functions = LettaMemoryFunctionController(
         composition.database, composition.projection_outbox, build_memory_acl()
@@ -285,8 +286,7 @@ def install_memory_composition(composition: MemoryComposition) -> MemoryComposit
             raise TypeError(f"Memory composition dependency {name!r} does not implement {protocol.__name__}")
 
     # Construct the complete service graph before touching any ambient state.
-    from memory.infrastructure.pipeline_jobs import CanonicalPipelineJobRepository
-    job_repository = CanonicalPipelineJobRepository(composition.database)
+    job_repository = composition.pipeline_repository
     services = {
         "learning": CanonicalLearningService(composition.database, job_repository),
         "skill_compiler": CanonicalSkillCompiler(composition.database, job_repository),
