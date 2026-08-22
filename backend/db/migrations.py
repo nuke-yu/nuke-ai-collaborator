@@ -24,6 +24,7 @@ from db.migration_057 import apply as _migration_057_impl
 from db.migration_056 import apply as _migration_056_impl
 from db.migration_055 import apply as _migration_055_impl
 from db.migration_054 import apply as _migration_054_impl
+from db.migration_053 import apply as _migration_053_impl
 
 log = logging.getLogger(__name__)
 
@@ -1194,17 +1195,7 @@ async def migration_052(db):
 
 async def migration_053(db):
     """Persist validated learned-memory references in decision and tool traces."""
-    await _safe_add_column(
-        db,
-        "ALTER TABLE tool_events ADD COLUMN memory_refs_json "
-        "TEXT NOT NULL DEFAULT '[]'",
-    )
-    await _safe_add_column(
-        db,
-        "ALTER TABLE run_decisions ADD COLUMN memory_refs_json "
-        "TEXT NOT NULL DEFAULT '[]'",
-    )
-    await db.commit()
+    await _migration_053_impl(db, _safe_add_column)
 
 
 async def migration_054(db):
