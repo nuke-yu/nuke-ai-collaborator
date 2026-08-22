@@ -31,6 +31,7 @@ from core.orchestration.ai_service import AIService
 from core.orchestration import prompt_builder
 from ai.model_limits import resolve_max_tokens
 from executors.plugins.workspace_tools import _IS_WINDOWS
+from executors.plugins.tool_loop_context import drop_oldest_message_group
 from executors.tool_dispatch import execute_tool_call as _execute_tool_call
 
 logger = logging.getLogger(__name__)
@@ -130,25 +131,8 @@ def _apply_memory_context_budget(
         return memory, learned_contexts
 
 
-def _drop_oldest_message_group(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Remove one complete turn while preserving provider message invariants.
-
-    A turn starts at a user message (or an assistant/tool recovery fragment when
-    the history is already malformed) and extends up to the next user message.
-    This keeps assistant tool calls and every result belonging to that turn
-    inseparable during emergency pruning. System messages are never pruned.
-    """
-    if not messages:
-        return messages
-    index = 0
-    while index < len(messages) and messages[index].get("role") == "system":
-        index += 1
-    if index >= len(messages):
-        return messages
-    end = index + 1
-    while end < len(messages) and messages[end].get("role") != "user":
-        end += 1
-    return messages[:index] + messages[end:]
+# Compatibility export: existing tests and callers import this helper here.
+_drop_oldest_message_group = drop_oldest_message_group
 
 
 def _enforce_final_context_budget(runner: Any) -> None:
