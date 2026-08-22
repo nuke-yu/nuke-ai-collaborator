@@ -25,6 +25,7 @@ from db.migration_056 import apply as _migration_056_impl
 from db.migration_055 import apply as _migration_055_impl
 from db.migration_054 import apply as _migration_054_impl
 from db.migration_053 import apply as _migration_053_impl
+from db.migration_052 import apply as _migration_052_impl
 
 log = logging.getLogger(__name__)
 
@@ -1161,36 +1162,7 @@ async def migration_051(db):
 
 async def migration_052(db):
     """Add a bounded cursor for durable post-turn observation gap repair."""
-    async with db.execute("PRAGMA table_info(pipeline_jobs)") as cur:
-        pipeline_columns = {row[1] for row in await cur.fetchall()}
-    if {"group_id", "job_type", "input_id", "input_version"} <= pipeline_columns:
-        await db.execute(
-            """CREATE INDEX IF NOT EXISTS idx_pipeline_jobs_input
-            ON pipeline_jobs(group_id,job_type,input_id,input_version)"""
-        )
-
-    async with db.execute("PRAGMA table_info(messages)") as cur:
-        message_columns = {row[1] for row in await cur.fetchall()}
-    if {"id", "group_id", "member_id"} <= message_columns:
-        await db.execute(
-            """CREATE INDEX IF NOT EXISTS idx_messages_group_member_id
-            ON messages(group_id,member_id,id)"""
-        )
-        await db.execute(
-            """CREATE TABLE IF NOT EXISTS memory_observation_scan_state (
-            group_id INTEGER PRIMARY KEY,
-            scan_after_message_id INTEGER NOT NULL DEFAULT 0,
-            updated_at INTEGER NOT NULL DEFAULT 0
-        )"""
-        )
-        now = int(time.time() * 1000)
-        await db.execute(
-            """INSERT OR IGNORE INTO memory_observation_scan_state
-               (group_id,scan_after_message_id,updated_at)
-               SELECT group_id,MAX(id),? FROM messages GROUP BY group_id""",
-            (now,),
-        )
-    await db.commit()
+    await _migration_052_impl(db)
 
 
 async def migration_053(db):
