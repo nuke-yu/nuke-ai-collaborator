@@ -88,6 +88,20 @@ class StorageAdapterTest(unittest.IsolatedAsyncioTestCase):
                 )
                 self.assertIsNotNone(await cursor.fetchone())
 
+    async def test_sqlite_writer_is_serialized_and_facade_independent(self) -> None:
+        from storage.adapters.sqlite import SQLiteStorageAdapter
+
+        adapter = SQLiteStorageAdapter()
+        with NamedTemporaryFile(suffix=".db") as file:
+            async with adapter.write_connect(file.name) as connection:
+                await connection.execute("CREATE TABLE writer_probe (value TEXT)")
+                await connection.execute("INSERT INTO writer_probe VALUES ('ok')")
+                await connection.commit()
+            async with adapter.connect(file.name) as connection:
+                cursor = await connection.execute("SELECT value FROM writer_probe")
+                self.assertEqual(await cursor.fetchone(), ("ok",))
+            await adapter.close()
+
 
 if __name__ == "__main__":
     unittest.main()
