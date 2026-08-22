@@ -28,6 +28,7 @@ from db.migration_053 import apply as _migration_053_impl
 from db.migration_052 import apply as _migration_052_impl
 from db.migration_051 import apply as _migration_051_impl
 from db.migration_050 import apply as _migration_050_impl
+from db.migration_049 import apply as _migration_049_impl
 
 log = logging.getLogger(__name__)
 
@@ -1091,24 +1092,7 @@ async def migration_048(db):
 
 async def migration_049(db):
     """Add explicit ownership, authority, and evidence to canonical memory."""
-    for declaration in (
-        "owner_type TEXT NOT NULL DEFAULT 'bot'",
-        "authority TEXT NOT NULL DEFAULT 'bot_observation'",
-        "subject_key TEXT NOT NULL DEFAULT ''",
-        "sensitivity TEXT NOT NULL DEFAULT 'group'",
-        "evidence_json TEXT NOT NULL DEFAULT '{}'",
-        "created_by TEXT NOT NULL DEFAULT ''",
-        "effective_from INTEGER",
-    ):
-        await _safe_add_column(
-            db, f"ALTER TABLE memory_records ADD COLUMN {declaration}"
-        )
-    await db.execute(
-        """CREATE INDEX IF NOT EXISTS idx_memory_records_group_facts
-        ON memory_records(group_id,owner_type,kind,status,subject_key,
-        updated_at DESC)"""
-    )
-    await db.commit()
+    await _migration_049_impl(db, _safe_add_column)
 
 
 async def migration_050(db):
