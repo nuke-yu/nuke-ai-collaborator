@@ -16,6 +16,7 @@ from db.migration_runner import run_migrations as _run_migrations_impl
 from db.migration_helpers import safe_add_column as _safe_add_column_impl
 from db.migration_063 import apply as _migration_063_impl
 from db.migration_062 import apply as _migration_062_impl
+from db.migration_061 import apply as _migration_061_impl
 
 log = logging.getLogger(__name__)
 
@@ -1351,16 +1352,7 @@ async def migration_060(db):
 
 async def migration_061(db):
     """Add version, derivation, creator, and soft-delete Artifact metadata."""
-    for statement in (
-        "ALTER TABLE group_artifacts ADD COLUMN artifact_version INTEGER NOT NULL DEFAULT 1",
-        "ALTER TABLE group_artifacts ADD COLUMN parent_artifact_id TEXT DEFAULT NULL",
-        "ALTER TABLE group_artifacts ADD COLUMN derives_from TEXT DEFAULT NULL",
-        "ALTER TABLE group_artifacts ADD COLUMN created_by TEXT NOT NULL DEFAULT ''",
-        "ALTER TABLE group_artifacts ADD COLUMN deleted_at TIMESTAMP DEFAULT NULL",
-        "ALTER TABLE group_artifacts ADD COLUMN lifecycle_status TEXT NOT NULL DEFAULT 'active'",
-    ):
-        await _safe_add_column(db, statement)
-    await db.commit()
+    await _migration_061_impl(db, _safe_add_column)
 
 
 async def migration_062(db):
