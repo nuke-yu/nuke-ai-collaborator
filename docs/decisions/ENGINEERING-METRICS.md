@@ -1,26 +1,26 @@
 # Engineering Metrics · Nuke AI Collaborator
 
-> Last Updated: 2026-06-01
+> Last Updated: 2026-08-22
 
 ## 📊 Summary of Codebase Scale
 
-Current total Lines of Code (LOC): **~38,510** (including docs and tests).
+Current tracked application code: **78,753 LOC**; tracked backend tests:
+**48,071 LOC**. These figures exclude documentation and runtime workspace data
+from the application-code ratio.
 
 | Layer | Files | Est. LOC | % | Primary Responsibility |
 | :--- | :--- | :--- | :--- | :--- |
-| **Backend Core** | ~60 | **7,800+** | 20% | AI loop, orchestrator, split-DB logic, runtime |
-| **Tests (Pytest)** | ~55 | **11,500+** | 30% | Unit, integration, and E2E regression suites |
-| **Frontend (React)**| ~25 | **4,200+** | 11% | Real-time UI, WebSocket hooks, state management |
-| **Architectural Docs**| ~15 | **5,500+** | 14% | PRDs, design specs, V3 sharding blueprints |
-| **Bot Knowledge** | ~100 | **9,500+** | 25% | Skill definitions, memory, identity profiles |
+| **Tracked application code** | — | **78,753** | 100% | Backend, frontend, and runtime application code |
+| **Tests (Pytest)** | — | **48,071** | 61% of application code | Unit, integration, and E2E regression suites |
 
 ---
 
 ## 🔍 Engineering Health Analysis
 
 ### 1. Quality Lever (Test-to-Code Ratio)
-- **Ratio: 1.5:1**
-- Our testing suite (11,500+ LOC) significantly outweighs the core backend logic (7,800+ LOC). This rigorous coverage is what allowed us to execute the "V3 Sharding Universe" and "DI Unification" refactors with near-zero regressions.
+- **Measured ratio: 0.61:1** (`48,071 / 78,753`).
+- This is a line-count indicator, not a coverage percentage. Behavioral coverage
+  still requires the full test suite and production-shaped integration tests.
 
 ### 2. Backend Complexity Centers
 - **AI Core (tool_loop_v1.py)**: 806 lines. This is our state-machine based engine for tool-use.

@@ -16,7 +16,7 @@ This document presents a horizontal architectural comparison between **Nuke AI C
 | **Security & Sandboxing** | Multi-domain database separation (Central DB vs Group DB) + VFS path lock cleanups. | Interactive CLI permission prompts. Shell calls run locally or under custom sandboxes. | Read-only planning mode rejects file-write tools. | **Robust Sandbox**: Sandboxes non-main agent sessions via Docker, SSH, or OpenShell. | Budget ceilings, cost projections, and branchless worktree isolation to avoid dirty commits. |
 | **Tool & Skill Ecosystem** | Pluggable executors (Tool Loop, ReAct), APScheduler Cron Jobs, ChromaDB Vector Memory. | **Rich Developer Tools**: Bash, Edit, Glob, Grep, LSP (Language Server Protocol), Web fetch. | File/Git tools, HTTP recorder, enterprise plugins. | Browser automation, Live Canvas (A2UI rendering), system/cron triggers. | Interactive visualizer, MCP servers, cost tables, complexity-based model routing. |
 | **Voice & Multimodal** | Inline markdown rendering, image upload/preview, full-screen Lightbox. | Text-only CLI inputs/outputs. | Text-only CLI + UI screenshot captures. | **First-class Voice**: Wake words, continuously active Talk Mode, macOS MLX native TTS. | Visual progress tracking, token compression. |
-| **Test Coverage Ratio** | **1.5:1 (Test-to-Code ratio)**, ~70+ integration tests for memory and recap pipelines. | Standard unit tests. | Standard unit tests. | QA suite for gateway/channels. | Full test suite. |
+| **Test Coverage Ratio** | Historical snapshot: **1.5:1** (not the current repository metric). | Standard unit tests. | Standard unit tests. | QA suite for gateway/channels. | Full test suite. |
 
 ---
 

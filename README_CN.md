@@ -15,7 +15,7 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688.svg?logo=fastapi&logoColor=white&style=flat-square)](https://fastapi.tiangolo.com/)
 [![Tailwind CSS v4](https://img.shields.io/badge/Tailwind_CSS-v4.0-38B2AC.svg?logo=tailwind-css&logoColor=white&style=flat-square)](https://tailwindcss.com/)
 [![MCP Native](https://img.shields.io/badge/MCP-Protocol_Native-8A2BE2.svg?style=flat-square)](https://modelcontextprotocol.io/)
-[![Test Ratio](https://img.shields.io/badge/Test_Ratio-1.5:1-success.svg?style=flat-square)](docs/ENGINEERING-METRICS.md)
+[![实测测试比](https://img.shields.io/badge/%E5%AE%9E%E6%B5%8B%E6%B5%8B%E8%AF%95%E6%AF%94-0.61%3A1-informational.svg?style=flat-square)](docs/decisions/ENGINEERING-METRICS.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](LICENSE)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](https://github.com/nuke-yu/nuke-ai-collaborator/pulls)
 
@@ -157,6 +157,9 @@ Nuke AI Collaborator 围绕**组织级协作**、**认知记忆沉淀**与**企�
 ### ⏰ 定时调度与自动化巡检 (Cron Scheduler)
 - **标准 Cron 调度**：内置基于 APScheduler 的定时任务引擎，支持 5 段式标准 Cron 表达式。
 - **自动化运营**：可设置每日 Standup 自动总结、代码质量定时巡检、服务器健康体检与周报汇总。
+
+Memory 各能力是否真正接入默认生产链路，见
+[`Memory Capability Wiring Status`](docs/decisions/MEMORY-CAPABILITY-STATUS.md)。适配器存在不等于默认启用。
 
 ---
 

@@ -15,7 +15,11 @@
 
 Nuke AI Collaborator is a group-based multi-agent collaboration platform. Unlike a single-agent chat application, our system runs an asynchronous multi-process topology (Supervisor $\rightarrow$ Worker $\rightarrow$ MCP Collector), executes shell commands, redacts credentials, manages permissions recursively for sub-agents, and dynamically extracts patterns for self-learning.
 
-While our unit testing suite maintains a high quality bar (test-to-code ratio of ~1.5:1), we currently lack a **functional and behavioral evaluation framework**. This document defines the metrics, data sets, and execution methods to measure the quality, security, and performance of Nuke AI Collaborator.
+The repository's current line-count metric is maintained in
+`docs/decisions/ENGINEERING-METRICS.md`; historical documents must not copy its
+value. We currently lack a **functional and behavioral evaluation framework**.
+This document defines the metrics, data sets, and execution methods to measure
+the quality, security, and performance of Nuke AI Collaborator.
 
 ---
 

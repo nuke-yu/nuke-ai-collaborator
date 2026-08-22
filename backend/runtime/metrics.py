@@ -272,7 +272,7 @@ class SupervisorCollector:
             ("outbox_pending", "outbox_pending", "Undelivered canonical Bot memory projections."),
             ("consecutive_passes", "rollout_consecutive_passes", "Consecutive qualifying audits."),
             ("required_passes", "rollout_required_passes", "Audits required to retire direct writes."),
-            ("direct_write_enabled", "direct_write_enabled", "Whether legacy direct Chroma writes remain enabled."),
+            ("direct_write_enabled", "direct_write_enabled", "Migration gate state: whether legacy direct Chroma writes remain enabled while canonical projection rollout is audited."),
             ("last_audit_passed", "last_audit_passed", "Whether the latest audit qualified for rollout."),
             ("errors_total", "audit_errors", "Shadow audit failures since worker start."),
         )

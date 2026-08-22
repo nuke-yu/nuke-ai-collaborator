@@ -15,7 +15,7 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688.svg?logo=fastapi&logoColor=white&style=flat-square)](https://fastapi.tiangolo.com/)
 [![Tailwind CSS v4](https://img.shields.io/badge/Tailwind_CSS-v4.0-38B2AC.svg?logo=tailwind-css&logoColor=white&style=flat-square)](https://tailwindcss.com/)
 [![MCP Native](https://img.shields.io/badge/MCP-Protocol_Native-8A2BE2.svg?style=flat-square)](https://modelcontextprotocol.io/)
-[![Test Ratio](https://img.shields.io/badge/Test_Ratio-1.5:1-success.svg?style=flat-square)](docs/ENGINEERING-METRICS.md)
+[![Measured Test Ratio](https://img.shields.io/badge/Measured_Test_Ratio-0.61%3A1-informational.svg?style=flat-square)](docs/decisions/ENGINEERING-METRICS.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](LICENSE)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](https://github.com/nuke-yu/nuke-ai-collaborator/pulls)
 
@@ -172,6 +172,10 @@ Allowing an LLM to freely invoke file read/write tools without security guardrai
 - **Standard Cron Syntax**: Built on APScheduler supporting 5-part cron expressions.
 - **Automated Operations**: Configure automated daily standups, repository health audits, and scheduled sprint summary reports.
 
+Memory capability wiring is tracked in
+[`docs/decisions/MEMORY-CAPABILITY-STATUS.md`](docs/decisions/MEMORY-CAPABILITY-STATUS.md).
+An implemented adapter is not automatically enabled on the default production path.
+
 ---
 
 ## 🏗️ System Architecture & Process Topology
@@ -230,10 +234,10 @@ Nuke does not embed these projects as a second runtime. It studies their core me
 | Reference project | Design and algorithms absorbed by Nuke | Nuke implementation focus |
 |---|---|---|
 | **Mem0** | Atomic fact extraction; `ADD / UPDATE / DELETE / NOOP` memory operations; idempotent writes and history retention | Conversational facts, conflict resolution, supersede history, and selective memory distillation |
-| **EverOS** | `Run → Case → Experience → Skill` hierarchy; Case extraction, quality gates, clustering, and Skill Induction | Structured execution traces, corrective-experience distillation, aggregation, and declarative Skill candidates |
+| **EverOS** | `Run → Case → Experience → Skill` hierarchy | Nuke-native durable Case/Experience/Skill pipeline; not a complete EverOS OME/Markdown runtime |
 | **AutoGen Task-Centric Memory** | Failure Insight extraction; linking correction outcomes to the original failure; persisting an Insight only after validation | Failure → correction → verification evidence chain for durable learning |
-| **Graphiti** | Temporal knowledge, relation edges, conflicting-fact invalidation, and Sparse/Dense/Graph hybrid retrieval concepts | `valid_from / valid_to`, source-aware relations, superseded history, and an evolving hybrid-recall path |
-| **Voyager** | Critic, success gating, skill extraction from successful trajectories, Skill Library, and reuse feedback | Outcome verification, Skill Candidates, and `Trial → Active → Stable / Suspended` lifecycle |
+| **Graphiti** | Temporal knowledge and relation invalidation concepts | Optional temporal relation adapter; not the default hot-recall path |
+| **Voyager** | Critic and success-gating concepts | Constrained declarative Skill candidates and execution plans; not an executable code Skill Library |
 | **LangGraph** | Stateful workflows, checkpoint lineage, idempotent recovery, and durable execution | Memory Learning background jobs, stable Job identity, leases, failure recovery, and replay boundaries |
 | **Letta / MemGPT** | Core Memory versus Archival Memory; context-window budgeting; on-demand retrieval of long-term knowledge | Separation of current context and long-term storage, with budgeted Experience/Personal Knowledge injection |
 | **OpenMemory** | Personal Memory ACL, explicit sharing, access auditing, and export/delete lifecycle | Isolated Personal Vault, Group/Bot Projection, fail-closed ACL, usage auditing, and revocable projections |
