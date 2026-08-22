@@ -28,6 +28,7 @@ from executors.compact_thresholds import (
     snip_threshold as _snip_threshold_impl,
 )
 from executors.compact_summary import format_compact_summary as _format_compact_summary_impl
+from executors.compact_retry import drop_oldest_rounds as _drop_oldest_rounds_impl
 
 logger = logging.getLogger(__name__)
 
@@ -563,15 +564,7 @@ def _drop_oldest_rounds(messages: list[dict], fraction: float = _PTL_DROP_FRACTI
     Returns a strictly shorter list, or the input unchanged when it can't shrink
     (len <= 1) — the caller treats "no shrink" as the signal to stop retrying.
     """
-    n = len(messages)
-    if n <= 1:
-        return messages
-    head = max(1, int(n * fraction))
-    while head < n and messages[head].get("role") == "tool":
-        head += 1
-    if head >= n:                      # everything left is one tool group → keep last
-        head = n - 1
-    return messages[head:]
+    return _drop_oldest_rounds_impl(messages, fraction)
 
 
 async def _ai_compact(
