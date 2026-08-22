@@ -33,6 +33,12 @@ def test_application_does_not_import_host_or_concrete_infrastructure() -> None:
             ), (path, imported)
 
 
+def test_adapters_do_not_import_application_modules() -> None:
+    for path in (MEMORY_ROOT / "adapters").rglob("*.py"):
+        for imported in _imports(path):
+            assert not imported.startswith("memory.application"), (path, imported)
+
+
 def test_memory_public_package_imports_without_host_bootstrap() -> None:
     import memory
 

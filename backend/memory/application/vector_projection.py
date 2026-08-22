@@ -5,10 +5,8 @@ import hashlib
 import json
 from typing import Any, Mapping
 
+from memory.contracts.projection import BOT_MEMORY_VECTOR_DELETE, BOT_MEMORY_VECTOR_UPSERT
 from memory.ports import ProjectionOutboxPort
-
-BOT_MEMORY_VECTOR_UPSERT = "bot_memory_vector_upsert"
-BOT_MEMORY_VECTOR_DELETE = "bot_memory_vector_delete"
 
 
 async def enqueue_bot_memory_projection(

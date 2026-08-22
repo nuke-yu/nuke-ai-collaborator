@@ -8,12 +8,11 @@ from __future__ import annotations
 import asyncio
 from typing import Mapping, Any
 
-from memory.application.vector_projection import (
+from memory.contracts.projection import (
     BOT_MEMORY_VECTOR_DELETE,
     BOT_MEMORY_VECTOR_UPSERT,
+    EXPERIENCE_VECTOR_UPSERT,
 )
-
-EXPERIENCE_VECTOR_UPSERT = "experience_vector_upsert"
 
 
 class ChromaBotMemoryProjectionDelivery:
