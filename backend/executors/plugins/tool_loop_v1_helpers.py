@@ -1210,6 +1210,7 @@ async def execute_serial_tools(runner, calls, iteration=None) -> None:
 from executors.plugins.tool_loop_presentation import (
     THINKING_I18N, generate_thinking_preview, build_invoked_skills_block,
 )
+from executors.plugins.tool_loop_media import MCPSHOT_RE, check_and_attach_file
 
 
 
@@ -1234,58 +1235,7 @@ async def build_reinject(runner) -> str:
     return "\n\n".join(parts)
 
 
-_MCPSHOT_RE = re.compile(r"__mcpshot__:([A-Za-z0-9._-]+)")
+_MCPSHOT_RE = MCPSHOT_RE
 
 
-def _check_and_attach_file(runner, tool_result: str) -> tuple[str, bool]:
-    """Promote MCP screenshot markers into the owning group's private media dir.
-
-    The collector stages screenshot bytes (group-agnostic) and emits a
-    ``__mcpshot__:<filename>`` marker. Here, in the group-aware worker, we move
-    each staged file into ``group_<gid>/media/screenshots/`` and record the
-    canonical ``/media/...`` ref as the message attachment (it gets presigned on
-    read). The marker is rewritten to a clean note so the model context stays tidy.
-
-    Only this explicit marker is handled — we deliberately do NOT scan arbitrary
-    tool output for filenames (the previous version copied AND deleted any
-    workspace file whose name appeared in any tool result, which was silent data
-    loss and a cross-group leak).
-    """
-    if not isinstance(tool_result, str) or "__mcpshot__:" not in tool_result:
-        return tool_result, False
-
-    import shutil
-    from core import media as _media
-    from workspace import layout
-
-    group_id = runner.ctx.group_id
-    if not group_id:
-        return tool_result, False
-
-    staging = layout.media_staging_dir()
-    dest_dir = layout.group_media_dir(group_id, "screenshots")
-    modified = False
-
-    for filename in _MCPSHOT_RE.findall(tool_result):
-        if not _media.is_safe_filename(filename):
-            continue
-        src = staging / filename
-        ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else "png"
-        mime_type = "image/jpeg" if ext == "jpg" else f"image/{ext}"
-        try:
-            if src.exists() and src.is_file():
-                dest_dir.mkdir(parents=True, exist_ok=True)
-                shutil.move(str(src), str(dest_dir / filename))
-            ref = _media.canonical_ref(group_id, "screenshots", filename)
-            if "attached_file" not in runner.execution_ctx:
-                runner.execution_ctx["attached_file"] = {
-                    "url": ref, "name": filename, "type": mime_type,
-                }
-            modified = True
-        except Exception as e:
-            import logging
-            logging.getLogger(__name__).error(f"Failed to promote MCP screenshot {filename}: {e}")
-
-    # Strip the internal marker from the model-facing text.
-    tool_result = _MCPSHOT_RE.sub("screenshot attached", tool_result)
-    return tool_result, modified
+_check_and_attach_file = check_and_attach_file
