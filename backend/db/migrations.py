@@ -42,6 +42,7 @@ from db.migration_039 import apply as _migration_039_impl
 from db.migration_038 import apply as _migration_038_impl
 from db.migration_037 import apply as _migration_037_impl
 from db.migration_036 import apply as _migration_036_impl
+from db.migration_035 import apply as _migration_035_impl
 
 log = logging.getLogger(__name__)
 
@@ -878,10 +879,7 @@ async def migration_034(db):
 
 
 async def migration_035(db):
-    await _safe_add_column(db, "ALTER TABLE experience_usage ADD COLUMN input_tokens INTEGER NOT NULL DEFAULT 0")
-    await _safe_add_column(db, "ALTER TABLE experience_usage ADD COLUMN output_tokens INTEGER NOT NULL DEFAULT 0")
-    await _safe_add_column(db, "ALTER TABLE experience_usage ADD COLUMN tool_attempts INTEGER NOT NULL DEFAULT 0")
-    await db.commit()
+    await _migration_035_impl(db, _safe_add_column)
 
 
 async def migration_036(db):
