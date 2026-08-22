@@ -8,6 +8,12 @@ from .ports import (
     StoragePort,
     TransactionPort,
 )
+from .composition import (
+    StorageComposition,
+    current_storage_adapter,
+    current_storage_composition,
+    storage_scope,
+)
 
 __all__ = [
     "ConnectionPort",
@@ -16,4 +22,8 @@ __all__ = [
     "MigrationPort",
     "StoragePort",
     "TransactionPort",
+    "StorageComposition",
+    "current_storage_adapter",
+    "current_storage_composition",
+    "storage_scope",
 ]

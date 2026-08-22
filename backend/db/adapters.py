@@ -63,10 +63,18 @@ def select_storage_backend(name: str) -> None:
 
 
 def selected_storage_backend() -> str:
+    from storage.composition import current_storage_composition
+    composition = current_storage_composition()
+    if composition is not None:
+        return composition.backend_name
     return _selected
 
 
 def selected_external_adapter() -> StorageAdapter | None:
+    from storage.composition import current_storage_adapter
+    scoped = current_storage_adapter()
+    if scoped is not None:
+        return scoped
     return _adapters.get(_selected)
 
 
