@@ -10,7 +10,7 @@ from __future__ import annotations
 from contextvars import ContextVar
 from typing import Any, Callable
 
-from memory.ports import MemoryDatabasePort
+from memory.ports import MemoryDatabasePort, PipelineJobRepositoryPort
 
 _database: ContextVar[MemoryDatabasePort | None] = ContextVar(
     "memory_database", default=None
@@ -24,7 +24,7 @@ _composition: ContextVar[Any | None] = ContextVar(
 _services: dict[str, ContextVar[Any]] = {
     name: ContextVar(f"memory_{name}", default=None)
     for name in (
-        "learning", "pipeline", "skill_compiler", "skill_projection",
+        "learning", "pipeline", "pipeline_repository", "skill_compiler", "skill_projection",
         "experience_distiller", "projection_outbox", "projection_reconciler", "member_directory", "secret_provider", "skill_workspace", "fact_engine", "settings", "model",
         "temporal_graph",
         "memory_functions",
@@ -156,6 +156,22 @@ def require_pipeline() -> Any:
     return require_service("pipeline", lambda: _legacy_factory("build_pipeline_dispatcher"))
 
 
+def require_pipeline_repository(
+    database: MemoryDatabasePort | None = None,
+) -> PipelineJobRepositoryPort:
+    configured = _services["pipeline_repository"].get()
+    if configured is None and database is not None:
+        from memory.application.pipeline import CanonicalPipelineJobRepository
+        repository = CanonicalPipelineJobRepository(database)
+    else:
+        repository = require_service(
+            "pipeline_repository", _legacy_default_pipeline_repository
+        )
+    if not isinstance(repository, PipelineJobRepositoryPort):
+        raise TypeError("configured pipeline_repository does not implement PipelineJobRepositoryPort")
+    return repository
+
+
 def require_skill_compiler() -> Any:
     return require_service("skill_compiler", lambda: _legacy_factory("build_skill_compiler"))
 
@@ -214,6 +230,11 @@ def _legacy_factory(name: str) -> Any:
 def _legacy_default_member_directory() -> Any:
     from memory.legacy_fallback import default_member_directory
     return default_member_directory()
+
+
+def _legacy_default_pipeline_repository() -> PipelineJobRepositoryPort:
+    from memory.application.pipeline import CanonicalPipelineJobRepository
+    return CanonicalPipelineJobRepository()
 
 
 def _legacy_default_secret_provider() -> Any:

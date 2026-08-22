@@ -6,8 +6,7 @@ import json
 import time
 from typing import Any
 
-from memory.application.pipeline import CanonicalPipelineJobRepository
-from memory.application.context import require_database
+from memory.application.context import require_database, require_pipeline_repository
 from memory.domain import MemoryScope
 from memory.domain.safety import safe_memory_mapping, safe_memory_text
 from memory.ports import MemoryDatabasePort, PipelineJobRepositoryPort
@@ -20,7 +19,7 @@ class CanonicalSkillCompiler:
         job_repository: PipelineJobRepositoryPort | None = None,
     ) -> None:
         self._database = database or require_database()
-        self._jobs = job_repository or CanonicalPipelineJobRepository(self._database)
+        self._jobs = job_repository or require_pipeline_repository(self._database)
 
     async def compile(self, group_id: int, record_id: str, input_version: str = "1") -> dict[str, Any]:
         async with await self._database.connect("memory_records", group_id, write=False) as db:

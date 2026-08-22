@@ -14,7 +14,6 @@ from dataclasses import asdict
 from typing import Any
 
 from memory.application.jobs import pipeline_job_identity
-from memory.application.pipeline import CanonicalPipelineJobRepository
 from memory.application.references import experience_ref, skill_ref
 from memory.contracts import (
     ApproveSkillCandidate, AssembleCase, CompleteExperienceUsage,
@@ -29,6 +28,7 @@ from memory.domain import (
     require_verification_evidence,
 )
 from memory.domain.safety import safe_memory_mapping, safe_memory_text
+from memory.application.context import require_pipeline_repository
 from memory.ports import LearningPort, MemoryDatabasePort, PipelineJobRepositoryPort
 
 
@@ -39,7 +39,7 @@ class CanonicalLearningService(LearningPort):
         job_repository: PipelineJobRepositoryPort | None = None,
     ) -> None:
         self._database = database
-        self._job_repository = job_repository or CanonicalPipelineJobRepository(self._database)
+        self._job_repository = job_repository or require_pipeline_repository(self._database)
 
     @property
     def job_repository(self) -> PipelineJobRepositoryPort:

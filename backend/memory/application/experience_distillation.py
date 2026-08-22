@@ -8,8 +8,7 @@ import time
 import logging
 from typing import Any
 
-from memory.application.pipeline import CanonicalPipelineJobRepository
-from memory.application.context import require_database
+from memory.application.context import require_database, require_pipeline_repository
 from memory.domain import MemoryScope
 from memory.domain.safety import safe_memory_mapping, safe_memory_text
 from memory.ports import MemoryDatabasePort, PipelineJobRepositoryPort, ProjectionOutboxPort
@@ -25,7 +24,7 @@ class CanonicalExperienceDistiller:
         job_repository: PipelineJobRepositoryPort | None = None,
     ) -> None:
         self._database = database or require_database()
-        self._jobs = job_repository or CanonicalPipelineJobRepository(self._database)
+        self._jobs = job_repository or require_pipeline_repository(self._database)
         self._projection_outbox = projection_outbox
 
     async def distill(self, group_id: int, case_id: str, input_version: str = "1") -> dict[str, Any]:

@@ -298,6 +298,7 @@ def install_memory_composition(composition: MemoryComposition) -> MemoryComposit
         ),
         "projection_outbox": composition.projection_outbox,
         "projection_reconciler": composition.module.reconciler,
+        "pipeline_repository": job_repository,
         "memory_functions": composition.memory_functions,
         **{name: dependency for name, (dependency, _) in dependencies.items()},
     }

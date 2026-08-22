@@ -19,7 +19,7 @@ from memory.application.jobs import pipeline_job_identity
 from memory.contracts import LostLeaseError, MemoryOperationError
 from memory.domain import MemoryScope, ScopeKind
 from memory.domain.safety import safe_memory_mapping, safe_memory_text
-from memory.application.context import require_database
+from memory.application.context import require_database, require_pipeline_repository
 from memory.ports import MemoryDatabasePort, PipelineJobRepositoryPort
 
 log = logging.getLogger(__name__)
@@ -276,7 +276,7 @@ class CanonicalPipelineDispatcher:
         self, repository: PipelineJobRepositoryPort | None = None,
         handlers: Mapping[str, PipelineHandler] = (),
     ) -> None:
-        self.repository = repository or CanonicalPipelineJobRepository()
+        self.repository = repository or require_pipeline_repository()
         self.handlers = dict(handlers)
 
     async def dispatch_group(
