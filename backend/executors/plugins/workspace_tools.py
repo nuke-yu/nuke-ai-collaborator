@@ -28,6 +28,7 @@ from executors.plugins import win_sandbox
 from executors.plugins.shell_backend import (
     ShellExecRequest, ShellExecResult, ShellBackgroundHandle, ShellExecBackend,
 )
+from executors.plugins.workspace_tool_policy import is_sensitive_path
 
 # ---------------------------------------------------------------------------
 # Platform detection
@@ -390,82 +391,7 @@ def _build_skills_xml(skills: list[dict], model_name: str) -> tuple[str, set[str
 # ---------------------------------------------------------------------------
 
 # Sensitive path prefixes — expanded at runtime with Path.expanduser()
-_SENSITIVE_PATH_PREFIXES = [
-    "~/.ssh",
-    "~/.aws",
-    "~/.gnupg",
-    "~/.config/gcloud",
-    "~/.kube",
-    "~/.docker",          # config.json holds registry auth tokens
-    "~/.config/gh",       # GitHub CLI oauth tokens
-    "~/.config/git",      # git credential store / config
-    "~/.password-store",  # pass(1) GPG-encrypted secrets
-]
-
-# Sensitive filename patterns (fnmatch style)
-_SENSITIVE_FILENAME_PATTERNS = [
-    ".env",
-    ".env.*",
-    "*.pem",
-    "*.key",
-    "id_rsa",
-    "id_rsa.*",
-    "id_ed25519",
-    "id_ed25519.*",
-    "credentials",
-    ".netrc",
-    "*.pfx",
-    "*.p12",
-    ".git-credentials",   # plaintext git http creds
-    ".npmrc",             # npm auth token
-    ".pypirc",            # PyPI upload token
-    ".dockercfg",         # legacy docker registry auth
-    "*.keystore",
-    "*.jks",
-    ".htpasswd",
-    "cookies.sqlite",     # Firefox cookie store
-]
-
-# Filenames explicitly allowed despite matching a broad pattern above
-_SENSITIVE_FILENAME_ALLOWLIST = {
-    ".env.example",
-    ".env.sample",
-    ".env.template",
-}
-
-
-def _is_sensitive_path(path: str) -> bool:
-    """Return True if path points to a sensitive location that must not be read or written."""
-    try:
-        p = Path(path).expanduser().resolve()
-    except (OSError, RuntimeError):
-        p = Path(path).expanduser()
-    p_str = str(p)
-    filename = p.name
-
-    # Allowlist check first
-    if filename.lower() in _SENSITIVE_FILENAME_ALLOWLIST:
-        return False
-
-    # Directory prefix check (primarily for home-dir expanded paths)
-    for prefix in _SENSITIVE_PATH_PREFIXES:
-        expanded = str(Path(prefix).expanduser())
-        if p_str == expanded or p_str.startswith(expanded + os.sep):
-            return True
-
-    # Point 6: Defensive Depth (DFT-023)
-    # Block sensitive directories regardless of where they appear in the path
-    sensitive_dirs = {".ssh", ".aws", ".docker", ".gnupg", ".kube", ".password-store"}
-    if any(d in p.parts for d in sensitive_dirs):
-        return True
-
-    # Filename pattern check (case-insensitive for macOS APFS)
-    filename_lower = filename.lower()
-    for pattern in _SENSITIVE_FILENAME_PATTERNS:
-        if fnmatch.fnmatch(filename_lower, pattern):
-            return True
-
-    return False
+_is_sensitive_path = is_sensitive_path
 
 
 # ---------------------------------------------------------------------------
