@@ -37,6 +37,7 @@ from db.migration_044 import apply as _migration_044_impl
 from db.migration_043 import apply as _migration_043_impl
 from db.migration_042 import apply as _migration_042_impl
 from db.migration_041 import apply as _migration_041_impl
+from db.migration_040 import apply as _migration_040_impl
 
 log = logging.getLogger(__name__)
 
@@ -937,8 +938,7 @@ async def migration_039(db):
 
 
 async def migration_040(db):
-    await _safe_add_column(db, "ALTER TABLE pipeline_jobs ADD COLUMN lease_token TEXT DEFAULT NULL")
-    await db.commit()
+    await _migration_040_impl(db, _safe_add_column)
 
 
 async def migration_041(db):
