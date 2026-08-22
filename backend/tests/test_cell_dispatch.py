@@ -159,6 +159,16 @@ class TestCellDispatch(unittest.IsolatedAsyncioTestCase):
         replies = await self._bot_replies()
         self.assertTrue(replies, "wake trigger did not execute the target bot")
         self.assertIn("wake reply", replies[-1])
+        async with db.connect(self.group) as c:
+            cur = await c.execute(
+                "SELECT content, member_id, sender_type, meta FROM messages "
+                "WHERE member_id=0 ORDER BY id DESC LIMIT 1"
+            )
+            wake = await cur.fetchone()
+        self.assertIsNotNone(wake, "wake message was not persisted to the group")
+        self.assertEqual(wake[0], "scheduled standup")
+        self.assertEqual(wake[2], "system")
+        self.assertIn("wake_trigger", wake[3])
 
 
 class TestEntryFactory(unittest.TestCase):

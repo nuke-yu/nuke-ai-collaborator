@@ -293,9 +293,28 @@ async def dispatch_wake_trigger(msg: dict) -> None:
     if not bot:
         return
 
-    # ── group domain (load recent) ──
-    async with db.connect() as gdb:
+    if not content.strip():
+        return
+
+    # ── group domain: persist the system wake message before dispatch ──
+    # Cron/alert messages are real group events.  Keep a denormalized sender
+    # snapshot because the group DB deliberately has no cross-domain member FK.
+    async with db.write_connect() as gdb:
+        msg_id = await db.save_message(
+            gdb,
+            gid,
+            _SYSTEM_SENDER["id"],
+            content,
+            meta={"source": "wake_trigger", "target_bot_id": int(bot_id)},
+            sender_snapshot=_SYSTEM_SENDER,
+        )
         recent = await db.get_messages(gdb, gid)
+
+    saved = next((m for m in recent if m["id"] == msg_id), None)
+    if saved:
+        await bus.publish(Message(group_id=gid, **{
+            k: v for k, v in saved.items() if k in _MESSAGE_FIELDS and k != "group_id"
+        }))
 
     import core.workflow as wf
     from core import bg
