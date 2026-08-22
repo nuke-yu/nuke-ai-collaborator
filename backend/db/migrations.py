@@ -31,6 +31,7 @@ from db.migration_050 import apply as _migration_050_impl
 from db.migration_049 import apply as _migration_049_impl
 from db.migration_048 import apply as _migration_048_impl
 from db.migration_047 import apply as _migration_047_impl
+from db.migration_046 import apply as _migration_046_impl
 
 log = logging.getLogger(__name__)
 
@@ -1032,15 +1033,7 @@ async def migration_045(db):
 
 async def migration_046(db):
     """Persist deterministic Case verdicts and correction evidence."""
-    for column in (
-        "outcome_status TEXT NOT NULL DEFAULT 'unverified_completion'",
-        "verification_adapter TEXT NOT NULL DEFAULT ''",
-        "correction_evidence_json TEXT NOT NULL DEFAULT '{}'",
-    ):
-        await _safe_add_column(
-            db, f"ALTER TABLE agent_cases ADD COLUMN {column}"
-        )
-    await db.commit()
+    await _migration_046_impl(db, _safe_add_column)
 
 
 async def migration_047(db):
