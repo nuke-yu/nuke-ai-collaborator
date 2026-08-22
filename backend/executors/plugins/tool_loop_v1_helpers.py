@@ -34,6 +34,7 @@ from executors.plugins.workspace_tools import _IS_WINDOWS
 from executors.plugins.tool_loop_context import drop_oldest_message_group
 from executors.plugins.tool_loop_budget import apply_memory_context_budget, enforce_final_context_budget
 from executors.plugins.tool_loop_retry import inject_failure_insight, maybe_autogen_retry
+from executors.plugins.tool_loop_provenance import tool_evidence_links, context_evidence_links
 from executors.tool_dispatch import execute_tool_call as _execute_tool_call
 
 logger = logging.getLogger(__name__)
@@ -79,23 +80,7 @@ _drop_oldest_message_group = drop_oldest_message_group
 _enforce_final_context_budget = enforce_final_context_budget
 
 
-def _tool_evidence_links(memory_refs: list[str], dispatch_context: dict) -> list[dict]:
-    """Build explicit causal links after arguments have passed provenance validation."""
-    from sessions.evidence import evidence_kind
-
-    links = [
-        {
-            "kind": evidence_kind(ref),
-            "ref": ref,
-            "relation": "cited",
-            "metadata": {"source": "validated_tool_argument"},
-        }
-        for ref in memory_refs
-    ]
-    skill_link = dispatch_context.get("skill_evidence_link")
-    if isinstance(skill_link, dict):
-        links.append(skill_link)
-    return links
+_tool_evidence_links = tool_evidence_links
 
 
 _inject_failure_insight = inject_failure_insight
@@ -104,25 +89,7 @@ _inject_failure_insight = inject_failure_insight
 _maybe_autogen_retry = maybe_autogen_retry
 
 
-def _context_evidence_links(memory_refs, always_skills: list[dict]) -> list[dict]:
-    """Describe availability separately from later causal citation/adoption."""
-    from sessions.evidence import evidence_kind
-
-    links = [
-        {
-            "kind": evidence_kind(ref),
-            "ref": ref,
-            "relation": "injected",
-            "metadata": {"source": "learned_context_recall"},
-        }
-        for ref in memory_refs
-    ]
-    links.extend(
-        skill["evidence_link"]
-        for skill in always_skills
-        if isinstance(skill.get("evidence_link"), dict)
-    )
-    return links
+_context_evidence_links = context_evidence_links
 
 
 def _acc_usage(target: list, result: dict) -> None:
