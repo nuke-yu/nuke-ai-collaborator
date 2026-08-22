@@ -351,7 +351,8 @@ class TestSchedulerRunner(unittest.IsolatedAsyncioTestCase):
         mock_dispatch.assert_awaited_once()
         call_args = mock_dispatch.call_args
         self.assertEqual(call_args.args[0], _GROUP_ID)
-        self.assertEqual(call_args.args[2], "hello scheduler")
+        self.assertEqual(len(call_args.args), 1)
+        self.assertEqual(call_args.kwargs, {})
 
     async def test_fire_job_skips_unknown_bot(self):
         from scheduler.runner import fire_job

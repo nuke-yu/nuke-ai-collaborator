@@ -37,10 +37,12 @@ async def fire_job(bot_id: int, group_id: int, message: str, job_id: int | None 
         return
 
     try:
-        await wf.advance(
-            group_id, [bot], message, _SYSTEM_SENDER,
-            recent, all_bots, all_members,
-        )
+        # ``workflow.advance`` is the scheduler-facing orchestration command.
+        # It owns loading the recent group state and currently accepts only
+        # the group identity.  Do not pass the scheduler's validation snapshot
+        # into this API: doing so silently broke every Cron invocation when the
+        # workflow facade was reduced to its canonical contract.
+        await wf.advance(group_id)
         log.info("scheduler: fired job bot_id=%d group_id=%d msg=%r", bot_id, group_id, message[:60])
     except Exception as exc:
         log.error("scheduler: dispatch failed bot_id=%d group_id=%d: %s", bot_id, group_id, exc)
