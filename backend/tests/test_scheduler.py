@@ -322,7 +322,15 @@ class TestSchedulerEngine(unittest.IsolatedAsyncioTestCase):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestSchedulerRunner(unittest.IsolatedAsyncioTestCase):
-    """runner.py uses lazy imports inside fire_job, so patches target the source modules."""
+    """Cron must emit a Supervisor-routed wake frame, not mutate workflow state."""
+
+    async def asyncSetUp(self):
+        from scheduler.runner import configure_wake_dispatch
+        configure_wake_dispatch(None)
+
+    async def asyncTearDown(self):
+        from scheduler.runner import configure_wake_dispatch
+        configure_wake_dispatch(None)
 
     def _make_async_cm(self):
         """Async context manager mock that yields itself."""
@@ -331,8 +339,9 @@ class TestSchedulerRunner(unittest.IsolatedAsyncioTestCase):
         mock_conn.__aexit__ = AsyncMock(return_value=False)
         return mock_conn
 
-    async def test_fire_job_calls_dispatch_bots(self):
+    async def test_fire_job_routes_message_to_target_bot(self):
         from scheduler.runner import fire_job
+        from scheduler.runner import configure_wake_dispatch
         fake_members = [
             {"id": _BOT_ID, "type": "bot", "name": "Bot",
              "system_prompt": "", "role": "", "avatar_color": "#fff",
@@ -342,34 +351,37 @@ class TestSchedulerRunner(unittest.IsolatedAsyncioTestCase):
              "personality_prompt": None, "context_cleared_at": None,
              "auto_reply": None, "group_id": _GROUP_ID},
         ]
+        send_wake = AsyncMock()
+        configure_wake_dispatch(send_wake)
         with patch("db.get_db", return_value=self._make_async_cm()), \
              patch("db.get_members", new_callable=AsyncMock, return_value=fake_members), \
-             patch("db.get_messages", new_callable=AsyncMock, return_value=[]), \
-             patch("core.workflow.advance", new_callable=AsyncMock) as mock_dispatch:
+             patch("db.get_messages", new_callable=AsyncMock, return_value=[]):
             await fire_job(_BOT_ID, _GROUP_ID, "hello scheduler")
 
-        mock_dispatch.assert_awaited_once()
-        call_args = mock_dispatch.call_args
-        self.assertEqual(call_args.args[0], _GROUP_ID)
-        self.assertEqual(len(call_args.args), 1)
-        self.assertEqual(call_args.kwargs, {})
+        send_wake.assert_awaited_once()
+        routed_group, frame = send_wake.await_args.args
+        self.assertEqual(routed_group, _GROUP_ID)
+        self.assertEqual(frame["type"], "wake_trigger")
+        self.assertEqual(frame["group_id"], _GROUP_ID)
+        self.assertEqual(frame["bot_id"], _BOT_ID)
+        self.assertEqual(frame["content"], "hello scheduler")
 
     async def test_fire_job_skips_unknown_bot(self):
         from scheduler.runner import fire_job
         with patch("db.get_db", return_value=self._make_async_cm()), \
              patch("db.get_members", new_callable=AsyncMock, return_value=[]), \
-             patch("db.get_messages", new_callable=AsyncMock, return_value=[]), \
-             patch("core.workflow.advance", new_callable=AsyncMock) as mock_dispatch:
+             patch("db.get_messages", new_callable=AsyncMock, return_value=[]):
             await fire_job(999, _GROUP_ID, "ping")
 
-        mock_dispatch.assert_not_awaited()
+        from scheduler.runner import _wake_dispatch
+        self.assertIsNone(_wake_dispatch)
 
     async def test_fire_job_handles_db_error_gracefully(self):
         from scheduler.runner import fire_job
-        with patch("db.get_db", side_effect=Exception("DB down")), \
-             patch("core.workflow.advance", new_callable=AsyncMock) as mock_dispatch:
+        with patch("db.get_db", side_effect=Exception("DB down")):
             await fire_job(_BOT_ID, _GROUP_ID, "fail gracefully")  # must not raise
-        mock_dispatch.assert_not_awaited()
+        from scheduler.runner import _wake_dispatch
+        self.assertIsNone(_wake_dispatch)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

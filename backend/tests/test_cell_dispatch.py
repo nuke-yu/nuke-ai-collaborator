@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import db
 import db.writer as _writer
-from runtime.dispatch import dispatch_user_message
+from runtime.dispatch import dispatch_user_message, dispatch_wake_trigger
 
 BOT_ID, HUMAN_ID, GID = 1, 2, 1
 
@@ -125,6 +125,41 @@ class TestCellDispatch(unittest.IsolatedAsyncioTestCase):
             cur = await c.execute("SELECT name FROM sqlite_master WHERE name='members'")
             self.assertIsNone(await cur.fetchone())
 
+    async def test_wake_trigger_routes_message_to_configured_bot(self):
+        """Cron/alert wake frames must execute the selected bot in the Worker."""
+        async def mock_stream(*a, **k):
+            yield "wake reply"
+            if isinstance(k.get("usage_out"), list):
+                k["usage_out"].append({"input_tokens": 1, "output_tokens": 1})
+
+        m = "executors.plugins.tool_loop_v1."
+        with patch("core.orchestration.ai_service.call_ai_once", new=AsyncMock(return_value={
+            "type": "text", "content": "wake reply", "usage": {}})), \
+             patch("core.orchestration.ai_service.call_ai_stream_messages", side_effect=mock_stream), \
+             patch(m + "list_skills_all", new=AsyncMock(return_value=[])), \
+             patch(m + "load_always_skills", new=AsyncMock(return_value=[])), \
+             patch(m + "load_context_files", new=AsyncMock(return_value=[])), \
+             patch(m + "format_context_blocks", return_value=""), \
+             patch(m + "filter_skills_by_context", side_effect=lambda s, _: s), \
+             patch(m + "append_log", new=AsyncMock()), \
+             patch(m + "archive_run", new=AsyncMock()), \
+             patch("executors.compact.maybe_compact_db_history", new=AsyncMock()):
+            with db.bind_db(self.group):
+                await dispatch_wake_trigger({
+                    "type": "wake_trigger",
+                    "group_id": GID,
+                    "bot_id": BOT_ID,
+                    "content": "scheduled standup",
+                })
+                for _ in range(250):
+                    if await self._bot_replies():
+                        break
+                    await asyncio.sleep(0.02)
+
+        replies = await self._bot_replies()
+        self.assertTrue(replies, "wake trigger did not execute the target bot")
+        self.assertIn("wake reply", replies[-1])
+
 
 class TestEntryFactory(unittest.TestCase):
     def test_build_worker_wires_real_dispatch(self):
@@ -155,6 +190,9 @@ class TestEntrySupervisorLifecycle(unittest.IsolatedAsyncioTestCase):
             async def stop(self):
                 self.stopped = True
 
+            async def send_to_worker(self, group_id, frame):
+                return None
+
         fake = _FakeSupervisor()
 
         with patch.object(entry, "build_supervisor", return_value=fake):
@@ -178,6 +216,9 @@ class TestEntrySupervisorLifecycle(unittest.IsolatedAsyncioTestCase):
 
             async def stop(self):
                 events.append("sup.stop")
+
+            async def send_to_worker(self, group_id, frame):
+                return None
 
         fake = _FakeSupervisor()
 

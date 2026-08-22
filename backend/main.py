@@ -214,6 +214,7 @@ async def lifespan(app: FastAPI):
     sup_mod.supervisor = sup
     
     # 5. Start Global Scheduler
+    scheduler.configure_wake_dispatch(sup.send_to_worker)
     await scheduler.start()
 
     # 6. Load plugins (auto-discovery from NUKE_PLUGINS_DIR or plugins/ directory)

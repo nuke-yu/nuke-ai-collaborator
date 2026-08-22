@@ -303,7 +303,13 @@ async def dispatch_wake_trigger(msg: dict) -> None:
     # Unified Orchestration Call
     orch = wf._orch_for(gid)
     # Wrap system message in a dict for dispatch compatibility
-    msg_dict = {"group_id": gid, "content": content, "member_id": 0, "sender_type": "system"}
+    msg_dict = {
+        "group_id": gid,
+        "content": content,
+        "member_id": 0,
+        "sender_type": "system",
+        "target_bot_id": int(bot_id),
+    }
     step = await orch.dispatch(gid, msg_dict, all_members, recent)
     
     if step.next_units:

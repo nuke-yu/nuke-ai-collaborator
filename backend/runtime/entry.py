@@ -95,6 +95,7 @@ async def run_supervisor(addr: str, num_workers: int = 8) -> None:
     sup = build_supervisor(addr, num_workers=num_workers)
     await sup.start()
     try:
+        scheduler.configure_wake_dispatch(sup.send_to_worker)
         await scheduler.start()
         try:
             # TODO(CELL-13/WS shell): wire the FastAPI/WebSocket termination shell

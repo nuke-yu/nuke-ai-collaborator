@@ -8,7 +8,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from scheduler.store import list_jobs
-from scheduler.runner import fire_job
+from scheduler.runner import configure_wake_dispatch, fire_job
 
 log = logging.getLogger(__name__)
 
@@ -61,6 +61,7 @@ def stop() -> None:
     if _scheduler and _scheduler.running:
         _scheduler.shutdown(wait=False)
     _scheduler = None
+    configure_wake_dispatch(None)
     log.info("scheduler stopped")
 
 
