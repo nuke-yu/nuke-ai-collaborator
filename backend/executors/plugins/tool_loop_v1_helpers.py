@@ -36,6 +36,7 @@ from executors.plugins.tool_loop_budget import apply_memory_context_budget, enfo
 from executors.plugins.tool_loop_retry import inject_failure_insight, maybe_autogen_retry
 from executors.plugins.tool_loop_provenance import tool_evidence_links, context_evidence_links
 from executors.plugins.tool_loop_prompt import UNTRUSTED_LEARNING_POLICY, attach_untrusted_learning_data
+from executors.plugins.tool_loop_usage import accumulate_usage
 from executors.tool_dispatch import execute_tool_call as _execute_tool_call
 
 logger = logging.getLogger(__name__)
@@ -73,17 +74,7 @@ _maybe_autogen_retry = maybe_autogen_retry
 _context_evidence_links = context_evidence_links
 
 
-def _acc_usage(target: list, result: dict) -> None:
-    """Append usage from a call_ai_once result into a shared accumulator list."""
-    u = result.get("usage") or {}
-    if not u:
-        return
-    target.append({
-        "input_tokens": u.get("input_tokens", 0),
-        "output_tokens": u.get("output_tokens", 0),
-        "cache_read_tokens": u.get("cache_read_tokens", 0),
-        "cache_creation_tokens": u.get("cache_creation_tokens", 0),
-    })
+_acc_usage = accumulate_usage
 
 
 async def _tool_loop_core(
