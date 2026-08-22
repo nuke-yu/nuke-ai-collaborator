@@ -52,17 +52,14 @@ def _bot_scope(group_id: int, bot_id: int, run_id: str | None = None) -> MemoryS
 
 
 async def compile_candidate(record_id: str, group_id: int) -> str | None:
-    from memory.application.context import require_skill_compiler, require_database
+    from memory.application.context import require_skill_compiler, require_learning
     result = await require_skill_compiler().compile(group_id, record_id)
     if result.get("skill_id"):
-        database = require_database()
-        async with await database.connect("pipeline_jobs", group_id, write=True) as db:
-            await db.execute(
-                """UPDATE pipeline_jobs SET status='completed',output_json=?,completed_at=updated_at
-                   WHERE group_id=? AND job_type='compile_skill_candidate' AND input_id=? AND status='pending'""",
-                ('{"source":"canonical_skill_compilation"}', group_id, record_id),
-            )
-            await db.commit()
+        await require_learning().job_repository.complete_pending_by_input(
+            MemoryScope.group(group_id=group_id, actor_id="service:skill_compiler"),
+            "compile_skill_candidate", record_id,
+            '{"source":"canonical_skill_compilation"}',
+        )
     return result.get("skill_id")
 
 

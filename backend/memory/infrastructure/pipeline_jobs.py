@@ -38,6 +38,36 @@ class CanonicalPipelineJobRepository:
             await db.commit()
         return job_id
 
+    async def reset_completed(self, scope: MemoryScope, job_id: str) -> bool:
+        group_id = _group_id(scope)
+        now = _now_ms()
+        async with await self._database.connect("pipeline_jobs", group_id, write=True) as db:
+            cur = await db.execute(
+                """UPDATE pipeline_jobs SET status='pending',attempt=0,
+                   lease_until=NULL,lease_token=NULL,error='',output_json='{}',
+                   completed_at=NULL,updated_at=?
+                   WHERE group_id=? AND job_id=? AND status='completed'""",
+                (now, group_id, job_id),
+            )
+            await db.commit()
+        return cur.rowcount == 1
+
+    async def complete_pending_by_input(
+        self, scope: MemoryScope, job_type: str, input_id: str,
+        output_json: str = "{}",
+    ) -> int:
+        group_id = _group_id(scope)
+        now = _now_ms()
+        async with await self._database.connect("pipeline_jobs", group_id, write=True) as db:
+            cur = await db.execute(
+                """UPDATE pipeline_jobs SET status='completed',output_json=?,completed_at=?,updated_at=?
+                   WHERE group_id=? AND job_type=? AND input_id=? AND status='pending'""",
+                (safe_memory_text(output_json, limit=100_000), now, now,
+                 group_id, job_type, input_id),
+            )
+            await db.commit()
+        return int(cur.rowcount or 0)
+
     async def list_ready(
         self, scope: MemoryScope, limit: int = 10
     ) -> list[dict[str, Any]]:

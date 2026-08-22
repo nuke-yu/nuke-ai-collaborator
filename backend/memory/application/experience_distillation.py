@@ -199,15 +199,9 @@ class CanonicalExperienceDistiller:
             "compile_skill_candidate", record_id, input_version,
         )
         if len(source_ids) >= 2:
-            async with await self._database.connect("pipeline_jobs", group_id, write=True) as db:
-                await db.execute(
-                    """UPDATE pipeline_jobs
-                       SET status='pending',attempt=0,lease_until=NULL,
-                           lease_token=NULL,error='',output_json='{}',
-                           completed_at=NULL,updated_at=?
-                       WHERE job_id=? AND status='completed'""",
-                    (now, skill_job),
-                )
-                await db.commit()
+            await self._jobs.reset_completed(
+                MemoryScope.group(group_id=group_id, actor_id="service:experience_distiller"),
+                skill_job,
+            )
         return {"case_id": case_id, "record_id": record_id, "distilled": True,
                 "skill_job_id": skill_job, "promotion_required": False}
