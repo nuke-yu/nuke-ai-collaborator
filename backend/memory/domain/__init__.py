@@ -24,6 +24,7 @@ from .ownership import (
 )
 from .relations import MemoryRelationType
 from .scope import MemoryScope, Principal, ScopeKind
+from .pipeline import pipeline_job_identity
 from .task_identity import TaskIdentity, identify_task
 from .usage import (
     UsageKind,
@@ -63,6 +64,7 @@ __all__ = [
     "can_transition_usage",
     "admit_group_fact",
     "identify_task",
+    "pipeline_job_identity",
     "require_adoption_evidence",
     "require_execution_evidence",
     "require_usage_transition",

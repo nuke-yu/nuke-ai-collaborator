@@ -8,6 +8,7 @@ service constructors remain preferred for embedding.
 from __future__ import annotations
 
 from contextvars import ContextVar
+import importlib
 from typing import Any, Callable
 
 from memory.ports import MemoryDatabasePort, PipelineJobRepositoryPort
@@ -233,8 +234,8 @@ def _legacy_default_member_directory() -> Any:
 
 
 def _legacy_default_pipeline_repository() -> PipelineJobRepositoryPort:
-    from memory.application.pipeline import CanonicalPipelineJobRepository
-    return CanonicalPipelineJobRepository()
+    module = importlib.import_module("memory.infrastructure.pipeline_jobs")
+    return module.CanonicalPipelineJobRepository(require_database())
 
 
 def _legacy_default_secret_provider() -> Any:

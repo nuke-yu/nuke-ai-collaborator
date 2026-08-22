@@ -8,19 +8,17 @@ import uuid
 from collections.abc import Mapping
 from typing import Any
 
-from memory.application.jobs import pipeline_job_identity
-from memory.contracts import LostLeaseError, MemoryOperationError
-from memory.domain import MemoryScope, ScopeKind
+from memory.contracts import MemoryOperationError
+from memory.domain import MemoryScope, ScopeKind, pipeline_job_identity
 from memory.domain.safety import safe_memory_mapping, safe_memory_text
-from memory.application.context import require_database
 from memory.ports import MemoryDatabasePort, PipelineJobRepositoryPort
 
 
 class CanonicalPipelineJobRepository:
     """Durable group-scoped repository for background Memory jobs."""
 
-    def __init__(self, database: MemoryDatabasePort | None = None) -> None:
-        self._database = database or require_database()
+    def __init__(self, database: MemoryDatabasePort) -> None:
+        self._database = database
 
     async def enqueue(
         self, scope: MemoryScope, job_type: str, input_id: str,
