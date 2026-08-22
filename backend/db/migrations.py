@@ -26,6 +26,7 @@ from db.migration_055 import apply as _migration_055_impl
 from db.migration_054 import apply as _migration_054_impl
 from db.migration_053 import apply as _migration_053_impl
 from db.migration_052 import apply as _migration_052_impl
+from db.migration_051 import apply as _migration_051_impl
 
 log = logging.getLogger(__name__)
 
@@ -1140,24 +1141,7 @@ async def migration_050(db):
 
 async def migration_051(db):
     """Persist the per-group canonical-memory projection rollout gate."""
-    cur = await db.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='memory_records'"
-    )
-    if await cur.fetchone() is None:
-        return
-    await db.execute("""CREATE TABLE IF NOT EXISTS memory_projection_rollout (
-        group_id INTEGER PRIMARY KEY,
-        consecutive_passes INTEGER NOT NULL DEFAULT 0,
-        required_passes INTEGER NOT NULL DEFAULT 3,
-        direct_write_enabled INTEGER NOT NULL DEFAULT 1
-            CHECK(direct_write_enabled IN (0,1)),
-        last_audit_passed INTEGER NOT NULL DEFAULT 0
-            CHECK(last_audit_passed IN (0,1)),
-        last_audited_at INTEGER NOT NULL DEFAULT 0,
-        last_failure_reason TEXT NOT NULL DEFAULT '',
-        updated_at INTEGER NOT NULL DEFAULT 0
-    )""")
-    await db.commit()
+    await _migration_051_impl(db)
 
 
 async def migration_052(db):
