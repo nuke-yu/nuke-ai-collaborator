@@ -11,9 +11,9 @@ Adding a new migration:
 """
 
 import logging
-import sqlite3
 import time
 from db.migration_runner import run_migrations as _run_migrations_impl
+from db.migration_helpers import safe_add_column as _safe_add_column_impl
 
 log = logging.getLogger(__name__)
 
@@ -22,28 +22,7 @@ async def _safe_add_column(db, sql: str) -> None:
     """Run an idempotent ADD COLUMN, swallowing ONLY the benign 'duplicate
     column' case, and skipping if the table does not exist (split/legacy DBs).
     """
-    try:
-        parts = sql.split()
-        if len(parts) >= 3 and parts[0].upper() == "ALTER" and parts[1].upper() == "TABLE":
-            table_name = parts[2].strip("`\"[]")
-            from db.schema_split import CENTRAL_TABLES, GROUP_TABLES
-            
-            # Check if the table is a known split table and exists in this database
-            if table_name in CENTRAL_TABLES or table_name in GROUP_TABLES:
-                cur = await db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table_name,))
-                if (await cur.fetchone()) is None:
-                    log.debug("Skipping column migration for non-existent split table %s: %s", table_name, sql)
-                    return
-    except Exception as e:
-        log.warning("failed to check table existence for %s: %s", sql, e)
-
-    try:
-        await db.execute(sql)
-    except sqlite3.OperationalError as e:
-        if "duplicate column" in str(e).lower():
-            log.debug("column already present, skipping: %s", sql)
-            return
-        raise
+    await _safe_add_column_impl(db, sql)
 
 
 # ---------------------------------------------------------------------------
