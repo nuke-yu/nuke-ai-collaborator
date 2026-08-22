@@ -19,6 +19,13 @@ storage/
 connections through the active `StorageComposition` and delegates the default
 SQLite implementation to `storage.adapters.sqlite`.
 
+Memory uses the same boundary at its infrastructure edge. `SQLiteMemoryDatabase`
+accepts an explicit `StoragePort`, otherwise resolving the adapter from the
+current storage scope. Pipeline learning services receive one shared
+`PipelineJobRepositoryPort` from the composition root; they do not construct a
+second repository per use case. Legacy constructors retain a compatibility
+fallback for existing embedded callers.
+
 ## Required adapter capabilities
 
 Every replaceable adapter must provide:
@@ -39,3 +46,12 @@ This is now a complete capability contract, not yet a PostgreSQL implementation.
 The query and migration layers still contain SQLite-specific SQL. A future
 PostgreSQL adapter must provide its own dialect-aware repositories/migrations;
 it must not be registered as a compatibility wrapper around SQLite.
+
+## Remaining extraction work
+
+The canonical pipeline repository implementation is still located in the
+legacy application module for compatibility with existing imports. Its runtime
+instance is now composition-injected and application services depend on the
+`PipelineJobRepositoryPort`. Moving the concrete implementation into
+`memory.infrastructure` is the next mechanical extraction and must preserve
+the compatibility import until callers are migrated.
