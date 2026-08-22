@@ -29,6 +29,9 @@ from executors.plugins.shell_backend import (
     ShellExecRequest, ShellExecResult, ShellBackgroundHandle, ShellExecBackend,
 )
 from executors.plugins.workspace_tool_policy import is_sensitive_path
+from executors.plugins.workspace_shell_policy import (
+    SHELL_ENV_ALLOW, SHELL_ENV_ALLOW_PREFIX, sandbox_env, resolve_shell_cwd,
+)
 
 # ---------------------------------------------------------------------------
 # Platform detection
@@ -683,60 +686,10 @@ def _is_destructive_git(cmd: str) -> tuple[bool, str]:
 
 # --- run_shell sandbox tier 1: env allowlist + cwd confinement -------------
 
-# Only these env vars (and LC_* locale vars) are passed to spawned shells.
-# Everything else — API keys, tokens, cloud creds — is stripped so a command
-# the model runs can't exfiltrate the host's secrets.
-_SHELL_ENV_ALLOW = {
-    "PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "LANGUAGE",
-    "TERM", "TMPDIR", "TZ", "PWD", "HOSTNAME",
-}
-_SHELL_ENV_ALLOW_PREFIX = ("LC_",)
-
-
-def _sandbox_env() -> dict:
-    """Build a minimal env for spawned shells, stripping host secrets."""
-    return {
-        k: v for k, v in os.environ.items()
-        if k in _SHELL_ENV_ALLOW or k.startswith(_SHELL_ENV_ALLOW_PREFIX)
-    }
-
-
-def _resolve_shell_cwd(cwd: str, bot_id, group_id: int | None = None) -> tuple[Path | None, str]:
-    """Confine the shell working directory to the bot's workspace.
-
-    放行两个根：本群组共享区 group_{gid}/shared（Dev/QA 在 shared/workspace/<repo> 共享工作树上
-    build/跑测/git），以及 bot 私有区 group_{gid}/bots/bot_{id}。
-
-    落点与 VFS 路由一致「共享优先」：空 cwd / 普通相对 cwd → 共享区根（这样 `mkdir -p workspace/pacman`
-    不带 cwd 也落 shared/workspace/pacman，不再静默进私有）。私有命名空间前缀（skills/ logs/）→ 私有区。
-    无群组上下文（group_id=None）→ 回落私有根。任何越出这两个根的目标（绝对路径越界 / '..' 穿越）拒绝。
-    """
-    if bot_id is None:
-        return None, "缺少 bot_id，无法确定工作区"
-    private_root = _ws.bot_workspace(bot_id, group_id).resolve()
-    shared_root = _ws.group_workspace(group_id).resolve() if group_id is not None else None
-    default_root = shared_root if shared_root is not None else private_root
-
-    candidate = (cwd or "").strip()
-    if not candidate:
-        return default_root, ""
-
-    p = Path(candidate)
-    if p.is_absolute():
-        target = p
-    else:
-        first = candidate.replace("\\", "/").split("/", 1)[0] + "/"
-        base = private_root if first in _ws._PRIVATE_PREFIXES else default_root
-        target = base / p
-
-    try:
-        target = target.resolve()
-        for root in (private_root, shared_root):
-            if root is not None and target.is_relative_to(root):
-                return target, ""
-    except (OSError, ValueError):
-        pass
-    return None, f"工作目录越界，必须位于本群组工作区内：{cwd}"
+_SHELL_ENV_ALLOW = SHELL_ENV_ALLOW
+_SHELL_ENV_ALLOW_PREFIX = SHELL_ENV_ALLOW_PREFIX
+_sandbox_env = sandbox_env
+_resolve_shell_cwd = resolve_shell_cwd
 
 
 _TOOL_RESULT_MAX_CHARS = config.TOOL_RESULT_MAX_CHARS
