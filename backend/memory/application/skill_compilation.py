@@ -10,13 +10,17 @@ from memory.application.pipeline import CanonicalPipelineJobRepository
 from memory.application.context import require_database
 from memory.domain import MemoryScope
 from memory.domain.safety import safe_memory_mapping, safe_memory_text
-from memory.ports import MemoryDatabasePort
+from memory.ports import MemoryDatabasePort, PipelineJobRepositoryPort
 
 
 class CanonicalSkillCompiler:
-    def __init__(self, database: MemoryDatabasePort | None = None) -> None:
+    def __init__(
+        self,
+        database: MemoryDatabasePort | None = None,
+        job_repository: PipelineJobRepositoryPort | None = None,
+    ) -> None:
         self._database = database or require_database()
-        self._jobs = CanonicalPipelineJobRepository(self._database)
+        self._jobs = job_repository or CanonicalPipelineJobRepository(self._database)
 
     async def compile(self, group_id: int, record_id: str, input_version: str = "1") -> dict[str, Any]:
         async with await self._database.connect("memory_records", group_id, write=False) as db:

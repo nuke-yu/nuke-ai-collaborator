@@ -12,7 +12,7 @@ from memory.application.pipeline import CanonicalPipelineJobRepository
 from memory.application.context import require_database
 from memory.domain import MemoryScope
 from memory.domain.safety import safe_memory_mapping, safe_memory_text
-from memory.ports import MemoryDatabasePort, ProjectionOutboxPort
+from memory.ports import MemoryDatabasePort, PipelineJobRepositoryPort, ProjectionOutboxPort
 
 log = logging.getLogger(__name__)
 
@@ -22,9 +22,10 @@ class CanonicalExperienceDistiller:
         self,
         database: MemoryDatabasePort | None = None,
         projection_outbox: ProjectionOutboxPort | None = None,
+        job_repository: PipelineJobRepositoryPort | None = None,
     ) -> None:
         self._database = database or require_database()
-        self._jobs = CanonicalPipelineJobRepository(self._database)
+        self._jobs = job_repository or CanonicalPipelineJobRepository(self._database)
         self._projection_outbox = projection_outbox
 
     async def distill(self, group_id: int, case_id: str, input_version: str = "1") -> dict[str, Any]:

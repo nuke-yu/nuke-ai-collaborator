@@ -20,7 +20,7 @@ from memory.application import (
     CanonicalSummaryObserver,
     CanonicalToolCompressionObserver,
 )
-from memory.application.pipeline import CanonicalPipelineDispatcher
+from memory.application.pipeline import CanonicalPipelineDispatcher, CanonicalPipelineJobRepository
 from memory.composition import MemoryComposition
 from memory.domain import MemoryScope
 
@@ -41,7 +41,8 @@ def build_pipeline_dispatcher(composition: MemoryComposition) -> CanonicalPipeli
         )
     database = composition.database
     projection_outbox = composition.projection_outbox
-    learning = CanonicalLearningService(database)
+    job_repository = CanonicalPipelineJobRepository(database)
+    learning = CanonicalLearningService(database, job_repository)
     model = composition.model
     settings = composition.settings
 
@@ -77,8 +78,10 @@ def build_pipeline_dispatcher(composition: MemoryComposition) -> CanonicalPipeli
         database, composition.skill_workspace
     )
     case_evaluator = CanonicalCaseEvaluator(database)
-    experience_distiller = CanonicalExperienceDistiller(database, projection_outbox)
-    skill_compiler = CanonicalSkillCompiler(database)
+    experience_distiller = CanonicalExperienceDistiller(
+        database, projection_outbox, job_repository
+    )
+    skill_compiler = CanonicalSkillCompiler(database, job_repository)
 
     async def enqueue_observation(group_id: int, input_id: str, input_version: str):
         child_types = (

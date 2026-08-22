@@ -29,16 +29,20 @@ from memory.domain import (
     require_verification_evidence,
 )
 from memory.domain.safety import safe_memory_mapping, safe_memory_text
-from memory.ports import LearningPort, MemoryDatabasePort
+from memory.ports import LearningPort, MemoryDatabasePort, PipelineJobRepositoryPort
 
 
 class CanonicalLearningService(LearningPort):
-    def __init__(self, database: MemoryDatabasePort) -> None:
+    def __init__(
+        self,
+        database: MemoryDatabasePort,
+        job_repository: PipelineJobRepositoryPort | None = None,
+    ) -> None:
         self._database = database
-        self._job_repository = CanonicalPipelineJobRepository(self._database)
+        self._job_repository = job_repository or CanonicalPipelineJobRepository(self._database)
 
     @property
-    def job_repository(self) -> CanonicalPipelineJobRepository:
+    def job_repository(self) -> PipelineJobRepositoryPort:
         """Expose canonical durable job mechanics to the runtime boundary."""
         return self._job_repository
 

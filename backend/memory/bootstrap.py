@@ -285,14 +285,16 @@ def install_memory_composition(composition: MemoryComposition) -> MemoryComposit
             raise TypeError(f"Memory composition dependency {name!r} does not implement {protocol.__name__}")
 
     # Construct the complete service graph before touching any ambient state.
+    from memory.application.pipeline import CanonicalPipelineJobRepository
+    job_repository = CanonicalPipelineJobRepository(composition.database)
     services = {
-        "learning": CanonicalLearningService(composition.database),
-        "skill_compiler": CanonicalSkillCompiler(composition.database),
+        "learning": CanonicalLearningService(composition.database, job_repository),
+        "skill_compiler": CanonicalSkillCompiler(composition.database, job_repository),
         "skill_projection": CanonicalSkillProjectionService(
             composition.database, composition.skill_workspace
         ),
         "experience_distiller": CanonicalExperienceDistiller(
-            composition.database, composition.projection_outbox
+            composition.database, composition.projection_outbox, job_repository
         ),
         "projection_outbox": composition.projection_outbox,
         "projection_reconciler": composition.module.reconciler,
