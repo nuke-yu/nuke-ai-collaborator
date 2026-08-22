@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import asyncio
-import importlib
 import json
 import logging
 from collections.abc import Awaitable, Callable, Mapping
@@ -110,14 +109,7 @@ class CanonicalPipelineDispatcher:
         return {"claimed": processed + failed, "completed": processed, "failed": failed}
 
 
-def __getattr__(name: str):
-    """Resolve the old repository symbol without a static layer violation."""
-    if name == "CanonicalPipelineJobRepository":
-        module = importlib.import_module("memory.infrastructure.pipeline_jobs")
-        return module.CanonicalPipelineJobRepository
-    raise AttributeError(name)
-
 __all__ = [
-    "CanonicalPipelineDispatcher", "CanonicalPipelineJobRepository",
+    "CanonicalPipelineDispatcher",
     "PipelineHandler", "RetryablePipelineJob",
 ]

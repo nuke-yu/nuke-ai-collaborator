@@ -10,11 +10,11 @@ import db
 
 from memory.application.pipeline import (
     CanonicalPipelineDispatcher,
-    CanonicalPipelineJobRepository,
     RetryablePipelineJob,
 )
 from memory.domain import MemoryScope
 from memory.infrastructure import MemorySchemaManager
+from memory.infrastructure.pipeline_jobs import CanonicalPipelineJobRepository
 from memory.ports import MemoryDatabasePort
 
 

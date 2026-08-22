@@ -162,7 +162,8 @@ def require_pipeline_repository(
 ) -> PipelineJobRepositoryPort:
     configured = _services["pipeline_repository"].get()
     if configured is None and database is not None:
-        from memory.application.pipeline import CanonicalPipelineJobRepository
+        module = importlib.import_module("memory.infrastructure.pipeline_jobs")
+        CanonicalPipelineJobRepository = module.CanonicalPipelineJobRepository
         repository = CanonicalPipelineJobRepository(database)
     else:
         repository = require_service(
