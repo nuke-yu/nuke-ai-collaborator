@@ -39,6 +39,7 @@ from db.migration_042 import apply as _migration_042_impl
 from db.migration_041 import apply as _migration_041_impl
 from db.migration_040 import apply as _migration_040_impl
 from db.migration_039 import apply as _migration_039_impl
+from db.migration_038 import apply as _migration_038_impl
 
 log = logging.getLogger(__name__)
 
@@ -910,12 +911,7 @@ async def migration_037(db):
 
 
 async def migration_038(db):
-    await _safe_add_column(db, "ALTER TABLE memory_records ADD COLUMN supporting_count INTEGER NOT NULL DEFAULT 1")
-    await _safe_add_column(db, "ALTER TABLE memory_records ADD COLUMN contradicting_count INTEGER NOT NULL DEFAULT 0")
-    await _safe_add_column(db, "ALTER TABLE memory_records ADD COLUMN last_used_at INTEGER")
-    await _safe_add_column(db, "ALTER TABLE memory_records ADD COLUMN valid_to INTEGER")
-    await _safe_add_column(db, "ALTER TABLE memory_records ADD COLUMN superseded_by TEXT")
-    await db.commit()
+    await _migration_038_impl(db, _safe_add_column)
 
 
 async def migration_039(db):
