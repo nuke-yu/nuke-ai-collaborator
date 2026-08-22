@@ -15,6 +15,8 @@ import stat as stat_module
 import sys
 from pathlib import Path
 
+from pydantic import BaseModel, Field
+
 from executors.base import ExecutionContext, ExecutionResult, ToolDef, ToolResult
 from core import config
 from executors import tool_executor, registry as _executor_registry
@@ -52,6 +54,9 @@ from executors.plugins.workspace_tool_models import (
     SignalStageDoneParams, SignalReworkParams,
 )
 from executors.plugins.workspace_tool_definitions import WORKSPACE_TOOLS
+from executors.plugins.workspace_tool_middleware import (
+    default_secret_redactor, default_output_truncator,
+)
 _WORKSPACE_TOOLS = WORKSPACE_TOOLS
 
 # ---------------------------------------------------------------------------
@@ -490,38 +495,14 @@ _TOOL_RESULT_MAX_CHARS = config.TOOL_RESULT_MAX_CHARS
 _TOOL_RESULT_HEAD_TAIL = _TOOL_RESULT_MAX_CHARS // 2
 
 
-async def _default_secret_redactor(
-    name: str, arguments: dict, result: str, context: dict
-) -> str | None:
-    """Mask credentials in tool output before it enters the shared model context.
-
-    Runs BEFORE the truncator (registration order) so the full, pre-truncation
-    text — including whatever truncation persists — is already redacted. Covers
-    builtin / run_shell / run_skill (MCP is redacted in its own provider)."""
-    from executors.redaction import redact_secrets
-    redacted, n = redact_secrets(result)
-    if n:
-        import logging
-        logging.getLogger(__name__).warning(
-            "redacted %d secret(s) from '%s' output", n, name
-        )
-        return redacted
-    return None
+async def _default_secret_redactor(name: str, arguments: dict, result: str, context: dict) -> str | None:
+    """Compatibility hook name retained for existing registrations/tests."""
+    return await default_secret_redactor(name, arguments, result, context)
 
 
-async def _default_output_truncator(
-    name: str, arguments: dict, result: str, context: dict
-) -> str | None:
-    """Spill long results and return a bounded preview with a locator."""
-    from executors.spill import spill_output
-
-    preview, locator = spill_output(
-        group_id=(context or {}).get("group_id"),
-        tool_name=name,
-        text=result,
-        limit=_TOOL_RESULT_MAX_CHARS,
-    )
-    return preview if locator is not None or preview != result else None
+async def _default_output_truncator(name: str, arguments: dict, result: str, context: dict) -> str | None:
+    """Compatibility hook name retained for existing registrations/tests."""
+    return await default_output_truncator(name, arguments, result, context)
 
 
 async def _default_shell_guard(name: str, arguments: dict, context: dict) -> dict | None:
