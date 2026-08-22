@@ -17,6 +17,7 @@ from db.migration_helpers import safe_add_column as _safe_add_column_impl
 from db.migration_063 import apply as _migration_063_impl
 from db.migration_062 import apply as _migration_062_impl
 from db.migration_061 import apply as _migration_061_impl
+from db.migration_060 import apply as _migration_060_impl
 
 log = logging.getLogger(__name__)
 
@@ -1341,13 +1342,7 @@ async def migration_059(db):
 
 async def migration_060(db):
     """Persist the immutable capability identity captured at Session start."""
-    for statement in (
-        "ALTER TABLE agent_sessions ADD COLUMN manifest_json TEXT NOT NULL DEFAULT '{}'",
-        "ALTER TABLE agent_sessions ADD COLUMN manifest_hash TEXT NOT NULL DEFAULT ''",
-        "ALTER TABLE agent_sessions ADD COLUMN manifest_version INTEGER NOT NULL DEFAULT 1",
-    ):
-        await _safe_add_column(db, statement)
-    await db.commit()
+    await _migration_060_impl(db, _safe_add_column)
 
 
 async def migration_061(db):
