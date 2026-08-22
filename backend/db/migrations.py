@@ -36,6 +36,7 @@ from db.migration_045 import apply as _migration_045_impl
 from db.migration_044 import apply as _migration_044_impl
 from db.migration_043 import apply as _migration_043_impl
 from db.migration_042 import apply as _migration_042_impl
+from db.migration_041 import apply as _migration_041_impl
 
 log = logging.getLogger(__name__)
 
@@ -941,9 +942,7 @@ async def migration_040(db):
 
 
 async def migration_041(db):
-    await _safe_add_column(db, "ALTER TABLE skill_usage ADD COLUMN state TEXT NOT NULL DEFAULT 'injected'")
-    await db.execute("UPDATE skill_usage SET state='executed' WHERE outcome IS NOT NULL AND outcome!=''")
-    await db.commit()
+    await _migration_041_impl(db, _safe_add_column)
 
 
 async def migration_042(db):
