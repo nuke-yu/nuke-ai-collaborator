@@ -5,9 +5,11 @@ from contextlib import asynccontextmanager, contextmanager
 
 from db.adapters import selected_external_adapter, selected_storage_backend
 from storage import StorageComposition, storage_scope
+from storage.adapters import SQLiteDialect
 
 
 class _Adapter:
+    dialect = SQLiteDialect()
     def __init__(self, name: str):
         self.name = name
 

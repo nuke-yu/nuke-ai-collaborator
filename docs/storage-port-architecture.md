@@ -35,6 +35,7 @@ Every replaceable adapter must provide:
 - `migrate()` for schema changes;
 - `health_check()` for readiness/liveness checks;
 - `close()` for lifecycle shutdown.
+- `dialect` with parameter-placeholder and identifier-quoting capabilities.
 
 Registration and composition fail fast when any capability is missing. Storage
 composition is scoped with `storage_scope()`, so nested hosts can use different
@@ -44,8 +45,9 @@ backends without mutating one another's ContextVar state.
 
 This is now a complete capability contract, not yet a PostgreSQL implementation.
 The query and migration layers still contain SQLite-specific SQL. A future
-PostgreSQL adapter must provide its own dialect-aware repositories/migrations;
-it must not be registered as a compatibility wrapper around SQLite.
+PostgreSQL adapter must provide its own dialect-aware repositories/migrations
+and implement the dialect contract; it must not be registered as a
+compatibility wrapper around SQLite.
 
 ## Current extraction status
 

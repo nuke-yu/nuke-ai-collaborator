@@ -7,11 +7,26 @@ from contextlib import AbstractAsyncContextManager, AbstractContextManager, asyn
 
 import aiosqlite
 
-from storage.ports import StoragePort
+from storage.ports import StorageDialectPort, StoragePort
+
+
+class SQLiteDialect(StorageDialectPort):
+    name = "sqlite"
+
+    def placeholder(self, index: int) -> str:
+        if index < 1:
+            raise ValueError("placeholder index must be positive")
+        return "?"
+
+    def quote_identifier(self, identifier: str) -> str:
+        if not identifier or "\x00" in identifier:
+            raise ValueError("invalid SQL identifier")
+        return '"' + identifier.replace('"', '""') + '"'
 
 
 class SQLiteStorageAdapter(StoragePort):
     name = "sqlite"
+    dialect = SQLiteDialect()
     _writers: dict[tuple[int, str], tuple[asyncio.Lock, aiosqlite.Connection | None]] = {}
 
     @asynccontextmanager

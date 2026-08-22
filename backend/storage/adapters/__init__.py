@@ -1,5 +1,5 @@
 """Concrete storage adapters."""
 
-from .sqlite import SQLiteStorageAdapter
+from .sqlite import SQLiteDialect, SQLiteStorageAdapter
 
-__all__ = ["SQLiteStorageAdapter"]
+__all__ = ["SQLiteDialect", "SQLiteStorageAdapter"]

@@ -5,6 +5,7 @@ from .ports import (
     HealthCheckPort,
     LifecyclePort,
     MigrationPort,
+    StorageDialectPort,
     StoragePort,
     TransactionPort,
 )
@@ -26,6 +27,7 @@ __all__ = [
     "LifecyclePort",
     "MigrationPort",
     "StoragePort",
+    "StorageDialectPort",
     "TransactionPort",
     "StorageComposition",
     "current_storage_adapter",

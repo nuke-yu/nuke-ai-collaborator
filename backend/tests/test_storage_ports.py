@@ -9,10 +9,12 @@ from storage import (
     missing_storage_capabilities,
     validate_storage_port,
 )
+from storage.adapters import SQLiteDialect
 
 
 class _ContractProbe:
     name = "probe"
+    dialect = SQLiteDialect()
 
     @asynccontextmanager
     async def connect(self, path=None):

@@ -4,10 +4,12 @@ import unittest
 from contextlib import asynccontextmanager
 from memory.infrastructure import SQLiteMemoryDatabase
 from storage import StorageComposition, storage_scope
+from storage.adapters import SQLiteDialect
 
 
 class _StorageProbe:
     name = "probe"
+    dialect = SQLiteDialect()
 
     def __init__(self):
         self.paths: list[str] = []

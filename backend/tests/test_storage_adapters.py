@@ -12,10 +12,12 @@ from db.adapters import (
     selected_storage_backend,
     unregister_storage_adapter,
 )
+from storage.adapters import SQLiteDialect
 
 
 class _FakeAdapter:
     name = "fake"
+    dialect = SQLiteDialect()
 
     @asynccontextmanager
     async def connect(self, path=None):

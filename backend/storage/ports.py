@@ -5,6 +5,16 @@ from contextlib import AbstractAsyncContextManager, AbstractContextManager
 from typing import Awaitable, Callable, Protocol, runtime_checkable
 
 
+@runtime_checkable
+class StorageDialectPort(Protocol):
+    """SQL capabilities required by repositories that target a backend."""
+
+    name: str
+
+    def placeholder(self, index: int) -> str: ...
+    def quote_identifier(self, identifier: str) -> str: ...
+
+
 class ConnectionPort(Protocol):
     name: str
 
@@ -51,3 +61,5 @@ class StoragePort(
     Protocol,
 ):
     """Complete storage boundary required by a replaceable backend."""
+
+    dialect: StorageDialectPort
