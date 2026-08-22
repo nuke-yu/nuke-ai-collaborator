@@ -20,6 +20,7 @@ MEMORY_GROUP_TABLES = frozenset(
         "memory_projection_rollout",
         "experience_usage",
         "pipeline_jobs",
+        "memory_checkpoints",
         "skills",
         "skill_versions",
         "skill_usage",

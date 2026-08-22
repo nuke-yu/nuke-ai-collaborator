@@ -101,7 +101,6 @@ class CanonicalPipelineJobRepository:
         state_hash = hashlib.sha256(raw_json.encode()).hexdigest()[:16]
         checkpoint_id = f"chk:{thread_id}:completed:{state_hash[:8]}"
         async with await self._database.connect("pipeline_jobs", group_id, write=True) as db:
-            await _ensure_checkpoint_tables(db)
             cur = await db.execute(
                 """UPDATE pipeline_jobs SET status='completed',lease_until=NULL,
                    lease_token=NULL,error='',output_json=?,completed_at=?,updated_at=?
@@ -207,7 +206,6 @@ class CanonicalPipelineJobRepository:
         checkpoint_id = f"chk:{thread_id}:{step_name}:{state_hash[:8]}"
         created_at = time.time()
         async with await self._database.connect("memory_checkpoints", group_id, write=True) as db:
-            await _ensure_checkpoint_tables(db)
             await db.execute(
                 """INSERT OR IGNORE INTO memory_checkpoints
                    (checkpoint_id,group_id,thread_id,parent_checkpoint_id,step_name,
@@ -232,7 +230,6 @@ class CanonicalPipelineJobRepository:
     ) -> dict[str, Any] | None:
         group_id = _group_id(scope)
         async with await self._database.connect("memory_checkpoints", group_id, write=False) as db:
-            await _ensure_checkpoint_tables(db)
             async with db.execute(
                 """SELECT checkpoint_id,parent_checkpoint_id,step_name,state_hash,
                           state_json,created_at FROM memory_checkpoints
@@ -249,21 +246,6 @@ class CanonicalPipelineJobRepository:
             "state_hash": str(row[3]), "state": json.loads(row[4] or "{}"),
             "created_at": int(row[5]),
         }
-
-
-async def _ensure_checkpoint_tables(db: Any) -> None:
-    await db.execute(
-        """CREATE TABLE IF NOT EXISTS memory_checkpoints (
-           checkpoint_id TEXT PRIMARY KEY, group_id INTEGER NOT NULL,
-           thread_id TEXT NOT NULL, parent_checkpoint_id TEXT,
-           step_name TEXT NOT NULL, state_hash TEXT NOT NULL,
-           state_json TEXT NOT NULL DEFAULT '{}', created_at INTEGER NOT NULL)"""
-    )
-    await db.execute(
-        """CREATE INDEX IF NOT EXISTS idx_memory_checkpoints_thread
-           ON memory_checkpoints(group_id,thread_id,created_at)"""
-    )
-
 
 def _group_id(scope: MemoryScope) -> int:
     if scope.kind not in (ScopeKind.GROUP, ScopeKind.BOT) or scope.group_id is None:
