@@ -1,6 +1,7 @@
 import logging
 import asyncio
 from .archive_format import build_archive_markdown
+from .context_format import format_context_blocks as _format_context_blocks_impl
 import hashlib
 from workspace.observation import (
     UnobservedFileMutationError,
@@ -698,11 +699,7 @@ async def load_context_files(bot_id: int, group_id: int | None,
 
 def format_context_blocks(blocks: list[dict]) -> str:
     """Format context blocks into a readable string for injection."""
-    parts = []
-    for b in blocks:
-        label = b["name"] if b["source"] == "bot" else f"{b['name']} (群组)"
-        parts.append(f"=== {label} ===\n{b['content']}")
-    return "\n\n".join(parts)
+    return _format_context_blocks_impl(blocks)
 
 
 # legacy shim so simple_v1 keeps working
