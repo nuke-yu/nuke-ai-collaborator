@@ -13,7 +13,6 @@ import uuid
 from dataclasses import asdict
 from typing import Any
 
-from memory.application.jobs import pipeline_job_identity
 from memory.application.references import experience_ref, skill_ref
 from memory.contracts import (
     ApproveSkillCandidate, AssembleCase, CompleteExperienceUsage,
@@ -465,16 +464,13 @@ class CanonicalLearningService(LearningPort):
 
     async def process_case(self, command: ProcessLearningCase) -> str:
         group_id, _ = _scope(command.scope)
-        job_id, key = pipeline_job_identity("process_case", group_id, command.case_id, command.input_version)
-        now = int(time.time()*1000)
-        async with await self._database.connect("pipeline_jobs", group_id, write=True) as db:
-            await db.execute("INSERT INTO pipeline_jobs(job_id,job_type,group_id,input_id,input_version,idempotency_key,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(idempotency_key) DO NOTHING", (job_id,"process_case",group_id,command.case_id,command.input_version,key,now,now))
-            await db.commit()
-        return job_id
+        return await self._job_repository.enqueue(
+            MemoryScope.group(group_id=group_id, actor_id="service:learning"),
+            "process_case", command.case_id, command.input_version,
+        )
 
     async def repair_observation_gaps(self, group_id: int, *, limit: int = 100) -> int:
         """Requeue committed bot messages that have no observation job."""
-        now = int(time.time() * 1000)
         async with await self._database.connect("messages", group_id, write=False) as db:
             async with db.execute("PRAGMA table_info(messages)") as columns_cursor:
                 columns = {str(row[1]) for row in await columns_cursor.fetchall()}
@@ -491,15 +487,12 @@ class CanonicalLearningService(LearningPort):
             ) as cur:
                 rows = await cur.fetchall()
         repaired = 0
-        async with await self._database.connect("pipeline_jobs", group_id, write=True) as db:
-            for message_id, bot_id in rows:
-                job_id, key = pipeline_job_identity("observe_turn", group_id, f"{message_id}:{bot_id}", "1")
-                await db.execute(
-                    "INSERT INTO pipeline_jobs(job_id,job_type,group_id,input_id,input_version,idempotency_key,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(idempotency_key) DO NOTHING",
-                    (job_id, "observe_turn", group_id, f"{message_id}:{bot_id}", "1", key, now, now),
-                )
-                repaired += 1
-            await db.commit()
+        scope = MemoryScope.group(group_id=group_id, actor_id="service:learning_repair")
+        for message_id, bot_id in rows:
+            await self._job_repository.enqueue(
+                scope, "observe_turn", f"{message_id}:{bot_id}", "1"
+            )
+            repaired += 1
         return repaired
 
     async def repair_skill_projection_gaps(self, group_id: int) -> int:
@@ -516,17 +509,13 @@ class CanonicalLearningService(LearningPort):
                 (group_id,),
             ) as cur:
                 rows = await cur.fetchall()
-        now = int(time.time() * 1000)
         repaired = 0
-        async with await self._database.connect("pipeline_jobs", group_id, write=True) as db:
-            for skill_id, version in rows:
-                job_id, key = pipeline_job_identity("project_skill", group_id, str(skill_id), str(version))
-                await db.execute(
-                    "INSERT INTO pipeline_jobs(job_id,job_type,group_id,input_id,input_version,idempotency_key,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(idempotency_key) DO NOTHING",
-                    (job_id, "project_skill", group_id, str(skill_id), str(version), key, now, now),
-                )
-                repaired += 1
-            await db.commit()
+        scope = MemoryScope.group(group_id=group_id, actor_id="service:learning_repair")
+        for skill_id, version in rows:
+            await self._job_repository.enqueue(
+                scope, "project_skill", str(skill_id), str(version)
+            )
+            repaired += 1
         return repaired
 
 
