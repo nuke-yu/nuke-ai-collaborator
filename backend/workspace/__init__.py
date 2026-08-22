@@ -3,6 +3,7 @@ import asyncio
 from .archive_format import build_archive_markdown
 from .context_format import format_context_blocks as _format_context_blocks_impl
 from .history import history_dir, save_to_history
+from .walk import walk_visible as _walk_visible_impl
 import hashlib
 from workspace.observation import (
     UnobservedFileMutationError,
@@ -534,36 +535,7 @@ def walk_visible(root: Path, max_entries: int = _WS_MAX_ENTRIES,
         作为条目放行（让人看到仓库存在，仍不递归进去）。
     返回 (排序后的路径列表, 是否因超过 max_entries 被截断)。
     """
-    import os
-    if not root.exists():
-        return [], False
-    paths: list[Path] = []
-    truncated = False
-    for dirpath, dirnames, filenames in os.walk(root, followlinks=True):
-        # 原地剪枝 + 排序：os.walk 的物理顺序依赖文件系统(inode)、非确定；先排序保证
-        # 遍历顺序稳定，这样在超大工作区因 max_entries 截断时每次前缀一致，UI 树不抖动。
-        all_dirs = sorted(dirnames)
-        dirnames[:] = [
-            d for d in all_dirs
-            if d not in _WS_IGNORE_DIRS and (not skip_hidden or not d.startswith("."))
-        ]
-        base = Path(dirpath)
-        for name in all_dirs:
-            if skip_hidden:
-                if name.startswith(".") or name in _WS_IGNORE_DIRS:
-                    continue
-            else:
-                if name in _WS_IGNORE_DIRS and name != ".git":
-                    continue
-            paths.append(base / name)
-        for name in sorted(filenames):
-            if skip_hidden and name.startswith("."):
-                continue
-            paths.append(base / name)
-        if len(paths) >= max_entries:
-            truncated = True
-            break
-    return sorted(paths)[:max_entries], truncated
+    return _walk_visible_impl(root, max_entries, skip_hidden, _WS_IGNORE_DIRS)
 
 
 async def list_workspace(bot_id: int, group_id: int | None = None) -> str:
