@@ -15,6 +15,7 @@ import time
 from db.migration_runner import run_migrations as _run_migrations_impl
 from db.migration_helpers import safe_add_column as _safe_add_column_impl
 from db.migration_063 import apply as _migration_063_impl
+from db.migration_062 import apply as _migration_062_impl
 
 log = logging.getLogger(__name__)
 
@@ -1364,16 +1365,7 @@ async def migration_061(db):
 
 async def migration_062(db):
     """Deduplicate replayed Channel ingress at the Group message boundary."""
-    await _safe_add_column(
-        db, "ALTER TABLE messages ADD COLUMN external_message_key TEXT DEFAULT NULL"
-    )
-    cursor = await db.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='messages'"
-    )
-    if await cursor.fetchone() is not None:
-        await db.execute("""CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_external_key
-            ON messages(external_message_key) WHERE external_message_key IS NOT NULL""")
-    await db.commit()
+    await _migration_062_impl(db, _safe_add_column)
 
 
 async def migration_063(db):
