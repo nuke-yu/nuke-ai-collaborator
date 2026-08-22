@@ -273,50 +273,9 @@ async def _handle_signal_rework(target_stage: str = "", reason: str = "", contex
 # Skills XML builder (prompt-side, reads compact's context window table)
 # ---------------------------------------------------------------------------
 
+from executors.plugins.workspace_skill_xml import build_skills_xml
 _SKILL_DESC_MAX_CHARS = 250
-
-
-def _build_skills_xml(skills: list[dict], model_name: str) -> tuple[str, set[str]]:
-    """Build the lazy-skill XML block with token budget control.
-
-    Budget = max(3000 chars, 1% of model context window in chars).
-    Returns (xml_string, set_of_included_skill_names).
-    """
-    context_window = compact._MODEL_CONTEXT_WINDOWS.get(model_name, compact._DEFAULT_CONTEXT_WINDOW)
-    budget = max(3000, int(context_window * 0.01 * 4))
-
-    parts: list[str] = []
-    used = 0
-    included: set[str] = set()
-    skipped = 0
-
-    for s in skills:
-        desc = (s.get("description") or "")[:_SKILL_DESC_MAX_CHARS]
-        snippet_lines = [
-            f"    <name>{s['name']}</name>",
-            f"    <description>{desc}</description>",
-        ]
-        if s.get("when_to_use"):
-            snippet_lines.append(f"    <when_to_use>{s['when_to_use']}</when_to_use>")
-        if s.get("argument_hint"):
-            snippet_lines.append(f"    <argument_hint>{s['argument_hint']}</argument_hint>")
-        snippet = "  <skill>\n" + "\n".join(snippet_lines) + "\n  </skill>"
-
-        if used + len(snippet) > budget:
-            skipped += 1
-            continue
-
-        parts.append(snippet)
-        used += len(snippet)
-        included.add(s["name"])
-
-    if not parts:
-        return "", included
-
-    xml = "<available_skills>\n" + "\n".join(parts) + "\n</available_skills>"
-    if skipped:
-        xml += f"\n<!-- 另有 {skipped} 个技能因 token 预算未列出 -->"
-    return xml, included
+_build_skills_xml = build_skills_xml
 
 
 # ---------------------------------------------------------------------------
