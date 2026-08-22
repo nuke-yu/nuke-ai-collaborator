@@ -49,17 +49,17 @@ class GraphitiTemporalAlgorithmAdapter:
     async def disambiguate_entity(self, name: str):
         return self._engine.disambiguate_entity(name)
 
-    async def disambiguate_entities(self, name: str, *, limit: int = 5):
+    async def disambiguate_entities(self, name: str, *, limit: int = 5) -> Sequence[Mapping[str, Any]]:
         return self._engine.disambiguate_entities(name, limit=limit)
 
     async def discover_communities(self, as_of: float | None = None):
         return self._engine.discover_communities(as_of=as_of)
 
-    async def community_graph(self, as_of: float | None = None):
+    async def community_graph(self, as_of: float | None = None) -> Sequence[Any]:
         return self._engine.community_graph(as_of=as_of)
 
     async def multi_hop_search(self, start_name: str, *, max_hops: int = 3,
-                               as_of: float | None = None, max_paths: int = 100):
+                               as_of: float | None = None, max_paths: int = 100) -> Sequence[Any]:
         return self._engine.multi_hop_search(start_name, max_hops=max_hops,
                                              as_of=as_of, max_paths=max_paths)
 
