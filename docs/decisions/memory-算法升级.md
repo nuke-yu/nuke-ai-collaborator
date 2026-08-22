@@ -300,6 +300,20 @@ Ruflo 当前只有设计材料，没有本地源码，因此不能满足“引�
 
 ## 12. 实施批次
 
+> 本节是实施路线，不是能力状态。当前状态以
+> [Memory Capability Wiring Status](MEMORY-CAPABILITY-STATUS.md) 为准。
+
+| 批次 | 当前状态 | 说明 |
+|---:|---|---|
+| 1–2 | 已完成 | Contracts/domain/ports 已建立，主要应用入口已切换到模块契约 |
+| 3 | 已在线 | Mem0 风格事实决策接入 canonical memory flow |
+| 4–7 | 部分在线 | Case/Experience/Skill durable pipeline 在线；不是完整 EverOS OME runtime |
+| 8 | 部分在线 | RRF/MMR/Graph 适配器存在；默认热召回并非所有查询都经过完整 hybrid 链 |
+| 9 | 部分在线 | Voyager critic、门控和声明式执行计划在线；不是可执行代码 Skill Library |
+| 10–12 | 已在线/部分在线 | checkpoint、Letta budget、Personal ACL/审计按各自边界接入 |
+| 13 | 已实现/已组合 | Graphiti temporal adapter 可用，但默认热召回未启用 |
+| 14 | 持续进行 | 需要持续补充无记忆、Experience、Skill 的生产形态对照测试 |
+
 每个批次独立开发、验证和提交：
 
 1. 建立独立模块 contracts/domain/ports、legacy adapters 和架构测试；
