@@ -20,6 +20,8 @@ from typing import Optional
 
 from core import config
 from ai.client import call_ai_once, AIContextOverflowError
+from executors.compact_tokens import estimate_tokens as _estimate_tokens_impl
+from executors.compact_tokens import _token_cache as _token_cache_impl
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +75,7 @@ _db_compaction_locks: set[int] = set()
 # Incremental token estimation cache: id(list) → (len, total_chars, last_ver)
 # last_ver = first-32-chars of last message content, used to detect id() reuse
 # (CPython may reuse the same memory address after a list is garbage-collected).
-_token_cache: dict[int, tuple[int, int, str]] = {}
+_token_cache = _token_cache_impl
 _TOKEN_CACHE_MAX = 32
 
 
@@ -177,32 +179,7 @@ def estimate_tokens(messages: list[dict]) -> int:
     estimate_tokens runs several times per turn (snip, auto-compact,
     session-memory, db-compaction).
     """
-    key = id(messages)
-    n = len(messages)
-    cached = _token_cache.get(key)
-    if cached is not None:
-        cached_n, cached_chars, cached_cjk, cached_ver = cached
-        if cached_n == n:
-            curr_ver = _msg_verifier(messages[-1]) if n > 0 else ""
-            if curr_ver == cached_ver:
-                return _chars_to_tokens(cached_chars, cached_cjk)
-        elif cached_n == n - 1:
-            # One message appended: verify the previous last element is unchanged
-            prev_ver = _msg_verifier(messages[-2]) if n >= 2 else ""
-            if prev_ver == cached_ver:
-                new_chars = cached_chars + _message_chars(messages[-1])
-                new_cjk = cached_cjk + _message_cjk(messages[-1])
-                _token_cache[key] = (n, new_chars, new_cjk, _msg_verifier(messages[-1]))
-                return _chars_to_tokens(new_chars, new_cjk)
-
-    total_chars = sum(_message_chars(m) for m in messages)
-    total_cjk = sum(_message_cjk(m) for m in messages)
-    if len(_token_cache) >= _TOKEN_CACHE_MAX:
-        for k in list(_token_cache)[: _TOKEN_CACHE_MAX // 2]:
-            del _token_cache[k]
-    ver = _msg_verifier(messages[-1]) if messages else ""
-    _token_cache[key] = (n, total_chars, total_cjk, ver)
-    return _chars_to_tokens(total_chars, total_cjk)
+    return _estimate_tokens_impl(messages)
 
 
 def inject_context_after_compact(
@@ -1097,5 +1074,3 @@ async def compress_history(
             msg["content"] = f"【此前发言摘要记录：{cached}】"
             
     return recent
-
-

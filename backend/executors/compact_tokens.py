@@ -1,0 +1,84 @@
+"""CJK-aware token estimation and multimodal content normalization."""
+from __future__ import annotations
+
+_PER_MESSAGE_OVERHEAD = 8
+_TOKEN_CACHE_MAX = 32
+_token_cache: dict[int, tuple[int, int, int, str]] = {}
+
+
+def _count_cjk(text: str) -> int:
+    return sum(1 for ch in text if '一' <= ch <= '鿿' or '㐀' <= ch <= '䶿'
+               or '豈' <= ch <= '﫿' or '\U00020000' <= ch <= '\U0002a6df'
+               or '　' <= ch <= '〿' or '぀' <= ch <= 'ヿ' or '가' <= ch <= '힯')
+
+
+def _content_cjk(content) -> int:
+    return 0 if content is None else _count_cjk(content if isinstance(content, str) else str(content))
+
+
+def _content_chars(content) -> int:
+    return 0 if content is None else len(content if isinstance(content, str) else str(content))
+
+
+def clean_multimodal_content(content) -> str:
+    if not content:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if not isinstance(block, dict):
+                parts.append(str(block))
+                continue
+            btype = block.get("type")
+            if btype == "text":
+                parts.append(block.get("text") or "")
+            elif btype in ("image", "image_url"):
+                parts.append("[图片数据]")
+            elif btype == "document":
+                parts.append("[文档数据]")
+            elif btype == "tool_result" and isinstance(block.get("content"), list):
+                parts.append(clean_multimodal_content(block["content"]))
+            else:
+                parts.append(f"[{btype or '未知数据类型'}]")
+        return " ".join(p for p in parts if p.strip())
+    return str(content)
+
+
+def _msg_verifier(m: dict) -> str:
+    c = m.get("content") or ""
+    return c[:32] if isinstance(c, str) else str(c)[:32]
+
+
+def _message_chars(m: dict) -> int:
+    return _content_chars(m.get("content")) + len(m.get("name") or "") + _PER_MESSAGE_OVERHEAD
+
+
+def _message_cjk(m: dict) -> int:
+    return _content_cjk(m.get("content")) + _count_cjk(m.get("name") or "")
+
+
+def _chars_to_tokens(total_chars: int, cjk_chars: int) -> int:
+    return (total_chars + cjk_chars * 2) // 4
+
+
+def estimate_tokens(messages: list[dict]) -> int:
+    key, n = id(messages), len(messages)
+    cached = _token_cache.get(key)
+    if cached is not None:
+        cached_n, cached_chars, cached_cjk, cached_ver = cached
+        if cached_n == n and (_msg_verifier(messages[-1]) if n else "") == cached_ver:
+            return _chars_to_tokens(cached_chars, cached_cjk)
+        if cached_n == n - 1 and (cached_n < 2 or _msg_verifier(messages[-2]) == cached_ver):
+            new_chars = cached_chars + _message_chars(messages[-1])
+            new_cjk = cached_cjk + _message_cjk(messages[-1])
+            _token_cache[key] = (n, new_chars, new_cjk, _msg_verifier(messages[-1]))
+            return _chars_to_tokens(new_chars, new_cjk)
+    total_chars = sum(_message_chars(m) for m in messages)
+    total_cjk = sum(_message_cjk(m) for m in messages)
+    if len(_token_cache) >= _TOKEN_CACHE_MAX:
+        for old_key in list(_token_cache)[: _TOKEN_CACHE_MAX // 2]:
+            del _token_cache[old_key]
+    _token_cache[key] = (n, total_chars, total_cjk, _msg_verifier(messages[-1]) if messages else "")
+    return _chars_to_tokens(total_chars, total_cjk)
