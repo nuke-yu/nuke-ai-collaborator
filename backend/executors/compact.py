@@ -21,6 +21,7 @@ from typing import Optional
 from core import config
 from ai.client import call_ai_once, AIContextOverflowError
 from executors.compact_tokens import estimate_tokens as _estimate_tokens_impl
+from executors.compact_tokens import clean_multimodal_content as _clean_multimodal_content_impl
 from executors.compact_tokens import _token_cache as _token_cache_impl
 
 logger = logging.getLogger(__name__)
@@ -117,29 +118,7 @@ def _content_chars(content) -> int:
 
 def clean_multimodal_content(content) -> str:
     """Extract clean text from multimodal content, replacing image blocks with a placeholder."""
-    if not content:
-        return ""
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts = []
-        for block in content:
-            if not isinstance(block, dict):
-                parts.append(str(block))
-                continue
-            btype = block.get("type")
-            if btype == "text":
-                parts.append(block.get("text") or "")
-            elif btype in ("image", "image_url"):
-                parts.append("[图片数据]")
-            elif btype == "document":
-                parts.append("[文档数据]")
-            elif btype == "tool_result" and isinstance(block.get("content"), list):
-                parts.append(clean_multimodal_content(block["content"]))
-            else:
-                parts.append(f"[{btype or '未知数据类型'}]")
-        return " ".join(p for p in parts if p.strip())
-    return str(content)
+    return _clean_multimodal_content_impl(content)
 
 
 def _msg_verifier(m: dict) -> str:
