@@ -15,6 +15,7 @@ from storage.ports import (
     StoragePort,
     TransactionPort,
 )
+from storage.contracts import validate_storage_port
 
 
 # Compatibility name used by existing adapter registration callers.
@@ -35,11 +36,7 @@ def register_storage_adapter(name: str, adapter: StorageAdapter) -> None:
         raise ValueError("external storage adapter name is required")
     if getattr(adapter, "name", normalized).lower() != normalized:
         raise ValueError("storage adapter name does not match registration name")
-    for method in (
-        "connect", "connect_sync", "write_connect", "migrate", "health_check", "close",
-    ):
-        if not callable(getattr(adapter, method, None)):
-            raise TypeError(f"storage adapter must implement {method}()")
+    validate_storage_port(adapter)
     _adapters[normalized] = adapter
 
 

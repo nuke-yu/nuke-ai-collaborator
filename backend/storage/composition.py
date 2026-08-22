@@ -6,6 +6,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 
 from .ports import StoragePort
+from .contracts import validate_storage_port
 
 
 @dataclass(frozen=True)
@@ -23,16 +24,7 @@ class StorageComposition:
         if normalized == "sqlite" and self.adapter is not None:
             raise ValueError("sqlite composition uses the built-in adapter")
         if self.adapter is not None:
-            missing = [
-                method for method in (
-                    "connect", "connect_sync", "write_connect",
-                    "migrate", "health_check", "close",
-                ) if not callable(getattr(self.adapter, method, None))
-            ]
-            if missing:
-                raise TypeError(
-                    f"storage adapter is missing capabilities: {', '.join(missing)}"
-                )
+            validate_storage_port(self.adapter)
 
 
 _current: ContextVar[StorageComposition | None] = ContextVar(

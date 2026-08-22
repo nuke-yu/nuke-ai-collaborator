@@ -14,6 +14,11 @@ from .composition import (
     current_storage_composition,
     storage_scope,
 )
+from .contracts import (
+    REQUIRED_STORAGE_CAPABILITIES,
+    missing_storage_capabilities,
+    validate_storage_port,
+)
 
 __all__ = [
     "ConnectionPort",
@@ -26,4 +31,7 @@ __all__ = [
     "current_storage_adapter",
     "current_storage_composition",
     "storage_scope",
+    "REQUIRED_STORAGE_CAPABILITIES",
+    "missing_storage_capabilities",
+    "validate_storage_port",
 ]
