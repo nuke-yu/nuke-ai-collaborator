@@ -47,11 +47,14 @@ The query and migration layers still contain SQLite-specific SQL. A future
 PostgreSQL adapter must provide its own dialect-aware repositories/migrations;
 it must not be registered as a compatibility wrapper around SQLite.
 
-## Remaining extraction work
+## Current extraction status
 
-The canonical pipeline repository implementation is still located in the
-legacy application module for compatibility with existing imports. Its runtime
-instance is now composition-injected and application services depend on the
-`PipelineJobRepositoryPort`. Moving the concrete implementation into
-`memory.infrastructure` is the next mechanical extraction and must preserve
-the compatibility import until callers are migrated.
+The canonical pipeline repository implementation now lives in
+`memory.infrastructure.pipeline_jobs`. The application module retains only the
+dispatcher and a temporary dynamic compatibility symbol for older imports.
+The runtime instance is composition-owned and application services depend on
+the `PipelineJobRepositoryPort`.
+
+The remaining work is to remove that compatibility symbol after all callers
+have migrated, and to route the remaining learning use cases that write
+`pipeline_jobs` directly through the repository port.
