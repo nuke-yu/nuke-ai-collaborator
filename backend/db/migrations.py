@@ -29,6 +29,7 @@ from db.migration_052 import apply as _migration_052_impl
 from db.migration_051 import apply as _migration_051_impl
 from db.migration_050 import apply as _migration_050_impl
 from db.migration_049 import apply as _migration_049_impl
+from db.migration_048 import apply as _migration_048_impl
 
 log = logging.getLogger(__name__)
 
@@ -1065,29 +1066,7 @@ async def migration_047(db):
 
 async def migration_048(db):
     """Add structured task identity and Experience matching signatures."""
-    columns = {
-        "agent_cases": (
-            "semantic_cluster_key TEXT NOT NULL DEFAULT ''",
-            "task_family TEXT NOT NULL DEFAULT 'other'",
-            "task_concepts_json TEXT NOT NULL DEFAULT '[]'",
-        ),
-        "memory_records": (
-            "semantic_cluster_key TEXT NOT NULL DEFAULT ''",
-            "environment_signature TEXT NOT NULL DEFAULT ''",
-            "failure_signature TEXT NOT NULL DEFAULT ''",
-        ),
-    }
-    for table, declarations in columns.items():
-        for declaration in declarations:
-            await _safe_add_column(
-                db, f"ALTER TABLE {table} ADD COLUMN {declaration}"
-            )
-    await db.execute(
-        """CREATE INDEX IF NOT EXISTS idx_memory_records_semantic
-        ON memory_records(group_id,bot_id,kind,status,semantic_cluster_key,
-        environment_signature,failure_signature)"""
-    )
-    await db.commit()
+    await _migration_048_impl(db, _safe_add_column)
 
 
 async def migration_049(db):
