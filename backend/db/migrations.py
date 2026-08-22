@@ -20,6 +20,7 @@ from db.migration_061 import apply as _migration_061_impl
 from db.migration_060 import apply as _migration_060_impl
 from db.migration_059 import apply as _migration_059_impl
 from db.migration_058 import apply as _migration_058_impl
+from db.migration_057 import apply as _migration_057_impl
 
 log = logging.getLogger(__name__)
 
@@ -1264,29 +1265,7 @@ async def migration_056(db):
 
 async def migration_057(db):
     """Link group-local Session Events to Memory/Skill usage evidence."""
-    cur = await db.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='session_events'"
-    )
-    if await cur.fetchone() is None:
-        return
-    await db.execute("""CREATE TABLE IF NOT EXISTS session_evidence_links (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        session_event_id INTEGER NOT NULL,
-        session_id TEXT NOT NULL,
-        evidence_kind TEXT NOT NULL CHECK(evidence_kind IN ('memory','skill')),
-        evidence_ref TEXT NOT NULL,
-        relation TEXT NOT NULL CHECK(relation IN ('injected','cited','invoked')),
-        metadata_json TEXT NOT NULL DEFAULT '{}',
-        created_at TEXT DEFAULT (datetime('now')),
-        UNIQUE(session_event_id,evidence_kind,evidence_ref,relation),
-        FOREIGN KEY (session_event_id) REFERENCES session_events(id) ON DELETE CASCADE,
-        FOREIGN KEY (session_id) REFERENCES agent_sessions(id) ON DELETE CASCADE
-    )""")
-    await db.execute("""CREATE INDEX IF NOT EXISTS idx_session_evidence_ref
-        ON session_evidence_links(evidence_ref,id)""")
-    await db.execute("""CREATE INDEX IF NOT EXISTS idx_session_evidence_session
-        ON session_evidence_links(session_id,session_event_id)""")
-    await db.commit()
+    await _migration_057_impl(db)
 
 
 async def migration_058(db):
