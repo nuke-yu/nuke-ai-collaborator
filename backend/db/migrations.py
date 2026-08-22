@@ -23,6 +23,7 @@ from db.migration_058 import apply as _migration_058_impl
 from db.migration_057 import apply as _migration_057_impl
 from db.migration_056 import apply as _migration_056_impl
 from db.migration_055 import apply as _migration_055_impl
+from db.migration_054 import apply as _migration_054_impl
 
 log = logging.getLogger(__name__)
 
@@ -1208,12 +1209,7 @@ async def migration_053(db):
 
 async def migration_054(db):
     """Store structured evidence behind Memory adoption decisions."""
-    await _safe_add_column(
-        db,
-        "ALTER TABLE run_decisions ADD COLUMN evidence_json "
-        "TEXT NOT NULL DEFAULT '{}'",
-    )
-    await db.commit()
+    await _migration_054_impl(db, _safe_add_column)
 
 
 async def migration_055(db):
