@@ -111,7 +111,31 @@ Nuke AI Collaborator is designed around **organizational collaboration**, **cogn
 - **Dynamic Secret Redaction**: Automatically scrubs PEM keys, JWTs, AWS credentials, and GitHub tokens before outputs enter LLM context or logs.
 - **Sub-Agent Permission Attenuation**: Enforces strict downward privilege boundaries when parent agents spawn sub-tasks.
 
-#### 📊 Autonomous Coding Safety & Verification Assessment
+#### 📊 Code Editing Security Gate & Safety Mesh Assessment
+
+> **💡 What is a Code Editing Security Gate?**  
+> A **Code Editing Security Gate** is a mandatory, multi-layered security verification, permission control, and outcome validation mechanism enforced by the system whenever an AI agent attempts to read, modify, overwrite, or commit codebase files. It acts as an automated blast wall preventing AI models from destroying code repositories due to hallucinations, guesses, line drift, or prompt injection exploits.
+
+##### ❓ Why LLMs Require Code Editing Safety Gates
+Allowing an LLM to freely invoke file read/write tools without security guardrails inevitably triggers 5 major failure scenarios:
+1. **Unobserved Blind Overwrite**: The LLM hasn't read the file's latest content, hallucinating logic and invoking `write_file` to replace a 1000-line core module with 20 lines of imaginary code.
+2. **Line Drift & Misalignment**: The LLM attempts to replace line 45, but code insertions shifted the target to line 58. Lacking anchor validation, it deletes unrelated code at line 45, breaking syntax.
+3. **Secret Leakage**: The LLM accidentally hardcodes API keys, JWT tokens, or private PEM keys into public commits or test logs during code generation.
+4. **Untested Broken Code Admission**: The LLM claims "task completed" and attempts to merge changes directly into main, despite syntax errors or breaking unit tests.
+5. **Command Evasion & Privilege Escalation**: Poisoned context induces the LLM to execute `rm -rf /` or obfuscated `base64 -d | sh` pipe commands to bypass security filters.
+
+##### 🛡️ 3-Phase 6-Layer Closed-Loop Security Gate Architecture
+```
+                     【Autonomous Code Editing Security Gate Mesh】
+
+ ┌───────────────────┐    ┌────────────────────┐    ┌────────────────────┐
+ │ 1. Pre-Edit Gates │ ➔ │ 2. Mid-Edit Gates  │ ➔ │ 3. Post-Edit Gates │
+ └───────────────────┘    └────────────────────┘    └────────────────────┘
+   • Read-Before-Mutate     • Hashline Anti-Drift     • Automated Test Evidence
+   • Interactive HIL Gate   • Diff Syntax Validation   • Secret Redaction Filter
+   • Git Worktree Isolation • AST Token Shell Parser   • PR Gate Admission Block
+```
+
 ```
 ================================================================================
 🏛️ Nuke AI Collaborator Autonomous Coding Safety Mesh Assessment
