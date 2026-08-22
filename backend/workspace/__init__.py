@@ -2,6 +2,7 @@ import logging
 import asyncio
 from .archive_format import build_archive_markdown
 from .context_format import format_context_blocks as _format_context_blocks_impl
+from .history import history_dir, save_to_history
 import hashlib
 from workspace.observation import (
     UnobservedFileMutationError,
@@ -212,26 +213,11 @@ _WRITE_PROTECTED = {"MEMORY.md", "RETRO_LATEST.md"}
 
 
 def _history_dir(ws: Path, p: Path) -> Path:
-    rel = p.relative_to(ws)
-    parent_str = str(rel.parent)
-    stem = rel.stem
-    if parent_str == ".":
-        return ws / ".history" / stem
-    return ws / ".history" / parent_str / stem
+    return history_dir(ws, p)
 
 
 def _save_to_history(ws: Path, p: Path) -> None:
-    try:
-        existing = p.read_text(encoding="utf-8")
-        hdir = _history_dir(ws, p)
-        hdir.mkdir(parents=True, exist_ok=True)
-        ts = datetime.now().strftime("%Y%m%dT%H%M%S")
-        (hdir / f"{ts}.md").write_text(existing, encoding="utf-8")
-        versions = sorted(hdir.glob("*.md"), key=lambda f: f.name)
-        while len(versions) > _HISTORY_LIMIT:
-            versions.pop(0).unlink(missing_ok=True)
-    except Exception:
-        log.exception("vfs: failed to save history for %s", p)
+    save_to_history(ws, p, _HISTORY_LIMIT)
 
 
 def list_file_history(bot_id: int, path: str, group_id: int | None = None) -> list[dict]:
