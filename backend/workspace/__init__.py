@@ -1,5 +1,6 @@
 import logging
 import asyncio
+from .archive_format import build_archive_markdown
 import hashlib
 from workspace.observation import (
     UnobservedFileMutationError,
@@ -979,6 +980,8 @@ def _build_archive_markdown(
     executor: str,
     now: datetime,
 ) -> str:
+    return build_archive_markdown(group_id, run_id, bot, user_message, sender_name,
+                                  tool_records, reply, iterations, model, executor, now)
     _RESULT_PREVIEW = 500
     lines = [
         f"# Run · {bot.get('name', '')} · {now.strftime('%Y-%m-%d %H:%M:%S')}",
