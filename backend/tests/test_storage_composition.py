@@ -48,10 +48,10 @@ class StorageCompositionTest(unittest.TestCase):
             self.assertEqual(selected_storage_backend(), "first")
             self.assertIs(selected_external_adapter(), first)
 
-    def test_sqlite_scope_does_not_use_external_adapter(self) -> None:
-        with storage_scope(StorageComposition()):
+    def test_default_sqlite_is_an_ordinary_composed_adapter(self) -> None:
+        with storage_scope(StorageComposition()) as composition:
             self.assertEqual(selected_storage_backend(), "sqlite")
-            self.assertIsNone(selected_external_adapter())
+            self.assertIs(selected_external_adapter(), composition.adapter)
 
 
 if __name__ == "__main__":

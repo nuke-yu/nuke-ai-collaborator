@@ -3,10 +3,11 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from contextvars import ContextVar
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from .ports import StoragePort
 from .contracts import validate_storage_port
+from .adapters.sqlite import SQLiteStorageAdapter
 
 
 @dataclass(frozen=True)
@@ -14,17 +15,14 @@ class StorageComposition:
     """One storage backend binding owned by a host composition."""
 
     backend_name: str = "sqlite"
-    adapter: StoragePort | None = None
+    adapter: StoragePort = field(default_factory=SQLiteStorageAdapter)
 
     def __post_init__(self) -> None:
         normalized = self.backend_name.strip().lower()
         if not normalized:
             raise ValueError("storage backend name is required")
         object.__setattr__(self, "backend_name", normalized)
-        if normalized == "sqlite" and self.adapter is not None:
-            raise ValueError("sqlite composition uses the built-in adapter")
-        if self.adapter is not None:
-            validate_storage_port(self.adapter)
+        validate_storage_port(self.adapter)
 
 
 _current: ContextVar[StorageComposition | None] = ContextVar(
