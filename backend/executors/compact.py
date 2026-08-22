@@ -29,6 +29,7 @@ from executors.compact_thresholds import (
 )
 from executors.compact_summary import format_compact_summary as _format_compact_summary_impl
 from executors.compact_retry import drop_oldest_rounds as _drop_oldest_rounds_impl
+from executors.compact_history import render_history as _render_history_impl
 
 logger = logging.getLogger(__name__)
 
@@ -543,15 +544,7 @@ _PTL_DROP_FRACTION = 0.3    # fraction of the oldest messages to drop per retry
 
 def _render_history(messages: list[dict]) -> str:
     """Flatten messages to the truncated plain-text history the summariser sees."""
-    lines = []
-    for m in messages:
-        role = m.get("role", "")
-        mc = clean_multimodal_content(m.get("content") or "")
-        if role == "tool":
-            lines.append(f"[工具结果 {m.get('name', '')}]: {mc[:1000]}")
-        else:
-            lines.append(f"[{role}]: {mc[:2000]}")
-    return "\n".join(lines)
+    return _render_history_impl(messages, clean_multimodal_content)
 
 
 def _drop_oldest_rounds(messages: list[dict], fraction: float = _PTL_DROP_FRACTION) -> list[dict]:
