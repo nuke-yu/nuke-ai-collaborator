@@ -7,50 +7,14 @@ fallback to SQLite.
 """
 from __future__ import annotations
 
-from contextlib import AbstractAsyncContextManager, AbstractContextManager
-from typing import Awaitable, Callable, Protocol
-
-
-class ConnectionPort(Protocol):
-    name: str
-
-    def connect(self, path: str | None = None) -> AbstractAsyncContextManager:
-        ...
-
-    def connect_sync(self, path: str | None = None) -> AbstractContextManager:
-        ...
-
-    def write_connect(self, path: str | None = None) -> AbstractAsyncContextManager:
-        ...
-
-
-class TransactionPort(Protocol):
-    """Serialized write transaction capability."""
-
-    def write_connect(self, path: str | None = None) -> AbstractAsyncContextManager:
-        ...
-
-
-class MigrationPort(Protocol):
-    async def migrate(
-        self, path: str | None = None,
-        migration: Callable[[object], Awaitable[None]] | None = None,
-    ) -> None:
-        ...
-
-
-class HealthCheckPort(Protocol):
-    async def health_check(self, path: str | None = None) -> dict[str, object]:
-        ...
-
-
-class LifecyclePort(Protocol):
-    async def close(self) -> None:
-        ...
-
-
-class StoragePort(ConnectionPort, TransactionPort, MigrationPort, HealthCheckPort, LifecyclePort, Protocol):
-    """Complete storage boundary required by a replaceable backend."""
+from storage.ports import (
+    ConnectionPort,
+    HealthCheckPort,
+    LifecyclePort,
+    MigrationPort,
+    StoragePort,
+    TransactionPort,
+)
 
 
 # Compatibility name used by existing adapter registration callers.
