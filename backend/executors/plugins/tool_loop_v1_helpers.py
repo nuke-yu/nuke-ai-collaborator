@@ -37,6 +37,7 @@ from executors.plugins.tool_loop_retry import inject_failure_insight, maybe_auto
 from executors.plugins.tool_loop_provenance import tool_evidence_links, context_evidence_links
 from executors.plugins.tool_loop_prompt import UNTRUSTED_LEARNING_POLICY, attach_untrusted_learning_data
 from executors.plugins.tool_loop_usage import accumulate_usage
+from executors.plugins.tool_loop_signals import extract_completion_signals
 from executors.tool_dispatch import execute_tool_call as _execute_tool_call
 
 logger = logging.getLogger(__name__)
@@ -716,58 +717,7 @@ async def finalize_reply(runner) -> None:
         })
 
 
-def _extract_completion_signals(
-    messages: list[dict],
-    tool_records: list[dict],
-    execution_error: str | None = None,
-) -> list[dict]:
-    """Return workflow signals plus verified successful-tool evidence."""
-    # Extract structured workflow signals from tool calls in assistant messages.
-    # Successful tool outcomes are also projected as internal evidence so an
-    # orchestrator can enforce completion gates (for example, a Dashboard coding
-    # task must not complete unless create_pr actually succeeded).
-    signals = []
-    for msg in messages:
-        if msg.get("role") == "assistant" and msg.get("tool_calls"):
-            for tc in msg["tool_calls"]:
-                func = tc.get("function", {})
-                name = func.get("name")
-                if name in ("signal_stage_done", "signal_rework"):
-                    tc_id = tc.get("id")
-                    failed = False
-                    if tc_id:
-                        for m in messages:
-                            if m.get("role") == "tool" and m.get("tool_call_id") == tc_id:
-                                content = str(m.get("content") or "")
-                                if content.startswith("[") and "]" in content:
-                                    prefix = content.split("]", 1)[0] + "]"
-                                    if any(k in prefix for k in ("错误", "拒绝", "不存在", "受保护", "拦截", "异常", "fail", "error", "denied", "blocked")):
-                                        failed = True
-                                break
-                    if not failed:
-                        try:
-                            args = json.loads(func.get("arguments") or "{}") if isinstance(func.get("arguments"), str) else func.get("arguments", {})
-                        except Exception:
-                            args = {}
-                        signals.append({
-                            "name": name,
-                            "arguments": args
-                        })
-
-    for record in tool_records:
-        if not record.get("is_error", False):
-            signals.append({
-                "name": "_tool_succeeded",
-                "arguments": {"tool_name": record.get("name", "")},
-            })
-
-    if execution_error:
-        signals.append({
-            "name": "_execution_failed",
-            "arguments": {"reason": execution_error},
-        })
-
-    return signals
+_extract_completion_signals = extract_completion_signals
 
 
 async def _finalize_causal_memory_usage(
