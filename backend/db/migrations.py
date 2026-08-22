@@ -18,6 +18,7 @@ from db.migration_063 import apply as _migration_063_impl
 from db.migration_062 import apply as _migration_062_impl
 from db.migration_061 import apply as _migration_061_impl
 from db.migration_060 import apply as _migration_060_impl
+from db.migration_059 import apply as _migration_059_impl
 
 log = logging.getLogger(__name__)
 
@@ -1323,21 +1324,7 @@ async def migration_058(db):
 
 async def migration_059(db):
     """Add payload-free receipts for policy-driven observation retention."""
-    cur = await db.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='session_events'"
-    )
-    if await cur.fetchone() is None:
-        return
-    await db.execute("""CREATE TABLE IF NOT EXISTS observability_retention_archive (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        source TEXT NOT NULL CHECK(source IN ('session','workflow')),
-        source_row_id INTEGER NOT NULL,event_id TEXT NOT NULL,event_type TEXT NOT NULL,
-        retention TEXT NOT NULL,occurred_at INTEGER NOT NULL,content_sha256 TEXT NOT NULL,
-        archived_at TEXT DEFAULT (datetime('now')),UNIQUE(source,source_row_id)
-    )""")
-    await db.execute("""CREATE INDEX IF NOT EXISTS idx_retention_archive_policy
-        ON observability_retention_archive(retention,archived_at)""")
-    await db.commit()
+    await _migration_059_impl(db)
 
 
 async def migration_060(db):
