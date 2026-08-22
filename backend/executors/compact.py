@@ -27,6 +27,7 @@ from executors.compact_thresholds import (
     autocompact_threshold as _autocompact_threshold_impl,
     snip_threshold as _snip_threshold_impl,
 )
+from executors.compact_summary import format_compact_summary as _format_compact_summary_impl
 
 logger = logging.getLogger(__name__)
 
@@ -528,11 +529,7 @@ Format:
 
 def format_compact_summary(raw: str) -> str:
     """Strip <analysis> scratchpad and extract <summary> content."""
-    cleaned = re.sub(r"<analysis>.*?</analysis>", "", raw, flags=re.DOTALL).strip()
-    m = re.search(r"<summary>(.*?)</summary>", cleaned, flags=re.DOTALL)
-    if m:
-        return m.group(1).strip()
-    return cleaned  # fallback: return full text if tags absent
+    return _format_compact_summary_impl(raw)
 
 
 # PROMPT_TOO_LONG retry: if the rendered history is *itself* too long for the
