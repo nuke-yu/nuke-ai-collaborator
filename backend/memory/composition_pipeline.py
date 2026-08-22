@@ -20,9 +20,10 @@ from memory.application import (
     CanonicalSummaryObserver,
     CanonicalToolCompressionObserver,
 )
-from memory.application.pipeline import CanonicalPipelineDispatcher, CanonicalPipelineJobRepository
+from memory.application.pipeline import CanonicalPipelineDispatcher
 from memory.composition import MemoryComposition
 from memory.domain import MemoryScope
+from memory.infrastructure.pipeline_jobs import CanonicalPipelineJobRepository
 
 
 def build_pipeline_dispatcher(composition: MemoryComposition) -> CanonicalPipelineDispatcher:
