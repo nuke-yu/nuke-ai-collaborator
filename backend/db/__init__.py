@@ -1,57 +1,26 @@
-import aiosqlite
 import os
 from contextlib import asynccontextmanager, contextmanager
 
 from db.context import resolve as _route, bind_db, current_db_path
-from db.adapters import selected_external_adapter
+from db.adapters import SQLiteStorageAdapter, selected_external_adapter
 
 DB_PATH = os.environ.get("NUKE_DB_PATH") or os.path.join(os.path.dirname(__file__), "chat.db")
+_sqlite = SQLiteStorageAdapter()
 
 
 @asynccontextmanager
 async def connect(path: str | None = None):
-    adapter = selected_external_adapter()
-    if adapter is not None:
-        async with adapter.connect(_route(path, DB_PATH)) as conn:
-            yield conn
-        return
-    # DFT-028/029: single connect helper. WAL + busy_timeout avoid
-    # "database is locked" under concurrent writers; foreign_keys=ON makes
-    # SQLite actually enforce the FK constraints (it ignores them by default).
-    # DFT-066: aiosqlite runs each connection on its own OS thread. If the
-    # `async with` is abandoned (e.g. a fire-and-forget task cancelled at loop
-    # teardown), the finally below never runs and a NON-daemon thread lingers,
-    # blocking process exit and hanging the test/run. Mark the thread daemon
-    # before it starts so an orphaned read connection can never block exit.
-    conn = aiosqlite.connect(_route(path, DB_PATH))
-    conn.daemon = True
-    conn = await conn
-    try:
-        await conn.execute("PRAGMA journal_mode=WAL")
-        await conn.execute("PRAGMA busy_timeout=5000")
-        await conn.execute("PRAGMA foreign_keys=ON")
+    adapter = selected_external_adapter() or _sqlite
+    async with adapter.connect(_route(path, DB_PATH)) as conn:
         yield conn
-    finally:
-        await conn.close()
 
 
 @contextmanager
 def connect_sync(path: str | None = None):
     """Synchronous connection for low-frequency lookups (e.g. workspace redirection)."""
-    adapter = selected_external_adapter()
-    if adapter is not None:
-        with adapter.connect_sync(_route(path, DB_PATH)) as conn:
-            yield conn
-        return
-    import sqlite3
-    conn = sqlite3.connect(_route(path, DB_PATH))
-    try:
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA busy_timeout=5000")
-        conn.execute("PRAGMA foreign_keys=ON")
+    adapter = selected_external_adapter() or _sqlite
+    with adapter.connect_sync(_route(path, DB_PATH)) as conn:
         yield conn
-    finally:
-        conn.close()
 
 
 def get_db():
