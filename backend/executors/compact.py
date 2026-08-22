@@ -30,6 +30,10 @@ from executors.compact_thresholds import (
 from executors.compact_summary import format_compact_summary as _format_compact_summary_impl
 from executors.compact_retry import drop_oldest_rounds as _drop_oldest_rounds_impl
 from executors.compact_history import render_history as _render_history_impl
+from executors.compact_truncation import (
+    truncate_tool_result as _truncate_tool_result_impl,
+    truncate_user_message as _truncate_user_message_impl,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -883,6 +887,14 @@ def truncate_tool_result(
     along with the path of the saved file.
     Otherwise returns the original tool_result, and None.
     """
+    from workspace import group_workspace
+    return _truncate_tool_result_impl(
+        tool_name, tool_result, group_id, model_name,
+        default_cap=config.TOOL_RESULT_MAX_CHARS,
+        context_windows=_MODEL_CONTEXT_WINDOWS,
+        default_window=_DEFAULT_CONTEXT_WINDOW,
+        group_workspace=group_workspace,
+    )
     import os
     import uuid
     from core.config import TOOL_RESULT_MAX_CHARS
@@ -944,6 +956,14 @@ def truncate_user_message(
     along with the path of the saved file.
     Otherwise returns the original content, and None.
     """
+    from workspace import group_workspace
+    return _truncate_user_message_impl(
+        content, group_id, model_name,
+        default_cap=config.TOOL_RESULT_MAX_CHARS,
+        context_windows=_MODEL_CONTEXT_WINDOWS,
+        default_window=_DEFAULT_CONTEXT_WINDOW,
+        group_workspace=group_workspace,
+    )
     import os
     import uuid
     from core.config import TOOL_RESULT_MAX_CHARS
