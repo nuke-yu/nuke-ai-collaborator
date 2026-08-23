@@ -59,6 +59,13 @@ from executors.plugins.workspace_tool_middleware import (
 )
 from executors.plugins.workspace_permission_hook import permission_check as _permission_check_impl
 from executors.plugins.workspace_shell_hook import shell_guard as _shell_guard_impl
+from executors.plugins.workspace_spawn import (
+    NullBroadcaster as _NullBroadcasterImpl,
+    run_bg_agent as _run_bg_agent_impl,
+    spawn_agent as _spawn_agent_impl,
+    signal_stage_done as _signal_stage_done_impl,
+    signal_rework as _signal_rework_impl,
+)
 _WORKSPACE_TOOLS = WORKSPACE_TOOLS
 
 # ---------------------------------------------------------------------------
@@ -84,6 +91,7 @@ async def _run_bg_agent(
     task_id: str,
 ) -> None:
     """Run a sub-agent in the background and inject result into parent's steer channel."""
+    return await _run_bg_agent_impl(sub_ctx, bot_name, parent_steer, task_id, _bg_tasks, _executor_registry)
     try:
         result = await _executor_registry.get(
             sub_ctx.bot.get("executor_id", "tool_loop_v1")
@@ -107,6 +115,10 @@ async def _run_bg_agent(
 
 
 async def _spawn_agent_handler(bot_name: str, task: str, background: bool = False, context: dict = None) -> str:
+    return await _spawn_agent_impl(
+        bot_name, task, background, context or {}, max_depth=_SPAWN_MAX_DEPTH,
+        execution_context=ExecutionContext, registry=_executor_registry, tasks=_bg_tasks,
+    )
     ctx = context or {}
     group_id    = ctx.get("group_id")
     all_bots    = ctx.get("all_bots", [])
@@ -156,6 +168,7 @@ async def _spawn_agent_handler(bot_name: str, task: str, background: bool = Fals
 
 
 async def _handle_signal_stage_done(reason: str = "", context: dict = None) -> str:
+    return await _signal_stage_done_impl(reason, context or {})
     ctx = context or {}
     runner = ctx.get("runner")
     if runner:
@@ -178,7 +191,7 @@ async def _handle_signal_stage_done(reason: str = "", context: dict = None) -> s
 
 
 async def _handle_signal_rework(target_stage: str = "", reason: str = "", context: dict = None) -> str:
-    return f"[系统] 已记录返工信号。目标阶段: {target_stage}，原因: {reason}。工作流即将打回..."
+    return _signal_rework_impl(target_stage, reason)
 
 
 # ---------------------------------------------------------------------------
