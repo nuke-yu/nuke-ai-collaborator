@@ -37,6 +37,7 @@ from executors.plugins.tool_loop_retry import inject_failure_insight, maybe_auto
 from executors.plugins.tool_loop_provenance import tool_evidence_links, context_evidence_links
 from executors.plugins.tool_loop_prompt import UNTRUSTED_LEARNING_POLICY, attach_untrusted_learning_data
 from executors.plugins.tool_loop_usage import accumulate_usage
+from executors.plugins.tool_loop_fork_skill import run_fork_skill as _run_fork_skill_impl
 from executors.plugins.tool_loop_signals import extract_completion_signals
 from executors.tool_dispatch import execute_tool_call as _execute_tool_call
 
@@ -233,6 +234,12 @@ async def _run_fork_skill(
         still requests tools we return a notice rather than executing anything.
     Tokens roll into the parent ai_service.usage (canonical accumulator).
     """
+    return await _run_fork_skill_impl(
+        skill_content, task, provider, model, temperature, ai_service, tool_schemas,
+        parent_ruleset=parent_ruleset, spawn_depth=spawn_depth, group_id=group_id,
+        bot_id=bot_id, broadcaster=broadcaster, max_iter=max_iter, run_id=run_id,
+        allowed_memory_refs=allowed_memory_refs, tool_records=tool_records,
+    )
     if spawn_depth >= config.SPAWN_MAX_DEPTH:
         return f"[fork skill 已达最大深度 {config.SPAWN_MAX_DEPTH}，拒绝执行]"
 
