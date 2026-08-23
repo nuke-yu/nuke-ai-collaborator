@@ -14,6 +14,7 @@ import shlex
 import stat as stat_module
 import sys
 from pathlib import Path
+from contextlib import asynccontextmanager
 
 from pydantic import BaseModel, Field
 
@@ -74,6 +75,7 @@ from executors.plugins.workspace_local_files import (
     read_local_file_sync as _read_local_file_sync_impl,
     write_local_file_sync as _write_local_file_sync_impl,
 )
+from executors.plugins.workspace_worktree_lock import WorktreeLocks
 _WORKSPACE_TOOLS = WORKSPACE_TOOLS
 
 # ---------------------------------------------------------------------------
@@ -692,21 +694,11 @@ def _check_shell_command_paths(cmd: str, work_dir: Path) -> str | None:
 # ---------------------------------------------------------------------------
 # 共享工作树承重墙：per-group 进程内互斥（固定分片 → 同群组的并发 run_shell 同进程）
 # ---------------------------------------------------------------------------
-import threading as _threading
-from contextlib import asynccontextmanager as _asynccontextmanager
-
-_WORKTREE_LOCKS: dict = {}            # loop_id -> {group_id: asyncio.Lock}
-_WORKTREE_LOCKS_GUARD = _threading.Lock()
+_WORKTREE_LOCK_MANAGER = WorktreeLocks(_ws)
 
 
 def _get_worktree_lock(group_id: int) -> "asyncio.Lock":
-    """按 (event loop, group_id) 取/建进程内互斥锁。类比 workspace._get_path_lock。"""
-    loop_id = id(asyncio.get_running_loop())
-    with _WORKTREE_LOCKS_GUARD:
-        per_loop = _WORKTREE_LOCKS.setdefault(loop_id, {})
-        if group_id not in per_loop:
-            per_loop[group_id] = asyncio.Lock()
-        return per_loop[group_id]
+    return _WORKTREE_LOCK_MANAGER.get(group_id)
 
 
 def _worktree_lock_for(work_dir: Path, group_id) -> "asyncio.Lock | None":
@@ -714,22 +706,16 @@ def _worktree_lock_for(work_dir: Path, group_id) -> "asyncio.Lock | None":
     if group_id is None:
         return None
     try:
-        wt_root = (_ws.group_workspace(group_id).resolve() / "workspace")
-        if work_dir.resolve().is_relative_to(wt_root):
-            return _get_worktree_lock(group_id)
+        return _WORKTREE_LOCK_MANAGER.for_dir(work_dir, group_id)
     except (OSError, ValueError):
         log.exception("workspace_tools: failed to resolve worktree lock for %s", work_dir)
-    return None
+        return None
 
 
-@_asynccontextmanager
+@asynccontextmanager
 async def _maybe_lock(lock):
-    """lock 为 None 时无操作；否则进入临界区。"""
-    if lock is None:
+    async with _WORKTREE_LOCK_MANAGER.maybe(lock):
         yield
-    else:
-        async with lock:
-            yield
 
 
 # ---------------------------------------------------------------------------
