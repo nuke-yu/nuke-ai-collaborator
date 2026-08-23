@@ -640,17 +640,8 @@ async def _handle_run_skill(name: str, args: str = "", context: dict = None) -> 
 
 # --- run_shell sandbox tier 3: dynamic port allocation ----------------------
 
-_INTERCEPT_PORTS = {"8000", "8080", "3000", "5000", "5173", "80"}
-
-def _allocate_free_port() -> int:
-    import socket
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(('', 0))
-        return s.getsockname()[1]
-
-
 def _intercept_command_ports(cmd: str, env: dict) -> tuple[str, str | None, int | None]:
-    return _intercept_command_ports_impl(cmd, env)
+    return _intercept_command_ports_impl(cmd, env, allocate=_allocate_free_port)
 
 
 def _wrap_command_with_limits(cmd: str, limit_bytes: int) -> str:

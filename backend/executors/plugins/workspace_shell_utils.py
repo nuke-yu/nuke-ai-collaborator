@@ -13,12 +13,12 @@ def allocate_free_port() -> int:
         return sock.getsockname()[1]
 
 
-def intercept_command_ports(cmd: str, env: dict):
+def intercept_command_ports(cmd: str, env: dict, *, allocate=allocate_free_port):
     allocated = intercepted = None
     for port in sorted(INTERCEPT_PORTS, key=len, reverse=True):
         pattern = r"(?<![\d\-])" + re.escape(port) + r"(?![\d])"
         if re.search(pattern, cmd):
-            intercepted, allocated = port, allocate_free_port()
+            intercepted, allocated = port, allocate()
             env["APP_PORT"] = env["PORT"] = str(allocated)
             cmd = re.sub(pattern, str(allocated), cmd)
             break
