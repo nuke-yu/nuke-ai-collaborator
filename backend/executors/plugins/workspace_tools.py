@@ -82,6 +82,7 @@ from executors.plugins.workspace_shell_utils import (
     intercept_command_ports as _intercept_command_ports_impl,
     wrap_command_with_limits as _wrap_command_with_limits_impl,
 )
+from executors.plugins.workspace_shell_paths import check_shell_command_paths as _check_shell_command_paths_impl
 _WORKSPACE_TOOLS = WORKSPACE_TOOLS
 
 # ---------------------------------------------------------------------------
@@ -649,30 +650,7 @@ def _wrap_command_with_limits(cmd: str, limit_bytes: int) -> str:
 
 
 def _check_shell_command_paths(cmd: str, work_dir: Path) -> str | None:
-    home_dir = Path("~").expanduser().resolve()
-    home_dir_str = str(home_dir)
-    
-    # 1. Check path-like patterns under /Users, /home, or ~
-    path_pattern = r'(?:/Users/|/home/|~)(?:/[a-zA-Z0-9_\-\.]+)+'
-    for match in re.findall(path_pattern, cmd):
-        try:
-            resolved = Path(match).expanduser().resolve()
-            if not resolved.is_relative_to(work_dir.resolve()):
-                return f"工作区沙箱限制：禁止读写工作区外的路径「{match}」"
-        except Exception:
-            log.exception("workspace_tools: failed to validate shell path candidate %s", match)
-
-    # 2. Check direct home directory string references in arguments
-    if home_dir_str in cmd:
-        for word in re.split(r'[\s\'\"<>\|;&]+', cmd):
-            if home_dir_str in word:
-                try:
-                    resolved = Path(word).expanduser().resolve()
-                    if not resolved.is_relative_to(work_dir.resolve()):
-                        return f"工作区沙箱限制：禁止读写工作区外的路径「{word}」"
-                except Exception:
-                    log.exception("workspace_tools: failed to validate shell home-path candidate %s", word)
-    return None
+    return _check_shell_command_paths_impl(cmd, work_dir, path_cls=Path, regex=re, logger=log)
 
 
 # ---------------------------------------------------------------------------
