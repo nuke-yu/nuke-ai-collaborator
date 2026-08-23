@@ -66,6 +66,15 @@ from executors.plugins.workspace_spawn import (
     signal_stage_done as _signal_stage_done_impl,
     signal_rework as _signal_rework_impl,
 )
+from executors.plugins.workspace_local_files import (
+    local_file_roots as _local_file_roots_impl,
+    lexical_relative_to_root as _lexical_relative_to_root_impl,
+    validate_path as _validate_path_impl,
+    secure_open_root as _secure_open_root_impl,
+    secure_open_parent as _secure_open_parent_impl,
+    read_local_file_sync as _read_local_file_sync_impl,
+    write_local_file_sync as _write_local_file_sync_impl,
+)
 _WORKSPACE_TOOLS = WORKSPACE_TOOLS
 
 # ---------------------------------------------------------------------------
@@ -1052,6 +1061,34 @@ def _write_local_file_sync(spec: tuple[Path, tuple[str, ...]], content: str) -> 
         if fd is not None:
             os.close(fd)
         os.close(parent_fd)
+
+
+def _local_file_roots(context: dict, *, allow_write: bool = False) -> list[Path]:
+    return _local_file_roots_impl(context, allow_write=allow_write, layout=_layout)
+
+
+def _lexical_relative_to_root(path: str, roots: list[Path]):
+    return _lexical_relative_to_root_impl(path, roots)
+
+
+def _validate_path_in_group_workspace(path: str, context: dict | None, *, allow_write: bool = False):
+    return _validate_path_impl(path, context, allow_write=allow_write, layout=_layout)
+
+
+def _secure_open_root(root: Path) -> int:
+    return _secure_open_root_impl(root, _layout)
+
+
+def _secure_open_parent(root: Path, parts: tuple[str, ...], *, create: bool):
+    return _secure_open_parent_impl(root, parts, create=create, layout=_layout)
+
+
+def _read_local_file_sync(spec):
+    return _read_local_file_sync_impl(spec, layout=_layout)
+
+
+def _write_local_file_sync(spec, content: str):
+    return _write_local_file_sync_impl(spec, content, layout=_layout)
 
 
 async def _handle_read_local_file(path: str, context: dict = None) -> str:
