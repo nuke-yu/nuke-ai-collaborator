@@ -60,7 +60,6 @@ from executors.plugins.workspace_tool_middleware import (
 from executors.plugins.workspace_permission_hook import permission_check as _permission_check_impl
 from executors.plugins.workspace_shell_hook import shell_guard as _shell_guard_impl
 from executors.plugins.workspace_spawn import (
-    NullBroadcaster as _NullBroadcasterImpl,
     run_bg_agent as _run_bg_agent_impl,
     spawn_agent as _spawn_agent_impl,
     signal_stage_done as _signal_stage_done_impl,
@@ -85,12 +84,6 @@ _SPAWN_MAX_DEPTH = config.SPAWN_MAX_DEPTH
 
 # Running background sub-agent tasks: task_id → asyncio.Task
 _bg_tasks: dict[str, asyncio.Task] = {}
-
-
-class _NullBroadcaster:
-    """Silent broadcaster for sub-agent runs — suppresses all WS events."""
-    async def broadcast(self, group_id, message):
-        pass
 
 
 async def _run_bg_agent(
