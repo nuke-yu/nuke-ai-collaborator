@@ -47,6 +47,7 @@ from db.migration_034 import apply as _migration_034_impl
 from db.migration_033 import apply as _migration_033_impl
 from db.migration_032 import apply as _migration_032_impl
 from db.migration_031 import apply as _migration_031_impl
+from db.migration_030 import apply as _migration_030_impl
 
 log = logging.getLogger(__name__)
 
@@ -763,17 +764,7 @@ async def migration_029(db):
 
 async def migration_030(db):
     """Add tokenized, recoverable leases for coding-agent task retries."""
-    await db.execute("""
-        CREATE TABLE IF NOT EXISTS agent_task_retry_claims (
-            task_id         TEXT PRIMARY KEY,
-            token           TEXT NOT NULL UNIQUE,
-            previous_status TEXT NOT NULL,
-            automatic      INTEGER NOT NULL DEFAULT 0,
-            claimed_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (task_id) REFERENCES agent_tasks(task_id) ON DELETE CASCADE
-        )
-    """)
-    await db.commit()
+    await _migration_030_impl(db)
 
 
 async def migration_031(db):
