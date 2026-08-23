@@ -1218,28 +1218,23 @@ from executors.plugins.tool_loop_presentation import (
     THINKING_I18N, generate_thinking_preview, build_invoked_skills_block,
 )
 from executors.plugins.tool_loop_media import MCPSHOT_RE, check_and_attach_file
+from executors.plugins.tool_loop_reinject import (
+    get_fresh_context_prefix as _get_fresh_context_prefix_impl,
+    build_reinject as _build_reinject_impl,
+)
 
 
 
 async def get_fresh_context_prefix(runner) -> tuple[str, str]:
     from core.orchestration import prompt_builder
-    return await prompt_builder.get_fresh_context_prefix(
-        runner.bot["id"],
-        runner.ctx.group_id,
-        runner.executor.manifest.workspace.startup_files,
-        runner.skills_xml
-    )
+    return await _get_fresh_context_prefix_impl(runner, prompt_builder)
 
 
 async def build_reinject(runner) -> str:
-    fresh_prefix, _ = await runner._get_fresh_context_prefix()
-    ft_xml = compact.build_file_tracker_xml(runner.file_tracker)
-    file_contents = compact.build_file_contents_for_reinject(
-        runner.file_tracker, workspace_dir=str(_bot_ws(runner.bot["id"], runner.ctx.group_id))
+    return await _build_reinject_impl(
+        runner, compact=compact, bot_workspace=_bot_ws,
+        invoked_skills_block=build_invoked_skills_block,
     )
-    invoked = build_invoked_skills_block(getattr(runner, "invoked_skills", {}))
-    parts = [p for p in [fresh_prefix, invoked, ft_xml, file_contents] if p]
-    return "\n\n".join(parts)
 
 
 _MCPSHOT_RE = MCPSHOT_RE
