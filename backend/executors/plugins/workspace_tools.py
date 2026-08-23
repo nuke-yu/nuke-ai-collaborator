@@ -58,6 +58,7 @@ from executors.plugins.workspace_tool_middleware import (
     default_secret_redactor, default_output_truncator,
 )
 from executors.plugins.workspace_permission_hook import permission_check as _permission_check_impl
+from executors.plugins.workspace_shell_hook import shell_guard as _shell_guard_impl
 _WORKSPACE_TOOLS = WORKSPACE_TOOLS
 
 # ---------------------------------------------------------------------------
@@ -514,15 +515,7 @@ async def _default_shell_guard(name: str, arguments: dict, context: dict) -> dic
     than open. The permission hook (_permission_check_hook) handles the case
     where a ruleset *is* present — there it can ask/deny per the pipeline.
     """
-    if name != "run_shell":
-        return None
-    if context.get("ruleset") is None:
-        return {"block": True, "reason": "run_shell 未接入权限系统（无 ruleset），出于安全已拒绝执行"}
-    cmd = (arguments.get("cmd") or "").strip()
-    blocked, reason = _check_shell_command(cmd)
-    if blocked:
-        return {"block": True, "reason": f"{reason}（命令：{cmd}）"}
-    return None
+    return await _shell_guard_impl(name, arguments, context, check_shell_command=_check_shell_command)
 
 
 
