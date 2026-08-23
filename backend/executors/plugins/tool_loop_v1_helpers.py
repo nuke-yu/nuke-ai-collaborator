@@ -39,6 +39,8 @@ from executors.plugins.tool_loop_usage import accumulate_usage
 from executors.plugins.tool_loop_fork_skill import run_fork_skill as _run_fork_skill_impl
 from executors.plugins.tool_loop_signals import extract_completion_signals
 from executors.tool_dispatch import execute_tool_call as _execute_tool_call
+from executors.plugins.tool_loop_primitives import tool_loop_core as _tool_loop_core_impl
+from executors.plugins.tool_loop_primitives import before_finalize_hook as _before_finalize_hook_impl
 
 logger = logging.getLogger(__name__)
 _DOOM_LOOP_THRESHOLD = config.DOOM_LOOP_THRESHOLD
@@ -88,50 +90,10 @@ async def _tool_loop_core(
     tool_schemas: list,
     max_iter: int = 10,
 ) -> str:
-    """Minimal tool-calling loop used by tests (no broadcaster, no compaction, no DB)."""
-    import executors.plugins.tool_loop_v1 as tool_loop_v1
-    messages = list(messages)
-    iter_count = 0
-    tool_calls_history = []
-    while iter_count < max_iter:
-        iter_count += 1
-        result = await tool_loop_v1.call_ai_once(
-            system_prompt, messages, provider, model_name,
-            temperature, max_tokens, tool_schemas,
-        )
-        if result["type"] == "tool_calls":
-            def _serialize_calls(calls):
-                serialized = []
-                for c in calls:
-                    serialized.append({
-                        "name": c["name"],
-                        "arguments": c.get("arguments", {})
-                    })
-                return json.dumps(serialized, sort_keys=True)
-
-            current_serialized = _serialize_calls(result["calls"])
-            tool_calls_history.append(current_serialized)
-
-            if len(tool_calls_history) >= _DOOM_LOOP_THRESHOLD:
-                recent_history = tool_calls_history[-_DOOM_LOOP_THRESHOLD:]
-                if all(h == current_serialized for h in recent_history):
-                    return f"[循环保护] 连续 {_DOOM_LOOP_THRESHOLD} 次完全相同的工具调用，已终止循环"
-
-            messages.append(result["assistant_message"])
-            for call in result["calls"]:
-                tool_result = await tool_loop_v1._execute_tool_call(
-                    call["name"], call.get("arguments", {}), context={}
-                )
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": call.get("id", ""),
-                    "name": call["name"],
-                    "content": tool_result,
-                })
-        else:
-            tool_calls_history.clear()
-            return result.get("content", "")
-    return "[达到最大工具调用次数，任务未完成]"
+    return await _tool_loop_core_impl(
+        system_prompt, messages, provider, model_name, temperature,
+        max_tokens, tool_schemas, max_iter,
+    )
 
 
 
@@ -147,98 +109,13 @@ async def _before_finalize_hook(
     ai_service: AIService,
     user_message: str,
 ) -> str:
-    """Quality gate before finalizing a reply."""
-    reviewer_prompt = config.get("reviewer_prompt", "")
-    max_retries = int(config.get("max_retries", 2))
-    cur_messages = list(snap_messages)
-    cur_draft = draft
-
-    for attempt in range(max_retries + 1):
-        await ai_service.ctx.interaction.broadcast(ai_service.ctx.group_id, {
-            "type": "before_finalize_review", "temp_id": ai_service.temp_id,
-            "attempt": attempt + 1, "max_retries": max_retries + 1,
-        })
-
-        approved, feedback = True, ""
-        try:
-            review = await ai_service.call(
-                reviewer_prompt,
-                [{"role": "user", "content": f"【用户问题】\n{user_message}\n\n【待审查回复】\n{cur_draft}"}],
-                model_name, provider, temperature, 512,
-                auto_compact=False,
-                operation="before_finalize_review",
-            )
-            feedback = review["content"] if review["type"] == "text" else ""
-            approved = not feedback.strip().upper().startswith("REJECTED")
-        except Exception:
-            break  # fail open
-
-        if approved or attempt >= max_retries:
-            await ai_service.ctx.interaction.broadcast(ai_service.ctx.group_id, {
-                "type": "before_finalize_approved", "temp_id": ai_service.temp_id,
-                "note": "" if approved else "retry budget exhausted",
-            })
-            break
-
-        await ai_service.ctx.interaction.broadcast(ai_service.ctx.group_id, {
-            "type": "before_finalize_rejected", "temp_id": ai_service.temp_id,
-            "feedback": feedback[:300], "attempt": attempt + 1,
-        })
-
-        cur_messages = cur_messages + [
-            {"role": "assistant", "content": cur_draft},
-            {"role": "user", "content": f"[审查意见] {feedback}\n\n请根据以上意见修改回复。"},
-        ]
-        try:
-            regen = await ai_service.call(
-                system_prompt, cur_messages, model_name, provider, temperature, max_tokens,
-                auto_compact=False,
-                operation="before_finalize_regeneration",
-            )
-            if regen["type"] == "text":
-                cur_draft = regen["content"]
-        except Exception:
-            break
-
-    return cur_draft
-
-
-async def _run_fork_skill(
-    skill_content: str,
-    task: str,
-    provider: str,
-    model: str,
-    temperature: float,
-    ai_service: AIService,
-    tool_schemas: list | None = None,
-    *,
-    parent_ruleset=None,
-    spawn_depth: int = 0,
-    group_id: int | None = None,
-    bot_id: int | None = None,
-    broadcaster=None,
-    max_iter: int = 8,
-    run_id: str | None = None,
-    allowed_memory_refs: tuple[str, ...] = (),
-    tool_records: list[dict] | None = None,
-) -> str:
-    """Execute a fork skill as a real, attenuated sub-agent.
-
-    Security contract (§7.5.2):
-      - refuses past SPAWN_MAX_DEPTH (prevents skill→skill explosion);
-      - child tools run at spawn_depth+1 through the permission pipeline with a
-        ruleset attenuated by derive_subagent_ruleset (bypass not propagated,
-        blanket high-risk allows dropped; the engine denies `ask` at depth>0);
-      - tool gating: no declared tool_schemas → single call, and if the model
-        still requests tools we return a notice rather than executing anything.
-    Tokens roll into the parent ai_service.usage (canonical accumulator).
-    """
-    return await _run_fork_skill_impl(
-        skill_content, task, provider, model, temperature, ai_service, tool_schemas,
-        parent_ruleset=parent_ruleset, spawn_depth=spawn_depth, group_id=group_id,
-        bot_id=bot_id, broadcaster=broadcaster, max_iter=max_iter, run_id=run_id,
-        allowed_memory_refs=allowed_memory_refs, tool_records=tool_records,
+    return await _before_finalize_hook_impl(
+        draft, snap_messages, system_prompt, config, provider, model_name,
+        temperature, max_tokens, ai_service, user_message,
     )
+
+
+_run_fork_skill = _run_fork_skill_impl
 async def setup_session(runner) -> None:
     skill_discovery = bool(runner.executor.manifest.workspace.skill_discovery)
     # Build ruleset
