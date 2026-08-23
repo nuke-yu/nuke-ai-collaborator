@@ -57,6 +57,7 @@ from executors.plugins.workspace_tool_definitions import WORKSPACE_TOOLS
 from executors.plugins.workspace_tool_middleware import (
     default_secret_redactor, default_output_truncator,
 )
+from executors.plugins.workspace_permission_hook import permission_check as _permission_check_impl
 _WORKSPACE_TOOLS = WORKSPACE_TOOLS
 
 # ---------------------------------------------------------------------------
@@ -530,9 +531,7 @@ async def _default_shell_guard(name: str, arguments: dict, context: dict) -> dic
 # open (DFT-024) — otherwise an executor that forgets to build a ruleset (e.g.
 # the old react_v1) would run these with zero checks. Read-only workspace tools
 # stay allowed so such a bot can still inspect its own workspace.
-_APPROVAL_REQUIRED_TOOLS = frozenset({
-    "run_shell", "write_file", "read_local_file", "write_local_file", "spawn_agent", "run_code",
-})
+_APPROVAL_REQUIRED_TOOLS = frozenset({"run_shell", "write_file", "read_local_file", "write_local_file", "spawn_agent", "run_code"})
 
 # RD 流水线的内部记账工具（Jira/PR 替身）：人把关在工作流的 4 道门，不在每次工具调用，
 # 故这些工具不走权限询问，直接放行。
@@ -550,62 +549,11 @@ _READ_ONLY_CONFINED_TOOLS = frozenset({
 
 async def _permission_check_hook(name: str, arguments: dict, context: dict) -> dict | None:
     """Run the permission decision pipeline before every tool call."""
-    if name in _AUTO_ALLOW_TOOLS:
-        return None  # internal RD bookkeeping tools — gated at the workflow doors, not here
-    ruleset = context.get("ruleset")
-    if ruleset is None:
-        if name in _APPROVAL_REQUIRED_TOOLS:
-            return {"block": True,
-                    "reason": f"{name} 未接入权限系统（无 ruleset），出于安全已拒绝执行"}
-        return None  # read-only workspace tools are safe without a ruleset
-
-    # run_shell confined to the group workspace is auto-allowed: the sandbox
-    # (_resolve_shell_cwd) already enforces path boundaries, and the danger guard
-    # (_default_shell_guard) blocks destructive patterns.  Deny rules still win.
-    #
-    # EXCEPTION — destructive git (force_ask): path confinement does NOT bound the
-    # blast radius of `reset --hard` / `clean -f` / `push --force` (they destroy
-    # content git never stored, or rewrite the shared remote). Those skip both the
-    # confined auto-allow and any scoped/blanket allow rule, and always reach human
-    # approval — deny rules still win, sub-agents still can't prompt (→ denied).
-    workspace_confined = name in _READ_ONLY_CONFINED_TOOLS
-    force_ask = False
-    if name == "run_shell":
-        cwd = (arguments.get("cwd") or "").strip()
-        _, err = _resolve_shell_cwd(cwd, context.get("bot_id"), context.get("group_id"))
-        workspace_confined = (err is None)
-        force_ask, _ = _is_destructive_git((arguments.get("cmd") or "").strip())
-
-    result = await permissions.check(
-        tool_name=name,
-        arguments=arguments,
-        ruleset=ruleset,
-        bot_id=context.get("bot_id"),
-        broadcaster=context.get("broadcaster"),
-        group_id=context.get("group_id"),
-        spawn_depth=context.get("spawn_depth", 0),
-        workspace_confined=workspace_confined,
-        force_ask=force_ask,
-        event_recorder=context.get("permission_event_recorder"),
+    return await _permission_check_impl(
+        name, arguments, context,
+        resolve_shell_cwd=_resolve_shell_cwd,
+        is_destructive_git=_is_destructive_git,
     )
-
-    if result["action"] == "deny":
-        return {"block": True, "reason": result.get("reason", "权限拒绝")}
-
-    # Note: persisting an "always" rule is handled in ONE place — the worker's
-    # PERMISSION_RESPONSE handler (runtime/worker.py), the universal path for every
-    # tool incl MCP, which synthesizes a scoped args_pattern (#5). Saving here too
-    # would double-write (and previously wrote a blanket rule that defeated the
-    # scoped one).
-
-    # Hot-patch the in-memory ruleset so the same rule takes effect immediately
-    # within this session — without this, the DB write is async and the next
-    # identical call in the same tool loop still falls through to "ask".
-    persist_rule = result.get("persist_rule")
-    if persist_rule is not None:
-        ruleset.rules.append(persist_rule)
-
-    return None
 
 
 # ---------------------------------------------------------------------------
