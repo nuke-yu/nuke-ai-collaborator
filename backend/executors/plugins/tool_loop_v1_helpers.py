@@ -734,6 +734,7 @@ async def _finalize_causal_memory_usage(
     learning_port,
 ) -> None:
     """Advance only cited Memory through the evidence-bearing usage lifecycle."""
+    return await _finalize_usage_impl(runner, scope=scope, learning_port=learning_port)
     from memory.application.reflexion_service import record_memory_adoption
     from memory.application.causal_usage import (
         collect_causal_usages,
@@ -1222,6 +1223,7 @@ from executors.plugins.tool_loop_reinject import (
     get_fresh_context_prefix as _get_fresh_context_prefix_impl,
     build_reinject as _build_reinject_impl,
 )
+from executors.plugins.tool_loop_usage_finalize import finalize_causal_memory_usage as _finalize_usage_impl
 
 
 
