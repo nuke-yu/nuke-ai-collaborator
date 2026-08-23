@@ -92,104 +92,13 @@ async def _run_bg_agent(
 ) -> None:
     """Run a sub-agent in the background and inject result into parent's steer channel."""
     return await _run_bg_agent_impl(sub_ctx, bot_name, parent_steer, task_id, _bg_tasks, _executor_registry)
-    try:
-        result = await _executor_registry.get(
-            sub_ctx.bot.get("executor_id", "tool_loop_v1")
-        ).run(sub_ctx)
-        reply = result.full_text or "[子 Agent 未返回内容]"
-    except asyncio.CancelledError:
-        raise
-    except Exception as e:
-        reply = f"[后台子Agent 执行错误] {e}"
-    finally:
-        _bg_tasks.pop(task_id, None)
-
-    if parent_steer is not None:
-        await parent_steer.put(f"[后台子Agent「{bot_name}」已完成]\n{reply}")
-
-    await sub_ctx.broadcaster.broadcast(sub_ctx.group_id, {
-        "type": "bg_agent_done",
-        "bot_name": bot_name,
-        "preview": reply[:300],
-    })
-
-
 async def _spawn_agent_handler(bot_name: str, task: str, background: bool = False, context: dict = None) -> str:
     return await _spawn_agent_impl(
         bot_name, task, background, context or {}, max_depth=_SPAWN_MAX_DEPTH,
         execution_context=ExecutionContext, registry=_executor_registry, tasks=_bg_tasks,
     )
-    ctx = context or {}
-    group_id    = ctx.get("group_id")
-    all_bots    = ctx.get("all_bots", [])
-    all_members = ctx.get("all_members", [])
-    spawn_depth = ctx.get("spawn_depth", 0)
-
-    if spawn_depth >= _SPAWN_MAX_DEPTH:
-        return f"[spawn_agent] 已达最大深度 {_SPAWN_MAX_DEPTH}，拒绝派生"
-
-    target = next((b for b in all_bots if b["name"] == bot_name), None)
-    if not target:
-        available = "、".join(b["name"] for b in all_bots) or "（无）"
-        return f"[spawn_agent] 未找到 Bot「{bot_name}」。可用：{available}"
-
-    sub_ctx = ExecutionContext(
-        bot=target,
-        group_id=group_id,
-        user_message=task,
-        sender={"id": 0, "name": "sub_agent", "type": "bot", "avatar_color": "#888"},
-        history=[],
-        all_bots=all_bots,
-        all_members=all_members,
-        interaction=ctx.get("interaction"),
-        spawn_depth=spawn_depth + 1,
-        # Attenuate the parent's permissions for the child (blast-radius
-        # containment): bypass doesn't propagate, blanket high-risk allows are
-        # dropped; deny + scoped allows are kept. The child also can't prompt
-        # (engine denies ask when spawn_depth>0).
-        ruleset=permissions.derive_subagent_ruleset(ctx.get("ruleset")),
-    )
-
-    if background:
-        import uuid as _uuid
-        task_id = _uuid.uuid4().hex
-        parent_steer = ctx.get("steer_channel")
-        bg = asyncio.create_task(_run_bg_agent(sub_ctx, bot_name, parent_steer, task_id))
-        _bg_tasks[task_id] = bg
-        return f"[后台子Agent 已启动] Bot「{bot_name}」正在后台执行，完成后结果将自动注回对话。task_id={task_id}"
-
-    try:
-        result = await _executor_registry.get(
-            target.get("executor_id", "tool_loop_v1")
-        ).run(sub_ctx)
-        return result.full_text or "[子 Agent 未返回内容]"
-    except Exception as e:
-        return f"[spawn_agent 执行错误] {e}"
-
-
 async def _handle_signal_stage_done(reason: str = "", context: dict = None) -> str:
     return await _signal_stage_done_impl(reason, context or {})
-    ctx = context or {}
-    runner = ctx.get("runner")
-    if runner:
-        require_pr = bool(
-            (runner.bot.get("executor_config") or {}).get(
-                "require_pull_request_completion"
-            )
-        )
-        if require_pr:
-            has_pr = any(
-                rec.get("name") == "create_pr" and not rec.get("is_error")
-                for rec in runner.tool_records
-            )
-            if not has_pr:
-                return (
-                    "[错误] 在调用 signal_stage_done 之前，必须先成功调用 create_pr 创建 Pull Request。"
-                    "请先调用 create_pr，确认成功后再调用 signal_stage_done。"
-                )
-    return f"[系统] 已记录阶段完成信号。原因: {reason}。正在推进工作流..."
-
-
 async def _handle_signal_rework(target_stage: str = "", reason: str = "", context: dict = None) -> str:
     return _signal_rework_impl(target_stage, reason)
 
