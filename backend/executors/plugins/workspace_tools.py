@@ -76,6 +76,12 @@ from executors.plugins.workspace_local_files import (
     write_local_file_sync as _write_local_file_sync_impl,
 )
 from executors.plugins.workspace_worktree_lock import WorktreeLocks
+from executors.plugins.workspace_shell_utils import (
+    INTERCEPT_PORTS as _INTERCEPT_PORTS,
+    allocate_free_port as _allocate_free_port,
+    intercept_command_ports as _intercept_command_ports_impl,
+    wrap_command_with_limits as _wrap_command_with_limits_impl,
+)
 _WORKSPACE_TOOLS = WORKSPACE_TOOLS
 
 # ---------------------------------------------------------------------------
@@ -644,24 +650,11 @@ def _allocate_free_port() -> int:
 
 
 def _intercept_command_ports(cmd: str, env: dict) -> tuple[str, str | None, int | None]:
-    allocated_port = None
-    intercepted_port = None
-    for p in sorted(_INTERCEPT_PORTS, key=len, reverse=True):
-        pattern = r"(?<![\d\-])" + re.escape(p) + r"(?![\d])"
-        if re.search(pattern, cmd):
-            intercepted_port = p
-            allocated_port = _allocate_free_port()
-            env["APP_PORT"] = str(allocated_port)
-            env["PORT"] = str(allocated_port)
-            cmd = re.sub(pattern, str(allocated_port), cmd)
-            break
-    return cmd, intercepted_port, allocated_port
+    return _intercept_command_ports_impl(cmd, env)
 
 
 def _wrap_command_with_limits(cmd: str, limit_bytes: int) -> str:
-    if not _IS_WINDOWS:
-        return f"ulimit -v { limit_bytes // 1024 } 2>/dev/null; {cmd}"
-    return cmd
+    return _wrap_command_with_limits_impl(cmd, limit_bytes, is_windows=_IS_WINDOWS)
 
 
 def _check_shell_command_paths(cmd: str, work_dir: Path) -> str | None:
