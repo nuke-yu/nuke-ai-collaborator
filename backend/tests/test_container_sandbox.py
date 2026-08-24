@@ -48,6 +48,10 @@ class TestBuildRunArgv(unittest.TestCase):
         self.assertIn("--memory=256m", argv)
         self.assertIn("--cpus=1.5", argv)
         self.assertIn("--network=none", argv)
+        self.assertIn("--cap-drop=ALL", argv)
+        self.assertIn("--read-only", argv)
+        self.assertIn("no-new-privileges:true", argv)
+        self.assertIn("--pids-limit", argv)
         self.assertEqual(argv[-3:], ["img", "sleep", "infinity"])
         self.assertIn("nuke-sbx-3", argv)
 

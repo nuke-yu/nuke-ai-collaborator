@@ -55,6 +55,14 @@ def build_run_argv(
         "--user", f"{uid}:{gid}",
         "--mount", f"type=bind,src={ws},dst={ws}",
         "--workdir", ws,
+        # Defense in depth: even if the Docker API proxy is misconfigured, a
+        # sandbox cannot gain extra kernel capabilities or persist writes
+        # outside the explicitly mounted workspace.
+        "--cap-drop=ALL",
+        "--security-opt", "no-new-privileges:true",
+        "--read-only",
+        "--tmpfs", "/tmp:rw,nosuid,nodev,noexec,size=64m",
+        "--pids-limit", "256",
         f"--memory={memory}",
         f"--cpus={cpus}",
         f"--network={network}",
