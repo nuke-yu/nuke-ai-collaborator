@@ -83,6 +83,7 @@ from executors.plugins.workspace_shell_utils import (
     wrap_command_with_limits as _wrap_command_with_limits_impl,
 )
 from executors.plugins.workspace_shell_paths import check_shell_command_paths as _check_shell_command_paths_impl
+from executors.plugins.container_shell_backend import ContainerShellBackend
 _WORKSPACE_TOOLS = WORKSPACE_TOOLS
 
 # ---------------------------------------------------------------------------
@@ -741,38 +742,6 @@ class LocalShellBackend:
         if _IS_WINDOWS:
             win_sandbox.apply_memory_limit(proc.pid, req.mem_limit_bytes)
         return ShellBackgroundHandle(identifier=str(proc.pid))
-
-
-class ContainerShellBackend:
-    """per-group sandbox container (bind-mounts ONLY that group's workspace) —
-    group isolation as a mount fact. Delegates lifecycle/exec to ContainerManager
-    (see container_sandbox.py); memory is enforced by the container cgroup, so the
-    local ulimit wrap is NOT applied here."""
-
-    def __init__(self, manager=None):
-        from executors.plugins import container_sandbox
-        self._mgr = manager or container_sandbox.ContainerManager()
-
-    async def ensure_ready(self, group_id) -> None:
-        if group_id is None:
-            raise RuntimeError("container backend 需要 group_id（无群上下文无法隔离）")
-        await self._mgr.ensure(group_id, _ws.group_workspace(group_id))
-
-    async def healthy(self) -> bool:
-        return await self._mgr.available()
-
-    async def run_foreground(self, req: ShellExecRequest) -> ShellExecResult:
-        rc, out, err, timed_out = await self._mgr.exec_foreground(
-            req.group_id, cmd=req.cmd, cwd=str(req.work_dir),
-            env=req.env, timeout=req.timeout_s,
-        )
-        return ShellExecResult(rc, out, err, timed_out=timed_out)
-
-    async def start_background(self, req: ShellExecRequest) -> ShellBackgroundHandle:
-        ident = await self._mgr.exec_background(
-            req.group_id, cmd=req.cmd, cwd=str(req.work_dir), env=req.env,
-        )
-        return ShellBackgroundHandle(identifier=ident)
 
 
 _SHELL_BACKEND: ShellExecBackend | None = None
