@@ -3,8 +3,16 @@ from __future__ import annotations
 
 import json
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import Any, Protocol
 from core import config
+
+
+class AiCall(Protocol):
+    def __call__(self, *args: Any, **kwargs: Any) -> Awaitable[dict]: ...
+
+
+class ToolCall(Protocol):
+    def __call__(self, name: str, arguments: dict, *, context: dict) -> Awaitable[str]: ...
 
 
 async def tool_loop_core(
@@ -17,8 +25,8 @@ async def tool_loop_core(
     tool_schemas: list,
     max_iter: int = 10,
     *,
-    call_ai_once: Callable[..., Awaitable[dict]],
-    execute_tool_call: Callable[..., Awaitable[str]],
+    call_ai_once: AiCall,
+    execute_tool_call: ToolCall,
 ) -> str:
     """Minimal tool-calling loop used by tests (no broadcaster or DB)."""
     messages = list(messages)
