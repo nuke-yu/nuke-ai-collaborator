@@ -473,16 +473,23 @@ async def _authenticate_websocket(
         await websocket.close()
         return None
     
-    # DFT-082: a valid token (a logged-in company user) is the access boundary —
-    # this is a trusted, internal shared workspace, not a public multi-tenant
-    # service, so we don't bind member_id to a specific user (members.user_id is
-    # not populated; the old check rejected EVERY connection). We still verify the
-    # member exists in this group so a client can't attach to a bogus member_id.
+    # A valid token is not sufficient for group access. Require explicit human
+    # membership before allowing the browser onto the group bus. Member rows are
+    # group-scoped identities, so validate the requested member belongs to the
+    # same authorized group without relying on nullable members.user_id.
     async with db.global_db() as cdb:
-        async with cdb.execute("SELECT 1 FROM members WHERE id = ? AND group_id = ?", (member_id, group_id)) as cur:
+        async with cdb.execute(
+            """SELECT 1 FROM group_memberships gm
+               WHERE gm.user_id = ? AND gm.group_id = ?
+               AND EXISTS (
+                   SELECT 1 FROM members m
+                   WHERE m.id = ? AND m.group_id = gm.group_id
+               )""",
+            (int(user_payload["uid"]), group_id, member_id),
+        ) as cur:
             if not await cur.fetchone():
                 await websocket.accept(subprotocol=subprotocol)
-                await websocket.send_json({"type": "auth_error", "message": "Unknown member for this group"})
+                await websocket.send_json({"type": "auth_error", "message": "Group membership required"})
                 await websocket.close()
                 return None
     return user_payload
