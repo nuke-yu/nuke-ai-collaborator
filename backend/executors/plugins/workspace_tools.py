@@ -16,8 +16,6 @@ import sys
 from pathlib import Path
 from contextlib import asynccontextmanager
 
-from pydantic import BaseModel, Field
-
 from executors.base import ExecutionContext, ExecutionResult, ToolDef, ToolResult
 from core import config
 from executors import tool_executor, registry as _executor_registry
@@ -85,6 +83,7 @@ from executors.plugins.workspace_shell_utils import (
 from executors.plugins.workspace_shell_paths import check_shell_command_paths as _check_shell_command_paths_impl
 from executors.plugins.container_shell_backend import ContainerShellBackend
 from executors.plugins.local_shell_backend import LocalShellBackend
+from executors.plugins.workspace_registration import register_workspace_tools as _register_workspace_tools_impl
 _WORKSPACE_TOOLS = WORKSPACE_TOOLS
 
 # ---------------------------------------------------------------------------
@@ -864,12 +863,6 @@ async def _handle_mcp_authenticate(server: str, context: dict = None) -> str:
 
 def register_workspace_tools() -> None:
     """Register all workspace tool handlers and hooks into the global tool_executor."""
-    tool_executor.add_before_hook(_permission_check_hook)
-    tool_executor.add_before_hook(_default_shell_guard)
-    # Redactor BEFORE truncator: secrets are masked on the full output before any
-    # head/tail truncation, so nothing truncation persists can leak a credential.
-    tool_executor.add_after_hook(_default_secret_redactor)
-    tool_executor.add_after_hook(_default_output_truncator)
     handlers = {
         "read_file":        _handle_read_file,
         "slice_read":       _handle_slice_read,
@@ -886,36 +879,14 @@ def register_workspace_tools() -> None:
         "spawn_agent":      _spawn_agent_handler,
         "signal_stage_done": _handle_signal_stage_done,
         "signal_rework":     _handle_signal_rework,
+        "mcp_authenticate":  _handle_mcp_authenticate,
     }
-    for tdef in _WORKSPACE_TOOLS:
-        tool_executor.register(tdef, handlers[tdef.name])
-
-    # search (ripgrep) / code_intel (jedi) — lazy imports break the cycle (both
-    # import our _resolve_shell_cwd / _sandbox_env at their module top).
-    from executors.plugins import search_tool
-    tool_executor.register(search_tool.SEARCH_TOOL_DEF, search_tool._handle_search)
-    from executors.plugins import code_intel_tool
-    tool_executor.register(code_intel_tool.CODE_INTEL_TOOL_DEF, code_intel_tool._handle_code_intel)
-
-    # L3 — 3-layer tool-memory retrieval (search → timeline → fetch over the L1
-    # tool_events log). Builtin so they stay on the hooked tool_executor path.
-    from executors.plugins import memory_search_tool as _mem
-    tool_executor.register(_mem.SEARCH_MEMORY_TOOL_DEF, _mem._handle_search_memory)
-    tool_executor.register(_mem.MEMORY_TIMELINE_TOOL_DEF, _mem._handle_memory_timeline)
-    tool_executor.register(_mem.MEMORY_FETCH_TOOL_DEF, _mem._handle_memory_fetch)
-
-    # MCP OAuth trigger (McpAuthTool style). Builtin so it stays on the hooked
-    # tool_executor path; bots that should authenticate MCP servers must include
-    # "mcp_authenticate" in their allowed_tools to have it surfaced to the LLM.
-    class McpAuthenticateParams(BaseModel):
-        server: str = Field(..., description="mcp_servers.json 中的 server 名")
-
-    from executors.base import ToolDef as _ToolDef
-    tool_executor.register(
-        _ToolDef(
-            name="mcp_authenticate",
-            description="为需要 OAuth 授权的 remote MCP server 发起授权，返回授权链接交给用户在浏览器打开",
-            parameters=McpAuthenticateParams,
-        ),
-        _handle_mcp_authenticate,
+    _register_workspace_tools_impl(
+        tool_executor=tool_executor,
+        workspace_tools=_WORKSPACE_TOOLS,
+        handlers=handlers,
+        permission_hook=_permission_check_hook,
+        shell_guard=_default_shell_guard,
+        secret_redactor=_default_secret_redactor,
+        output_truncator=_default_output_truncator,
     )
