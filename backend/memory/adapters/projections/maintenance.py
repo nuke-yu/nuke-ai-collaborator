@@ -12,6 +12,15 @@ from .chroma_client import ChromaProjectionClient, _get_collection
 _LEGACY_FACT_ID_RE = re.compile(r"^(?P<message_id>\d+)_(?P<index>\d+)$")
 
 
+class LegacyFactMigrationError(RuntimeError):
+    """Raised when a legacy fact cannot be migrated without guessing scope."""
+
+
+def build_fact_projection_id(*, bot_id: int, group_id: int, message_id: int, index: int) -> str:
+    """Build the canonical, group-scoped Chroma projection identifier."""
+    return f"fact_{int(bot_id)}_{int(group_id)}_{int(message_id)}_{int(index)}"
+
+
 async def migrate_legacy_fact_ids(*, dry_run: bool = False) -> dict[str, int]:
     def read() -> dict[str, Any]:
         return _get_collection().get(include=["documents", "metadatas"])
@@ -19,7 +28,9 @@ async def migrate_legacy_fact_ids(*, dry_run: bool = False) -> dict[str, int]:
     ids, documents, metadatas = rows.get("ids") or [], rows.get("documents") or [], rows.get("metadatas") or []
     all_ids = {str(item) for item in ids}
     moves, delete_ids = [], []
-    stats = {"scanned": len(ids), "legacy": 0, "migrated": 0, "deduplicated": 0, "missing_scope": 0}
+    stats = {"scanned": len(ids), "legacy": 0, "migrated": 0, "deduplicated": 0, "missing_scope": 0, "collisions": 0}
+    unresolved: list[str] = []
+    planned_targets: set[str] = set()
     for index, old_id in enumerate(ids):
         match = _LEGACY_FACT_ID_RE.fullmatch(str(old_id))
         if not match:
@@ -28,14 +39,39 @@ async def migrate_legacy_fact_ids(*, dry_run: bool = False) -> dict[str, int]:
         metadata = dict(metadatas[index] or {}) if index < len(metadatas) else {}
         if metadata.get("group_id") is None or metadata.get("bot_id") is None:
             stats["missing_scope"] += 1
+            unresolved.append(str(old_id))
             continue
-        new_id = f"fact_{int(metadata['bot_id'])}_{int(metadata['group_id'])}_{match.group('message_id')}_{match.group('index')}"
+        try:
+            new_id = build_fact_projection_id(
+                bot_id=int(metadata["bot_id"]),
+                group_id=int(metadata["group_id"]),
+                message_id=int(match.group("message_id")),
+                index=int(match.group("index")),
+            )
+        except (TypeError, ValueError):
+            stats["missing_scope"] += 1
+            unresolved.append(str(old_id))
+            continue
         delete_ids.append(str(old_id))
         if new_id in all_ids:
             stats["deduplicated"] += 1
             continue
+        if new_id in planned_targets:
+            stats["collisions"] += 1
+            continue
+        planned_targets.add(new_id)
         moves.append((new_id, documents[index] if index < len(documents) else "", metadata))
     stats["migrated"] = len(moves)
+    if not dry_run and unresolved:
+        raise LegacyFactMigrationError(
+            "refusing to migrate legacy Chroma IDs without a trustworthy scope: "
+            + ", ".join(unresolved[:10])
+            + (" ..." if len(unresolved) > 10 else "")
+        )
+    if not dry_run and stats["collisions"]:
+        raise LegacyFactMigrationError(
+            f"refusing to migrate {stats['collisions']} colliding legacy Chroma IDs"
+        )
     if dry_run:
         return stats
     for offset in range(0, len(moves), 500):
