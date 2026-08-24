@@ -44,6 +44,7 @@ from executors.plugins.tool_loop_primitives import before_finalize_hook as _befo
 from executors.plugins.tool_loop_session_persistence import persist_session_start
 from executors.plugins.tool_loop_schema_assembly import assemble_tool_schemas
 from executors.plugins.tool_loop_memory_hydration import hydrate_memory_context
+from executors.plugins.tool_loop_prompt_setup import prepare_prompt_and_messages
 
 logger = logging.getLogger(__name__)
 _DOOM_LOOP_THRESHOLD = config.DOOM_LOOP_THRESHOLD
@@ -181,46 +182,14 @@ async def setup_session(runner) -> None:
         runner, memory_scope, apply_budget=_apply_memory_context_budget
     )
 
-    if skill_discovery:
-        runner.system_prompt_base, runner.skills_xml, runner.skills_snapshot, runner.always_skills = await prompt_builder.compile_system_prompt(
-            runner.bot, runner.ctx, runner.model_name, memory
-        )
-    else:
-        from workspace.layout import get_group_language
-        lang = get_group_language(runner.ctx.group_id)
-        runner.system_prompt_base = prompt_builder.build_system_prompt_base(
-            runner.bot, runner.ctx, memory, always_section="", lang=lang
-        )
-
-    # Group workspace context: unconditionally injected for all group bots.
-    if runner.ctx.group_id is not None:
-        group_ctx = await _ws.load_group_context(runner.ctx.group_id)
-        if group_ctx:
-            runner.system_prompt_base += f"\n\n{group_ctx}"
-
-    if learned_contexts:
-        runner.system_prompt_base += f"\n\n{_UNTRUSTED_LEARNING_POLICY}"
-
-    runner.system_prompt = runner.system_prompt_base
-
-    user_content = build_image_content(user_msg, runner.ctx.file_url, runner.ctx.file_type, runner.provider)
-    if isinstance(user_content, str):
-        user_content, _ = compact.truncate_user_message(user_content, runner.ctx.group_id, runner.model_name)
-    elif isinstance(user_content, list):
-        for block in user_content:
-            if isinstance(block, dict) and block.get("type") == "text":
-                truncated_text, _ = compact.truncate_user_message(block.get("text", ""), runner.ctx.group_id, runner.model_name)
-                block["text"] = truncated_text
-    user_content = _attach_untrusted_learning_data(user_content, learned_contexts)
-    
-    _resuming = bool(runner.ctx.resume_session_id)
-    if _resuming:
-        resumed = list(runner.ctx.resume_messages or [])
-        if resumed and resumed[0].get("role") == "system":
-            resumed = resumed[1:]
-        runner.messages = resumed
-    else:
-        runner.messages = list(history) + [{"role": "user", "content": user_content}]
+    user_content, _resuming = await prepare_prompt_and_messages(
+        runner,
+        skill_discovery=skill_discovery,
+        memory=memory,
+        learned_contexts=learned_contexts,
+        history=history,
+        user_msg=user_msg,
+    )
 
     assemble_tool_schemas(runner, skill_discovery=skill_discovery)
     _enforce_final_context_budget(runner)
