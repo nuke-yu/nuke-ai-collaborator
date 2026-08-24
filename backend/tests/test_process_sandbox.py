@@ -110,6 +110,16 @@ class TestProcessSandbox(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(result)
         self.assertTrue(any("failed to validate shell home-path candidate" in line for line in logs.output))
 
+    def test_shell_path_validation_rejects_relative_traversal(self):
+        work_dir = Path("/ws/group_1")
+        result = _check_shell_command_paths("cat ../central.db", work_dir)
+        self.assertIn("工作区外", result)
+
+    def test_shell_path_validation_allows_in_workspace_relative_path(self):
+        work_dir = Path("/ws/group_1")
+        result = _check_shell_command_paths("cat project/../README.md", work_dir)
+        self.assertIsNone(result)
+
     def test_worktree_lock_resolution_logs_when_group_workspace_fails(self):
         work_dir = Path("/ws/group_1/workspace/project")
 
