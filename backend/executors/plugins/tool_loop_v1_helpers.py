@@ -119,7 +119,34 @@ async def _before_finalize_hook(
     )
 
 
-_run_fork_skill = _run_fork_skill_impl
+async def _run_fork_skill(
+    skill_content: str,
+    task: str,
+    provider: str,
+    model: str,
+    temperature: float,
+    ai_service: AIService,
+    tool_schemas: list | None = None,
+    *,
+    parent_ruleset=None,
+    spawn_depth: int = 0,
+    group_id: int | None = None,
+    bot_id: int | None = None,
+    broadcaster=None,
+    max_iter: int = 8,
+    run_id: str | None = None,
+    allowed_memory_refs: tuple[str, ...] = (),
+    tool_records: list[dict] | None = None,
+) -> str:
+    """Compatibility facade for the attenuated fork-skill executor."""
+    return await _run_fork_skill_impl(
+        skill_content, task, provider, model, temperature, ai_service, tool_schemas,
+        parent_ruleset=parent_ruleset, spawn_depth=spawn_depth, group_id=group_id,
+        bot_id=bot_id, broadcaster=broadcaster, max_iter=max_iter, run_id=run_id,
+        allowed_memory_refs=allowed_memory_refs, tool_records=tool_records,
+    )
+
+
 async def setup_session(runner) -> None:
     skill_discovery = bool(runner.executor.manifest.workspace.skill_discovery)
     # Build ruleset
