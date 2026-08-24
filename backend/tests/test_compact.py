@@ -105,6 +105,21 @@ class TestEstimateTokens(unittest.TestCase):
         self.assertIsInstance(result, int)
         self.assertGreaterEqual(result, 0)
 
+    def test_cjk_estimator_can_be_calibrated_against_provider_tokenizer(self):
+        class Tokenizer:
+            def encode(self, text):
+                # Representative stand-in: one token per CJK character and
+                # one token per four ASCII characters.
+                cjk = sum(1 for ch in text if '\u4e00' <= ch <= '\u9fff')
+                ascii_tokens = (len(text) - cjk + 3) // 4
+                return [None] * (cjk + ascii_tokens)
+
+        report = compact.calibrate_cjk_estimator(
+            ["这是中文校准样本", "混合 mixed 文本"], Tokenizer()
+        )
+        self.assertEqual(report["samples"], 2)
+        self.assertLessEqual(report["mean_abs_error"], 1)
+
     def test_does_not_serialise_whole_array(self):
         """DFT-052: must not json.dumps the entire message array on each call."""
         msgs = [

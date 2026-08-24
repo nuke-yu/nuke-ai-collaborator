@@ -4,6 +4,10 @@ from __future__ import annotations
 _PER_MESSAGE_OVERHEAD = 8
 _TOKEN_CACHE_MAX = 32
 _token_cache: dict[int, tuple[int, int, int, str]] = {}
+# Extra token cost assigned to CJK characters over the English 1 token / 4
+# characters baseline.  It is deliberately configurable through the explicit
+# calibration API below rather than silently assuming a provider tokenizer.
+_cjk_adjustment = 2.0
 
 
 def _count_cjk(text: str) -> int:
@@ -60,7 +64,52 @@ def _message_cjk(m: dict) -> int:
 
 
 def _chars_to_tokens(total_chars: int, cjk_chars: int) -> int:
-    return (total_chars + cjk_chars * 2) // 4
+    return int((total_chars + cjk_chars * _cjk_adjustment) // 4)
+
+
+def calibrate_cjk_estimator(samples, tokenizer) -> dict[str, float | int]:
+    """Calibrate the heuristic against a provider-compatible tokenizer.
+
+    ``samples`` is an iterable of representative text strings and ``tokenizer``
+    exposes ``encode(text)`` (or is a callable).  The resulting adjustment is
+    process-local and should be performed during worker startup/configuration;
+    without calibration the conservative default remains active.
+    """
+    global _cjk_adjustment
+    samples = [str(text or "") for text in samples]
+    total_cjk = 0
+    total_chars = 0
+    total_actual = 0
+    count = 0
+    for text in samples:
+        value = str(text or "")
+        cjk = _count_cjk(value)
+        if not value or cjk == 0:
+            continue
+        encoded = tokenizer.encode(value) if hasattr(tokenizer, "encode") else tokenizer(value)
+        actual = len(encoded)
+        total_cjk += cjk
+        total_chars += len(value)
+        total_actual += actual
+        count += 1
+    if not count or not total_cjk:
+        return {"samples": count, "adjustment": _cjk_adjustment, "mean_abs_error": 0.0}
+    # Solve tokens = (chars + cjk * adjustment) / 4 for the observed corpus.
+    _cjk_adjustment = max(0.0, (4.0 * total_actual - total_chars) / total_cjk)
+    errors = []
+    for text in samples:
+        value = str(text or "")
+        if not value or _count_cjk(value) == 0:
+            continue
+        encoded = tokenizer.encode(value) if hasattr(tokenizer, "encode") else tokenizer(value)
+        estimate = int((len(value) + _count_cjk(value) * _cjk_adjustment) // 4)
+        errors.append(abs(estimate - len(encoded)))
+    _token_cache.clear()
+    return {
+        "samples": count,
+        "adjustment": _cjk_adjustment,
+        "mean_abs_error": sum(errors) / len(errors) if errors else 0.0,
+    }
 
 
 def estimate_tokens(messages: list[dict]) -> int:

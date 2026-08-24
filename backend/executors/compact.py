@@ -22,6 +22,7 @@ from core import config
 from ai.client import call_ai_once, AIContextOverflowError
 from executors.compact_tokens import estimate_tokens as _estimate_tokens_impl
 from executors.compact_tokens import clean_multimodal_content as _clean_multimodal_content_impl
+from executors.compact_tokens import calibrate_cjk_estimator
 from executors.compact_tokens import _token_cache as _token_cache_impl
 from executors.compact_thresholds import (
     autocompact_threshold as _autocompact_threshold_impl,
