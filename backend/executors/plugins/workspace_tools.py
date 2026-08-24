@@ -84,6 +84,10 @@ from executors.plugins.workspace_shell_paths import check_shell_command_paths as
 from executors.plugins.container_shell_backend import ContainerShellBackend
 from executors.plugins.local_shell_backend import LocalShellBackend
 from executors.plugins.workspace_registration import register_workspace_tools as _register_workspace_tools_impl
+from executors.plugins.workspace_git_safety import (
+    git_subcommand as _git_subcommand_impl,
+    destructive_git_reason as _destructive_git_reason_impl,
+)
 _WORKSPACE_TOOLS = WORKSPACE_TOOLS
 
 # ---------------------------------------------------------------------------
@@ -331,65 +335,12 @@ def _check_shell_command(cmd: str) -> tuple[bool, str]:
 
 # git's own global options that take a separate value, skipped to reach the real
 # subcommand: `git -C <dir> reset --hard`, `git -c user.x=y push --force`.
-_GIT_GLOBAL_OPTS_WITH_VALUE = frozenset({
-    "-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path",
-})
-
-
 def _git_subcommand(rest: list[str]) -> tuple[str | None, list[str]]:
-    """From the args following `git`, skip global options and return
-    (subcommand, its_remaining_args). (None, []) if no subcommand is present."""
-    i = 0
-    while i < len(rest):
-        tok = rest[i]
-        if tok in _GIT_GLOBAL_OPTS_WITH_VALUE:
-            i += 2
-            continue
-        if tok.startswith("-"):          # other global flag, e.g. --no-pager
-            i += 1
-            continue
-        return tok, rest[i + 1:]
-    return None, []
+    return _git_subcommand_impl(rest)
 
 
 def _destructive_git_reason(rest: list[str]) -> str | None:
-    """Reason string if the git args (after `git`) are destructive, else None."""
-    sub, args = _git_subcommand(rest)
-    if sub is None:
-        return None
-    aset = set(args)
-
-    def has(*flags: str) -> bool:
-        return any(f in aset for f in flags)
-
-    if sub == "reset" and has("--hard"):
-        return "git reset --hard 会丢弃已跟踪文件的未提交改动（不可恢复）"
-    if sub == "clean" and (has("--force") or any(
-            a.startswith("-") and not a.startswith("--") and "f" in a for a in args)):
-        return "git clean -f 会删除未跟踪文件（git 从未存过，不可恢复）"
-    if sub == "checkout" and (has("-f", "--force") or "." in args or "--" in args):
-        return "git checkout 会丢弃工作树未提交改动"
-    if sub == "restore" and "--staged" not in aset and (
-            has("-f", "--force") or "." in args):
-        return "git restore 会丢弃工作树未提交改动"
-    if sub == "push" and (
-            has("--force", "-f", "--force-with-lease", "--mirror", "--delete", "-d")
-            or any(a.startswith("+") for a in args)):
-        return "git push --force 会重写远端历史（影响每个克隆）"
-    if sub == "gc" and any(
-            a.startswith("--prune=") and a != "--prune=never" for a in args):
-        return "git gc --prune 立即回收悬空对象，关闭恢复窗口"
-    if sub == "reflog" and "expire" in args:
-        return "git reflog expire 清空 reflog，关闭恢复窗口"
-    if sub == "branch" and (has("-D") or (has("--delete") and has("--force"))):
-        return "git branch -D 强制删除分支"
-    if sub == "stash" and ("clear" in args or "drop" in args):
-        return "git stash clear/drop 丢弃暂存内容"
-    if sub == "filter-branch":
-        return "git filter-branch 重写历史"
-    if sub == "update-ref" and has("-d", "--delete"):
-        return "git update-ref -d 删除引用"
-    return None
+    return _destructive_git_reason_impl(rest)
 
 
 def _is_destructive_git(cmd: str) -> tuple[bool, str]:
