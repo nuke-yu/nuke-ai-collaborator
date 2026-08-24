@@ -91,9 +91,12 @@ async def _tool_loop_core(
     tool_schemas: list,
     max_iter: int = 10,
 ) -> str:
+    import executors.plugins.tool_loop_v1 as tool_loop_v1
     return await _tool_loop_core_impl(
         system_prompt, messages, provider, model_name, temperature,
         max_tokens, tool_schemas, max_iter,
+        call_ai_once=tool_loop_v1.call_ai_once,
+        execute_tool_call=tool_loop_v1._execute_tool_call,
     )
 
 

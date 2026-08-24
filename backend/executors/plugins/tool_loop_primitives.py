@@ -2,17 +2,29 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Awaitable, Callable
+from typing import Any
 from core import config
 
 
-async def tool_loop_core(system_prompt, messages, provider, model_name,
-                         temperature, max_tokens, tool_schemas, max_iter=10):
+async def tool_loop_core(
+    system_prompt: str,
+    messages: list,
+    provider: str,
+    model_name: str,
+    temperature: float,
+    max_tokens: int,
+    tool_schemas: list,
+    max_iter: int = 10,
+    *,
+    call_ai_once: Callable[..., Awaitable[dict]],
+    execute_tool_call: Callable[..., Awaitable[str]],
+) -> str:
     """Minimal tool-calling loop used by tests (no broadcaster or DB)."""
-    import executors.plugins.tool_loop_v1 as tool_loop_v1
     messages = list(messages)
     history = []
     for _ in range(max_iter):
-        result = await tool_loop_v1.call_ai_once(
+        result = await call_ai_once(
             system_prompt, messages, provider, model_name,
             temperature, max_tokens, tool_schemas,
         )
@@ -29,7 +41,7 @@ async def tool_loop_core(system_prompt, messages, provider, model_name,
                 return f"[循环保护] 连续 {config.DOOM_LOOP_THRESHOLD} 次完全相同的工具调用，已终止循环"
         messages.append(result["assistant_message"])
         for call in result["calls"]:
-            content = await tool_loop_v1._execute_tool_call(
+            content = await execute_tool_call(
                 call["name"], call.get("arguments", {}), context={}
             )
             messages.append({
