@@ -84,6 +84,7 @@ from executors.plugins.workspace_shell_utils import (
 )
 from executors.plugins.workspace_shell_paths import check_shell_command_paths as _check_shell_command_paths_impl
 from executors.plugins.container_shell_backend import ContainerShellBackend
+from executors.plugins.local_shell_backend import LocalShellBackend
 _WORKSPACE_TOOLS = WORKSPACE_TOOLS
 
 # ---------------------------------------------------------------------------
@@ -694,57 +695,17 @@ def _safe_kill(proc) -> None:
         log.exception("workspace_tools: failed to kill timed-out process")
 
 
-class LocalShellBackend:
-    """Host subprocess — current behavior, moved verbatim. NO cross-group
-    isolation; the mem-limit ulimit wrap (a local-only mechanism) lives here."""
-
-    async def ensure_ready(self, group_id) -> None:
-        return
-
-    async def healthy(self) -> bool:
-        return True
-
-    async def run_foreground(self, req: ShellExecRequest) -> ShellExecResult:
-        safe_cmd = _wrap_command_with_limits(req.cmd, req.mem_limit_bytes)
-        proc = await asyncio.create_subprocess_exec(
-            *_DEFAULT_SHELL, safe_cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=str(req.work_dir),
-            env=req.env,
-        )
-        if _IS_WINDOWS:
-            win_sandbox.apply_memory_limit(proc.pid, req.mem_limit_bytes)
-        try:
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=req.timeout_s)
-        except asyncio.TimeoutError:
-            _safe_kill(proc)
-            return ShellExecResult(None, "", "", timed_out=True)
-        except asyncio.CancelledError:
-            _safe_kill(proc)
-            raise
-        return ShellExecResult(
-            proc.returncode,
-            stdout.decode(errors="replace").strip(),
-            stderr.decode(errors="replace").strip(),
-        )
-
-    async def start_background(self, req: ShellExecRequest) -> ShellBackgroundHandle:
-        safe_cmd = _wrap_command_with_limits(req.cmd, req.mem_limit_bytes)
-        proc = await asyncio.create_subprocess_exec(
-            *_DEFAULT_SHELL, safe_cmd,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
-            cwd=str(req.work_dir),
-            env=req.env,
-            start_new_session=True if not _IS_WINDOWS else False,
-        )
-        if _IS_WINDOWS:
-            win_sandbox.apply_memory_limit(proc.pid, req.mem_limit_bytes)
-        return ShellBackgroundHandle(identifier=str(proc.pid))
-
-
 _SHELL_BACKEND: ShellExecBackend | None = None
+
+
+def _new_local_shell_backend() -> LocalShellBackend:
+    return LocalShellBackend(
+        wrap_command=_wrap_command_with_limits,
+        safe_kill=_safe_kill,
+        shell=_DEFAULT_SHELL,
+        is_windows=_IS_WINDOWS,
+        memory_limiter=win_sandbox,
+    )
 
 
 async def get_shell_backend() -> ShellExecBackend:
@@ -761,9 +722,9 @@ async def get_shell_backend() -> ShellExecBackend:
         _SHELL_BACKEND = ContainerShellBackend()
     elif mode == "auto":
         candidate = ContainerShellBackend()
-        _SHELL_BACKEND = candidate if await candidate.healthy() else LocalShellBackend()
+        _SHELL_BACKEND = candidate if await candidate.healthy() else _new_local_shell_backend()
     else:
-        _SHELL_BACKEND = LocalShellBackend()
+        _SHELL_BACKEND = _new_local_shell_backend()
     return _SHELL_BACKEND
 
 
