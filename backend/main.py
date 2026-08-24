@@ -623,13 +623,11 @@ async def _handle_websocket_disconnect(websocket: WebSocket, group_id: int):
 @app.websocket("/ws/{group_id:int}/{member_id:int}")
 async def websocket_endpoint(
     websocket: WebSocket, group_id: int, member_id: int,
-    token: str = None, cursor: str = None,
+    cursor: str = None,
 ):
     protocol_token, subprotocol = _websocket_protocol_auth(websocket)
-    # Query token is a temporary compatibility fallback for older clients.
-    auth_token = protocol_token or token
     user_payload = await _authenticate_websocket(
-        websocket, group_id, member_id, auth_token, subprotocol=subprotocol,
+        websocket, group_id, member_id, protocol_token, subprotocol=subprotocol,
     )
     if not user_payload:
         return

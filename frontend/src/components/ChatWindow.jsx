@@ -155,11 +155,15 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
 
   const loadRecap = useCallback(async (groupId) => {
     if (!groupId) return
+    const generation = groupRequestGeneration.current
     if (useChatStore.getState().recapDismissed) return
     try {
       const data = await fetchGroupRecap(groupId)
       // Validate response still belongs to current group before setting state
-      if (useGroupStore.getState().activeGroupId !== groupId) return
+      if (
+        useGroupStore.getState().activeGroupId !== groupId
+        || groupRequestGeneration.current !== generation
+      ) return
       if (!useChatStore.getState().recapDismissed) {
         setAwaySummary(data?.away_summary || null)
       }
@@ -171,13 +175,17 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
   // 方案 1：按需拉「我」错过的 per-user recap；10s 内不重复触发（每次都现算 LLM）。
   const loadPersonalRecap = useCallback(async (groupId) => {
     if (!groupId || !memberId) return
+    const generation = groupRequestGeneration.current
     const now = Date.now()
     if (now - (personalRecapAt.current[groupId] || 0) < 10000) return
     personalRecapAt.current[groupId] = now
     try {
       const data = await fetchPersonalRecap(groupId, memberId)
       // Validate response still belongs to current group before setting state
-      if (useGroupStore.getState().activeGroupId !== groupId) return
+      if (
+        useGroupStore.getState().activeGroupId !== groupId
+        || groupRequestGeneration.current !== generation
+      ) return
       setPersonalSummary(data?.unread_count > 0 ? (data.summary || null) : null)
       personalCoveredId.current[groupId] = data?.covered_through_id || 0
     } catch (err) {
@@ -203,6 +211,8 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
 
   const handleRegenerateRecap = async () => {
     if (!activeGroupId) return
+    const groupIdAtCall = activeGroupId
+    const generation = groupRequestGeneration.current
     setLoadingRecap(true)
     try {
       const res = await fetch(`/api/groups/${activeGroupId}/recap/trigger`, {
@@ -213,7 +223,11 @@ export default function ChatWindow({ memberId, theme, onThemeChange, onLogout })
         }
       })
       const data = await res.json()
-      if (data.ok) {
+      if (
+        data.ok
+        && useGroupStore.getState().activeGroupId === groupIdAtCall
+        && groupRequestGeneration.current === generation
+      ) {
         setAwaySummary(data.away_summary)
       }
     } catch (err) {
