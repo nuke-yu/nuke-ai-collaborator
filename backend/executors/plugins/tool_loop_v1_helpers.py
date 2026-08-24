@@ -42,6 +42,7 @@ from executors.tool_dispatch import execute_tool_call as _execute_tool_call
 from executors.plugins.tool_loop_primitives import tool_loop_core as _tool_loop_core_impl
 from executors.plugins.tool_loop_primitives import before_finalize_hook as _before_finalize_hook_impl
 from executors.plugins.tool_loop_session_persistence import persist_session_start
+from executors.plugins.tool_loop_schema_assembly import assemble_tool_schemas
 
 logger = logging.getLogger(__name__)
 _DOOM_LOOP_THRESHOLD = config.DOOM_LOOP_THRESHOLD
@@ -317,57 +318,7 @@ async def setup_session(runner) -> None:
     else:
         runner.messages = list(history) + [{"role": "user", "content": user_content}]
 
-    tool_names = [t.name for t in runner.executor.manifest.tools]
-    if not skill_discovery:
-        tool_names = [name for name in tool_names if name != "run_skill"]
-    from executors.tool_router import router as _tool_router
-    if _tool_router.has_providers():
-        from executors import tool_executor
-        builtin_schemas = tool_executor.get_schemas(tool_names)
-        builtin_names = {b["function"]["name"] for b in builtin_schemas}
-        mcp_schemas = [
-            s for s in _tool_router.get_external_schemas()
-            if s["function"]["name"] not in builtin_names
-        ]
-        _mcp_vis = (runner.bot.get("executor_config") or {}).get("mcp") or {}
-        mcp_schemas = prompt_builder.filter_mcp_schemas(
-            mcp_schemas, _mcp_vis.get("allow"), _mcp_vis.get("block"))
-        mcp_schemas, deferred_names = prompt_builder.apply_external_schema_budget(mcp_schemas)
-        if deferred_names:
-            logger.warning(
-                "tool schema budget: deferred %d MCP tool(s): %s",
-                len(deferred_names), deferred_names,
-            )
-            _budget_note = prompt_builder.build_budget_note(deferred_names, runner.ctx.group_id)
-            runner.system_prompt_base += _budget_note
-            runner.system_prompt += _budget_note
-        runner.tool_schemas = builtin_schemas + mcp_schemas
-    else:
-        from executors import tool_executor
-        runner.tool_schemas = tool_executor.get_schemas(tool_names)
-    runner.tool_schemas = prompt_builder.restrict_schemas(runner.tool_schemas, runner.bot.get("allowed_tools"))
-    from runtime_features.code_mode import append_code_mode_prompt
-    runner.system_prompt_base = append_code_mode_prompt(
-        runner.system_prompt_base, runner.tool_schemas
-    )
-    runner.system_prompt = append_code_mode_prompt(
-        runner.system_prompt, runner.tool_schemas
-    )
-    # Letta active memory functions are explicitly opt-in. They are not added
-    # to the generic tool registry; dispatch_tool routes them to the composed
-    # Memory controller, preserving the existing ToolRouter policy.
-    _executor_config = runner.bot.get("executor_config") or {}
-    _allowed_tools = runner.bot.get("allowed_tools")
-    _memory_tools_allowed = not _allowed_tools or all(
-        name in _allowed_tools for name in ("memory_read", "memory_write")
-    )
-    if (_executor_config.get("memory_functions_enabled") and _memory_tools_allowed
-            and getattr(runner, "memory_functions", None) is not None):
-        runner.tool_schemas.extend(runner.memory_functions.tool_schemas())
-    from memory.application.references import add_tool_ref_parameter
-    runner.tool_schemas = add_tool_ref_parameter(
-        runner.tool_schemas, runner.injected_memory_refs
-    )
+    assemble_tool_schemas(runner, skill_discovery=skill_discovery)
     _enforce_final_context_budget(runner)
 
     await persist_session_start(
