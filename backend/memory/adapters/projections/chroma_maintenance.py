@@ -90,7 +90,11 @@ def backup_store(path: str | Path, backup_root: str | Path | None = None) -> Pat
 
 
 def quarantine_store(path: str | Path) -> Path:
-    """Atomically move an unreadable store aside; never delete its evidence."""
+    """Move an unreadable store aside; never delete its evidence.
+
+    The operation is atomic only when source and destination share a filesystem;
+    callers must verify the resulting directory before opening a new index.
+    """
     source = Path(path)
     if not source.is_dir():
         raise FileNotFoundError(f"Chroma directory does not exist: {source}")

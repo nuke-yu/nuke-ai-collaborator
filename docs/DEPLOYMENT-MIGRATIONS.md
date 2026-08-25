@@ -65,6 +65,10 @@ host-root socket。使用 systemd 时，在 `/etc/nuke-ai-collaborator/env` 中�
 `DOCKER_HOST=unix:///run/user/<nuke-uid>/docker.sock`；该 daemon 的用户必须拥有数据目录及
 各 group workspace，才能创建受限的 bind mount。
 
+Rootless daemon 只解决宿主 root 提权，不等于 Docker API 授权策略。若 app 进程被攻陷，
+仍必须在 socket proxy 之外部署 Authorization Plugin 或 policy broker，校验容器镜像、容器名、
+bind source、capabilities、namespace 和资源限制，才能宣称群组 workspace 完全隔离。
+
 ## Worker CJK tokenizer 校准
 
 可选地为某个 provider/model 提供本地 HuggingFace `tokenizer.json`。Worker 在启动前完成
