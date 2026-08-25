@@ -70,7 +70,8 @@ host-root socket。使用 systemd 时，在 `/etc/nuke-ai-collaborator/env` 中�
 export NUKE_TOKENIZER_PATHS_JSON='{"openai/gpt-4o":"/opt/tokenizers/gpt-4o/tokenizer.json"}'
 ```
 
-校准结果按 `provider/model` 保存在 Worker 进程内，并通过
+校准结果按 `provider/model` 保存在 `NUKE_TOKENIZER_CALIBRATION_PATH` 指定的 JSON 文件及
+Worker 进程内，并通过
 `nuke_memory_tokenizer_abs_error_avg` 和 Worker 快照中的
 `tokenizer_configured_models` 暴露。应将 tokenizer 文件作为部署制品版本化，并在升级模型
 或 tokenizer 后重启 Worker。
