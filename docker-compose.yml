@@ -24,7 +24,7 @@ services:
   # Socket proxy fronts a dedicated rootless daemon. It provides API minimization
   # while the rootless daemon removes host-root escalation from container create.
   docker-proxy:
-    image: tecnativa/docker-socket-proxy:latest
+    image: ${NUKE_DOCKER_PROXY_IMAGE:?Set to a pinned socket-proxy tag or digest}
     container_name: nuke-docker-proxy
     volumes:
       - ${NUKE_ROOTLESS_DOCKER_SOCKET:?Set to the dedicated rootless Docker socket}:/var/run/docker.sock
@@ -78,7 +78,7 @@ services:
       # enable the per-group container sandbox (default is "local" = no isolation)
       NUKE_SHELL_EXEC_BACKEND: container
       NUKE_DOCKER_ISOLATION: rootless
-      NUKE_SANDBOX_IMAGE: nuke-sandbox:latest
+      NUKE_SANDBOX_IMAGE: ${NUKE_SANDBOX_IMAGE:?Set to a pinned sandbox image tag or digest}
       # Point the Docker client at the proxy instead of the raw socket
       DOCKER_HOST: tcp://docker-proxy:2375
       # ── REQUIRED: security credentials ──────────────────────────────

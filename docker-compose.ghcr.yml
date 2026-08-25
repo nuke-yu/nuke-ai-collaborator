@@ -22,7 +22,7 @@ services:
     restart: "no"
 
   docker-proxy:
-    image: tecnativa/docker-socket-proxy:latest
+    image: ${NUKE_DOCKER_PROXY_IMAGE:?Set to a pinned socket-proxy tag or digest}
     container_name: nuke-docker-proxy
     volumes:
       - ${NUKE_ROOTLESS_DOCKER_SOCKET:?Set to the dedicated rootless Docker socket}:/var/run/docker.sock
@@ -70,7 +70,7 @@ services:
       NUKE_WORKERS: 8
       NUKE_SHELL_EXEC_BACKEND: container
       NUKE_DOCKER_ISOLATION: rootless
-      NUKE_SANDBOX_IMAGE: ghcr.io/nuke-yu/nuke-sandbox:latest
+      NUKE_SANDBOX_IMAGE: ${NUKE_SANDBOX_IMAGE:?Set to a pinned sandbox image tag or digest}
       DOCKER_HOST: tcp://docker-proxy:2375
       # ── REQUIRED: security credentials ──
       AUTH_SECRET: ${AUTH_SECRET:?Set AUTH_SECRET (≥32 chars)}

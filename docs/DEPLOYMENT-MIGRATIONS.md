@@ -55,6 +55,10 @@ Linux 主机可将 `deploy/nuke-rootless-docker.service` 安装为 Docker 用户
 Compose 前执行 `deploy/check-rootless-docker.sh`。检查脚本会拒绝空 socket、host root
 socket，以及未报告 rootless 安全选项的 daemon。
 
+生产部署还必须设置 `NUKE_DOCKER_PROXY_IMAGE` 和 `NUKE_SANDBOX_IMAGE`，值应为固定版本
+或 digest，不能使用 `latest`。rootless Docker 安装应确保 `dockerd-rootless.sh` 位于
+`/usr/bin/`，否则请在 service 文件中改为发行版实际路径并执行 `systemctl --user daemon-reload`。
+
 Compose 仅将该 socket 交给 API-minimizing proxy；应用仍只连接私有的
 `tcp://docker-proxy:2375`。生产启动校验要求 `NUKE_DOCKER_ISOLATION=rootless`，并拒绝
 host-root socket。使用 systemd 时，在 `/etc/nuke-ai-collaborator/env` 中设置

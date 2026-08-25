@@ -4,7 +4,7 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-ExecStart=%h/bin/dockerd-rootless.sh --experimental
+ExecStart=/usr/bin/dockerd-rootless.sh --experimental
 Restart=always
 RestartSec=3
 Environment=DOCKERD_ROOTLESS_ROOTLESSKIT_NET=slirp4netns
