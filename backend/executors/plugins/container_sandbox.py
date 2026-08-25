@@ -20,6 +20,7 @@ import asyncio
 import logging
 import os
 import time
+from pathlib import Path
 
 from core import config
 
@@ -31,6 +32,23 @@ _SHELL = "/bin/sh"
 
 def container_name(group_id: int) -> str:
     return f"{_CONTAINER_PREFIX}{group_id}"
+
+
+def validate_group_workspace(group_id: int, workspace_dir: str | Path) -> Path:
+    """Enforce the mount contract before invoking Docker.
+
+    This protects the application path as well as the Docker API policy; the
+    latter must still be enforced by a broker/authorization plugin because a
+    compromised app could otherwise call the daemon directly.
+    """
+    from workspace.layout import group_shared_dir
+    actual = Path(workspace_dir).resolve()
+    expected = Path(group_shared_dir(group_id)).resolve()
+    if actual != expected:
+        raise ValueError(
+            f"sandbox mount must be group {group_id} workspace {expected}, got {actual}"
+        )
+    return actual
 
 
 def build_run_argv(
@@ -144,6 +162,7 @@ class ContainerManager:
 
     async def ensure(self, group_id: int, workspace_dir) -> None:
         """Idempotently start the group's sandbox container."""
+        workspace_dir = validate_group_workspace(group_id, workspace_dir)
         self._touch(group_id)        # activity → resets the idle clock
         self.start_reaper()
         async with self._lock:

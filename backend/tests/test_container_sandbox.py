@@ -20,6 +20,12 @@ from executors.plugins.shell_backend import ShellExecRequest
 
 
 class TestBuildRunArgv(unittest.TestCase):
+    def test_workspace_must_match_group_layout(self):
+        with patch("workspace.layout.group_shared_dir", return_value=Path("/ws/group_3")):
+            self.assertEqual(cs.validate_group_workspace(3, "/ws/group_3"), Path("/ws/group_3"))
+            with self.assertRaisesRegex(ValueError, "must be group 3"):
+                cs.validate_group_workspace(3, "/ws/group_2")
+
     def test_mounts_only_group_dir_same_path(self):
         argv = cs.build_run_argv(
             3, "/var/lib/nuke/workspaces/group_3",
@@ -109,7 +115,8 @@ class TestContainerManager(unittest.IsolatedAsyncioTestCase):
             return (0, "", "")
 
         mgr._docker = fake_docker
-        await mgr.ensure(7, "/ws/group_7")
+        with patch("workspace.layout.group_shared_dir", return_value=Path("/ws/group_7")):
+            await mgr.ensure(7, "/ws/group_7")
         self.assertTrue(any(a[1] == "run" for a in calls))
         self.assertIn(7, mgr._last_used)          # activity recorded
         await mgr.close()                          # cancel the reaper it started
@@ -125,7 +132,8 @@ class TestContainerManager(unittest.IsolatedAsyncioTestCase):
             return (0, "", "")
 
         mgr._docker = fake_docker
-        await mgr.ensure(7, "/ws/group_7")
+        with patch("workspace.layout.group_shared_dir", return_value=Path("/ws/group_7")):
+            await mgr.ensure(7, "/ws/group_7")
         self.assertFalse(any(a[1] == "run" for a in calls))
         await mgr.close()
 
