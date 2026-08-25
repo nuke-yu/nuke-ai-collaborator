@@ -15,6 +15,7 @@ tokens. Stop the app first so online writes cannot race the rebuild.
 import argparse
 import asyncio
 import os
+from pathlib import Path
 
 import db
 from ai.client import call_ai_once
@@ -25,6 +26,9 @@ from memory.application import BotFactObservationService, CanonicalBotFactObserv
 from memory.infrastructure import ProjectionOutbox, SQLiteMemoryDatabase
 from db import bind_db
 from runtime.dbpaths import group_db_path
+from memory.adapters.projections.chroma_maintenance import (
+    ChromaCompatibilityError, backup_store, quarantine_store, require_compatible_store,
+)
 
 
 def _read_collection_sync() -> dict:
@@ -56,8 +60,9 @@ def _rebuild_vector_ids(rows: dict, selected_bots: set[tuple[int, int]]) -> list
     return selected
 
 
-async def rebuild_group_facts(*, group_ids: set[int] | None, dry_run: bool) -> dict:
-    collection_rows = await asyncio.to_thread(_read_collection_sync)
+async def rebuild_group_facts(*, group_ids: set[int] | None, dry_run: bool,
+                              fresh_store: bool = False) -> dict:
+    collection_rows = {} if fresh_store else await asyncio.to_thread(_read_collection_sync)
     async with db.global_db() as central:
         sql = (
             "SELECT g.id, m.id, COALESCE(m.role, ''), "
@@ -109,7 +114,8 @@ async def rebuild_group_facts(*, group_ids: set[int] | None, dry_run: bool) -> d
     if dry_run:
         return stats
 
-    await asyncio.to_thread(_delete_vectors_sync, delete_ids)
+    if delete_ids:
+        await asyncio.to_thread(_delete_vectors_sync, delete_ids)
     for group_id in selected_groups:
         path = group_db_path(group_id)
         if not os.path.isfile(path):
@@ -144,12 +150,14 @@ async def rebuild_group_facts(*, group_ids: set[int] | None, dry_run: bool) -> d
 
 
 async def _run(args) -> int:
-    renamed = await migrate_legacy_fact_ids(dry_run=args.dry_run)
-    print(f"legacy ID migration: {renamed}")
+    if not args.fresh_store:
+        renamed = await migrate_legacy_fact_ids(dry_run=args.dry_run)
+        print(f"legacy ID migration: {renamed}")
     if args.rebuild:
         rebuilt = await rebuild_group_facts(
             group_ids=set(args.group_id) if args.group_id else None,
             dry_run=args.dry_run,
+            fresh_store=args.fresh_store,
         )
         print(f"group fact rebuild: {rebuilt}")
     return 0
@@ -160,7 +168,44 @@ def main(argv=None) -> int:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--rebuild", action="store_true")
     parser.add_argument("--group-id", type=int, action="append")
-    return asyncio.run(_run(parser.parse_args(argv)))
+    parser.add_argument("--chroma-path", default=os.environ.get("NUKE_CHROMA_PATH", "./chroma_db"))
+    parser.add_argument("--expected-chroma-version", help="refuse a different installed chromadb version")
+    parser.add_argument("--backup-dir", help="directory in which to place the automatic pre-write backup")
+    args = parser.parse_args(argv)
+    # Import-time configuration is process-local: scripts may select an offline
+    # store without altering a running Worker's configuration.
+    os.environ["NUKE_CHROMA_PATH"] = str(Path(args.chroma_path).resolve())
+    from core import config
+    config.CHROMA_PATH = os.environ["NUKE_CHROMA_PATH"]
+    import chromadb
+    args.fresh_store = False
+    try:
+        report = require_compatible_store(
+            args.chroma_path, chromadb.__version__, args.expected_chroma_version
+        )
+    except ChromaCompatibilityError as exc:
+        if not args.rebuild:
+            print(f"ERROR: {exc}")
+            return 2
+        report = {"path": str(Path(args.chroma_path)), "schema_version": "unreadable"}
+        args.fresh_store = True
+        print(f"WARNING: {exc}; rebuilding a new index from canonical SQLite")
+    print(f"Chroma store: {report['path']} (schema={report['schema_version']}, runtime={chromadb.__version__})")
+    if not args.dry_run:
+        try:
+            backup = backup_store(args.chroma_path, args.backup_dir)
+        except OSError as exc:
+            print(f"ERROR: backup failed; refusing to write: {exc}")
+            return 2
+        print(f"Backup created: {backup}")
+        if args.fresh_store:
+            try:
+                quarantined = quarantine_store(args.chroma_path)
+            except OSError as exc:
+                print(f"ERROR: failed to quarantine incompatible store; refusing to write: {exc}")
+                return 2
+            print(f"Incompatible store quarantined: {quarantined}")
+    return asyncio.run(_run(args))
 
 
 if __name__ == "__main__":

@@ -19,7 +19,7 @@ def _get_collection():
     global _client, _collection
     if _collection is None:
         try:
-            _client = chromadb.PersistentClient(path="./chroma_db")
+            _client = chromadb.PersistentClient(path=config.CHROMA_PATH)
             signature = embeddings.embedding_signature()
             collection = _client.get_or_create_collection(
                 name="messages",

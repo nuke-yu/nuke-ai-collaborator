@@ -1,5 +1,6 @@
 """Centralized system configuration and magic numbers (DFT-084)."""
 import os
+import json
 
 # --- WebSocket & IPC ---
 WS_SEND_TIMEOUT = 10.0
@@ -39,6 +40,18 @@ def validate_runtime_security() -> None:
             "NUKE_ENV=production requires NUKE_SHELL_EXEC_BACKEND=container; "
             f"got {SHELL_EXEC_BACKEND!r}"
         )
+    docker_host = os.environ.get("DOCKER_HOST", "")
+    isolation = os.environ.get("NUKE_DOCKER_ISOLATION", "").lower()
+    if isolation != "rootless":
+        raise RuntimeError(
+            "NUKE_ENV=production requires NUKE_DOCKER_ISOLATION=rootless; "
+            "the host Docker daemon socket is not an isolation boundary"
+        )
+    if docker_host == "unix:///var/run/docker.sock":
+        raise RuntimeError(
+            "NUKE_ENV=production must not use unix:///var/run/docker.sock; "
+            "connect to a dedicated rootless Docker daemon instead"
+        )
 
 # Per-group execution sandbox (container backend). One long-lived container per
 # active group; only that group's workspace is bind-mounted in → group isolation
@@ -77,6 +90,17 @@ METRICS_TOKEN = os.environ.get("NUKE_METRICS_TOKEN") or None
 EMBEDDING_PROVIDER = (os.environ.get("NUKE_EMBEDDING_PROVIDER") or "local").lower()
 EMBEDDING_MODEL = os.environ.get("NUKE_EMBEDDING_MODEL") or None      # None → provider default
 EMBEDDING_ENDPOINT = os.environ.get("NUKE_EMBEDDING_ENDPOINT") or None  # override base URL
+# Persistent Chroma data is a derived index, but its location must be explicit
+# so maintenance commands and the running Worker never accidentally operate on
+# different directories.
+CHROMA_PATH = os.environ.get("NUKE_CHROMA_PATH") or "./chroma_db"
+# Optional local HuggingFace tokenizer.json files, keyed by "provider/model".
+# They are deliberately local-only: Worker startup must not fetch arbitrary
+# tokenizer code or block on a model hub.
+try:
+    TOKENIZER_PATHS = json.loads(os.environ.get("NUKE_TOKENIZER_PATHS_JSON") or "{}")
+except json.JSONDecodeError:
+    TOKENIZER_PATHS = {}
 
 # --- Memory Retrieval (RAG ranking) ---
 # Absolute cosine-similarity floor for injecting a memory into context: candidates
