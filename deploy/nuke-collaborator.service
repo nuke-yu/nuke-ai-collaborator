@@ -1,13 +1,11 @@
 [Unit]
 Description=Nuke AI Collaborator Supervisor Service
-After=network.target docker.service
-Requires=docker.service
+After=network.target
 
 [Service]
 Type=simple
 User=nuke
 Group=nuke
-SupplementaryGroups=docker
 WorkingDirectory=/opt/nuke-ai-collaborator/backend
 
 # Environment configuration
@@ -17,7 +15,10 @@ Environment=NUKE_WORKERS=8
 Environment=NUKE_ENV=production
 Environment=NUKE_SHELL_EXEC_BACKEND=container
 Environment=NUKE_SANDBOX_IMAGE=nuke-sandbox:latest
-Environment=DOCKER_HOST=unix:///var/run/docker.sock
+# A dedicated rootless Docker service must be started for user nuke. Do not
+# replace this with the host root daemon socket. Set its user-specific path as
+# DOCKER_HOST=unix:///run/user/<nuke-uid>/docker.sock in EnvironmentFile.
+Environment=NUKE_DOCKER_ISOLATION=rootless
 Environment=PORT=8000
 Environment=HOST=0.0.0.0
 

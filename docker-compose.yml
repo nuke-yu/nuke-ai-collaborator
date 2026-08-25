@@ -8,27 +8,26 @@
 #   2. Create the data dir (chat.db + workspaces live here, on the HOST):
 #        sudo mkdir -p /var/lib/nuke-ai-collaborator/workspaces
 #        sudo chown -R "$(id -u):$(id -g)" /var/lib/nuke-ai-collaborator
-#   3. docker compose up -d --build
+#   3. Start a dedicated rootless Docker daemon as the same unprivileged user
+#      that owns /var/lib/nuke-ai-collaborator, then export its socket path:
+#        export NUKE_ROOTLESS_DOCKER_SOCKET=/run/user/$(id -u)/docker.sock
+#   4. docker compose up -d --build
 #
 # Why these volumes (the two gotchas of running the app in Docker):
-#   - docker.sock: lets the app dispatch sandbox containers. This is ≈ host root;
-#     in production front it with a socket-proxy that only allows run/exec/stop.
+#   - rootless Docker socket: the app dispatches sandboxes through a proxy to a
+#     dedicated unprivileged daemon, never the host root daemon.
 #   - the data dir is mounted at the SAME path inside the container as on the
 #     host, because the sibling sandbox containers' `--mount src=<host path>` is
 #     resolved by the host daemon — paths must line up.
 
 services:
-  # Socket proxy: limits which Docker API sections the app can access.
-  # Stage 1 defense — blocks build/swarm/secrets/plugins/volumes/networks.
-  # Residual risk: container create API is allowed, so an attacker who
-  # compromises the app container could still craft a container with
-  # host bind mounts. Stage 2 (authorization plugin or rootless daemon)
-  # is needed to fully close host-root risk.
+  # Socket proxy fronts a dedicated rootless daemon. It provides API minimization
+  # while the rootless daemon removes host-root escalation from container create.
   docker-proxy:
     image: tecnativa/docker-socket-proxy:latest
     container_name: nuke-docker-proxy
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
+      - ${NUKE_ROOTLESS_DOCKER_SOCKET:?Set to the dedicated rootless Docker socket}:/var/run/docker.sock
     environment:
       # Allow only what the sandbox executor needs
       CONTAINERS: 1    # create, inspect, exec, stop sandbox containers
@@ -78,6 +77,7 @@ services:
       NUKE_WORKERS: 8
       # enable the per-group container sandbox (default is "local" = no isolation)
       NUKE_SHELL_EXEC_BACKEND: container
+      NUKE_DOCKER_ISOLATION: rootless
       NUKE_SANDBOX_IMAGE: nuke-sandbox:latest
       # Point the Docker client at the proxy instead of the raw socket
       DOCKER_HOST: tcp://docker-proxy:2375

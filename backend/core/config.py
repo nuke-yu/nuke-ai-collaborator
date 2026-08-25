@@ -101,6 +101,7 @@ try:
     TOKENIZER_PATHS = json.loads(os.environ.get("NUKE_TOKENIZER_PATHS_JSON") or "{}")
 except json.JSONDecodeError:
     TOKENIZER_PATHS = {}
+TOKENIZER_CALIBRATION_PATH = os.environ.get("NUKE_TOKENIZER_CALIBRATION_PATH") or "./tokenizer_calibration.json"
 
 # --- Memory Retrieval (RAG ranking) ---
 # Absolute cosine-similarity floor for injecting a memory into context: candidates

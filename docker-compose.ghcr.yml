@@ -25,7 +25,7 @@ services:
     image: tecnativa/docker-socket-proxy:latest
     container_name: nuke-docker-proxy
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
+      - ${NUKE_ROOTLESS_DOCKER_SOCKET:?Set to the dedicated rootless Docker socket}:/var/run/docker.sock
     environment:
       CONTAINERS: 1
       EXEC: 1
@@ -69,6 +69,7 @@ services:
       NUKE_WORKSPACE_ROOT: /var/lib/nuke-ai-collaborator/workspaces
       NUKE_WORKERS: 8
       NUKE_SHELL_EXEC_BACKEND: container
+      NUKE_DOCKER_ISOLATION: rootless
       NUKE_SANDBOX_IMAGE: ghcr.io/nuke-yu/nuke-sandbox:latest
       DOCKER_HOST: tcp://docker-proxy:2375
       # ── REQUIRED: security credentials ──
