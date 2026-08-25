@@ -11,6 +11,66 @@
 
 ## 1. Chroma 记忆时间戳回填 — `scripts.backfill_chroma_timestamps`
 
+## Chroma 版本兼容、备份与安全重建
+
+Chroma 是由 canonical SQLite 记录派生的索引，但迁移工具仍必须在应用停机后执行。
+`rebuild_chroma_fact_ids` 会在任何写入前读取 SQLite migration metadata，确认指定
+Chroma runtime 版本，并自动完整复制索引目录；无法读取或缺少 migration metadata 时会拒绝
+写入。备份路径会打印到 stdout，可直接恢复为原目录。
+
+```bash
+# 在 backend/ 目录、应用已停止的前提下
+python3 -m scripts.rebuild_chroma_fact_ids --dry-run \
+  --chroma-path /var/lib/nuke-ai-collaborator/chroma_db \
+  --expected-chroma-version 1.5.9
+
+# 自动备份后迁移幸存的 legacy IDs
+python3 -m scripts.rebuild_chroma_fact_ids \
+  --chroma-path /var/lib/nuke-ai-collaborator/chroma_db \
+  --backup-dir /var/backups/nuke-chroma
+
+# 旧格式无法安全读取或历史 ID 覆盖导致数据丢失时：从 canonical SQLite 重建
+python3 -m scripts.rebuild_chroma_fact_ids --rebuild --group-id 3 \
+  --chroma-path /var/lib/nuke-ai-collaborator/chroma_db
+```
+
+当前实现状态：上述兼容检查、自动备份、旧库隔离和 canonical SQLite 全量重建已经完成。
+`--rebuild` 遇到无法读取的旧格式时不会打开旧 Chroma，而是将其保留为
+`*.pre-rebuild-*` 目录，再创建新索引。恢复或清理这些备份前，请先完成离线校验。
+
+运行时使用 `NUKE_CHROMA_PATH`（默认 `./chroma_db`）。所有相关命令须指向同一路径。
+`--dry-run` 不创建备份、不做写入；真正执行时不能跳过备份。
+
+## Rootless Docker sandbox daemon
+
+生产容器沙箱必须连接到专用的 rootless Docker daemon，不能挂载宿主机
+`/var/run/docker.sock`。启动 rootless daemon 后，将它的 user socket 暴露给 Compose：
+
+```bash
+export NUKE_ROOTLESS_DOCKER_SOCKET=/run/user/$(id -u)/docker.sock
+docker compose up -d --build
+```
+
+Compose 仅将该 socket 交给 API-minimizing proxy；应用仍只连接私有的
+`tcp://docker-proxy:2375`。生产启动校验要求 `NUKE_DOCKER_ISOLATION=rootless`，并拒绝
+host-root socket。使用 systemd 时，在 `/etc/nuke-ai-collaborator/env` 中设置
+`DOCKER_HOST=unix:///run/user/<nuke-uid>/docker.sock`；该 daemon 的用户必须拥有数据目录及
+各 group workspace，才能创建受限的 bind mount。
+
+## Worker CJK tokenizer 校准
+
+可选地为某个 provider/model 提供本地 HuggingFace `tokenizer.json`。Worker 在启动前完成
+校准，不访问网络，也不会让单个 tokenizer 加载失败中断启动：
+
+```bash
+export NUKE_TOKENIZER_PATHS_JSON='{"openai/gpt-4o":"/opt/tokenizers/gpt-4o/tokenizer.json"}'
+```
+
+校准结果按 `provider/model` 保存在 Worker 进程内，并通过
+`nuke_memory_tokenizer_abs_error_avg` 和 Worker 快照中的
+`tokenizer_configured_models` 暴露。应将 tokenizer 文件作为部署制品版本化，并在升级模型
+或 tokenizer 后重启 Worker。
+
 **何时需要**：记忆 recency 衰减重构（commit `14461da`，2026-06-13）之后。在此之前写入的
 Chroma 记忆没有 `timestamp` 元数据，检索排序器 `TimeDecayRanker` 会把它们当作约 30 天前的旧
 数据、压到结果底部。
