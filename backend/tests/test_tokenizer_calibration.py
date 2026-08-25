@@ -41,3 +41,19 @@ def test_persisted_calibration_is_loaded_and_activated(monkeypatch, tmp_path):
     tokenizer_calibration.load_configured_tokenizers({})
 
     assert tokenizer_calibration.activate("openai", "gpt-test") == 3.25
+
+
+def test_context_local_activation_does_not_leak_between_async_tasks():
+    import asyncio
+    from executors import compact_tokens
+
+    async def run(key, expected):
+        compact_tokens.activate_cjk_calibration(key)
+        await asyncio.sleep(0)
+        assert compact_tokens._chars_to_tokens(10, 10) == expected
+
+    compact_tokens.register_cjk_calibration("a", 0.0)
+    compact_tokens.register_cjk_calibration("b", 4.0)
+    async def main():
+        await asyncio.gather(run("a", 2), run("b", 12))
+    asyncio.run(main())
