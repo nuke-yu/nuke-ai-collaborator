@@ -40,12 +40,16 @@ def validate_runtime_security() -> None:
             "NUKE_ENV=production requires NUKE_SHELL_EXEC_BACKEND=container; "
             f"got {SHELL_EXEC_BACKEND!r}"
         )
-    docker_host = os.environ.get("DOCKER_HOST", "")
+    docker_host = os.environ.get("DOCKER_HOST", "").strip()
     isolation = os.environ.get("NUKE_DOCKER_ISOLATION", "").lower()
     if isolation != "rootless":
         raise RuntimeError(
             "NUKE_ENV=production requires NUKE_DOCKER_ISOLATION=rootless; "
             "the host Docker daemon socket is not an isolation boundary"
+        )
+    if not docker_host:
+        raise RuntimeError(
+            "NUKE_ENV=production requires an explicit DOCKER_HOST for the rootless daemon or proxy"
         )
     if docker_host == "unix:///var/run/docker.sock":
         raise RuntimeError(

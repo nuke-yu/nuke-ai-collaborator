@@ -33,3 +33,9 @@ class RuntimeSecurityConfigTests(unittest.TestCase):
              patch.object(config, "SHELL_EXEC_BACKEND", "container"):
             with self.assertRaisesRegex(RuntimeError, "ISOLATION=rootless"):
                 config.validate_runtime_security()
+
+    def test_production_rejects_missing_docker_host(self):
+        with patch.dict(os.environ, {"NUKE_ENV": "production", "NUKE_DOCKER_ISOLATION": "rootless"}, clear=True), \
+             patch.object(config, "SHELL_EXEC_BACKEND", "container"):
+            with self.assertRaisesRegex(RuntimeError, "explicit DOCKER_HOST"):
+                config.validate_runtime_security()
