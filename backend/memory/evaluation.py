@@ -59,7 +59,7 @@ class MemoryEvaluation:
         self.operation_cost_total += max(0.0, float(cost))
 
     def snapshot(self) -> dict[str, float | int]:
-        return {
+        snapshot = {
             "graph_resolution_accuracy": self.graph_resolution_correct / self.graph_resolution_total
             if self.graph_resolution_total else 0.0,
             "retrieval_recall": self.retrieval_relevant_hits / self.retrieval_relevant_total
@@ -73,6 +73,12 @@ class MemoryEvaluation:
             "tokenizer_abs_error_avg": self.tokenizer_abs_error_total / self.tokenizer_samples
             if self.tokenizer_samples else 0.0,
         }
+        try:
+            from executors.tokenizer_calibration import reports
+            snapshot["tokenizer_configured_models"] = len(reports())
+        except Exception:
+            snapshot["tokenizer_configured_models"] = 0
+        return snapshot
 
 
 memory_evaluation = MemoryEvaluation()

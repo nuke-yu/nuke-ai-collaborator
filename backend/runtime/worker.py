@@ -58,6 +58,11 @@ class Worker:
         self._hydrate_assigned_groups_enabled = hydrate_assigned_groups
 
     async def connect(self) -> None:
+        # Tokenizers are optional local artifacts. Loading and calibration happen
+        # before serving groups, never in the async request path.
+        from core import config
+        from executors.tokenizer_calibration import load_configured_tokenizers
+        load_configured_tokenizers(config.TOKENIZER_PATHS)
         self._reader, self._writer = await ipc.connect(self.addr)
         # Identify ourselves so the Supervisor can route group→worker (CELL-12).
         await ipc.send_msg(self._writer, {"type": ipc.protocol.HELLO, "worker_id": self.worker_id})
