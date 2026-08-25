@@ -108,6 +108,8 @@ class ToolLoopRunner:
         self.bf_config = (self.bot.get("executor_config") or {}).get("before_finalize")
         self.model_name = self.bot.get("model_name", "deepseek-chat")
         self.provider = self.bot.get("model_provider", "deepseek")
+        from executors.tokenizer_calibration import activate as activate_tokenizer
+        activate_tokenizer(self.provider, self.model_name)
         self.memory = build_conversation_memory_client()
         self.learning = build_learning_client()
         personal_user_id = getattr(ctx, "personal_user_id", None)

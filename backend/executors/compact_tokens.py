@@ -8,6 +8,19 @@ _token_cache: dict[int, tuple[int, int, int, str]] = {}
 # characters baseline.  It is deliberately configurable through the explicit
 # calibration API below rather than silently assuming a provider tokenizer.
 _cjk_adjustment = 2.0
+_cjk_adjustments: dict[str, float] = {"default": _cjk_adjustment}
+
+
+def activate_cjk_calibration(key: str) -> float:
+    """Select the calibrated adjustment for one provider/model in this loop."""
+    global _cjk_adjustment
+    _cjk_adjustment = float(_cjk_adjustments.get(key, _cjk_adjustments["default"]))
+    _token_cache.clear()
+    return _cjk_adjustment
+
+
+def register_cjk_calibration(key: str, adjustment: float) -> None:
+    _cjk_adjustments[str(key)] = max(0.0, float(adjustment))
 
 
 def _count_cjk(text: str) -> int:
@@ -96,6 +109,7 @@ def calibrate_cjk_estimator(samples, tokenizer) -> dict[str, float | int]:
         return {"samples": count, "adjustment": _cjk_adjustment, "mean_abs_error": 0.0}
     # Solve tokens = (chars + cjk * adjustment) / 4 for the observed corpus.
     _cjk_adjustment = max(0.0, (4.0 * total_actual - total_chars) / total_cjk)
+    register_cjk_calibration("default", _cjk_adjustment)
     errors = []
     for text in samples:
         value = str(text or "")
