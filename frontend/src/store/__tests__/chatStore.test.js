@@ -350,3 +350,16 @@ describe('dispatchWsEvent — other events', () => {
     expect(fired[0].skills).toEqual(['x'])
   })
 })
+
+it('updates only the gate card acknowledged by the server', () => {
+  const meta = { kind: 'confirm_gate', gate_id: '1-0', gate_instance_id: 'new', status: 'confirmed' }
+  useChatStore.setState({ messages: [
+    { id: 7, content: 'old gate', meta: { ...meta, gate_instance_id: 'old', status: 'pending' } },
+    { id: 8, content: 'current gate', meta: { ...meta, status: 'pending' } },
+  ] })
+  useChatStore.getState().dispatchWsEvent({ type: 'gate_confirmed', id: 8, meta }, notify)
+  const messages = useChatStore.getState().messages
+  expect(messages[0].meta.status).toBe('pending')
+  expect(messages[1].meta).toEqual(meta)
+  expect(messages[1].content).toBe('current gate')
+})

@@ -18,6 +18,11 @@ class CodingAgentOrchestrator(Orchestrator):
     """
     orchestrator_id = CODING_WORKFLOW_ID
 
+    async def admit_dispatch(self, group_id, body, spec, workflow):
+        """Online-queue admission hook; generic runtime stays task-domain agnostic."""
+        from online_tasks.dispatch_receipts import accept_dispatch
+        return await accept_dispatch(group_id, body, spec, workflow)
+
     def __init__(self):
         # group_id → state dict
         self._state: dict[int, dict] = {}
@@ -68,6 +73,7 @@ class CodingAgentOrchestrator(Orchestrator):
             "requirements": requirements,
             "test_command": test_command,
             "task_id": task_id,
+            "dispatch_attempt": spec.get("dispatch_attempt"),
             "require_pull_request": require_pull_request,
         }
 
@@ -325,5 +331,6 @@ class CodingAgentOrchestrator(Orchestrator):
             "requirements": body.get("requirements", ""),
             "test_command": body.get("test_command", ""),
             "task_id": body.get("task_id", ""),
+            "dispatch_attempt": body.get("dispatch_attempt"),
             "require_pull_request": bool(body.get("require_pull_request", False)),
         }

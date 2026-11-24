@@ -1,12 +1,21 @@
-"""Central tables for the online Jira execution queue."""
+"""Central tables for the online single-Story execution queue."""
 
-JIRA_TASK_TABLES = {"jira_task_runs", "jira_story_jobs", "jira_run_stories", "jira_job_attempts"}
+JIRA_TASK_TABLES = {"jira_task_runs", "jira_story_jobs", "jira_run_stories", "jira_job_attempts", "task_attempt_delivery"}
 
 JIRA_TASK_DDL = (
+    """CREATE TABLE IF NOT EXISTS task_attempt_delivery (
+        job_id INTEGER NOT NULL REFERENCES jira_story_jobs(id),
+        attempt INTEGER NOT NULL,
+        event_floor INTEGER NOT NULL DEFAULT 0,
+        pr_url TEXT,
+        pr_state TEXT,
+        validation TEXT,
+        PRIMARY KEY (job_id, attempt)
+    )""",
     """CREATE TABLE IF NOT EXISTS jira_task_runs (
         id TEXT PRIMARY KEY,
         site TEXT NOT NULL,
-        kind TEXT NOT NULL CHECK (kind IN ('story', 'epic')),
+        kind TEXT NOT NULL CHECK (kind = 'story'),
         issue_key TEXT NOT NULL,
         mappings TEXT NOT NULL,
         max_parallel INTEGER NOT NULL,

@@ -17,6 +17,7 @@ import db as _db
 
 # group tables that carry a direct group_id column
 _DIRECT = [
+    "online_dispatch_receipts",
     "messages", "agent_sessions", "role_summaries", "member_read",
     "workflow_state", "group_locks", "tickets", "pinned_messages",
 ]
@@ -38,6 +39,8 @@ async def _table_cols(conn, table: str) -> set[str]:
 async def _copy(src, dst, table: str, where: str = "", params: tuple = ()) -> int:
     """Copy rows of `table` from src→dst, restricting to columns that exist in BOTH
     (robust to schema drift). Returns rows copied."""
+    if table == "online_dispatch_receipts" and not await _table_cols(src, table):
+        return 0  # Legacy databases created before online dispatch receipts.
     tgt_cols = await _table_cols(dst, table)
     cur = await src.execute(f"SELECT * FROM {table} {where}", params)
     src_cols = [d[0] for d in cur.description]

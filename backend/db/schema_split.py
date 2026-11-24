@@ -23,6 +23,7 @@ import logging
 from db import DB_PATH
 from db.jira_task_schema import JIRA_TASK_DDL, JIRA_TASK_TABLES
 from db.migrations import MIGRATIONS
+from db.task_dispatch_schema import ONLINE_DISPATCH_RECEIPT_DDL
 from db.schema import _seed_templates
 from memory.infrastructure.schema import MEMORY_GROUP_DDL, MEMORY_GROUP_TABLES
 
@@ -36,6 +37,7 @@ CENTRAL_TABLES = frozenset({
     "personal_vault_deletion_audit",
 }) | JIRA_TASK_TABLES
 GROUP_TABLES = frozenset({
+    "online_dispatch_receipts",
     "messages", "role_summaries", "message_embeddings", "member_read",
     "message_reactions", "pinned_messages", "agent_sessions", "session_events", "session_evidence_links",
     "model_usage_ledger", "group_artifacts",
@@ -223,6 +225,7 @@ _CENTRAL_DDL = [
 
 # ── GROUP DDL (final shape; cross-domain FKs dropped, within-group FKs kept) ─
 _GROUP_DDL = [
+    ONLINE_DISPATCH_RECEIPT_DDL,
     # messages: DROP FK group_id->groups, member_id->members (cross-domain).
     """CREATE TABLE IF NOT EXISTS messages (
         id          INTEGER PRIMARY KEY AUTOINCREMENT,

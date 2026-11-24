@@ -285,7 +285,7 @@ function MessageBubble({ msg, isTyping, currentMemberId, members = [], readMap =
 
   // 工作流人确认门：内联卡片（不是弹窗），人点确认才推进；想改就直接发消息。
   if (msg.meta?.kind === 'confirm_gate') {
-    const status = gateState || (msg.meta.status === 'confirmed' ? 'confirmed' : 'pending')
+    const status = msg.meta.status === 'confirmed' ? 'confirmed' : (gateState || 'pending')
     return (
       <div className="flex items-start gap-2 py-1">
         {avatar}
@@ -311,7 +311,7 @@ function MessageBubble({ msg, isTyping, currentMemberId, members = [], readMap =
                   onChange={e => setReviseNote(e.target.value)}
                   onKeyDown={e => {
                     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && reviseNote.trim()) {
-                      onReviseGate?.(msg.meta.gate_id, reviseNote.trim()); setGateState('revised')
+                      onReviseGate?.(msg.meta.gate_id, reviseNote.trim(), msg.meta.gate_instance_id); setGateState(null)
                     }
                     if (e.key === 'Escape') { setGateState(null); setReviseNote('') }
                   }}
@@ -322,7 +322,7 @@ function MessageBubble({ msg, isTyping, currentMemberId, members = [], readMap =
                 <div className="flex items-center gap-2">
                   <button
                     disabled={!reviseNote.trim()}
-                    onClick={() => { onReviseGate?.(msg.meta.gate_id, reviseNote.trim()); setGateState('revised') }}
+                    onClick={() => { onReviseGate?.(msg.meta.gate_id, reviseNote.trim(), msg.meta.gate_instance_id); setGateState(null) }}
                     className="px-3 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors"
                   >➤ {t(K.message.gateReviseSubmit)}</button>
                   <button
@@ -334,7 +334,7 @@ function MessageBubble({ msg, isTyping, currentMemberId, members = [], readMap =
             ) : (
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => { onConfirmGate?.(msg.meta.gate_id); setGateState('confirmed') }}
+                  onClick={() => { onConfirmGate?.(msg.meta.gate_id, msg.meta.gate_instance_id) }}
                   className="px-3 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium transition-colors"
                 >✅ {t(K.message.workflow.confirm)}</button>
                 <button

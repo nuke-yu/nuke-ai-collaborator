@@ -24,6 +24,7 @@ export function useWebSocket(groupId, memberId, onMessage, onReconnect, token, o
   const connectRef = useRef(null)
   const cursorRef = useRef(null)
   const seenEventIdsRef = useRef(new Set())
+  const pendingMessagesRef = useRef(new Map())
 
   const onMessageRef = useRef(onMessage)
   const onReconnectRef = useRef(onReconnect)
@@ -41,6 +42,9 @@ export function useWebSocket(groupId, memberId, onMessage, onReconnect, token, o
       identityRef.current = identity
       attemptRef.current = 0
       reconnectingRef.current = false
+      pendingMessagesRef.current.clear()
+      cursorRef.current = null
+      seenEventIdsRef.current.clear()
     }
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const host = window.location.host || 'localhost:8000'
@@ -53,6 +57,9 @@ export function useWebSocket(groupId, memberId, onMessage, onReconnect, token, o
     socket.onopen = () => {
       if (ws.current !== socket) return
       wsrpc.setSocket(socket)
+      for (const frame of pendingMessagesRef.current.values()) {
+        socket.send(JSON.stringify(frame))
+      }
       if (reconnectingRef.current) {
         onReconnectRef.current?.()
       }
@@ -69,6 +76,10 @@ export function useWebSocket(groupId, memberId, onMessage, onReconnect, token, o
     socket.onmessage = (e) => {
       if (ws.current !== socket) return
       const data = JSON.parse(e.data)
+      if (data.type === 'client_message_ack') {
+        if (data.member_id === memberId) pendingMessagesRef.current.delete(data.client_message_id)
+        return
+      }
       if (data.event_id) {
         if (seenEventIdsRef.current.has(data.event_id)) return
         seenEventIdsRef.current.add(data.event_id)
@@ -135,12 +146,15 @@ export function useWebSocket(groupId, memberId, onMessage, onReconnect, token, o
 
   const send = useCallback((content, replyToId = null, fileData = null) => {
     if (ws.current?.readyState === WebSocket.OPEN) {
-      ws.current.send(JSON.stringify({
+      const frame = {
+        client_message_id: crypto.randomUUID(),
         content,
         reply_to_id: replyToId,
         lang: localStorage.getItem('lang') || 'zh',
         ...(fileData && { file_url: fileData.url, file_name: fileData.name, file_size: fileData.size, file_type: fileData.type }),
-      }))
+      }
+      pendingMessagesRef.current.set(frame.client_message_id, frame)
+      ws.current.send(JSON.stringify(frame))
     }
   }, [])
 

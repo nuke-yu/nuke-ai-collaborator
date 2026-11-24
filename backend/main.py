@@ -550,6 +550,7 @@ async def _handle_incoming_message(payload: dict, group_id: int, member_id: int,
         await sup_mod.supervisor.send_to_worker(group_id, ipc.protocol.envelope(
             ipc.protocol.CONFIRM, group_id=group_id, trace_id=trace_id,
             gate_id=payload.get("gate_id"),
+            gate_instance_id=payload.get("gate_instance_id"),
             revise=bool(payload.get("revise", False)),
             note=(payload.get("note") or ""),
             lang=payload.get("lang")

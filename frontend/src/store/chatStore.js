@@ -158,6 +158,11 @@ export const useChatStore = create((set, get) => ({
         reactionMap: { ...s.reactionMap, [String(data.message_id)]: data.reactions },
       }))
 
+    } else if (data.type === 'gate_confirmed') {
+      const applyGate = (ms) => ms.map((m) => (m.id === data.id ? { ...m, meta: data.meta } : m))
+      set((s) => ({ messages: applyGate(s.messages) }))
+      syncCache(activeGroupId, applyGate)
+
     } else if (data.type === 'message_edited') {
       const applyEdit = (ms) =>
         ms.map((m) => (m.id === data.id ? { ...m, content: data.content, edited: true } : m))

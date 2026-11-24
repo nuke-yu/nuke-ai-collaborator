@@ -1,4 +1,4 @@
-"""Supervisor-side discovery and scheduling for Jira-backed coding tasks."""
+"""Supervisor-side submission and scheduling for online coding tasks."""
 import asyncio
 import json
 import logging
@@ -6,16 +6,17 @@ from pathlib import Path
 
 import db
 from online_tasks import CODING_WORKFLOW_ID
-from online_tasks.jira_source import JiraSourceError
-from online_tasks.jira_store import safe_error
+from online_tasks.story_input import build_story_input
+from online_tasks.task_queue_store import safe_error
 from runtime.dbpaths import group_db_path
 
 log = logging.getLogger(__name__)
 
 
-class JiraTaskService:
-    def __init__(self, source, store, tasks, task_store, pick_worker, get_pr, *, max_parallel=2):
-        self.source = source
+class TaskQueueService:
+    def __init__(self, site, store, tasks, task_store, pick_worker, get_pr, *, github_owner="nuke-yu", max_parallel=2):
+        self.site = site
+        self.github_owner = github_owner
         self.store = store
         self._tasks = tasks
         self._task_store = task_store
@@ -27,23 +28,13 @@ class JiraTaskService:
     def wake(self):
         self._wake.set()
 
-    async def discover(self, run):
-        try:
-            if not run["cursor"]:
-                issue = await self.source.get(run["issue_key"])
-                expected = self.source.story_type if run["kind"] == "story" else self.source.epic_type
-                if issue.kind != expected:
-                    raise JiraSourceError(f"Expected Jira issue type {expected}")
-                if run["kind"] == "story":
-                    await self.store.save_page(run["id"], [issue], None, run["generation"])
-                    return
-                epic_key = issue.key
-            else:
-                epic_key = run["issue_key"]
-            issues, cursor = await self.source.children(epic_key, run["cursor"])
-            await self.store.save_page(run["id"], issues, cursor, run["generation"])
-        except JiraSourceError as exc:
-            await self.store.discovery_failed(run, str(exc), retryable=exc.retryable)
+    async def submit_story(self, jira_id, summary, description, acceptance_criteria, operator_id):
+        story = build_story_input(
+            jira_id, summary, description, acceptance_criteria, github_owner=self.github_owner,
+        )
+        return await self.store.submit_story(
+            self.site, story["jira_id"], story["requirements"], story["mapping"], operator_id,
+        )
 
     async def _reconcile(self, job, record):
         if record["status"] != "created":
@@ -55,8 +46,10 @@ class JiraTaskService:
         if Path(path).exists():
             async with db.connect(path) as conn:
                 async with conn.execute(
-                    """SELECT 1 FROM workflow_state WHERE group_id=? AND orchestrator_id=?""",
-                    (record["group_id"], CODING_WORKFLOW_ID),
+                    """SELECT 1 FROM workflow_state WHERE group_id=? AND orchestrator_id=?
+                       AND json_extract(state_json, '$.task_id')=?
+                       AND COALESCE(json_extract(state_json, '$.dispatch_attempt'), 1)=?""",
+                    (record["group_id"], CODING_WORKFLOW_ID, job["task_id"], job["attempt"]),
                 ) as cur:
                     if await cur.fetchone():
                         await self._task_store.update_status(job["task_id"], "dispatched")
@@ -69,7 +62,21 @@ class JiraTaskService:
             record = await self._task_store.get_task(job["task_id"])
             if record:
                 if job["state"] == "retry":
-                    await self._tasks.retry_task(job["task_id"], jira_dispatch=True)
+                    async def before_dispatch():
+                        # Abort ACK has stopped the previous execution. Freeze its
+                        # event boundary before the new Worker can publish evidence.
+                        path = group_db_path(record["group_id"])
+                        floor = 0
+                        if Path(path).exists():
+                            async with db.connect(path) as conn:
+                                async with conn.execute("SELECT COALESCE(MAX(id), 0) FROM session_events") as cur:
+                                    floor = (await cur.fetchone())[0]
+                        await self.store.set_event_floor(job, floor)
+                    await self._tasks.retry_task(
+                        job["task_id"], jira_dispatch=True,
+                        recover_created=record["status"] == "created", before_dispatch=before_dispatch,
+                        dispatch_attempt=job["attempt"],
+                    )
                     await self.store.finish(job, "linked")
                 else:
                     await self._reconcile(job, record)
@@ -78,11 +85,14 @@ class JiraTaskService:
             await self._tasks.create_task(
                 **json.loads(job["mapping"]), requirements=job["requirements"],
                 worker_id=worker, jira_task_id=job["task_id"], jira_operator_id=int(job["operator_id"]),
+                dispatch_attempt=job["attempt"],
             )
             await self.store.finish(job, "linked")
         except Exception as exc:
             record = await self._task_store.get_task(job["task_id"])
-            if record and record["status"] == "created":
+            if job["state"] == "retry":
+                await self.store.finish(job, "interrupted", str(exc))
+            elif record and record["status"] == "created":
                 await self._reconcile(job, record)
             else:
                 await self.store.finish(job, "linked" if record else "failed", str(exc))
@@ -107,11 +117,14 @@ class JiraTaskService:
                 if result and result[1] == "needs_review" and not verified:
                     result = (result[0], "pr_unverified")
         except Exception as exc:
-            log.warning("Jira task %s PR lookup failed: %s", job["task_id"], safe_error(str(exc)))
+            log.warning("Task %s PR lookup failed: %s", job["task_id"], safe_error(str(exc)))
             result = None
-        await self.store.record_pr(job["id"], result, validation)
+        await self.store.record_pr(job["id"], job["attempt"], result, validation)
 
     async def _evidence(self, job, event_type):
+        if (job.get("event_floor") is None and job["attempt"] > 1) or (
+                job.get("event_floor") is not None and job["event_floor"] < 0):
+            return {}  # Legacy retries have no reliable event boundary.
         path = group_db_path(job["group_id"])
         if not Path(path).exists():
             return {}
@@ -120,17 +133,18 @@ class JiraTaskService:
                 """SELECT e.payload, e.session_id FROM session_events e JOIN agent_sessions s ON e.session_id=s.id
                    WHERE s.group_id=? AND s.bot_id=? AND e.event_type=?
                      AND json_extract(e.payload, '$.task_id')=?
-                   ORDER BY e.id DESC LIMIT 1""", (job["group_id"], job["bot_id"], event_type, job["task_id"]),
+                     AND e.id>?
+                   ORDER BY e.id DESC LIMIT 1""", (job["group_id"], job["bot_id"], event_type,
+                                               job["task_id"], job.get("event_floor") or 0),
             ) as rows:
                 row = await rows.fetchone()
         return {**json.loads(row[0]), "session_id": row[1]} if row else {}
 
     async def run(self):
         operations = set()
-        discovery = None
         review = None
         try:
-            for job in await self.store.interrupted(self.source.site):
+            for job in await self.store.interrupted(self.site):
                 record = await self._task_store.get_task(job["task_id"])
                 if record:
                     await self._reconcile(job, record)
@@ -144,14 +158,9 @@ class JiraTaskService:
                         try:
                             op.result()
                         except Exception:
-                            log.exception("Jira queue operation failed")
-                if discovery is None or discovery.done():
-                    run = await self.store.next_discovery(self.source.site)
-                    if run:
-                        discovery = asyncio.create_task(self.discover(run))
-                        operations.add(discovery)
+                            log.exception("Task queue operation failed")
                 if review is None or review.done():
-                    prs = await self.store.pending_prs(self.source.site)
+                    prs = await self.store.pending_prs(self.site)
                     if prs:
                         async def refresh_all(jobs):
                             await asyncio.gather(*(self._refresh_pr(job) for job in jobs))
@@ -161,7 +170,7 @@ class JiraTaskService:
                     worker = self._pick_worker()
                     if not worker:
                         break
-                    job = await self.store.claim(self.source.site, self._max_parallel)
+                    job = await self.store.claim(self.site, self._max_parallel)
                     if job is None:
                         break
                     operation = asyncio.create_task(self._prepare(job, worker))
@@ -174,4 +183,3 @@ class JiraTaskService:
             for op in operations:
                 op.cancel()
             await asyncio.gather(*operations, return_exceptions=True)
-            await self.source.close()

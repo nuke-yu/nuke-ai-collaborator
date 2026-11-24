@@ -11,6 +11,7 @@ flow out through the Worker's upstream pump.
 import dataclasses
 import logging
 import re
+import uuid
 
 import db
 from bus import bus
@@ -46,6 +47,12 @@ def _coalesce_should_abort(sender: dict, next_units: list) -> bool:
 async def dispatch_user_message(msg: dict) -> None:
     gid = msg["group_id"]
     sender_id = msg.get("member_id")
+    client_message_id = msg.get("client_message_id")
+    if client_message_id is not None:
+        try:
+            client_message_id = str(uuid.UUID(client_message_id))
+        except (ValueError, TypeError, AttributeError):
+            raise ValueError("client_message_id must be a UUID") from None
     content = (msg.get("content") or "").strip()
     channel_meta = msg.get("channel_meta")
     channel_attachments = (
@@ -88,12 +95,16 @@ async def dispatch_user_message(msg: dict) -> None:
             msg.get("reply_to_id"), file_url, file_name, file_size, file_type,
             meta=channel_meta,
             sender_snapshot=sender if sender.get("type") == "integration" else None,
-            external_message_key=msg.get("channel_message_key"),
+            external_message_key=(f"web:{gid}:{sender_id}:{client_message_id}"
+                                  if client_message_id else msg.get("channel_message_key")),
             return_created=True,
         )
-        if not created:
-            return
-        recent = await db.get_messages(gdb, gid)
+        recent = await db.get_messages(gdb, gid) if created else []
+    if client_message_id:
+        await bus.broadcast(gid, {"type": "client_message_ack", "client_message_id": client_message_id,
+                                  "member_id": sender_id, "id": msg_id})
+    if not created:
+        return
     saved = next((m for m in recent if m["id"] == msg_id), {})
     if msg.get("channel_target_bot_id"):
         saved["target_bot_id"] = int(msg["channel_target_bot_id"])
@@ -208,7 +219,13 @@ async def dispatch_start_workflow(msg: dict) -> None:
                 "avatar_color": "#6366f1", "content": content,
             })
             return
-        await wf.apply(gid, wf.start(gid, spec, orchestrator_id))
+        admit_dispatch = getattr(orch, "admit_dispatch", None)
+        if callable(admit_dispatch) and "dispatch_attempt" in body:
+            step = await admit_dispatch(gid, body, spec, wf)
+            if step is not None:
+                await wf.apply(gid, step)
+        else:
+            await wf.apply(gid, wf.start(gid, spec, orchestrator_id))
         return
 
     # 默认起 RD 人确认流水线（BA→Dev→QA 三道门）

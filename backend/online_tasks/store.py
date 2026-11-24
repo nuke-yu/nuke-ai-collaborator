@@ -458,8 +458,8 @@ class TaskStore:
     ) -> bool:
         """Restore a failed retry only while this caller still owns the claim."""
         if status not in {
-            "running", "dispatched", "paused", "stuck", "failed", "aborted",
-            "stuck_permanently",
+            "created", "running", "dispatched", "paused", "stuck", "failed", "aborted",
+            "stuck_permanently", "incomplete",
         }:
             raise ValueError(f"Invalid retry fallback status: {status}")
         from db import write_connect

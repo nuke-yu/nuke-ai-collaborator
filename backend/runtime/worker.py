@@ -329,6 +329,7 @@ class Worker:
                 elif t == ipc.protocol.CONFIRM:
                     import core.workflow as wf
                     await wf.confirm(gid, msg.get("gate_id"),
+                                     gate_instance_id=msg.get("gate_instance_id"), require_instance=True,
                                      revise=bool(msg.get("revise", False)),
                                      note=(msg.get("note") or ""))
                 elif t == ipc.protocol.START_WORKFLOW:

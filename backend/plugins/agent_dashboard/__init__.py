@@ -66,29 +66,31 @@ async def register(host):
     host.mount_router(api_module.router, prefix="/api/agent",
                       dependencies=[Depends(auth.get_current_user)])
 
-    from .jira_api import router_for
-    from online_tasks.jira_source import JiraCloudSource
-    from online_tasks.jira_store import JiraTaskStore
-    from online_tasks.jira_service import JiraTaskService
+    from .task_queue_api import router_for
+    from online_tasks.story_input import task_scope
+    from online_tasks.task_queue_store import TaskQueueStore
+    from online_tasks.task_queue import TaskQueueService
     from integrations.github_client import find_task_pull_request
 
-    jira_service = None
+    task_queue = None
     try:
-        jira_parallel = int(os.getenv("NUKE_JIRA_MAX_PARALLEL", "2"))
-        if not 1 <= jira_parallel <= 32:
-            raise ValueError("NUKE_JIRA_MAX_PARALLEL must be between 1 and 32")
-        jira = JiraCloudSource.from_environment()
-        if jira is not None:
-            jira_service = JiraTaskService(
-                jira, JiraTaskStore(), orchestrator, task_store,
-                lambda: host.pick_worker("least_loaded"), find_task_pull_request,
-                max_parallel=jira_parallel,
-            )
+        story_parallel = int(os.getenv(
+            "NUKE_ONLINE_STORY_MAX_PARALLEL",
+            os.getenv("NUKE_JIRA_MAX_PARALLEL", "2"),
+        ))
+        if not 1 <= story_parallel <= 32:
+            raise ValueError("NUKE_ONLINE_STORY_MAX_PARALLEL must be between 1 and 32")
+        github_owner = os.getenv("NUKE_GITHUB_OWNER", "nuke-yu")
+        task_queue = TaskQueueService(
+            task_scope(), TaskQueueStore(), orchestrator, task_store,
+            lambda: host.pick_worker("least_loaded"), find_task_pull_request,
+            github_owner=github_owner, max_parallel=story_parallel,
+        )
     except ValueError as exc:
-        log.warning("Jira online tasks configuration invalid: %s", exc)
-    host.mount_router(router_for(jira_service), prefix="/api/agent")
-    if jira_service is not None:
-        host.start_background(jira_service.run())
+        log.warning("Online task queue configuration invalid: %s", exc)
+    host.mount_router(router_for(task_queue), prefix="/api/agent")
+    if task_queue is not None:
+        host.start_background(task_queue.run())
 
     # 4. Mount Dashboard WebSocket routes (JWT validated inside endpoint)
     host.mount_router(ws_module.router)

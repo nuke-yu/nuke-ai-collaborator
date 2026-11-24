@@ -117,6 +117,7 @@ class HelloFrame(BaseFrame):
 @register_frame_type(USER_MESSAGE)
 @dataclass(eq=False)
 class UserMessageFrame(BaseFrame):
+    client_message_id: Optional[str] = None
     member_id: int = 0
     user_id: int = 0
     content: str = ""
@@ -172,6 +173,7 @@ class PermissionResponseFrame(BaseFrame):
 @dataclass(eq=False)
 class ConfirmFrame(BaseFrame):
     gate_id: str = ""
+    gate_instance_id: Optional[str] = None
     # revise=True → human chose 「修改」 (not plain 确认): carry an optional note
     # that gets injected into the dispatched stage's trigger. For a rework gate
     # this augments the rework; for a completion gate it redoes the current stage.

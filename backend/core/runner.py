@@ -53,14 +53,15 @@ async def _post_confirm_gate(group_id: int, gate: dict) -> None:
     await bus.broadcast(group_id, {"type": "message", **saved})
 
 
-async def mark_gate_confirmed(group_id: int, gate_id: str) -> None:
+async def mark_gate_confirmed(group_id: int, gate_id: str, *, gate_instance_id: str | None = None) -> None:
     """把已确认的确认门卡片 meta.status 翻成 'confirmed'，让"已确认"态能扛过刷新
-    （前端 MessageBubble 读 meta.status 渲染；点按钮只是本地乐观更新，刷新即丢）。
+    前端根据提交后的 gate_confirmed 事件更新卡片，刷新后读取已保存的 meta.status。
 
     纯卡片外观，best-effort：任何失败只告警、不影响 confirm 本身的推进。卡片由
     _post_confirm_gate 落库（建时 status='pending'），故标记 confirmed 收在同一模块。"""
     if not gate_id:
         return
+    updated = []
     try:
         async with write_connect() as db:
             cur = await db.execute(
@@ -74,12 +75,18 @@ async def mark_gate_confirmed(group_id: int, gate_id: str) -> None:
                 except (ValueError, TypeError):
                     continue
                 if meta.get("kind") == "confirm_gate" and meta.get("gate_id") == gate_id:
+                    if gate_instance_id is not None and meta.get("gate_instance_id") != gate_instance_id:
+                        continue
                     meta["status"] = "confirmed"
                     await db.execute(
                         "UPDATE messages SET meta = ? WHERE id = ?",
                         (json.dumps(meta, ensure_ascii=False), msg_id),
                     )
+                    updated.append((msg_id, meta))
             await db.commit()
+        if gate_instance_id is not None:
+            for msg_id, meta in updated:
+                await bus.broadcast(group_id, {"type": "gate_confirmed", "id": msg_id, "meta": meta})
     except Exception:
         log.warning("mark_gate_confirmed failed for gate %s (group %s)", gate_id, group_id, exc_info=True)
 

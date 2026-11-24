@@ -118,6 +118,7 @@ class TaskOrchestrator:
         *,
         jira_task_id: str | None = None,
         jira_operator_id: int | None = None,
+        dispatch_attempt: int | None = None,
     ) -> dict:
         """Create and dispatch a new coding agent task.
 
@@ -233,7 +234,9 @@ class TaskOrchestrator:
                 self._adapter.register_task(group_id, task_id)
 
             # 7. Dispatch before exposing the dispatched state.
-            await self._dispatch_agent(group_id, bot_id, requirements, test_command, task_id=task_id)
+            dispatch_options = {"dispatch_attempt": dispatch_attempt} if dispatch_attempt is not None else {}
+            await self._dispatch_agent(group_id, bot_id, requirements, test_command, task_id=task_id,
+                                       **dispatch_options)
             await self._task_store.update_status(task_id, "dispatched")
 
         except Exception as e:
@@ -282,7 +285,9 @@ class TaskOrchestrator:
         log.info("TaskOrchestrator: task %s dispatched (group=%d, bot=%d)", task_id, group_id, bot_id)
         return record
 
-    async def retry_task(self, task_id: str, *, automatic: bool = False, jira_dispatch: bool = False) -> dict:
+    async def retry_task(self, task_id: str, *, automatic: bool = False, jira_dispatch: bool = False,
+                         recover_created: bool = False, before_dispatch=None,
+                         dispatch_attempt: int | None = None) -> dict:
         """Retry a stuck/failed task: abort via IPC ACK → re-dispatch.
 
         P0-2: Uses ABORT_REQUEST/ABORT_ACK protocol. Only re-dispatches after
@@ -304,6 +309,10 @@ class TaskOrchestrator:
         allowed_statuses = set(
             _AUTOMATIC_RETRY_STATUSES if automatic else _MANUAL_RETRY_STATUSES
         )
+        if recover_created:
+            if not jira_dispatch or automatic:
+                raise ValueError("Created-task recovery is reserved for the online task queue")
+            allowed_statuses.add("created")
         local_stuck_override = False
         if not automatic and self._adapter:
             local_state = self._adapter.get_progress(group_id)
@@ -334,12 +343,15 @@ class TaskOrchestrator:
                 self._adapter.mark_retrying(group_id, "正在停止旧任务并准备重试")
             # Only the owner of the durable retry claim may abort and dispatch.
             await self._send_abort(group_id, task_id, mode="retry")
+            if before_dispatch is not None:
+                await before_dispatch()
             await self._dispatch_agent(
                 group_id,
                 record["bot_id"],
                 record["requirements"],
                 record.get("test_command", ""),
                 task_id=task_id,
+                **({"dispatch_attempt": dispatch_attempt} if dispatch_attempt is not None else {}),
             )
             updated = await self._task_store.complete_retry_claim(
                 task_id, claim.token
@@ -748,7 +760,7 @@ class TaskOrchestrator:
         await clone_repo(repo_url, workspace, branch=branch)
         return workspace
 
-    async def _dispatch_agent(self, group_id: int, bot_id: int, requirements: str, test_command: str, task_id: str = "") -> None:
+    async def _dispatch_agent(self, group_id: int, bot_id: int, requirements: str, test_command: str, task_id: str = "", *, dispatch_attempt: int | None = None) -> None:
         """Dispatch the coding agent via START_WORKFLOW.
 
         Uses the CodingAgentOrchestrator (coding_agent_v1) which provides:
@@ -778,6 +790,8 @@ class TaskOrchestrator:
             # been pushed and a pull request was successfully created.
             "require_pull_request": True,
         }
+        if dispatch_attempt is not None:
+            body["dispatch_attempt"] = dispatch_attempt
         await sup.send_to_worker(
             group_id,
             ipc.protocol.envelope(
