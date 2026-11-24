@@ -21,6 +21,7 @@ additive, used by the future Supervisor (central) and Worker (per group).
 import logging
 
 from db import DB_PATH
+from db.jira_task_schema import JIRA_TASK_DDL, JIRA_TASK_TABLES
 from db.migrations import MIGRATIONS
 from db.schema import _seed_templates
 from memory.infrastructure.schema import MEMORY_GROUP_DDL, MEMORY_GROUP_TABLES
@@ -33,7 +34,7 @@ CENTRAL_TABLES = frozenset({
     "unread_counts", "bot_skills", "external_skills", "agent_tasks",
     "agent_task_requests", "agent_task_retry_claims",
     "personal_vault_deletion_audit",
-})
+}) | JIRA_TASK_TABLES
 GROUP_TABLES = frozenset({
     "messages", "role_summaries", "message_embeddings", "member_read",
     "message_reactions", "pinned_messages", "agent_sessions", "session_events", "session_evidence_links",
@@ -569,6 +570,8 @@ async def init_central_db(path: str | None = None) -> None:
     import db as _db
     async with _db.connect(path or DB_PATH) as conn:
         for ddl in _CENTRAL_DDL:
+            await conn.execute(ddl)
+        for ddl in JIRA_TASK_DDL:
             await conn.execute(ddl)
         await _ensure_personal_vault_deletion_audit_schema(conn)
         await conn.commit()

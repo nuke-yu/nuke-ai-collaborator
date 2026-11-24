@@ -1,4 +1,5 @@
 from db.migrations import run_migrations
+from db.jira_task_schema import JIRA_TASK_DDL
 
 _DEFAULT_TEMPLATES = [
     ("代码助手", "代码助手", "#3b82f6",
@@ -260,6 +261,8 @@ async def init_db():
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_artifacts_group ON group_artifacts(group_id)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_artifacts_session ON group_artifacts(session_id)")
         await conn.commit()
+        for ddl in JIRA_TASK_DDL:
+            await conn.execute(ddl)
         await run_migrations(conn)
         await conn.execute("""CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_external_key
             ON messages(external_message_key) WHERE external_message_key IS NOT NULL""")

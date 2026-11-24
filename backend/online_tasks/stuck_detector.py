@@ -102,6 +102,9 @@ class StuckDetector:
             # Check timeout: no events for STUCK_TIMEOUT_SEC
             idle_sec = now - state.last_event_at
             if idle_sec > STUCK_TIMEOUT_SEC:
+                if state.task_id.startswith("jira_"):
+                    self._adapter.set_status(group_id, "stuck", detail=f"卡死检测: {idle_sec:.0f}s 无新事件")
+                    continue
                 retry_count = self._retry_counts.get(group_id, 0)
 
                 if self._orchestrator and retry_count < self._max_auto_retries:

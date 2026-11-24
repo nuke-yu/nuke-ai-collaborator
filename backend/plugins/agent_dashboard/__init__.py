@@ -25,6 +25,7 @@ service to the progress observer. Workers discover the coding workflow through
 the orchestration registry.
 """
 import logging
+import os
 
 log = logging.getLogger(__name__)
 
@@ -64,6 +65,30 @@ async def register(host):
     from fastapi import Depends
     host.mount_router(api_module.router, prefix="/api/agent",
                       dependencies=[Depends(auth.get_current_user)])
+
+    from .jira_api import router_for
+    from online_tasks.jira_source import JiraCloudSource
+    from online_tasks.jira_store import JiraTaskStore
+    from online_tasks.jira_service import JiraTaskService
+    from integrations.github_client import find_task_pull_request
+
+    jira_service = None
+    try:
+        jira_parallel = int(os.getenv("NUKE_JIRA_MAX_PARALLEL", "2"))
+        if not 1 <= jira_parallel <= 32:
+            raise ValueError("NUKE_JIRA_MAX_PARALLEL must be between 1 and 32")
+        jira = JiraCloudSource.from_environment()
+        if jira is not None:
+            jira_service = JiraTaskService(
+                jira, JiraTaskStore(), orchestrator, task_store,
+                lambda: host.pick_worker("least_loaded"), find_task_pull_request,
+                max_parallel=jira_parallel,
+            )
+    except ValueError as exc:
+        log.warning("Jira online tasks configuration invalid: %s", exc)
+    host.mount_router(router_for(jira_service), prefix="/api/agent")
+    if jira_service is not None:
+        host.start_background(jira_service.run())
 
     # 4. Mount Dashboard WebSocket routes (JWT validated inside endpoint)
     host.mount_router(ws_module.router)

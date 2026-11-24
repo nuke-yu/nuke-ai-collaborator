@@ -10,6 +10,7 @@ Design choices:
   - create_pr() pushes the current branch and creates a PR via `gh pr create`
 """
 import asyncio
+import json
 import logging
 import os
 import shutil
@@ -150,7 +151,7 @@ async def _run_cmd(*args: str, cwd: str | Path | None = None, timeout: int = _CM
     )
     try:
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-    except asyncio.TimeoutError:
+    except (asyncio.TimeoutError, asyncio.CancelledError) as exc:
         try:
             proc.kill()
         except Exception:
@@ -159,7 +160,9 @@ async def _run_cmd(*args: str, cwd: str | Path | None = None, timeout: int = _CM
             await proc.wait()
         except Exception:
             log.exception("Failed to reap timed-out command: %s", args[0])
-        raise RuntimeError(f"Command timed out after {timeout}s: {' '.join(args)}")
+        if isinstance(exc, asyncio.CancelledError):
+            raise
+        raise RuntimeError(f"Command timed out after {timeout}s: {' '.join(args)}") from exc
 
     return (
         stdout.decode(errors="replace").strip(),
@@ -191,6 +194,34 @@ async def _gh(*args: str, cwd: str | Path | None = None) -> str:
     if rc != 0:
         raise RuntimeError(f"gh {' '.join(args)} failed (rc={rc}): {stderr}")
     return stdout
+
+
+def _repository_slug(repo_url: str) -> str:
+    DEFAULT_REPOSITORY_ADMISSION_POLICY.validate(repo_url)
+    return urlsplit(repo_url).path.removeprefix("/").removesuffix(".git")
+
+
+async def _task_pull_requests(repo_url: str, base: str, branch: str) -> list[dict]:
+    result = await _gh(
+        "pr", "list", "--repo", _repository_slug(repo_url), "--state", "all",
+        "--base", base, "--head", branch, "--limit", "10",
+        "--json", "url,state,headRefName,headRefOid,isCrossRepository",
+    )
+    return [pr for pr in json.loads(result)
+            if pr["headRefName"] == branch and not pr["isCrossRepository"]]
+
+
+async def find_task_pull_request(
+    repo_url: str, base: str, branch: str, verified_head: str = "",
+) -> tuple[str, str] | None:
+    prs = await _task_pull_requests(repo_url, base, branch)
+    for state, status in (("MERGED", "merged"), ("OPEN", "needs_review"), ("CLOSED", "closed_unmerged")):
+        pr = next((pr for pr in prs if pr["state"] == state), None)
+        if pr:
+            if state == "OPEN" and verified_head and pr["headRefOid"] != verified_head:
+                return pr["url"], "pr_head_changed"
+            return pr["url"], status
+    return None
 
 
 def is_gh_available() -> bool:
@@ -349,6 +380,50 @@ class GitHubClient(GitClient):
                            If None, uses the group's workspace at call time.
         """
         self._default_workspace = Path(workspace_path) if workspace_path else None
+
+    async def create_task_pr(
+        self, group_id: int, title: str, description: str, *, target: dict, verify,
+    ) -> dict:
+        """Publish one verified Jira task branch against its configured repository and base."""
+        from workspace.layout import group_shared_dir
+
+        workspace = group_shared_dir(group_id) / "workspace"
+        repo_url = target["repo_url"]
+        repository = _repository_slug(repo_url)
+        base = target["base_branch"]
+        branch = f"task_{target['task_id']}"
+        if await _git("rev-parse", "--abbrev-ref", "HEAD", cwd=workspace) != branch:
+            raise RuntimeError("PR publication requires the assigned task worktree")
+        origin = await _git("remote", "get-url", "origin", cwd=workspace)
+        if _repository_slug(origin).casefold() != repository.casefold():
+            raise RuntimeError("The worktree remote differs from the Story repository")
+
+        await commit_all(workspace, title)
+        sha = await _git("rev-parse", "HEAD", cwd=workspace)
+        await verify(sha)
+        if (sha != await _git("rev-parse", "HEAD", cwd=workspace)
+                or await _git("status", "--porcelain", "--untracked-files=no", cwd=workspace)):
+            raise RuntimeError("Tests changed the tracked worktree. Revert generated changes and verify again.")
+
+        base_tree = await _git("rev-parse", f"refs/heads/{base}^{{tree}}", cwd=workspace)
+        head_tree = await _git("rev-parse", "HEAD^{tree}", cwd=workspace)
+        existing = await _task_pull_requests(repo_url, base, branch)
+        if base_tree == head_tree and not existing:
+            return {"no_change": True, "head_sha": sha}
+        if existing:
+            match = next((pr for pr in existing
+                          if pr["headRefOid"] == sha and pr["state"] in {"OPEN", "MERGED"}), None)
+            if match is None:
+                raise RuntimeError("Existing PR has a different head or was closed. Human review is required.")
+            url = match["url"]
+        else:
+            await _git("push", repo_url, f"{sha}:refs/heads/{branch}", cwd=workspace, authenticated=True)
+            url = await _gh(
+                "pr", "create", "--title", title, "--body", description,
+                "--repo", repository, "--head", branch, "--base", base, cwd=workspace,
+            )
+        return {"pr_id": f"PR-{url.rsplit('/', 1)[-1]}", "url": url, "tickets": [],
+                "head_sha": sha}
 
     async def create_pr(
         self,

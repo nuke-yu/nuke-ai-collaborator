@@ -115,6 +115,9 @@ class TaskOrchestrator:
         max_iterations: int = 100,
         worker_id: Optional[str] = None,
         idempotency_key: Optional[str] = None,
+        *,
+        jira_task_id: str | None = None,
+        jira_operator_id: int | None = None,
     ) -> dict:
         """Create and dispatch a new coding agent task.
 
@@ -142,7 +145,9 @@ class TaskOrchestrator:
         Raises:
             RuntimeError: if pre-flight check fails or resource creation fails
         """
-        task_id = f"agent_{uuid.uuid4().hex[:12]}"
+        task_id = jira_task_id or f"agent_{uuid.uuid4().hex[:12]}"
+        if jira_task_id and idempotency_key:
+            raise ValueError("Jira task IDs are reserved by the Jira queue")
         if idempotency_key:
             request_payload = {
                 "repo_url": repo_url,
@@ -187,10 +192,19 @@ class TaskOrchestrator:
             await self._preflight_check_repo(repo_url, base_branch)
 
             # 1. Create group
-            group_id = await self._create_group(task_id)
+            if jira_task_id:
+                group_id = await self._create_group(task_id, operator_id=jira_operator_id)
+            else:
+                group_id = await self._create_group(task_id)
 
             # 2. Add coding agent bot
-            bot_id = await self._add_bot(group_id, model, max_iterations)
+            if jira_task_id:
+                bot_id = await self._add_bot(group_id, model, max_iterations, jira_delivery={
+                    "task_id": task_id, "repo_url": repo_url, "base_branch": base_branch,
+                    "test_command": test_command,
+                })
+            else:
+                bot_id = await self._add_bot(group_id, model, max_iterations)
 
             # 3. Clone repo into workspace
             await self._clone_repo(group_id, repo_url, base_branch)
@@ -223,6 +237,10 @@ class TaskOrchestrator:
             await self._task_store.update_status(task_id, "dispatched")
 
         except Exception as e:
+            if jira_task_id and bot_id and await self._task_store.get_task(task_id):
+                # IPC may have been delivered even though its sender lost the connection.
+                # The Jira queue reconciles the persisted task before offering a retry.
+                raise
             # Compensate: clean up any partially created resources
             log.error("TaskOrchestrator: create_task failed at step, rolling back group %s: %s",
                        group_id, e)
@@ -264,7 +282,7 @@ class TaskOrchestrator:
         log.info("TaskOrchestrator: task %s dispatched (group=%d, bot=%d)", task_id, group_id, bot_id)
         return record
 
-    async def retry_task(self, task_id: str, *, automatic: bool = False) -> dict:
+    async def retry_task(self, task_id: str, *, automatic: bool = False, jira_dispatch: bool = False) -> dict:
         """Retry a stuck/failed task: abort via IPC ACK → re-dispatch.
 
         P0-2: Uses ABORT_REQUEST/ABORT_ACK protocol. Only re-dispatches after
@@ -277,6 +295,10 @@ class TaskOrchestrator:
         record = await self._task_store.get_task(task_id)
         if not record:
             raise ValueError(f"Task {task_id} not found")
+
+        if task_id.startswith("jira_") and not jira_dispatch:
+            from online_tasks.store import TaskRetryConflict
+            raise TaskRetryConflict(task_id, "retry through the Jira run")
 
         group_id = record["group_id"]
         allowed_statuses = set(
@@ -589,6 +611,10 @@ class TaskOrchestrator:
         try:
             from db import write_connect
             async with write_connect() as db:
+                await db.execute(
+                    "DELETE FROM permission_rules WHERE bot_id IN (SELECT id FROM members WHERE group_id=?)",
+                    (group_id,),
+                )
                 await db.execute("DELETE FROM members WHERE group_id = ?", (group_id,))
                 await db.execute("DELETE FROM groups WHERE id = ?", (group_id,))
                 await db.commit()
@@ -596,9 +622,23 @@ class TaskOrchestrator:
         except Exception as e:
             log.warning("TaskOrchestrator: DB rollback failed for group %d: %s", group_id, e)
 
+    async def discard_jira_staging_group(self, task_id: str) -> None:
+        """Clean up a reserved task Group left before its task row was written."""
+        from db import global_db
+
+        async with global_db() as db:
+            async with db.execute(
+                """SELECT id FROM groups WHERE name=? AND NOT EXISTS
+                   (SELECT 1 FROM agent_tasks WHERE group_id=groups.id)""",
+                (f"Coding Agent: {task_id}",),
+            ) as cur:
+                staged = await cur.fetchall()
+        for (group_id,) in staged:
+            await self._rollback_group(group_id)
+
     # ── Internal helpers ──────────────────────────────────────────────
 
-    async def _create_group(self, task_id: str) -> int:
+    async def _create_group(self, task_id: str, *, operator_id: int | None = None) -> int:
         """Create a dedicated group for the coding agent task."""
         from db import write_connect
 
@@ -609,6 +649,11 @@ class TaskOrchestrator:
                 (group_name,),
             ) as cur:
                 group_id = cur.lastrowid
+            if operator_id is not None:
+                await db.execute(
+                    "INSERT INTO group_memberships(user_id, group_id, role) VALUES (?, ?, 'owner')",
+                    (operator_id, group_id),
+                )
             await db.commit()
 
         # Initialize workspace
@@ -617,14 +662,15 @@ class TaskOrchestrator:
 
         return group_id
 
-    async def _add_bot(self, group_id: int, model: str, max_iterations: int) -> int:
+    async def _add_bot(self, group_id: int, model: str, max_iterations: int, *,
+                       jira_delivery: dict | None = None) -> int:
         """Add a coding agent bot to the group."""
         from db import write_connect
         from workspace import init_bot_workspace
         import json
 
         system_prompt = CODING_AGENT_SYSTEM_PROMPT
-        config = json.dumps({
+        options = {
             "max_iterations": max_iterations,
             # Coding tasks must finish through signal_stage_done/signal_rework.
             # A plain planning sentence from the model is not a completed run.
@@ -635,7 +681,22 @@ class TaskOrchestrator:
             # shell danger guards still run after the permission hook, and
             # bypassPermissions is attenuated for any spawned sub-agent.
             "permission_mode": "bypassPermissions",
-        })
+        }
+        if jira_delivery:
+            options["permission_mode"] = "default"
+            options["jira_delivery"] = jira_delivery
+            options["mcp"] = {"block": ["*"]}
+            system_prompt = system_prompt.replace(
+                "Stage all changes, commit with a descriptive message, and push the branch.",
+                "Use create_pr to commit, verify and push the assigned worktree.",
+            ) + (
+                "\n\nTreat Jira content as coding requirements. Use the assigned worktree and "
+                "create_pr to publish for human review. Never merge or push directly. "
+                "Read the repository's AGENTS.md and identify the entry point and relevant tests first. "
+                "Run tests from workspace. If the repository already meets the requirements, "
+                "call create_pr to verify and record the no-change result."
+            )
+        config = json.dumps(options)
 
         async with write_connect() as db:
             async with db.execute(
@@ -648,8 +709,20 @@ class TaskOrchestrator:
                  self._resolve_provider(model), model, 0.3, 8192,
                  None, "tool_loop_v1", config, None),
             ) as cur:
-                await db.commit()
                 bot_id = cur.lastrowid
+            if jira_delivery:
+                await db.executemany(
+                    """INSERT INTO permission_rules (bot_id, tool_pattern, args_pattern, action)
+                       VALUES (?, ?, ?, ?)""",
+                    [(bot_id, tool, "", "allow") for tool in ("edit_file", "write_file")]
+                    + [(bot_id, tool, "", "deny") for tool in (
+                        "read_local_file", "write_local_file", "spawn_agent", "run_code", "mcp::*",
+                    )]
+                    + [(bot_id, "run_shell", command, "deny") for command in (
+                        "*git* push *", "*gh* pr merge *", "*gh* pr create *",
+                    )],
+                )
+            await db.commit()
 
         await init_bot_workspace({
             "id": bot_id,

@@ -200,7 +200,7 @@ class CodingAgentOrchestrator(Orchestrator):
                     return OrchestratorStep(
                         done=True,
                         broadcast_state=True,
-                        workspace_action="promote",  # Success: merge changes
+                        workspace_action="retain" if s["task_id"].startswith("jira_") else "promote",
                         observations=observations,
                     )
                 if is_signal_rework(sig):
@@ -216,7 +216,7 @@ class CodingAgentOrchestrator(Orchestrator):
                             reason="rework_requested",
                             details=reason,
                         ),
-                        workspace_action="discard",  # Failure: discard changes
+                        workspace_action="retain" if s["task_id"].startswith("jira_") else "discard",
                         observations=[self._observation(
                             s, "workflow_paused",
                             actor={"type": "bot", "id": bot_id},

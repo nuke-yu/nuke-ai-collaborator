@@ -102,8 +102,49 @@ async def _update_jira(ticket_id, status, project=None, context=None):
 
 
 async def _create_pr(title, description="", ticket_ids=None, context=None):
-    gid = (context or {}).get("group_id")
-    pr = await get_git().create_pr(gid, title, description, ticket_ids)
+    ctx = context or {}
+    gid = ctx.get("group_id")
+    git = get_git()
+    runner = ctx.get("runner")
+    target = (runner.bot.get("executor_config") or {}).get("jira_delivery") if runner else None
+    if target:
+        if runner.ctx.active_ticket_id != target["task_id"]:
+            raise RuntimeError("Jira PR publication requires the assigned task")
+        from executors.redaction import redact_secrets
+        from integrations.test_command import observed_test_command
+
+        command = target["test_command"] or observed_test_command(runner.tool_records)
+        if not command:
+            raise RuntimeError("Run a supported test command from the worktree root before creating the PR")
+
+        async def verify(sha):
+            output, failed = await tool_executor.execute(
+                "run_shell", {"cmd": command, "cwd": "workspace", "timeout": 300}, context=ctx,
+            )
+            first_line = output.split("\n", 1)[0]
+            passed = not failed and first_line == "exit_code: 0"
+            preview, _ = redact_secrets(output)
+            safe_command, _ = redact_secrets(command)
+            await runner.ctx.interaction.append_session_event(
+                ctx["session_id"], "jira_validation",
+                {"task_id": target["task_id"], "command": safe_command, "head_sha": sha,
+                 "passed": passed, "output": preview[:3000]},
+            )
+            if not passed:
+                raise RuntimeError("Configured Story validation command failed")
+
+        title, _ = redact_secrets(title)
+        description, _ = redact_secrets(description)
+        pr = await git.create_task_pr(gid, title[:200], description[:10000], target=target, verify=verify)
+        await runner.ctx.interaction.append_session_event(
+            ctx["session_id"], "jira_delivery",
+            {"task_id": target["task_id"], "head_sha": pr["head_sha"],
+             "no_change": bool(pr.get("no_change")), "pr_url": pr.get("url")},
+        )
+        if pr.get("no_change"):
+            return "已验证当前版本，工作树与目标分支内容相同，无需创建 PR。"
+    else:
+        pr = await git.create_pr(gid, title, description, ticket_ids)
     refs = ", ".join(pr["tickets"]) if pr["tickets"] else "(无)"
     return f"已提交 {pr['pr_id']}：{title}（{pr['url']}，关联工单 {refs}）"
 
