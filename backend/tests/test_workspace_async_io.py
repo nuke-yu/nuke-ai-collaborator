@@ -17,6 +17,7 @@ from unittest.mock import patch
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import workspace as ws
+from executors.plugins import workspace_local_files
 from executors.plugins import workspace_tools as wt
 
 
@@ -168,15 +169,15 @@ class TestLocalFileOffload(unittest.IsolatedAsyncioTestCase):
         shared = ws.group_workspace(1)
         target_dir = shared / "target"
         target_dir.mkdir()
-        original_open_parent = wt._secure_open_parent
+        original_open_parent = workspace_local_files.secure_open_parent
 
-        def swap_after_open(root, parts, *, create):
-            result = original_open_parent(root, parts, create=create)
+        def swap_after_open(root, parts, *, create, layout):
+            result = original_open_parent(root, parts, create=create, layout=layout)
             target_dir.rename(shared / "held")
             target_dir.symlink_to(outside, target_is_directory=True)
             return result
 
-        with patch.object(wt, "_secure_open_parent", side_effect=swap_after_open):
+        with patch.object(workspace_local_files, "secure_open_parent", side_effect=swap_after_open):
             result = await wt._handle_write_local_file(
                 str(target_dir / "result.txt"), "safe",
                 context={"group_id": 1, "bot_id": 5},

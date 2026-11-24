@@ -17,6 +17,7 @@ from unittest.mock import ANY, AsyncMock, patch
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import db as database
+from db import writer as db_writer
 from memory.application import tool_events
 from memory.application.tool_events import (
     _extract_command,
@@ -46,6 +47,9 @@ from memory.application.experience_service import complete_usage, decay_experien
 from memory.application.learning_metrics import collect_learning_shadow_metrics
 from memory.application.learning_usage import mark_adopted, mark_executed, mark_verified
 from memory.domain import MemoryScope, UsageKind, UsageState
+from runtime.dbpaths import group_db_path
+from storage.adapters.sqlite import SQLiteStorageAdapter
+from workspace import layout
 
 TEST_DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "test_tool_events.db")
 
@@ -310,16 +314,19 @@ class RecordEventTest(unittest.IsolatedAsyncioTestCase):
 
 class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        self._orig = database.DB_PATH
-        database.DB_PATH = TEST_DB_PATH
-        if os.path.exists(TEST_DB_PATH):
-            os.remove(TEST_DB_PATH)
-        await database.init_db()
+        root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        central_path = str(root / "central.db")
+        self.enterContext(patch.object(database, "DB_PATH", central_path))
+        self.enterContext(patch.object(db_writer, "DB_PATH", central_path))
+        self.enterContext(patch("skills.constants.WORKSPACE_ROOT", root))
 
-    async def asyncTearDown(self):
-        database.DB_PATH = self._orig
-        if os.path.exists(TEST_DB_PATH):
-            os.remove(TEST_DB_PATH)
+        group_path = group_db_path(7)
+        Path(group_path).parent.mkdir()
+        await database.init_central_db(central_path)
+        await database.init_group_db(group_path)
+        self.enterContext(database.bind_db(group_path))
+        self.addAsyncCleanup(database.aclose_writer)
+        self.addAsyncCleanup(SQLiteStorageAdapter().close)
 
     async def _verify_usage(
         self,
@@ -363,7 +370,7 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
             memory_refs=("exp:one", "skill:two@v2"),
         )
         self.assertIsNotNone(decision_id)
-        async with database.connect(TEST_DB_PATH) as db:
+        async with database.get_db() as db:
             async with db.execute(
                 """SELECT decision_type,memory_refs_json FROM run_decisions
                    WHERE decision_id=?""",
@@ -385,7 +392,7 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
                 "skill:two@v2": ("attempt:2", "attempt:2"),
             },
         )
-        async with database.connect(TEST_DB_PATH) as db:
+        async with database.get_db() as db:
             async with db.execute(
                 """SELECT decision_type,memory_refs_json,evidence_json
                    FROM run_decisions WHERE decision_id=?""",
@@ -415,7 +422,7 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
             run_id="session-1", group_id=7, status="completed", iterations=4,
             input_tokens=120, output_tokens=30,
         )
-        async with database.connect(TEST_DB_PATH) as db:
+        async with database.get_db() as db:
             async with db.execute(
                 "SELECT status, iterations, input_tokens, output_tokens, completed_at "
                 "FROM agent_runs WHERE run_id='session-1'"
@@ -439,7 +446,7 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
                                       task="Fix bug", outcome="completed", tool_records=records)
         await assemble_case(run_id="r1", group_id=7, bot_id=3,
                             task="Fix bug", outcome="completed", tool_records=records)
-        async with database.connect(TEST_DB_PATH) as db:
+        async with database.get_db() as db:
             async with db.execute(
                 """SELECT case_id,attempts,outcome,files_touched,
                     task_family,task_concepts_json,semantic_cluster_key
@@ -473,7 +480,7 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
             tool_records=records,
         )
 
-        async with database.connect(TEST_DB_PATH) as db:
+        async with database.get_db() as db:
             async with db.execute(
                 """SELECT ordinal,step_id,attempt_id,phase,action_tool,
                     observation_status,observation_summary,verifier_adapter,
@@ -517,7 +524,7 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
             ],
         )
         self.assertIsNone(await distill_case(error_only, 7))
-        async with database.connect(TEST_DB_PATH) as db:
+        async with database.get_db() as db:
             async with db.execute(
                 "SELECT correction_evidence_json FROM agent_cases WHERE case_id=?",
                 (error_only,),
@@ -534,7 +541,7 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
         )
         record_id = await distill_case(corrected, 7)
         self.assertEqual(record_id, await distill_case(corrected, 7))
-        async with database.connect(TEST_DB_PATH) as db:
+        async with database.get_db() as db:
             async with db.execute(
                 """SELECT kind,confidence,source_ids,content,metadata_json,
                     algorithm_version FROM memory_records"""
@@ -572,7 +579,7 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
         record_id = await distill_case(first, 7)
         await distill_case(second, 7)
 
-        async with database.connect(TEST_DB_PATH) as db:
+        async with database.get_db() as db:
             async with db.execute(
                 "SELECT content,confidence FROM memory_records WHERE record_id=?", (record_id,)
             ) as cur:
@@ -621,7 +628,7 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotEqual(
             first_record, await distill_case(different_failure, 7)
         )
-        async with database.connect(TEST_DB_PATH) as db:
+        async with database.get_db() as db:
             async with db.execute(
                 """SELECT supporting_count,semantic_cluster_key,
                     environment_signature,failure_signature
@@ -644,7 +651,7 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ids, [record_id])
         self.assertIn("prior execution experience", context)
         self.assertIn(f'memory_ref="{record_id}"', context)
-        async with database.connect(TEST_DB_PATH) as db:
+        async with database.get_db() as db:
             async with db.execute(
                 "SELECT supporting_count,confidence FROM memory_records "
                 "WHERE record_id=?",
@@ -653,7 +660,7 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
                 before_completion = await cur.fetchone()
         await complete_usage(record_ids=ids, run_id="target", group_id=7,
                              outcome="completed", input_tokens=90, output_tokens=20, tool_attempts=1)
-        async with database.connect(TEST_DB_PATH) as db:
+        async with database.get_db() as db:
             async with db.execute("SELECT state,outcome,input_tokens,tool_attempts FROM experience_usage") as cur:
                 row = await cur.fetchone()
             async with db.execute(
@@ -699,7 +706,7 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
             UsageState.VERIFIED_SUCCESS,
         )
 
-        async with database.connect(TEST_DB_PATH) as db:
+        async with database.get_db() as db:
             async with db.execute(
                 """SELECT state,adopted_at,executed_at,verified_at,
                     verification_status FROM experience_usage"""
@@ -772,7 +779,7 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
             learning_port=build_learning_client(),
         )
 
-        async with database.connect(TEST_DB_PATH) as db:
+        async with database.get_db() as db:
             async with db.execute(
                 """SELECT state,adopted_via,verification_status
                    FROM experience_usage
@@ -812,14 +819,14 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
         )
         job_id = await process_case(case_id, 7)
         self.assertEqual(job_id, await process_case(case_id, 7))
-        async with database.connect(TEST_DB_PATH) as db:
+        async with database.get_db() as db:
             async with db.execute("SELECT status,attempt FROM pipeline_jobs") as cur:
                 queued = await cur.fetchone()
         self.assertEqual(queued, ("pending", 0))
 
         result = await dispatch_group(7)
         self.assertEqual(result, {"claimed": 1, "completed": 1, "failed": 0})
-        async with database.connect(TEST_DB_PATH) as db:
+        async with database.get_db() as db:
             async with db.execute("SELECT status,attempt,output_json FROM pipeline_jobs") as cur:
                 jobs = await cur.fetchall()
             async with db.execute("SELECT COUNT(*) FROM memory_records") as cur:
@@ -848,7 +855,7 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotEqual(version_one, version_two)
         result = await dispatch_group(7)
         self.assertEqual(result["completed"], 2)
-        async with database.connect(TEST_DB_PATH) as db:
+        async with database.get_db() as db:
             async with db.execute(
                 "SELECT input_version,status FROM pipeline_jobs ORDER BY input_version"
             ) as cur:
@@ -865,7 +872,7 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
             await process_case(case_id, 7)
             await dispatch_group(7)
 
-        async with database.connect(TEST_DB_PATH) as db:
+        async with database.get_db() as db:
             async with db.execute("SELECT skill_id,maturity FROM skills") as cur:
                 skill = await cur.fetchone()
             async with db.execute(
@@ -895,7 +902,7 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
             tool_records=[],
         )
         job_id = await process_case(case_id, 7)
-        async with database.connect(TEST_DB_PATH) as db:
+        async with database.get_db() as db:
             await db.execute(
                 """UPDATE pipeline_jobs SET status='running',attempt=1,
                    lease_until=?,lease_token='fence:crashed' WHERE job_id=?""",
@@ -909,7 +916,7 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
         result = await dispatch_group(7)
         self.assertEqual(result, {"claimed": 1, "completed": 1, "failed": 0})
 
-        async with database.connect(TEST_DB_PATH) as db:
+        async with database.get_db() as db:
             async with db.execute(
                 "SELECT status,attempt,lease_token FROM pipeline_jobs WHERE job_id=?",
                 (job_id,),
@@ -919,7 +926,7 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_dispatcher_marks_exhausted_crash_lease_dead(self):
         job_id = await process_case("missing-case", 7)
-        async with database.connect(TEST_DB_PATH) as db:
+        async with database.get_db() as db:
             await db.execute(
                 """UPDATE pipeline_jobs SET status='running',attempt=max_attempts,
                    lease_until=0,lease_token='fence:crashed' WHERE job_id=?""",
@@ -932,7 +939,7 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
         stats = await job_stats(7)
         self.assertEqual(stats["dead"], 1)
         self.assertEqual(stats["expired_lease"], 0)
-        async with database.connect(TEST_DB_PATH) as db:
+        async with database.get_db() as db:
             async with db.execute(
                 "SELECT status,error,lease_token FROM pipeline_jobs WHERE job_id=?",
                 (job_id,),
@@ -943,13 +950,15 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(row[2])
 
     async def test_turn_observation_gap_repair_fans_out_durable_stages(self):
-        async with database.connect(TEST_DB_PATH) as db:
+        async with database.global_db() as db:
             await db.execute("INSERT INTO groups(id,name) VALUES(7,'g')")
             await db.execute(
                 """INSERT INTO members
                    (id,group_id,name,type,role,model_provider,model_name)
                    VALUES(3,7,'DevBot','bot','developer','claude','opus')"""
             )
+            await db.commit()
+        async with database.get_db() as db:
             await db.execute(
                 """INSERT INTO messages
                    (id,group_id,member_id,content,sender_name,sender_type,
@@ -1005,7 +1014,7 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reflection.await_count, 2)
         compression.assert_awaited_once()
         self.assertEqual(compression.await_args.args[0].bot_id, 3)
-        async with database.connect(TEST_DB_PATH) as db:
+        async with database.get_db() as db:
             async with db.execute(
                 """SELECT job_type,status FROM pipeline_jobs
                    WHERE job_type LIKE 'observe_turn%' ORDER BY job_type"""
@@ -1023,7 +1032,7 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(await maybe_inject(runner, iteration=2))
         self.assertFalse(await maybe_inject(runner, iteration=3))
         self.assertIn("Execution Reflexion", runner.messages[-1]["content"])
-        async with database.connect(TEST_DB_PATH) as db:
+        async with database.get_db() as db:
             async with db.execute("SELECT failure_class,step_id FROM run_decisions") as cur:
                 rows = await cur.fetchall()
         self.assertEqual(rows, [("correctable_execution", "rr:step:2")])
@@ -1052,11 +1061,11 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
                 run_id,
                 UsageState.VERIFIED_FAILURE,
             )
-        async with database.connect(TEST_DB_PATH) as db:
+        async with database.get_db() as db:
             async with db.execute("SELECT supporting_count,contradicting_count,status FROM memory_records") as cur:
                 row = await cur.fetchone()
         self.assertEqual(row, (2,2,"suspended"))
-        async with database.connect(TEST_DB_PATH) as db:
+        async with database.get_db() as db:
             await db.execute("UPDATE memory_records SET status='active',confidence=0.4,created_at=1,last_used_at=NULL")
             await db.commit()
         self.assertEqual(await decay_experiences(7, now_ms=100*86_400_000), 1)
@@ -1085,7 +1094,7 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
             )
 
         await distill_case(case_ids[2], 7)
-        async with database.connect(TEST_DB_PATH) as db:
+        async with database.get_db() as db:
             async with db.execute(
                 "SELECT status,confidence FROM memory_records WHERE record_id=?", (record_id,)
             ) as cur:
@@ -1095,7 +1104,7 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
 
         for case_id in case_ids[3:6]:
             await distill_case(case_id, 7)
-        async with database.connect(TEST_DB_PATH) as db:
+        async with database.get_db() as db:
             async with db.execute(
                 "SELECT status,confidence,supporting_count,contradicting_count "
                 "FROM memory_records WHERE record_id=?", (record_id,)
@@ -1113,18 +1122,18 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
         record_id = await distill_case(first,7)
         self.assertIsNone(await compile_candidate(record_id,7))
         await distill_case(second,7)
-        async with database.connect(TEST_DB_PATH) as db:
+        async with database.get_db() as db:
             await db.execute("UPDATE memory_records SET confidence=0.75 WHERE record_id=?",(record_id,))
             await db.commit()
         skill_id = await compile_candidate(record_id,7)
-        async with database.connect(TEST_DB_PATH) as db:
+        async with database.get_db() as db:
             async with db.execute("SELECT maturity,risk_level FROM skills WHERE skill_id=?",(skill_id,)) as cur:
                 row = await cur.fetchone()
             async with db.execute("SELECT declaration_json FROM skill_versions WHERE skill_id=?",(skill_id,)) as cur:
                 declaration = json.loads((await cur.fetchone())[0])
         self.assertEqual(row,("trial","S0")); self.assertEqual(declaration["allowed_tools"],[])
         self.assertFalse(declaration["execution_plan"]["requires_hil"])
-        async with database.connect(TEST_DB_PATH) as db:
+        async with database.get_db() as db:
             async with db.execute(
                 "SELECT source_type FROM everos_source_documents WHERE record_id=?",
                 (record_id,),
@@ -1163,7 +1172,7 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
         )
         record_id = await distill_case(case1, 7)
         await distill_case(case2, 7)
-        async with database.connect(TEST_DB_PATH) as db:
+        async with database.get_db() as db:
             await db.execute(
                 "UPDATE memory_records SET confidence=.8 WHERE record_id=?",
                 (record_id,),
@@ -1171,48 +1180,43 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
             await db.commit()
         skill_id = await compile_candidate(record_id, 7)
 
-        with tempfile.TemporaryDirectory() as temp_dir:
-            workspace = Path(temp_dir) / "bot"
-            with patch(
-                "skills.constants.bot_ws",
-                return_value=workspace,
-            ):
-                projected = await dispatch_group(7)
-                self.assertEqual(projected["completed"], 1)
-                draft = next(
-                    (workspace / "skills" / "learned" / "draft").glob(
-                        "*.md"
-                    )
-                )
-                self.assertIn(
-                    f"canonical_skill_id: {skill_id}",
-                    draft.read_text(encoding="utf-8"),
-                )
+        workspace = layout.bot_dir(7, 3)
+        projected = await dispatch_group(7)
+        self.assertEqual(projected["completed"], 1)
+        draft = next(
+            (workspace / "skills" / "learned" / "draft").glob(
+                "*.md"
+            )
+        )
+        self.assertIn(
+            f"canonical_skill_id: {skill_id}",
+            draft.read_text(encoding="utf-8"),
+        )
 
-                self.assertTrue(await promote_skill(
-                    skill_id,
-                    7,
-                    "active",
-                    bot_id=3,
-                    actor_id="user:1",
-                    reason="Reviewed projection evidence",
-                ))
-                promoted = await dispatch_group(7)
-                self.assertEqual(promoted["completed"], 1)
-                active = (
-                    workspace / "skills" / "learned" / "active"
-                    / draft.name
-                )
-                self.assertTrue(active.exists())
-                self.assertFalse(draft.exists())
+        self.assertTrue(await promote_skill(
+            skill_id,
+            7,
+            "active",
+            bot_id=3,
+            actor_id="user:1",
+            reason="Reviewed projection evidence",
+        ))
+        promoted = await dispatch_group(7)
+        self.assertEqual(promoted["completed"], 1)
+        active = (
+            workspace / "skills" / "learned" / "active"
+            / draft.name
+        )
+        self.assertTrue(active.exists())
+        self.assertFalse(draft.exists())
 
-                active.unlink()
-                self.assertEqual(
-                    await enqueue_missing_skill_projections(7), 1
-                )
-                rebuilt = await dispatch_group(7)
-                self.assertEqual(rebuilt["completed"], 1)
-                self.assertTrue(active.exists())
+        active.unlink()
+        self.assertEqual(
+            await enqueue_missing_skill_projections(7), 1
+        )
+        rebuilt = await dispatch_group(7)
+        self.assertEqual(rebuilt["completed"], 1)
+        self.assertTrue(active.exists())
 
     async def test_skill_maturity_uses_independent_run_outcomes(self):
         case1=await assemble_case(run_id="k1",group_id=7,bot_id=3,task="repair schema migration",
@@ -1220,11 +1224,11 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
         case2=await assemble_case(run_id="k2",group_id=7,bot_id=3,task="repair schema migration",
                                   outcome="completed",tool_records=_corrected_trace("verification failed y"))
         record_id=await distill_case(case1,7); await distill_case(case2,7)
-        async with database.connect(TEST_DB_PATH) as db:
+        async with database.get_db() as db:
             await db.execute("UPDATE memory_records SET confidence=.8 WHERE record_id=?",(record_id,)); await db.commit()
         skill_id=await compile_candidate(record_id,7)
         now = int(time.time() * 1000)
-        async with database.connect(TEST_DB_PATH) as db:
+        async with database.get_db() as db:
             await db.execute(
                 """INSERT INTO skill_usage
                    (skill_id,version,run_id,group_id,created_at,updated_at)
@@ -1238,7 +1242,7 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
             "trial-evidence",
             UsageState.VERIFIED_SUCCESS,
         )
-        async with database.connect(TEST_DB_PATH) as db:
+        async with database.get_db() as db:
             async with db.execute(
                 "SELECT maturity,success_count FROM skills WHERE skill_id=?",
                 (skill_id,),
@@ -1267,7 +1271,7 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
             await resolve_skill_refs(skill_ids=ids, group_id=7, bot_id=3),
             (f"{skill_id}@v1",),
         )
-        async with database.connect(TEST_DB_PATH) as db:
+        async with database.get_db() as db:
             await db.execute(
                 "UPDATE skills SET maturity='trial' WHERE skill_id=?",
                 (skill_id,),
@@ -1277,7 +1281,7 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
             await resolve_skill_refs(skill_ids=ids, group_id=7, bot_id=3),
             (),
         )
-        async with database.connect(TEST_DB_PATH) as db:
+        async with database.get_db() as db:
             await db.execute(
                 "UPDATE skills SET maturity='active' WHERE skill_id=?",
                 (skill_id,),
@@ -1290,7 +1294,7 @@ class ExecutionRunTest(unittest.IsolatedAsyncioTestCase):
             "new-run",
             UsageState.VERIFIED_SUCCESS,
         )
-        async with database.connect(TEST_DB_PATH) as db:
+        async with database.get_db() as db:
             async with db.execute("SELECT maturity,success_count FROM skills WHERE skill_id=?",(skill_id,)) as cur:
                 row=await cur.fetchone()
             async with db.execute(

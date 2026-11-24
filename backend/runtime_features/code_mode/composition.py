@@ -15,10 +15,13 @@ def run_code(
     limits: CodeModeLimits = CodeModeLimits(),
     bash_executor=None,
 ) -> str:
+    from workspace.observation import get_observation_store, observation_scope
+
     if group_id is None:
         raise CodeModeRejected("Code Mode 必须绑定 group_id")
     tools = CodeTools(
         WorkspaceAdapter(bot_id=bot_id, group_id=group_id, session_id=session_id),
         CallbackBashAdapter(bash_executor),
     )
-    return CodeModeService(SubprocessCodeExecutionAdapter()).run(code, tools, limits)
+    with observation_scope(get_observation_store()):
+        return CodeModeService(SubprocessCodeExecutionAdapter()).run(code, tools, limits)

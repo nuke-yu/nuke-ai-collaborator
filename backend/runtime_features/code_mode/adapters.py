@@ -100,7 +100,11 @@ def _code_worker(connection, code: str, limits: CodeModeLimits) -> None:
         if sum(len(item) for item in output) > limits.max_output_chars:
             raise CodeModeRejected("Code Mode 输出超过限制")
 
-    def trace(_frame, _event, _arg):
+    def trace(frame, _event, _arg):
+        # Count the script's steps. SDK transport and interpreter internals
+        # still run under the wall-clock deadline.
+        if frame.f_code is not program:
+            return None
         nonlocal steps
         steps += 1
         if steps > limits.max_steps or time.monotonic() - started > limits.timeout_seconds:
@@ -110,10 +114,11 @@ def _code_worker(connection, code: str, limits: CodeModeLimits) -> None:
     try:
         tree = __import__("ast").parse(code, mode="exec")
         validate(tree)
+        program = compile(tree, "<run_code>", "exec")
         env = {"__builtins__": {**ALLOWED_BUILTINS, "print": safe_print}, "tools": ChildTools()}
         import sys
         sys.settrace(trace)
-        exec(compile(tree, "<run_code>", "exec"), env, env)
+        exec(program, env, env)
         connection.send(("done", "".join(output) or "[Code Mode] 执行完成，无输出"))
     except BaseException as exc:
         connection.send(("failed", f"{type(exc).__name__}: {exc}"))

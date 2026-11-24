@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import workspace
-from executors.code_mode import CodeModeRejected, run_code
+from executors.code_mode import CodeModeLimits, CodeModeRejected, run_code
 
 
 class CodeModeTest(unittest.TestCase):
@@ -36,8 +36,29 @@ class CodeModeTest(unittest.TestCase):
                     "print(tools.write('sample.txt', 'ONE\\ntwo\\n'))",
                     bot_id=7, group_id=3, session_id="code-session",
                 )
-            self.assertTrue("已写入" in result or "已修改" in result)
+            self.assertTrue("已写入" in result or "已修改" in result, result)
             self.assertEqual(path.read_text(encoding="utf-8"), "ONE\ntwo\n")
+
+    def test_script_steps_still_count_toward_budget(self) -> None:
+        with self.assertRaisesRegex(CodeModeRejected, "超过执行预算"):
+            run_code(
+                "total = 0\nfor item in range(20):\n    total += item",
+                bot_id=7, group_id=3, session_id="code-session",
+                limits=CodeModeLimits(max_steps=10),
+            )
+
+    def test_workspace_sdk_rejects_write_without_read(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            path = root / "sample.txt"
+            path.write_text("original", encoding="utf-8")
+            with patch.object(workspace, "_get_effective_ws", return_value=(root, "sample.txt")):
+                result = run_code(
+                    "print(tools.write('sample.txt', 'changed'))",
+                    bot_id=7, group_id=3, session_id="unobserved-session",
+                )
+            self.assertIn("requires reading", result)
+            self.assertEqual(path.read_text(encoding="utf-8"), "original")
 
     def test_requires_group_scope(self) -> None:
         with self.assertRaises(CodeModeRejected):

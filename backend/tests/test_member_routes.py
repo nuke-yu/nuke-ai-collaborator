@@ -5,6 +5,7 @@ import shutil
 import asyncio
 import json
 from pathlib import Path
+from sqlite3 import Row
 from unittest.mock import AsyncMock
 
 # Add backend directory to path
@@ -100,7 +101,7 @@ class TestMemberRoutes(unittest.IsolatedAsyncioTestCase):
 
             # Now verify the database has all the fields populated correctly
             async with database.get_db() as db:
-                db.row_factory = database.aiosqlite.Row
+                db.row_factory = Row
                 async with db.execute("SELECT * FROM members WHERE id = ?", (bot_id,)) as cur:
                     row = await cur.fetchone()
                     
