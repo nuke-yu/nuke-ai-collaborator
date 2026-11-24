@@ -20,14 +20,10 @@ Architecture:
   - Dashboard WebSocket clients receive real-time updates
   - StuckDetector runs in background, flags hung tasks for retry
 
-This plugin does NOT modify any existing code. It only:
-  1. Observes existing events (read-only)
-  2. Mounts its own REST/WS routes (additive)
-  3. Runs its own background tasks (isolated)
-
-Removal: Delete this directory. No other changes needed.
+The plugin mounts the Supervisor HTTP/WS endpoints and wires the online_tasks
+service to the progress observer. Workers discover the coding workflow through
+the orchestration registry.
 """
-import asyncio
 import logging
 
 log = logging.getLogger(__name__)
@@ -39,19 +35,15 @@ async def register(host):
     Args:
         host: PluginHost instance providing infrastructure access
     """
-    from .progress import ProgressAdapter
-    from .stuck_detector import StuckDetector
-    from .orchestrator import TaskOrchestrator
-    from .task_store import TaskStateProjector, TaskStore
-    from .reconciler import TaskReconciler
+    from online_tasks.progress import ProgressAdapter
+    from online_tasks.stuck_detector import StuckDetector
+    from online_tasks.service import TaskOrchestrator
+    from online_tasks.store import TaskStateProjector, TaskStore
+    from online_tasks.reconciler import TaskReconciler
     from . import websocket as ws_module
     from . import api as api_module
 
     log.info("agent_dashboard: registering plugin...")
-
-    # Note: CodingAgentOrchestrator is registered via core/orchestration/plugins/coding_agent.py
-    # so that Worker processes discover it via registry.discover(). Registering it here
-    # (Supervisor process only) would make it unavailable to Workers.
 
     # 1. Create shared components
     task_store = TaskStore()
@@ -68,10 +60,7 @@ async def register(host):
     api_module.set_context(adapter, host, detector, orchestrator=orchestrator)
 
     # 3. Mount REST API routes
-    # Write operations (create/retry/abort) require operator-level auth.
-    # Read operations (list/get/workers) require user-level auth.
     from core import auth
-    from api.admin_deps import require_operator
     from fastapi import Depends
     host.mount_router(api_module.router, prefix="/api/agent",
                       dependencies=[Depends(auth.get_current_user)])

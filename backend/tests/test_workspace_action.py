@@ -222,12 +222,13 @@ class TestRunnerWorktreeLifecycle(unittest.IsolatedAsyncioTestCase):
              patch("workspace.git_worktree.promote_worktree", new_callable=AsyncMock) as promote, \
              patch("workspace.git_worktree.remove_worktree", new_callable=AsyncMock) as remove, \
              patch.object(runner.bus, "publish", new_callable=AsyncMock), \
-             patch.object(runner.workflow_store, "clear_state", new_callable=AsyncMock), \
-             patch.object(runner.workflow_store, "save_state", new_callable=AsyncMock):
+             patch.object(runner.workflow_store, "commit_transition", new_callable=AsyncMock) as transition:
             await runner._run_unit_body(1, unit, orch)
 
         promote.assert_awaited_once_with(1, "agent_123")
         remove.assert_not_awaited()
+        transition.assert_awaited_once()
+        self.assertTrue(transition.await_args.kwargs["clear"])
 
 
 class TestRealDispatchTaskId(unittest.IsolatedAsyncioTestCase):

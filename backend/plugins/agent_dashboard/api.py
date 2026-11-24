@@ -21,7 +21,7 @@ from typing import Annotated, Optional
 
 from api.admin_deps import require_operator
 from integrations.repository_policy import DEFAULT_REPOSITORY_ADMISSION_POLICY
-from plugins.agent_dashboard.task_store import TaskRetryConflict
+from online_tasks.store import TaskRetryConflict
 
 log = logging.getLogger(__name__)
 
@@ -173,7 +173,7 @@ async def create_task(
         )
     except Exception as e:
         from integrations.github_client import GitHubIntegrationUnavailable
-        from plugins.agent_dashboard.task_store import (
+        from online_tasks.store import (
             IdempotencyConflict,
             PreviousTaskCreationFailed,
             TaskCreationInProgress,

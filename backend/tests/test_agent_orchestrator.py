@@ -189,7 +189,7 @@ class TestCreateTask(DatabaseTestBase):
         )
         self.assertTrue(reservation["owner"])
 
-        with patch("plugins.agent_dashboard.orchestrator.hashlib.sha256") as digest:
+        with patch("online_tasks.service.hashlib.sha256") as digest:
             digest.return_value.hexdigest.return_value = "different-hash"
             with self.assertRaises(IdempotencyConflict):
                 await orch.create_task(
@@ -784,7 +784,7 @@ class TestAbortTask(DatabaseTestBase):
 
         with patch.object(orch, "_send_abort", new_callable=AsyncMock) as abort, \
              patch(
-                 "plugins.agent_dashboard.reconciler.finalize_group_state",
+                 "online_tasks.reconciler.finalize_group_state",
                  new_callable=AsyncMock,
              ) as finalize:
             result = await orch.terminate_permanently_stuck(

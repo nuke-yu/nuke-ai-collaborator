@@ -1,0 +1,728 @@
+"""
+Supervisor-side lifecycle for online coding tasks.
+
+Wires up the coding agent task lifecycle:
+  1. Create a dedicated group for the task
+  2. Add a "Coding Agent" bot member
+  3. Clone the target repo into the workspace
+  4. Dispatch the coding agent via workflow message
+  5. Track the task via ProgressAdapter
+
+This module uses the existing group/member/workflow APIs internally,
+so it doesn't duplicate any business logic.
+
+The coding agent system prompt drives autonomous behavior:
+  clone → explore code → write code → run tests → fix if failed → commit → push → create PR
+"""
+import asyncio
+import hashlib
+import json
+import logging
+import time
+import uuid
+from pathlib import Path
+from typing import Optional
+
+from online_tasks import CODING_WORKFLOW_ID
+
+log = logging.getLogger(__name__)
+
+_MANUAL_RETRY_STATUSES = frozenset(
+    {"stuck", "failed", "aborted", "stuck_permanently", "incomplete"}
+)
+_AUTOMATIC_RETRY_STATUSES = frozenset(
+    {"dispatched", "running", "paused", "stuck"}
+)
+_ACTIVE_PERSISTED_STATUSES = frozenset({"dispatched", "running", "paused"})
+_LOCAL_RETRY_FAILURE_STATUS = {
+    "stuck": "stuck",
+    "failed": "error",
+    "aborted": "aborted",
+    "stuck_permanently": "stuck_permanently",
+    "incomplete": "incomplete",
+}
+
+# Default coding agent system prompt
+CODING_AGENT_SYSTEM_PROMPT = """You are an autonomous coding agent. Your task is to implement the requested feature, test it, and submit a PR.
+
+## Your Workflow
+
+1. **Explore**: Read the existing codebase to understand the structure, conventions, and relevant files.
+2. **Plan**: Briefly outline your implementation approach.
+3. **Implement**: Write/edit the necessary files. Use edit_file for modifications, write_file only for new files.
+4. **Test**: Run the test suite. If tests fail, fix the issues and re-run until all tests pass.
+5. **Commit & Push**: Stage all changes, commit with a descriptive message, and push the branch.
+6. **Create PR**: Create a pull request with a clear description of the changes.
+
+## Rules
+
+- NEVER skip testing. If the test command is provided, run it. If not, look for test configuration and run whatever test framework exists.
+- If tests fail, you MUST fix them before creating a PR. Iterate up to 5 times.
+- Use edit_file (not write_file) for modifying existing files — it sends only the diff.
+- Keep commits focused and atomic.
+- Write clean, well-documented code following the project's existing conventions.
+- If you encounter an error you cannot fix after 3 attempts, describe the issue clearly and stop.
+
+## Test Loop
+
+When running tests:
+1. Run the test command
+2. If tests pass → proceed to commit
+3. If tests fail → read the error output, identify the failing test, fix the code, re-run
+4. Repeat until all tests pass or you've tried 5 times
+
+## Completion (CRITICAL)
+
+You MUST call one of these tools to signal completion:
+
+**Success path** (all tests pass, PR created):
+- Call `signal_stage_done(reason="Brief description of what was implemented and PR URL")`
+
+**Failure path** (cannot complete after 3-5 attempts):
+- Call `signal_rework(reason="Detailed description of what failed and why you cannot fix it")`
+
+Do NOT just describe completion in text. The workflow system requires these explicit tool calls.
+Without them, the task will be marked as incomplete and may be retried automatically.
+"""
+
+
+class TaskOrchestrator:
+    """Manages the full lifecycle of coding agent tasks."""
+
+    def __init__(self, adapter=None, task_store=None):
+        """
+        Args:
+            adapter: ProgressAdapter instance for progress tracking (optional)
+        """
+        self._adapter = adapter
+        # P1-1: Use database-backed storage instead of in-memory dict
+        from online_tasks.store import TaskStore
+        self._task_store = task_store or TaskStore()
+
+    @property
+    async def tasks(self) -> dict:
+        """Read-only access to task registry (from database)."""
+        task_list = await self._task_store.list_tasks(limit=1000)
+        return {t["task_id"]: t for t in task_list}
+
+    async def create_task(
+        self,
+        repo_url: str,
+        requirements: str,
+        base_branch: str = "main",
+        test_command: str = "",
+        model: str = "deepseek-chat",
+        max_iterations: int = 100,
+        worker_id: Optional[str] = None,
+        idempotency_key: Optional[str] = None,
+    ) -> dict:
+        """Create and dispatch a new coding agent task.
+
+        Atomic: if any step fails, all partially created resources are cleaned up.
+        Pre-flight: validates repo_url reachability before creating any resources.
+
+        P0-4: GitHub credentials are NOT passed as parameters. They are read from
+        the Worker process's GITHUB_TOKEN environment variable by github_client.py.
+
+        Args:
+            repo_url: Git repository URL to clone (github.com only)
+            requirements: Task requirements / feature description
+            base_branch: Base branch to work from
+            test_command: Test command to run
+            model: AI model to use
+            max_iterations: Max tool loop iterations
+            worker_id: Pre-selected worker for this group. If provided, the group
+                      is bound to this worker BEFORE dispatch, preventing the
+                      dispatch-then-reassign race that cancels the just-started task.
+                      If None, the group uses default modulo routing.
+
+        Returns:
+            dict with task_id, group_id, status
+
+        Raises:
+            RuntimeError: if pre-flight check fails or resource creation fails
+        """
+        task_id = f"agent_{uuid.uuid4().hex[:12]}"
+        if idempotency_key:
+            request_payload = {
+                "repo_url": repo_url,
+                "requirements": requirements,
+                "base_branch": base_branch,
+                "test_command": test_command,
+                "model": model,
+                "max_iterations": max_iterations,
+                "worker_id": worker_id,
+            }
+            request_hash = hashlib.sha256(
+                json.dumps(
+                    request_payload, sort_keys=True, separators=(",", ":")
+                ).encode("utf-8")
+            ).hexdigest()
+            reservation = await self._task_store.reserve_request(
+                idempotency_key, request_hash, task_id
+            )
+            task_id = reservation["task_id"]
+            if not reservation["owner"]:
+                if reservation["state"] == "completed":
+                    record = await self._task_store.get_task(task_id)
+                    if record:
+                        return record
+                from online_tasks.store import (
+                    PreviousTaskCreationFailed,
+                    TaskCreationInProgress,
+                )
+                if reservation["state"] == "failed":
+                    raise PreviousTaskCreationFailed(
+                        reservation.get("error_message")
+                        or "The previous task creation attempt failed"
+                    )
+                raise TaskCreationInProgress(
+                    f"Task creation is already in progress for {idempotency_key}"
+                )
+
+        group_id = None
+        bot_id = None
+        try:
+            # Validate reachability before creating project resources.
+            await self._preflight_check_repo(repo_url, base_branch)
+
+            # 1. Create group
+            group_id = await self._create_group(task_id)
+
+            # 2. Add coding agent bot
+            bot_id = await self._add_bot(group_id, model, max_iterations)
+
+            # 3. Clone repo into workspace
+            await self._clone_repo(group_id, repo_url, base_branch)
+
+            # 4. Bind group to selected worker BEFORE dispatch.
+            # This prevents the race where dispatch goes to the default-routed worker,
+            # then a subsequent reassign evicts that group (cancelling the just-started task).
+            if worker_id:
+                await self._bind_group_to_worker(group_id, worker_id)
+
+            # 5. Persist task to database (P1-1)
+            await self._task_store.create_task(
+                task_id=task_id,
+                group_id=group_id,
+                bot_id=bot_id,
+                repo_url=repo_url,
+                requirements=requirements,
+                base_branch=base_branch,
+                test_command=test_command,
+                model=model,
+                max_iterations=max_iterations,
+            )
+
+            # 6. Register with progress adapter
+            if self._adapter:
+                self._adapter.register_task(group_id, task_id)
+
+            # 7. Dispatch before exposing the dispatched state.
+            await self._dispatch_agent(group_id, bot_id, requirements, test_command, task_id=task_id)
+            await self._task_store.update_status(task_id, "dispatched")
+
+        except Exception as e:
+            # Compensate: clean up any partially created resources
+            log.error("TaskOrchestrator: create_task failed at step, rolling back group %s: %s",
+                       group_id, e)
+            # R2-9: Remove from progress adapter to prevent ghost progress + stuck detector
+            # from retrying a task that no longer exists.
+            if self._adapter and group_id is not None:
+                self._adapter.remove_task(group_id)
+            # P1-1: Delete task from database if it was created
+            if bot_id is not None:
+                await self._task_store.delete_task(task_id)
+            if group_id is not None:
+                await self._rollback_group(group_id)
+            if idempotency_key:
+                try:
+                    await self._task_store.fail_request(idempotency_key, str(e))
+                except Exception:
+                    log.exception(
+                        "TaskOrchestrator: failed to persist idempotency failure"
+                    )
+            from integrations.github_client import GitHubIntegrationUnavailable
+            if isinstance(e, GitHubIntegrationUnavailable):
+                raise
+            raise RuntimeError(f"Task creation failed: {e}") from e
+
+        # P1-1: Fetch the persisted task record from database
+        record = await self._task_store.get_task(task_id)
+        if record is None:
+            raise RuntimeError(f"Persisted task {task_id} disappeared after dispatch")
+        if idempotency_key:
+            try:
+                await self._task_store.complete_request(idempotency_key)
+            except Exception:
+                # The reservation can self-heal from the dispatched task row on
+                # the next request; do not roll back a workflow already sent.
+                log.exception(
+                    "TaskOrchestrator: failed to mark idempotency request complete"
+                )
+
+        log.info("TaskOrchestrator: task %s dispatched (group=%d, bot=%d)", task_id, group_id, bot_id)
+        return record
+
+    async def retry_task(self, task_id: str, *, automatic: bool = False) -> dict:
+        """Retry a stuck/failed task: abort via IPC ACK → re-dispatch.
+
+        P0-2: Uses ABORT_REQUEST/ABORT_ACK protocol. Only re-dispatches after
+        receiving successful ACK from Worker. Fail closed on timeout/error.
+
+        Worktree cleanup is handled by Worker's _cleanup_finally() when tasks
+        are cancelled.
+        """
+        # P1-1: Fetch task from database
+        record = await self._task_store.get_task(task_id)
+        if not record:
+            raise ValueError(f"Task {task_id} not found")
+
+        group_id = record["group_id"]
+        allowed_statuses = set(
+            _AUTOMATIC_RETRY_STATUSES if automatic else _MANUAL_RETRY_STATUSES
+        )
+        local_stuck_override = False
+        if not automatic and self._adapter:
+            local_state = self._adapter.get_progress(group_id)
+            if (
+                local_state
+                and local_state["task_id"] == task_id
+                and local_state["status"] == "stuck"
+            ):
+                # The local detector can be ahead of its asynchronous projector.
+                local_stuck_override = True
+                allowed_statuses.update(_ACTIVE_PERSISTED_STATUSES)
+
+        claim = await self._task_store.claim_retry(
+            task_id,
+            frozenset(allowed_statuses),
+            automatic=automatic,
+        )
+        if claim is None:
+            from online_tasks.store import TaskRetryConflict
+
+            current = await self._task_store.get_task(task_id)
+            raise TaskRetryConflict(
+                task_id, current["status"] if current else "missing"
+            )
+
+        try:
+            if self._adapter:
+                self._adapter.mark_retrying(group_id, "正在停止旧任务并准备重试")
+            # Only the owner of the durable retry claim may abort and dispatch.
+            await self._send_abort(group_id, task_id, mode="retry")
+            await self._dispatch_agent(
+                group_id,
+                record["bot_id"],
+                record["requirements"],
+                record.get("test_command", ""),
+                task_id=task_id,
+            )
+            updated = await self._task_store.complete_retry_claim(
+                task_id, claim.token
+            )
+            if not updated:
+                raise RuntimeError(
+                    f"Retry claim for task {task_id} was lost before completion"
+                )
+        except BaseException as exc:
+            fallback_status = (
+                "stuck"
+                if (
+                    (automatic or local_stuck_override)
+                    and claim.previous_status in _ACTIVE_PERSISTED_STATUSES
+                )
+                else claim.previous_status
+            )
+            try:
+                restored = await asyncio.shield(
+                    self._task_store.restore_retry_claim(
+                        task_id, claim.token, fallback_status, str(exc)
+                    )
+                )
+            except Exception:
+                restored = False
+                log.exception(
+                    "TaskOrchestrator: failed to restore retry claim for %s",
+                    task_id,
+                )
+            if self._adapter and restored:
+                local_status = _LOCAL_RETRY_FAILURE_STATUS.get(
+                    fallback_status, "stuck"
+                )
+                self._adapter.fail_retry(
+                    group_id,
+                    local_status,
+                    f"重试失败: {str(exc)[:80]}",
+                    str(exc),
+                )
+            elif self._adapter:
+                self._adapter.release_retry_claim(group_id)
+            raise
+
+        if self._adapter:
+            self._adapter.reset_for_retry(group_id)
+
+        # P1-1: Fetch updated record from database
+        return await self._task_store.get_task(task_id)
+
+    async def abort_task(self, task_id: str) -> dict:
+        """Abort a task via IPC ACK protocol.
+
+        P0-2: Uses ABORT_REQUEST/ABORT_ACK protocol. Only writes terminal state
+        after receiving successful ACK from Worker. Fail closed on timeout/error.
+
+        Worktree cleanup is handled by Worker's _cleanup_finally() when tasks
+        are cancelled.
+        """
+        # P1-1: Fetch task from database
+        record = await self._task_store.get_task(task_id)
+        if not record:
+            raise ValueError(f"Task {task_id} not found")
+
+        group_id = record["group_id"]
+
+        # 1. Abort via IPC ACK protocol (raises on timeout/error - fail closed)
+        await self._send_abort(group_id, task_id, mode="abort")
+
+        # 2. Write terminal state (only after successful ACK)
+        if self._adapter:
+            self._adapter.mark_aborted(group_id)
+
+        # P1-1: Update status in database
+        await self._task_store.update_status(task_id, "aborted")
+
+        # Converge the durable session/workflow records as part of the same
+        # logical termination. The periodic reconciler retries this idempotently.
+        from online_tasks.reconciler import finalize_group_state
+        await finalize_group_state(group_id, record["bot_id"], status="aborted")
+
+        # P1-1: Fetch updated record from database
+        return await self._task_store.get_task(task_id)
+
+    async def delete_task_record(self, task_id: str) -> dict:
+        """Permanently remove a terminal task from the dashboard registry."""
+        record = await self._task_store.get_task(task_id)
+        if not record:
+            raise ValueError(f"Task {task_id} not found")
+        if record["status"] not in {
+            "completed", "failed", "aborted", "stuck_permanently", "incomplete"
+        }:
+            raise RuntimeError(
+                f"Task {task_id} must be terminal before it can be removed"
+            )
+
+        if self._adapter:
+            self._adapter.remove_task(record["group_id"])
+        if not await self._task_store.delete_task(task_id):
+            raise ValueError(f"Task {task_id} not found")
+        return record
+
+    async def terminate_permanently_stuck(self, task_id: str, reason: str) -> dict:
+        """Fail a hung task only after its Worker proves cancellation/cleanup."""
+        record = await self._task_store.get_task(task_id)
+        if not record:
+            raise ValueError(f"Task {task_id} not found")
+
+        group_id = record["group_id"]
+        await self._send_abort(group_id, task_id, mode="abort")
+
+        updated = await self._task_store.update_status(
+            task_id, "stuck_permanently", error_message=reason
+        )
+        if not updated:
+            current = await self._task_store.get_task(task_id)
+            raise RuntimeError(
+                f"Could not persist permanently stuck task {task_id} "
+                f"from status {(current or {}).get('status', 'missing')}"
+            )
+
+        from online_tasks.reconciler import finalize_group_state
+        await finalize_group_state(
+            group_id, record["bot_id"], status="failed"
+        )
+        if self._adapter:
+            self._adapter.set_status(
+                group_id,
+                "stuck_permanently",
+                detail=reason,
+                error_message=reason,
+                project=False,
+            )
+        return await self._task_store.get_task(task_id)
+
+    # Note: cleanup_orphan_worktrees removed (R2-2). The previous implementation
+    # was dangerous: it swept for "unknown" worktrees (tid not in self._tasks),
+    # but runner creates chat_<uuid> worktrees that would be incorrectly flagged
+    # and deleted while still in use. Worktree lifecycle is managed by:
+    #   - runner._cleanup_finally() promotes/removes on task completion
+    #   - prune_group_worktrees() cleans stale worktrees on group hydration
+    # These are the correct owners of worktree cleanup.
+
+    async def _bind_group_to_worker(self, group_id: int, worker_id: str) -> None:
+        """Persistently bind a group to a specific worker via assigned_worker_id.
+
+        This must happen BEFORE dispatch so the Supervisor routes the START_WORKFLOW
+        frame to the correct worker. Without this, the default modulo routing may
+        send the dispatch to a different worker, and a later reassign would evict
+        (and abort) the just-started task.
+        """
+        from db import write_connect
+
+        async with write_connect() as db:
+            await db.execute(
+                "UPDATE groups SET assigned_worker_id = ? WHERE id = ?",
+                (worker_id, group_id),
+            )
+            await db.commit()
+
+        # Invalidate the supervisor's routing cache so the next route lookup
+        # picks up the new assignment immediately.
+        try:
+            from runtime import supervisor as sup_mod
+            sup = sup_mod.supervisor
+            if sup:
+                sup._routing_cache.pop(group_id, None)
+        except Exception:
+            pass  # best-effort; cache expires in 60s anyway
+
+        log.info("TaskOrchestrator: bound group %d to worker %s", group_id, worker_id)
+
+    # ── Cross-process abort + worktree cleanup ───────────────────────
+
+    async def _send_abort(
+        self, group_id: int, task_id: str, mode: str = "abort", timeout: float = 10.0
+    ) -> dict:
+        """P0-2: Send ABORT_REQUEST and wait for ABORT_ACK from Worker.
+
+        Unlike the old fire-and-forget ABORT, this uses the ACK protocol:
+          1. Send ABORT_REQUEST via Supervisor.request_abort()
+          2. Wait for Worker to cancel tasks and complete cleanup
+          3. Receive ABORT_ACK with result
+
+        Args:
+            group_id: Group to abort
+            mode: "abort" or "retry"
+            timeout: Seconds to wait for ACK (fail closed on timeout)
+
+        Returns:
+            ABORT_ACK dict with cancelled_count, cleanup_status, error
+
+        Raises:
+            TimeoutError: If Worker doesn't respond within timeout
+            RuntimeError: If Worker disconnected or send fails
+        """
+        from runtime import supervisor as sup_mod
+
+        sup = sup_mod.supervisor
+        if not sup:
+            raise RuntimeError("Supervisor not available")
+
+        ack = await sup.request_abort(
+            group_id, task_id=task_id, mode=mode, timeout=timeout
+        )
+
+        cleanup_status = ack.get("cleanup_status")
+        if (
+            cleanup_status != "success"
+            or ack.get("task_id") != task_id
+            or ack.get("mode") != mode
+            or ack.get("workspace_action") != "discard"
+            or ack.get("workspace_cleaned") is not True
+        ):
+            error = ack.get("error", "Unknown error")
+            raise RuntimeError(
+                f"Worker cleanup was not proven for task {task_id}: {error}"
+            )
+
+        log.info(
+            "TaskOrchestrator: abort ACK received for group %d: cancelled=%d status=%s",
+            group_id,
+            ack.get("cancelled_count", 0),
+            cleanup_status,
+        )
+        return ack
+
+    # ── Resilience: pre-flight + rollback ────────────────────────────
+
+    async def _preflight_check_repo(self, repo_url: str, branch: str = "") -> None:
+        """Validate repo URL is reachable before creating any resources.
+
+        Uses `git ls-remote` which is lightweight (no clone) and fails fast
+        on invalid URLs, auth issues, or unreachable hosts.
+        """
+        from integrations.github_client import ls_remote, require_github_integration
+
+        require_github_integration()
+        await ls_remote(repo_url, branch=branch, timeout=30)
+
+    async def _rollback_group(self, group_id: Optional[int]) -> None:
+        """Clean up a partially created group: remove DB rows + workspace dir.
+
+        Best-effort: logs errors but doesn't raise (we're already in an exception handler).
+        """
+        if group_id is None:
+            return
+
+        # 1. Remove workspace directory
+        try:
+            from workspace import layout as ws_layout
+            group_dir = ws_layout.group_dir(group_id)
+            if group_dir.exists():
+                import shutil
+                shutil.rmtree(group_dir, ignore_errors=True)
+                log.info("TaskOrchestrator: rolled back workspace %s", group_dir)
+        except Exception as e:
+            log.warning("TaskOrchestrator: workspace rollback failed for group %d: %s", group_id, e)
+
+        # 2. Remove group DB file
+        try:
+            from runtime.dbpaths import group_db_path
+            db_path = group_db_path(group_id)
+            if Path(db_path).exists():
+                Path(db_path).unlink()
+        except Exception as e:
+            log.warning("TaskOrchestrator: DB file rollback failed for group %d: %s", group_id, e)
+
+        # 3. Remove members and group row from central DB
+        try:
+            from db import write_connect
+            async with write_connect() as db:
+                await db.execute("DELETE FROM members WHERE group_id = ?", (group_id,))
+                await db.execute("DELETE FROM groups WHERE id = ?", (group_id,))
+                await db.commit()
+            log.info("TaskOrchestrator: rolled back DB for group %d", group_id)
+        except Exception as e:
+            log.warning("TaskOrchestrator: DB rollback failed for group %d: %s", group_id, e)
+
+    # ── Internal helpers ──────────────────────────────────────────────
+
+    async def _create_group(self, task_id: str) -> int:
+        """Create a dedicated group for the coding agent task."""
+        from db import write_connect
+
+        group_name = f"Coding Agent: {task_id}"
+        async with write_connect() as db:
+            async with db.execute(
+                "INSERT INTO groups (name, assigned_worker_id) VALUES (?, NULL)",
+                (group_name,),
+            ) as cur:
+                group_id = cur.lastrowid
+            await db.commit()
+
+        # Initialize workspace
+        from workspace import init_group_workspace
+        await init_group_workspace(group_id, group_name)
+
+        return group_id
+
+    async def _add_bot(self, group_id: int, model: str, max_iterations: int) -> int:
+        """Add a coding agent bot to the group."""
+        from db import write_connect
+        from workspace import init_bot_workspace
+        import json
+
+        system_prompt = CODING_AGENT_SYSTEM_PROMPT
+        config = json.dumps({
+            "max_iterations": max_iterations,
+            # Coding tasks must finish through signal_stage_done/signal_rework.
+            # A plain planning sentence from the model is not a completed run.
+            "require_tool_completion_signal": True,
+            "require_pull_request_completion": True,
+            # The dashboard control plane has no interactive permission-response
+            # channel. This dedicated bot works in an isolated task worktree;
+            # shell danger guards still run after the permission hook, and
+            # bypassPermissions is attenuated for any spawned sub-agent.
+            "permission_mode": "bypassPermissions",
+        })
+
+        async with write_connect() as db:
+            async with db.execute(
+                """INSERT INTO members (
+                    group_id, name, type, role, system_prompt, avatar_color,
+                    model_provider, model_name, temperature, max_tokens,
+                    personality_prompt, executor_id, executor_config, done_keyword
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (group_id, "Coding Agent", "bot", "developer", system_prompt, "#10b981",
+                 self._resolve_provider(model), model, 0.3, 8192,
+                 None, "tool_loop_v1", config, None),
+            ) as cur:
+                await db.commit()
+                bot_id = cur.lastrowid
+
+        await init_bot_workspace({
+            "id": bot_id,
+            "group_id": group_id,
+            "name": "Coding Agent",
+            "role": "developer",
+            "system_prompt": system_prompt,
+            "personality_prompt": "",
+        })
+
+        return bot_id
+
+    async def _clone_repo(self, group_id: int, repo_url: str, branch: str) -> Path:
+        """Clone the repository into the group's workspace.
+
+        P0-4: GitHub credentials are NOT passed as parameters. They are read from
+        the Worker process's GITHUB_TOKEN environment variable by github_client.py.
+        """
+        from workspace import layout as ws_layout
+        from integrations.github_client import clone_repo
+
+        workspace = ws_layout.group_shared_dir(group_id) / "workspace"
+        await clone_repo(repo_url, workspace, branch=branch)
+        return workspace
+
+    async def _dispatch_agent(self, group_id: int, bot_id: int, requirements: str, test_command: str, task_id: str = "") -> None:
+        """Dispatch the coding agent via START_WORKFLOW.
+
+        Uses the CodingAgentOrchestrator (coding_agent_v1) which provides:
+          - State persistence via workflow_store (survives restart)
+          - Crash recovery via resume_workflows() (auto-resume in-flight tasks)
+          - WorkflowPaused events on AI failures (provider_unavailable handling)
+
+        P0-3: task_id is passed via START_WORKFLOW body so the orchestrator
+        can set WorkUnit.tag["ticket_id"], ensuring worktree is named after
+        the task, not chat_<uuid>.
+        """
+        from runtime import supervisor as sup_mod
+        from runtime import ipc
+
+        sup = sup_mod.supervisor
+        if not sup:
+            raise RuntimeError("Supervisor not available")
+
+        # Send START_WORKFLOW with the coding_agent_v1 orchestrator
+        body = {
+            "orchestrator_id": CODING_WORKFLOW_ID,
+            "bot_id": bot_id,
+            "requirements": requirements,
+            "test_command": test_command,
+            "task_id": task_id,  # P0-3: Pass task_id for worktree naming
+            # Dashboard tasks are only complete once their feature branch has
+            # been pushed and a pull request was successfully created.
+            "require_pull_request": True,
+        }
+        await sup.send_to_worker(
+            group_id,
+            ipc.protocol.envelope(
+                ipc.protocol.START_WORKFLOW,
+                group_id=group_id,
+                body=body,
+            ),
+        )
+
+    @staticmethod
+    def _resolve_provider(model: str) -> str:
+        """Resolve model name to provider."""
+        model_lower = model.lower()
+        if "gpt" in model_lower or "o1" in model_lower or "o3" in model_lower:
+            return "openai"
+        elif "claude" in model_lower:
+            return "anthropic"
+        elif "deepseek" in model_lower:
+            return "deepseek"
+        else:
+            return "deepseek"  # default

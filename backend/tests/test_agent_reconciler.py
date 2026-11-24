@@ -47,7 +47,7 @@ class TestTaskReconciler(unittest.IsolatedAsyncioTestCase):
         reconciler = TaskReconciler(store)
 
         with patch(
-            "plugins.agent_dashboard.reconciler.group_db_path",
+            "online_tasks.reconciler.group_db_path",
             return_value=self.db_path,
         ):
             await reconciler._reconcile_task(
@@ -70,9 +70,9 @@ class TestTaskReconciler(unittest.IsolatedAsyncioTestCase):
             await conn.commit()
 
         with patch(
-            "plugins.agent_dashboard.reconciler.group_db_path",
+            "online_tasks.reconciler.group_db_path",
             return_value=self.db_path,
-        ), patch("plugins.agent_dashboard.reconciler.db.DB_PATH", self.db_path):
+        ), patch("online_tasks.reconciler.db.DB_PATH", self.db_path):
             await finalize_group_state(10, 5)
 
         async with db.connect(self.db_path) as conn:
