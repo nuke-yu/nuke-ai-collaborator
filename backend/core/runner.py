@@ -20,8 +20,19 @@ from executors.base import ExecutionContext
 from core.orchestration.interaction import StandardInteraction
 from executors import registry as exec_registry
 from executors.compact import compress_history
+from multi_conversation import EXECUTION_MODE as MULTI_CONVERSATION_MODE
 
 log = logging.getLogger(__name__)
+
+
+async def _execute_work_unit(unit, ctx):
+    """Route an admitted unit to its application path, then to its Agent executor."""
+    executor = exec_registry.get(unit.executor_id)
+    if unit.execution_mode == MULTI_CONVERSATION_MODE:
+        from multi_conversation.plugin import run_turn
+
+        return await run_turn(executor, ctx)
+    return await executor.run(ctx)
 
 
 async def _post_system_msg(group_id: int, sender_bot_id: int, text: str) -> None:
@@ -259,6 +270,7 @@ async def _run_unit_body(group_id: int, unit, orch) -> None:
         is_workflow=unit.is_workflow,
         active_ticket_id=ticket_id,
         personal_user_id=unit.tag.get("personal_user_id") if isinstance(unit.tag,dict) else None,
+        execution_mode=unit.execution_mode,
         # Side-effect dispatcher: broadcasts via the bus + persists via the writer.
         # (Executors default this themselves when None, but wiring it here makes the
         # workflow path explicit and testable.)
@@ -277,9 +289,9 @@ async def _run_unit_body(group_id: int, unit, orch) -> None:
                 ) from w_err
 
             with use_worktree(group_id, worktree_path):
-                result = await exec_registry.get(unit.executor_id).run(ctx)
+                result = await _execute_work_unit(unit, ctx)
         else:
-            result = await exec_registry.get(unit.executor_id).run(ctx)
+            result = await _execute_work_unit(unit, ctx)
     except asyncio.CancelledError:
         if use_sandbox and ticket_id:
             try:

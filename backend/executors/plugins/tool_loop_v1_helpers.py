@@ -9,14 +9,13 @@ import aiosqlite
 
 from executors.base import build_group_section, ExecutionResult
 from core import config
-import permissions
 from ai.client import call_ai_once, AIError
 from memory.contracts import (AssembleCase, CompleteExperienceUsage, CompleteSkillUsage,
                               FormatProjectedContext, ObserveMemory,
                               ProcessLearningCase, RecallExperiences,
                               RecallGroupFacts, RecallMemory, RecallSkills,
                               ResolveLearningRefs)
-from memory.domain import MemoryScope, Principal
+from memory.domain import MemoryScope
 from core.role_router import build_context_message, build_image_content
 from workspace import load_context_files, format_context_blocks, append_log, archive_run
 import workspace as _ws
@@ -41,9 +40,10 @@ from executors.plugins.tool_loop_signals import extract_completion_signals
 from executors.tool_dispatch import execute_tool_call as _execute_tool_call
 from executors.plugins.tool_loop_primitives import tool_loop_core as _tool_loop_core_impl
 from executors.plugins.tool_loop_primitives import before_finalize_hook as _before_finalize_hook_impl
-from executors.plugins.tool_loop_session_persistence import persist_session_start
+from multi_conversation.session import persist_session_start
+from multi_conversation.service import ConversationSetupPorts, setup_turn
 from executors.plugins.tool_loop_schema_assembly import assemble_tool_schemas
-from executors.plugins.tool_loop_memory_hydration import hydrate_memory_context
+from multi_conversation.context import hydrate_memory_context
 from executors.plugins.tool_loop_prompt_setup import prepare_prompt_and_messages
 
 logger = logging.getLogger(__name__)
@@ -151,67 +151,19 @@ async def _run_fork_skill(
 
 
 async def setup_session(runner) -> None:
-    skill_discovery = bool(runner.executor.manifest.workspace.skill_discovery)
-    # Build ruleset
-    if runner.ctx.ruleset is not None:
-        runner.ruleset = runner.ctx.ruleset
-    else:
-        perm_mode = (runner.bot.get("executor_config") or {}).get("permission_mode", "default")
-        try:
-            db_rules = await permissions.load_rules(runner.bot["id"])
-        except aiosqlite.OperationalError:
-            db_rules = []
-        runner.ruleset = permissions.Ruleset(rules=db_rules, mode=perm_mode)
-
     import executors.plugins.tool_loop_v1 as _tool_loop_v1_mod
-    _bcm = getattr(_tool_loop_v1_mod, "build_context_message", build_context_message)
-    history, user_msg = _bcm(
-        runner.ctx.user_message, runner.ctx.sender["name"], runner.ctx.history, is_workflow=runner.ctx.is_workflow
-    )
     import core.workflow as _wf
-    thread_id = _wf.current_thread_id(runner.ctx.group_id)
-    memory_scope = MemoryScope.bot(
-        group_id=runner.ctx.group_id,
-        bot_id=runner.bot["id"],
-        actor_id=f"bot:{runner.bot['id']}",
-        thread_id=thread_id,
-        run_id=getattr(runner, "run_id", runner.session_id),
-        purpose="task_context_recall",
-    )
-    memory, learned_contexts = await hydrate_memory_context(
-        runner, memory_scope, apply_budget=_apply_memory_context_budget
-    )
-
-    user_content, _resuming = await prepare_prompt_and_messages(
-        runner,
-        skill_discovery=skill_discovery,
-        memory=memory,
-        learned_contexts=learned_contexts,
-        history=history,
-        user_msg=user_msg,
-    )
-
-    assemble_tool_schemas(runner, skill_discovery=skill_discovery)
-    _enforce_final_context_budget(runner)
-
-    await persist_session_start(
-        runner,
-        user_content=user_content,
-        resuming=_resuming,
-        thread_id=thread_id,
-    )
-
-    await runner.ctx.interaction.broadcast(runner.ctx.group_id, {
-        "type": "stream_start", "temp_id": runner.temp_id,
-        "member_id": runner.bot["id"], "sender_name": runner.bot["name"],
-        "sender_type": "bot", "avatar_color": runner.bot["avatar_color"],
-        "session_id": runner.session_id,
-    })
-    if runner.skills_snapshot:
-        await runner.ctx.interaction.broadcast(runner.ctx.group_id, {
-            "type": "skills_loaded", "temp_id": runner.temp_id,
-            "member_id": runner.bot["id"], "skills": runner.skills_snapshot,
-        })
+    await setup_turn(runner, ConversationSetupPorts(
+        build_context_message=getattr(
+            _tool_loop_v1_mod, "build_context_message", build_context_message
+        ),
+        apply_memory_budget=_apply_memory_context_budget,
+        prepare_prompt=prepare_prompt_and_messages,
+        assemble_tool_schemas=assemble_tool_schemas,
+        enforce_context_budget=_enforce_final_context_budget,
+        persist_session_start=persist_session_start,
+        resolve_thread_id=_wf.current_thread_id,
+    ))
 
 
 async def run_pre_compaction(runner) -> None:

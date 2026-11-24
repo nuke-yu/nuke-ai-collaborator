@@ -86,6 +86,7 @@ class CodingAgentOrchestrator(Orchestrator):
             next_units=[WorkUnit(
                 bot=bot,
                 executor_id=bot.get("executor_id", "tool_loop_v1"),
+                execution_mode="online_task",
                 trigger_msg=trigger,
                 is_workflow=True,
                 tag={"ticket_id": task_id} if task_id else {},
@@ -308,6 +309,7 @@ class CodingAgentOrchestrator(Orchestrator):
         return [WorkUnit(
             bot=bot,
             executor_id=bot.get("executor_id", "tool_loop_v1"),
+            execution_mode="online_task",
             trigger_msg="Resume your coding task (previous run was interrupted). Continue from where you left off.",
             is_workflow=True,
             tag={"ticket_id": s["task_id"]} if s.get("task_id") else {},

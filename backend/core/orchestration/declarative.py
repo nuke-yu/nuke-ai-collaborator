@@ -14,6 +14,7 @@ import uuid
 from core.orchestration.base import Orchestrator, OrchestratorStep, WorkUnit
 from core.orchestration import locks
 from core.orchestration.stages import StageCtx, stage_handler
+from multi_conversation import EXECUTION_MODE as MULTI_CONVERSATION_MODE
 
 
 class DeclarativeOrchestrator(Orchestrator):
@@ -565,7 +566,7 @@ class DeclarativeOrchestrator(Orchestrator):
             return OrchestratorStep()
 
         return OrchestratorStep(next_units=[
-            WorkUnit(bot=b, trigger_msg=content)
+            WorkUnit(bot=b, trigger_msg=content, execution_mode=MULTI_CONVERSATION_MODE)
             for b in target_bots
         ])
 

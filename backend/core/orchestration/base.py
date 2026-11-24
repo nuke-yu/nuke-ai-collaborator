@@ -21,6 +21,7 @@ class WorkUnit:
     prompt_suffix: str = ""             # 阶段指令 → ExecutionContext.workflow_suffix
     is_workflow: bool = False           # 由编排器创建的单元设为 True → ExecutionContext.is_workflow
     tag: dict = field(default_factory=dict)  # 编排私有记账（ticket 等），不进执行层
+    execution_mode: str = "orchestrated"   # 应用运行路径，与底层 executor 类型分开
 
 
 @dataclass

@@ -168,6 +168,7 @@ class ExecutionContext:
     resume_session_id: str | None = None
     resume_messages: list | None = None
     personal_user_id: int | None = None  # trusted auth identity; never inferred from member_id
+    execution_mode: str = "orchestrated"  # application path selected by the orchestrator
 
 
 @dataclass

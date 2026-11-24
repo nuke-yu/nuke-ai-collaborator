@@ -23,20 +23,6 @@ def tool_evidence_links(memory_refs: list[str], dispatch_context: dict) -> list[
 
 def context_evidence_links(memory_refs: list[str], always_skills: list[dict]) -> list[dict]:
     """Describe recalled evidence availability separately from later citation."""
-    from sessions.evidence import evidence_kind
+    from multi_conversation.session import context_evidence_links as build_links
 
-    links = [
-        {
-            "kind": evidence_kind(ref),
-            "ref": ref,
-            "relation": "injected",
-            "metadata": {"source": "learned_context_recall"},
-        }
-        for ref in memory_refs
-    ]
-    links.extend(
-        skill["evidence_link"]
-        for skill in always_skills
-        if isinstance(skill.get("evidence_link"), dict)
-    )
-    return links
+    return build_links(memory_refs, always_skills)
